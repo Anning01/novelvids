@@ -13,10 +13,10 @@ from novelvids.api.dependencies import (
 )
 from novelvids.application.dto import NovelResponseDTO
 from novelvids.application.dto.dashboard import DashboardStatsDTO
-from novelvids.domain.repositories import (
-    NovelRepository,
-    UserRepository,
-    VideoRepository,
+from novelvids.infrastructure.database.repositories import (
+    TortoiseNovelRepository,
+    TortoiseUserRepository,
+    TortoiseVideoRepository,
 )
 from novelvids.infrastructure.database.models import UserModel
 
@@ -26,9 +26,9 @@ router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 @router.get("/stats", response_model=DashboardStatsDTO)
 async def get_dashboard_stats(
     current_user: Annotated[UserModel, Depends(get_current_user)],
-    novel_repo: Annotated[NovelRepository, Depends(get_novel_repository)],
-    video_repo: Annotated[VideoRepository, Depends(get_video_repository)],
-    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    novel_repo: Annotated[TortoiseNovelRepository, Depends(get_novel_repository)],
+    video_repo: Annotated[TortoiseVideoRepository, Depends(get_video_repository)],
+    user_repo: Annotated[TortoiseUserRepository, Depends(get_user_repository)],
 ) -> DashboardStatsDTO:
     """获取当前用户的仪表盘统计信息。"""
     # 获取用户的小说

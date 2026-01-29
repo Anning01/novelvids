@@ -32,7 +32,7 @@ export const useNovelStore = defineStore('novels', () => {
     }
   }
 
-  async function addNovel(data: { title: string; content: string; author?: string }): Promise<Novel> {
+  async function addNovel(data: { title: string; content?: string; author?: string }): Promise<Novel> {
     const novel = await createNovel(data)
     novels.value.unshift(novel)
     return novel

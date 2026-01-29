@@ -1,5 +1,5 @@
-"""Domain layer exports."""
+"""Domain layer."""
 
-from novelvids.domain import entities, events, repositories, services
-
-__all__ = ["entities", "events", "repositories", "services"]
+# Domain layer contains:
+# - services/ - Business logic services (extraction, nlp, llm_client)
+# - models/ - Domain models (nlp)

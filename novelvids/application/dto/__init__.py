@@ -1,8 +1,10 @@
 """Data Transfer Objects for API layer."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Generic, TypeVar
 from uuid import UUID
+
+T = TypeVar("T")
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -67,7 +69,7 @@ class NovelCreateDTO(BaseModel):
     """DTO for creating a novel."""
 
     title: str = Field(min_length=1, max_length=255)
-    content: str = Field(min_length=1)
+    content: str | None = None
     author: str | None = None
 
 
@@ -96,7 +98,7 @@ class NovelResponseDTO(BaseDTO):
 class NovelDetailDTO(NovelResponseDTO):
     """DTO for detailed novel response."""
 
-    content: str
+    content: str | None = None
     metadata: dict[str, Any]
 
     # 工作流状态检查
@@ -107,6 +109,14 @@ class NovelDetailDTO(NovelResponseDTO):
 
 
 # Chapter DTOs
+class ChapterCreateDTO(BaseModel):
+    """DTO for creating a chapter manually."""
+
+    title: str = Field(min_length=1, max_length=255)
+    content: str | None = None
+    number: int | None = None  # Auto-assign if not provided
+
+
 class ChapterResponseDTO(BaseDTO):
     """DTO for chapter response."""
 
@@ -125,44 +135,6 @@ class ChapterDetailDTO(ChapterResponseDTO):
 
     content: str
     metadata: dict[str, Any]
-
-
-# Character DTOs
-class CharacterCreateDTO(BaseModel):
-    """DTO for creating a character."""
-
-    name: str = Field(min_length=1, max_length=100)
-    description: str | None = None
-    gender: str = "other"
-    age_range: str | None = None
-    appearance: str | None = None
-    personality: str | None = None
-    voice_id: str | None = None
-    voice_provider: str = "edge_tts"
-
-
-class CharacterUpdateDTO(BaseModel):
-    """DTO for updating a character."""
-
-    name: str | None = None
-    description: str | None = None
-    gender: str | None = None
-    appearance: str | None = None
-    voice_id: str | None = None
-    voice_provider: str | None = None
-
-
-class CharacterResponseDTO(BaseDTO):
-    """DTO for character response."""
-
-    id: UUID
-    novel_id: UUID
-    name: str
-    description: str | None
-    gender: str
-    voice_provider: str
-    reference_images: list[str]
-    created_at: datetime
 
 
 # Scene DTOs
@@ -307,6 +279,95 @@ class CharacterAssetDTO(BaseDTO):
     last_updated_chapter: int
 
 
+class AssetCreateDTO(BaseModel):
+    """DTO for creating an asset."""
+
+    asset_type: str = Field(description="Asset type: person, scene, or item")
+    canonical_name: str = Field(min_length=1, max_length=100)
+    aliases: list[str] = Field(default_factory=list)
+    description: str | None = None
+    base_traits: str | None = None
+    is_global: bool = True
+    source_chapters: list[int] = Field(default_factory=list)
+
+
+class AssetUpdateDTO(BaseModel):
+    """DTO for updating an asset."""
+
+    canonical_name: str | None = None
+    aliases: list[str] | None = None
+    description: str | None = None
+    base_traits: str | None = None
+    main_image: str | None = None
+    angle_image_1: str | None = None
+    angle_image_2: str | None = None
+    image_source: str | None = None
+    is_global: bool | None = None
+    source_chapters: list[int] | None = None
+
+
+class AssetResponseDTO(BaseDTO):
+    """DTO for asset response."""
+
+    id: UUID
+    novel_id: UUID
+    asset_type: str
+    canonical_name: str
+    aliases: list[str]
+    description: str | None
+    base_traits: str | None
+    main_image: str | None
+    angle_image_1: str | None
+    angle_image_2: str | None
+    image_source: str
+    is_global: bool
+    source_chapters: list[int]
+    last_updated_chapter: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChapterAssetCreateDTO(BaseModel):
+    """DTO for creating a chapter-asset relationship."""
+
+    asset_id: UUID
+    state_description: str | None = None
+    state_traits: str | None = None
+    appearances: list[dict] = Field(default_factory=list)
+
+
+class ChapterAssetResponseDTO(BaseDTO):
+    """DTO for chapter-asset relationship response."""
+
+    id: UUID
+    chapter_id: UUID
+    asset_id: UUID
+    state_description: str | None
+    state_traits: str | None
+    appearances: list[dict]
+    asset: AssetResponseDTO | None = None
+
+
+class ExtractionRequestDTO(BaseModel):
+    """DTO for extraction request."""
+
+    types: list[str] = Field(
+        default=["person", "scene", "item"],
+        description="Types to extract: person, scene, item",
+    )
+
+
+class ExtractionResponseDTO(BaseDTO):
+    """DTO for extraction response."""
+
+    chapter_id: UUID
+    chapter_number: int
+    persons: list[dict]
+    scenes: list[dict]
+    items: list[dict]
+    merged_count: int = 0
+
+
 class ExtractedEntityDTO(BaseDTO):
     """DTO for extracted entity."""
 
@@ -358,10 +419,10 @@ class PaginationDTO(BaseModel):
         return self.page_size
 
 
-class PaginatedResponseDTO(BaseModel):
+class PaginatedResponseDTO(BaseModel, Generic[T]):
     """DTO for paginated response."""
 
-    items: list[Any]
+    items: list[T]
     total: int
     page: int
     page_size: int

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Chapter, ChapterDetail, PaginatedResponse } from '@/types'
-import { getChapters, getChapter, updateChapter, deleteChapter, api as apiClient } from '@/api'
+import { getChapters, getChapter, updateChapter, deleteChapter, createChapter, api as apiClient } from '@/api'
 
 export const useChapterStore = defineStore('chapters', () => {
   const chapters = ref<Chapter[]>([])
@@ -81,9 +81,21 @@ export const useChapterStore = defineStore('chapters', () => {
   async function removeChapter(id: string): Promise<void> {
     await deleteChapter(id)
     chapters.value = chapters.value.filter((c) => c.id !== id)
+    totalChapters.value = Math.max(0, totalChapters.value - 1)
     if (currentChapter.value?.id === id) {
       currentChapter.value = null
     }
+  }
+
+  async function addChapter(
+    novelId: string,
+    data: { title: string; content?: string; number?: number }
+  ): Promise<Chapter> {
+    const chapter = await createChapter(novelId, data)
+    chapters.value.push(chapter)
+    chapters.value.sort((a, b) => a.number - b.number)
+    totalChapters.value += 1
+    return chapter
   }
 
   function clearChapters(): void {
@@ -104,6 +116,7 @@ export const useChapterStore = defineStore('chapters', () => {
     fetchChapters,
     loadMore,
     fetchChapter,
+    addChapter,
     editChapter,
     reorderChapters,
     removeChapter,

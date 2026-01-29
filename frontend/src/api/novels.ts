@@ -21,7 +21,7 @@ function transformNovel(data: Record<string, unknown>): Novel {
 function transformNovelDetail(data: Record<string, unknown>): NovelDetail {
   return {
     ...transformNovel(data),
-    content: data.content as string,
+    content: (data.content as string | null) ?? null,
     metadata: (data.metadata ?? {}) as Record<string, unknown>,
     canExtractChapters: (data.can_extract_chapters ?? false) as boolean,
     canExtractCharacters: (data.can_extract_characters ?? false) as boolean,
@@ -52,7 +52,7 @@ export async function getNovel(id: string): Promise<NovelDetail> {
 
 export async function createNovel(data: {
   title: string
-  content: string
+  content?: string
   author?: string
 }): Promise<Novel> {
   const response = await api.post('/novels', data)

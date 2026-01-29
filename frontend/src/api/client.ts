@@ -1,6 +1,23 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
 
+// API base URL (without /api/v1 prefix)
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
+/**
+ * Get full URL for media files (images, videos, etc.)
+ * Converts relative paths like /media/... to full URLs
+ */
+export function getMediaUrl(relativePath: string | null | undefined): string | undefined {
+  if (!relativePath) return undefined
+  // If already a full URL (http/https or data:), return as-is
+  if (relativePath.startsWith('http') || relativePath.startsWith('data:')) {
+    return relativePath
+  }
+  // Otherwise prepend the API base URL
+  return `${API_BASE_URL}${relativePath}`
+}
+
 const api: AxiosInstance = axios.create({
   baseURL: '/api/v1',
   headers: {

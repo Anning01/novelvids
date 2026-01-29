@@ -79,10 +79,6 @@ def get_chapter_repository():
     return TortoiseChapterRepository()
 
 
-def get_character_repository():
-    from novelvids.infrastructure.database.repositories import TortoiseCharacterRepository
-    return TortoiseCharacterRepository()
-
 
 def get_scene_repository():
     from novelvids.infrastructure.database.repositories import TortoiseSceneRepository

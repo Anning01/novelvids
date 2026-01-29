@@ -80,6 +80,7 @@ class StorageSettings(BaseSettings):
     )
 
     base_path: str = Field(default="./data/storage")
+    media_dir: str = Field(default="./media", description="Media files directory for static serving")
     max_file_size: int = Field(default=100 * 1024 * 1024, description="Max file size in bytes")
 
 
@@ -131,6 +132,23 @@ class LLMSettings(BaseSettings):
     timeout: int = Field(default=60, description="Request timeout in seconds")
 
 
+class ArkSettings(BaseSettings):
+    """Volcengine Ark (Doubao) image generation settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="ARK_",
+        extra="ignore",
+    )
+
+    api_key: str = Field(default="")
+    base_url: str = Field(default="https://ark.cn-beijing.volces.com/api/v3")
+    model_name: str = Field(default="doubao-seedream-4-5-251128")
+    image_size: str = Field(default="2K", description="Image size: 2K, 1080P, etc.")
+    timeout: int = Field(default=120, description="Request timeout in seconds")
+
+
 class Settings(BaseSettings):
     """Application settings."""
 
@@ -152,6 +170,7 @@ class Settings(BaseSettings):
     billing: BillingSettings = Field(default_factory=BillingSettings)
     jwt: JWTSettings = Field(default_factory=JWTSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    ark: ArkSettings = Field(default_factory=ArkSettings)
 
 
 def get_settings() -> Settings:

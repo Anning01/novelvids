@@ -82,3 +82,7 @@ temp/
 .claude
 .serena
 .github
+.ruff_cache
+
+media
+novelvids.db*

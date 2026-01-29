@@ -20,7 +20,7 @@ export interface Novel {
 }
 
 export interface NovelDetail extends Novel {
-  content: string
+  content: string | null
   metadata: Record<string, unknown>
   // 工作流状态检查
   canExtractChapters: boolean
@@ -84,7 +84,7 @@ export interface Video {
 
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type WorkflowStatus = 'draft' | 'chapters_extracted' | 'characters_extracted' | 'storyboard_ready' | 'generating' | 'completed'
-export type ChapterWorkflowStatus = 'pending' | 'characters_extracted' | 'storyboard_ready' | 'generating' | 'completed'
+export type ChapterWorkflowStatus = 'pending' | 'characters_extracted' | 'assets_reviewed' | 'storyboard_ready' | 'generating' | 'completed'
 export type Gender = 'male' | 'female' | 'other'
 export type VoiceProvider = 'edge_tts' | 'azure' | 'openai' | 'fish_speech' | 'custom'
 
@@ -114,5 +114,3 @@ export interface DashboardStats {
   recent_novels: Novel[]
 }
 
-// Re-export chapter processing types
-export * from './chapter-processing'

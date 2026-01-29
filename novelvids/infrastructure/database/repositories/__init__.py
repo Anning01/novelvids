@@ -7,20 +7,10 @@ from uuid import UUID
 from tortoise.models import Model
 from tortoise.queryset import QuerySet
 
-from novelvids.domain.repositories import (
-    BaseRepository,
-    ChapterRepository,
-    CharacterRepository,
-    NovelRepository,
-    SceneRepository,
-    UsageRecordRepository,
-    UserRepository,
-    VideoRepository,
-    WorkflowRepository,
-)
 from novelvids.infrastructure.database.models import (
+    AssetModel,
+    ChapterAssetModel,
     ChapterModel,
-    CharacterModel,
     ComfyUIWorkflowModel,
     NovelModel,
     SceneModel,
@@ -74,8 +64,8 @@ class TortoiseRepository(Generic[T]):
         return await queryset.count()
 
 
-class TortoiseNovelRepository(TortoiseRepository[NovelModel], NovelRepository):
-    """Tortoise ORM implementation of NovelRepository."""
+class TortoiseNovelRepository(TortoiseRepository[NovelModel]):
+    """Tortoise ORM repository for novels."""
 
     model_class = NovelModel
 
@@ -86,8 +76,8 @@ class TortoiseNovelRepository(TortoiseRepository[NovelModel], NovelRepository):
         return await self.model_class.get_or_none(id=novel_id).prefetch_related("chapters")
 
 
-class TortoiseChapterRepository(TortoiseRepository[ChapterModel], ChapterRepository):
-    """Tortoise ORM implementation of ChapterRepository."""
+class TortoiseChapterRepository(TortoiseRepository[ChapterModel]):
+    """Tortoise ORM repository for chapters."""
 
     model_class = ChapterModel
 
@@ -98,21 +88,20 @@ class TortoiseChapterRepository(TortoiseRepository[ChapterModel], ChapterReposit
     async def get_by_novel_id(self, novel_id: UUID) -> list[ChapterModel]:
         return await self.model_class.filter(novel_id=novel_id).order_by("number")
 
+    async def get_max_number(self, novel_id: UUID) -> int | None:
+        """Get the maximum chapter number for a novel."""
+        from tortoise.functions import Max
 
-class TortoiseCharacterRepository(TortoiseRepository[CharacterModel], CharacterRepository):
-    """Tortoise ORM implementation of CharacterRepository."""
-
-    model_class = CharacterModel
-
-    async def get_by_novel_id(self, novel_id: UUID) -> list[CharacterModel]:
-        return await self.model_class.filter(novel_id=novel_id)
-
-    async def get_by_name(self, novel_id: UUID, name: str) -> CharacterModel | None:
-        return await self.model_class.get_or_none(novel_id=novel_id, name=name)
+        result = await self.model_class.filter(novel_id=novel_id).annotate(
+            max_num=Max("number")
+        ).values("max_num")
+        if result and result[0]["max_num"] is not None:
+            return result[0]["max_num"]
+        return None
 
 
-class TortoiseSceneRepository(TortoiseRepository[SceneModel], SceneRepository):
-    """Tortoise ORM implementation of SceneRepository."""
+class TortoiseSceneRepository(TortoiseRepository[SceneModel]):
+    """Tortoise ORM repository for scenes."""
 
     model_class = SceneModel
 
@@ -120,8 +109,8 @@ class TortoiseSceneRepository(TortoiseRepository[SceneModel], SceneRepository):
         return await self.model_class.filter(chapter_id=chapter_id).order_by("sequence")
 
 
-class TortoiseVideoRepository(TortoiseRepository[VideoModel], VideoRepository):
-    """Tortoise ORM implementation of VideoRepository."""
+class TortoiseVideoRepository(TortoiseRepository[VideoModel]):
+    """Tortoise ORM repository for videos."""
 
     model_class = VideoModel
 
@@ -129,8 +118,8 @@ class TortoiseVideoRepository(TortoiseRepository[VideoModel], VideoRepository):
         return await self.model_class.filter(novel_id=novel_id)
 
 
-class TortoiseUserRepository(TortoiseRepository[UserModel], UserRepository):
-    """Tortoise ORM implementation of UserRepository."""
+class TortoiseUserRepository(TortoiseRepository[UserModel]):
+    """Tortoise ORM repository for users."""
 
     model_class = UserModel
 
@@ -141,8 +130,8 @@ class TortoiseUserRepository(TortoiseRepository[UserModel], UserRepository):
         return await self.model_class.get_or_none(username=username)
 
 
-class TortoiseUsageRecordRepository(TortoiseRepository[UsageRecordModel], UsageRecordRepository):
-    """Tortoise ORM implementation of UsageRecordRepository."""
+class TortoiseUsageRecordRepository(TortoiseRepository[UsageRecordModel]):
+    """Tortoise ORM repository for usage records."""
 
     model_class = UsageRecordModel
 
@@ -176,8 +165,8 @@ class TortoiseUsageRecordRepository(TortoiseRepository[UsageRecordModel], UsageR
         return float(result[0]["total"] or 0) if result else 0.0
 
 
-class TortoiseWorkflowRepository(TortoiseRepository[ComfyUIWorkflowModel], WorkflowRepository):
-    """Tortoise ORM implementation of WorkflowRepository."""
+class TortoiseWorkflowRepository(TortoiseRepository[ComfyUIWorkflowModel]):
+    """Tortoise ORM repository for workflows."""
 
     model_class = ComfyUIWorkflowModel
 
@@ -186,3 +175,63 @@ class TortoiseWorkflowRepository(TortoiseRepository[ComfyUIWorkflowModel], Workf
 
     async def get_default(self, category: str) -> ComfyUIWorkflowModel | None:
         return await self.model_class.get_or_none(category=category, is_default=True)
+
+
+class TortoiseAssetRepository(TortoiseRepository[AssetModel]):
+    """Tortoise ORM repository for assets."""
+
+    model_class = AssetModel
+
+    async def get_by_novel_id(
+        self, novel_id: UUID, asset_type: str | None = None
+    ) -> list[AssetModel]:
+        queryset = self.model_class.filter(novel_id=novel_id)
+        if asset_type:
+            queryset = queryset.filter(asset_type=asset_type)
+        return await queryset.order_by("asset_type", "canonical_name")
+
+    async def get_by_name(
+        self, novel_id: UUID, canonical_name: str, asset_type: str
+    ) -> AssetModel | None:
+        return await self.model_class.get_or_none(
+            novel_id=novel_id, canonical_name=canonical_name, asset_type=asset_type
+        )
+
+    async def find_by_alias(
+        self, novel_id: UUID, alias: str, asset_type: str | None = None
+    ) -> AssetModel | None:
+        """Find asset by alias using JSON contains query."""
+        queryset = self.model_class.filter(novel_id=novel_id)
+        if asset_type:
+            queryset = queryset.filter(asset_type=asset_type)
+        # Check canonical_name or aliases
+        assets = await queryset
+        for asset in assets:
+            if asset.canonical_name == alias or alias in asset.aliases:
+                return asset
+        return None
+
+    async def get_global_assets(
+        self, novel_id: UUID, asset_type: str | None = None
+    ) -> list[AssetModel]:
+        queryset = self.model_class.filter(novel_id=novel_id, is_global=True)
+        if asset_type:
+            queryset = queryset.filter(asset_type=asset_type)
+        return await queryset.order_by("asset_type", "canonical_name")
+
+
+class TortoiseChapterAssetRepository(TortoiseRepository[ChapterAssetModel]):
+    """Tortoise ORM repository for chapter assets."""
+
+    model_class = ChapterAssetModel
+
+    async def get_by_chapter_id(self, chapter_id: UUID) -> list[ChapterAssetModel]:
+        return await self.model_class.filter(chapter_id=chapter_id).prefetch_related("asset")
+
+    async def get_by_asset_id(self, asset_id: UUID) -> list[ChapterAssetModel]:
+        return await self.model_class.filter(asset_id=asset_id).prefetch_related("chapter")
+
+    async def get_by_chapter_and_asset(
+        self, chapter_id: UUID, asset_id: UUID
+    ) -> ChapterAssetModel | None:
+        return await self.model_class.get_or_none(chapter_id=chapter_id, asset_id=asset_id)

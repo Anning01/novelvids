@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 
 const routes: RouteRecordRaw[] = [
+  // Public routes
   {
     path: '/',
     name: 'home',
@@ -17,36 +18,75 @@ const routes: RouteRecordRaw[] = [
     name: 'register',
     component: () => import('@/views/RegisterView.vue'),
   },
+
+  // Dashboard (项目管理大厅)
   {
     path: '/dashboard',
     name: 'dashboard',
     component: () => import('@/views/DashboardView.vue'),
     meta: { requiresAuth: true },
   },
+
+  // Legacy novels route - redirect to dashboard
   {
     path: '/novels',
-    name: 'novels',
-    component: () => import('@/views/NovelsView.vue'),
-    meta: { requiresAuth: true },
+    redirect: '/dashboard',
   },
+
+  // Editor Layout (书籍工作台)
   {
-    path: '/novels/:id',
-    name: 'novel-detail',
-    component: () => import('@/views/NovelDetailView.vue'),
+    path: '/editor/:novelId',
+    component: () => import('@/layouts/EditorLayout.vue'),
     meta: { requiresAuth: true },
+    children: [
+      // 默认重定向到资产库
+      {
+        path: '',
+        redirect: { name: 'editor-assets' },
+      },
+
+      // 全局资产库
+      {
+        path: 'assets',
+        name: 'editor-assets',
+        component: () => import('@/views/editor/AssetsView.vue'),
+      },
+
+      // 章节工作流
+      {
+        path: 'chapter/:chapterId',
+        component: () => import('@/layouts/ChapterLayout.vue'),
+        children: [
+          {
+            path: '',
+            redirect: { name: 'chapter-extraction' },
+          },
+          {
+            path: 'extraction',
+            name: 'chapter-extraction',
+            component: () => import('@/views/editor/ExtractionView.vue'),
+          },
+          {
+            path: 'asset-review',
+            name: 'chapter-asset-review',
+            component: () => import('@/views/editor/AssetReviewView.vue'),
+          },
+          {
+            path: 'storyboard',
+            name: 'chapter-storyboard',
+            component: () => import('@/views/editor/StoryboardView.vue'),
+          },
+          {
+            path: 'studio',
+            name: 'chapter-studio',
+            component: () => import('@/views/editor/StudioView.vue'),
+          },
+        ],
+      },
+    ],
   },
-  {
-    path: '/novels/:id/processing',
-    name: 'chapter-processing',
-    component: () => import('@/views/ChapterProcessingView.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/generate',
-    name: 'generate',
-    component: () => import('@/views/GenerateView.vue'),
-    meta: { requiresAuth: true },
-  },
+
+  // Settings
   {
     path: '/settings',
     name: 'settings',

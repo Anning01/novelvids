@@ -59,3 +59,23 @@ export async function updateChapter(
 export async function deleteChapter(id: string): Promise<void> {
   await api.delete(`/chapters/${id}`)
 }
+
+export async function createChapter(
+  novelId: string,
+  data: { title: string; content?: string; number?: number }
+): Promise<Chapter> {
+  const response = await api.post('/chapters', data, {
+    params: { novel_id: novelId }
+  })
+  return transformChapter(response.data)
+}
+
+export async function updateChapterWorkflowStatus(
+  chapterId: string,
+  workflowStatus: ChapterWorkflowStatus
+): Promise<Chapter> {
+  const response = await api.patch(`/chapters/${chapterId}/workflow-status`, {
+    workflow_status: workflowStatus
+  })
+  return transformChapter(response.data)
+}

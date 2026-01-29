@@ -5,7 +5,6 @@ from novelvids.infrastructure.comfyui import ComfyUIClient, ComfyUIWorkflowBuild
 from novelvids.infrastructure.database import (
     TORTOISE_ORM,
     TortoiseChapterRepository,
-    TortoiseCharacterRepository,
     TortoiseNovelRepository,
     TortoiseSceneRepository,
     TortoiseUsageRecordRepository,
@@ -23,7 +22,6 @@ __all__ = [
     "TORTOISE_ORM",
     "TortoiseNovelRepository",
     "TortoiseChapterRepository",
-    "TortoiseCharacterRepository",
     "TortoiseSceneRepository",
     "TortoiseVideoRepository",
     "TortoiseUserRepository",
