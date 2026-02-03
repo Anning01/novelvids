@@ -136,7 +136,7 @@ export interface Shot {
   // 视频生成任务状态
   video_task_id: string | null
   video_task_platform: string | null
-  video_task_status: 'pending' | 'processing' | 'success' | 'failed' | null
+  video_task_status: 'pending' | 'processing' | 'running' | 'queued' | 'success' | 'completed' | 'succeeded' | 'failed' | null
   video_task_progress: number
   video_url: string | null
   video_error: string | null

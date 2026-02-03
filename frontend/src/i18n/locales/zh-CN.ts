@@ -335,10 +335,13 @@ export default {
 
         // 右侧面板 - 标签页
         tabs: {
-            info: '分镜信息',
+            info: '基础',
+            camera: '相机',
+            subject: '主体',
+            environment: '环境',
+            style: '风格',
             prompt: '提示词',
-            generate: '视频生成',
-            gallery: '素材库',
+            generate: '生成',
         },
 
         // 右侧面板 - 属性
@@ -365,6 +368,7 @@ export default {
             retry: '重试',
             failed: '生成失败',
             succeeded: '生成成功',
+            processing: '视频生成中，请等待...',
         },
 
         // 分镜 CRUD

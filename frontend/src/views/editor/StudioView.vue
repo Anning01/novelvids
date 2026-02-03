@@ -30,7 +30,15 @@ import {
   deleteShot as apiDeleteShot,
   type Shot,
   type ShotUpdateRequest,
+  SHOT_SIZES,
+  CAMERA_ANGLES,
+  CAMERA_MOVEMENTS,
+  VIDEO_STYLES,
+  MOODS,
+  LIGHTING_STYLES,
 } from '@/api/storyboard'
+import { getAssets, type Asset } from '@/api/assets'
+import { getMediaUrl } from '@/api/client'
 import type { StudioProject, StudioShot, VideoClip, TimelineClip, VideoModel, ExportSettings } from '@/types/studio'
 import type { ShotPrompt } from '@/api/storyboard'
 
@@ -39,6 +47,7 @@ const route = useRoute()
 const toastStore = useToastStore()
 
 // Route params
+const novelId = computed(() => route.params.novelId as string)
 const chapterId = computed(() => route.params.chapterId as string)
 
 // ============== State ==============
@@ -70,7 +79,10 @@ const currentShotPrompt = computed<ShotPrompt | null>(() => {
 })
 
 // Tab state for right panel
-const activeTab = ref<'info' | 'prompt' | 'generate' | 'gallery'>('info')
+const activeTab = ref<'info' | 'camera' | 'subject' | 'environment' | 'style' | 'prompt' | 'generate'>('info')
+
+// Assets for linking
+const assets = ref<Asset[]>([])
 
 // Edit state
 const isEditing = ref(false)
@@ -79,6 +91,11 @@ const editForm = ref<Partial<Shot>>({})
 // Shot CRUD modals
 const showDeleteConfirm = ref(false)
 const deletingShotSequence = ref<number | null>(null)
+
+// Asset selector
+const showAssetSelector = ref(false)
+const assetSelectorField = ref<'subject' | 'environment'>('subject')
+const assetSelectorTypes = ref<string[]>(['person', 'scene', 'item'])
 
 // Video task polling
 const pollingIntervals = ref<Map<number, ReturnType<typeof setInterval>>>(new Map())
@@ -129,6 +146,14 @@ async function loadData(): Promise<void> {
   try {
     project.value = await getStudioProject(chapterId.value)
 
+    // Load assets for linking
+    try {
+      const assetsResponse = await getAssets(novelId.value, { page_size: 100 })
+      assets.value = assetsResponse.items
+    } catch {
+      assets.value = []
+    }
+
     try {
       const promptsResponse = await getStoryboardPrompts(chapterId.value, generateSettings.value.model)
       shotPrompts.value = promptsResponse.prompts
@@ -143,8 +168,9 @@ async function loadData(): Promise<void> {
     }
 
     // Start polling for any in-progress tasks
+    // Note: backend uses 'running'/'queued', frontend uses 'processing'/'pending' - handle both
     for (const shot of project.value.shots) {
-      if (shot.video_task_id && shot.video_task_status && ['pending', 'processing'].includes(shot.video_task_status)) {
+      if (shot.video_task_id && shot.video_task_status && ['pending', 'processing', 'running', 'queued'].includes(shot.video_task_status)) {
         startPollingTask(shot.sequence, shot.video_task_id, shot.video_task_platform ?? 'vidu')
       }
     }
@@ -188,15 +214,17 @@ async function handleGenerateVideo(): Promise<void> {
   if (!selectedShot.value || isGenerating.value) return
 
   isGenerating.value = true
+  const shot = selectedShot.value
+  const shotSequence = shot.sequence
 
   try {
-    const prompt = currentShotPrompt.value?.prompt ?? selectedShot.value.description_cn
+    const prompt = currentShotPrompt.value?.prompt ?? shot.description_cn
     const negativePrompt = currentShotPrompt.value?.negative_prompt ?? null
 
-    const clip = await generateVideoClip(
+    const result = await generateVideoClip(
       chapterId.value,
       {
-        shotSequence: selectedShot.value.sequence,
+        shotSequence,
         model: generateSettings.value.model,
         duration: generateSettings.value.duration,
       },
@@ -204,14 +232,28 @@ async function handleGenerateVideo(): Promise<void> {
       negativePrompt
     )
 
-    selectedShot.value.clips.push(clip)
+    // Update shot-level status for tracking (persisted by backend)
+    shot.video_task_id = result.taskId
+    shot.video_task_platform = generateSettings.value.model
+    shot.video_task_status = result.isComplete ? 'success' : 'processing'
+    shot.video_task_progress = result.clip.progress
+    shot.video_url = result.clip.videoUrl
+
+    // Add clip to gallery
+    shot.clips.push(result.clip)
 
     // Auto-select if it's the first clip
-    if (!selectedShot.value.selectedClipId) {
-      selectedShot.value.selectedClipId = clip.id
+    if (!shot.selectedClipId) {
+      shot.selectedClipId = result.clip.id
     }
 
-    toastStore.success(t('studio.clipGenerated'))
+    if (result.isComplete) {
+      toastStore.success(t('studio.clipGenerated'))
+    } else {
+      // Task didn't complete within 60 seconds, start background polling
+      toastStore.info(t('studio.task.processing'))
+      startPollingTask(shotSequence, result.taskId, generateSettings.value.model)
+    }
   } catch {
     toastStore.error(t('studio.clipGenerateFailed'))
   } finally {
@@ -249,9 +291,48 @@ function startPollingTask(shotSequence: number, taskId: string, platform: string
       // Stop polling if completed or failed
       if (status.status === 'completed' || status.status === 'failed') {
         stopPollingTask(shotSequence)
-        if (status.status === 'completed') {
+        if (status.status === 'completed' && status.videoUrl && shot) {
+          // Find existing pending/generating clip for this shot and update it
+          const existingClip = shot.clips.find(c =>
+            c.shotSequence === shotSequence && ['pending', 'generating'].includes(c.status)
+          )
+          if (existingClip) {
+            // Update existing clip
+            existingClip.status = 'completed'
+            existingClip.progress = 100
+            existingClip.videoUrl = status.videoUrl
+          } else {
+            // No existing clip found, create a new one
+            const newClip: VideoClip = {
+              id: `clip-${Date.now()}-${shotSequence}`,
+              shotSequence,
+              model: shot.video_task_platform as VideoModel || 'vidu',
+              status: 'completed',
+              progress: 100,
+              videoUrl: status.videoUrl,
+              thumbnailUrl: null,
+              duration: generateSettings.value.duration,
+              createdAt: new Date().toISOString(),
+              prompt: currentShotPrompt.value?.prompt ?? shot.description_cn,
+              negativePrompt: currentShotPrompt.value?.negative_prompt ?? null,
+              error: null,
+            }
+            shot.clips.push(newClip)
+            // Auto-select the new clip if none selected
+            if (!shot.selectedClipId) {
+              shot.selectedClipId = newClip.id
+            }
+          }
           toastStore.success(t('studio.task.succeeded'))
-        } else {
+        } else if (status.status === 'failed') {
+          // Update existing pending clip to failed status
+          const existingClip = shot?.clips.find(c =>
+            c.shotSequence === shotSequence && ['pending', 'generating'].includes(c.status)
+          )
+          if (existingClip) {
+            existingClip.status = 'failed'
+            existingClip.error = status.error
+          }
           toastStore.error(t('studio.task.failed') + (status.error ? `: ${status.error}` : ''))
         }
       }
@@ -621,6 +702,82 @@ function handleExport(): void {
   showExportModal.value = false
 }
 
+// ============== Asset Helpers ==============
+
+function getAssetById(id: string): Asset | undefined {
+  return assets.value.find(a => a.id === id)
+}
+
+function getAssetName(id: string): string {
+  const asset = getAssetById(id)
+  return asset?.canonical_name || id
+}
+
+function openAssetSelector(field: 'subject' | 'environment', types: string[]): void {
+  assetSelectorField.value = field
+  assetSelectorTypes.value = types
+  showAssetSelector.value = true
+}
+
+function selectAsset(asset: Asset): void {
+  if (!selectedShot.value) return
+
+  if (assetSelectorField.value === 'subject') {
+    if (!selectedShot.value.subject) {
+      (selectedShot.value as any).subject = { asset_refs: [] }
+    }
+    if (!selectedShot.value.subject.asset_refs) {
+      selectedShot.value.subject.asset_refs = []
+    }
+    if (!selectedShot.value.subject.asset_refs.includes(asset.id)) {
+      selectedShot.value.subject.asset_refs.push(asset.id)
+      handleSaveField('subject', { asset_refs: selectedShot.value.subject.asset_refs })
+    }
+    // Auto-fill description if empty
+    if (!selectedShot.value.subject.subject_description && asset.base_traits) {
+      selectedShot.value.subject.subject_description = asset.base_traits
+      handleSaveField('subject', { subject_description: asset.base_traits })
+    }
+  } else if (assetSelectorField.value === 'environment') {
+    if (!selectedShot.value.environment) {
+      (selectedShot.value as any).environment = {}
+    }
+    selectedShot.value.environment.scene_asset_ref = asset.id
+    handleSaveField('environment', { scene_asset_ref: asset.id })
+    // Auto-fill location if empty
+    if (!selectedShot.value.environment.location && asset.base_traits) {
+      selectedShot.value.environment.location = asset.base_traits
+      handleSaveField('environment', { location: asset.base_traits })
+    }
+  }
+
+  showAssetSelector.value = false
+}
+
+function removeAssetRef(id: string): void {
+  if (!selectedShot.value?.subject?.asset_refs) return
+  selectedShot.value.subject.asset_refs = selectedShot.value.subject.asset_refs.filter(ref => ref !== id)
+  handleSaveField('subject', { asset_refs: selectedShot.value.subject.asset_refs })
+}
+
+// ============== Field Save (Auto-save on change) ==============
+
+async function handleSaveField(
+  section: 'camera' | 'subject' | 'environment' | 'style' | 'audio' | 'technical',
+  updates: Record<string, any>
+): Promise<void> {
+  if (!selectedShot.value) return
+
+  try {
+    const updatePayload: ShotUpdateRequest = {
+      [section]: updates,
+    }
+    await apiUpdateShot(chapterId.value, selectedShot.value.sequence, updatePayload)
+  } catch {
+    toastStore.error(t('common.saveFailed'))
+  }
+}
+
 // ============== Helpers ==============
 
 function formatTime(seconds: number): string {
@@ -758,14 +915,14 @@ function getModelLabel(value: VideoModel): string {
                     </span>
                     <!-- Video task status -->
                     <span
-                      v-if="shot.video_task_status === 'processing'"
+                      v-if="['pending', 'processing', 'running', 'queued'].includes(shot.video_task_status || '')"
                       class="px-1.5 py-0.5 rounded text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 flex items-center gap-1"
                     >
                       <span class="animate-spin w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full" />
                       {{ Math.round(shot.video_task_progress || 0) }}%
                     </span>
                     <span
-                      v-else-if="shot.video_task_status === 'success'"
+                      v-else-if="['success', 'completed', 'succeeded'].includes(shot.video_task_status || '')"
                       class="px-1.5 py-0.5 rounded text-xs bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300"
                     >
                       ✓
@@ -846,9 +1003,18 @@ function getModelLabel(value: VideoModel): string {
                   @dragstart="handleGalleryDragStart($event, clip)"
                   @dragend="handleGalleryDragEnd"
                 >
-                  <!-- Thumbnail Placeholder -->
+                  <!-- Video Preview or Placeholder -->
                   <div class="absolute inset-0 bg-gray-800 flex items-center justify-center">
-                    <div class="text-center text-gray-400">
+                    <video
+                      v-if="clip.videoUrl"
+                      :src="clip.videoUrl"
+                      class="w-full h-full object-cover"
+                      muted
+                      loop
+                      @mouseenter="($event.target as HTMLVideoElement).play()"
+                      @mouseleave="($event.target as HTMLVideoElement).pause()"
+                    />
+                    <div v-else class="text-center text-gray-400">
                       <p class="text-xs">{{ getModelLabel(clip.model) }}</p>
                       <p class="text-lg font-bold">{{ clip.duration }}s</p>
                     </div>
@@ -883,20 +1049,23 @@ function getModelLabel(value: VideoModel): string {
         </div>
 
         <!-- Right Panel - Tabbed Properties -->
-        <div class="w-80 flex-none border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
+        <div class="w-1/5 flex-none border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
           <div v-if="!selectedShot" class="flex-1 flex items-center justify-center text-gray-500">
             {{ t('studio.noPreview') }}
           </div>
           <template v-else>
             <!-- Tab Header -->
             <div class="flex-none border-b border-gray-200 dark:border-gray-700">
-              <div class="flex">
+              <div class="flex overflow-x-auto">
                 <button
                   v-for="tab in [
                     { key: 'info', label: t('studio.tabs.info') },
+                    { key: 'camera', label: t('studio.tabs.camera') },
+                    { key: 'subject', label: t('studio.tabs.subject') },
+                    { key: 'environment', label: t('studio.tabs.environment') },
+                    { key: 'style', label: t('studio.tabs.style') },
                     { key: 'prompt', label: t('studio.tabs.prompt') },
                     { key: 'generate', label: t('studio.tabs.generate') },
-                    { key: 'gallery', label: t('studio.tabs.gallery') },
                   ]"
                   :key="tab.key"
                   :class="[
@@ -955,6 +1124,300 @@ function getModelLabel(value: VideoModel): string {
               </template>
             </div>
 
+            <!-- Tab: Camera Settings -->
+            <div v-else-if="activeTab === 'camera'" class="flex-1 overflow-y-auto p-4 space-y-4">
+              <div>
+                <label class="label">{{ t('storyboard.camera.shotSize') }}</label>
+                <select
+                  :value="selectedShot.camera?.shot_size"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.camera) (selectedShot as any).camera = {}
+                      selectedShot.camera.shot_size = value
+                      handleSaveField('camera', { shot_size: value })
+                    }
+                  }"
+                >
+                  <option v-for="s in SHOT_SIZES" :key="s.value" :value="s.value">
+                    {{ s.label }} ({{ s.labelEn }})
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.camera.cameraAngle') }}</label>
+                <select
+                  :value="selectedShot.camera?.camera_angle"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.camera) (selectedShot as any).camera = {}
+                      selectedShot.camera.camera_angle = value
+                      handleSaveField('camera', { camera_angle: value })
+                    }
+                  }"
+                >
+                  <option v-for="a in CAMERA_ANGLES" :key="a.value" :value="a.value">
+                    {{ a.label }} ({{ a.labelEn }})
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.camera.cameraMovement') }}</label>
+                <select
+                  :value="selectedShot.camera?.camera_movement"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.camera) (selectedShot as any).camera = {}
+                      selectedShot.camera.camera_movement = value
+                      handleSaveField('camera', { camera_movement: value })
+                    }
+                  }"
+                >
+                  <option v-for="m in CAMERA_MOVEMENTS" :key="m.value" :value="m.value">
+                    {{ m.label }} ({{ m.labelEn }})
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Tab: Subject & Action -->
+            <div v-else-if="activeTab === 'subject'" class="flex-1 overflow-y-auto p-4 space-y-4">
+              <div>
+                <label class="label">{{ t('storyboard.subject.linkedAssets') }}</label>
+                <div class="flex flex-wrap gap-2 mb-2">
+                  <span
+                    v-for="assetId in selectedShot.subject?.asset_refs || []"
+                    :key="assetId"
+                    class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
+                  >
+                    <img
+                      v-if="getAssetById(assetId)?.main_image"
+                      :src="getMediaUrl(getAssetById(assetId)?.main_image)"
+                      class="w-4 h-4 rounded-full object-cover"
+                      alt=""
+                    />
+                    {{ getAssetName(assetId) }}
+                    <button type="button" class="hover:text-red-500" @click="removeAssetRef(assetId)">×</button>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm w-full"
+                  @click="openAssetSelector('subject', ['person', 'item'])"
+                >
+                  {{ t('storyboard.edit.addCharacterOrItem') }}
+                </button>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.subject.subjectDescription') }}</label>
+                <textarea
+                  :value="selectedShot.subject?.subject_description"
+                  rows="3"
+                  class="input w-full resize-none"
+                  placeholder="e.g., A young woman with long black hair wearing a red dress"
+                  @blur="(e: Event) => {
+                    const value = (e.target as HTMLTextAreaElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.subject) (selectedShot as any).subject = {}
+                      selectedShot.subject.subject_description = value
+                      handleSaveField('subject', { subject_description: value })
+                    }
+                  }"
+                />
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.subject.action') }}</label>
+                <input
+                  :value="selectedShot.subject?.action"
+                  type="text"
+                  class="input w-full"
+                  placeholder="e.g., walking slowly towards the window"
+                  @blur="(e: Event) => {
+                    const value = (e.target as HTMLInputElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.subject) (selectedShot as any).subject = {}
+                      selectedShot.subject.action = value
+                      handleSaveField('subject', { action: value })
+                    }
+                  }"
+                />
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.subject.emotion') }}</label>
+                <input
+                  :value="selectedShot.subject?.emotion"
+                  type="text"
+                  class="input w-full"
+                  placeholder="e.g., subtle sadness, thoughtful expression"
+                  @blur="(e: Event) => {
+                    const value = (e.target as HTMLInputElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.subject) (selectedShot as any).subject = {}
+                      selectedShot.subject.emotion = value
+                      handleSaveField('subject', { emotion: value })
+                    }
+                  }"
+                />
+              </div>
+            </div>
+
+            <!-- Tab: Environment Settings -->
+            <div v-else-if="activeTab === 'environment'" class="flex-1 overflow-y-auto p-4 space-y-4">
+              <div>
+                <label class="label">{{ t('storyboard.edit.sceneAsset') }}</label>
+                <div class="flex items-center gap-2 mb-2">
+                  <span v-if="selectedShot.environment?.scene_asset_ref" class="px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-sm flex items-center gap-1">
+                    <img
+                      v-if="getAssetById(selectedShot.environment.scene_asset_ref)?.main_image"
+                      :src="getMediaUrl(getAssetById(selectedShot.environment.scene_asset_ref)?.main_image)"
+                      class="w-4 h-4 rounded object-cover"
+                      alt=""
+                    />
+                    {{ getAssetName(selectedShot.environment.scene_asset_ref) }}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm w-full"
+                  @click="openAssetSelector('environment', ['scene'])"
+                >
+                  {{ selectedShot.environment?.scene_asset_ref ? t('storyboard.edit.change') : t('storyboard.edit.selectScene') }}
+                </button>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.environment.location') }}</label>
+                <textarea
+                  :value="selectedShot.environment?.location"
+                  rows="3"
+                  class="input w-full resize-none"
+                  placeholder="e.g., A cozy living room with vintage furniture and warm lighting"
+                  @blur="(e: Event) => {
+                    const value = (e.target as HTMLTextAreaElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.environment) (selectedShot as any).environment = {}
+                      selectedShot.environment.location = value
+                      handleSaveField('environment', { location: value })
+                    }
+                  }"
+                />
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.environment.timeOfDay') }}</label>
+                <select
+                  :value="selectedShot.environment?.time_of_day"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.environment) (selectedShot as any).environment = {}
+                      selectedShot.environment.time_of_day = value
+                      handleSaveField('environment', { time_of_day: value })
+                    }
+                  }"
+                >
+                  <option value="dawn">{{ t('storyboard.timeOfDays.dawn') }}</option>
+                  <option value="morning">{{ t('storyboard.timeOfDays.morning') }}</option>
+                  <option value="noon">{{ t('storyboard.timeOfDays.noon') }}</option>
+                  <option value="afternoon">{{ t('storyboard.timeOfDays.afternoon') }}</option>
+                  <option value="dusk">{{ t('storyboard.timeOfDays.dusk') }}</option>
+                  <option value="night">{{ t('storyboard.timeOfDays.night') }}</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.environment.lighting') }}</label>
+                <select
+                  :value="selectedShot.environment?.lighting"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.environment) (selectedShot as any).environment = {}
+                      selectedShot.environment.lighting = value
+                      handleSaveField('environment', { lighting: value })
+                    }
+                  }"
+                >
+                  <option v-for="l in LIGHTING_STYLES" :key="l.value" :value="l.value">
+                    {{ l.label }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Tab: Style Settings -->
+            <div v-else-if="activeTab === 'style'" class="flex-1 overflow-y-auto p-4 space-y-4">
+              <div>
+                <label class="label">{{ t('storyboard.style.videoStyle') }}</label>
+                <select
+                  :value="selectedShot.style?.video_style"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.style) (selectedShot as any).style = {}
+                      selectedShot.style.video_style = value
+                      handleSaveField('style', { video_style: value })
+                    }
+                  }"
+                >
+                  <option v-for="s in VIDEO_STYLES" :key="s.value" :value="s.value">
+                    {{ s.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.style.mood') }}</label>
+                <select
+                  :value="selectedShot.style?.mood"
+                  class="input w-full"
+                  @change="(e: Event) => {
+                    const value = (e.target as HTMLSelectElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.style) (selectedShot as any).style = {}
+                      selectedShot.style.mood = value
+                      handleSaveField('style', { mood: value })
+                    }
+                  }"
+                >
+                  <option v-for="m in MOODS" :key="m.value" :value="m.value">
+                    {{ m.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="label">{{ t('storyboard.style.colorGrading') }}</label>
+                <input
+                  :value="selectedShot.style?.color_grading"
+                  type="text"
+                  class="input w-full"
+                  placeholder="e.g., teal-orange, warm, desaturated"
+                  @blur="(e: Event) => {
+                    const value = (e.target as HTMLInputElement).value
+                    if (selectedShot) {
+                      if (!selectedShot.style) (selectedShot as any).style = {}
+                      selectedShot.style.color_grading = value
+                      handleSaveField('style', { color_grading: value })
+                    }
+                  }"
+                />
+              </div>
+            </div>
+
             <!-- Tab: Prompt Preview -->
             <div v-else-if="activeTab === 'prompt'" class="flex-1 overflow-y-auto p-4">
               <div v-if="currentShotPrompt" class="space-y-4">
@@ -996,7 +1459,7 @@ function getModelLabel(value: VideoModel): string {
             <!-- Tab: Generate Video -->
             <div v-else-if="activeTab === 'generate'" class="flex-1 overflow-y-auto p-4 space-y-4">
               <!-- Video task progress -->
-              <div v-if="selectedShot.video_task_status === 'processing'" class="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+              <div v-if="selectedShot.video_task_status === 'pending' || selectedShot.video_task_status === 'processing' || selectedShot.video_task_status === 'running' || selectedShot.video_task_status === 'queued'" class="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                 <div class="flex items-center justify-between mb-2">
                   <span class="text-sm font-medium text-blue-700 dark:text-blue-300">{{ t('studio.task.progress') }}</span>
                   <span class="text-sm text-blue-600 dark:text-blue-400">{{ Math.round(selectedShot.video_task_progress || 0) }}%</span>
@@ -1016,7 +1479,7 @@ function getModelLabel(value: VideoModel): string {
               </div>
 
               <!-- Success state -->
-              <div v-else-if="selectedShot.video_task_status === 'success' && selectedShot.video_url" class="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+              <div v-else-if="['success', 'completed', 'succeeded'].includes(selectedShot.video_task_status || '') && selectedShot.video_url" class="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
                 <p class="text-sm font-medium text-green-700 dark:text-green-300 mb-2">{{ t('studio.task.succeeded') }}</p>
                 <video
                   :src="selectedShot.video_url"
@@ -1039,8 +1502,8 @@ function getModelLabel(value: VideoModel): string {
                 </button>
               </div>
 
-              <!-- Generate settings -->
-              <template v-if="!selectedShot.video_task_status || selectedShot.video_task_status === 'success' || selectedShot.video_task_status === 'failed'">
+              <!-- Generate settings (always show unless actively generating) -->
+              <template v-if="!['pending', 'processing', 'running', 'queued'].includes(selectedShot.video_task_status || '')">
                 <div>
                   <label class="label">{{ t('studio.model') }}</label>
                   <select v-model="generateSettings.model" class="input w-full">
@@ -1074,7 +1537,7 @@ function getModelLabel(value: VideoModel): string {
 
                 <button
                   class="btn-primary w-full"
-                  :disabled="isGenerating || (selectedShot.video_task_status as string) === 'processing'"
+                  :disabled="isGenerating || ['processing', 'running', 'queued', 'pending'].includes(selectedShot.video_task_status || '')"
                   @click="handleGenerateVideo"
                 >
                   <span v-if="isGenerating" class="flex items-center justify-center gap-2">
@@ -1088,45 +1551,7 @@ function getModelLabel(value: VideoModel): string {
               </template>
             </div>
 
-            <!-- Tab: Video Gallery -->
-            <div v-else-if="activeTab === 'gallery'" class="flex-1 overflow-y-auto p-4">
-              <div v-if="selectedShot.clips.length === 0" class="text-center py-8 text-gray-500">
-                <p>{{ t('studio.galleryEmpty') }}</p>
-                <p class="text-sm mt-2">{{ t('studio.galleryHint') }}</p>
-              </div>
-              <div v-else class="grid grid-cols-2 gap-3">
-                <div
-                  v-for="clip in selectedShot.clips"
-                  :key="clip.id"
-                  :class="[
-                    'relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all group',
-                    selectedShot.selectedClipId === clip.id
-                      ? 'border-primary-500 ring-2 ring-primary-500/30'
-                      : 'border-gray-300 dark:border-gray-600 hover:border-gray-400',
-                  ]"
-                  @click="selectClipForShot(clip)"
-                >
-                  <div class="absolute inset-0 bg-gray-800 flex items-center justify-center">
-                    <div class="text-center text-gray-400">
-                      <p class="text-xs">{{ getModelLabel(clip.model) }}</p>
-                      <p class="text-lg font-bold">{{ clip.duration }}s</p>
-                    </div>
-                  </div>
-                  <div v-if="selectedShot.selectedClipId === clip.id" class="absolute top-1 left-1">
-                    <span class="px-1.5 py-0.5 bg-primary-500 text-white text-xs rounded font-medium">
-                      {{ t('studio.selectedVideo') }}
-                    </span>
-                  </div>
-                  <button
-                    class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
-                    @click.stop="deleteClipHandler(clip)"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
+            </template>
         </div>
       </div>
 
@@ -1297,11 +1722,73 @@ function getModelLabel(value: VideoModel): string {
         </div>
       </div>
     </Teleport>
+
+    <!-- Asset Selector Modal -->
+    <Teleport to="body">
+      <div v-if="showAssetSelector" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showAssetSelector = false">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+          <div class="flex-none p-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('storyboard.edit.selectAsset') }}
+            </h2>
+          </div>
+
+          <div class="flex-1 overflow-auto p-4">
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <template v-for="asset in assets.filter(a => assetSelectorTypes.includes(a.asset_type))" :key="asset.id">
+                <button
+                  type="button"
+                  class="text-left p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                  @click="selectAsset(asset)"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-lg bg-gray-100 dark:bg-gray-700 overflow-hidden flex-none">
+                      <img
+                        v-if="asset.main_image"
+                        :src="getMediaUrl(asset.main_image)"
+                        class="w-full h-full object-cover"
+                        alt=""
+                      />
+                      <div v-else class="w-full h-full flex items-center justify-center text-gray-400">
+                        <span v-if="asset.asset_type === 'person'">👤</span>
+                        <span v-else-if="asset.asset_type === 'scene'">🏞️</span>
+                        <span v-else>📦</span>
+                      </div>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="font-medium text-gray-900 dark:text-white truncate">
+                        {{ asset.canonical_name }}
+                      </div>
+                      <div class="text-xs text-gray-500">
+                        {{ t(`assets.types.${asset.asset_type}`) }}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </template>
+            </div>
+
+            <div v-if="assets.filter(a => assetSelectorTypes.includes(a.asset_type)).length === 0" class="text-center py-8 text-gray-500">
+              {{ t('storyboard.edit.noAvailableAssets') }}
+            </div>
+          </div>
+
+          <div class="flex-none p-4 border-t border-gray-200 dark:border-gray-700">
+            <button type="button" class="btn-secondary w-full" @click="showAssetSelector = false">
+              {{ t('common.cancel') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .studio-view {
   height: 100%;
+}
+.btn-sm {
+  @apply px-2 py-1 text-sm;
 }
 </style>

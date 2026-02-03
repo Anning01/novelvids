@@ -29,6 +29,12 @@ interface VideoTaskResponse {
   shot_sequence: number | null
 }
 
+export interface GenerateVideoResult {
+  clip: VideoClip
+  taskId: string
+  isComplete: boolean
+}
+
 // ============== Helper Functions ==============
 
 let clipIdCounter = 1
@@ -73,11 +79,38 @@ function taskResponseToClip(
 export async function getStudioProject(chapterId: string): Promise<StudioProject> {
   const storyboard: StoryboardResponse = await getStoryboard(chapterId)
 
-  const shots: StudioShot[] = storyboard.shots.map(shot => ({
-    ...shot,
-    clips: [],
-    selectedClipId: null,
-  }))
+  const shots: StudioShot[] = storyboard.shots.map(shot => {
+    const clips: VideoClip[] = []
+    let selectedClipId: string | null = null
+
+    // If shot has a completed video, create a clip for it
+    // Note: backend uses 'succeeded', handle all possible success status values
+    const isCompleted = ['success', 'completed', 'succeeded'].includes(shot.video_task_status || '')
+    if (shot.video_url && isCompleted) {
+      const clipId = `clip-${shot.sequence}-${Date.now()}`
+      clips.push({
+        id: clipId,
+        shotSequence: shot.sequence,
+        model: (shot.video_task_platform as VideoModel) || 'vidu',
+        status: 'completed',
+        progress: 100,
+        videoUrl: shot.video_url,
+        thumbnailUrl: null,
+        duration: shot.technical?.duration || 6,
+        createdAt: new Date().toISOString(),
+        prompt: shot.platform_prompt || shot.description_cn,
+        negativePrompt: null,
+        error: null,
+      })
+      selectedClipId = clipId
+    }
+
+    return {
+      ...shot,
+      clips,
+      selectedClipId,
+    }
+  })
 
   return {
     chapterId,
@@ -93,13 +126,14 @@ export async function getStudioProject(chapterId: string): Promise<StudioProject
 /**
  * Generate a new video clip for a shot.
  * Calls the real backend API and starts a video generation task.
+ * Returns both the clip and task information for tracking.
  */
 export async function generateVideoClip(
   chapterId: string,
   request: GenerateVideoRequest,
   prompt: string,
   negativePrompt: string | null
-): Promise<VideoClip> {
+): Promise<GenerateVideoResult> {
   const response = await api.post<VideoTaskResponse>('/generate/video', {
     chapter_id: chapterId,
     shot_sequence: request.shotSequence,
@@ -109,18 +143,26 @@ export async function generateVideoClip(
   })
 
   const task = response.data
+  const taskId = task.task_id
 
   // If task started successfully, poll until completion or timeout
   if (task.status === 'pending' || task.status === 'processing') {
     const completedTask = await pollVideoTaskUntilComplete(
-      task.task_id,
+      taskId,
       request.model,
-      60000 // 60 second timeout
+      60000, // 60 second timeout
+      3000,
+      chapterId,
+      request.shotSequence
     )
-    return taskResponseToClip(completedTask, request.model, request.duration, prompt, negativePrompt)
+    const clip = taskResponseToClip(completedTask, request.model, request.duration, prompt, negativePrompt)
+    const isComplete = completedTask.status === 'succeeded'
+    return { clip, taskId, isComplete }
   }
 
-  return taskResponseToClip(task, request.model, request.duration, prompt, negativePrompt)
+  const clip = taskResponseToClip(task, request.model, request.duration, prompt, negativePrompt)
+  const isComplete = task.status === 'succeeded'
+  return { clip, taskId, isComplete }
 }
 
 /**

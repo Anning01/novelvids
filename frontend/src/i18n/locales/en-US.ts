@@ -335,10 +335,13 @@ export default {
 
         // Right Panel - Tabs
         tabs: {
-            info: 'Shot Info',
+            info: 'Info',
+            camera: 'Camera',
+            subject: 'Subject',
+            environment: 'Env',
+            style: 'Style',
             prompt: 'Prompt',
             generate: 'Generate',
-            gallery: 'Gallery',
         },
 
         // Right Panel - Properties
@@ -365,6 +368,7 @@ export default {
             retry: 'Retry',
             failed: 'Generation failed',
             succeeded: 'Generation complete',
+            processing: 'Video generation in progress, please wait...',
         },
 
         // Shot CRUD
