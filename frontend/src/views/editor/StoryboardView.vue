@@ -57,7 +57,7 @@ const editForm = ref<Partial<Shot>>({})
 const showGenerateSettings = ref(false)
 const generateSettings = ref({
   max_shot_duration: 8,
-  target_platform: 'veo' as 'veo' | 'vidu' | 'kling' | 'sora',
+  target_platform: 'vidu' as 'vidu' | 'doubao',
   style_preset: 'cinematic',
   aspect_ratio: '16:9',
   include_audio: true,
@@ -66,7 +66,7 @@ const generateSettings = ref({
 // Prompts modal
 const showPromptsModal = ref(false)
 const prompts = ref<ShotPrompt[]>([])
-const selectedPlatform = ref<'veo' | 'vidu' | 'kling' | 'sora'>('veo')
+const selectedPlatform = ref<'vidu' | 'doubao'>('vidu')
 
 // Asset selector
 const showAssetSelector = ref(false)

@@ -1,7 +1,6 @@
 """Infrastructure layer exports."""
 
 from novelvids.infrastructure.cache import RedisCache
-from novelvids.infrastructure.comfyui import ComfyUIClient, ComfyUIWorkflowBuilder
 from novelvids.infrastructure.database import (
     TORTOISE_ORM,
     TortoiseChapterRepository,
@@ -17,8 +16,6 @@ from novelvids.infrastructure.storage import LocalStorage
 
 __all__ = [
     "RedisCache",
-    "ComfyUIClient",
-    "ComfyUIWorkflowBuilder",
     "TORTOISE_ORM",
     "TortoiseNovelRepository",
     "TortoiseChapterRepository",

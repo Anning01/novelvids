@@ -333,12 +333,21 @@ export default {
         deleteConfirm: '确定删除此视频片段？',
         dragToTimeline: '拖到时间轴',
 
+        // 右侧面板 - 标签页
+        tabs: {
+            info: '分镜信息',
+            prompt: '提示词',
+            generate: '视频生成',
+            gallery: '素材库',
+        },
+
         // 右侧面板 - 属性
         properties: '分镜属性',
         shotInfo: '分镜信息',
         description: '描述',
         model: 'AI 模型',
         modelHint: '选择视频生成模型',
+        unavailable: '不可用',
         duration: '时长',
         durationSeconds: '{seconds}秒',
         durationHint: '视频时长（秒）',
@@ -346,6 +355,30 @@ export default {
         generating: '生成中...',
         generateMore: '再生成一个',
         regenerate: '重新生成',
+
+        // 视频任务状态
+        task: {
+            progress: '生成进度',
+            cancel: '取消任务',
+            cancelConfirm: '确定取消当前视频生成任务？',
+            cancelled: '任务已取消',
+            retry: '重试',
+            failed: '生成失败',
+            succeeded: '生成成功',
+        },
+
+        // 分镜 CRUD
+        shot: {
+            add: '添加分镜',
+            addAfter: '在此后插入分镜',
+            delete: '删除分镜',
+            deleteConfirm: '确定删除镜头 {sequence}？此操作不可恢复。',
+            deleted: '分镜已删除',
+            edit: '编辑',
+            save: '保存',
+            cancel: '取消',
+            newShotDescription: '新分镜描述',
+        },
 
         // 提示词预览
         promptPreview: '提示词预览',
@@ -449,6 +482,11 @@ export default {
         imageGenFailed: 'AI 图片生成失败，请稍后重试',
         missingBaseTraits: '缺少英文视觉特征 (base_traits)，请先填写',
         generating: '正在生成...',
+        batchGenerate: '一键生成全部',
+        batchGenerating: '正在生成 {current}/{total}...',
+        batchGenerateSuccess: '批量生成完成，成功生成 {count} 张图片',
+        batchGeneratePartial: '批量生成部分完成：成功 {success} 张，失败 {fail} 张',
+        noAssetsNeedImages: '没有需要生成图片的资产（所有资产已有图片或缺少特征描述）',
     },
 
     common: {
@@ -474,6 +512,8 @@ export default {
         upload: '上传',
         refresh: '刷新',
         optional: '可选',
+        angle: '角度',
+        clickToClose: '点击任意处关闭',
         retry: '重试',
         backToNovels: '返回小说列表',
         processNovel: '处理小说',
@@ -488,8 +528,12 @@ export default {
         deleteFailed: '删除失败',
         deleting: '删除中...',
         creating: '创建中...',
+        saving: '保存中...',
         reorderFailed: '排序更新失败',
         loadingMore: '加载更多...',
+        prev: '上一页',
+        total: '总计',
+        confirmDelete: '确认删除',
     },
 
     auth: {
@@ -614,28 +658,39 @@ export default {
 
     novels: {
         title: '小说管理',
+        description: '管理您的小说项目，支持增删改查',
         myNovels: '我的小说',
+        createNovel: '新建小说',
         uploadNovel: '上传小说',
         uploadTxt: '上传 TXT',
+        uploadFile: '上传文件',
+        uploadPreview: '文件预览',
+        confirmUpload: '确认导入',
         insertIntoContent: '插入到内容',
         novelTitle: '小说标题',
+        titlePlaceholder: '请输入小说标题',
         author: '作者',
-        status: '状态',
+        authorPlaceholder: '请输入作者名称（可选）',
         chapters: '章节',
         scenes: '场景',
         createdAt: '创建时间',
         updatedAt: '更新时间',
         actions: '操作',
         noNovels: '暂无小说',
+        empty: '暂无小说',
+        createFirst: '创建您的第一部小说',
         uploadFirst: '上传您的第一部小说开始创作',
+        searchPlaceholder: '搜索小说标题或作者...',
         viewDetails: '查看详情',
         generateVideo: '生成视频',
         deleteNovel: '删除小说',
         confirmDelete: '确认删除这部小说吗？',
         novelDetails: '小说详情',
         totalChapters: '总章节数',
+        totalChars: '共 {count} 字符',
         processedChapters: '已处理章节',
         content: '内容',
+        contentPlaceholder: '请输入小说内容，或点击右上方上传文件',
         metadata: '元数据',
         characters: '角色',
         addCharacter: '添加角色',
@@ -652,6 +707,14 @@ export default {
         deleteConfirm: '确定删除小说',
         deleteWarning: '此操作不可撤销，小说及所有章节将永久删除。',
         deleteSuccess: '小说删除成功',
+        status: {
+            pending: '待处理',
+            queued: '队列中',
+            processing: '处理中',
+            completed: '已完成',
+            failed: '失败',
+            cancelled: '已取消',
+        },
         novelStatus: {
             pending: '待处理',
             queued: '队列中',

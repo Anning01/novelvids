@@ -3,8 +3,8 @@
  * StudioView - Video Composition Studio
  *
  * The final step in the chapter workflow where users:
- * 1. View storyboard shots in a left sidebar
- * 2. Generate video clips for each shot (multiple versions - gacha mechanic)
+ * 1. View storyboard shots in a left sidebar (with CRUD)
+ * 2. Generate video clips for each shot (with progress tracking)
  * 3. Pick the best video version for each shot
  * 4. Arrange clips on a timeline via drag-and-drop
  * 5. Compose the final video
@@ -16,12 +16,21 @@ import { useToastStore } from '@/stores/toast'
 import {
   getStudioProject,
   generateVideoClip,
+  getVideoTaskStatus,
+  cancelVideoTask,
   VIDEO_MODELS,
   EXPORT_RESOLUTIONS,
   EXPORT_FORMATS,
   EXPORT_FPS,
 } from '@/api/studio'
-import { getStoryboardPrompts } from '@/api/storyboard'
+import {
+  getStoryboardPrompts,
+  addShot as apiAddShot,
+  updateShot as apiUpdateShot,
+  deleteShot as apiDeleteShot,
+  type Shot,
+  type ShotUpdateRequest,
+} from '@/api/storyboard'
 import type { StudioProject, StudioShot, VideoClip, TimelineClip, VideoModel, ExportSettings } from '@/types/studio'
 import type { ShotPrompt } from '@/api/storyboard'
 
@@ -36,6 +45,7 @@ const chapterId = computed(() => route.params.chapterId as string)
 
 // Loading states
 const isLoading = ref(true)
+const isSaving = ref(false)
 const isGenerating = ref(false)
 const error = ref<string | null>(null)
 
@@ -59,9 +69,23 @@ const currentShotPrompt = computed<ShotPrompt | null>(() => {
   return shotPrompts.value.find(p => p.sequence === selectedShotSequence.value) ?? null
 })
 
+// Tab state for right panel
+const activeTab = ref<'info' | 'prompt' | 'generate' | 'gallery'>('info')
+
+// Edit state
+const isEditing = ref(false)
+const editForm = ref<Partial<Shot>>({})
+
+// Shot CRUD modals
+const showDeleteConfirm = ref(false)
+const deletingShotSequence = ref<number | null>(null)
+
+// Video task polling
+const pollingIntervals = ref<Map<number, ReturnType<typeof setInterval>>>(new Map())
+
 // Generate settings
 const generateSettings = ref<{ model: VideoModel; duration: number }>({
-  model: 'veo',
+  model: 'vidu',
   duration: 6,
 })
 
@@ -106,7 +130,7 @@ async function loadData(): Promise<void> {
     project.value = await getStudioProject(chapterId.value)
 
     try {
-      const promptsResponse = await getStoryboardPrompts(chapterId.value, 'veo')
+      const promptsResponse = await getStoryboardPrompts(chapterId.value, generateSettings.value.model)
       shotPrompts.value = promptsResponse.prompts
     } catch {
       // Prompts are optional, don't fail on error
@@ -116,6 +140,13 @@ async function loadData(): Promise<void> {
     // Auto-select first shot
     if (project.value.shots.length > 0 && !selectedShotSequence.value) {
       selectedShotSequence.value = project.value.shots[0].sequence
+    }
+
+    // Start polling for any in-progress tasks
+    for (const shot of project.value.shots) {
+      if (shot.video_task_id && shot.video_task_status && ['pending', 'processing'].includes(shot.video_task_status)) {
+        startPollingTask(shot.sequence, shot.video_task_id, shot.video_task_platform ?? 'vidu')
+      }
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Failed to load studio data'
@@ -132,6 +163,17 @@ onMounted(() => {
 
 watch(chapterId, () => {
   loadData()
+})
+
+// Re-fetch prompts when model changes (different platforms generate different prompts)
+watch(() => generateSettings.value.model, async (newModel) => {
+  if (!chapterId.value) return
+  try {
+    const promptsResponse = await getStoryboardPrompts(chapterId.value, newModel)
+    shotPrompts.value = promptsResponse.prompts
+  } catch {
+    shotPrompts.value = []
+  }
 })
 
 // ============== Shot Selection ==============
@@ -174,6 +216,182 @@ async function handleGenerateVideo(): Promise<void> {
     toastStore.error(t('studio.clipGenerateFailed'))
   } finally {
     isGenerating.value = false
+  }
+}
+
+// ============== Video Task Polling ==============
+
+function startPollingTask(shotSequence: number, taskId: string, platform: string): void {
+  // Clear existing interval if any
+  stopPollingTask(shotSequence)
+
+  const interval = setInterval(async () => {
+    try {
+      const status = await getVideoTaskStatus(
+        taskId,
+        platform,
+        chapterId.value,
+        shotSequence
+      )
+
+      // Update shot status
+      const shot = project.value?.shots.find(s => s.sequence === shotSequence)
+      if (shot) {
+        shot.video_task_status = status.status === 'running' ? 'processing'
+          : status.status === 'completed' ? 'success'
+          : status.status === 'failed' ? 'failed'
+          : 'pending'
+        shot.video_task_progress = status.progress
+        shot.video_url = status.videoUrl
+        shot.video_error = status.error
+      }
+
+      // Stop polling if completed or failed
+      if (status.status === 'completed' || status.status === 'failed') {
+        stopPollingTask(shotSequence)
+        if (status.status === 'completed') {
+          toastStore.success(t('studio.task.succeeded'))
+        } else {
+          toastStore.error(t('studio.task.failed') + (status.error ? `: ${status.error}` : ''))
+        }
+      }
+    } catch (err) {
+      console.error('Polling error:', err)
+    }
+  }, 3000)
+
+  pollingIntervals.value.set(shotSequence, interval)
+}
+
+function stopPollingTask(shotSequence: number): void {
+  const interval = pollingIntervals.value.get(shotSequence)
+  if (interval) {
+    clearInterval(interval)
+    pollingIntervals.value.delete(shotSequence)
+  }
+}
+
+async function handleCancelTask(): Promise<void> {
+  if (!selectedShot.value) return
+
+  const shot = selectedShot.value
+  if (!shot.video_task_id) return
+
+  try {
+    await cancelVideoTask(chapterId.value, shot.sequence)
+    stopPollingTask(shot.sequence)
+
+    shot.video_task_id = null
+    shot.video_task_status = null
+    shot.video_task_progress = 0
+    shot.video_error = null
+
+    toastStore.success(t('studio.task.cancelled'))
+  } catch (err) {
+    toastStore.error(t('common.saveFailed'))
+  }
+}
+
+// ============== Shot CRUD ==============
+
+async function handleAddShot(afterSequence?: number): Promise<void> {
+  if (!project.value) return
+
+  isSaving.value = true
+  try {
+    // 如果没有指定位置，添加到最后
+    const insertAfter = afterSequence ?? (
+      project.value.shots.length > 0
+        ? Math.max(...project.value.shots.map(s => s.sequence))
+        : 0
+    )
+
+    const newShot = await apiAddShot(chapterId.value, {
+      description_cn: t('studio.shot.newShotDescription'),
+    }, insertAfter)
+
+    // 重新加载数据以获取正确的排序
+    await loadData()
+
+    // Select the new shot
+    selectedShotSequence.value = newShot.sequence
+    toastStore.success(t('common.saved'))
+  } catch (err) {
+    toastStore.error(t('common.saveFailed'))
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function handleDeleteShot(): Promise<void> {
+  if (deletingShotSequence.value === null || !project.value) return
+
+  isSaving.value = true
+  try {
+    await apiDeleteShot(chapterId.value, deletingShotSequence.value)
+
+    // Remove from project
+    const index = project.value.shots.findIndex(s => s.sequence === deletingShotSequence.value)
+    if (index >= 0) {
+      project.value.shots.splice(index, 1)
+    }
+
+    // Select another shot if the deleted one was selected
+    if (selectedShotSequence.value === deletingShotSequence.value) {
+      selectedShotSequence.value = project.value.shots[0]?.sequence ?? null
+    }
+
+    toastStore.success(t('studio.shot.deleted'))
+  } catch (err) {
+    toastStore.error(t('common.deleteFailed'))
+  } finally {
+    isSaving.value = false
+    showDeleteConfirm.value = false
+    deletingShotSequence.value = null
+  }
+}
+
+function confirmDeleteShot(sequence: number): void {
+  deletingShotSequence.value = sequence
+  showDeleteConfirm.value = true
+}
+
+function startEditing(): void {
+  if (!selectedShot.value) return
+  editForm.value = {
+    name: selectedShot.value.name,
+    description_cn: selectedShot.value.description_cn,
+  }
+  isEditing.value = true
+}
+
+function cancelEditing(): void {
+  isEditing.value = false
+  editForm.value = {}
+}
+
+async function saveEditing(): Promise<void> {
+  if (!selectedShot.value) return
+
+  isSaving.value = true
+  try {
+    const update: ShotUpdateRequest = {}
+    if (editForm.value.name !== undefined) update.name = editForm.value.name ?? undefined
+    if (editForm.value.description_cn !== undefined) update.description_cn = editForm.value.description_cn
+
+    await apiUpdateShot(chapterId.value, selectedShot.value.sequence, update)
+
+    // Update local state
+    if (editForm.value.name !== undefined) selectedShot.value.name = editForm.value.name
+    if (editForm.value.description_cn !== undefined) selectedShot.value.description_cn = editForm.value.description_cn
+
+    isEditing.value = false
+    editForm.value = {}
+    toastStore.success(t('common.saved'))
+  } catch (err) {
+    toastStore.error(t('common.saveFailed'))
+  } finally {
+    isSaving.value = false
   }
 }
 
@@ -380,6 +598,11 @@ onUnmounted(() => {
   if (playbackInterval) {
     window.clearInterval(playbackInterval)
   }
+  // Clean up all polling intervals
+  for (const interval of pollingIntervals.value.values()) {
+    clearInterval(interval)
+  }
+  pollingIntervals.value.clear()
 })
 
 // ============== Compose & Export ==============
@@ -470,8 +693,18 @@ function getModelLabel(value: VideoModel): string {
       <div class="flex-1 flex overflow-hidden">
         <!-- Left Panel - Shot List -->
         <div class="w-72 flex-none border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
-          <div class="flex-none p-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex-none p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('studio.shotList') }}</h3>
+            <button
+              class="w-8 h-8 rounded-lg bg-primary-500 hover:bg-primary-600 text-white flex items-center justify-center transition-colors"
+              :disabled="isSaving"
+              @click="handleAddShot()"
+              :title="t('studio.shot.add')"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
           </div>
 
           <div class="flex-1 overflow-y-auto p-2">
@@ -484,7 +717,7 @@ function getModelLabel(value: VideoModel): string {
               v-for="shot in project.shots"
               :key="shot.sequence"
               :class="[
-                'p-3 rounded-lg cursor-pointer transition-all mb-2',
+                'p-3 rounded-lg cursor-pointer transition-all mb-2 group',
                 selectedShotSequence === shot.sequence
                   ? 'bg-primary-100 dark:bg-primary-900/30 border-2 border-primary-500'
                   : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent',
@@ -511,10 +744,11 @@ function getModelLabel(value: VideoModel): string {
                   <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
                     {{ shot.description_cn }}
                   </p>
-                  <p class="text-xs mt-1">
+                  <div class="flex items-center gap-2 mt-1">
+                    <!-- Clip count badge -->
                     <span
                       :class="[
-                        'px-1.5 py-0.5 rounded',
+                        'px-1.5 py-0.5 rounded text-xs',
                         shot.clips.length > 0
                           ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
                           : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-400',
@@ -522,9 +756,49 @@ function getModelLabel(value: VideoModel): string {
                     >
                       {{ shot.clips.length > 0 ? t('studio.clipsCount', { count: shot.clips.length }) : t('studio.noClip') }}
                     </span>
-                  </p>
+                    <!-- Video task status -->
+                    <span
+                      v-if="shot.video_task_status === 'processing'"
+                      class="px-1.5 py-0.5 rounded text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 flex items-center gap-1"
+                    >
+                      <span class="animate-spin w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full" />
+                      {{ Math.round(shot.video_task_progress || 0) }}%
+                    </span>
+                    <span
+                      v-else-if="shot.video_task_status === 'success'"
+                      class="px-1.5 py-0.5 rounded text-xs bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300"
+                    >
+                      ✓
+                    </span>
+                    <span
+                      v-else-if="shot.video_task_status === 'failed'"
+                      class="px-1.5 py-0.5 rounded text-xs bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300"
+                    >
+                      ✗
+                    </span>
+                  </div>
                 </div>
+                <!-- Delete button -->
+                <button
+                  class="flex-shrink-0 w-6 h-6 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  @click.stop="confirmDeleteShot(shot.sequence)"
+                  :title="t('studio.shot.delete')"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </div>
+              <!-- Insert after this shot button -->
+              <button
+                class="w-full h-6 flex items-center justify-center text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 -mt-1 mb-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                @click.stop="handleAddShot(shot.sequence)"
+                :title="t('studio.shot.addAfter')"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -608,70 +882,85 @@ function getModelLabel(value: VideoModel): string {
           </div>
         </div>
 
-        <!-- Right Panel - Properties -->
+        <!-- Right Panel - Tabbed Properties -->
         <div class="w-80 flex-none border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
           <div v-if="!selectedShot" class="flex-1 flex items-center justify-center text-gray-500">
             {{ t('studio.noPreview') }}
           </div>
           <template v-else>
-            <!-- Shot Info -->
-            <div class="flex-none p-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 class="font-semibold text-gray-900 dark:text-white mb-3">{{ t('studio.shotInfo') }}</h3>
-              <p class="font-medium text-gray-800 dark:text-gray-200">
-                {{ selectedShot.name || t('studio.shotNumber', { number: selectedShot.sequence }) }}
-              </p>
-              <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                {{ selectedShot.description_cn }}
-              </p>
+            <!-- Tab Header -->
+            <div class="flex-none border-b border-gray-200 dark:border-gray-700">
+              <div class="flex">
+                <button
+                  v-for="tab in [
+                    { key: 'info', label: t('studio.tabs.info') },
+                    { key: 'prompt', label: t('studio.tabs.prompt') },
+                    { key: 'generate', label: t('studio.tabs.generate') },
+                    { key: 'gallery', label: t('studio.tabs.gallery') },
+                  ]"
+                  :key="tab.key"
+                  :class="[
+                    'flex-1 px-3 py-2.5 text-xs font-medium transition-colors',
+                    activeTab === tab.key
+                      ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-500'
+                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
+                  ]"
+                  @click="activeTab = tab.key as typeof activeTab"
+                >
+                  {{ tab.label }}
+                </button>
+              </div>
             </div>
 
-            <!-- Generate Settings -->
-            <div class="flex-none p-4 border-b border-gray-200 dark:border-gray-700 space-y-4">
-              <div>
-                <label class="label">{{ t('studio.model') }}</label>
-                <select v-model="generateSettings.model" class="input w-full">
-                  <option v-for="m in VIDEO_MODELS" :key="m.value" :value="m.value">
-                    {{ locale === 'zh-CN' ? m.labelZh : m.label }}
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label class="label">
-                  {{ t('studio.duration') }}: {{ t('studio.durationSeconds', { seconds: generateSettings.duration }) }}
-                </label>
-                <input
-                  v-model.number="generateSettings.duration"
-                  type="range"
-                  min="2"
-                  max="10"
-                  step="1"
-                  class="w-full"
-                />
-              </div>
-
-              <button
-                class="btn-primary w-full"
-                :disabled="isGenerating"
-                @click="handleGenerateVideo"
-              >
-                <span v-if="isGenerating" class="flex items-center justify-center gap-2">
-                  <span class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                  {{ t('studio.generating') }}
-                </span>
-                <span v-else>
-                  {{ selectedShot.clips.length > 0 ? t('studio.generateMore') : t('studio.generate') }}
-                </span>
-              </button>
+            <!-- Tab: Shot Info -->
+            <div v-if="activeTab === 'info'" class="flex-1 overflow-y-auto p-4 space-y-4">
+              <template v-if="!isEditing">
+                <div>
+                  <h4 class="text-xs font-medium text-gray-500 mb-1">{{ t('studio.shotNumber', { number: selectedShot.sequence }) }}</h4>
+                  <p class="font-medium text-gray-900 dark:text-white">
+                    {{ selectedShot.name || t('studio.shotNumber', { number: selectedShot.sequence }) }}
+                  </p>
+                </div>
+                <div>
+                  <h4 class="text-xs font-medium text-gray-500 mb-1">{{ t('studio.description') }}</h4>
+                  <p class="text-sm text-gray-700 dark:text-gray-300">
+                    {{ selectedShot.description_cn }}
+                  </p>
+                </div>
+                <button class="btn-secondary w-full" @click="startEditing">
+                  {{ t('studio.shot.edit') }}
+                </button>
+              </template>
+              <template v-else>
+                <div>
+                  <label class="label">{{ t('storyboard.editModal.name') }}</label>
+                  <input v-model="editForm.name" type="text" class="input w-full" />
+                </div>
+                <div>
+                  <label class="label">{{ t('studio.description') }}</label>
+                  <textarea
+                    v-model="editForm.description_cn"
+                    rows="4"
+                    class="input w-full resize-none"
+                  />
+                </div>
+                <div class="flex gap-2">
+                  <button class="btn-secondary flex-1" @click="cancelEditing">
+                    {{ t('studio.shot.cancel') }}
+                  </button>
+                  <button class="btn-primary flex-1" :disabled="isSaving" @click="saveEditing">
+                    {{ t('studio.shot.save') }}
+                  </button>
+                </div>
+              </template>
             </div>
 
-            <!-- Prompt Preview -->
-            <div class="flex-1 overflow-y-auto p-4">
-              <h4 class="font-medium text-gray-900 dark:text-white mb-3">{{ t('studio.promptPreview') }}</h4>
-              <div v-if="currentShotPrompt" class="space-y-3">
+            <!-- Tab: Prompt Preview -->
+            <div v-else-if="activeTab === 'prompt'" class="flex-1 overflow-y-auto p-4">
+              <div v-if="currentShotPrompt" class="space-y-4">
                 <div>
                   <div class="flex items-center justify-between mb-1">
-                    <span class="text-xs text-gray-500">{{ t('studio.prompt') }}</span>
+                    <span class="text-xs font-medium text-gray-500">{{ t('studio.prompt') }}</span>
                     <button
                       class="text-xs text-primary-500 hover:text-primary-600"
                       @click="copyPrompt(currentShotPrompt.prompt)"
@@ -679,14 +968,14 @@ function getModelLabel(value: VideoModel): string {
                       {{ t('studio.copyPrompt') }}
                     </button>
                   </div>
-                  <p class="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 max-h-32 overflow-y-auto">
+                  <p class="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 whitespace-pre-wrap">
                     {{ currentShotPrompt.prompt }}
                   </p>
                 </div>
 
                 <div v-if="currentShotPrompt.negative_prompt">
                   <div class="flex items-center justify-between mb-1">
-                    <span class="text-xs text-gray-500">{{ t('studio.negativePrompt') }}</span>
+                    <span class="text-xs font-medium text-gray-500">{{ t('studio.negativePrompt') }}</span>
                     <button
                       class="text-xs text-primary-500 hover:text-primary-600"
                       @click="copyPrompt(currentShotPrompt.negative_prompt)"
@@ -694,13 +983,147 @@ function getModelLabel(value: VideoModel): string {
                       {{ t('studio.copyPrompt') }}
                     </button>
                   </div>
-                  <p class="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 max-h-24 overflow-y-auto">
+                  <p class="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 whitespace-pre-wrap">
                     {{ currentShotPrompt.negative_prompt }}
                   </p>
                 </div>
               </div>
-              <div v-else class="text-sm text-gray-500">
+              <div v-else class="text-sm text-gray-500 text-center py-8">
                 {{ t('studio.noPreview') }}
+              </div>
+            </div>
+
+            <!-- Tab: Generate Video -->
+            <div v-else-if="activeTab === 'generate'" class="flex-1 overflow-y-auto p-4 space-y-4">
+              <!-- Video task progress -->
+              <div v-if="selectedShot.video_task_status === 'processing'" class="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-sm font-medium text-blue-700 dark:text-blue-300">{{ t('studio.task.progress') }}</span>
+                  <span class="text-sm text-blue-600 dark:text-blue-400">{{ Math.round(selectedShot.video_task_progress || 0) }}%</span>
+                </div>
+                <div class="h-2 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                  <div
+                    class="h-full bg-blue-500 transition-all duration-300"
+                    :style="{ width: `${selectedShot.video_task_progress || 0}%` }"
+                  />
+                </div>
+                <button
+                  class="mt-3 text-sm text-red-500 hover:text-red-600 w-full text-center"
+                  @click="handleCancelTask"
+                >
+                  {{ t('studio.task.cancel') }}
+                </button>
+              </div>
+
+              <!-- Success state -->
+              <div v-else-if="selectedShot.video_task_status === 'success' && selectedShot.video_url" class="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                <p class="text-sm font-medium text-green-700 dark:text-green-300 mb-2">{{ t('studio.task.succeeded') }}</p>
+                <video
+                  :src="selectedShot.video_url"
+                  controls
+                  class="w-full rounded"
+                />
+              </div>
+
+              <!-- Failed state -->
+              <div v-else-if="selectedShot.video_task_status === 'failed'" class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                <p class="text-sm font-medium text-red-700 dark:text-red-300">{{ t('studio.task.failed') }}</p>
+                <p v-if="selectedShot.video_error" class="text-xs text-red-600 dark:text-red-400 mt-1">
+                  {{ selectedShot.video_error }}
+                </p>
+                <button
+                  class="mt-3 btn-primary w-full"
+                  @click="handleCancelTask"
+                >
+                  {{ t('studio.task.retry') }}
+                </button>
+              </div>
+
+              <!-- Generate settings -->
+              <template v-if="!selectedShot.video_task_status || selectedShot.video_task_status === 'success' || selectedShot.video_task_status === 'failed'">
+                <div>
+                  <label class="label">{{ t('studio.model') }}</label>
+                  <select v-model="generateSettings.model" class="input w-full">
+                    <option
+                      v-for="m in VIDEO_MODELS"
+                      :key="m.value"
+                      :value="m.value"
+                      :disabled="m.disabled"
+                    >
+                      {{ locale === 'zh-CN' ? m.labelZh : m.label }}{{ m.disabled ? ` (${t('studio.unavailable')})` : '' }}
+                    </option>
+                  </select>
+                  <p v-if="generateSettings.model" class="text-xs text-gray-500 mt-1">
+                    {{ locale === 'zh-CN' ? VIDEO_MODELS.find(m => m.value === generateSettings.model)?.descriptionZh : VIDEO_MODELS.find(m => m.value === generateSettings.model)?.description }}
+                  </p>
+                </div>
+
+                <div>
+                  <label class="label">
+                    {{ t('studio.duration') }}: {{ t('studio.durationSeconds', { seconds: generateSettings.duration }) }}
+                  </label>
+                  <input
+                    v-model.number="generateSettings.duration"
+                    type="range"
+                    min="2"
+                    max="10"
+                    step="1"
+                    class="w-full"
+                  />
+                </div>
+
+                <button
+                  class="btn-primary w-full"
+                  :disabled="isGenerating || (selectedShot.video_task_status as string) === 'processing'"
+                  @click="handleGenerateVideo"
+                >
+                  <span v-if="isGenerating" class="flex items-center justify-center gap-2">
+                    <span class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                    {{ t('studio.generating') }}
+                  </span>
+                  <span v-else>
+                    {{ selectedShot.video_url ? t('studio.regenerate') : t('studio.generate') }}
+                  </span>
+                </button>
+              </template>
+            </div>
+
+            <!-- Tab: Video Gallery -->
+            <div v-else-if="activeTab === 'gallery'" class="flex-1 overflow-y-auto p-4">
+              <div v-if="selectedShot.clips.length === 0" class="text-center py-8 text-gray-500">
+                <p>{{ t('studio.galleryEmpty') }}</p>
+                <p class="text-sm mt-2">{{ t('studio.galleryHint') }}</p>
+              </div>
+              <div v-else class="grid grid-cols-2 gap-3">
+                <div
+                  v-for="clip in selectedShot.clips"
+                  :key="clip.id"
+                  :class="[
+                    'relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all group',
+                    selectedShot.selectedClipId === clip.id
+                      ? 'border-primary-500 ring-2 ring-primary-500/30'
+                      : 'border-gray-300 dark:border-gray-600 hover:border-gray-400',
+                  ]"
+                  @click="selectClipForShot(clip)"
+                >
+                  <div class="absolute inset-0 bg-gray-800 flex items-center justify-center">
+                    <div class="text-center text-gray-400">
+                      <p class="text-xs">{{ getModelLabel(clip.model) }}</p>
+                      <p class="text-lg font-bold">{{ clip.duration }}s</p>
+                    </div>
+                  </div>
+                  <div v-if="selectedShot.selectedClipId === clip.id" class="absolute top-1 left-1">
+                    <span class="px-1.5 py-0.5 bg-primary-500 text-white text-xs rounded font-medium">
+                      {{ t('studio.selectedVideo') }}
+                    </span>
+                  </div>
+                  <button
+                    class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
+                    @click.stop="deleteClipHandler(clip)"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             </div>
           </template>
@@ -783,6 +1206,32 @@ function getModelLabel(value: VideoModel): string {
         </div>
       </div>
     </template>
+
+    <!-- Delete Confirmation Modal -->
+    <Teleport to="body">
+      <div
+        v-if="showDeleteConfirm"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        @click.self="showDeleteConfirm = false"
+      >
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-sm p-6">
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            {{ t('studio.shot.delete') }}
+          </h3>
+          <p class="text-gray-600 dark:text-gray-400 mb-6">
+            {{ t('studio.shot.deleteConfirm', { sequence: deletingShotSequence }) }}
+          </p>
+          <div class="flex justify-end gap-3">
+            <button class="btn-secondary" @click="showDeleteConfirm = false">
+              {{ t('common.cancel') }}
+            </button>
+            <button class="btn-danger" :disabled="isSaving" @click="handleDeleteShot">
+              {{ t('common.delete') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Export Modal -->
     <Teleport to="body">

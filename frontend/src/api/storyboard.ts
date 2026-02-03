@@ -35,7 +35,7 @@ export interface StoryboardTask {
 /** 分镜生成请求 */
 export interface StoryboardGenerateRequest {
   max_shot_duration?: number
-  target_platform?: 'veo' | 'vidu' | 'kling' | 'sora'
+  target_platform?: 'vidu' | 'doubao'
   style_preset?: string
   aspect_ratio?: string
   include_audio?: boolean
@@ -131,6 +131,15 @@ export interface Shot {
   end_frame: string | null
   transition_in: string | null
   transition_out: string | null
+  // 平台优化提示词
+  platform_prompt: string | null
+  // 视频生成任务状态
+  video_task_id: string | null
+  video_task_platform: string | null
+  video_task_status: 'pending' | 'processing' | 'success' | 'failed' | null
+  video_task_progress: number
+  video_url: string | null
+  video_error: string | null
 }
 
 /** 分镜脚本响应 */
@@ -287,7 +296,7 @@ export async function addShot(
  */
 export async function getStoryboardPrompts(
   chapterId: string,
-  platform: 'veo' | 'vidu' | 'kling' | 'sora' = 'veo'
+  platform: 'vidu' | 'doubao' | 'veo' | 'kling' | 'sora' = 'vidu'
 ): Promise<StoryboardPromptsResponse> {
   const response = await api.get(`/storyboard/chapters/${chapterId}/prompts`, {
     params: { platform },
@@ -389,8 +398,6 @@ export const ASPECT_RATIOS = [
 ]
 
 export const TARGET_PLATFORMS = [
-  { value: 'veo', label: 'Veo 3.1', description: '支持原生音频、多参考图' },
-  { value: 'vidu', label: 'Vidu Q2', description: '细腻表情、平滑镜头运动' },
-  { value: 'kling', label: 'Kling 2.5', description: '电影感动作视频' },
-  { value: 'sora', label: 'Sora 2', description: '物理感知、复杂场景' },
+  { value: 'vidu', label: 'Vidu Q2', description: '参考图格式 @id，细腻表情、平滑镜头运动' },
+  { value: 'doubao', label: '豆包 Seedance', description: '参考图格式 [图N]，火山引擎视频模型' },
 ]

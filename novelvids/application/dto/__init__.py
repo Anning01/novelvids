@@ -214,26 +214,6 @@ class UsageSummaryDTO(BaseModel):
     records: list[UsageRecordResponseDTO]
 
 
-# Generation DTOs
-class GenerateImageDTO(BaseModel):
-    """DTO for image generation request."""
-
-    prompt: str = Field(min_length=1)
-    negative_prompt: str = ""
-    width: int = Field(default=1024, ge=256, le=2048)
-    height: int = Field(default=576, ge=256, le=2048)
-    seed: int = -1
-    workflow_id: UUID | None = None
-
-
-class GenerateAudioDTO(BaseModel):
-    """DTO for audio generation request."""
-
-    text: str = Field(min_length=1)
-    voice_id: str
-    provider: str = "edge_tts"
-
-
 class ProcessNovelDTO(BaseModel):
     """DTO for novel processing request."""
 
@@ -243,6 +223,29 @@ class ProcessNovelDTO(BaseModel):
     generate_images: bool = True
     generate_audio: bool = True
     generate_video: bool = True
+
+
+# Video Generation DTOs
+class GenerateVideoDTO(BaseModel):
+    """DTO for video generation request."""
+
+    chapter_id: UUID
+    shot_sequence: int
+    platform: str = Field(default="vidu", description="Video platform: vidu or doubao")
+    duration: float = Field(default=6.0, ge=1.0, le=10.0)
+    aspect_ratio: str = Field(default="16:9")
+
+
+class VideoTaskResponseDTO(BaseModel):
+    """DTO for video generation task response."""
+
+    task_id: str
+    platform: str
+    status: str
+    progress: float = 0
+    video_url: str | None = None
+    error: str | None = None
+    shot_sequence: int | None = None
 
 
 # Chapter Processing DTOs

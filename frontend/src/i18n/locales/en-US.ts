@@ -333,12 +333,21 @@ export default {
         deleteConfirm: 'Delete this video clip?',
         dragToTimeline: 'Drag to timeline',
 
+        // Right Panel - Tabs
+        tabs: {
+            info: 'Shot Info',
+            prompt: 'Prompt',
+            generate: 'Generate',
+            gallery: 'Gallery',
+        },
+
         // Right Panel - Properties
         properties: 'Shot Properties',
         shotInfo: 'Shot Info',
         description: 'Description',
         model: 'AI Model',
         modelHint: 'Select video generation model',
+        unavailable: 'Unavailable',
         duration: 'Duration',
         durationSeconds: '{seconds}s',
         durationHint: 'Video duration in seconds',
@@ -346,6 +355,30 @@ export default {
         generating: 'Generating...',
         generateMore: 'Generate More',
         regenerate: 'Regenerate',
+
+        // Video task status
+        task: {
+            progress: 'Generation Progress',
+            cancel: 'Cancel Task',
+            cancelConfirm: 'Are you sure you want to cancel the current video generation task?',
+            cancelled: 'Task cancelled',
+            retry: 'Retry',
+            failed: 'Generation failed',
+            succeeded: 'Generation complete',
+        },
+
+        // Shot CRUD
+        shot: {
+            add: 'Add Shot',
+            addAfter: 'Insert shot after this',
+            delete: 'Delete Shot',
+            deleteConfirm: 'Are you sure you want to delete shot {sequence}? This action cannot be undone.',
+            deleted: 'Shot deleted',
+            edit: 'Edit',
+            save: 'Save',
+            cancel: 'Cancel',
+            newShotDescription: 'New shot description',
+        },
 
         // Prompt Preview
         promptPreview: 'Prompt Preview',
@@ -449,6 +482,11 @@ export default {
         imageGenFailed: 'AI image generation failed, please try again',
         missingBaseTraits: 'Missing base_traits (English visual traits), please fill in first',
         generating: 'Generating...',
+        batchGenerate: 'Generate All',
+        batchGenerating: 'Generating {current}/{total}...',
+        batchGenerateSuccess: 'Batch generation complete, {count} images generated',
+        batchGeneratePartial: 'Batch generation partial: {success} succeeded, {fail} failed',
+        noAssetsNeedImages: 'No assets need images (all have images or missing traits)',
     },
 
     common: {
@@ -474,6 +512,8 @@ export default {
         upload: 'Upload',
         refresh: 'Refresh',
         optional: 'optional',
+        angle: 'Angle',
+        clickToClose: 'Click anywhere to close',
         retry: 'Retry',
         backToNovels: 'Back to Novels',
         processNovel: 'Process Novel',
@@ -488,8 +528,12 @@ export default {
         deleteFailed: 'Delete failed',
         deleting: 'Deleting...',
         creating: 'Creating...',
+        saving: 'Saving...',
         reorderFailed: 'Reorder failed',
         loadingMore: 'Loading more...',
+        prev: 'Previous',
+        total: 'Total',
+        confirmDelete: 'Confirm delete',
     },
 
     auth: {
@@ -614,28 +658,39 @@ export default {
 
     novels: {
         title: 'Novel Management',
+        description: 'Manage your novel projects with full CRUD support',
         myNovels: 'My Novels',
+        createNovel: 'Create Novel',
         uploadNovel: 'Upload Novel',
         uploadTxt: 'Upload TXT',
+        uploadFile: 'Upload File',
+        uploadPreview: 'File Preview',
+        confirmUpload: 'Confirm Import',
         insertIntoContent: 'Insert into Content',
         novelTitle: 'Novel Title',
+        titlePlaceholder: 'Enter novel title',
         author: 'Author',
-        status: 'Status',
+        authorPlaceholder: 'Enter author name (optional)',
         chapters: 'Chapters',
         scenes: 'Scenes',
         createdAt: 'Created At',
         updatedAt: 'Updated At',
         actions: 'Actions',
         noNovels: 'No novels yet',
+        empty: 'No novels yet',
+        createFirst: 'Create your first novel',
         uploadFirst: 'Upload your first novel to get started',
+        searchPlaceholder: 'Search by title or author...',
         viewDetails: 'View Details',
         generateVideo: 'Generate Video',
         deleteNovel: 'Delete Novel',
         confirmDelete: 'Are you sure you want to delete this novel?',
         novelDetails: 'Novel Details',
         totalChapters: 'Total Chapters',
+        totalChars: '{count} characters',
         processedChapters: 'Processed Chapters',
         content: 'Content',
+        contentPlaceholder: 'Enter novel content, or click upload file above',
         metadata: 'Metadata',
         characters: 'Characters',
         addCharacter: 'Add Character',
@@ -652,6 +707,14 @@ export default {
         deleteConfirm: 'Delete Novel',
         deleteWarning: 'This action cannot be undone. The novel and all chapters will be permanently deleted.',
         deleteSuccess: 'Novel deleted successfully',
+        status: {
+            pending: 'Pending',
+            queued: 'Queued',
+            processing: 'Processing',
+            completed: 'Completed',
+            failed: 'Failed',
+            cancelled: 'Cancelled',
+        },
         novelStatus: {
             pending: 'Pending',
             queued: 'Queued',

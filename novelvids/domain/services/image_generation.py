@@ -8,32 +8,50 @@ from novelvids.core.config import settings
 
 def build_prompt(asset_type: str, name: str, traits: str, description: str) -> str:
     """
-    根据资产类型构建结构化提示词。
-    遵循：主体(Subject) + 行为(Behavior) + 环境(Environment) + 审美(Aesthetics) 逻辑
+    根据资产类型构建结构化提示词，优化为AI视频生成的最佳参考图。
+    生成多角度展示图，白色背景，便于视频模型保持角色/物品一致性。
     """
-    # 引导词：加入"视频静帧画面"以适配后续视频生成模型
-    base_prefix = "视频静帧画面，"
+    # 通用前缀：二次元风格，视频静帧，电影感，高保真
+    base_prefix = "二次元风格，视频静帧画面，电影感构图，极高保真度，4K分辨率，"
+    
+    # 通用后缀：强调无文字、无水印、干净背景
+    no_text_suffix = (
+        "画面中绝对不要出现任何文字、字母、数字、符号、签名、水印、标志或logo，"
+        "保持画面纯净无杂，干净整洁的视觉效果。"
+    )
 
     if asset_type == "person":
-        # 角色类：侧重于面部特征一致性和服装细节
+        # 角色类：三视图（正面/侧面/背面）+ 白色背景 + 身份锚点
         prompt = (
-            f"{base_prefix}主角是{name}，视觉特征为：{traits}。{description}。"
-            "二次元风格，电影感布光，中画幅拍摄，皮肤纹理清晰，眼神深邃，高保真渲染。"
+            f"{base_prefix}角色设定三视图，纯白色无任何图案的背景，"
+            f"展示{name}的正面、侧面和背面全身像，"
+            f"角色特征：{traits}。{description}。"
+            "保持三个角度的服装、发型、体型完全一致，"
+            "清晰的轮廓线条，专业的角色设定图风格，"
+            f"面部特征精细，五官清晰可辨，便于视频模型追踪识别。{no_text_suffix}"
         )
     elif asset_type == "item":
-        # 物品类：侧重于材质感、光影反射和微距细节
+        # 物品类：多角度产品展示 + 白色背景 + 工作室灯光
         prompt = (
-            f"{base_prefix}{name}的特写，具有{traits}的特征。{description}。"
-            "二次元风格，工作室灯光，高保真材质，极细致的纹理，微距镜头。"
+            f"{base_prefix}产品展示图，纯白色无任何图案的背景，"
+            f"展示{name}的多角度视图（正面、侧面、45度角），"
+            f"物品特征：{traits}。{description}。"
+            "专业摄影棚灯光，高光与阴影层次分明，"
+            "材质纹理清晰可见，细节丰富，"
+            f"产品目录风格，便于视频模型保持物品一致性。{no_text_suffix}"
         )
     elif asset_type == "scene":
-        # 场景类：侧重于空间布局、大气氛围和环境色调
+        # 场景类：全景展示 + 空间纵深 + 环境氛围
         prompt = (
-            f"{base_prefix}{name}的全景，基础架构为：{traits}。{description}。"
-            "二次元风格，广角镜头，庄重威严的氛围，丁达尔效应，细腻的光影层次，高分辨率建筑摄影。"
+            f"{base_prefix}场景概念图，电影级宽银幕构图，"
+            f"{name}的全景展示，"
+            f"场景特征：{traits}。{description}。"
+            "广角镜头视角，空间纵深感强烈，"
+            "环境光影层次丰富，大气透视效果，"
+            f"建立清晰的空间参照系，便于视频模型理解场景布局。{no_text_suffix}"
         )
     else:
-        prompt = f"{base_prefix}{name}, {traits}, {description}"
+        prompt = f"{base_prefix}{name}，{traits}，{description}。{no_text_suffix}"
 
     return prompt
 

@@ -3,17 +3,17 @@
 使用任务模式进行分镜生成，支持轮询查询进度。
 """
 
-import asyncio
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from novelvids.api.dependencies import get_current_user
 from novelvids.application.services.storyboard_task_service import storyboard_task_service
 from novelvids.domain.models.storyboard import Shot
 from novelvids.domain.services.storyboard import create_storyboard_service
+from novelvids.domain.services.storyboard.prompts import SUPPORTED_VIDEO_PLATFORMS
 from novelvids.core.config.settings import get_settings
 from novelvids.infrastructure.database.models import (
     ChapterModel,
@@ -23,7 +23,7 @@ from novelvids.infrastructure.database.models import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/storyboard", tags=["Storyboard"])
+router = APIRouter(prefix="/storyboard", tags=["分镜"])
 
 
 # ============== DTO ==============
@@ -33,7 +33,7 @@ class StoryboardGenerateDTO(BaseModel):
     """分镜生成请求 DTO。"""
 
     max_shot_duration: float = Field(default=8.0, ge=4.0, le=15.0, description="单个镜头最大时长")
-    target_platform: str = Field(default="veo", description="目标平台：veo/vidu/kling/sora")
+    target_platform: str = Field(default="vidu", description="目标平台：vidu/doubao")
     style_preset: str = Field(default="cinematic", description="风格预设")
     aspect_ratio: str = Field(default="16:9", description="画面比例")
     include_audio: bool = Field(default=True, description="是否包含音频指令")
@@ -143,12 +143,22 @@ async def _verify_chapter_access(chapter_id: UUID, current_user: UserModel) -> C
 async def start_generate_storyboard(
     chapter_id: UUID,
     request: StoryboardGenerateDTO,
+    background_tasks: BackgroundTasks,
     current_user: UserModel = Depends(get_current_user),
 ):
     """启动分镜生成任务。
 
     返回任务ID，前端通过轮询 GET /tasks/{task_id} 查询进度。
+    
+    仅支持 vidu 和 doubao 平台。
     """
+    # 验证平台
+    if request.target_platform not in SUPPORTED_VIDEO_PLATFORMS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的平台: {request.target_platform}，仅支持: {SUPPORTED_VIDEO_PLATFORMS}",
+        )
+
     await _verify_chapter_access(chapter_id, current_user)
 
     # 创建任务
@@ -163,7 +173,7 @@ async def start_generate_storyboard(
 
     # 如果是新任务，启动后台执行
     if task.status == TaskStatus.PENDING:
-        asyncio.create_task(storyboard_task_service.execute_task(task.id))
+        background_tasks.add_task(storyboard_task_service.execute_task, task.id)
 
     return _task_to_dto(task)
 
@@ -345,28 +355,45 @@ async def add_shot(
 @router.get("/chapters/{chapter_id}/prompts", response_model=StoryboardPromptsDTO)
 async def get_storyboard_prompts(
     chapter_id: UUID,
-    platform: str = "veo",
+    platform: str = "vidu",
     current_user: UserModel = Depends(get_current_user),
 ):
-    """获取分镜的视频生成提示词。"""
+    """获取分镜的视频生成提示词。
+
+    仅支持 vidu 和 doubao 平台。
+    如果 shot 中已有预生成的 platform_prompt，则直接使用；否则实时构建。
+    """
+    # 验证平台
+    if platform not in SUPPORTED_VIDEO_PLATFORMS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的平台: {platform}，仅支持: {SUPPORTED_VIDEO_PLATFORMS}",
+        )
+
     chapter = await _verify_chapter_access(chapter_id, current_user)
 
     storyboard_data = chapter.metadata.get("storyboard")
     if not storyboard_data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Storyboard not found")
 
-    settings_obj = get_settings()
-    service = create_storyboard_service(
-        api_key=settings_obj.llm.api_key,
-        base_url=settings_obj.llm.base_url,
-        model_name=settings_obj.llm.model_name,
-    )
-
     prompts = []
     for shot_data in storyboard_data.get("shots", []):
         try:
             shot = Shot.model_validate(shot_data)
-            prompt = service.build_platform_prompt(shot, platform)
+
+            # 优先使用预生成的 platform_prompt（已包含 {ref:id} 占位符）
+            if shot.platform_prompt:
+                prompt = shot.platform_prompt
+            else:
+                # 回退：实时构建（但不包含资产引用）
+                settings_obj = get_settings()
+                service = create_storyboard_service(
+                    api_key=settings_obj.llm.api_key,
+                    base_url=settings_obj.llm.base_url,
+                    model_name=settings_obj.llm.model_name,
+                )
+                prompt = service.build_platform_prompt(shot=shot, platform=platform)
+
             negative_prompt = shot.build_negative_prompt()
 
             prompts.append(

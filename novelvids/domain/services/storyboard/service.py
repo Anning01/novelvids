@@ -34,6 +34,7 @@ from novelvids.domain.services.storyboard.prompts import (
     STORYBOARD_GENERATION_PROMPT,
     STORYBOARD_JSON_SCHEMA,
     STORYBOARD_SYSTEM_PROMPT,
+    SUPPORTED_VIDEO_PLATFORMS,
 )
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,51 @@ class StoryboardService:
 
         return refs
 
+
+    def _build_asset_refs_string(
+        self,
+        shot: Shot,
+        person_assets: list[dict],
+        scene_assets: list[dict],
+        item_assets: list[dict],
+    ) -> str:
+        """构建资产引用字符串，格式为 {ref:canonical_name}。
+
+        视频客户端会将这些占位符转换为平台特定格式：
+        - vidu: {ref:name} -> @name
+        - doubao: {ref:name} -> [图N]
+
+        占位符使用 canonical_name 以匹配 ReferenceImage.id（也是 canonical_name）。
+        仅引用有 main_image 的资产（没有图片的资产无法作为参考图）。
+        """
+        all_assets = {a["id"]: a for a in person_assets + scene_assets + item_assets}
+        refs: list[str] = []
+        seen_names: set[str] = set()
+
+        # 主体关联的资产（已经是 UUID 列表）
+        for asset_id in shot.subject.asset_refs:
+            aid = str(asset_id)
+            asset = all_assets.get(aid)
+            if asset and asset.get("main_image"):
+                name = asset.get("canonical_name", aid)
+                if name not in seen_names:
+                    refs.append(f"{{ref:{name}}}")
+                    seen_names.add(name)
+
+        # 场景资产引用（已经是 UUID | None）
+        if shot.environment.scene_asset_ref:
+            aid = str(shot.environment.scene_asset_ref)
+            asset = all_assets.get(aid)
+            if asset and asset.get("main_image"):
+                name = asset.get("canonical_name", aid)
+                if name not in seen_names:
+                    refs.append(f"{{ref:{name}}}")
+                    seen_names.add(name)
+
+        if refs:
+            return " ".join(refs) + " "
+        return ""
+
     def _find_asset_id(self, name: str | None, assets: list[dict]) -> UUID | None:
         """根据名称查找资产ID。"""
         if not name:
@@ -340,39 +386,46 @@ class StoryboardService:
 
         return None
 
-    def build_platform_prompt(self, shot: Shot, platform: str = "veo") -> str:
+    def build_platform_prompt(
+        self,
+        shot: Shot,
+        platform: str = "vidu",
+        person_assets: list[dict] | None = None,
+        scene_assets: list[dict] | None = None,
+        item_assets: list[dict] | None = None,
+    ) -> str:
         """为特定平台构建优化的提示词。
 
         Args:
             shot: 分镜对象
-            platform: 目标平台 veo/vidu/kling/sora
+            platform: 目标平台 (仅支持 vidu/doubao)
+            person_assets: 人物资产列表
+            scene_assets: 场景资产列表
+            item_assets: 物品资产列表
 
         Returns:
-            优化后的提示词
+            优化后的提示词，包含 {ref:asset_id} 占位符
         """
+        # 验证平台
+        if platform not in SUPPORTED_VIDEO_PLATFORMS:
+            raise ValueError(f"不支持的平台: {platform}，仅支持: {SUPPORTED_VIDEO_PLATFORMS}")
+
         template = PLATFORM_PROMPT_TEMPLATES.get(platform)
         if not template:
-            return shot.build_prompt(platform)
+            raise ValueError(f"平台 {platform} 没有对应的提示词模板")
 
-        # 构建音频相关字符串
-        dialogue_prompt = ""
-        if shot.audio.dialogue:
-            speaker = shot.audio.dialogue_speaker or "Character"
-            dialogue_prompt = f'{speaker} says: "{shot.audio.dialogue}"'
-
-        sfx_prompt = ""
-        if shot.audio.sound_effects:
-            sfx_prompt = "SFX: " + ", ".join(shot.audio.sound_effects)
-
-        ambient_prompt = ""
-        if shot.audio.ambient_sounds:
-            ambient_prompt = "Ambient: " + ", ".join(shot.audio.ambient_sounds)
-
-        audio_prompt = ". ".join(filter(None, [dialogue_prompt, sfx_prompt, ambient_prompt]))
+        # 构建资产引用字符串
+        asset_refs = self._build_asset_refs_string(
+            shot=shot,
+            person_assets=person_assets or [],
+            scene_assets=scene_assets or [],
+            item_assets=item_assets or [],
+        )
 
         # 格式化模板
         try:
             return template.format(
+                asset_refs=asset_refs,
                 shot_size=shot.camera.shot_size.value.replace("_", " "),
                 camera_angle=shot.camera.camera_angle.value.replace("_", " "),
                 camera_movement=shot.camera.camera_movement.value.replace("_", " "),
@@ -388,13 +441,10 @@ class StoryboardService:
                 video_style=shot.style.video_style.value,
                 mood=shot.style.mood.value,
                 color_grading=shot.style.color_grading or "natural",
-                dialogue_prompt=dialogue_prompt,
-                sfx_prompt=sfx_prompt,
-                ambient_prompt=ambient_prompt,
-                audio_prompt=audio_prompt,
             )
-        except KeyError:
-            return shot.build_prompt(platform)
+        except KeyError as e:
+            logger.warning(f"模板格式化失败: {e}，使用默认提示词")
+            return f"{asset_refs}{shot.subject.subject_description} {shot.subject.action}. {shot.environment.location}."
 
 
 def create_storyboard_service(

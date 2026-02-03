@@ -44,7 +44,7 @@ class ExtractionTaskCreateDTO(BaseModel):
 
     chapter_id: UUID
     task_type: str = Field(description="提取类型: person, scene, item")
-    timeout_seconds: int = Field(default=120, ge=30, le=300)
+    timeout_seconds: int = Field(default=120, ge=30, le=600)
     max_retries: int = Field(default=3, ge=0, le=5)
 
 
@@ -56,7 +56,7 @@ class ExtractionTaskBatchDTO(BaseModel):
         default=["person", "scene", "item"],
         description="要提取的类型列表",
     )
-    timeout_seconds: int = Field(default=120, ge=30, le=300)
+    timeout_seconds: int = Field(default=120, ge=30, le=600)
 
 
 class ExtractionTaskResponseDTO(BaseModel):

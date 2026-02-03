@@ -8,7 +8,7 @@
 import type { Shot } from '@/api/storyboard'
 
 /** Supported video generation models */
-export type VideoModel = 'veo' | 'vidu' | 'kling' | 'sora'
+export type VideoModel = 'vidu' | 'doubao' | 'veo' | 'kling' | 'sora'
 
 /** Video clip generation status */
 export type ClipStatus = 'pending' | 'generating' | 'completed' | 'failed'

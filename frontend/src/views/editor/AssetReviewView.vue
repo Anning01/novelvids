@@ -34,6 +34,20 @@ const isEditModalOpen = ref(false)
 const isUploading = ref(false)
 const activeTab = ref<'person' | 'scene' | 'item'>('person')
 
+// Image viewer state
+const viewerImage = ref<string | null>(null)
+const viewerTitle = ref<string>('')
+
+function openImageViewer(imageUrl: string, title: string): void {
+  viewerImage.value = imageUrl
+  viewerTitle.value = title
+}
+
+function closeImageViewer(): void {
+  viewerImage.value = null
+  viewerTitle.value = ''
+}
+
 // Computed
 const currentAssets = computed(() => {
   switch (activeTab.value) {
@@ -180,6 +194,8 @@ async function handleImageUpload(
 }
 
 const isGenerating = ref(false)
+const isBatchGenerating = ref(false)
+const batchProgress = ref({ current: 0, total: 0 })
 
 async function handleGenerateImage(
   asset: Asset,
@@ -199,11 +215,50 @@ async function handleGenerateImage(
     }
     toastStore.success(t('assetReview.imageGenerated'))
     await loadAssets()
+    // Auto-close modal after successful generation (image is already saved on backend)
+    closeEditModal()
   } catch (error) {
     console.error('Failed to generate image:', error)
     toastStore.error(t('assetReview.imageGenFailed'))
   } finally {
     isGenerating.value = false
+  }
+}
+
+// Batch generate images for all assets missing main_image
+async function handleBatchGenerate(): Promise<void> {
+  const allAssets = [...assets.value.persons, ...assets.value.scenes, ...assets.value.items]
+  const assetsNeedingImages = allAssets.filter(a => !a.main_image && a.base_traits)
+  
+  if (assetsNeedingImages.length === 0) {
+    toastStore.info(t('assetReview.noAssetsNeedImages'))
+    return
+  }
+
+  isBatchGenerating.value = true
+  batchProgress.value = { current: 0, total: assetsNeedingImages.length }
+
+  let successCount = 0
+  let failCount = 0
+
+  for (const asset of assetsNeedingImages) {
+    try {
+      await generateAssetImage(novelId.value, asset.id, 'main_image')
+      successCount++
+      // Refresh immediately after each successful generation to show progress
+      await loadAssets()
+    } catch (error) {
+      console.error(`Failed to generate image for ${asset.canonical_name}:`, error)
+      failCount++
+    }
+    batchProgress.value.current++
+  }
+  isBatchGenerating.value = false
+
+  if (failCount === 0) {
+    toastStore.success(t('assetReview.batchGenerateSuccess', { count: successCount }))
+  } else {
+    toastStore.warning(t('assetReview.batchGeneratePartial', { success: successCount, fail: failCount }))
   }
 }
 
@@ -244,43 +299,64 @@ watch([novelId, chapterId], async () => {
             : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800',
         ]"
       >
-        <div class="flex items-center gap-3">
-          <svg
-            v-if="allAssetsHaveImages"
-            class="w-6 h-6 text-green-600 dark:text-green-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <svg
-            v-else
-            class="w-6 h-6 text-yellow-600 dark:text-yellow-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div>
-            <p
-              :class="[
-                'font-medium',
-                allAssetsHaveImages
-                  ? 'text-green-800 dark:text-green-200'
-                  : 'text-yellow-800 dark:text-yellow-200',
-              ]"
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <svg
+              v-if="allAssetsHaveImages"
+              class="w-6 h-6 text-green-600 dark:text-green-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              {{
-                allAssetsHaveImages
-                  ? t('assetReview.allImagesReady')
-                  : t('assetReview.missingImages', { count: assetsWithMissingImages.length })
-              }}
-            </p>
-            <p class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t('assetReview.reviewHint') }}
-            </p>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            <svg
+              v-else
+              class="w-6 h-6 text-yellow-600 dark:text-yellow-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <p
+                :class="[
+                  'font-medium',
+                  allAssetsHaveImages
+                    ? 'text-green-800 dark:text-green-200'
+                    : 'text-yellow-800 dark:text-yellow-200',
+                ]"
+              >
+                {{
+                  allAssetsHaveImages
+                    ? t('assetReview.allImagesReady')
+                    : t('assetReview.missingImages', { count: assetsWithMissingImages.length })
+                }}
+              </p>
+              <p class="text-sm text-gray-600 dark:text-gray-400">
+                {{ t('assetReview.reviewHint') }}
+              </p>
+            </div>
+          </div>
+          <!-- Batch Generate Button -->
+          <button
+            v-if="!allAssetsHaveImages && !isBatchGenerating"
+            type="button"
+            class="btn-primary flex items-center gap-2"
+            @click="handleBatchGenerate"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            {{ t('assetReview.batchGenerate') }}
+          </button>
+          <!-- Batch Progress -->
+          <div v-if="isBatchGenerating" class="flex items-center gap-3">
+            <div class="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-primary-500" />
+            <span class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t('assetReview.batchGenerating', { current: batchProgress.current, total: batchProgress.total }) }}
+            </span>
           </div>
         </div>
       </div>
@@ -353,9 +429,10 @@ watch([novelId, chapterId], async () => {
               :class="[
                 'aspect-square rounded-lg overflow-hidden border-2',
                 asset.main_image
-                  ? 'border-gray-200 dark:border-gray-700'
+                  ? 'border-gray-200 dark:border-gray-700 cursor-pointer hover:ring-2 hover:ring-primary-500'
                   : 'border-dashed border-yellow-400 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20',
               ]"
+              @click="asset.main_image && openImageViewer(getMediaUrl(asset.main_image)!, asset.canonical_name)"
             >
               <img
                 v-if="asset.main_image"
@@ -373,7 +450,11 @@ watch([novelId, chapterId], async () => {
             <div
               v-for="(img, idx) in [asset.angle_image_1, asset.angle_image_2]"
               :key="idx"
-              class="aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800"
+              :class="[
+                'aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800',
+                img ? 'cursor-pointer hover:ring-2 hover:ring-primary-500' : '',
+              ]"
+              @click="img && openImageViewer(getMediaUrl(img)!, `${asset.canonical_name} - ${t('common.angle')} ${idx + 1}`)"
             >
               <img
                 v-if="img"
@@ -667,6 +748,44 @@ watch([novelId, chapterId], async () => {
               {{ t('common.save') }}
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Image Viewer Modal -->
+      <div
+        v-if="viewerImage"
+        class="fixed inset-0 z-[60] flex items-center justify-center bg-black/90"
+        @click.self="closeImageViewer"
+        @keydown.escape="closeImageViewer"
+      >
+        <!-- Close Button -->
+        <button
+          type="button"
+          class="absolute top-4 right-4 text-white/80 hover:text-white z-10"
+          @click="closeImageViewer"
+        >
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <!-- Title -->
+        <div class="absolute top-4 left-4 text-white/90 text-lg font-medium">
+          {{ viewerTitle }}
+        </div>
+
+        <!-- Image Container -->
+        <div class="max-w-[90vw] max-h-[90vh] flex items-center justify-center">
+          <img
+            :src="viewerImage"
+            :alt="viewerTitle"
+            class="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+          />
+        </div>
+
+        <!-- Hint -->
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/60 text-sm">
+          {{ t('common.clickToClose') }}
         </div>
       </div>
     </Teleport>

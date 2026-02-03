@@ -34,6 +34,7 @@ const extractedAssets = ref<{ persons: Asset[]; scenes: Asset[]; items: Asset[] 
 // 轮询控制
 const pollingInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const POLL_INTERVAL_MS = 2000
+const wasRunning = ref(false) // 追踪之前是否有任务在运行
 
 // 计算属性
 const personTask = computed(() => extractionStatus.value?.person)
@@ -117,13 +118,20 @@ async function loadExtractedAssets(): Promise<void> {
 function startPolling(): void {
   if (pollingInterval.value) return
 
+  wasRunning.value = true // 标记开始有任务运行
+
   pollingInterval.value = setInterval(async () => {
     await loadExtractionStatus()
 
     // 如果没有正在运行的任务，停止轮询并刷新资产
     if (!isAnyRunning.value) {
       stopPolling()
-      await loadExtractedAssets()
+      // 只有之前有任务在运行，现在完成了，才刷新资产
+      if (wasRunning.value) {
+        wasRunning.value = false
+        await loadExtractedAssets()
+        toastStore.success(t('extraction.completed'))
+      }
     }
   }, POLL_INTERVAL_MS)
 }
@@ -142,7 +150,7 @@ async function startExtraction(taskType: ExtractionTaskType): Promise<void> {
     await createExtractionTask({
       chapter_id: chapterId.value,
       task_type: taskType,
-      timeout_seconds: 120,
+      timeout_seconds: 600,
       max_retries: 3,
     })
     toastStore.success(t('extraction.taskSubmitted'))
@@ -162,7 +170,7 @@ async function startAllExtraction(): Promise<void> {
       await createExtractionTask({
         chapter_id: chapterId.value,
         task_type: type,
-        timeout_seconds: 120,
+        timeout_seconds: 600,
         max_retries: 3,
       })
     }

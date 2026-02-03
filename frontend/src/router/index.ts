@@ -27,10 +27,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
 
-  // Legacy novels route - redirect to dashboard
+  // Novels management (小说管理)
   {
     path: '/novels',
-    redirect: '/dashboard',
+    name: 'novels',
+    component: () => import('@/views/NovelsView.vue'),
+    meta: { requiresAuth: true },
   },
 
   // Editor Layout (书籍工作台)

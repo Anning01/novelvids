@@ -8,8 +8,11 @@
 """
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from novelvids.core.config import settings
 from novelvids.domain.services.llm_client import OpenAICompatibleClient
@@ -65,6 +68,8 @@ class ExtractionTaskService:
 
         如果已存在进行中的同类型任务，返回现有任务。
         """
+        logger.info(f"[Extraction] 创建任务请求: chapter_id={chapter_id}, type={task_type.value}")
+
         # 检查是否已有进行中的任务
         existing = await ExtractionTaskModel.filter(
             chapter_id=chapter_id,
@@ -73,6 +78,7 @@ class ExtractionTaskService:
         ).first()
 
         if existing:
+            logger.info(f"[Extraction] 已存在进行中的任务: task_id={existing.id}, status={existing.status}")
             return existing
 
         # 创建新任务
@@ -83,6 +89,7 @@ class ExtractionTaskService:
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
         )
+        logger.info(f"[Extraction] 新任务已创建: task_id={task.id}, type={task_type.value}")
 
         return task
 
@@ -117,11 +124,16 @@ class ExtractionTaskService:
 
         这个方法会被 FastAPI BackgroundTasks 调用。
         """
+        logger.info(f"[Task {task_id}] ========== 开始执行提取任务 ==========")
+
         task = await ExtractionTaskModel.get_or_none(id=task_id).prefetch_related(
             "chapter", "chapter__novel"
         )
         if task is None:
+            logger.error(f"[Task {task_id}] 任务不存在!")
             raise ValueError(f"Task {task_id} not found")
+
+        logger.info(f"[Task {task_id}] 任务类型: {task.task_type.value}, 重试次数: {task.retry_count}/{task.max_retries}")
 
         # 标记为运行中
         task.status = TaskStatus.RUNNING
@@ -129,19 +141,26 @@ class ExtractionTaskService:
         task.progress = 10
         task.message = "正在准备提取..."
         await task.save()
+        logger.info(f"[Task {task_id}] 状态更新为 RUNNING")
 
         try:
             # 执行提取
             chapter = task.chapter
+            logger.info(f"[Task {task_id}] 章节: {chapter.title} (ID: {chapter.id})")
+            logger.info(f"[Task {task_id}] 章节内容长度: {len(chapter.content or '')} 字符")
+
             entities = await self._extract_entities(task, chapter)
+            logger.info(f"[Task {task_id}] 提取完成: 共 {len(entities)} 个实体")
 
             # 更新进度
             task.progress = 70
             task.message = "正在保存资产..."
             await task.save()
+            logger.info(f"[Task {task_id}] 开始保存到数据库...")
 
             # 保存到数据库
             await self._save_entities_to_db(task, chapter, entities)
+            logger.info(f"[Task {task_id}] 数据库保存完成")
 
             # 完成
             task.status = TaskStatus.COMPLETED
@@ -150,8 +169,10 @@ class ExtractionTaskService:
             task.result = {"count": len(entities), "entities": [e.to_dict() for e in entities]}
             task.completed_at = datetime.now(UTC)
             await task.save()
+            logger.info(f"[Task {task_id}] ✅ 任务完成! 共提取 {len(entities)} 个{self._get_type_name(task.task_type)}")
 
         except asyncio.TimeoutError:
+            logger.error(f"[Task {task_id}] ❌ 提取超时 (timeout={task.timeout_seconds}s)")
             task.status = TaskStatus.FAILED
             task.error = "提取超时"
             task.message = "操作超时，请重试"
@@ -160,6 +181,7 @@ class ExtractionTaskService:
             await self._maybe_retry(task)
 
         except Exception as e:
+            logger.exception(f"[Task {task_id}] ❌ 提取失败: {e}")
             task.status = TaskStatus.FAILED
             task.error = str(e)
             task.message = f"提取失败: {str(e)[:100]}"
@@ -167,6 +189,7 @@ class ExtractionTaskService:
             # 检查是否可以重试
             await self._maybe_retry(task)
 
+        logger.info(f"[Task {task_id}] ========== 任务执行结束 ==========")
         return task
 
     async def _extract_entities(
@@ -176,6 +199,7 @@ class ExtractionTaskService:
         task.progress = 30
         task.message = f"正在提取{self._get_type_name(task.task_type)}..."
         await task.save()
+        logger.info(f"[Task {task.id}] 开始调用 LLM 提取 {task.task_type.value}...")
 
         # 选择提取器
         if task.task_type == ExtractionTaskType.PERSON:
@@ -186,6 +210,7 @@ class ExtractionTaskService:
             extractor = ItemExtractor(self.llm_client)
 
         # 执行提取（带超时）
+        logger.info(f"[Task {task.id}] 调用 extractor.extract(), timeout={task.timeout_seconds}s")
         entities = await asyncio.wait_for(
             extractor.extract(chapter.content or "", chapter.number),
             timeout=task.timeout_seconds,
@@ -194,6 +219,7 @@ class ExtractionTaskService:
         task.progress = 60
         task.message = f"提取到 {len(entities)} 个{self._get_type_name(task.task_type)}"
         await task.save()
+        logger.info(f"[Task {task.id}] LLM 返回 {len(entities)} 个实体")
 
         return entities
 
@@ -211,7 +237,9 @@ class ExtractionTaskService:
         novel_id = chapter.novel_id
         asset_type = AssetType(task.task_type.value)
 
-        for entity in entities:
+        for i, entity in enumerate(entities):
+            logger.debug(f"[Task {task.id}] 保存实体 {i+1}/{len(entities)}: {entity.name}")
+
             # 查找或创建资产
             asset = await AssetModel.get_or_none(
                 novel_id=novel_id,
@@ -232,6 +260,7 @@ class ExtractionTaskService:
                     source_chapters=[chapter.number],
                     last_updated_chapter=chapter.number,
                 )
+                logger.debug(f"[Task {task.id}] 创建新资产: {entity.name}")
             else:
                 # 更新现有资产
                 # 合并别名
@@ -250,6 +279,7 @@ class ExtractionTaskService:
                 if not asset.base_traits and entity.base_traits:
                     asset.base_traits = entity.base_traits
                 await asset.save()
+                logger.debug(f"[Task {task.id}] 更新资产: {entity.name}")
 
             # 创建章节-资产关联
             chapter_asset = await ChapterAssetModel.get_or_none(
@@ -272,9 +302,14 @@ class ExtractionTaskService:
                 chapter_asset.state_traits = entity.base_traits
                 await chapter_asset.save()
 
-    async def _maybe_retry(self, task: ExtractionTaskModel) -> None:
-        """检查是否可以重试，如果可以则创建新任务。"""
+    async def _maybe_retry(self, task: ExtractionTaskModel) -> ExtractionTaskModel | None:
+        """检查是否可以重试，如果可以则创建新任务并立即执行。
+
+        返回新创建的任务，供调用者添加到后台执行。
+        """
         if task.retry_count < task.max_retries:
+            logger.info(f"[Task {task.id}] 准备重试 ({task.retry_count + 1}/{task.max_retries})...")
+
             # 创建重试任务
             new_task = await ExtractionTaskModel.create(
                 chapter_id=task.chapter_id,
@@ -284,9 +319,22 @@ class ExtractionTaskService:
                 max_retries=task.max_retries,
                 timeout_seconds=task.timeout_seconds,
             )
+
             # 返回新任务 ID 供外部处理
             task.result = {"retry_task_id": str(new_task.id)}
             await task.save()
+
+            logger.info(f"[Task {task.id}] 重试任务已创建: new_task_id={new_task.id}")
+
+            # 直接在这里执行重试任务（递归调用）
+            # 这样避免了需要外部再次调度的问题
+            logger.info(f"[Task {new_task.id}] 开始执行重试任务...")
+            await self.execute_task(new_task.id)
+
+            return new_task
+        else:
+            logger.warning(f"[Task {task.id}] 已达到最大重试次数 ({task.max_retries})，不再重试")
+            return None
 
     def _get_type_name(self, task_type: ExtractionTaskType) -> str:
         """获取任务类型的中文名称。"""
@@ -304,6 +352,8 @@ class ExtractionTaskService:
             status__in=[TaskStatus.PENDING, TaskStatus.RUNNING],
             created_at__lt=cutoff,
         ).update(status=TaskStatus.FAILED, error="任务超时被清理")
+        if count > 0:
+            logger.info(f"[Extraction] 清理了 {count} 个过期任务")
         return count
 
 

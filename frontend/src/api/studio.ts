@@ -1,10 +1,10 @@
 /**
  * Studio API Client
  *
- * Mock API functions for the video composition studio.
- * These will be replaced with real backend calls once the API is implemented.
+ * API functions for the video composition studio.
  */
 
+import api from './client'
 import type {
   VideoClip,
   StudioShot,
@@ -17,31 +17,50 @@ import type {
 import type { StoryboardResponse } from './storyboard'
 import { getStoryboard } from './storyboard'
 
-// ============== Mock Data Generators ==============
+// ============== Types for API Responses ==============
+
+interface VideoTaskResponse {
+  task_id: string
+  platform: string
+  status: 'pending' | 'processing' | 'succeeded' | 'failed'
+  progress: number
+  video_url: string | null
+  error: string | null
+  shot_sequence: number | null
+}
+
+// ============== Helper Functions ==============
 
 let clipIdCounter = 1
 
-function generateMockClip(
-  shotSequence: number,
+function taskResponseToClip(
+  response: VideoTaskResponse,
   model: VideoModel,
   duration: number,
   prompt: string,
   negativePrompt: string | null
 ): VideoClip {
   const id = `clip-${clipIdCounter++}-${Date.now()}`
+  const statusMap: Record<string, VideoClip['status']> = {
+    pending: 'pending',
+    processing: 'generating',
+    succeeded: 'completed',
+    failed: 'failed',
+  }
+
   return {
     id,
-    shotSequence,
+    shotSequence: response.shot_sequence ?? 0,
     model,
-    status: 'completed',
-    progress: 100,
-    videoUrl: null, // Mock - no actual video
-    thumbnailUrl: null, // Mock - no actual thumbnail
+    status: statusMap[response.status] || 'pending',
+    progress: response.progress,
+    videoUrl: response.video_url,
+    thumbnailUrl: null,
     duration,
     createdAt: new Date().toISOString(),
     prompt,
     negativePrompt,
-    error: null,
+    error: response.error,
   }
 }
 
@@ -72,107 +91,198 @@ export async function getStudioProject(chapterId: string): Promise<StudioProject
 }
 
 /**
- * Generate a new video clip for a shot (MOCK).
- * In real implementation, this would start a task and return task ID.
+ * Generate a new video clip for a shot.
+ * Calls the real backend API and starts a video generation task.
  */
 export async function generateVideoClip(
-  _chapterId: string,
+  chapterId: string,
   request: GenerateVideoRequest,
   prompt: string,
   negativePrompt: string | null
 ): Promise<VideoClip> {
-  // Simulate API delay (500ms - 1.5s)
-  const delay = 500 + Math.random() * 1000
-  await new Promise(resolve => setTimeout(resolve, delay))
+  const response = await api.post<VideoTaskResponse>('/generate/video', {
+    chapter_id: chapterId,
+    shot_sequence: request.shotSequence,
+    platform: request.model,
+    duration: request.duration,
+    aspect_ratio: '16:9',
+  })
 
-  return generateMockClip(
-    request.shotSequence,
-    request.model,
-    request.duration,
-    prompt,
-    negativePrompt
-  )
+  const task = response.data
+
+  // If task started successfully, poll until completion or timeout
+  if (task.status === 'pending' || task.status === 'processing') {
+    const completedTask = await pollVideoTaskUntilComplete(
+      task.task_id,
+      request.model,
+      60000 // 60 second timeout
+    )
+    return taskResponseToClip(completedTask, request.model, request.duration, prompt, negativePrompt)
+  }
+
+  return taskResponseToClip(task, request.model, request.duration, prompt, negativePrompt)
+}
+
+/**
+ * Poll video task status until completion.
+ */
+export async function pollVideoTaskUntilComplete(
+  taskId: string,
+  platform: string,
+  timeoutMs: number = 60000,
+  intervalMs: number = 3000,
+  chapterId?: string,
+  shotSequence?: number
+): Promise<VideoTaskResponse> {
+  const startTime = Date.now()
+
+  while (Date.now() - startTime < timeoutMs) {
+    const response = await api.get<VideoTaskResponse>(`/generate/video/${taskId}`, {
+      params: {
+        platform,
+        chapter_id: chapterId,
+        shot_sequence: shotSequence,
+      },
+    })
+
+    const task = response.data
+
+    if (task.status === 'succeeded' || task.status === 'failed') {
+      return task
+    }
+
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+
+  // Timeout - return last known status
+  const response = await api.get<VideoTaskResponse>(`/generate/video/${taskId}`, {
+    params: {
+      platform,
+      chapter_id: chapterId,
+      shot_sequence: shotSequence,
+    },
+  })
+  return response.data
+}
+
+/**
+ * Get video task status (single poll).
+ */
+export async function getVideoTaskStatus(
+  taskId: string,
+  platform: string = 'vidu',
+  chapterId?: string,
+  shotSequence?: number
+): Promise<{
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  progress: number
+  videoUrl: string | null
+  error: string | null
+}> {
+  const response = await api.get<VideoTaskResponse>(`/generate/video/${taskId}`, {
+    params: {
+      platform,
+      chapter_id: chapterId,
+      shot_sequence: shotSequence,
+    },
+  })
+
+  const task = response.data
+  const statusMap: Record<string, 'pending' | 'running' | 'completed' | 'failed'> = {
+    pending: 'pending',
+    processing: 'running',
+    succeeded: 'completed',
+    failed: 'failed',
+  }
+
+  return {
+    status: statusMap[task.status] || 'pending',
+    progress: task.progress,
+    videoUrl: task.video_url,
+    error: task.error,
+  }
+}
+
+/**
+ * Cancel/clear a video generation task for a shot.
+ */
+export async function cancelVideoTask(
+  chapterId: string,
+  shotSequence: number
+): Promise<void> {
+  await api.delete(`/generate/video/${chapterId}/${shotSequence}`)
 }
 
 /**
  * Get all clips for a shot.
+ * Note: Clips are currently managed locally on the frontend.
  */
 export async function getShotClips(
   _chapterId: string,
   _shotSequence: number
 ): Promise<VideoClip[]> {
-  // Mock - returns empty array, clips are managed locally
+  // TODO: Implement backend storage for clips
   return []
 }
 
 /**
  * Select a clip for a shot.
+ * Note: State is currently managed locally on the frontend.
  */
 export async function selectClipForShot(
   _chapterId: string,
   _shotSequence: number,
   _clipId: string
 ): Promise<void> {
-  // Mock - no-op, state managed locally
+  // TODO: Implement backend persistence
   await new Promise(resolve => setTimeout(resolve, 100))
 }
 
 /**
  * Delete a clip.
+ * Note: State is currently managed locally on the frontend.
  */
 export async function deleteClip(
   _chapterId: string,
   _clipId: string
 ): Promise<void> {
+  // TODO: Implement backend deletion
   await new Promise(resolve => setTimeout(resolve, 100))
 }
 
 /**
  * Update timeline arrangement.
+ * Note: State is currently managed locally on the frontend.
  */
 export async function updateTimeline(
   _chapterId: string,
   _timeline: TimelineTrack[]
 ): Promise<void> {
+  // TODO: Implement backend persistence
   await new Promise(resolve => setTimeout(resolve, 100))
 }
 
 /**
- * Compose final video (MOCK).
- * In real implementation, this would start a composition task.
+ * Compose final video.
+ * Note: Not yet implemented on the backend.
  */
 export async function composeVideo(
   _chapterId: string,
   _request: ComposeVideoRequest
 ): Promise<{ taskId: string }> {
+  // TODO: Implement backend composition
   await new Promise(resolve => setTimeout(resolve, 500))
   return { taskId: `compose-task-${Date.now()}` }
-}
-
-/**
- * Get video generation task status (MOCK).
- */
-export async function getVideoTaskStatus(_taskId: string): Promise<{
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  progress: number
-  videoUrl: string | null
-  error: string | null
-}> {
-  return {
-    status: 'completed',
-    progress: 100,
-    videoUrl: null,
-    error: null,
-  }
 }
 
 // ============== Constants ==============
 
 export const VIDEO_MODELS = [
-  { value: 'veo' as const, label: 'Veo 3.1', labelZh: 'Veo 3.1', description: 'Native audio, multi-reference', descriptionZh: '原生音频，多参考图' },
-  { value: 'vidu' as const, label: 'Vidu Q2', labelZh: 'Vidu Q2', description: 'Fine expressions, smooth motion', descriptionZh: '细腻表情，平滑运动' },
-  { value: 'kling' as const, label: 'Kling 2.5', labelZh: 'Kling 2.5', description: 'Cinematic action videos', descriptionZh: '电影感动作视频' },
-  { value: 'sora' as const, label: 'Sora 2', labelZh: 'Sora 2', description: 'Physics-aware, complex scenes', descriptionZh: '物理感知，复杂场景' },
+  { value: 'vidu' as const, label: 'Vidu Q2', labelZh: 'Vidu Q2', description: 'Fine expressions, smooth motion', descriptionZh: '细腻表情，平滑运动', disabled: false },
+  { value: 'doubao' as const, label: 'Doubao Seedance', labelZh: '豆包 Seedance', description: 'Volcano Engine video model', descriptionZh: '火山引擎视频模型', disabled: false },
+  { value: 'veo' as const, label: 'Veo 3.1', labelZh: 'Veo 3.1', description: 'Native audio, multi-reference', descriptionZh: '原生音频，多参考图', disabled: true },
+  { value: 'kling' as const, label: 'Kling 2.5', labelZh: 'Kling 2.5', description: 'Cinematic action videos', descriptionZh: '电影感动作视频', disabled: true },
+  { value: 'sora' as const, label: 'Sora 2', labelZh: 'Sora 2', description: 'Physics-aware, complex scenes', descriptionZh: '物理感知，复杂场景', disabled: true },
 ] as const
 
 export const EXPORT_RESOLUTIONS = [

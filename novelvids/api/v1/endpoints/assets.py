@@ -24,7 +24,7 @@ from novelvids.infrastructure.database.repositories import (
     TortoiseNovelRepository,
 )
 
-router = APIRouter(prefix="/novels/{novel_id}/assets", tags=["资产库"])
+router = APIRouter(prefix="/novels/{novel_id}/assets", tags=["资产库管理"])
 
 
 def get_asset_repository() -> TortoiseAssetRepository:

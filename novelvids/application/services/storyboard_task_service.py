@@ -21,6 +21,7 @@ from novelvids.domain.models.storyboard import (
     VideoStyle,
 )
 from novelvids.domain.services.llm_client import OpenAICompatibleClient
+from novelvids.domain.services.storyboard.prompts import SUPPORTED_VIDEO_PLATFORMS
 from novelvids.domain.services.storyboard.service import StoryboardService
 from novelvids.infrastructure.database.models import (
     AssetModel,
@@ -66,7 +67,7 @@ class StoryboardTaskService:
     async def create_task(
         self,
         chapter_id: UUID,
-        target_platform: str = "veo",
+        target_platform: str = "vidu",
         max_shot_duration: float = 8.0,
         style_preset: str = "cinematic",
         aspect_ratio: str = "16:9",
@@ -77,7 +78,21 @@ class StoryboardTaskService:
         """创建分镜生成任务。
 
         如果已存在进行中的任务，返回现有任务。
+        
+        Args:
+            chapter_id: 章节ID
+            target_platform: 目标平台，仅支持 vidu/doubao
+            其他参数...
+            
+        Raises:
+            ValueError: 如果平台不支持
         """
+        # 验证平台
+        if target_platform not in SUPPORTED_VIDEO_PLATFORMS:
+            raise ValueError(
+                f"不支持的平台: {target_platform}，仅支持: {SUPPORTED_VIDEO_PLATFORMS}"
+            )
+
         # 检查是否已有进行中的任务
         existing = await StoryboardTaskModel.filter(
             chapter_id=chapter_id,
@@ -299,6 +314,19 @@ class StoryboardTaskService:
             ),
             timeout=task.timeout_seconds,
         )
+
+        # 为每个 shot 构建包含资产引用的平台提示词
+        platform = task.target_platform
+        logger.info(f"[Task {task.id}] 为 {platform} 平台构建资产引用提示词...")
+        for shot in result.storyboard.shots:
+            shot.platform_prompt = self.storyboard_service.build_platform_prompt(
+                shot=shot,
+                platform=platform,
+                person_assets=person_assets,
+                scene_assets=scene_assets,
+                item_assets=item_assets,
+            )
+            logger.debug(f"  Shot {shot.sequence}: {shot.platform_prompt[:100]}...")
 
         # 更新进度
         task.progress = 80

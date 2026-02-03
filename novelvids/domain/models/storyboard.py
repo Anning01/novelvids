@@ -473,6 +473,38 @@ class Shot(BaseModel):
         description="出场转场效果",
     )
 
+    # 平台优化提示词（包含 {ref:id} 占位符）
+    platform_prompt: str | None = Field(
+        default=None,
+        description="针对目标平台优化的提示词，包含资产引用占位符",
+    )
+
+    # 视频生成任务状态
+    video_task_id: str | None = Field(
+        default=None,
+        description="视频生成任务ID（来自vidu/doubao等平台）",
+    )
+    video_task_platform: str | None = Field(
+        default=None,
+        description="视频生成平台：vidu/doubao",
+    )
+    video_task_status: str | None = Field(
+        default=None,
+        description="视频任务状态：pending/processing/success/failed",
+    )
+    video_task_progress: float = Field(
+        default=0,
+        description="视频生成进度（0-100）",
+    )
+    video_url: str | None = Field(
+        default=None,
+        description="生成的视频URL/本地路径",
+    )
+    video_error: str | None = Field(
+        default=None,
+        description="视频生成失败时的错误信息",
+    )
+
     def build_prompt(self, platform: str = "veo") -> str:
         """根据目标平台构建完整的提示词。
 

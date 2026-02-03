@@ -63,7 +63,7 @@ def setup_logging():
         logging.getLogger(logger_name).setLevel(logging.DEBUG)
 
     # 降低第三方库的日志级别
-    for logger_name in ["httpx", "httpcore", "openai", "tortoise", "aiosqlite", "asyncio"]:
+    for logger_name in ["httpx", "httpcore", "openai", "tortoise", "aiosqlite", "asyncio", "uvicorn", "uvicorn.access"]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
@@ -90,7 +90,7 @@ def create_app() -> FastAPI:
     )
 
     # Add middleware
-    app.add_middleware(LoggingMiddleware)
+    # app.add_middleware(LoggingMiddleware)
     app.add_middleware(CORSMiddleware, **CORSConfig.get_config())
 
     # Register routes
