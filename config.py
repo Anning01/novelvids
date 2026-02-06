@@ -23,6 +23,8 @@ class Settings:
     ALLOWED_HOSTS: list = ["*"]
     ALLOWED_ORIGINS: list = ["*"]
 
+    # 媒体文件目录
+    MEDIA_PATH = os.getenv("MEDIA_PATH", "./media")
 
     # 时区配置
     TIMEZONE = "Asia/Shanghai"

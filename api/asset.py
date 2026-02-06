@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 
 from controllers.asset import asset_controller
+from schemas.ai_task import AiTaskOut
 from schemas.asset import AssetBriefOut, AssetCreate, AssetUpdate, AssetPatch, AssetOut
+from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
@@ -48,3 +50,10 @@ async def get_asset(asset_id: int):
 async def delete_asset(asset_id: int):
     await asset_controller.remove(asset_id)
     return ResponseSchema()
+
+
+@router.get("/reference/{asset_id}", summary="生成资产参考图", response_model=ResponseSchema[AiTaskOut])
+async def asset_reference(asset_id: int, bg: BackgroundTasks):
+    task = await asset_controller.reference(asset_id)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)

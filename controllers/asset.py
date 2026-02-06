@@ -1,12 +1,17 @@
 from typing import Any, Optional, Type
 
+from fastapi import HTTPException
 from pydantic import BaseModel
 from tortoise.queryset import QuerySet
 
+from controllers.config import ai_model_config_controller
+from models.ai_task import AiTask
 from models.asset import Asset
 from schemas.asset import AssetCreate, AssetUpdate
+from services.ai_task_executor import ai_task_executor
 from utils.crud import CRUDBase
 from utils.decorators import atomic
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from utils.page import QueryParams
 
 
@@ -39,7 +44,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 pass  # 忽略无效的 chapter_id
 
         return await super().list(params, response_model, search_fields, base_query)
-        
+
     async def update(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
         instance = await self.get(asset_id)
         return await super().update(instance, obj_in)
@@ -52,5 +57,43 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         instance = await self.get(asset_id)
         await super().remove(instance)
 
+    async def reference(self, asset_id: int) -> AiTask:
+        """提交参考图生成任务。"""
+        asset = await self.get(asset_id)
+
+        # 1. 获取任务配置
+        config = await ai_model_config_controller.get_active(
+            AiTaskTypeEnum.reference_image.value
+        )
+
+        # 2. 清理超时异常任务
+        await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.reference_image)
+
+        # 3. 检查活跃任务
+        active_tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.reference_image.value,
+            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
+        )
+        for t in active_tasks:
+            # 检查 request_params 中的 asset_id
+            if t.request_params.get("asset_id") == asset_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"该资产已有进行中的生成任务（{t.id}）",
+                )
+
+        # 4. 提交任务
+        request_params = {
+            "asset_id": asset.id,
+            "novel_id": asset.novel_id,
+            "base_url": config.base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        }
+
+        task = await ai_task_executor.submit(
+            AiTaskTypeEnum.reference_image, request_params
+        )
+        return task
 
 asset_controller = AssetController()
