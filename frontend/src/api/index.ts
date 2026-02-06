@@ -1,8 +1,0 @@
-export { default as api } from './client'
-export * from './auth'
-export * from './novels'
-export * from './chapters'
-export * from './assets'
-export * from './dashboard'
-export * from './extraction'
-export * from './storyboard'
