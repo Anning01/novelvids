@@ -6,7 +6,7 @@ from utils.enums import TaskStatusEnum
 
 if TYPE_CHECKING:
     from models.chapter import Chapter
-    from models.asset import Asset, ChapterAsset
+    from models.asset import Asset
 
 
 class Scene(AbstractBaseModel):
@@ -19,21 +19,18 @@ class Scene(AbstractBaseModel):
         description="所属章节"
     )
     sequence = fields.IntField(db_index=True, description="镜头序列")
-    description = fields.TextField(description="描述")
-    speaker: fields.ForeignKeyRelation["Asset"] | None = fields.ForeignKeyField(
+    description = fields.TextField(null=True, description="描述")
+    assets: fields.ManyToManyRelation["Asset"] = fields.ManyToManyField(
         "models.Asset",
-        related_name="spoken_scenes",
-        on_delete=fields.SET_NULL,
-        null=True,
-        description="资产"
+        related_name="scenes",
+        through="scene_assets",  # 显式指定中间表名
+        description="该镜头中涉及的所有资产/角色"
     )
-    prompt = fields.TextField(null=True, description="提示词")
-    negative_prompt = fields.TextField(null=True, description="负面提示词")
+    prompt = fields.JSONField(default=dict, description="提示词")
     duration = fields.FloatField(default=0.0)
     status = fields.IntField(default=TaskStatusEnum.pending.value, db_index=True)
     metadata = fields.JSONField(default=dict, description="元数据")
 
-    chapter_appearances: fields.ReverseRelation["ChapterAsset"]
 
     class Meta:
         table = "scenes"

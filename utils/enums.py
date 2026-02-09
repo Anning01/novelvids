@@ -119,3 +119,12 @@ class AiTaskTypeEnum(NicknameIntEnum):
     reference_image = 2, "生成参考图"
     storyboard = 3, "生成分镜"
     video = 4, "生成视频"
+
+
+@enum_description
+class VideoModelTypeEnum(NicknameIntEnum):
+    """视频全局模型类型。"""
+    viduq2 = 1, "Viduq2"
+    sora2 = 2, "Sora2"
+    seedance = 3, "Seedance/即梦"
+    veo3 = 4, "Veo3"
