@@ -1,17 +1,21 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 
 from controllers.scene import scene_controller
-from schemas.scene import SceneBriefOut, SceneCreate, SceneUpdate, ScenePatch, SceneOut
+from schemas.scene import SceneBriefOut, SceneUpdate, ScenePatch, SceneOut
+from schemas.ai_task import AiTaskOut
+from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
 router = APIRouter()
 
 
-@router.post("", summary="创建分镜", response_model=ResponseSchema[SceneOut])
-async def create_scene(scene: SceneCreate):
-    scenes = await scene_controller.create(scene)
-    return ResponseSchema(data=scenes)
+@router.post("/generate/{chapter_id}", summary="生成分镜", response_model=ResponseSchema[AiTaskOut])
+async def create_scene(chapter_id: int, background_tasks: BackgroundTasks):
+    """提交分镜生成任务，返回任务记录供前端轮询"""
+    task = await scene_controller.create(chapter_id)
+    background_tasks.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
 
 
 @router.put("/{scene_id}", summary="全量修改分镜", response_model=ResponseSchema[SceneOut])

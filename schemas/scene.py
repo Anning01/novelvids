@@ -1,7 +1,7 @@
 # 生成视频分镜
 
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
 from utils.enums import AssetTypeEnum, TaskStatusEnum, VideoModelTypeEnum
 
@@ -17,7 +17,9 @@ class SceneEntity(BaseModel):
 
 class SoraScenePromptConfig(BaseModel):
     """生成视频分镜的提示词配置 - Sora"""
-
+    sequence: int = Field(..., description="分镜序列号")
+    description: str = Field(..., description="分镜标题，简短有力，如 'The Revelation'")
+    duration: Literal["4s", "8s"] = Field(..., description="时长，推荐4s以获得最佳指令依从性")
     # --- 核心内容 ---
     visual_prose: str = Field(
         ...,
@@ -60,6 +62,9 @@ class SoraScenePromptConfig(BaseModel):
         description="【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
     )
 
+class Storyboard(BaseModel):
+    """完整的故事板，包含多个分镜"""
+    shots: list[SoraScenePromptConfig]
 
 
 # --- 核心业务属性 (Internal Mixins) ---

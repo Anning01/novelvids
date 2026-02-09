@@ -22,6 +22,7 @@ from exceptions.handlers import (
 from services.ai_task_executor import ai_task_executor
 from services.extraction.handler import ExtractionTaskHandler
 from services.reference.handler import AssetReferenceHandler
+from services.storyboard.handler import StoryboardTaskHandler
 from utils.enums import AiTaskTypeEnum
 
 app = FastAPI(title=settings.APP_NAME, version=settings.VERSION)
@@ -48,6 +49,7 @@ app.include_router(api_router, prefix="/api")
 # 注册 AI 任务处理器
 ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.reference_image, AssetReferenceHandler())
+ai_task_executor.register(AiTaskTypeEnum.storyboard, StoryboardTaskHandler())
 
 
 # 定义包含时区的配置字典
@@ -65,7 +67,7 @@ tortoise_config = {
 
 
 # 为媒体（图像、视频、音频）安装静态文件
-media_path = Path(settings.MEDIA_ROOT)
+media_path = Path(settings.MEDIA_PATH)
 media_path.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
 
