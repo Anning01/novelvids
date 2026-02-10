@@ -16,7 +16,9 @@ class Video(AbstractBaseModel):
         on_delete=fields.CASCADE,
         description="所属分镜"
     )
-    url = fields.CharField(max_length=255, description="视频URL")
+    model_type = fields.IntField(db_index=True, description="视频模型类型")
+    external_task_id = fields.CharField(max_length=255, null=True, description="外部任务ID")
+    url = fields.CharField(max_length=500, null=True, description="视频URL")
     metadata = fields.JSONField(default=dict, description="元数据")
     status = fields.IntField(default=TaskStatusEnum.pending.value, db_index=True)
 

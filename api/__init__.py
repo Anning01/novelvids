@@ -7,6 +7,7 @@ from api.novel import router as novel_router
 from api.chapter import router as chapter_router
 from api.file import router as file_router
 from api.scene import router as scene_router
+from api.video import router as video_router
 
 api_router = APIRouter()
 
@@ -18,3 +19,4 @@ api_router.include_router(asset_router, prefix="/asset", tags=["资产管理"])
 api_router.include_router(ai_task_router, prefix="/task", tags=["AI 任务"])
 api_router.include_router(config_router, prefix="/config", tags=["模型配置"])
 api_router.include_router(file_router, prefix="/file", tags=["文件管理"])
+api_router.include_router(video_router, prefix="/video", tags=["视频生成"])

@@ -294,3 +294,34 @@ async def test_api_activate_does_not_affect_other_task_types(client: AsyncClient
     # 旧的 extraction 被禁用
     await extraction.refresh_from_db()
     assert extraction.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_api_获取所有枚举(client: AsyncClient):
+    """GET /api/config/enums/all 返回所有枚举。"""
+    response = await client.get("/api/config/enums/all")
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+
+    # 验证所有枚举 key 都存在
+    expected_keys = {
+        "task_status", "asset_type", "image_source",
+        "workflow_status", "ai_task_type", "video_model_type",
+    }
+    assert set(data.keys()) == expected_keys
+
+    # 验证每项结构: [{value, label, name}]
+    for key in expected_keys:
+        items = data[key]
+        assert len(items) > 0, f"{key} 不应为空"
+        first = items[0]
+        assert "value" in first
+        assert "label" in first
+        assert "name" in first
+
+    # 抽查具体值
+    video_types = {item["name"]: item for item in data["video_model_type"]}
+    assert "viduq2" in video_types
+    assert video_types["viduq2"]["value"] == 1
+    assert video_types["viduq2"]["label"] == "Viduq2"
+    print(f"    枚举接口: keys={list(data.keys())}, video_model_type count={len(data['video_model_type'])}")
