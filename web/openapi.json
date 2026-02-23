@@ -1,0 +1,6386 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "猫影短剧",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/novel": {
+      "post": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "创建小说/剧本",
+        "operationId": "create_novel_api_novel_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NovelCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_NovelOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "获取小说/剧本列表",
+        "operationId": "get_novel_list_api_novel_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "页码：默认为1，必须为≥1的整数。示例：?page=2",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码：默认为1，必须为≥1的整数。示例：?page=2"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页数量：默认为10，范围1-100。示例：?page_size=20",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页数量：默认为10，范围1-100。示例：?page_size=20"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        ",
+              "title": "Sort"
+            },
+            "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        "
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        ",
+              "title": "Search"
+            },
+            "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_PaginationResponse_NovelBriefOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/novel/{novel_id}": {
+      "put": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "全量修改小说/剧本",
+        "operationId": "update_novel_api_novel__novel_id__put",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Novel Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NovelUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_NovelOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "局部更新小说/剧本",
+        "operationId": "patch_novel_api_novel__novel_id__patch",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Novel Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NovelPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_NovelOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "获取小说/剧本详情",
+        "operationId": "get_novel_api_novel__novel_id__get",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Novel Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_NovelOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "删除一个小说/剧本",
+        "operationId": "delete_novel_api_novel__novel_id__delete",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Novel Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/novel/{novel_id}/split": {
+      "get": {
+        "tags": [
+          "小说/剧本管理"
+        ],
+        "summary": "使用nlp智能拆分章节",
+        "operationId": "split_novel_api_novel__novel_id__split_get",
+        "parameters": [
+          {
+            "name": "novel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Novel Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_NovelOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapter": {
+      "post": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "创建章节",
+        "operationId": "create_chapter_api_chapter_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_ChapterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "获取章节列表",
+        "operationId": "get_chapter_list_api_chapter_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "页码：默认为1，必须为≥1的整数。示例：?page=2",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码：默认为1，必须为≥1的整数。示例：?page=2"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页数量：默认为10，范围1-100。示例：?page_size=20",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页数量：默认为10，范围1-100。示例：?page_size=20"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        ",
+              "title": "Sort"
+            },
+            "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        "
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        ",
+              "title": "Search"
+            },
+            "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_PaginationResponse_ChapterBriefOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapter/{chapter_id}": {
+      "put": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "全量修改章节",
+        "operationId": "update_chapter_api_chapter__chapter_id__put",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_ChapterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "局部更新章节",
+        "operationId": "patch_chapter_api_chapter__chapter_id__patch",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_ChapterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "获取章节详情",
+        "operationId": "get_chapter_api_chapter__chapter_id__get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_ChapterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "删除一个章节",
+        "operationId": "delete_chapter_api_chapter__chapter_id__delete",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chapter/extract/{chapter_id}": {
+      "post": {
+        "tags": [
+          "章节管理"
+        ],
+        "summary": "连通分量+增量式状态机提取",
+        "operationId": "extract_chapter_api_chapter_extract__chapter_id__post",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiTaskOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scene/generate/": {
+      "post": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "AI生成分镜",
+        "description": "提交分镜生成任务，返回任务记录供前端轮询",
+        "operationId": "generate_scene_api_scene_generate__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SceneGenerateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiTaskOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scene/": {
+      "post": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "手动创建分镜",
+        "operationId": "create_scene_api_scene__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SceneCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_SceneOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scene/{scene_id}": {
+      "put": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "全量修改分镜",
+        "operationId": "update_scene_api_scene__scene_id__put",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Scene Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SceneUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_SceneOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "局部更新分镜",
+        "operationId": "patch_scene_api_scene__scene_id__patch",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Scene Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_SceneOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "获取分镜详情",
+        "operationId": "get_scene_api_scene__scene_id__get",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Scene Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_SceneOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "删除一个分镜",
+        "operationId": "delete_scene_api_scene__scene_id__delete",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Scene Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scene": {
+      "get": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "获取分镜列表",
+        "operationId": "get_scene_list_api_scene_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "页码：默认为1，必须为≥1的整数。示例：?page=2",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码：默认为1，必须为≥1的整数。示例：?page=2"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页数量：默认为10，范围1-100。示例：?page_size=20",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页数量：默认为10，范围1-100。示例：?page_size=20"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        ",
+              "title": "Sort"
+            },
+            "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        "
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        ",
+              "title": "Search"
+            },
+            "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_PaginationResponse_SceneBriefOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/asset": {
+      "post": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "创建资产",
+        "operationId": "create_asset_api_asset_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AssetOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "获取资产列表",
+        "operationId": "get_asset_list_api_asset_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "页码：默认为1，必须为≥1的整数。示例：?page=2",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码：默认为1，必须为≥1的整数。示例：?page=2"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页数量：默认为10，范围1-100。示例：?page_size=20",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页数量：默认为10，范围1-100。示例：?page_size=20"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        ",
+              "title": "Sort"
+            },
+            "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        "
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        ",
+              "title": "Search"
+            },
+            "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_PaginationResponse_AssetBriefOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/asset/{asset_id}": {
+      "put": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "全量修改资产",
+        "operationId": "update_asset_api_asset__asset_id__put",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AssetOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "局部更新资产",
+        "operationId": "patch_asset_api_asset__asset_id__patch",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AssetOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "获取资产详情",
+        "operationId": "get_asset_api_asset__asset_id__get",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AssetOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "删除一个资产",
+        "operationId": "delete_asset_api_asset__asset_id__delete",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/asset/reference/{asset_id}": {
+      "get": {
+        "tags": [
+          "资产管理"
+        ],
+        "summary": "生成资产参考图",
+        "operationId": "asset_reference_api_asset_reference__asset_id__get",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiTaskOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/task/{task_id}": {
+      "get": {
+        "tags": [
+          "AI 任务"
+        ],
+        "summary": "查询任务状态",
+        "operationId": "get_task_api_task__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiTaskOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/task/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "AI 任务"
+        ],
+        "summary": "取消任务",
+        "operationId": "cancel_task_api_task__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiTaskOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/enums/all": {
+      "get": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "获取所有枚举配置",
+        "description": "返回前端需要的所有枚举定义，避免前端维护重复的枚举。",
+        "operationId": "get_all_enums_api_config_enums_all_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config": {
+      "post": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "创建模型配置",
+        "operationId": "create_config_api_config_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelConfigCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiModelConfigOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "获取模型配置列表",
+        "operationId": "get_config_list_api_config_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "页码：默认为1，必须为≥1的整数。示例：?page=2",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码：默认为1，必须为≥1的整数。示例：?page=2"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页数量：默认为10，范围1-100。示例：?page_size=20",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页数量：默认为10，范围1-100。示例：?page_size=20"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        ",
+              "title": "Sort"
+            },
+            "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        "
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        ",
+              "title": "Search"
+            },
+            "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_PaginationResponse_AiModelConfigOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/{config_id}": {
+      "get": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "获取模型配置详情",
+        "operationId": "get_config_api_config__config_id__get",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Config Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiModelConfigOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "全量更新模型配置",
+        "operationId": "update_config_api_config__config_id__put",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Config Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelConfigUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiModelConfigOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "局部更新模型配置",
+        "operationId": "patch_config_api_config__config_id__patch",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Config Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelConfigPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiModelConfigOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "删除模型配置",
+        "operationId": "delete_config_api_config__config_id__delete",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Config Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/{config_id}/activate": {
+      "post": {
+        "tags": [
+          "模型配置"
+        ],
+        "summary": "启用模型配置",
+        "operationId": "activate_config_api_config__config_id__activate_post",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Config Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiModelConfigOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/file/upload": {
+      "post": {
+        "tags": [
+          "文件管理"
+        ],
+        "summary": "多文件上传",
+        "description": "处理多文件上传",
+        "operationId": "upload_files_api_file_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_files_api_file_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/video/generate/": {
+      "post": {
+        "tags": [
+          "视频生成"
+        ],
+        "summary": "提交视频生成",
+        "description": "提交视频生成请求，返回 Video 记录",
+        "operationId": "generate_video_api_video_generate__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_VideoOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/video/query/{video_id}": {
+      "get": {
+        "tags": [
+          "视频生成"
+        ],
+        "summary": "查询视频生成状态",
+        "description": "轮询查询视频生成进度",
+        "operationId": "query_video_api_video_query__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Video Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_VideoQueryOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/video": {
+      "get": {
+        "tags": [
+          "视频生成"
+        ],
+        "summary": "获取视频列表",
+        "operationId": "get_video_list_api_video_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "页码：默认为1，必须为≥1的整数。示例：?page=2",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码：默认为1，必须为≥1的整数。示例：?page=2"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页数量：默认为10，范围1-100。示例：?page_size=20",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页数量：默认为10，范围1-100。示例：?page_size=20"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        ",
+              "title": "Sort"
+            },
+            "description": "\n        排序规则：格式为「字段名+符号」（无符号=升序，-=降序），多字段用逗号分隔。\n        示例：?sort=create_time,-id → 按create_time升序、id降序排列\n        "
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        ",
+              "title": "Search"
+            },
+            "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_PaginationResponse_VideoBriefOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/video/{video_id}": {
+      "get": {
+        "tags": [
+          "视频生成"
+        ],
+        "summary": "获取视频详情",
+        "operationId": "get_video_api_video__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Video Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_VideoOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "视频生成"
+        ],
+        "summary": "删除视频",
+        "operationId": "delete_video_api_video__video_id__delete",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Video Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AiModelConfigCreate": {
+        "properties": {
+          "task_type": {
+            "type": "integer",
+            "title": "Task Type",
+            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Name",
+            "description": "配置名称"
+          },
+          "base_url": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Base Url",
+            "description": "API 地址"
+          },
+          "api_key": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Api Key",
+            "description": "API Key"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Model",
+            "description": "模型名称"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "description": "是否启用"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency",
+            "description": "并发数"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_type",
+          "name",
+          "base_url",
+          "api_key",
+          "model"
+        ],
+        "title": "AiModelConfigCreate",
+        "description": "创建请求：必填字段。"
+      },
+      "AiModelConfigOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "task_type": {
+            "type": "integer",
+            "title": "Task Type",
+            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "配置名称"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "API 地址"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "API Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "模型名称"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "是否启用"
+          },
+          "concurrency": {
+            "type": "integer",
+            "title": "Concurrency",
+            "description": "并发数"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "配置ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "task_type",
+          "name",
+          "is_active",
+          "concurrency",
+          "id"
+        ],
+        "title": "AiModelConfigOut",
+        "description": "配置输出。"
+      },
+      "AiModelConfigPatch": {
+        "properties": {
+          "task_type": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Type",
+            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "配置名称"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "API 地址"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "API Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "模型名称"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "description": "是否启用"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency",
+            "description": "并发数"
+          }
+        },
+        "type": "object",
+        "title": "AiModelConfigPatch",
+        "description": "局部更新：全字段可选。"
+      },
+      "AiModelConfigUpdate": {
+        "properties": {
+          "task_type": {
+            "type": "integer",
+            "title": "Task Type",
+            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Name",
+            "description": "配置名称"
+          },
+          "base_url": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Base Url",
+            "description": "API 地址"
+          },
+          "api_key": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Api Key",
+            "description": "API Key"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Model",
+            "description": "模型名称"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "description": "是否启用"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency",
+            "description": "并发数"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_type",
+          "name",
+          "base_url",
+          "api_key",
+          "model"
+        ],
+        "title": "AiModelConfigUpdate",
+        "description": "全量更新：同创建。"
+      },
+      "AiTaskOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "任务ID"
+          },
+          "task_type": {
+            "type": "integer",
+            "title": "Task Type",
+            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频"
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "request_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Request Params",
+            "description": "请求参数"
+          },
+          "response_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Data",
+            "description": "返回数据"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "错误消息"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "开始执行时间"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "执行完成时间"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id",
+          "task_type",
+          "status"
+        ],
+        "title": "AiTaskOut",
+        "description": "任务查询输出。"
+      },
+      "AssetBriefOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetTypeEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=人物, 2=场景, 3=物品"
+          },
+          "canonical_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Name",
+            "description": "资产名称"
+          },
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases",
+            "description": "别名列表",
+            "examples": [
+              "张三",
+              "小张"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "详细描述"
+          },
+          "base_traits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Traits",
+            "description": "固有特征 (英文, 用于 prompt)"
+          },
+          "main_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Image",
+            "description": "三视主图"
+          },
+          "angle_image_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 1",
+            "description": "可选参考图1"
+          },
+          "angle_image_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 2",
+            "description": "可选参考图2"
+          },
+          "image_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSourceEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=AI 生成, 2=用户上传"
+          },
+          "is_global": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Global",
+            "description": "是否全局资产"
+          },
+          "source_chapters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Chapters",
+            "description": "出现的章节列表"
+          },
+          "last_updated_chapter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated Chapter",
+            "description": "出现最新章节"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "小说/剧本ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "novel_id",
+          "id"
+        ],
+        "title": "AssetBriefOut",
+        "description": "列表输出：仅返回简要信息，提升加载速度。"
+      },
+      "AssetCreate": {
+        "properties": {
+          "asset_type": {
+            "$ref": "#/components/schemas/AssetTypeEnum"
+          },
+          "canonical_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Canonical Name",
+            "description": "资产名称"
+          },
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases",
+            "description": "别名列表",
+            "examples": [
+              "张三",
+              "小张"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "详细描述"
+          },
+          "base_traits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Traits",
+            "description": "固有特征 (英文, 用于 prompt)"
+          },
+          "main_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Image",
+            "description": "三视主图"
+          },
+          "angle_image_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 1",
+            "description": "可选参考图1"
+          },
+          "angle_image_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 2",
+            "description": "可选参考图2"
+          },
+          "image_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSourceEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=AI 生成, 2=用户上传"
+          },
+          "is_global": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Global",
+            "description": "是否全局资产"
+          },
+          "source_chapters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Chapters",
+            "description": "出现的章节列表"
+          },
+          "last_updated_chapter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated Chapter",
+            "description": "出现最新章节"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id",
+            "description": "关联的特定章节ID（可选）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_type",
+          "canonical_name",
+          "novel_id"
+        ],
+        "title": "AssetCreate",
+        "description": "创建请求：name 必填"
+      },
+      "AssetOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetTypeEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=人物, 2=场景, 3=物品"
+          },
+          "canonical_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Name",
+            "description": "资产名称"
+          },
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases",
+            "description": "别名列表",
+            "examples": [
+              "张三",
+              "小张"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "详细描述"
+          },
+          "base_traits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Traits",
+            "description": "固有特征 (英文, 用于 prompt)"
+          },
+          "main_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Image",
+            "description": "三视主图"
+          },
+          "angle_image_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 1",
+            "description": "可选参考图1"
+          },
+          "angle_image_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 2",
+            "description": "可选参考图2"
+          },
+          "image_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSourceEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=AI 生成, 2=用户上传"
+          },
+          "is_global": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Global",
+            "description": "是否全局资产"
+          },
+          "source_chapters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Chapters",
+            "description": "出现的章节列表"
+          },
+          "last_updated_chapter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated Chapter",
+            "description": "出现最新章节"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "小说/剧本ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "novel_id",
+          "id"
+        ],
+        "title": "AssetOut",
+        "description": "详情输出：返回包括正文在内的所有信息。"
+      },
+      "AssetPatch": {
+        "properties": {
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetTypeEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=人物, 2=场景, 3=物品"
+          },
+          "canonical_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Name",
+            "description": "资产名称"
+          },
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases",
+            "description": "别名列表",
+            "examples": [
+              "张三",
+              "小张"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "详细描述"
+          },
+          "base_traits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Traits",
+            "description": "固有特征 (英文, 用于 prompt)"
+          },
+          "main_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Image",
+            "description": "三视主图"
+          },
+          "angle_image_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 1",
+            "description": "可选参考图1"
+          },
+          "angle_image_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 2",
+            "description": "可选参考图2"
+          },
+          "image_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSourceEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=AI 生成, 2=用户上传"
+          },
+          "is_global": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Global",
+            "description": "是否全局资产"
+          },
+          "source_chapters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Chapters",
+            "description": "出现的章节列表"
+          },
+          "last_updated_chapter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated Chapter",
+            "description": "出现最新章节"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          }
+        },
+        "type": "object",
+        "title": "AssetPatch",
+        "description": "局部更新：全字段可选"
+      },
+      "AssetSimple": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "资产ID"
+          },
+          "asset_type": {
+            "$ref": "#/components/schemas/AssetTypeEnum"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "详细描述"
+          },
+          "base_traits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Traits",
+            "description": "固有特征 (英文, 用于 prompt)"
+          },
+          "is_global": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Global",
+            "description": "是否全局资产"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "asset_type"
+        ],
+        "title": "AssetSimple",
+        "description": "用于在 Scene 中嵌套展示资产的简化模型"
+      },
+      "AssetTypeEnum": {
+        "type": "integer",
+        "enum": [1, 2, 3],
+        "title": "AssetTypeEnum",
+        "description": "1=人物, 2=场景, 3=物品"
+      },
+      "AssetUpdate": {
+        "properties": {
+          "asset_type": {
+            "$ref": "#/components/schemas/AssetTypeEnum"
+          },
+          "canonical_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Canonical Name",
+            "description": "资产名称"
+          },
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases",
+            "description": "别名列表",
+            "examples": [
+              "张三",
+              "小张"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "详细描述"
+          },
+          "base_traits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Traits",
+            "description": "固有特征 (英文, 用于 prompt)"
+          },
+          "main_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Image",
+            "description": "三视主图"
+          },
+          "angle_image_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 1",
+            "description": "可选参考图1"
+          },
+          "angle_image_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Angle Image 2",
+            "description": "可选参考图2"
+          },
+          "image_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSourceEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=AI 生成, 2=用户上传"
+          },
+          "is_global": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Global",
+            "description": "是否全局资产"
+          },
+          "source_chapters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Chapters",
+            "description": "出现的章节列表"
+          },
+          "last_updated_chapter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated Chapter",
+            "description": "出现最新章节"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id",
+            "description": "关联的特定章节ID（可选）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_type",
+          "canonical_name",
+          "novel_id"
+        ],
+        "title": "AssetUpdate",
+        "description": "全量更新：逻辑同创建"
+      },
+      "Body_upload_files_api_file_upload_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_files_api_file_upload_post"
+      },
+      "ChapterBriefOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number",
+            "description": "章节序号"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "章节名称"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "workflow_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Status",
+            "description": "1=草稿 - 刚上传, 2=已分章, 3=已提取角色, 4=分镜就绪, 5=生成中, 6=已完成"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "章节ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "novel_id",
+          "id"
+        ],
+        "title": "ChapterBriefOut",
+        "description": "列表输出：仅返回简要信息，提升加载速度。"
+      },
+      "ChapterCreate": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "title": "Number",
+            "description": "章节序号"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "章节名称"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "workflow_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Status",
+            "description": "1=草稿 - 刚上传, 2=已分章, 3=已提取角色, 4=分镜就绪, 5=生成中, 6=已完成"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "章节内容"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          }
+        },
+        "type": "object",
+        "required": [
+          "number",
+          "name",
+          "content",
+          "novel_id"
+        ],
+        "title": "ChapterCreate",
+        "description": "创建请求：name 必填"
+      },
+      "ChapterOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number",
+            "description": "章节序号"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "章节名称"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "workflow_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Status",
+            "description": "1=草稿 - 刚上传, 2=已分章, 3=已提取角色, 4=分镜就绪, 5=生成中, 6=已完成"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "正文内容"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "章节ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "novel_id",
+          "id"
+        ],
+        "title": "ChapterOut",
+        "description": "详情输出：返回包括正文在内的所有信息。"
+      },
+      "ChapterPatch": {
+        "properties": {
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number",
+            "description": "章节序号"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "章节名称"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "workflow_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Status",
+            "description": "1=草稿 - 刚上传, 2=已分章, 3=已提取角色, 4=分镜就绪, 5=生成中, 6=已完成"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "正文内容"
+          }
+        },
+        "type": "object",
+        "title": "ChapterPatch",
+        "description": "局部更新：全字段可选"
+      },
+      "ChapterUpdate": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "title": "Number",
+            "description": "章节序号"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "章节名称"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "workflow_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Status",
+            "description": "1=草稿 - 刚上传, 2=已分章, 3=已提取角色, 4=分镜就绪, 5=生成中, 6=已完成"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "章节内容"
+          },
+          "novel_id": {
+            "type": "integer",
+            "title": "Novel Id",
+            "description": "所属小说/剧本"
+          }
+        },
+        "type": "object",
+        "required": [
+          "number",
+          "name",
+          "content",
+          "novel_id"
+        ],
+        "title": "ChapterUpdate",
+        "description": "全量更新：逻辑同创建"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ImageSourceEnum": {
+        "type": "integer",
+        "enum": [1, 2],
+        "title": "ImageSourceEnum",
+        "description": "1=AI 生成, 2=用户上传"
+      },
+      "NovelBriefOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "小说名称"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author",
+            "description": "作者"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover",
+            "description": "封面图URL"
+          },
+          "total_chapters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Chapters",
+            "description": "总章节数"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "小说/剧本ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id"
+        ],
+        "title": "NovelBriefOut",
+        "description": "列表输出：仅返回简要信息，提升加载速度。"
+      },
+      "NovelCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "小说名称"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author",
+            "description": "作者"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover",
+            "description": "封面图URL"
+          },
+          "total_chapters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Chapters",
+            "description": "总章节数"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "正文内容"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "NovelCreate",
+        "description": "创建请求：name 必填"
+      },
+      "NovelOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "小说名称"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author",
+            "description": "作者"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover",
+            "description": "封面图URL"
+          },
+          "total_chapters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Chapters",
+            "description": "总章节数"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "正文内容"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "小说/剧本ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id"
+        ],
+        "title": "NovelOut",
+        "description": "详情输出：返回包括正文在内的所有信息。"
+      },
+      "NovelPatch": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "小说名称"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author",
+            "description": "作者"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover",
+            "description": "封面图URL"
+          },
+          "total_chapters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Chapters",
+            "description": "总章节数"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "正文内容"
+          }
+        },
+        "type": "object",
+        "title": "NovelPatch",
+        "description": "局部更新：全字段可选"
+      },
+      "NovelUpdate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "小说名称"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author",
+            "description": "作者"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover",
+            "description": "封面图URL"
+          },
+          "total_chapters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Chapters",
+            "description": "总章节数"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "正文内容"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "NovelUpdate",
+        "description": "全量更新：逻辑同创建"
+      },
+      "Pagination": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "pages"
+        ],
+        "title": "Pagination"
+      },
+      "PaginationResponse_AiModelConfigOut_": {
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AiModelConfigOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pagination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PaginationResponse[AiModelConfigOut]"
+      },
+      "PaginationResponse_AssetBriefOut_": {
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AssetBriefOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pagination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PaginationResponse[AssetBriefOut]"
+      },
+      "PaginationResponse_ChapterBriefOut_": {
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChapterBriefOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pagination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PaginationResponse[ChapterBriefOut]"
+      },
+      "PaginationResponse_NovelBriefOut_": {
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NovelBriefOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pagination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PaginationResponse[NovelBriefOut]"
+      },
+      "PaginationResponse_SceneBriefOut_": {
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SceneBriefOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pagination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PaginationResponse[SceneBriefOut]"
+      },
+      "PaginationResponse_VideoBriefOut_": {
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VideoBriefOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pagination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PaginationResponse[VideoBriefOut]"
+      },
+      "ResponseSchema": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema",
+        "description": "统一API响应格式\n\n属性:\n    code (int): 响应状态码，0表示成功，非0表示异常\n    data (T): 响应数据，泛型类型\n    message (str): 响应消息",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_AiModelConfigOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiModelConfigOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[AiModelConfigOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_AiTaskOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiTaskOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[AiTaskOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_AssetOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[AssetOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_ChapterOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChapterOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[ChapterOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_NovelOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NovelOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[NovelOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_PaginationResponse_AiModelConfigOut__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationResponse_AiModelConfigOut_"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[PaginationResponse[AiModelConfigOut]]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_PaginationResponse_AssetBriefOut__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationResponse_AssetBriefOut_"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[PaginationResponse[AssetBriefOut]]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_PaginationResponse_ChapterBriefOut__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationResponse_ChapterBriefOut_"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[PaginationResponse[ChapterBriefOut]]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_PaginationResponse_NovelBriefOut__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationResponse_NovelBriefOut_"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[PaginationResponse[NovelBriefOut]]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_PaginationResponse_SceneBriefOut__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationResponse_SceneBriefOut_"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[PaginationResponse[SceneBriefOut]]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_PaginationResponse_VideoBriefOut__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaginationResponse_VideoBriefOut_"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[PaginationResponse[VideoBriefOut]]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_SceneOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SceneOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[SceneOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_VideoOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[VideoOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_VideoQueryOut_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoQueryOut"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[VideoQueryOut]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "ResponseSchema_dict_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "default": 0
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "操作成功"
+          }
+        },
+        "type": "object",
+        "title": "ResponseSchema[dict]",
+        "example": {
+          "code": 0,
+          "data": {
+
+          },
+          "message": "操作成功"
+        }
+      },
+      "SceneBriefOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence",
+            "description": "分镜序列号"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "提示词"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "时长"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "分镜ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id"
+        ],
+        "title": "SceneBriefOut",
+        "description": "列表输出：仅返回简要信息，提升加载速度。"
+      },
+      "SceneCreate": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence",
+            "description": "分镜序列号"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "提示词配置"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "时长"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Ids",
+            "description": "说话角色IDs，关联资产表"
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AssetSimple"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets",
+            "description": "该镜头涉及的资产列表"
+          },
+          "chapter_id": {
+            "type": "integer",
+            "title": "Chapter Id",
+            "description": "所属章节"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence",
+          "prompt",
+          "chapter_id"
+        ],
+        "title": "SceneCreate",
+        "description": "创建请求：chapter_id 必填"
+      },
+      "SceneGenerateCreate": {
+        "properties": {
+          "chapter_id": {
+            "type": "integer",
+            "title": "Chapter Id",
+            "description": "所属章节"
+          },
+          "model": {
+            "$ref": "#/components/schemas/VideoModelTypeEnum"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "model"
+        ],
+        "title": "SceneGenerateCreate",
+        "description": "创建请求：chapter_id 必填"
+      },
+      "SceneOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence",
+            "description": "分镜序列号"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "提示词"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "时长"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Ids",
+            "description": "说话角色IDs，关联资产表"
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AssetSimple"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets",
+            "description": "该镜头涉及的资产列表"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "分镜ID"
+          },
+          "prompt_params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SoraScenePromptConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "提示词参数配置"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id"
+        ],
+        "title": "SceneOut",
+        "description": "详情输出：返回包括正文在内的所有信息。"
+      },
+      "ScenePatch": {
+        "properties": {
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence",
+            "description": "分镜序列号"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "提示词配置"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "时长"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Ids",
+            "description": "说话角色IDs，关联资产表"
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AssetSimple"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets",
+            "description": "该镜头涉及的资产列表"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id",
+            "description": "所属章节"
+          }
+        },
+        "type": "object",
+        "title": "ScenePatch",
+        "description": "局部更新：全字段可选"
+      },
+      "SceneUpdate": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence",
+            "description": "分镜序列号"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "描述"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "提示词配置"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "时长"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          },
+          "asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Ids",
+            "description": "说话角色IDs，关联资产表"
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AssetSimple"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets",
+            "description": "该镜头涉及的资产列表"
+          },
+          "chapter_id": {
+            "type": "integer",
+            "title": "Chapter Id",
+            "description": "所属章节"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence",
+          "prompt",
+          "chapter_id"
+        ],
+        "title": "SceneUpdate",
+        "description": "全量更新"
+      },
+      "SoraScenePromptConfig": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence",
+            "description": "分镜序列号"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "分镜标题，简短有力，如 'The Revelation'"
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "4s",
+              "8s"
+            ],
+            "title": "Duration",
+            "description": "时长，推荐4s以获得最佳指令依从性"
+          },
+          "visual_prose": {
+            "type": "string",
+            "title": "Visual Prose",
+            "description": "【核心视觉描述】。逻辑约束：如果涉及 Defined Entities，必须使用 @实体名 (如 @张三)，严禁重复描述其外观。对于非预定义物体，必须进行极致的细节描述（材质、纹理、微动作）。"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions",
+            "description": "【时间轴动作分解】。格式必须为 '开始时间-结束时间: 动作描述'。例如 '0.0s-2.0s: @张三 turns head slowly.'。动作必须精确且符合物理逻辑。"
+          },
+          "format_and_look": {
+            "type": "string",
+            "title": "Format And Look",
+            "description": "【格式与质感】。必须包含：快门角度(shutter angle)、胶片/数字格式(digital/film stock)、颗粒感(grain)、光晕(halation)等。例: '180° shutter; digital capture emulating Kodak Vision3 500T; heavy film grain.'"
+          },
+          "lenses_and_filtration": {
+            "type": "string",
+            "title": "Lenses And Filtration",
+            "description": "【镜头与滤镜】。必须包含：焦段(Focal length)、镜头类型(Spherical/Anamorphic)、滤镜(Pro-Mist/Polarizer)。例: '35mm Anamorphic lens; Black Pro-Mist 1/8; slight edge distortion.'"
+          },
+          "lighting_and_atmosphere": {
+            "type": "string",
+            "title": "Lighting And Atmosphere",
+            "description": "【光影与氛围】。必须包含：主光方向、光比(Key/Fill ratio)、具体的灯光工具(Bounce/Negative fill)、大气效果(Haze/Mist)。例: 'Rembrandt lighting from camera right; volumetric haze; negative fill on the left.'"
+          },
+          "grade_and_palette": {
+            "type": "string",
+            "title": "Grade And Palette",
+            "description": "【调色与色板】。必须包含：高光(Highlights)、中间调(Mids)、暗部(Blacks/Shadows)的色彩倾向。例: 'Highlights: warm amber; Shadows: teal crush; Desaturated mids.'"
+          },
+          "camera_movement": {
+            "type": "string",
+            "title": "Camera Movement",
+            "description": "【运镜】。使用专业术语：Dolly, Truck, Pan, Tilt, Steadicam, Handheld。描述速度和稳定性。例: 'Slow push-in (Dolly forward) combined with subtle handheld shake.'"
+          },
+          "sound_design": {
+            "type": "string",
+            "title": "Sound Design",
+            "description": "【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence",
+          "description",
+          "duration",
+          "visual_prose",
+          "actions",
+          "format_and_look",
+          "lenses_and_filtration",
+          "lighting_and_atmosphere",
+          "grade_and_palette",
+          "camera_movement",
+          "sound_design"
+        ],
+        "title": "SoraScenePromptConfig",
+        "description": "生成视频分镜的提示词配置 - Sora"
+      },
+      "TaskStatusEnum": {
+        "type": "integer",
+        "enum": [1, 2, 3, 4, 5, 6],
+        "title": "TaskStatusEnum",
+        "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VideoBriefOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "视频ID"
+          },
+          "model_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoModelTypeEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "视频模型类型"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "视频URL"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "状态"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id"
+        ],
+        "title": "VideoBriefOut",
+        "description": "列表输出：简要信息"
+      },
+      "VideoGenerateRequest": {
+        "properties": {
+          "scene_id": {
+            "type": "integer",
+            "title": "Scene Id",
+            "description": "分镜ID"
+          },
+          "model_type": {
+            "$ref": "#/components/schemas/VideoModelTypeEnum"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scene_id",
+          "model_type"
+        ],
+        "title": "VideoGenerateRequest",
+        "description": "提交视频生成请求"
+      },
+      "VideoModelTypeEnum": {
+        "type": "integer",
+        "enum": [1, 2, 3, 4],
+        "title": "VideoModelTypeEnum",
+        "description": "1=Viduq2, 2=Sora2, 3=Seedance/即梦, 4=Veo3"
+      },
+      "VideoOut": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "视频ID"
+          },
+          "scene_id": {
+            "type": "integer",
+            "title": "Scene Id",
+            "description": "分镜ID"
+          },
+          "model_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoModelTypeEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "视频模型类型"
+          },
+          "external_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Task Id",
+            "description": "外部任务ID"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "视频URL"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatusEnum"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "状态"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "updated_at",
+          "id",
+          "scene_id"
+        ],
+        "title": "VideoOut",
+        "description": "详情输出：完整信息"
+      },
+      "VideoQueryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "视频ID"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatusEnum",
+            "description": "状态"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress",
+            "description": "进度百分比"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "视频URL"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "元数据"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "VideoQueryOut",
+        "description": "查询视频生成状态的结果"
+      }
+    }
+  }
+}
