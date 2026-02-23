@@ -101,12 +101,20 @@ class SeedanceGenerator(BaseVideoGenerator):
 
         # 自动切换 t2v / i2v 模型
         model_name = self.config.model
+        supports_images = "i2v" in model_name or "t2v" in model_name
         if ref_images and "t2v" in model_name:
             model_name = model_name.replace("t2v", "i2v")
             logger.info("Seedance auto-switch: t2v -> i2v (has images)")
         elif not ref_images and "i2v" in model_name:
             model_name = model_name.replace("i2v", "t2v")
             logger.info("Seedance auto-switch: i2v -> t2v (no images)")
+        elif ref_images and not supports_images:
+            # 模型名中无 t2v/i2v，不支持参考图，丢弃图片避免 r2v 错误
+            logger.warning(
+                "Seedance model %s does not support reference images, skipping %d images",
+                model_name, len(ref_images),
+            )
+            ref_images = []
 
         # 构建 content 数组（官方格式）
         content: list[dict[str, Any]] = [
