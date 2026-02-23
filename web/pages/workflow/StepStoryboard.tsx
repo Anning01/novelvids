@@ -42,8 +42,8 @@ export const StepStoryboard = ({ chapterId }: StepStoryboardProps) => {
       setLoading(true)
       const res = await api.getScenes(chapterId)
       setScenes(res.data.items)
-    } catch {
-      toast.error("加载分镜失败")
+    } catch (err) {
+      toast.error((err as Error).message || "加载分镜失败")
     } finally {
       setLoading(false)
     }
@@ -64,8 +64,8 @@ export const StepStoryboard = ({ chapterId }: StepStoryboardProps) => {
         toast.error("分镜生成失败")
       }
       await loadScenes()
-    } catch {
-      toast.error("分镜生成失败")
+    } catch (err) {
+      toast.error((err as Error).message || "分镜生成失败")
     } finally {
       setGenerating(false)
     }
@@ -88,8 +88,8 @@ export const StepStoryboard = ({ chapterId }: StepStoryboardProps) => {
       setEditingId(null)
       setEditPrompt("")
       await loadScenes()
-    } catch {
-      toast.error("保存提示词失败")
+    } catch (err) {
+      toast.error((err as Error).message || "保存提示词失败")
     }
   }
 
@@ -99,8 +99,8 @@ export const StepStoryboard = ({ chapterId }: StepStoryboardProps) => {
       await api.deleteScene(sceneId)
       toast.success("分镜已删除")
       setScenes((prev) => prev.filter((s) => s.id !== sceneId))
-    } catch {
-      toast.error("删除分镜失败")
+    } catch (err) {
+      toast.error((err as Error).message || "删除分镜失败")
     }
   }
 

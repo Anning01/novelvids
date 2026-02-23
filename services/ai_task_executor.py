@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 
 # 不同任务类型的超时时间（秒）
 TASK_TIMEOUT: dict[AiTaskTypeEnum, int] = {
-    AiTaskTypeEnum.extraction: 60,
-    AiTaskTypeEnum.reference_image: 120,
-    AiTaskTypeEnum.storyboard: 120,
-    AiTaskTypeEnum.video: 300,
+    AiTaskTypeEnum.extraction: 600,
+    AiTaskTypeEnum.reference_image: 600,
+    AiTaskTypeEnum.storyboard: 900,
+    AiTaskTypeEnum.video: 600,
 }
 
 
@@ -111,7 +111,7 @@ class AiTaskExecutor:
             logger.info("Task #%s skipped (status=%s)", task.id, task.status)
             return
 
-        timeout = TASK_TIMEOUT.get(task_type, 60)
+        timeout = TASK_TIMEOUT.get(task_type, 600)
 
         # 标记为执行中
         task.status = TaskStatusEnum.running.value

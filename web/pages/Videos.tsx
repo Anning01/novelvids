@@ -24,8 +24,8 @@ export const VideosPage = () => {
       const res = await api.getVideos(p, 20, '-id')
       setVideos(res.data.items)
       setPagination(res.data.pagination)
-    } catch {
-      toast.error('获取视频列表失败')
+    } catch (err) {
+      toast.error((err as Error).message || '获取视频列表失败')
     } finally {
       setLoading(false)
     }
@@ -43,8 +43,8 @@ export const VideosPage = () => {
         prev.map((v) => (v.id === video.id ? res.data : v)),
       )
       toast.success('状态已刷新')
-    } catch {
-      toast.error('刷新状态失败')
+    } catch (err) {
+      toast.error((err as Error).message || '刷新状态失败')
     } finally {
       setRefreshingIds((prev) => {
         const next = new Set(prev)
@@ -61,8 +61,8 @@ export const VideosPage = () => {
       await api.deleteVideo(video.id)
       toast.success('视频已删除')
       fetchVideos(page)
-    } catch {
-      toast.error('删除视频失败')
+    } catch (err) {
+      toast.error((err as Error).message || '删除视频失败')
     } finally {
       setDeletingIds((prev) => {
         const next = new Set(prev)
@@ -121,7 +121,7 @@ export const VideosPage = () => {
     video.status !== TaskStatusEnum.FAILED &&
     video.status !== TaskStatusEnum.CANCELLED
 
-  const totalPages = pagination?.total_pages ?? 1
+  const totalPages = pagination?.pages ?? 1
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">

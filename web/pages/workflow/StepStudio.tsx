@@ -54,8 +54,8 @@ export const StepStudio = ({ chapterId }: StepStudioProps) => {
       if (items.length > 0 && !selectedScene) {
         setSelectedScene(items[0])
       }
-    } catch {
-      toast.error("加载场景列表失败")
+    } catch (err) {
+      toast.error((err as Error).message || "加载场景列表失败")
     } finally {
       setLoading(false)
     }
@@ -65,8 +65,8 @@ export const StepStudio = ({ chapterId }: StepStudioProps) => {
     try {
       const res = await api.getVideos(1, 100, "-id", sceneId)
       setVideos(res.data.items)
-    } catch {
-      toast.error("加载视频列表失败")
+    } catch (err) {
+      toast.error((err as Error).message || "加载视频列表失败")
     }
   }
 
@@ -103,8 +103,8 @@ export const StepStudio = ({ chapterId }: StepStudioProps) => {
       } else {
         toast.error("视频生成失败")
       }
-    } catch {
-      toast.error("视频生成失败")
+    } catch (err) {
+      toast.error((err as Error).message || "视频生成失败")
     } finally {
       setGenerating(false)
     }
@@ -116,8 +116,8 @@ export const StepStudio = ({ chapterId }: StepStudioProps) => {
       setVideos((prev) =>
         prev.map((v) => (v.id === videoId ? res.data : v))
       )
-    } catch {
-      toast.error("刷新视频状态失败")
+    } catch (err) {
+      toast.error((err as Error).message || "刷新视频状态失败")
     }
   }
 

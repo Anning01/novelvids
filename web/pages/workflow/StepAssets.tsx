@@ -49,8 +49,8 @@ export const StepAssets = ({ chapterId: _chapterId, novelId }: StepAssetsProps) 
     try {
       const res = await api.getAssets(novelId)
       setAssets(res.data.items)
-    } catch {
-      toast.error("加载资产失败")
+    } catch (err) {
+      toast.error((err as Error).message || "加载资产失败")
     } finally {
       setLoading(false)
     }
@@ -71,8 +71,8 @@ export const StepAssets = ({ chapterId: _chapterId, novelId }: StepAssetsProps) 
         toast.error("参考图生成失败")
       }
       await loadAssets()
-    } catch {
-      toast.error("参考图生成失败")
+    } catch (err) {
+      toast.error((err as Error).message || "参考图生成失败")
     } finally {
       setProcessingId(null)
     }

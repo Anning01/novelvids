@@ -17,20 +17,23 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { api } from '@/services/api'
-import type { Novel } from '@/types'
+import type { Novel, Pagination } from '@/types'
 
 export const Dashboard = () => {
   const [novels, setNovels] = useState<Novel[]>([])
   const [loading, setLoading] = useState(true)
+  const [pagination, setPagination] = useState<Pagination | null>(null)
+  const [page, setPage] = useState(1)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ name: '', author: '', description: '' })
 
-  const fetchNovels = async () => {
+  const fetchNovels = async (p: number = page) => {
     try {
       setLoading(true)
-      const res = await api.getNovels()
+      const res = await api.getNovels(p)
       setNovels(res.data.items)
+      setPagination(res.data.pagination)
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -39,8 +42,8 @@ export const Dashboard = () => {
   }
 
   useEffect(() => {
-    fetchNovels()
-  }, [])
+    fetchNovels(page)
+  }, [page])
 
   const handleCreate = async () => {
     if (!form.name.trim()) return
@@ -54,7 +57,7 @@ export const Dashboard = () => {
       toast.success('项目创建成功')
       setDialogOpen(false)
       setForm({ name: '', author: '', description: '' })
-      await fetchNovels()
+      await fetchNovels(page)
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -133,6 +136,7 @@ export const Dashboard = () => {
 
       {/* Project Grid */}
       {!loading && novels.length > 0 && (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children">
           {novels.map((novel) => (
             <Link key={novel.id} to={`/novel/${novel.id}`} className="group">
@@ -185,6 +189,32 @@ export const Dashboard = () => {
             </Link>
           ))}
         </div>
+
+        {/* Pagination */}
+        {pagination && pagination.pages > 1 && (
+          <div className="flex items-center justify-center gap-4 pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+            >
+              上一页
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              第 {page} / {pagination.pages} 页
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(pagination!.pages, p + 1))}
+              disabled={page >= pagination.pages}
+            >
+              下一页
+            </Button>
+          </div>
+        )}
+        </>
       )}
 
       {/* Create Dialog */}

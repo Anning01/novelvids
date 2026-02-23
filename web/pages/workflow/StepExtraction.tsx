@@ -40,8 +40,8 @@ export const StepExtraction = ({ chapterId, novelId }: StepExtractionProps) => {
       setLoading(true)
       const res = await api.getAssets(novelId)
       setAssets(res.data.items)
-    } catch {
-      toast.error("加载资产失败")
+    } catch (err) {
+      toast.error((err as Error).message || "加载资产失败")
     } finally {
       setLoading(false)
     }
@@ -62,8 +62,8 @@ export const StepExtraction = ({ chapterId, novelId }: StepExtractionProps) => {
         toast.error("实体提取失败")
       }
       await loadAssets()
-    } catch {
-      toast.error("实体提取失败")
+    } catch (err) {
+      toast.error((err as Error).message || "实体提取失败")
     } finally {
       setExtracting(false)
     }

@@ -118,7 +118,7 @@ export interface Pagination {
   total: number;
   page: number;
   page_size: number;
-  total_pages: number;
+  pages: number;
 }
 
 export interface PaginationResponse<T> {

@@ -24,7 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/services/api'
-import type { Novel, Chapter } from '@/types'
+import type { Novel, Chapter, Pagination } from '@/types'
 
 export const NovelDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -33,6 +33,8 @@ export const NovelDetail: React.FC = () => {
 
   const [novel, setNovel] = useState<Novel | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
+  const [chapterPagination, setChapterPagination] = useState<Pagination | null>(null)
+  const [chapterPage, setChapterPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [splitting, setSplitting] = useState(false)
 
@@ -54,24 +56,29 @@ export const NovelDetail: React.FC = () => {
     }
   }, [novelId])
 
-  const fetchChapters = useCallback(async () => {
+  const fetchChapters = useCallback(async (p: number = chapterPage) => {
     try {
-      const res = await api.getChapters(novelId)
+      const res = await api.getChapters(novelId, p, 50)
       setChapters(res.data.items)
+      setChapterPagination(res.data.pagination)
     } catch (err) {
       console.error('Failed to fetch chapters:', err)
     }
-  }, [novelId])
+  }, [novelId, chapterPage])
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    await Promise.all([fetchNovel(), fetchChapters()])
+    await Promise.all([fetchNovel(), fetchChapters(1)])
     setLoading(false)
   }, [fetchNovel, fetchChapters])
 
   useEffect(() => {
     if (novelId) loadData()
   }, [novelId, loadData])
+
+  useEffect(() => {
+    if (chapterPage > 1) fetchChapters(chapterPage)
+  }, [chapterPage, fetchChapters])
 
   const handleEditOpen = () => {
     if (!novel) return
@@ -99,7 +106,7 @@ export const NovelDetail: React.FC = () => {
       toast.success('小说已更新')
     } catch (err) {
       console.error('Failed to update novel:', err)
-      toast.error('更新失败')
+      toast.error((err as Error).message || '更新失败')
     } finally {
       setSaving(false)
     }
@@ -114,7 +121,7 @@ export const NovelDetail: React.FC = () => {
       await fetchChapters()
     } catch (err) {
       console.error('Failed to split novel:', err)
-      toast.error('拆分失败')
+      toast.error((err as Error).message || '拆分失败')
     } finally {
       setSplitting(false)
     }
@@ -129,7 +136,7 @@ export const NovelDetail: React.FC = () => {
       navigate('/')
     } catch (err) {
       console.error('Failed to delete novel:', err)
-      toast.error('删除失败')
+      toast.error((err as Error).message || '删除失败')
     }
   }
 
@@ -141,7 +148,7 @@ export const NovelDetail: React.FC = () => {
       setChapters((prev) => prev.filter((c) => c.id !== chapter.id))
     } catch (err) {
       console.error('Failed to delete chapter:', err)
-      toast.error('删除失败')
+      toast.error((err as Error).message || '删除失败')
     }
   }
 
@@ -287,7 +294,7 @@ export const NovelDetail: React.FC = () => {
         <div className="flex items-center gap-2 mb-4">
           <FileText className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-semibold">章节列表</h2>
-          <span className="text-sm text-muted-foreground">({chapters.length})</span>
+          <span className="text-sm text-muted-foreground">({chapterPagination?.total ?? chapters.length})</span>
         </div>
 
         {chapters.length === 0 ? (
@@ -298,6 +305,7 @@ export const NovelDetail: React.FC = () => {
             <p className="text-xs mt-1 text-muted-foreground/60">请先粘贴小说内容，然后使用「智能拆分章节」</p>
           </div>
         ) : (
+          <>
           <div className="space-y-2 stagger-children">
             {chapters.map((chapter) => (
               <div
@@ -355,6 +363,32 @@ export const NovelDetail: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {/* Chapter Pagination */}
+          {chapterPagination && chapterPagination.pages > 1 && (
+            <div className="flex items-center justify-center gap-4 pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setChapterPage((p) => Math.max(1, p - 1))}
+                disabled={chapterPage <= 1}
+              >
+                上一页
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                第 {chapterPage} / {chapterPagination.pages} 页
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setChapterPage((p) => Math.min(chapterPagination!.pages, p + 1))}
+                disabled={chapterPage >= chapterPagination.pages}
+              >
+                下一页
+              </Button>
+            </div>
+          )}
+          </>
         )}
       </div>
 
