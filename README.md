@@ -102,8 +102,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/Anning01/novel-vids.git
-cd novel-vids
+git clone https://github.com/Anning01/novelvids.git
+cd novelvids
 
 # 安装依赖（推荐使用 uv）
 uv sync
@@ -129,7 +129,7 @@ npm run dev
 ## 项目结构
 
 ```
-novel-vids/
+novelvids/
 ├── api/                    # API 路由层 —— RESTful 接口定义
 │   ├── novel.py            # 小说相关 API
 │   ├── chapter.py          # 章节相关 API
