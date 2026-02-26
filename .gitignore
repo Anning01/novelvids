@@ -86,3 +86,4 @@ temp/
 media
 novelvids.db*
 .playwright-mcp
+test.py

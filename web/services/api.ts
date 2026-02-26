@@ -1,5 +1,5 @@
 import type {
-  Novel, Chapter, Asset, Scene, Video, AiModelConfig, AiTask,
+  Novel, Chapter, Asset, Scene, Video, AiModelConfig, AiTask, ChapterVideoItem, VideoMergeOut,
   PaginationResponse, SingleResponse, AllEnums,
 } from '../types';
 
@@ -118,6 +118,9 @@ class ApiService {
   getVideo(id: number): Promise<SingleResponse<Video>> {
     return request(`/video/${id}`);
   }
+  getChapterVideos(chapterId: number): Promise<SingleResponse<ChapterVideoItem[]>> {
+    return request(`/video/chapter/${chapterId}`);
+  }
   generateVideo(data: { scene_id: number; model_type: number }): Promise<SingleResponse<Video>> {
     return request('/video/generate/', { method: 'POST', body: JSON.stringify(data) });
   }
@@ -126,6 +129,12 @@ class ApiService {
   }
   deleteVideo(id: number): Promise<SingleResponse<null>> {
     return request(`/video/${id}`, { method: 'DELETE' });
+  }
+  mergeChapterVideos(data: { chapter_id: number }): Promise<SingleResponse<VideoMergeOut>> {
+    return request('/video/merge', { method: 'POST', body: JSON.stringify(data) });
+  }
+  getMergedVideo(chapterId: number): Promise<SingleResponse<VideoMergeOut>> {
+    return request(`/video/merge/${chapterId}`);
   }
 
   // --- Model Config ---

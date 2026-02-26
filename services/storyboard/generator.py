@@ -70,7 +70,8 @@ Generate the storyboard now.
             {"role": "user", "content": user_prompt},
         ],
         response_format=Storyboard,
-        timeout=600
+        timeout=600,
+        max_completion_tokens=10000  # o1 系列需要这个参数来增加输出长度
     )
 
     # 收集元数据

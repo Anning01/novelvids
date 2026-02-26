@@ -6,6 +6,8 @@ from schemas.video import (
     VideoGenerateRequest,
     VideoOut,
     VideoQueryOut,
+    VideoMergeRequest,
+    VideoMergeOut,
 )
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
@@ -43,3 +45,25 @@ async def get_video(video_id: int):
 async def delete_video(video_id: int):
     await video_controller.remove(video_id)
     return ResponseSchema()
+
+
+@router.post("/merge", summary="合并章节视频", response_model=ResponseSchema[VideoMergeOut])
+async def merge_chapter_videos(req: VideoMergeRequest):
+    result = await video_controller.merge_chapter_videos(req.chapter_id)
+    return ResponseSchema(data=result)
+
+
+@router.get("/merge/{chapter_id}", summary="查询章节合并视频")
+async def get_merged_video(chapter_id: int):
+    result = await video_controller.get_merged_video(chapter_id)
+    if result is None:
+        return ResponseSchema(code=1, data=None, message="未找到合并视频")
+    return ResponseSchema(data=result)
+
+
+@router.get("/chapter/{chapter_id}", summary="获取章节下所有分镜的视频")
+async def get_chapter_videos(chapter_id: int):
+    videos = await video_controller.get_chapter_videos(chapter_id)
+    return ResponseSchema(data=videos)
+
+

@@ -1,10 +1,11 @@
 import { Button } from "@/components/ui/button"
-import { User, Image as ImageIcon, Layers, Film, ChevronLeft } from "lucide-react"
+import { User, Image as ImageIcon, Layers, Film, ChevronLeft, FileVideo } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
 import { StepExtraction } from "./StepExtraction"
 import { StepAssets } from "./StepAssets"
 import { StepStoryboard } from "./StepStoryboard"
 import { StepStudio } from "./StepStudio"
+import { StepMerge } from "./StepMerge"
 import { cn } from "@/lib/utils"
 
 const steps = [
@@ -12,6 +13,7 @@ const steps = [
   { id: 2, label: "视觉资产", icon: ImageIcon },
   { id: 3, label: "分镜管理", icon: Layers },
   { id: 4, label: "视频工作台", icon: Film },
+  { id: 5, label: "视频合成", icon: FileVideo },
 ]
 
 export const WorkflowLayout = () => {
@@ -35,6 +37,8 @@ export const WorkflowLayout = () => {
         return <StepStoryboard chapterId={cId} novelId={nId} />
       case 4:
         return <StepStudio chapterId={cId} />
+      case 5:
+        return <StepMerge chapterId={cId} />
       default:
         return <StepExtraction chapterId={cId} novelId={nId} />
     }
