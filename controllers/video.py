@@ -205,6 +205,36 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         return result
 
+    async def get_novel_videos(self, novel_id: int) -> list[dict]:
+        """获取小说下所有视频。
+
+        Args:
+            novel_id: 小说 ID
+
+        Returns:
+            [
+                {
+                    "id": 10,
+                    "url": "/media/videos/10.mp4",
+                    "status": 3,
+                    "model_type": 4
+                },
+                ...
+            ]
+        """
+        videos = await Video.filter(
+            scene__chapter__novel_id=novel_id
+        ).order_by("-created_at")
+        return [
+        {
+            "id": video.id,
+            "url": video.url,
+            "status": video.status,
+            "model_type": video.model_type
+        }
+        for video in videos
+    ]
+
     async def merge_chapter_videos(self, chapter_id: int) -> dict:
         """合并章节下所有已完成的视频。
 

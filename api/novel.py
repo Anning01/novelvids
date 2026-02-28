@@ -30,7 +30,7 @@ async def patch_novel(novel_id: int, novel: NovelPatch):
     "", summary="获取小说/剧本列表", response_model=ResponseSchema[PaginationResponse[NovelBriefOut]]
 )
 async def get_novel_list(params: QueryParams = Depends(get_list_params)):
-    novels = await novel_controller.list(params, NovelBriefOut)
+    novels = await novel_controller.list(params, NovelBriefOut, search_fields=['name', 'author'])
     return ResponseSchema(data=novels)
 
 

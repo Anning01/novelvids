@@ -66,4 +66,7 @@ async def get_chapter_videos(chapter_id: int):
     videos = await video_controller.get_chapter_videos(chapter_id)
     return ResponseSchema(data=videos)
 
-
+@router.get("/novel/{novel_id}", summary="获取小说下的所有视频")
+async def get_novel_videos(novel_id: int):
+    videos = await video_controller.get_novel_videos(novel_id)
+    return ResponseSchema(data=videos)
