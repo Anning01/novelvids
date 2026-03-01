@@ -15,7 +15,17 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         super().__init__(model=Chapter)
 
     async def create(self, obj_in: ChapterCreate) -> Chapter:
-        """创建章节并更新小说的 total_chapters"""
+        """创建章节并更新小说的 total_chapters。
+
+        number 未传时，自动取该小说下最大 number + 1。
+        """
+        if obj_in.number is None:
+            max_row = await Chapter.filter(novel_id=obj_in.novel_id).order_by("-number").first()
+            obj_in.number = (max_row.number + 1) if max_row else 1
+
+        if not obj_in.name:
+            obj_in.name = f"第{obj_in.number}章"
+
         chapter = await super().create(obj_in)
 
         # 更新小说的总章节数

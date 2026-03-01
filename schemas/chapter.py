@@ -28,9 +28,9 @@ class ChapterFullProperties(ChapterProperties):
 # --- 输入 Schema (In-bound) ---
 
 class ChapterCreate(ChapterFullProperties):
-    """创建请求：name 必填"""
-    number: int = Field(..., description="章节序号")
-    name: str = Field(..., description="章节名称", max_length=255)
+    """创建请求：number/name 可选（后端自动计算）"""
+    number: Optional[int] = Field(None, description="章节序号，不传则自动递增")
+    name: Optional[str] = Field(None, description="章节名称，不传则自动生成", max_length=255)
     content: str = Field(..., description="章节内容")
     novel_id: int = Field(..., description="所属小说/剧本")
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -11,6 +11,8 @@ import {
   FileText,
   ArrowLeft,
   Plus,
+  ImagePlus,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,7 +27,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/services/api'
-import type { Novel, Chapter, Pagination } from '@/types'
+import type { Novel, Chapter, Pagination as PaginationType } from '@/types'
+import { Pagination } from '@/components/Pagination'
 
 export const NovelDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -34,7 +37,7 @@ export const NovelDetail: React.FC = () => {
 
   const [novel, setNovel] = useState<Novel | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
-  const [chapterPagination, setChapterPagination] = useState<Pagination | null>(null)
+  const [chapterPagination, setChapterPagination] = useState<PaginationType | null>(null)
   const [chapterPage, setChapterPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [splitting, setSplitting] = useState(false)
@@ -44,17 +47,32 @@ export const NovelDetail: React.FC = () => {
     name: '',
     author: '',
     description: '',
-    content: '',
   })
   const [saving, setSaving] = useState(false)
+  const editContentRef = useRef<HTMLTextAreaElement>(null)
+
+  // 编辑封面状态
+  const [editCoverFile, setEditCoverFile] = useState<File | null>(null)
+  const [editCoverPreview, setEditCoverPreview] = useState<string | null>(null)
+
+  const handleEditCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setEditCoverFile(file)
+    setEditCoverPreview(URL.createObjectURL(file))
+  }
+
+  const clearEditCover = () => {
+    setEditCoverFile(null)
+    if (editCoverPreview) URL.revokeObjectURL(editCoverPreview)
+    setEditCoverPreview(null)
+  }
 
   // 创建章节对话框状态
   const [createChapterOpen, setCreateChapterOpen] = useState(false)
-  const [createChapterForm, setCreateChapterForm] = useState({
-    name: '',
-    content: '',
-  })
+  const [createChapterForm, setCreateChapterForm] = useState({ name: '' })
   const [creatingChapter, setCreatingChapter] = useState(false)
+  const chapterContentRef = useRef<HTMLTextAreaElement>(null)
 
   const fetchNovel = useCallback(async () => {
     try {
@@ -95,23 +113,39 @@ export const NovelDetail: React.FC = () => {
       name: novel.name || '',
       author: novel.author || '',
       description: novel.description || '',
-      content: novel.content || '',
     })
+    setEditCoverPreview(novel.cover || null)
+    setEditCoverFile(null)
     setEditOpen(true)
+    // 延迟设置 ref 值，等 dialog 渲染完成
+    setTimeout(() => {
+      if (editContentRef.current) {
+        editContentRef.current.value = novel.content || ''
+      }
+    }, 0)
   }
 
   const handleSave = async () => {
     if (!novel) return
     setSaving(true)
     try {
+      let cover = editCoverPreview
+      // 如果选了新文件，先上传
+      if (editCoverFile) {
+        const uploadRes = await api.uploadFiles([editCoverFile])
+        const uploaded = uploadRes.data.files[0]
+        cover = `/media/${uploaded.filename}`
+      }
       const res = await api.updateNovel(novel.id, {
         name: editForm.name,
         author: editForm.author,
         description: editForm.description,
-        content: editForm.content,
+        content: editContentRef.current?.value ?? '',
+        cover: cover || '',
       })
       setNovel(res.data)
       setEditOpen(false)
+      clearEditCover()
       toast.success('小说已更新')
     } catch (err) {
       console.error('Failed to update novel:', err)
@@ -163,27 +197,20 @@ export const NovelDetail: React.FC = () => {
   }
 
   const handleCreateChapter = () => {
-    // 打开创建章节对话框
-    setCreateChapterForm({
-      name: '',
-      content: '',
-    })
+    setCreateChapterForm({ name: '' })
     setCreateChapterOpen(true)
+    setTimeout(() => {
+      if (chapterContentRef.current) chapterContentRef.current.value = ''
+    }, 0)
   }
 
   const handleSaveChapter = async () => {
     if (!novel) return
     setCreatingChapter(true)
     try {
-      // 自动计算章节序号：取最大序号 + 1
-      const maxNumber = chapters.length > 0
-        ? Math.max(...chapters.map((c) => c.number ?? 0))
-        : 0
-
       await api.createChapter(novel.id, {
-        number: maxNumber + 1,
-        name: createChapterForm.name || `第${maxNumber + 1}章`,
-        content: createChapterForm.content,
+        name: createChapterForm.name || undefined,
+        content: chapterContentRef.current?.value ?? '',
       })
       setCreateChapterOpen(false)
       await fetchChapters(chapterPage)
@@ -424,27 +451,7 @@ export const NovelDetail: React.FC = () => {
 
           {/* Chapter Pagination */}
           {chapterPagination && chapterPagination.pages > 1 && (
-            <div className="flex items-center justify-center gap-4 pt-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setChapterPage((p) => Math.max(1, p - 1))}
-                disabled={chapterPage <= 1}
-              >
-                上一页
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                第 {chapterPage} / {chapterPagination.pages} 页
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setChapterPage((p) => Math.min(chapterPagination!.pages, p + 1))}
-                disabled={chapterPage >= chapterPagination.pages}
-              >
-                下一页
-              </Button>
-            </div>
+            <Pagination current={chapterPage} total={chapterPagination.pages} onChange={setChapterPage} />
           )}
           </>
         )}
@@ -471,14 +478,11 @@ export const NovelDetail: React.FC = () => {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">章节内容</label>
-              <Textarea
-                value={createChapterForm.content}
-                onChange={(e) =>
-                  setCreateChapterForm((prev) => ({ ...prev, content: e.target.value }))
-                }
+              <textarea
+                ref={chapterContentRef}
                 placeholder="在此粘贴章节内容..."
                 rows={12}
-                className="font-mono text-sm"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 font-mono resize-y"
               />
             </div>
           </div>
@@ -503,6 +507,30 @@ export const NovelDetail: React.FC = () => {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {/* Cover Upload */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">封面</label>
+              {editCoverPreview ? (
+                <div className="relative w-full aspect-video rounded-lg overflow-hidden border">
+                  <img src={editCoverPreview} alt="封面预览" className="h-full w-full object-cover" />
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2 h-7 w-7"
+                    onClick={() => { clearEditCover(); setEditCoverPreview(null) }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
+                  <ImagePlus className="h-8 w-8 text-muted-foreground/40" />
+                  <span className="mt-2 text-sm text-muted-foreground/60">点击上传封面图片</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleEditCoverChange} />
+                </label>
+              )}
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium">名称</label>
               <Input
@@ -539,14 +567,11 @@ export const NovelDetail: React.FC = () => {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">内容</label>
-              <Textarea
-                value={editForm.content}
-                onChange={(e) =>
-                  setEditForm((prev) => ({ ...prev, content: e.target.value }))
-                }
+              <textarea
+                ref={editContentRef}
                 placeholder="在此粘贴小说全文..."
                 rows={16}
-                className="font-mono text-sm"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 font-mono resize-y"
               />
             </div>
           </div>
