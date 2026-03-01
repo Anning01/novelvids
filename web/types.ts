@@ -87,6 +87,26 @@ export interface Video {
   updated_at: string;
 }
 
+export interface ChapterVideoItem {
+  scene_id: number;
+  sequence: number;
+  description?: string;
+  duration?: number;
+  video: {
+    id: number;
+    url?: string;
+    status: number;
+    model_type: number;
+  } | null;
+}
+
+export interface VideoMergeOut {
+  chapter_id: number;
+  merged_url: string;
+  video_count: number;
+  total_duration: number;
+}
+
 export interface AiTask {
   id: string;
   task_type: number;

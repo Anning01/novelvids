@@ -15,6 +15,7 @@ from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.video import get_generator
 from services.video.asset_resolver import resolve_assets
+from services.video.merge import video_merger
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
@@ -152,6 +153,150 @@ class VideoController(CRUDBase[Video, dict, dict]):
     async def remove(self, video_id: int) -> None:
         instance = await self.get(video_id)
         await super().remove(instance)
+
+    async def get_chapter_videos(self, chapter_id: int) -> list[dict]:
+        """获取章节下所有分镜的视频，按 scene.sequence 排序。
+
+        Returns:
+            [
+                {
+                    "scene_id": 1,
+                    "sequence": 1,
+                    "description": "镜头描述",
+                    "duration": 4.0,
+                    "video": {
+                        "id": 10,
+                        "url": "/media/videos/10.mp4",
+                        "status": 3,
+                        "model_type": 4
+                    } | None
+                },
+                ...
+            ]
+        """
+        # 查询该章节的所有分镜，按 sequence 排序
+        scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
+
+        result = []
+        for scene in scenes:
+            # 获取该分镜最新的已完成视频
+            video = await Video.filter(
+                scene_id=scene.id,
+                status=TaskStatusEnum.completed.value
+            ).order_by("-id").first()
+
+            item = {
+                "scene_id": scene.id,
+                "sequence": scene.sequence,
+                "description": scene.description,
+                "duration": scene.duration,
+                "video": None
+            }
+
+            if video:
+                item["video"] = {
+                    "id": video.id,
+                    "url": video.url,
+                    "status": video.status,
+                    "model_type": video.model_type
+                }
+
+            result.append(item)
+
+        return result
+
+    async def merge_chapter_videos(self, chapter_id: int) -> dict:
+        """合并章节下所有已完成的视频。
+
+        Args:
+            chapter_id: 章节 ID
+
+        Returns:
+            {
+                "chapter_id": 123,
+                "merged_url": "/media/videos/merged/chapter_123_merged.mp4",
+                "video_count": 5,
+                "total_duration": 45.0
+            }
+        """
+        # 获取章节所有分镜
+        scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
+
+        # 收集所有已完成视频，同时检查是否有分镜缺少视频
+        videos_to_merge: list[Video] = []
+        total_duration = 0.0
+        missing_scenes: list[int] = []
+
+        for scene in scenes:
+            video = await Video.filter(
+                scene_id=scene.id,
+                status=TaskStatusEnum.completed.value
+            ).order_by("-id").first()
+
+            if video:
+                videos_to_merge.append(video)
+                total_duration += scene.duration or 0
+            else:
+                missing_scenes.append(scene.sequence)
+
+        # 检查是否所有分镜都有视频
+        if missing_scenes:
+            raise HTTPException(
+                400,
+                detail=f"以下分镜尚未生成视频，无法合并：分镜 #{', '.join(map(str, missing_scenes))}"
+            )
+
+        # 调用合并服务
+        try:
+            merged_url = video_merger.merge_videos(videos_to_merge, chapter_id)
+        except ValueError as e:
+            raise HTTPException(400, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(500, detail=str(e))
+
+        return {
+            "chapter_id": chapter_id,
+            "merged_url": merged_url,
+            "video_count": len(videos_to_merge),
+            "total_duration": round(total_duration, 1)
+        }
+
+    async def get_merged_video(self, chapter_id: int) -> dict | None:
+        """查询章节是否已有合并好的视频。
+
+        Args:
+            chapter_id: 章节 ID
+
+        Returns:
+            如果存在返回合并信息，否则返回 None
+        """
+        merged_dir = os.path.join(settings.MEDIA_PATH, "videos", "merged")
+        filename = f"chapter_{chapter_id}_merged.mp4"
+        file_path = os.path.join(merged_dir, filename)
+
+        if not os.path.exists(file_path):
+            return None
+
+        # 获取该章节的视频统计
+        scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
+        video_count = 0
+        total_duration = 0.0
+
+        for scene in scenes:
+            video = await Video.filter(
+                scene_id=scene.id,
+                status=TaskStatusEnum.completed.value
+            ).order_by("-id").first()
+            if video:
+                video_count += 1
+                total_duration += scene.duration or 0
+
+        return {
+            "chapter_id": chapter_id,
+            "merged_url": f"/media/videos/merged/{filename}",
+            "video_count": video_count,
+            "total_duration": round(total_duration, 1)
+        }
 
 
 video_controller = VideoController()

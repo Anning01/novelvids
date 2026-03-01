@@ -45,3 +45,18 @@ class VideoQueryOut(BaseModel):
     progress: Optional[int] = Field(None, description="进度百分比")
     url: Optional[str] = Field(None, description="视频URL")
     metadata: Optional[Any] = Field(None, description="元数据")
+
+
+# --- 合并视频 Schema ---
+
+class VideoMergeRequest(BaseModel):
+    """视频合并请求"""
+    chapter_id: int = Field(..., description="章节ID")
+
+
+class VideoMergeOut(BaseModel):
+    """视频合并结果"""
+    chapter_id: int = Field(..., description="章节ID")
+    merged_url: str = Field(..., description="合并后的视频URL")
+    video_count: int = Field(..., description="合并的视频数量")
+    total_duration: float = Field(..., description="视频总时长（秒）")

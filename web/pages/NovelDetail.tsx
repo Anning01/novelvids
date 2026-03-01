@@ -10,6 +10,7 @@ import {
   Loader2,
   FileText,
   ArrowLeft,
+  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -46,6 +47,14 @@ export const NovelDetail: React.FC = () => {
     content: '',
   })
   const [saving, setSaving] = useState(false)
+
+  // 创建章节对话框状态
+  const [createChapterOpen, setCreateChapterOpen] = useState(false)
+  const [createChapterForm, setCreateChapterForm] = useState({
+    name: '',
+    content: '',
+  })
+  const [creatingChapter, setCreatingChapter] = useState(false)
 
   const fetchNovel = useCallback(async () => {
     try {
@@ -145,10 +154,46 @@ export const NovelDetail: React.FC = () => {
     try {
       await api.deleteChapter(chapter.id)
       toast.success('章节已删除')
-      setChapters((prev) => prev.filter((c) => c.id !== chapter.id))
+      await fetchChapters(chapterPage)
+      await fetchNovel()  // 更新 total_chapters
     } catch (err) {
       console.error('Failed to delete chapter:', err)
       toast.error((err as Error).message || '删除失败')
+    }
+  }
+
+  const handleCreateChapter = () => {
+    // 打开创建章节对话框
+    setCreateChapterForm({
+      name: '',
+      content: '',
+    })
+    setCreateChapterOpen(true)
+  }
+
+  const handleSaveChapter = async () => {
+    if (!novel) return
+    setCreatingChapter(true)
+    try {
+      // 自动计算章节序号：取最大序号 + 1
+      const maxNumber = chapters.length > 0
+        ? Math.max(...chapters.map((c) => c.number ?? 0))
+        : 0
+
+      await api.createChapter(novel.id, {
+        number: maxNumber + 1,
+        name: createChapterForm.name || `第${maxNumber + 1}章`,
+        content: createChapterForm.content,
+      })
+      setCreateChapterOpen(false)
+      await fetchChapters(chapterPage)
+      await fetchNovel()  // 更新 total_chapters
+      toast.success('章节已创建')
+    } catch (err) {
+      console.error('Failed to create chapter:', err)
+      toast.error((err as Error).message || '创建失败')
+    } finally {
+      setCreatingChapter(false)
     }
   }
 
@@ -272,6 +317,19 @@ export const NovelDetail: React.FC = () => {
             >
               <Trash2 className="h-4 w-4" />
             </Button>
+              <Button
+              size="sm"
+              onClick={handleCreateChapter}
+              disabled={splitting}
+              className="shadow-lg shadow-primary/20"
+            >
+              {splitting ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4 mr-1.5" />
+              )}
+              新建章节
+            </Button>
             <Button
               size="sm"
               onClick={handleSplit}
@@ -391,6 +449,51 @@ export const NovelDetail: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Create Chapter dialog */}
+      <Dialog open={createChapterOpen} onOpenChange={setCreateChapterOpen}>
+        <DialogContent className="glass max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="gradient-text text-xl">新建章节</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">章节名称</label>
+              <Input
+                value={createChapterForm.name}
+                onChange={(e) =>
+                  setCreateChapterForm((prev) => ({ ...prev, name: e.target.value }))
+                }
+                placeholder="例如：第一章 开端"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">章节内容</label>
+              <Textarea
+                value={createChapterForm.content}
+                onChange={(e) =>
+                  setCreateChapterForm((prev) => ({ ...prev, content: e.target.value }))
+                }
+                placeholder="在此粘贴章节内容..."
+                rows={12}
+                className="font-mono text-sm"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCreateChapterOpen(false)} disabled={creatingChapter}>
+              取消
+            </Button>
+            <Button onClick={handleSaveChapter} disabled={creatingChapter} className="shadow-lg shadow-primary/20">
+              {creatingChapter && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

@@ -11,6 +11,7 @@ dependencies = [
     "optional>=0.0.1",
     "python-multipart>=0.0.22",
     "tortoise-orm>=0.25.4",
+    "tzdata>=2025.3",
     "uvicorn[standard]>=0.40.0",
 ]
 
