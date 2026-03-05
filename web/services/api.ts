@@ -30,8 +30,8 @@ class ApiService {
   }
 
   // --- Novels ---
-  getNovels(page = 1, pageSize = 20): Promise<PaginationResponse<Novel>> {
-    return request(`/novel${qs({ page, page_size: pageSize })}`);
+  getNovels(page = 1, pageSize = 20, search?: string): Promise<PaginationResponse<Novel>> {
+    return request(`/novel${qs({ page, page_size: pageSize, search })}`);
   }
   getNovel(id: number): Promise<SingleResponse<Novel>> {
     return request(`/novel/${id}`);
@@ -123,6 +123,9 @@ class ApiService {
   }
   getChapterVideos(chapterId: number): Promise<SingleResponse<ChapterVideoItem[]>> {
     return request(`/video/chapter/${chapterId}`);
+  }
+  getNovelVideos(novelId: number): Promise<SingleResponse<Video[]>> {
+    return request(`/video/novel/${novelId}`);
   }
   generateVideo(data: { scene_id: number; model_type: number }): Promise<SingleResponse<Video>> {
     return request('/video/generate/', { method: 'POST', body: JSON.stringify(data) });

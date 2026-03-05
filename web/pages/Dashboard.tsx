@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { BookOpen, Plus, Trash2, Sparkles, ImagePlus, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -17,31 +17,51 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { api } from '@/services/api'
-import type { Novel, Pagination as PaginationType } from '@/types'
-import { Pagination } from '@/components/Pagination'
+import type { Novel, Pagination } from '@/types'
 
 export const Dashboard = () => {
   const [novels, setNovels] = useState<Novel[]>([])
   const [loading, setLoading] = useState(true)
-  const [pagination, setPagination] = useState<PaginationType | null>(null)
+  const [pagination, setPagination] = useState<Pagination | null>(null)
   const [page, setPage] = useState(1)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [form, setForm] = useState({ name: '', author: '', description: '' })
-  const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [form, setForm] = useState({ name: '', author: '', description: '', cover: '' })
+  const [uploadingCover, setUploadingCover] = useState(false)
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
+  const uploadRef = useRef<HTMLInputElement>(null)
 
-  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    setCoverFile(file)
+    
+    // 显示预览
     setCoverPreview(URL.createObjectURL(file))
+    
+    // 上传文件
+    setUploadingCover(true)
+    try {
+      const res = await api.uploadFiles([file])
+      const uploaded = res.data.files[0]
+      setForm((f) => ({ ...f, cover: `/media/${uploaded.filename}` }))
+    } catch (err: any) {
+      toast.error(err.message || '上传失败')
+      // 上传失败时清除预览
+      clearCover()
+    } finally {
+      setUploadingCover(false)
+    }
+    
+    // 清空 input 值，允许重新选择同一文件
+    e.target.value = ''
   }
 
   const clearCover = () => {
-    setCoverFile(null)
-    if (coverPreview) URL.revokeObjectURL(coverPreview)
-    setCoverPreview(null)
+    setForm((f) => ({ ...f, cover: '' }))
+    if (coverPreview) {
+      URL.revokeObjectURL(coverPreview)
+      setCoverPreview(null)
+    }
   }
 
   const fetchNovels = async (p: number = page) => {
@@ -65,21 +85,15 @@ export const Dashboard = () => {
     if (!form.name.trim()) return
     try {
       setCreating(true)
-      let cover: string | undefined
-      if (coverFile) {
-        const uploadRes = await api.uploadFiles([coverFile])
-        const uploaded = uploadRes.data.files[0]
-        cover = `/media/${uploaded.filename}`
-      }
       await api.createNovel({
         name: form.name.trim(),
         author: form.author.trim() || undefined,
         description: form.description.trim() || undefined,
-        cover,
+        cover: form.cover || undefined,
       })
       toast.success('项目创建成功')
       setDialogOpen(false)
-      setForm({ name: '', author: '', description: '' })
+      setForm({ name: '', author: '', description: '', cover: '' })
       clearCover()
       await fetchNovels(page)
     } catch (err: any) {
@@ -216,7 +230,27 @@ export const Dashboard = () => {
 
         {/* Pagination */}
         {pagination && pagination.pages > 1 && (
-          <Pagination current={page} total={pagination.pages} onChange={setPage} />
+          <div className="flex items-center justify-center gap-4 pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+            >
+              上一页
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              第 {page} / {pagination.pages} 页
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(pagination!.pages, p + 1))}
+              disabled={page >= pagination.pages}
+            >
+              下一页
+            </Button>
+          </div>
         )}
         </>
       )}
@@ -231,26 +265,56 @@ export const Dashboard = () => {
           <div className="space-y-4 py-4">
             {/* Cover Upload */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">封面</label>
-              {coverPreview ? (
-                <div className="relative w-full aspect-video rounded-lg overflow-hidden border">
-                  <img src={coverPreview} alt="封面预览" className="h-full w-full object-cover" />
+              <label className="text-sm font-medium">智能短剧封面</label>
+              {(coverPreview || form.cover) ? (
+                <div className="relative w-full aspect-video rounded-lg overflow-hidden border group">
+                  <img 
+                    src={coverPreview || form.cover} 
+                    alt="封面预览" 
+                    className="h-full w-full object-cover" 
+                  />
                   <Button
                     variant="destructive"
                     size="icon"
-                    className="absolute top-2 right-2 h-7 w-7"
+                    className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={clearCover}
+                    disabled={uploadingCover}
                   >
                     <X className="h-3.5 w-3.5" />
                   </Button>
+                  {uploadingCover && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    </div>
+                  )}
                 </div>
               ) : (
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
-                  <ImagePlus className="h-8 w-8 text-muted-foreground/40" />
-                  <span className="mt-2 text-sm text-muted-foreground/60">点击上传封面图片</span>
-                  <input type="file" accept="image/*" className="hidden" onChange={handleCoverChange} />
-                </label>
+                <div
+                  className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                  onClick={() => uploadRef.current?.click()}
+                >
+                  {uploadingCover ? (
+                    <>
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      <span className="mt-2 text-sm text-muted-foreground">上传中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="h-8 w-8 text-muted-foreground/40" />
+                      <span className="mt-2 text-sm text-muted-foreground/60">点击上传封面图片</span>
+                    </>
+                  )}
+                </div>
               )}
+              <input
+                ref={uploadRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleCoverChange}
+                disabled={uploadingCover}
+              />
+              <p className="text-xs text-muted-foreground">选填，支持图片格式</p>
             </div>
 
             <div className="space-y-2">
@@ -285,7 +349,7 @@ export const Dashboard = () => {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleCreate} disabled={!form.name.trim() || creating} className="shadow-lg shadow-primary/20">
+            <Button onClick={handleCreate} disabled={!form.name.trim() || creating || uploadingCover} className="shadow-lg shadow-primary/20">
               {creating ? '创建中...' : '创建'}
             </Button>
           </DialogFooter>
