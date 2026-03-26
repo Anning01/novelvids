@@ -190,7 +190,6 @@ novelvids/
 │   ├── services/           # API 调用层
 │   └── types.ts            # TypeScript 类型定义
 │
-├── novelvids/              # 应用入口与配置
 ├── pyproject.toml          # Python 项目配置
 └── docs/                   # 项目文档与截图
 ```
