@@ -2346,6 +2346,43 @@
   stroke: none;
 }
 
+.media-resource-node { display: grid; gap: 12px; }
+.media-resource-preview { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.media-resource-preview img { width: 58px; height: 58px; flex: 0 0 auto; border: 1px solid rgb(255 255 255 / 9%); border-radius: 12px; object-fit: cover; background: #252321; }
+.media-resource-preview.is-digital-human { align-items: flex-end; }
+.media-resource-preview.is-digital-human img { width: 112px; height: 148px; }
+.media-resource-preview > div { display: grid; gap: 5px; min-width: 0; }
+.media-resource-preview strong, .media-resource-preview span, .media-resource-preview code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-resource-preview span, .media-resource-preview code { color: #98938d; font-size: 11px; }
+.media-resource-node audio { width: 100%; height: 36px; }
+.media-resource-placeholder { min-height: 112px; display: grid; place-items: center; align-content: center; gap: 9px; border: 1px dashed #4a4641; border-radius: 12px; color: #aaa49c; background: #211f1d; }
+.media-resource-select { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #4d4944; border-radius: 9px; color: #ebe7e1; background: #302d29; }
+
+.media-picker-backdrop { position: fixed; z-index: 10000000; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(10 9 8 / 76%); backdrop-filter: blur(8px); }
+.media-picker { width: min(980px, 100%); max-height: min(760px, calc(100vh - 48px)); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid #4b4741; border-radius: 18px; color: #f3efe8; background: #1c1a18; box-shadow: 0 28px 90px rgb(0 0 0 / 55%); }
+.media-picker > header, .media-picker > footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 20px; }
+.media-picker > header { border-bottom: 1px solid #35322e; }
+.media-picker h2, .media-picker p { margin: 0; }
+.media-picker h2 { font-size: 18px; }
+.media-picker header p, .media-picker footer { color: #99938c; font-size: 12px; }
+.media-picker header button, .media-picker footer button, .media-picker-search button { border: 1px solid #4a4640; border-radius: 8px; color: #e9e4dc; background: #2b2825; }
+.media-picker header button { width: 34px; height: 34px; display: grid; place-items: center; }
+.media-picker-search { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 16px 20px; padding: 8px 9px 8px 12px; border: 1px solid #45413c; border-radius: 10px; background: #24211f; }
+.media-picker-search input { min-width: 0; border: 0; outline: 0; color: #eee9e1; background: transparent; }
+.media-picker-search button, .media-picker footer button { min-height: 32px; padding: 0 13px; }
+.media-picker-error { margin: 0 20px 10px !important; color: #ef9c91; }
+.media-picker-grid { min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 11px; overflow: auto; padding: 0 20px 20px; }
+.media-picker-grid > button { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 8px; text-align: left; border: 1px solid #3c3935; border-radius: 11px; color: #eee9e1; background: #25221f; }
+.media-picker-grid > button:hover, .media-picker-grid > button.is-selected { border-color: #9d8ad9; background: #302a38; }
+.media-picker-grid img { width: 64px; height: 76px; border-radius: 8px; object-fit: cover; background: #171513; }
+.media-picker-grid span { min-width: 0; display: grid; align-content: center; gap: 5px; }
+.media-picker-grid strong, .media-picker-grid small, .media-picker-grid code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-picker-grid small, .media-picker-grid code { color: #9b958e; font-size: 10px; }
+.media-picker-empty { min-height: 220px; display: grid; place-items: center; color: #9f9992; }
+.media-picker > footer { border-top: 1px solid #35322e; }
+.media-picker footer button { display: flex; align-items: center; gap: 7px; }
+.is-spinning { animation: workbench-spin 0.8s linear infinite; }
+
 @keyframes workbench-spin {
   to {
     transform: rotate(360deg);
@@ -2353,6 +2390,9 @@
 }
 
 @media (max-width: 720px) {
+  .media-picker-backdrop { padding: 10px; }
+  .media-picker { max-height: calc(100vh - 20px); }
+  .media-picker-grid { grid-template-columns: 1fr; }
   .workbench-toolbar {
     top: 12px;
     left: 12px;

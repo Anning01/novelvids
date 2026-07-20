@@ -253,6 +253,12 @@ pytest 已配置自动覆盖率报告（`--cov=models --cov=controllers --cov=ap
 
 ## 开发指南
 
+### 音频与数字人种子库
+
+服务启动时会扫描 `audio_references` 和 `digital_humans` 两张表：表为空时分别从
+`seeds/audio_references.csv`、`seeds/digital_humans.csv` 批量初始化；表内已有任何数据时整表跳过，
+不会覆盖或重复创建已有资源。数字人模型不包含真人类型字段，CSV 与接口只提供纯数字人。
+
 ### 后端开发规范
 
 项目遵循严格的 **四层架构**，职责清晰分离：

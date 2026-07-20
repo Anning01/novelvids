@@ -1,4 +1,4 @@
-export type WorkbenchNodeKind = 'chapter' | 'asset' | 'shot' | 'video_result' | 'unsupported'
+export type WorkbenchNodeKind = 'chapter' | 'asset' | 'audio_reference' | 'digital_human' | 'shot' | 'video_result' | 'unsupported'
 export type WorkbenchEdgeType = 'asset_reference' | 'shot_sequence' | 'output_binding' | 'unsupported'
 export type SupportedWorkbenchEdgeType = Exclude<WorkbenchEdgeType, 'unsupported'>
 export interface Point { x: number; y: number }

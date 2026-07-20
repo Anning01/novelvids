@@ -110,7 +110,11 @@ async def clear_db():
     from models.ai_task import AiTask
     from models.config import AiModelConfig
     from models.video import Video
+    from models.audio_reference import AudioReference
+    from models.digital_human import DigitalHuman
 
+    await AudioReference.all().delete()
+    await DigitalHuman.all().delete()
     await Video.all().delete()
     await AiTask.all().delete()
     await Scene.all().delete()

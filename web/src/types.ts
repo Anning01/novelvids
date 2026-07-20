@@ -8,6 +8,8 @@ export interface Scene { id: number; chapter_id?: number; sequence: number; desc
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AiTask { id: string; task_type: number; status: TaskStatusEnum; error_message?: string; created_at: string }
 export interface AiModelConfig { id: number; task_type: number; name: string; base_url?: string; api_key?: string; model?: string; is_active: boolean; concurrency: number; created_at: string; updated_at: string }
+export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; is_active: boolean; created_at: string; updated_at: string }
+export interface DigitalHuman { id: number; country: string; age: number; gender: string; occupation: string; asset_id: string; image_url: string; is_active: boolean; created_at: string; updated_at: string }
 export interface EnumItem { value: number; label: string }
 export interface AllEnums { [key: string]: EnumItem[] }
 export interface PaginationResponse<T> { code: number; message: string; data: { items: T[]; pagination: { total: number; page: number; page_size: number; pages: number } } }

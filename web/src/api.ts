@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, Chapter, Novel, PaginationResponse, Scene, SingleResponse, Video } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AudioReference, Chapter, DigitalHuman, Novel, PaginationResponse, Scene, SingleResponse, Video } from './types'
 
 const BASE = '/api'
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -40,6 +40,8 @@ export const api = {
   generateVideo: (sceneId: number, modelType: number) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_type: modelType }) }),
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
+  audioReferences: (page = 1, search = '') => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id' })}`),
+  digitalHumans: (page = 1, search = '') => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id' })}`),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
   createConfig: (data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>('/config', { method: 'POST', body: JSON.stringify(data) }),
   activateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/activate`, { method: 'POST' }),
