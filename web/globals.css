@@ -2,45 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Distinctive Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Serif+SC:wght@400;600;700&display=swap');
-
 @layer base {
   :root {
-    --radius: 0.75rem;
-
-    --background: 222.2 47.4% 11.2%;
-    --foreground: 210 40% 98%;
-
-    --card: 217.2 32.6% 17.5%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 47.4% 13%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 188 95% 43%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 20%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 258 90% 66%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 25%;
-    --input: 217.2 32.6% 25%;
-    --ring: 188 95% 43%;
-
-    --sidebar-background: 217.2 32.6% 15%;
-    --sidebar-foreground: 215 20.2% 65.1%;
-    --sidebar-border: 217.2 32.6% 22%;
-    --sidebar-active: 188 95% 43%;
+    --radius: 0.625rem;
+    --background: 30 7% 8%;
+    --foreground: 35 28% 91%;
+    --card: 27 10% 12%;
+    --card-foreground: 35 28% 91%;
+    --popover: 27 10% 12%;
+    --popover-foreground: 35 28% 91%;
+    --primary: 251 100% 79%;
+    --primary-foreground: 30 12% 9%;
+    --secondary: 28 10% 17%;
+    --secondary-foreground: 35 18% 87%;
+    --muted: 27 9% 15%;
+    --muted-foreground: 27 9% 57%;
+    --accent: 251 23% 24%;
+    --accent-foreground: 35 28% 91%;
+    --destructive: 7 72% 64%;
+    --destructive-foreground: 30 12% 9%;
+    --border: 28 10% 23%;
+    --input: 28 10% 26%;
+    --ring: 251 100% 79%;
+    --sidebar-background: 27 9% 10%;
+    --sidebar-foreground: 27 9% 64%;
+    --sidebar-border: 28 10% 19%;
+    --sidebar-active: 251 100% 79%;
   }
 
   * {
@@ -49,15 +36,50 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Outfit', system-ui, sans-serif;
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+  button, a, input, textarea, select { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background; }
+}
 
-  /* Chinese headings use Noto Serif SC */
-  h1, h2, h3 {
-    font-family: 'Noto Serif SC', 'Outfit', serif;
-    letter-spacing: 0.02em;
-  }
+.app-shell { background: hsl(var(--background)); }
+.app-sidebar { border-right: 1px solid hsl(var(--sidebar-border)); background: hsl(var(--sidebar-background)); }
+.app-brand-mark { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 1px solid hsl(var(--primary) / .28); border-radius: 11px; color: hsl(var(--primary)); background: hsl(var(--primary) / .1); box-shadow: inset 0 0 18px hsl(var(--primary) / .08); }
+.app-brand-copy { display: grid; min-width: 0; line-height: 1; }
+.app-brand-copy strong { color: hsl(var(--foreground)); font-size: 16px; font-weight: 720; letter-spacing: .08em; }
+.app-brand-copy small { margin-top: 5px; color: hsl(var(--muted-foreground)); font-size: 8px; font-weight: 700; letter-spacing: .18em; }
+.app-nav-label { margin: 8px 10px 9px; color: hsl(var(--muted-foreground) / .62); font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.app-nav-item { position: relative; display: flex; align-items: center; gap: 11px; min-height: 42px; padding: 0 12px; border: 1px solid transparent; border-radius: 9px; color: hsl(var(--sidebar-foreground)); transition: color .15s ease, background .15s ease, border-color .15s ease; }
+.app-nav-item:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary) / .68); }
+.app-nav-item.is-active { border-color: hsl(var(--primary) / .17); color: hsl(var(--primary)); background: hsl(var(--primary) / .09); }
+.app-nav-item.is-active::before { position: absolute; top: 10px; bottom: 10px; left: -1px; width: 2px; border-radius: 0 2px 2px 0; background: hsl(var(--primary)); content: ''; }
+.app-sidebar-toggle { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: center; border-radius: 8px; color: hsl(var(--muted-foreground)); transition: .15s ease; }
+.app-sidebar-toggle:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
+
+.workflow-header { position: relative; z-index: 15; display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 22px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--background) / .94); backdrop-filter: blur(16px); }
+.workflow-header__back { display: flex; min-width: 220px; align-items: center; gap: 12px; }
+.workflow-header__back > div { display: grid; gap: 2px; }
+.workflow-header__back strong { color: hsl(var(--foreground)); font-size: 12px; }
+.workflow-header__back small { color: hsl(var(--muted-foreground)); font-size: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.workflow-header__divider { width: 1px; height: 28px; background: hsl(var(--border)); }
+.workflow-steps { display: flex; align-items: center; gap: 4px; }
+.workflow-step { display: flex; min-width: 170px; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px; color: hsl(var(--muted-foreground)); transition: .15s ease; }
+.workflow-step:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary) / .5); }
+.workflow-step.is-active { border-color: hsl(var(--primary) / .2); color: hsl(var(--foreground)); background: hsl(var(--primary) / .08); }
+.workflow-step.is-complete { color: hsl(var(--foreground) / .72); }
+.workflow-step__icon { display: grid; width: 29px; height: 29px; flex: 0 0 auto; place-items: center; border-radius: 8px; color: currentColor; background: hsl(var(--secondary)); }
+.workflow-step.is-active .workflow-step__icon { color: hsl(var(--primary)); background: hsl(var(--primary) / .13); }
+.workflow-step.is-complete .workflow-step__icon { color: #70c7a2; background: rgb(112 199 162 / 10%); }
+.workflow-step__icon svg { width: 14px; height: 14px; }
+.workflow-step > span:last-child { display: grid; min-width: 0; }
+.workflow-step strong { font-size: 11px; font-weight: 650; }
+.workflow-step small { color: hsl(var(--muted-foreground)); font-size: 9px; }
+
+@media (max-width: 1100px) {
+  .workflow-step { min-width: auto; }
+  .workflow-step > span:last-child { display: none; }
+  .workflow-header__back > div { display: none; }
+  .workflow-header__back { min-width: auto; }
 }
 
 /* Scrollbar */

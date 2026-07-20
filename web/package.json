@@ -19,6 +19,7 @@
     "@radix-ui/react-slot": "^1.1.2",
     "@radix-ui/react-dialog": "^1.1.6",
     "@radix-ui/react-select": "^2.1.6",
+    "@xyflow/react": "^12.11.2",
     "sonner": "^1.7.4"
   },
   "devDependencies": {
