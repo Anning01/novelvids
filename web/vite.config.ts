@@ -1,6 +1,6 @@
-import path from 'path'
+import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   server: {
@@ -11,10 +11,10 @@ export default defineConfig({
       '/media': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
-  plugins: [react()],
+  plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, '.'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
 })

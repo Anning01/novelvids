@@ -1,20 +1,24 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# NovelVids Studio Frontend
 
-# Run and deploy your AI Studio app
+Vue 3 + TypeScript frontend for NovelVids. The chapter creation workspace uses
+Vue Flow and shares the interaction architecture of the Shengshi Media infinite
+canvas: pan/select modes, minimap, zoom controls, layered auto-layout, node
+selection tools, copy/paste, undo/redo, pinning, collapsing, markers, and
+viewport persistence.
 
-This contains everything you need to run your app locally.
+## Development
 
-View your app in AI Studio: https://ai.studio/apps/drive/1IGS9o8EvVYel6o9FsqQDlSJZ2c4jZO1m
+```bash
+npm install
+npm run dev
+```
 
-## Run Locally
+The development server runs at `http://localhost:3000` and proxies `/api` and
+`/media` to `http://127.0.0.1:8000`.
 
-**Prerequisites:**  Node.js
+## Checks
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm run typecheck
+npm run build
+```
