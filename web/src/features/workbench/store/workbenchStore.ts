@@ -3,15 +3,17 @@ import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Video } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { Point, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
+import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 
-interface HistorySnapshot { positions: Record<string, Point>; ui: Record<string, Record<string, unknown>> }
+interface HistorySnapshot { nodes: Record<string, { position: Point; size: NodeSize | null; zIndex: number; ui: Record<string, unknown> }> }
 interface SavedCanvasState {
   viewport?: WorkbenchViewport
   nodes?: Record<string, { position: Point; zIndex: number; ui: Record<string, unknown> }>
+  manualNodes?: WorkbenchNode[]
   mediaNodes?: WorkbenchNode[]
   mediaEdges?: WorkbenchEdge[]
 }
+const manualNodeKinds = new Set<WorkbenchNode['kind']>(['audio_reference', 'digital_human', 'section', 'note'])
 const terminal = new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED])
 const now = () => new Date().toISOString()
 
@@ -42,7 +44,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     history: [] as HistorySnapshot[],
     future: [] as HistorySnapshot[],
     busySceneIds: [] as number[],
-    mediaNodes: [] as WorkbenchNode[],
+    manualNodes: [] as WorkbenchNode[],
     mediaEdges: [] as WorkbenchEdge[],
     viewport: { x: 40, y: 40, zoom: 0.4 } as WorkbenchViewport,
   }),
@@ -55,14 +57,18 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     layoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v1` },
     capture(): HistorySnapshot {
       return {
-        positions: Object.fromEntries(this.nodes.map(item => [item.key, { ...item.position }])),
-        ui: Object.fromEntries(this.nodes.map(item => [item.key, { ...((item.data.ui as Record<string, unknown>) || {}) }])),
+        nodes: Object.fromEntries(this.nodes.map(item => [item.key, {
+          position: { ...item.position }, size: item.size ? { ...item.size } : null, zIndex: item.zIndex,
+          ui: { ...((item.data.ui as Record<string, unknown>) || {}) },
+        }])),
       }
     },
     restore(snapshot: HistorySnapshot) {
       this.nodes.forEach((item) => {
-        if (snapshot.positions[item.key]) item.position = { ...snapshot.positions[item.key] }
-        item.data.ui = { ...(snapshot.ui[item.key] || {}) }
+        const saved = snapshot.nodes[item.key]
+        if (!saved) return
+        item.position = { ...saved.position }; item.size = saved.size ? { ...saved.size } : null; item.zIndex = saved.zIndex
+        item.data.ui = { ...saved.ui }
       })
       this.persistLayout()
     },
@@ -73,7 +79,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       localStorage.setItem(this.layoutKey(), JSON.stringify({
         viewport: this.viewport,
         nodes: Object.fromEntries(this.nodes.map(item => [item.key, { position: item.position, zIndex: item.zIndex, ui: item.data.ui || {} }])),
-        mediaNodes: this.nodes.filter(item => item.kind === 'audio_reference' || item.kind === 'digital_human'),
+        manualNodes: this.nodes.filter(item => manualNodeKinds.has(item.kind)),
         mediaEdges: this.edges.filter(item => item.key.startsWith('media-edge-')),
       }))
     },
@@ -81,9 +87,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       try {
         const saved = JSON.parse(localStorage.getItem(this.layoutKey()) || '{}') as SavedCanvasState
         if (saved.viewport) this.viewport = saved.viewport
-        this.mediaNodes = (saved.mediaNodes || []).filter(item => item.kind === 'audio_reference' || item.kind === 'digital_human')
+        this.manualNodes = (saved.manualNodes || saved.mediaNodes || []).filter(item => manualNodeKinds.has(item.kind))
         this.mediaEdges = (saved.mediaEdges || []).filter(item => item.key.startsWith('media-edge-'))
-        this.nodes.push(...this.mediaNodes.filter(item => !this.nodes.some(current => current.key === item.key)))
+        this.nodes.push(...this.manualNodes.filter(item => !this.nodes.some(current => current.key === item.key)))
         this.edges.push(...this.mediaEdges.filter(item => !this.edges.some(current => current.key === item.key)))
         this.nodes.forEach((item) => {
           const value = saved.nodes?.[item.key]
@@ -93,7 +99,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     async load(novelId: number, chapterId: number) {
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
-      this.nodes = []; this.edges = []; this.mediaNodes = []; this.mediaEdges = []; this.clearSelection()
+      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.clearSelection()
       try {
         const [chapterResponse, assetsResponse, scenesResponse, enumsResponse] = await Promise.all([api.chapter(chapterId), api.assets(novelId), api.scenes(chapterId), api.enums()])
         this.chapter = chapterResponse.data
@@ -125,18 +131,35 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })
       const old = new Map(this.nodes.map(item => [item.key, item]))
       this.nodes = nodes.map(item => old.has(item.key) ? { ...item, position: old.get(item.key)!.position, zIndex: old.get(item.key)!.zIndex, data: { ...item.data, ui: old.get(item.key)!.data.ui } } : item)
-      this.mediaNodes = [...old.values()].filter(item => item.kind === 'audio_reference' || item.kind === 'digital_human')
-      this.nodes.push(...this.mediaNodes)
+      this.manualNodes = [...old.values()].filter(item => manualNodeKinds.has(item.kind))
+      this.nodes.push(...this.manualNodes)
       this.edges = [...edges, ...this.mediaEdges.filter(item => this.nodes.some(nodeItem => nodeItem.key === item.source) && this.nodes.some(nodeItem => nodeItem.key === item.target))]
     },
-    selectNode(key: string, additive = false) { this.selectedNodeKeys = additive ? [...new Set([...this.selectedNodeKeys, key])] : [key]; this.selectedEdgeKeys = [] },
+    selectNode(key: string, additive = false) {
+      this.selectedNodeKeys = additive
+        ? this.selectedNodeKeys.includes(key) ? this.selectedNodeKeys.filter(item => item !== key) : [...this.selectedNodeKeys, key]
+        : [key]
+      this.selectedEdgeKeys = []
+    },
     clearSelection() { this.selectedNodeKeys = []; this.selectedEdgeKeys = [] },
-    updateNodeLayout(key: string, position: Point, _size?: unknown, zIndex?: number) { const item = this.nodeByKey(key); if (!item) return; item.position = position; if (zIndex !== undefined) item.zIndex = zIndex },
+    updateNodeLayout(key: string, position: Point, size?: NodeSize | null, zIndex?: number) { const item = this.nodeByKey(key); if (!item) return; item.position = position; if (size !== undefined) item.size = size; if (zIndex !== undefined) item.zIndex = zIndex },
     updateNodeUi(key: string, ui: Record<string, unknown>) { const item = this.nodeByKey(key); if (item) item.data.ui = ui; this.persistLayout() },
+    updateManualNodeData(key: string, patch: Record<string, unknown>) {
+      const item = this.nodeByKey(key)
+      if (!item || !manualNodeKinds.has(item.kind)) return
+      item.data = { ...item.data, ...patch }
+      this.manualNodes = this.nodes.filter(nodeItem => manualNodeKinds.has(nodeItem.kind))
+    },
     async flushLayout() { this.persistLayout() },
-    copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item?.kind === 'shot' ? structuredClone(item) : null },
+    copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item && ['shot', 'note'].includes(item.kind) ? structuredClone(item) : null },
     async paste() {
-      if (!this.clipboardNode || this.clipboardNode.kind !== 'shot') return
+      if (!this.clipboardNode) return
+      if (this.clipboardNode.kind === 'note') {
+        const created = this.addNote({ x: this.clipboardNode.position.x + 48, y: this.clipboardNode.position.y + 48 })
+        created.data = { ...created.data, content: this.clipboardNode.data.content || '', color: this.clipboardNode.data.color || '#8d793d' }
+        this.persistLayout(); notice.success('已复制便签'); return
+      }
+      if (this.clipboardNode.kind !== 'shot') return
       const source = this.clipboardNode.data.scene as Scene
       const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: source.description, prompt: source.prompt || '', duration: source.duration, asset_ids: source.asset_ids })).data
       this.scenes.push(created); this.videos[created.id] = []; this.rebuildGraph()
@@ -148,10 +171,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       await Promise.all(shots.map(item => api.deleteScene(item.id)))
       const removableKeys = new Set(this.selectedNodeKeys.filter(key => {
         const kind = this.nodeByKey(key)?.kind
-        return kind === 'audio_reference' || kind === 'digital_human'
+        return Boolean(kind && manualNodeKinds.has(kind))
       }))
       this.scenes = this.scenes.filter(item => !shots.some(nodeItem => nodeItem.id === item.id))
-      this.mediaNodes = this.mediaNodes.filter(item => !removableKeys.has(item.key))
+      this.manualNodes = this.manualNodes.filter(item => !removableKeys.has(item.key))
+      this.manualNodes.filter(item => item.kind === 'section').forEach((section) => {
+        const keys = Array.isArray(section.data.node_keys) ? section.data.node_keys.filter((key): key is string => typeof key === 'string') : []
+        section.data.node_keys = keys.filter(key => !removableKeys.has(key))
+      })
       this.mediaEdges = this.mediaEdges.filter(item => !removableKeys.has(item.source) && !removableKeys.has(item.target))
       this.nodes = this.nodes.filter(item => !removableKeys.has(item.key))
       this.edges = this.edges.filter(item => !removableKeys.has(item.source) && !removableKeys.has(item.target))
@@ -162,23 +189,39 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     addMediaNode(kind: 'audio_reference' | 'digital_human') {
       const stamp = Date.now()
       const key = `${kind}-${stamp}`
-      const item = node(-stamp, key, kind, kind === 'audio_reference' ? '参考音频' : '数字人', { x: 520, y: 120 + this.mediaNodes.length * 340 }, {
+      const item = node(-stamp, key, kind, kind === 'audio_reference' ? '参考音频' : '数字人', { x: 520, y: 120 + this.manualNodes.length * 340 }, {
         resource: null,
         asset_type: kind === 'audio_reference' ? 'audio' : 'digital_human',
         layout_family: 'asset',
         layout_lane: kind === 'audio_reference' ? 'asset:audio' : 'asset:digital-human',
         ui: {},
       })
-      this.mediaNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
     },
     setMediaResource(key: string, resource: AudioReference | DigitalHuman) {
       const item = this.nodeByKey(key)
       if (!item || (item.kind !== 'audio_reference' && item.kind !== 'digital_human')) return
       item.data.resource = resource
       item.title = item.kind === 'audio_reference' && 'nickname' in resource ? resource.nickname : 'occupation' in resource ? `${resource.country} · ${resource.occupation}` : item.title
-      this.mediaNodes = this.nodes.filter(nodeItem => nodeItem.kind === 'audio_reference' || nodeItem.kind === 'digital_human')
+      this.manualNodes = this.nodes.filter(nodeItem => manualNodeKinds.has(nodeItem.kind))
       this.persistLayout()
       notice.success(item.kind === 'audio_reference' ? '参考音频已选择' : '数字人已选择')
+    },
+    addNote(position?: Point) {
+      const stamp = Date.now(); const key = `note-${stamp}`
+      const item = node(-stamp, key, 'note', '便签', position || { x: 560, y: 120 + this.manualNodes.length * 260 }, { content: '', color: '#8d793d', layout_family: 'note', ui: {} })
+      item.size = { width: 320, height: 220 }
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      return item
+    },
+    addSection(memberKeys: string[], position: Point, size: NodeSize, color: string) {
+      const stamp = Date.now(); const key = `section-${stamp}`
+      const count = this.nodes.filter(item => item.kind === 'section').length + 1
+      const memberZ = memberKeys.map(keyValue => this.nodeByKey(keyValue)?.zIndex ?? 1)
+      const item = node(-stamp, key, 'section', `分区 ${count}`, position, { color, description: '', node_keys: memberKeys, layout_family: 'section', ui: {} })
+      item.size = size; item.zIndex = Math.min(-1, ...memberZ.map(value => value - 1))
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      return item
     },
     connectMediaNode(source: string, target: string) {
       const sourceNode = this.nodeByKey(source); const targetNode = this.nodeByKey(target)
