@@ -88,11 +88,21 @@ class AssetReferenceHandler(BaseTaskHandler):
             "description": asset.description,
         }
 
+        metadata = asset.metadata or {}
+        resolution = metadata.get("resolution", "2K")
+        aspect_ratio = metadata.get("aspect_ratio", "1:1")
+
         # 初始化客户端 (AsyncOpenAI)
         client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
         try:
-            image_list = await generate_for_sora_consistency(client, data, model=model)
+            image_list = await generate_for_sora_consistency(
+                client,
+                data,
+                model=model,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+            )
 
             result_urls = []
             if image_list:

@@ -33,7 +33,14 @@ def build_sora_compatible_prompt(data):
     return prompt
 
 
-async def generate_for_sora_consistency(client: AsyncOpenAI, data, reference_images=None, model="doubao-seedream-4-5-251128"):
+async def generate_for_sora_consistency(
+    client: AsyncOpenAI,
+    data,
+    reference_images=None,
+    model="doubao-seedream-4-5-251128",
+    resolution="2K",
+    aspect_ratio="1:1",
+):
     """
     执行生成任务，支持多图参考 (异步)
     """
@@ -41,7 +48,8 @@ async def generate_for_sora_consistency(client: AsyncOpenAI, data, reference_ima
 
     extra_body = {
         "sequential_image_generation": "disabled",
-        "watermark": False
+        "watermark": False,
+        "aspect_ratio": aspect_ratio,
     }
 
     # 兼容 OpenAI 格式，将 image 参数放入 extra_body
@@ -52,7 +60,7 @@ async def generate_for_sora_consistency(client: AsyncOpenAI, data, reference_ima
         response = await client.images.generate(
             model=model,
             prompt=final_prompt,
-            size="2K",  # 建议 2K，若需更高精度可在控制台设为 4K
+            size=resolution,
             response_format="url",
             n=1, # 显式指定只生成一张
             extra_body=extra_body

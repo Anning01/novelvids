@@ -255,6 +255,43 @@ async def test_reference_提交参考图任务():
 
 
 @pytest.mark.asyncio
+async def test_reference_使用资产指定的生图模型():
+    """资产元数据指定模型时，生成任务使用该模型而不是全局启用模型。"""
+    from models.config import AiModelConfig
+    from utils.enums import AiTaskTypeEnum
+
+    novel = await Novel.create(name="Selected Ref Config Novel", author="Author")
+    active_config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="active-ref-config",
+        base_url="https://active.example.com/v1",
+        api_key="active-key",
+        model="active-model",
+        is_active=True,
+    )
+    selected_config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="selected-ref-config",
+        base_url="https://selected.example.com/v1",
+        api_key="selected-key",
+        model="selected-model",
+        is_active=False,
+    )
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="指定模型测试",
+        metadata={"model_config_id": selected_config.id},
+    )
+
+    task = await asset_controller.reference(asset.id)
+
+    assert selected_config.id != active_config.id
+    assert task.request_params["base_url"] == selected_config.base_url
+    assert task.request_params["model"] == selected_config.model
+
+
+@pytest.mark.asyncio
 async def test_reference_重复提交被拦截():
     """同一资产重复提交参考图任务被拦截。"""
     from models.config import AiModelConfig

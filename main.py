@@ -23,9 +23,11 @@ from exceptions.handlers import (
 from services.ai_task_executor import ai_task_executor
 from services.extraction.handler import ExtractionTaskHandler
 from services.reference.handler import AssetReferenceHandler
+from services.project_analysis.handler import ProjectAnalysisTaskHandler
 from services.storyboard.handler import StoryboardTaskHandler
 from utils.enums import AiTaskTypeEnum
 from services.media_library_seed import ensure_media_library_seed_data
+from services.schema_compat import ensure_ai_model_config_schema
 
 
 # 定义包含时区的配置字典
@@ -47,6 +49,7 @@ async def lifespan(_: FastAPI):
     await Tortoise.init(config=tortoise_config)
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
+    await ensure_ai_model_config_schema()
     await ensure_media_library_seed_data()
     try:
         yield
@@ -79,6 +82,7 @@ app.include_router(api_router, prefix="/api")
 ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.reference_image, AssetReferenceHandler())
 ai_task_executor.register(AiTaskTypeEnum.storyboard, StoryboardTaskHandler())
+ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
 
 
 # 为媒体（图像、视频、音频）安装静态文件

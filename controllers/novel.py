@@ -1,10 +1,14 @@
 from fastapi import HTTPException
 
+from models.ai_task import AiTask
 from models.chapter import Chapter
+from controllers.config import ai_model_config_controller
+from services.ai_task_executor import ai_task_executor
 from services.nlp import RegexChapterRecognitionStrategy, NovelText
 from utils.crud import CRUDBase
 from models.novel import Novel
 from schemas.novel import NovelCreate, NovelUpdate
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
@@ -69,6 +73,39 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         )
         await novel.save()
         return novel
+
+    async def analyze(self, novel_id: int) -> AiTask:
+        """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
+        novel = await self.get(novel_id)
+        if not (novel.content or "").strip():
+            raise HTTPException(status_code=400, detail="项目没有可分析的书稿内容")
+
+        await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value)
+        await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
+        await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
+
+        active_tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.project_analysis.value,
+            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
+        )
+        for task in active_tasks:
+            if task.request_params.get("novel_id") == novel_id:
+                return task
+
+        return await ai_task_executor.submit(
+            AiTaskTypeEnum.project_analysis,
+            {"novel_id": novel_id, "resolution": "1K"},
+        )
+
+    async def latest_analysis(self, novel_id: int) -> AiTask | None:
+        await self.get(novel_id)
+        tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.project_analysis.value,
+        ).order_by("-created_at")
+        return next(
+            (task for task in tasks if task.request_params.get("novel_id") == novel_id),
+            None,
+        )
 
 
 novel_controller = NovelController()

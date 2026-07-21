@@ -1,6 +1,6 @@
 """人物/场景/物品提取器。
 
-使用 OpenAI 结构化输出（response_format），直接返回 Pydantic 模型。
+根据模型配置使用 JSON 格式化输出或提示词约束，返回 Pydantic 模型。
 不涉及数据库操作，调用方自行处理存储。
 
 用法：
@@ -23,6 +23,7 @@ from prompts.extraction import (
     SCENE_EXTRACTION_PROMPT,
     SCENE_SYSTEM_PROMPT,
 )
+from services.llm.json_output import create_json_completion
 
 
 
@@ -78,10 +79,17 @@ class BaseExtractor:
     user_prompt_template: str = ""
     response_model: type[BaseModel]
 
-    def __init__(self, client: AsyncOpenAI, model: str = "gpt-4o-mini", max_text_length: int = 8000):
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str = "gpt-4o-mini",
+        max_text_length: int = 8000,
+        supports_json_output: bool = False,
+    ):
         self.client = client
         self.model = model
         self.max_text_length = max_text_length
+        self.supports_json_output = supports_json_output
 
     async def extract(self, text: str, chapter_number: int) -> BaseModel:
         """提取实体，直接返回结构化的 Pydantic 模型。"""
@@ -90,18 +98,16 @@ class BaseExtractor:
             text=text[:self.max_text_length],
         )
 
-        response = await self.client.beta.chat.completions.parse(
+        parsed, _ = await create_json_completion(
+            self.client,
             model=self.model,
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            response_format=self.response_model,
+            response_model=self.response_model,
+            supports_json_output=self.supports_json_output,
         )
-
-        parsed = response.choices[0].message.parsed
-        if parsed is None:
-            raise ValueError("LLM 返回结果解析失败")
         return parsed
 
 

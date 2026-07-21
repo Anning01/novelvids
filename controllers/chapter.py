@@ -56,6 +56,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             "api_key": config.api_key,
             "model": config.model,
             "concurrency": config.concurrency,
+            "supports_json_output": config.supports_json_output,
         }
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.extraction, request_params

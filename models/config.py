@@ -36,6 +36,10 @@ class AiModelConfig(AbstractBaseModel):
         default=1,
         description="并发数",
     )
+    supports_json_output = fields.BooleanField(
+        default=False,
+        description="是否支持 response_format=json_object",
+    )
 
     class Meta:
         table = "ai_model_configs"

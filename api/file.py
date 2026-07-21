@@ -1,11 +1,47 @@
 from fastapi import APIRouter, File, UploadFile
 from datetime import datetime
+import asyncio
 import os
 import shutil
+from pathlib import Path
+
+from docx import Document
+from pypdf import PdfReader
+
 from utils.response_format import ResponseSchema
 from config import settings
 
 router = APIRouter()
+
+
+def _read_plain_text(file_path: str) -> str:
+    raw = Path(file_path).read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _extract_document_text(file_path: str, extension: str) -> str:
+    """提取上传书稿正文，供 Agent 分章和模型分析。"""
+    extension = extension.lower()
+    if extension in {".txt", ".md"}:
+        return _read_plain_text(file_path)
+    if extension == ".docx":
+        document = Document(file_path)
+        paragraphs = [paragraph.text for paragraph in document.paragraphs]
+        for table in document.tables:
+            paragraphs.extend(
+                "\t".join(cell.text for cell in row.cells)
+                for row in table.rows
+            )
+        return "\n".join(text for text in paragraphs if text.strip())
+    if extension == ".pdf":
+        reader = PdfReader(file_path)
+        return "\n\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+    return ""
 
 @router.post("/upload", summary="多文件上传", response_model=ResponseSchema[dict])
 async def upload_files(
@@ -36,6 +72,12 @@ async def upload_files(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
+            text_content = await asyncio.to_thread(
+                _extract_document_text,
+                file_path,
+                ext_part,
+            )
+
             # 记录结果
             results.append(
                 {
@@ -43,6 +85,7 @@ async def upload_files(
                     "original_filename": original_filename,
                     "content_type": file.content_type,
                     "file_path": file_path,
+                    "text_content": text_content,
                     "message": "文件上传成功",
                 }
             )

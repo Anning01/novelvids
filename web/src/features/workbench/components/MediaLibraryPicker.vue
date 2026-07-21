@@ -40,16 +40,16 @@ watch(() => props.open, value => { if (value) load(true) })
   <Teleport to="body">
     <div v-if="open" class="media-picker-backdrop" role="presentation" @mousedown.self="$emit('close')">
       <section class="media-picker" role="dialog" aria-modal="true" :aria-label="title">
-        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><button type="button" aria-label="关闭" @click="$emit('close')"><X :size="18" /></button></header>
-        <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" /><input v-model="search" :placeholder="kind === 'audio' ? '搜索昵称、性别或资产 ID' : '搜索国家、职业、性别或资产 ID'" autofocus><button type="submit">搜索</button></form>
+        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><AppButton type="button" aria-label="关闭" @click="$emit('close')"><X :size="18" /></AppButton></header>
+        <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" /><input v-model="search" :placeholder="kind === 'audio' ? '搜索昵称、性别或资产 ID' : '搜索国家、职业、性别或资产 ID'" autofocus><AppButton type="submit">搜索</AppButton></form>
         <p v-if="error" class="media-picker-error" role="alert">{{ error }}</p>
         <div class="media-picker-grid">
-          <button v-for="item in items" :key="assetId(item)" type="button" :class="{ 'is-selected': selectedAssetId === assetId(item) }" @click="$emit('choose', item)">
+          <AppButton v-for="item in items" :key="assetId(item)" type="button" :class="{ 'is-selected': selectedAssetId === assetId(item) }" @click="$emit('choose', item)">
             <img :src="preview(item)" alt="" loading="lazy"><span><strong>{{ name(item) }}</strong><small>{{ detail(item) }}</small><code>{{ assetId(item) }}</code></span>
-          </button>
+          </AppButton>
         </div>
         <div v-if="!items.length && !loading" class="media-picker-empty">没有匹配的资源</div>
-        <footer><span>第 {{ page }} / {{ pages || 1 }} 页</span><button v-if="page < pages" type="button" :disabled="loading" @click="loadMore"><LoaderCircle v-if="loading" class="is-spinning" :size="15" />加载更多</button></footer>
+        <footer><span>第 {{ page }} / {{ pages || 1 }} 页</span><AppButton v-if="page < pages" type="button" :disabled="loading" @click="loadMore"><LoaderCircle v-if="loading" class="is-spinning" :size="15" />加载更多</AppButton></footer>
       </section>
     </div>
   </Teleport>

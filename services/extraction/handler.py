@@ -35,6 +35,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
             api_key: str
             model: str
             concurrency: int
+            supports_json_output: bool
         """
         chapter_id = request_params["chapter_id"]
         novel_id = request_params["novel_id"]
@@ -42,6 +43,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
         api_key = request_params["api_key"]
         model = request_params["model"]
         concurrency = request_params.get("concurrency", 1)
+        supports_json_output = request_params.get("supports_json_output", False)
 
         chapter = await Chapter.get(id=chapter_id)
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -49,7 +51,11 @@ class ExtractionTaskHandler(BaseTaskHandler):
 
         async def run_extractor(extractor_cls, asset_type, result_key):
             async with semaphore:
-                extractor = extractor_cls(client, model=model)
+                extractor = extractor_cls(
+                    client,
+                    model=model,
+                    supports_json_output=supports_json_output,
+                )
                 result = await extractor.extract(chapter.content, chapter.number)
                 return asset_type, result_key, result
 

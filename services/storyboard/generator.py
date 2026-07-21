@@ -2,13 +2,15 @@ from typing import List
 from openai import AsyncOpenAI
 
 from schemas.scene import SceneEntity, Storyboard
+from services.llm.json_output import create_json_completion
 
 
 async def generate_storyboard(
     client: AsyncOpenAI,
     long_text: str,
     entities: List[SceneEntity],
-    model: str
+    model: str,
+    supports_json_output: bool = False,
 ) -> tuple[Storyboard, dict]:
     """
     调用 OpenAI API 生成分镜板
@@ -63,14 +65,16 @@ You must act like a film director using professional equipment. Fill the specifi
 Generate the storyboard now.
 """
 
-    completion = await client.beta.chat.completions.parse(
+    storyboard, completion = await create_json_completion(
+        client,
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        response_format=Storyboard,
-        timeout=600
+        response_model=Storyboard,
+        supports_json_output=supports_json_output,
+        timeout=600,
     )
 
     # 收集元数据
@@ -100,4 +104,4 @@ Generate the storyboard now.
     if hasattr(completion.choices[0].message, 'refusal') and completion.choices[0].message.refusal:
         metadata["refusal"] = completion.choices[0].message.refusal
 
-    return completion.choices[0].message.parsed, metadata
+    return storyboard, metadata

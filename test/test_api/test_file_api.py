@@ -2,6 +2,9 @@ import pytest
 import os
 import tempfile
 import shutil
+from io import BytesIO
+
+from docx import Document
 from httpx import AsyncClient
 from config import settings
 
@@ -29,7 +32,33 @@ async def test_upload_single_file(client: AsyncClient):
     assert data["files"][0]["original_filename"] == "test.txt"
     assert data["files"][0]["content_type"] == "text/plain"
     assert os.path.exists(data["files"][0]["file_path"])
+    assert data["files"][0]["text_content"] == "hello world"
     print(f"    上传单文件: filename='{data['files'][0]['filename']}', 原始名='test.txt'")
+
+
+@pytest.mark.asyncio
+async def test_upload_docx_extracts_book_text(client: AsyncClient):
+    """DOCX 上传后返回可供 Agent 分析的正文。"""
+    document = Document()
+    document.add_heading("第一章 山雨", level=1)
+    document.add_paragraph("林舟在雨夜离开故乡。")
+    content = BytesIO()
+    document.save(content)
+
+    response = await client.post(
+        "/api/file/upload",
+        files=[
+            (
+                "files",
+                ("book.docx", content.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            )
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    text_content = response.json()["data"]["files"][0]["text_content"]
+    assert "第一章 山雨" in text_content
+    assert "林舟在雨夜离开故乡" in text_content
 
 
 @pytest.mark.asyncio

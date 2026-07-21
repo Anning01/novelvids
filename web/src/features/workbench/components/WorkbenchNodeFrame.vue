@@ -27,15 +27,15 @@ function togglePin() { if (!node.value) return; store.updateNodeLayout(props.id,
 <template>
   <article class="workbench-node-frame" :class="{ 'is-selected': selected, 'is-collapsed': collapsed, 'is-ignored': ignored, 'has-marker': markerColor }" :style="markerColor ? { '--workbench-node-marker': markerColor } : undefined" :aria-label="`${data.title || '未命名'}节点`">
     <div v-if="selected" class="workbench-node-context nodrag nowheel" role="toolbar" :aria-label="`${data.title || '未命名'}节点操作`" @pointerdown.stop @click.stop>
-      <button type="button" aria-label="删除选中节点" :disabled="!canDelete" @click="store.deleteSelection()"><Trash2 :size="16" /></button>
+      <AppButton type="button" aria-label="删除选中节点" :disabled="!canDelete" @click="store.deleteSelection()"><Trash2 :size="16" /></AppButton>
       <span class="workbench-node-context__divider" />
-      <button type="button" aria-label="设置节点标记颜色" title="标记颜色" :class="{ 'is-active': paletteOpen }" @click="paletteOpen = !paletteOpen"><Palette :size="17" :style="markerColor ? { color: markerColor } : undefined" /></button>
-      <button type="button" :aria-label="pinned ? '取消固钉' : '固钉到最上层'" :class="{ 'is-active': pinned }" @click="togglePin"><Pin :size="16" :fill="pinned ? 'currentColor' : 'none'" /></button>
-      <button type="button" :aria-label="collapsed ? '展开节点' : '收缩节点'" @click="updateUi({ collapsed: !collapsed })"><ChevronDown v-if="collapsed" :size="17" /><ChevronUp v-else :size="17" /></button>
-      <button type="button" :aria-label="ignored ? '取消忽略节点' : '忽略节点'" :class="{ 'is-active': ignored }" @click="updateUi({ ignored: !ignored })"><Ban :size="16" /></button>
+      <AppButton type="button" aria-label="设置节点标记颜色" title="标记颜色" :class="{ 'is-active': paletteOpen }" @click="paletteOpen = !paletteOpen"><Palette :size="17" :style="markerColor ? { color: markerColor } : undefined" /></AppButton>
+      <AppButton type="button" :aria-label="pinned ? '取消固钉' : '固钉到最上层'" :class="{ 'is-active': pinned }" @click="togglePin"><Pin :size="16" :fill="pinned ? 'currentColor' : 'none'" /></AppButton>
+      <AppButton type="button" :aria-label="collapsed ? '展开节点' : '收缩节点'" @click="updateUi({ collapsed: !collapsed })"><ChevronDown v-if="collapsed" :size="17" /><ChevronUp v-else :size="17" /></AppButton>
+      <AppButton type="button" :aria-label="ignored ? '取消忽略节点' : '忽略节点'" :class="{ 'is-active': ignored }" @click="updateUi({ ignored: !ignored })"><Ban :size="16" /></AppButton>
       <div v-if="paletteOpen" class="workbench-node-context__popover workbench-node-context__palette">
-        <button v-for="color in markerColors" :key="color" type="button" :aria-label="`标记颜色 ${color}`" :style="{ background: color }" @click="updateUi({ color }); paletteOpen = false" />
-        <button type="button" class="is-clear" aria-label="清除颜色" @click="updateUi({ color: '' }); paletteOpen = false">×</button>
+        <AppButton v-for="color in markerColors" :key="color" type="button" :aria-label="`标记颜色 ${color}`" :style="{ background: color }" @click="updateUi({ color }); paletteOpen = false" />
+        <AppButton type="button" class="is-clear" aria-label="清除颜色" @click="updateUi({ color: '' }); paletteOpen = false">×</AppButton>
       </div>
     </div>
     <Handle v-if="hasTarget" id="input" type="target" :position="Position.Left" :connectable="connectable !== false" class="workbench-handle" aria-label="输入连接点" />

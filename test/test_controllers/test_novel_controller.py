@@ -4,7 +4,9 @@ from tortoise.contrib.test import finalizer, initializer
 from controllers.novel import novel_controller
 from models.novel import Novel
 from models.chapter import Chapter
+from models.config import AiModelConfig
 from schemas.novel import NovelCreate, NovelUpdate, NovelOut
+from utils.enums import AiTaskTypeEnum
 
 @pytest.mark.asyncio
 async def test_create_novel(sql_profiler):
@@ -108,3 +110,41 @@ async def test_split_novel_already_has_chapters():
     assert exc_info.value.status_code == 400
     assert "已有章节" in exc_info.value.detail
     print(f"    已有章节时拒绝分章: {exc_info.value.detail}")
+
+
+@pytest.mark.asyncio
+async def test_analyze_novel_submits_one_safe_task():
+    novel = await Novel.create(name="Analyze Novel", content="第1章 开始\n正文")
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        name="llm",
+        base_url="https://llm.example.com",
+        api_key="secret-llm",
+        model="llm-model",
+        is_active=True,
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="image",
+        base_url="https://image.example.com",
+        api_key="secret-image",
+        model="image-model",
+        is_active=True,
+    )
+
+    first = await novel_controller.analyze(novel.id)
+    second = await novel_controller.analyze(novel.id)
+
+    assert first.id == second.id
+    assert first.task_type == AiTaskTypeEnum.project_analysis.value
+    assert first.request_params == {"novel_id": novel.id, "resolution": "1K"}
+    assert "api_key" not in first.request_params
+
+
+@pytest.mark.asyncio
+async def test_analyze_novel_rejects_empty_content():
+    novel = await Novel.create(name="Empty Analyze Novel", content="")
+    with pytest.raises(HTTPException) as exc_info:
+        await novel_controller.analyze(novel.id)
+    assert exc_info.value.status_code == 400
+    assert "书稿内容" in exc_info.value.detail

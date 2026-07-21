@@ -65,9 +65,16 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         asset = await self.get(asset_id)
 
         # 1. 获取任务配置
-        config = await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.reference_image.value
-        )
+        metadata = asset.metadata or {}
+        requested_config_id = metadata.get("model_config_id")
+        if requested_config_id:
+            config = await ai_model_config_controller.get(int(requested_config_id))
+            if config.task_type != AiTaskTypeEnum.reference_image.value:
+                raise HTTPException(status_code=400, detail="所选配置不是生图模型")
+        else:
+            config = await ai_model_config_controller.get_active(
+                AiTaskTypeEnum.reference_image.value
+            )
 
         # 2. 清理超时异常任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.reference_image)

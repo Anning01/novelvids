@@ -18,6 +18,10 @@ class AiModelConfigProperties(BaseModel):
     model: Optional[str] = Field(None, description="模型名称", max_length=200)
     is_active: Optional[bool] = Field(None, description="是否启用")
     concurrency: Optional[int] = Field(None, description="并发数", ge=1)
+    supports_json_output: Optional[bool] = Field(
+        False,
+        description="是否支持 response_format=json_object",
+    )
 
 
 # --- 输入 Schema ---
@@ -54,3 +58,4 @@ class AiModelConfigOut(AiModelConfigProperties, BaseResponse):
     name: str = Field(..., description="配置名称")
     is_active: bool = Field(..., description="是否启用")
     concurrency: int = Field(..., description="并发数")
+    supports_json_output: bool = Field(False, description="是否支持结构化 JSON 输出")

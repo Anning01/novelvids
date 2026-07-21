@@ -20,11 +20,13 @@ class StoryboardTaskHandler(BaseTaskHandler):
             base_url: str - API基础URL
             api_key: str - API密钥
             model: str - 模型名称
+            supports_json_output: bool - 是否支持 response_format=json_object
         """
         chapter_id = request_params["chapter_id"]
         base_url = request_params["base_url"]
         api_key = request_params["api_key"]
         model = request_params["model"]
+        supports_json_output = request_params.get("supports_json_output", False)
 
         # 1. 获取章节和相关资产
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
@@ -51,7 +53,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 client=client,
                 long_text=chapter.content,
                 entities=entities,
-                model=model
+                model=model,
+                supports_json_output=supports_json_output,
             )
 
             end_time = time.time()

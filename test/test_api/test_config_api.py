@@ -13,6 +13,7 @@ async def test_api_create_config(client: AsyncClient):
         "base_url": "https://api.deepseek.com/v1",
         "api_key": "sk-test-key",
         "model": "deepseek-chat",
+        "supports_json_output": True,
     }
     response = await client.post("/api/config", json=payload)
     assert response.status_code == 200, response.text
@@ -20,6 +21,7 @@ async def test_api_create_config(client: AsyncClient):
     assert data["name"] == "deepseek-v3"
     assert data["is_active"] is False
     assert data["concurrency"] == 1
+    assert data["supports_json_output"] is True
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: 'select' | 'pan'] }>();
 
 <template>
   <div class="workbench-canvas-tools" role="toolbar" aria-label="画布操作模式">
-    <button
+    <AppButton
       type="button"
       class="workbench-canvas-tools__button"
       :class="{ 'is-active': modelValue === 'select' }"
@@ -18,8 +18,8 @@ const emit = defineEmits<{ 'update:modelValue': [value: 'select' | 'pan'] }>();
       @click.stop="emit('update:modelValue', 'select')"
     >
       <MousePointer2 :size="20" aria-hidden="true" />
-    </button>
-    <button
+    </AppButton>
+    <AppButton
       type="button"
       class="workbench-canvas-tools__button"
       :class="{ 'is-active': modelValue === 'pan' }"
@@ -30,6 +30,6 @@ const emit = defineEmits<{ 'update:modelValue': [value: 'select' | 'pan'] }>();
       @click.stop="emit('update:modelValue', 'pan')"
     >
       <Hand :size="20" aria-hidden="true" />
-    </button>
+    </AppButton>
   </div>
 </template>

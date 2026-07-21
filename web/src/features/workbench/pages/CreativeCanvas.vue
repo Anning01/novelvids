@@ -78,7 +78,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown); wi
       <Controls position="bottom-right" />
       <CanvasToolSwitcher v-model="canvasTool" />
       <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" @add-shot="store.addShot()" @add-audio="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @generate="generateScenes" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="store.undo" @redo="store.redo" @auto-arrange="autoArrange" />
-      <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><button type="button" @click="store.addShot()">添加第一个镜头</button></div>
+      <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="store.addShot()">添加第一个镜头</AppButton></div>
     </VueFlow>
   </main>
 </template>

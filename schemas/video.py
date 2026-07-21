@@ -41,6 +41,7 @@ class VideoOut(BaseResponse):
 class VideoQueryOut(BaseModel):
     """查询视频生成状态的结果"""
     id: int = Field(..., description="视频ID")
+    scene_id: int = Field(..., description="所属分镜ID")
     status: TaskStatusEnum = Field(..., description="状态")
     progress: Optional[int] = Field(None, description="进度百分比")
     url: Optional[str] = Field(None, description="视频URL")

@@ -84,3 +84,23 @@ async def test_media_library_api_only_returns_active_resources(client):
     assert [item["asset_id"] for item in audio_response.json()["data"]["items"]] == ["audio-active"]
     assert human_response.status_code == 200
     assert [item["asset_id"] for item in human_response.json()["data"]["items"]] == ["digital-active"]
+
+
+async def test_media_library_api_supports_gender_synonym_filter(client):
+    for index, gender in enumerate(["女", "女性", "男", "男性"], start=1):
+        await DigitalHuman.create(
+            country="中国",
+            age=20 + index,
+            gender=gender,
+            occupation="演员",
+            asset_id=f"digital-{index}",
+            image_url=f"https://example.com/digital-{index}.png",
+        )
+
+    response = await client.get(
+        "/api/media-library/digital-humans",
+        params={"page_size": 100, "gender__in": "女,女性"},
+    )
+
+    assert response.status_code == 200
+    assert {item["gender"] for item in response.json()["data"]["items"]} == {"女", "女性"}

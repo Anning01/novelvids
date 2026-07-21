@@ -15,6 +15,7 @@ TASK_TIMEOUT: dict[AiTaskTypeEnum, int] = {
     AiTaskTypeEnum.reference_image: 600,
     AiTaskTypeEnum.storyboard: 900,
     AiTaskTypeEnum.video: 600,
+    AiTaskTypeEnum.project_analysis: 1200,
 }
 
 

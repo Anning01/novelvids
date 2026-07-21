@@ -19,7 +19,7 @@ function choose(item: AudioReference | DigitalHuman) { store.setMediaResource(pr
       <div v-if="resource" class="media-resource-preview is-audio"><img :src="resource.avatar_url" alt=""><div><strong>{{ resource.nickname }}</strong><span>{{ resource.gender }} · {{ resource.asset_id }}</span></div></div>
       <div v-else class="media-resource-placeholder"><Volume2 :size="24" /><span>选择一段库内参考音频</span></div>
       <audio v-if="resource" :src="resource.audio_url" controls preload="none" />
-      <button type="button" class="media-resource-select" @click="pickerOpen = true"><Library :size="15" />{{ resource ? '更换音频' : '从音频库选择' }}</button>
+      <AppButton type="button" class="media-resource-select" @click="pickerOpen = true"><Library :size="15" />{{ resource ? '更换音频' : '从音频库选择' }}</AppButton>
     </div>
     <MediaLibraryPicker :open="pickerOpen" kind="audio" :selected-asset-id="resource?.asset_id" @close="pickerOpen = false" @choose="choose" />
   </WorkbenchNodeFrame>
