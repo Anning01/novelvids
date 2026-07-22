@@ -23,6 +23,7 @@ function resizeToContent() {
 }
 function updateContent(event: Event) { store.updateManualNodeData(props.id, { content: (event.target as HTMLTextAreaElement).value }); resizeToContent() }
 function updateColor(event: Event) { store.updateManualNodeData(props.id, { color: (event.target as HTMLInputElement).value }) }
+function beginEdit() { store.checkpoint() }
 function save() { store.persistLayout() }
 function deleteNote() { store.selectNode(props.id); void store.deleteSelection() }
 onMounted(() => void nextTick(resizeToContent))
@@ -33,9 +34,9 @@ watch(content, () => void nextTick(resizeToContent))
   <article class="workbench-note" :class="{ 'is-selected': selected }" :style="noteStyle" :aria-label="String(data.title || '便签')">
     <div v-if="selected" class="workbench-note__toolbar nodrag nowheel" role="toolbar" aria-label="便签操作" @pointerdown.stop @click.stop>
       <AppButton type="button" aria-label="删除便签" title="删除便签" @click="deleteNote"><Trash2 :size="17" aria-hidden="true" /></AppButton>
-      <label title="便签背景颜色"><Palette :size="17" aria-hidden="true" /><input type="color" :value="color" aria-label="修改便签背景颜色" @input="updateColor" @change="save"></label>
+      <label title="便签背景颜色"><Palette :size="17" aria-hidden="true" /><input type="color" :value="color" aria-label="修改便签背景颜色" @pointerdown="beginEdit" @input="updateColor" @change="save"></label>
     </div>
     <header><StickyNote :size="16" aria-hidden="true" /><strong>{{ data.title || '便签' }}</strong></header>
-    <textarea ref="textareaRef" class="nodrag nowheel" :value="content" maxlength="10000" aria-label="便签内容" placeholder="输入说明、备注或待办事项…" @input="updateContent" @blur="save" @keydown.stop />
+    <textarea ref="textareaRef" class="nodrag nowheel" :value="content" maxlength="10000" aria-label="便签内容" placeholder="输入说明、备注或待办事项…" @focus="beginEdit" @input="updateContent" @blur="save" @keydown.stop />
   </article>
 </template>

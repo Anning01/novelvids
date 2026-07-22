@@ -20,10 +20,11 @@ const hasTarget = computed(() => props.data.kind === 'shot' || props.data.kind =
 const hasSource = computed(() => props.data.kind === 'chapter' || props.data.kind === 'asset' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'shot')
 const canDelete = computed(() => props.data.kind === 'shot' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human')
 
-function updateUi(patch: Record<string, unknown>) { store.updateNodeUi(props.id, { ...ui.value, ...patch }) }
+function updateUi(patch: Record<string, unknown>) { store.checkpoint(); store.updateNodeUi(props.id, { ...ui.value, ...patch }) }
+function beginCustomColor() { store.checkpoint() }
 function previewCustomColor(event: Event) { store.updateNodeUi(props.id, { ...ui.value, color: (event.target as HTMLInputElement).value }) }
-function saveCustomColor(event: Event) { updateUi({ color: (event.target as HTMLInputElement).value }); paletteOpen.value = false }
-function togglePin() { if (!node.value) return; store.updateNodeLayout(props.id, node.value.position, node.value.size, pinned.value ? 1 : 1_000_000 + Math.max(0, ...store.nodes.map(item => item.zIndex))); store.flushLayout() }
+function saveCustomColor(event: Event) { store.updateNodeUi(props.id, { ...ui.value, color: (event.target as HTMLInputElement).value }); paletteOpen.value = false }
+function togglePin() { if (!node.value) return; store.checkpoint(); store.updateNodeLayout(props.id, node.value.position, node.value.size, pinned.value ? 1 : 1_000_000 + Math.max(0, ...store.nodes.map(item => item.zIndex))); store.flushLayout() }
 </script>
 
 <template>
@@ -37,7 +38,7 @@ function togglePin() { if (!node.value) return; store.updateNodeLayout(props.id,
       <AppButton type="button" :aria-label="ignored ? '取消忽略节点' : '忽略节点'" :class="{ 'is-active': ignored }" @click="updateUi({ ignored: !ignored })"><Ban :size="16" /></AppButton>
       <div v-if="paletteOpen" class="workbench-node-context__popover workbench-node-context__palette">
         <AppButton v-for="color in markerColors" :key="color" type="button" :aria-label="`背景颜色 ${color}`" :style="{ background: color }" @click="updateUi({ color }); paletteOpen = false" />
-        <label class="workbench-node-context__custom-color" title="自定义背景颜色"><span class="sr-only">自定义背景颜色</span><input type="color" :value="markerColor || '#a995ff'" aria-label="自定义背景颜色" @input="previewCustomColor" @change="saveCustomColor"></label>
+        <label class="workbench-node-context__custom-color" title="自定义背景颜色"><span class="sr-only">自定义背景颜色</span><input type="color" :value="markerColor || '#a995ff'" aria-label="自定义背景颜色" @pointerdown="beginCustomColor" @input="previewCustomColor" @change="saveCustomColor"></label>
         <AppButton type="button" class="is-clear" aria-label="清除颜色" @click="updateUi({ color: '' }); paletteOpen = false">×</AppButton>
       </div>
     </div>
