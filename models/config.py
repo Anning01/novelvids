@@ -9,7 +9,11 @@ class AiModelConfig(AbstractBaseModel):
 
     task_type = fields.IntField(
         db_index=True,
-        description="任务类型",
+        description="主任务类型（兼容旧数据）",
+    )
+    task_types = fields.JSONField(
+        default=list,
+        description="模型支持的任务类型列表",
     )
     name = fields.CharField(
         max_length=100,

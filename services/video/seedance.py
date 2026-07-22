@@ -92,19 +92,27 @@ class SeedanceGenerator(BaseVideoGenerator):
             "Content-Type": "application/json",
         }
 
-        # 处理 prompt 和参考图
-        processed_prompt, ref_images = self._process_prompt(prompt, subjects)
+        generation_mode = kwargs.get("generation_mode", "reference")
+        first_frame_url = kwargs.get("first_frame_url")
+        last_frame_url = kwargs.get("last_frame_url")
+
+        # 首尾帧模式只使用两张关键帧；参考图模式继续解析 @资产。
+        processed_prompt, ref_images = self._process_prompt(
+            prompt,
+            subjects if generation_mode == "reference" else None,
+        )
         logger.info(
             "Seedance _process_prompt: subjects=%d, ref_images=%d, prompt[:80]=%r",
             len(subjects or []), len(ref_images), processed_prompt[:80],
         )
 
-        # 自动切换 t2v / i2v 模型
+        # 自动切换 t2v / i2v 模型；首尾帧同样属于图生视频。
         model_name = self.config.model
-        if ref_images and "t2v" in model_name:
+        has_input_images = bool(ref_images) or generation_mode == "keyframes"
+        if has_input_images and "t2v" in model_name:
             model_name = model_name.replace("t2v", "i2v")
             logger.info("Seedance auto-switch: t2v -> i2v (has images)")
-        elif not ref_images and "i2v" in model_name:
+        elif not has_input_images and "i2v" in model_name:
             model_name = model_name.replace("i2v", "t2v")
             logger.info("Seedance auto-switch: i2v -> t2v (no images)")
 
@@ -112,12 +120,18 @@ class SeedanceGenerator(BaseVideoGenerator):
         content: list[dict[str, Any]] = [
             {"type": "text", "text": processed_prompt}
         ]
-        for img in ref_images:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": img},
-                "role": "reference_image",
-            })
+        if generation_mode == "keyframes":
+            content.extend([
+                {"type": "image_url", "image_url": {"url": first_frame_url}, "role": "first_frame"},
+                {"type": "image_url", "image_url": {"url": last_frame_url}, "role": "last_frame"},
+            ])
+        else:
+            for img in ref_images:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": img},
+                    "role": "reference_image",
+                })
 
         payload: dict[str, Any] = {
             "model": model_name,

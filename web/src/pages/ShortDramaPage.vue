@@ -121,12 +121,21 @@ async function createProject() {
       const uploaded = await api.upload(selectedFile.value)
       const textContent = uploaded.text_content?.trim() || ''
       if (!textContent) throw new Error('未能从文件中读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试')
+      if (uploaded.chapter_validation && !uploaded.chapter_validation.valid) {
+        throw new Error(uploaded.chapter_validation.message)
+      }
       const response = await api.createNovel({
         name: projectName,
         author: 'Agent 创建',
         description: `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label} · 源剧本：${uploaded.filename}`,
         content: textContent,
       })
+      try {
+        await api.splitNovel(response.data.id)
+      } catch (error) {
+        await api.deleteNovel(response.data.id).catch(() => undefined)
+        throw error
+      }
       sessionStorage.setItem('short-drama-agent-project', JSON.stringify({
         projectId: response.data.id,
         name: response.data.name,
@@ -136,7 +145,7 @@ async function createProject() {
         fileName: selectedFile.value.name,
         sourcePath: uploaded.file_path,
       }))
-      notice.success('项目已创建，正在进入 Agent 工作区')
+      notice.success(`书稿已成功拆分为 ${uploaded.chapter_validation?.chapter_count || '多'} 章，正在进入 Agent 工作区`)
       await router.push({ name: 'short-drama-agent', params: { projectId: response.data.id } })
     } catch (error) {
       notice.error((error as Error).message)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -10,6 +10,7 @@ import {
   Film,
   ImagePlus,
   Layers3,
+  LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -19,10 +20,11 @@ import {
   Video,
 } from 'lucide-vue-next'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
-import { api } from '@/api'
+import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
+import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
-import { AssetTypeEnum, type Asset } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type Asset } from '@/types'
 
 type AssetTab = 'character' | 'scene' | 'prop'
 
@@ -62,6 +64,18 @@ const editingName = ref(false)
 const nameDraft = ref('')
 const loading = ref(true)
 const showAssetDialog = ref(false)
+const editingAsset = ref<Asset | null>(null)
+const showBatchDialog = ref(false)
+const batchGenerating = ref(false)
+const generatingAssetIds = ref(new Set<number>())
+const failedAssetIds = ref(new Set<number>())
+let pageAlive = true
+
+const terminalTaskStatuses = new Set([
+  TaskStatusEnum.COMPLETED,
+  TaskStatusEnum.FAILED,
+  TaskStatusEnum.CANCELLED,
+])
 
 const tabs = [
   { value: 'character' as const, label: '角色', icon: UsersRound, type: AssetTypeEnum.PERSON },
@@ -79,6 +93,8 @@ const phases = computed(() => [
 const activeTabConfig = computed(() => tabs.find(item => item.value === activeTab.value) ?? tabs[0])
 const visibleAssets = computed(() => assets.value.filter(item => item.asset_type === activeTabConfig.value.type))
 const completedCount = computed(() => visibleAssets.value.filter(item => item.main_image).length)
+const generatingCount = computed(() => visibleAssets.value.filter(item => generatingAssetIds.value.has(item.id)).length)
+const failedCount = computed(() => visibleAssets.value.filter(item => failedAssetIds.value.has(item.id)).length)
 
 async function loadProject() {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return
@@ -126,12 +142,22 @@ async function saveName() {
   }
 }
 
-function openAssetDialog() {
+function openAssetDialog(asset?: Asset) {
+  editingAsset.value = asset || null
   showAssetDialog.value = true
+}
+
+function closeAssetDialog() {
+  showAssetDialog.value = false
+  editingAsset.value = null
 }
 
 function addCreatedAsset(asset: Asset) {
   assets.value.unshift(asset)
+}
+
+function saveEditedAsset(asset: Asset) {
+  assets.value = assets.value.map(item => item.id === asset.id ? asset : item)
 }
 
 async function removeAsset(asset: Asset) {
@@ -144,19 +170,103 @@ async function removeAsset(asset: Asset) {
   }
 }
 
+function setAssetGenerating(assetId: number, value: boolean) {
+  const next = new Set(generatingAssetIds.value)
+  value ? next.add(assetId) : next.delete(assetId)
+  generatingAssetIds.value = next
+}
+
+function setAssetFailed(assetId: number, value: boolean) {
+  const next = new Set(failedAssetIds.value)
+  value ? next.add(assetId) : next.delete(assetId)
+  failedAssetIds.value = next
+}
+
+async function generateAssetAndWait(asset: Asset) {
+  setAssetGenerating(asset.id, true)
+  setAssetFailed(asset.id, false)
+  try {
+    let task = (await api.generateAsset(asset.id)).data
+    while (pageAlive && !terminalTaskStatuses.has(task.status)) {
+      await sleep(2000)
+      task = (await api.task(task.id)).data
+    }
+    if (!pageAlive) return false
+    const completed = task.status === TaskStatusEnum.COMPLETED
+    setAssetFailed(asset.id, !completed)
+    return completed
+  } catch {
+    setAssetFailed(asset.id, true)
+    return false
+  } finally {
+    setAssetGenerating(asset.id, false)
+  }
+}
+
+async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; resolution: string; ratio: string }) {
+  if (batchGenerating.value) return
+  const selected = new Set(options.assetIds)
+  const targets = visibleAssets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingAssetIds.value.has(asset.id))
+  if (!targets.length) return
+
+  showBatchDialog.value = false
+  batchGenerating.value = true
+  try {
+    const preparedAssets = await Promise.all(targets.map(async asset => {
+      const metadata = {
+        ...(asset.metadata || {}),
+        model_config_id: options.modelConfigId,
+        resolution: options.resolution,
+        aspect_ratio: options.ratio,
+      }
+      const updated = (await api.updateAsset(asset.id, { metadata })).data
+      assets.value = assets.value.map(item => item.id === updated.id ? updated : item)
+      return updated
+    }))
+    const concurrency = Math.max(1, Math.min(4, options.concurrency || 1, preparedAssets.length))
+    let cursor = 0
+    let succeeded = 0
+    let failed = 0
+    const worker = async () => {
+      while (pageAlive) {
+        const asset = preparedAssets[cursor++]
+        if (!asset) return
+        const completed = await generateAssetAndWait(asset)
+        completed ? succeeded++ : failed++
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    if (!pageAlive) return
+    await loadProject()
+    if (failed) notice.info(`批量生成完成：成功 ${succeeded} 个，失败 ${failed} 个`)
+    else notice.success(`${succeeded} 个${activeTabConfig.value.label}参考图已生成`)
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    batchGenerating.value = false
+  }
+}
+
 function goToStoryboard() {
-  void router.push(`/create/short-drama/storyboard/${projectId.value}`)
+  void router.push({
+    path: `/create/short-drama/storyboard/${projectId.value}`,
+    query: route.query.chapter ? { chapter: String(route.query.chapter) } : undefined,
+  })
 }
 
 function selectPhase(label: string) {
   if (label === '剧本' && project.value.creationMode === 'agent') {
-    void router.push(`/create/short-drama/agent/${projectId.value}`)
+    void router.push({
+      path: `/create/short-drama/agent/${projectId.value}`,
+      query: route.query.chapter ? { chapter: String(route.query.chapter) } : undefined,
+    })
   } else if (label === '分镜') {
     goToStoryboard()
   }
 }
 
 onMounted(loadProject)
+onBeforeUnmount(() => { pageAlive = false })
 </script>
 
 <template>
@@ -200,11 +310,11 @@ onMounted(loadProject)
           <span>{{ activeTabConfig.label }}总计 <strong>{{ visibleAssets.length }}</strong></span>
           <i />
           <span><Check :size="13" />已完成 {{ completedCount }}</span>
-          <span>生成中 0</span>
-          <span>失败 0</span>
+          <span>生成中 {{ generatingCount }}</span>
+          <span>失败 {{ failedCount }}</span>
           <AppButton type="button" variant="secondary" size="sm" icon-only aria-label="刷新" @click="loadProject"><RefreshCw :size="14" /></AppButton>
-          <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
-          <AppButton type="button" variant="soft" size="sm" @click="notice.info('请先添加资产，再进行批量生成')"><Layers3 :size="15" />批量生成</AppButton>
+          <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
+          <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="visibleAssets.length ? showBatchDialog = true : notice.info(`请先添加${activeTabConfig.label}资产`)"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? '批量生成中' : '批量生成' }}</AppButton>
         </div>
       </header>
 
@@ -213,17 +323,19 @@ onMounted(loadProject)
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
         <strong>暂无{{ activeTabConfig.label }}</strong>
         <p>添加第一个{{ activeTabConfig.label }}，开始搭建你的短剧世界。</p>
-        <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
+        <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
-        <article v-for="asset in visibleAssets" :key="asset.id" class="asset-card">
+        <article v-for="asset in visibleAssets" :key="asset.id" class="asset-card" role="button" tabindex="0" :aria-label="`编辑${activeTabConfig.label}：${asset.canonical_name}`" @click="openAssetDialog(asset)" @keydown.enter="openAssetDialog(asset)" @keydown.space.prevent="openAssetDialog(asset)">
           <div class="asset-visual">
             <img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
             <component v-else :is="activeTabConfig.icon" :size="30" />
             <span v-if="asset.main_image" class="ready-badge"><Check :size="12" />已完成</span>
+            <span v-else-if="generatingAssetIds.has(asset.id)" class="generation-badge"><LoaderCircle :size="12" />生成中</span>
+            <span v-else-if="failedAssetIds.has(asset.id)" class="generation-badge is-failed">生成失败</span>
           </div>
           <div class="asset-card-copy">
-            <div><strong>{{ asset.canonical_name }}</strong><AppButton type="button" variant="danger" size="xs" icon-only aria-label="删除资产" @click="removeAsset(asset)"><Trash2 :size="14" /></AppButton></div>
+            <div><strong>{{ asset.canonical_name }}</strong><span class="asset-card-actions"><AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="`编辑${asset.canonical_name}`" @click.stop="openAssetDialog(asset)"><Pencil :size="14" /></AppButton><AppButton type="button" variant="danger" size="xs" icon-only :aria-label="`删除${asset.canonical_name}`" @click.stop="removeAsset(asset)"><Trash2 :size="14" /></AppButton></span></div>
             <p>{{ asset.description || `尚未填写${activeTabConfig.label}描述` }}</p>
           </div>
         </article>
@@ -238,8 +350,21 @@ onMounted(loadProject)
       :open="showAssetDialog"
       :kind="activeTab"
       :novel-id="projectId"
-      @close="showAssetDialog = false"
+      :asset="editingAsset"
+      @close="closeAssetDialog"
       @created="addCreatedAsset"
+      @saved="saveEditedAsset"
+    />
+
+    <AssetBatchGenerateDialog
+      :open="showBatchDialog"
+      :label="activeTabConfig.label"
+      :assets="visibleAssets"
+      :generating-ids="generatingAssetIds"
+      :failed-ids="failedAssetIds"
+      :submitting="batchGenerating"
+      @close="showBatchDialog = false"
+      @generate="batchGenerateAssets"
     />
   </main>
 </template>
@@ -283,13 +408,18 @@ onMounted(loadProject)
 .empty-state p { margin: 6px 0 18px; font-size: 12px; }
 .empty-state > button { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; color: #fff; border-radius: 9px; background: #5e60f5; font-size: 12px; box-shadow: 0 8px 18px rgba(94,96,245,.2); }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 16px; padding-top: 24px; }
-.asset-card { overflow: hidden; border: 1px solid #e4e6ed; border-radius: 14px; background: #fff; }
+.asset-card { overflow: hidden; border: 1px solid #e4e6ed; border-radius: 14px; outline: 0; background: #fff; cursor: pointer; transition: transform .18s ease,box-shadow .18s ease,border-color .18s ease; }
+.asset-card:hover,.asset-card:focus-visible { border-color: #cfd0fb; box-shadow: 0 14px 34px rgba(54,57,98,.1); transform: translateY(-2px); }
 .asset-visual { position: relative; display: grid; place-items: center; height: 190px; color: #aeb4c2; background: #f0f2f7; }
 .asset-visual img { width: 100%; height: 100%; object-fit: cover; }
 .ready-badge { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 3px; padding: 4px 7px; color: #2f9b72; border-radius: 999px; background: rgba(255,255,255,.92); font-size: 10px; }
+.generation-badge { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; color: #6264ec; background: rgba(255,255,255,.94); box-shadow: 0 5px 14px rgba(43,46,80,.08); font-size: 10px; }
+.generation-badge svg { animation: spin .8s linear infinite; }
+.generation-badge.is-failed { color: #cf5f70; }
 .asset-card-copy { padding: 13px 14px 14px; }
 .asset-card-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .asset-card-copy button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; }
+.asset-card-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .asset-card-copy p { min-height: 34px; margin: 7px 0 0; color: #8a91a1; font-size: 11px; line-height: 1.55; }
 .manual-next-step { position: fixed; bottom: 22px; left: 50%; z-index: 18; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 22px; color: #fff; border-radius: 15px; background: #23252c; box-shadow: 0 10px 28px rgba(21,23,31,.2); transform: translateX(-50%); }
 .is-spinning { animation: spin .8s linear infinite; }

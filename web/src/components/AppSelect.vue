@@ -31,8 +31,10 @@ const emit = defineEmits<{
 }>()
 
 const root = ref<HTMLElement | null>(null)
+const menu = ref<HTMLElement | null>(null)
 const open = ref(false)
 const opensUp = ref(false)
+const menuPosition = ref({ top: 0, left: 0, width: 0 })
 
 const normalizedOptions = computed<AppSelectOption[]>(() => props.options.map(option => (
   typeof option === 'string' ? { value: option, label: option } : option
@@ -40,7 +42,9 @@ const normalizedOptions = computed<AppSelectOption[]>(() => props.options.map(op
 const selectedOption = computed(() => normalizedOptions.value.find(option => option.value === props.modelValue) ?? normalizedOptions.value[0])
 const menuStyle = computed(() => ({
   maxHeight: `${props.maxMenuHeight}px`,
-  width: props.menuWidth ? `${props.menuWidth}px` : undefined,
+  width: `${props.menuWidth || menuPosition.value.width}px`,
+  top: `${menuPosition.value.top}px`,
+  left: `${menuPosition.value.left}px`,
 }))
 
 async function toggleMenu() {
@@ -57,6 +61,13 @@ function updatePlacement() {
   const estimatedMenuHeight = Math.min(props.maxMenuHeight, normalizedOptions.value.length * 38 + (props.menuLabel ? 34 : 14))
   const roomBelow = window.innerHeight - rect.bottom
   opensUp.value = roomBelow < estimatedMenuHeight + 12 && rect.top > roomBelow
+  const width = props.menuWidth || rect.width
+  const left = props.align === 'end' ? rect.right - width : rect.left
+  menuPosition.value = {
+    top: opensUp.value ? rect.top - estimatedMenuHeight - 7 : rect.bottom + 7,
+    left: Math.max(8, Math.min(left, window.innerWidth - width - 8)),
+    width,
+  }
 }
 
 function selectOption(option: AppSelectOption) {
@@ -65,7 +76,8 @@ function selectOption(option: AppSelectOption) {
 }
 
 function closeFromOutside(event: PointerEvent) {
-  if (!root.value?.contains(event.target as Node)) open.value = false
+  const target = event.target as Node
+  if (!root.value?.contains(target) && !menu.value?.contains(target)) open.value = false
 }
 
 function closeFromEscape() {
@@ -75,10 +87,12 @@ function closeFromEscape() {
 onMounted(() => {
   window.addEventListener('pointerdown', closeFromOutside)
   window.addEventListener('resize', updatePlacement)
+  window.addEventListener('scroll', updatePlacement, true)
 })
 onUnmounted(() => {
   window.removeEventListener('pointerdown', closeFromOutside)
   window.removeEventListener('resize', updatePlacement)
+  window.removeEventListener('scroll', updatePlacement, true)
 })
 </script>
 
@@ -102,34 +116,37 @@ onUnmounted(() => {
       <ChevronDown class="app-select__chevron" :size="14" />
     </AppButton>
 
-    <div
-      v-if="open"
-      class="app-select__menu"
-      :class="{ 'is-up': opensUp, 'is-end': align === 'end' }"
-      :style="menuStyle"
-      role="listbox"
-      :aria-label="ariaLabel"
-    >
-      <p v-if="menuLabel" class="app-select__menu-label">{{ menuLabel }}</p>
-      <AppButton
-        v-for="option in normalizedOptions"
-        :key="option.value"
-        type="button"
-        class="app-select__option"
-        :class="{ 'is-selected': option.value === modelValue, 'has-separator': option.separator }"
-        role="option"
-        :aria-selected="option.value === modelValue"
-        @click="selectOption(option)"
+    <Teleport to="body">
+      <div
+        v-if="open"
+        ref="menu"
+        class="app-select__menu"
+        :class="{ 'is-up': opensUp, 'is-end': align === 'end' }"
+        :style="menuStyle"
+        role="listbox"
+        :aria-label="ariaLabel"
       >
-        <span class="app-select__option-leading">
-          <slot name="option-leading" :option="option">
-            <img v-if="option.image" :src="option.image" alt="" />
-          </slot>
-        </span>
-        <span>{{ option.label }}</span>
-        <Check v-if="option.value === modelValue" class="app-select__check" :size="15" />
-      </AppButton>
-    </div>
+        <p v-if="menuLabel" class="app-select__menu-label">{{ menuLabel }}</p>
+        <AppButton
+          v-for="option in normalizedOptions"
+          :key="option.value"
+          type="button"
+          class="app-select__option"
+          :class="{ 'is-selected': option.value === modelValue, 'has-separator': option.separator }"
+          role="option"
+          :aria-selected="option.value === modelValue"
+          @click="selectOption(option)"
+        >
+          <span class="app-select__option-leading">
+            <slot name="option-leading" :option="option">
+              <img v-if="option.image" :src="option.image" alt="" />
+            </slot>
+          </span>
+          <span>{{ option.label }}</span>
+          <Check v-if="option.value === modelValue" class="app-select__check" :size="15" />
+        </AppButton>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -217,27 +234,14 @@ onUnmounted(() => {
 }
 
 .app-select__menu {
-  position: absolute;
-  top: calc(100% + 7px);
-  left: 0;
-  z-index: 100;
-  min-width: 100%;
+  position: fixed;
+  z-index: 1000;
   overflow: auto;
   padding: 6px;
   border: 1px solid #e1e4eb;
   border-radius: 11px;
   background: #fff;
   box-shadow: 0 18px 44px rgb(32 36 49 / 14%);
-}
-
-.app-select__menu.is-up {
-  top: auto;
-  bottom: calc(100% + 7px);
-}
-
-.app-select__menu.is-end {
-  right: 0;
-  left: auto;
 }
 
 .app-select__menu-label {

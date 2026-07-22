@@ -14,6 +14,37 @@ from dataclasses import dataclass
 from typing import Self
 
 
+LONG_SCRIPT_MIN_LENGTH = 30_000
+MAX_REPLACEMENT_CHARACTER_RATIO = 0.002
+
+
+class ChapterSplitError(ValueError):
+    """书稿无法可靠拆章。"""
+
+
+def validate_chapter_split(
+    content: str,
+    chapters: list["ParsedChapterResult"],
+) -> None:
+    """阻止乱码或明显漏识别的长书稿进入后续工作流。"""
+    text = (content or "").strip()
+    if not text:
+        raise ChapterSplitError("书稿正文为空，请检查文件内容后重新上传")
+
+    replacement_count = text.count("\ufffd")
+    replacement_ratio = replacement_count / len(text)
+    if replacement_count >= 20 and replacement_ratio >= MAX_REPLACEMENT_CHARACTER_RATIO:
+        raise ChapterSplitError(
+            "书稿解码后出现大量乱码，请将文件转换为 UTF-8、GB18030、DOCX 或文本型 PDF 后重试"
+        )
+
+    if len(text) >= LONG_SCRIPT_MIN_LENGTH and len(chapters) <= 1:
+        raise ChapterSplitError(
+            f"书稿约 {len(text):,} 字，但只识别到 {len(chapters)} 章。"
+            "请检查章节标题是否使用“第一章/第1章”格式，或转换文件编码后重试"
+        )
+
+
 @dataclass(frozen=True)
 class NovelText:
     """表示原始小说文本的值对象。"""

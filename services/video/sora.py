@@ -43,6 +43,9 @@ class SoraGenerator(BaseVideoGenerator):
         }
         if subjects:
             payload["subjects"] = subjects
+        if kwargs.get("generation_mode") == "keyframes":
+            payload["first_frame_url"] = kwargs.get("first_frame_url")
+            payload["last_frame_url"] = kwargs.get("last_frame_url")
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(

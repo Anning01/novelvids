@@ -62,6 +62,38 @@ async def test_upload_docx_extracts_book_text(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_upload_gb18030_text_previews_chapters(client: AsyncClient):
+    """GB18030 小说应正确解码并在进入项目前识别章节数量。"""
+    text = "第一章 山雨\n正文一\n第二章 归途\n正文二"
+    response = await client.post(
+        "/api/file/upload",
+        files=[("files", ("gb-book.txt", text.encode("gb18030"), "text/plain"))],
+    )
+
+    assert response.status_code == 200, response.text
+    uploaded = response.json()["data"]["files"][0]
+    assert uploaded["text_content"] == text
+    assert uploaded["chapter_validation"]["valid"] is True
+    assert uploaded["chapter_validation"]["chapter_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_upload_long_unstructured_text_reports_invalid(client: AsyncClient):
+    """长文本只识别到单章时，上传预检直接返回失败原因。"""
+    text = "没有章节标题的长篇正文。" * 3_000
+    response = await client.post(
+        "/api/file/upload",
+        files=[("files", ("invalid.txt", text.encode("utf-8"), "text/plain"))],
+    )
+
+    assert response.status_code == 200, response.text
+    validation = response.json()["data"]["files"][0]["chapter_validation"]
+    assert validation["valid"] is False
+    assert validation["chapter_count"] == 0
+    assert "只识别到 0 章" in validation["message"]
+
+
+@pytest.mark.asyncio
 async def test_upload_multiple_files(client: AsyncClient):
     """上传多个文件成功。"""
     response = await client.post(

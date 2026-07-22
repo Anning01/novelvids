@@ -6,7 +6,7 @@ from config import settings
 
 
 async def ensure_ai_model_config_schema() -> None:
-    """为已有 SQLite 数据库补齐模型 JSON 输出能力字段。"""
+    """为已有 SQLite 数据库补齐模型能力字段。"""
     if not settings.DATABASE_URL.startswith("sqlite"):
         return
 
@@ -16,4 +16,12 @@ async def ensure_ai_model_config_schema() -> None:
         await connection.execute_script(
             "ALTER TABLE ai_model_configs "
             "ADD COLUMN supports_json_output INT NOT NULL DEFAULT 0;"
+        )
+    if columns and not any(column["name"] == "task_types" for column in columns):
+        await connection.execute_script(
+            "ALTER TABLE ai_model_configs "
+            "ADD COLUMN task_types JSON NOT NULL DEFAULT '[]';"
+            "UPDATE ai_model_configs "
+            "SET task_types = '[' || task_type || ']' "
+            "WHERE task_types = '[]';"
         )

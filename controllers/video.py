@@ -14,7 +14,7 @@ from models.scene import Scene
 from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.video import get_generator
-from services.video.asset_resolver import resolve_assets
+from services.video.asset_resolver import resolve_assets, resolve_image_source
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
@@ -78,10 +78,23 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # 获取生成器并提交
         generator = get_generator(req.model_type, config)
         duration = scene.duration or 6.0
+        if req.generation_mode == "keyframes" and not (req.first_frame_url and req.last_frame_url):
+            raise HTTPException(400, detail="首尾帧模式必须同时上传首帧和尾帧")
+        first_frame = req.first_frame_url
+        last_frame = req.last_frame_url
+        if req.generation_mode == "keyframes":
+            try:
+                first_frame = resolve_image_source(req.first_frame_url or "")
+                last_frame = resolve_image_source(req.last_frame_url or "")
+            except FileNotFoundError as error:
+                raise HTTPException(400, detail=f"首尾帧图片不存在：{error}") from error
         external_task_id = await generator.submit(
             prompt=prompt,
-            subjects=subjects if subjects else None,
+            subjects=subjects if subjects and req.generation_mode == "reference" else None,
             duration=duration,
+            generation_mode=req.generation_mode,
+            first_frame_url=first_frame,
+            last_frame_url=last_frame,
         )
 
         # 创建 Video 记录
@@ -90,6 +103,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
             model_type=req.model_type,
             external_task_id=external_task_id,
             status=TaskStatusEnum.pending.value,
+            metadata={
+                "generation_mode": req.generation_mode,
+                "first_frame_url": req.first_frame_url,
+                "last_frame_url": req.last_frame_url,
+            },
         )
         logger.info(
             "Video generate: video_id=%s, scene_id=%s, task_id=%s",

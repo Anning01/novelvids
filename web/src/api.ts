@@ -42,7 +42,7 @@ export const api = {
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
   generateScenes: (chapterId: number) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
-  generateVideo: (sceneId: number, modelType: number) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_type: modelType }) }),
+  generateVideo: (sceneId: number, modelType: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string } = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_type: modelType, ...options }) }),
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
@@ -58,7 +58,12 @@ export const api = {
     const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data })
     const payload = await response.json()
     if (!response.ok || payload.code !== 0) throw new Error(payload.message || '上传失败')
-    return payload.data.files[0] as { filename: string; file_path: string; text_content?: string }
+    return payload.data.files[0] as {
+      filename: string
+      file_path: string
+      text_content?: string
+      chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string }
+    }
   },
 }
 

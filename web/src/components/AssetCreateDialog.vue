@@ -22,8 +22,8 @@ type AssetKind = 'character' | 'scene' | 'prop'
 type CreateMode = 'ai' | 'library' | 'upload'
 type LibraryItem = { key: string; name: string; detail: string; image: string; source: 'public' | 'project'; asset?: Asset; human?: DigitalHuman }
 
-const props = defineProps<{ open: boolean; kind: AssetKind; novelId: number }>()
-const emit = defineEmits<{ close: []; created: [asset: Asset] }>()
+const props = defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null }>()
+const emit = defineEmits<{ close: []; created: [asset: Asset]; saved: [asset: Asset] }>()
 
 const config = computed(() => ({
   character: { label: '角色', icon: UserRound, type: AssetTypeEnum.PERSON, library: '角色库' },
@@ -73,6 +73,7 @@ const publicPage = ref(0)
 const publicPages = ref(0)
 const projectPage = ref(0)
 const projectPages = ref(0)
+const isEditing = computed(() => Boolean(props.asset))
 
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.id), label: item.name || item.model || `生图模型 ${item.id}` })))
 const filteredLibraryItems = computed(() => libraryItems.value.filter(item => {
@@ -89,6 +90,7 @@ const libraryHasMore = computed(() => {
   return publicHasMore.value || projectHasMore.value
 })
 const canSubmit = computed(() => {
+  if (isEditing.value) return Boolean(name.value.trim())
   if (mode.value === 'library') return Boolean(selectedLibrary.value)
   const characterReady = props.kind !== 'character' || Boolean(gender.value && age.value)
   if (mode.value === 'upload') return Boolean(name.value.trim() && uploadFile.value && characterReady)
@@ -116,6 +118,20 @@ function reset() {
   uploadFile.value = null
   if (uploadPreview.value) URL.revokeObjectURL(uploadPreview.value)
   uploadPreview.value = ''
+
+  if (props.asset) {
+    const metadata = props.asset.metadata && typeof props.asset.metadata === 'object'
+      ? props.asset.metadata as Record<string, unknown>
+      : {}
+    name.value = props.asset.canonical_name || ''
+    description.value = props.asset.description || ''
+    prompt.value = props.asset.base_traits || ''
+    gender.value = typeof metadata.gender === 'string' ? metadata.gender : ''
+    age.value = typeof metadata.age_group === 'string' ? metadata.age_group : ''
+    voice.value = typeof metadata.voice === 'string' ? metadata.voice : ''
+    if (typeof metadata.aspect_ratio === 'string' && ratios.includes(metadata.aspect_ratio)) ratio.value = metadata.aspect_ratio
+    if (typeof metadata.resolution === 'string' && resolutions.includes(metadata.resolution.toUpperCase())) resolution.value = metadata.resolution.toUpperCase()
+  }
 }
 
 function appendLibraryItems(items: LibraryItem[]) {
@@ -221,7 +237,11 @@ async function submit() {
     let assetDescription = description.value.trim()
     let mainImage: string | undefined
     let imageSource = 1
+    const existingMetadata = props.asset?.metadata && typeof props.asset.metadata === 'object'
+      ? props.asset.metadata as Record<string, unknown>
+      : {}
     const metadata: Record<string, unknown> = {
+      ...existingMetadata,
       creation_mode: mode.value,
       aspect_ratio: ratio.value,
       resolution: resolution.value,
@@ -247,8 +267,7 @@ async function submit() {
       if (selected.human) Object.assign(metadata, { gender: selected.human.gender, age: selected.human.age, country: selected.human.country, occupation: selected.human.occupation })
     }
 
-    const response = await api.createAsset({
-      novel_id: props.novelId,
+    const payload: Partial<Asset> = {
       asset_type: config.value.type,
       canonical_name: assetName,
       description: assetDescription,
@@ -257,15 +276,22 @@ async function submit() {
       image_source: imageSource,
       metadata,
       is_global: false,
-    })
+    }
+    const response = props.asset
+      ? await api.updateAsset(props.asset.id, payload)
+      : await api.createAsset({ ...payload, novel_id: props.novelId } as Partial<Asset> & { novel_id: number; asset_type: number; canonical_name: string })
 
-    if (mode.value === 'ai') {
+    if (props.asset) {
+      notice.success(`${config.value.label}已更新`)
+      emit('saved', response.data)
+    } else if (mode.value === 'ai') {
       await api.generateAsset(response.data.id)
       notice.success(`${config.value.label}已创建，正在生成参考图`)
+      emit('created', response.data)
     } else {
       notice.success(`${config.value.label}已添加`)
+      emit('created', response.data)
     }
-    emit('created', response.data)
     emit('close')
   } catch (error) {
     notice.error((error as Error).message)
@@ -280,6 +306,7 @@ watch(() => props.open, value => {
   void loadSources()
 })
 watch(() => props.kind, () => { if (props.open) { reset(); void loadSources() } })
+watch(() => props.asset?.id, () => { if (props.open) reset() })
 onMounted(() => { if (props.open) void loadSources() })
 </script>
 
@@ -289,7 +316,7 @@ onMounted(() => { if (props.open) void loadSources() })
       <form class="asset-dialog" @submit.prevent="submit">
         <header class="asset-dialog__header">
           <span class="asset-dialog__icon"><component :is="config.icon" :size="20" /></span>
-          <div><span>PROJECT ASSET</span><h2>新增{{ config.label }}</h2></div>
+          <div><span>PROJECT ASSET</span><h2>{{ isEditing ? '编辑' : '新增' }}{{ config.label }}</h2></div>
           <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭" @click="emit('close')"><X :size="18" /></AppButton>
         </header>
 
@@ -353,7 +380,7 @@ onMounted(() => { if (props.open) void loadSources() })
             <AppSelect v-model="ratio" :options="ratios" ariaLabel="选择生成比例" />
           </div>
           <span v-else />
-          <div><AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton><AppButton type="submit" variant="primary" :disabled="!canSubmit" :loading="saving"><Sparkles v-if="!saving && mode === 'ai'" :size="15" />{{ mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton></div>
+          <div><AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton><AppButton type="submit" variant="primary" :disabled="!canSubmit" :loading="saving"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton></div>
         </footer>
       </form>
     </div>

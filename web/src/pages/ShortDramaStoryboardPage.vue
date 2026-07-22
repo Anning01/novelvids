@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -21,10 +21,12 @@ import {
   Settings2,
   Sparkles,
   Trash2,
+  Upload,
   UsersRound,
   Video,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import AppScrollArea from '@/components/AppScrollArea.vue'
 import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
@@ -36,6 +38,16 @@ interface ProjectView extends Novel {
   resolution: string
   style: string
   creationMode: 'agent' | 'manual'
+}
+
+interface SceneDraft {
+  description: string
+  prompt: string
+  duration: number
+  selectedAssetIds: number[]
+  videoGenerationMode: 'reference' | 'keyframes'
+  firstFrameUrl: string
+  lastFrameUrl: string
 }
 
 const terminalTaskStatuses = new Set([
@@ -59,19 +71,19 @@ const videoModelTypes = ref<EnumItem[]>([])
 const selectedVideoModel = ref('3')
 const videos = ref<Record<number, VideoResult[]>>({})
 const loading = ref(true)
-const generatingStoryboard = ref(false)
-const saving = ref(false)
-const generatingVideo = ref(false)
-const generationError = ref('')
-const description = ref('')
-const prompt = ref('')
-const duration = ref(6)
-const selectedAssetIds = ref<number[]>([])
+const generatingChapterIds = ref<Set<number>>(new Set())
+const savingSceneIds = ref<Set<number>>(new Set())
+const generatingVideoSceneIds = ref<Set<number>>(new Set())
+const generationErrors = ref<Record<number, string>>({})
+const sceneDrafts = ref<Record<number, SceneDraft>>({})
+const uploadingFrameKey = ref('')
 let alive = true
+let chapterLoadVersion = 0
+let sceneObserver: IntersectionObserver | undefined
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
-const selectedScene = computed(() => scenes.value.find(item => item.id === activeSceneId.value) ?? scenes.value[0])
-const selectedVideo = computed(() => selectedScene.value ? videos.value[selectedScene.value.id]?.[0] : undefined)
+const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
+const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
 const videoModelOptions = computed(() => (
   videoModelTypes.value.length
     ? videoModelTypes.value.map(item => ({ value: String(item.value), label: item.label }))
@@ -89,41 +101,125 @@ const assetGroups = computed(() => [
   { type: AssetTypeEnum.ITEM, label: '场景道具', icon: Boxes, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.ITEM) },
 ])
 
-function syncSceneForm(scene?: Scene) {
-  description.value = scene?.description || ''
-  prompt.value = scene?.prompt || ''
-  duration.value = scene?.duration || 6
-  selectedAssetIds.value = scene?.assets?.map(item => item.id) ?? scene?.asset_ids ?? []
+function makeSceneDraft(scene: Scene): SceneDraft {
+  const metadata = scene?.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}
+  return {
+    description: scene.description || '',
+    prompt: scene.prompt || '',
+    duration: scene.duration || 6,
+    selectedAssetIds: scene.assets?.map(item => item.id) ?? scene.asset_ids ?? [],
+    videoGenerationMode: metadata.video_generation_mode === 'keyframes' ? 'keyframes' : 'reference',
+    firstFrameUrl: typeof metadata.first_frame_url === 'string' ? metadata.first_frame_url : '',
+    lastFrameUrl: typeof metadata.last_frame_url === 'string' ? metadata.last_frame_url : '',
+  }
 }
 
-async function fetchScenes(chapterId: number) {
+function draftFor(scene: Scene) {
+  if (!sceneDrafts.value[scene.id]) sceneDrafts.value[scene.id] = makeSceneDraft(scene)
+  return sceneDrafts.value[scene.id]
+}
+
+function initializeSceneDrafts(items: Scene[]) {
+  sceneDrafts.value = Object.fromEntries(items.map(scene => [scene.id, makeSceneDraft(scene)]))
+}
+
+function setSceneBusy(target: typeof savingSceneIds, sceneId: number, value: boolean) {
+  const next = new Set(target.value)
+  value ? next.add(sceneId) : next.delete(sceneId)
+  target.value = next
+}
+
+function selectedVideoFor(scene: Scene) {
+  return videos.value[scene.id]?.[0]
+}
+
+function canGenerateSceneVideo(scene: Scene) {
+  const draft = draftFor(scene)
+  return Boolean(draft.prompt.trim() && (draft.videoGenerationMode === 'reference' || (draft.firstFrameUrl && draft.lastFrameUrl)))
+}
+
+async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    notice.error('首尾帧仅支持图片文件')
+    return
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    notice.error('图片大小不能超过 20MB')
+    return
+  }
+  const uploadKey = `${scene.id}:${kind}`
+  uploadingFrameKey.value = uploadKey
+  try {
+    const uploaded = await api.upload(file)
+    const url = `/media/${uploaded.filename}`
+    const draft = draftFor(scene)
+    if (kind === 'first') draft.firstFrameUrl = url
+    else draft.lastFrameUrl = url
+    await saveScene(scene, false)
+    notice.success(kind === 'first' ? '首帧已上传' : '尾帧已上传')
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    if (uploadingFrameKey.value === uploadKey) uploadingFrameKey.value = ''
+  }
+}
+
+async function setVideoGenerationMode(scene: Scene, mode: 'reference' | 'keyframes') {
+  draftFor(scene).videoGenerationMode = mode
+  await saveScene(scene, false)
+}
+
+function setChapterGenerating(chapterId: number, value: boolean) {
+  const next = new Set(generatingChapterIds.value)
+  value ? next.add(chapterId) : next.delete(chapterId)
+  generatingChapterIds.value = next
+}
+
+function setGenerationError(chapterId: number, message = '') {
+  generationErrors.value = { ...generationErrors.value, [chapterId]: message }
+}
+
+async function fetchChapterScenes(chapterId: number) {
   const briefScenes = (await api.scenes(chapterId)).data.items
-  scenes.value = await Promise.all(briefScenes.map(async item => (await api.scene(item.id)).data))
-  activeSceneId.value = scenes.value[0]?.id || 0
-  syncSceneForm(scenes.value[0])
-  const entries = await Promise.all(scenes.value.map(async scene => [scene.id, (await api.videos(scene.id)).data.items] as const))
-  videos.value = Object.fromEntries(entries)
+  const chapterScenes = await Promise.all(briefScenes.map(async item => (await api.scene(item.id)).data))
+  const entries = await Promise.all(chapterScenes.map(async scene => [scene.id, (await api.videos(scene.id)).data.items] as const))
+  return { scenes: chapterScenes, videos: Object.fromEntries(entries) as Record<number, VideoResult[]> }
 }
 
-async function createManualScene() {
-  if (!activeChapter.value) return
+function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>>) {
+  scenes.value = result.scenes
+  videos.value = result.videos
+  activeSceneId.value = result.scenes[0]?.id || 0
+  initializeSceneDrafts(result.scenes)
+  void nextTick(setupSceneObserver)
+}
+
+async function createManualScene(chapterId = activeChapterId.value) {
+  const chapter = chapters.value.find(item => item.id === chapterId)
+  if (!chapter) return
   const created = (await api.createScene({
-    chapter_id: activeChapter.value.id,
+    chapter_id: chapterId,
     sequence: 1,
-    description: activeChapter.value.name || '新分镜',
+    description: chapter.name || '新分镜',
     prompt: '',
     duration: 6,
   })).data
+  if (activeChapterId.value !== chapterId) return
   scenes.value = [created]
   activeSceneId.value = created.id
   videos.value[created.id] = []
-  syncSceneForm(created)
+  initializeSceneDrafts([created])
+  void nextTick(setupSceneObserver)
 }
 
 async function generateChapterStoryboard(chapterId: number) {
-  if (generatingStoryboard.value) return
-  generatingStoryboard.value = true
-  generationError.value = ''
+  if (!chapterId || generatingChapterIds.value.has(chapterId)) return
+  setChapterGenerating(chapterId, true)
+  setGenerationError(chapterId)
   try {
     const task = (await api.generateScenes(chapterId)).data
     let current = task
@@ -133,51 +229,72 @@ async function generateChapterStoryboard(chapterId: number) {
     }
     if (!alive) return
     if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || 'Agent 分镜生成失败')
-    await fetchScenes(chapterId)
-    notice.success(`第 ${activeChapter.value?.number || ''} 集分镜已生成`)
+    const result = await fetchChapterScenes(chapterId)
+    if (activeChapterId.value === chapterId) showChapterScenes(result)
+    const chapterNumber = chapters.value.find(item => item.id === chapterId)?.number || ''
+    notice.success(`第 ${chapterNumber} 集分镜已生成`)
   } catch (error) {
-    generationError.value = (error as Error).message
-    notice.error(generationError.value)
+    const message = (error as Error).message
+    setGenerationError(chapterId, message)
+    notice.error(message)
   } finally {
-    generatingStoryboard.value = false
+    setChapterGenerating(chapterId, false)
   }
 }
 
 async function regenerateStoryboard() {
-  if (!activeChapterId.value || generatingStoryboard.value) return
+  const chapterId = activeChapterId.value
+  if (!chapterId || generatingChapterIds.value.has(chapterId)) return
   if (!confirm('重新生成会替换本集现有分镜，是否继续？')) return
-  generatingStoryboard.value = true
-  generationError.value = ''
+  const chapterScenes = [...scenes.value]
+  setChapterGenerating(chapterId, true)
+  setGenerationError(chapterId)
   try {
-    await Promise.all(scenes.value.map(scene => api.deleteScene(scene.id)))
-    scenes.value = []
-    activeSceneId.value = 0
-    syncSceneForm()
+    await Promise.all(chapterScenes.map(scene => api.deleteScene(scene.id)))
+    if (activeChapterId.value === chapterId) {
+      scenes.value = []
+      activeSceneId.value = 0
+      sceneDrafts.value = {}
+    }
   } catch (error) {
-    generatingStoryboard.value = false
+    setChapterGenerating(chapterId, false)
     notice.error((error as Error).message)
     return
   }
-  generatingStoryboard.value = false
-  await generateChapterStoryboard(activeChapterId.value)
+  setChapterGenerating(chapterId, false)
+  await generateChapterStoryboard(chapterId)
 }
 
 async function loadChapter(chapterId: number) {
+  const loadVersion = ++chapterLoadVersion
   activeChapterId.value = chapterId
+  activeChapter.value = chapters.value.find(item => item.id === chapterId) ?? null
+  scenes.value = []
+  videos.value = {}
+  activeSceneId.value = 0
+  sceneDrafts.value = {}
   loading.value = true
-  generationError.value = ''
+  setGenerationError(chapterId)
   try {
-    activeChapter.value = (await api.chapter(chapterId)).data
-    await fetchScenes(chapterId)
-    if (!scenes.value.length) {
+    const [chapterResponse, result] = await Promise.all([
+      api.chapter(chapterId),
+      fetchChapterScenes(chapterId),
+    ])
+    if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
+    activeChapter.value = chapterResponse.data
+    showChapterScenes(result)
+    loading.value = false
+    if (!result.scenes.length) {
       if (isAgent.value) await generateChapterStoryboard(chapterId)
-      else await createManualScene()
+      else await createManualScene(chapterId)
     }
   } catch (error) {
-    generationError.value = (error as Error).message
-    notice.error(generationError.value)
+    if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
+    const message = (error as Error).message
+    setGenerationError(chapterId, message)
+    notice.error(message)
   } finally {
-    loading.value = false
+    if (loadVersion === chapterLoadVersion && activeChapterId.value === chapterId) loading.value = false
   }
 }
 
@@ -205,44 +322,66 @@ async function load() {
     videoModelTypes.value = enumResponse.data.video_model_type || []
     const preferredChapter = Number(route.query.chapter)
     const firstChapter = chapters.value.find(item => item.id === preferredChapter) ?? chapters.value[0]
-    if (firstChapter) await loadChapter(firstChapter.id)
+    if (firstChapter) {
+      if (preferredChapter !== firstChapter.id) {
+        void router.replace({ query: { ...route.query, chapter: String(firstChapter.id) } })
+      }
+      await loadChapter(firstChapter.id)
+    }
+    else loading.value = false
   } catch (error) {
-    generationError.value = (error as Error).message
-    notice.error(generationError.value)
-  } finally {
+    const message = (error as Error).message
+    setGenerationError(activeChapterId.value, message)
+    notice.error(message)
     loading.value = false
   }
 }
 
 function selectScene(scene: Scene) {
   activeSceneId.value = scene.id
-  syncSceneForm(scene)
+  document.getElementById(`scene-${scene.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function toggleAsset(assetId: number) {
-  selectedAssetIds.value = selectedAssetIds.value.includes(assetId)
-    ? selectedAssetIds.value.filter(id => id !== assetId)
-    : [...selectedAssetIds.value, assetId]
+function setupSceneObserver() {
+  sceneObserver?.disconnect()
+  if (typeof IntersectionObserver === 'undefined') return
+  sceneObserver = new IntersectionObserver((entries) => {
+    const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+    const sceneId = Number((visible?.target as HTMLElement | undefined)?.dataset.sceneId)
+    if (sceneId) activeSceneId.value = sceneId
+  }, { rootMargin: '-84px 0px -42% 0px', threshold: [0.08, 0.25, 0.5, 0.75] })
+  document.querySelectorAll<HTMLElement>('[data-scene-id]').forEach(element => sceneObserver?.observe(element))
 }
 
-async function saveScene(showNotice = true) {
-  const scene = selectedScene.value
-  if (!scene) return
-  saving.value = true
+function toggleAsset(scene: Scene, assetId: number) {
+  const draft = draftFor(scene)
+  draft.selectedAssetIds = draft.selectedAssetIds.includes(assetId)
+    ? draft.selectedAssetIds.filter(id => id !== assetId)
+    : [...draft.selectedAssetIds, assetId]
+}
+
+async function saveScene(scene: Scene, showNotice = true) {
+  const draft = draftFor(scene)
+  setSceneBusy(savingSceneIds, scene.id, true)
   try {
     const updated = (await api.updateScene(scene.id, {
-      description: description.value,
-      prompt: prompt.value,
-      duration: duration.value,
-      asset_ids: selectedAssetIds.value,
+      description: draft.description,
+      prompt: draft.prompt,
+      duration: draft.duration,
+      asset_ids: draft.selectedAssetIds,
+      metadata: {
+        ...(scene.metadata || {}),
+        video_generation_mode: draft.videoGenerationMode,
+        first_frame_url: draft.firstFrameUrl || undefined,
+        last_frame_url: draft.lastFrameUrl || undefined,
+      },
     })).data
     scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
-    syncSceneForm(updated)
     if (showNotice) notice.success('分镜已保存')
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
-    saving.value = false
+    setSceneBusy(savingSceneIds, scene.id, false)
   }
 }
 
@@ -258,6 +397,9 @@ async function addScene() {
     })).data
     scenes.value.push(created)
     videos.value[created.id] = []
+    sceneDrafts.value[created.id] = makeSceneDraft(created)
+    await nextTick()
+    setupSceneObserver()
     selectScene(created)
     notice.success('已添加分镜')
   } catch (error) {
@@ -265,20 +407,23 @@ async function addScene() {
   }
 }
 
-async function duplicateScene() {
-  const scene = selectedScene.value
+async function duplicateScene(scene: Scene) {
   if (!scene || !activeChapter.value) return
+  const draft = draftFor(scene)
   try {
     const created = (await api.createScene({
       chapter_id: activeChapter.value.id,
       sequence: Math.max(0, ...scenes.value.map(item => item.sequence)) + 1,
-      description: description.value,
-      prompt: prompt.value,
-      duration: duration.value,
-      asset_ids: selectedAssetIds.value,
+      description: draft.description,
+      prompt: draft.prompt,
+      duration: draft.duration,
+      asset_ids: draft.selectedAssetIds,
     })).data
     scenes.value.push(created)
     videos.value[created.id] = []
+    sceneDrafts.value[created.id] = makeSceneDraft(created)
+    await nextTick()
+    setupSceneObserver()
     selectScene(created)
     notice.success('分镜已复制')
   } catch (error) {
@@ -286,28 +431,33 @@ async function duplicateScene() {
   }
 }
 
-async function removeScene() {
-  const scene = selectedScene.value
+async function removeScene(scene: Scene) {
   if (!scene || !confirm(`删除分镜 ${scene.sequence}？`)) return
   try {
     await api.deleteScene(scene.id)
     scenes.value = scenes.value.filter(item => item.id !== scene.id)
-    const next = scenes.value[0]
+    delete sceneDrafts.value[scene.id]
+    const next = scenes.value.find(item => item.sequence > scene.sequence) ?? scenes.value.at(-1)
     activeSceneId.value = next?.id || 0
-    syncSceneForm(next)
+    await nextTick()
+    setupSceneObserver()
+    if (next) selectScene(next)
     notice.success('分镜已删除')
   } catch (error) {
     notice.error((error as Error).message)
   }
 }
 
-async function generateVideo() {
-  const scene = selectedScene.value
-  if (!scene) return
-  generatingVideo.value = true
+async function generateVideo(scene: Scene) {
+  const draft = draftFor(scene)
+  setSceneBusy(generatingVideoSceneIds, scene.id, true)
   try {
-    await saveScene(false)
-    let result = (await api.generateVideo(scene.id, Number(selectedVideoModel.value))).data
+    await saveScene(scene, false)
+    let result = (await api.generateVideo(scene.id, Number(selectedVideoModel.value), {
+      generation_mode: draft.videoGenerationMode,
+      first_frame_url: draft.firstFrameUrl || undefined,
+      last_frame_url: draft.lastFrameUrl || undefined,
+    })).data
     videos.value[scene.id] = [result, ...(videos.value[scene.id] || [])]
     while (alive && !terminalTaskStatuses.has(result.status)) {
       await sleep(4000)
@@ -321,17 +471,21 @@ async function generateVideo() {
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
-    generatingVideo.value = false
+    setSceneBusy(generatingVideoSceneIds, scene.id, false)
   }
 }
 
 function selectPhase(label: string) {
-  if (label === '剧本' && isAgent.value) void router.push(`/create/short-drama/agent/${projectId.value}`)
-  if (label === '设定') void router.push(`/create/short-drama/manual/${projectId.value}`)
+  const query = activeChapterId.value ? { chapter: String(activeChapterId.value) } : undefined
+  if (label === '剧本' && isAgent.value) void router.push({ path: `/create/short-drama/agent/${projectId.value}`, query })
+  if (label === '设定') void router.push({ path: `/create/short-drama/manual/${projectId.value}`, query })
 }
 
 onMounted(load)
-onBeforeUnmount(() => { alive = false })
+onBeforeUnmount(() => {
+  alive = false
+  sceneObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -350,11 +504,12 @@ onBeforeUnmount(() => { alive = false })
     </header>
 
     <div class="storyboard-shell">
-      <aside class="episode-rail">
-        <strong>集数</strong>
-        <div>
-          <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only :active="activeChapterId === chapter.id" :aria-label="`第 ${chapter.number} 集`" @click="loadChapter(chapter.id)">{{ chapter.number }}</AppButton>
-        </div>
+      <aside class="shot-rail">
+        <strong>分镜</strong>
+        <AppScrollArea class="scene-list" aria-label="本集分镜列表">
+          <AppButton v-for="scene in scenes" :key="scene.id" variant="soft" size="sm" icon-only :active="activeSceneId === scene.id" :aria-label="`分镜 ${scene.sequence}`" @click="selectScene(scene)">{{ scene.sequence }}</AppButton>
+          <AppButton v-if="!loading && !generatingStoryboard" variant="ghost" size="sm" icon-only aria-label="添加分镜" @click="addScene"><Plus :size="16" /></AppButton>
+        </AppScrollArea>
       </aside>
 
       <section class="storyboard-main">
@@ -367,54 +522,58 @@ onBeforeUnmount(() => { alive = false })
           </div>
         </header>
 
-        <div v-if="loading || generatingStoryboard" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? 'Agent 正在拆解章节并生成多个分镜' : '正在读取分镜' }}</strong><p>{{ generatingStoryboard ? '生成完成后会自动展示全部镜头，请稍候。' : '正在准备章节、资产和视频信息。' }}</p></div>
+        <div v-if="loading || generatingStoryboard" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : '正在准备本集章节、资产和视频信息。' }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
-        <template v-else>
-          <nav class="shot-strip" aria-label="本集分镜">
-            <AppButton v-for="scene in scenes" :key="scene.id" variant="soft" size="sm" :active="activeSceneId === scene.id" @click="selectScene(scene)"><span>{{ String(scene.sequence).padStart(2, '0') }}</span>分镜 {{ scene.sequence }}</AppButton>
-            <AppButton variant="ghost" size="sm" icon-only aria-label="添加分镜" @click="addScene"><Plus :size="16" /></AppButton>
-          </nav>
-
-          <article v-if="selectedScene" class="shot-editor">
+        <div v-else class="shot-editor-list">
+          <article v-for="scene in scenes" :id="`scene-${scene.id}`" :key="scene.id" class="shot-editor" :class="{ 'is-active': activeSceneId === scene.id }" :data-scene-id="scene.id">
             <header class="shot-editor-header">
-              <div><GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ selectedScene.sequence }}</strong><small>ID {{ selectedScene.id }}</small></div>
-              <div><AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" @click="duplicateScene"><Copy :size="15" /></AppButton><AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" @click="removeScene"><Trash2 :size="15" /></AppButton></div>
+              <div><GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ scene.sequence }}</strong><small>ID {{ scene.id }}</small></div>
+              <nav aria-label="视频生成方式">
+                <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'reference'" :aria-pressed="draftFor(scene).videoGenerationMode === 'reference'" @click="setVideoGenerationMode(scene, 'reference')">全能参考生视频</AppButton>
+                <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')">首尾帧生视频</AppButton>
+              </nav>
+              <div><AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton><AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton></div>
             </header>
 
             <div class="shot-editor-grid">
               <aside class="shot-info-panel">
                 <h2>分镜信息</h2>
-                <label><span>分镜描述</span><textarea v-model="description" rows="5" placeholder="请输入分镜描述" /></label>
+                <label><span>分镜描述</span><textarea v-model="draftFor(scene).description" rows="5" placeholder="请输入分镜描述" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
-                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><small>{{ selectedAssetIds.filter(id => group.items.some(item => item.id === id)).length }}/{{ group.items.length }}</small></header>
+                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><small>{{ draftFor(scene).selectedAssetIds.filter(id => group.items.some(item => item.id === id)).length }}/{{ group.items.length }}</small></header>
                   <div v-if="group.items.length">
-                    <AppButton v-for="asset in group.items" :key="asset.id" variant="ghost" size="sm" :active="selectedAssetIds.includes(asset.id)" :aria-pressed="selectedAssetIds.includes(asset.id)" @click="toggleAsset(asset.id)"><span class="asset-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="15" /></span><span>{{ asset.canonical_name }}</span><Check v-if="selectedAssetIds.includes(asset.id)" :size="14" /></AppButton>
+                    <AppButton v-for="asset in group.items" :key="asset.id" variant="ghost" size="sm" :active="draftFor(scene).selectedAssetIds.includes(asset.id)" :aria-pressed="draftFor(scene).selectedAssetIds.includes(asset.id)" @click="toggleAsset(scene, asset.id)"><span class="asset-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="15" /></span><span>{{ asset.canonical_name }}</span><Check v-if="draftFor(scene).selectedAssetIds.includes(asset.id)" :size="14" /></AppButton>
                   </div>
                   <p v-else>暂无可用{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
                 </section>
               </aside>
 
-              <section class="prompt-panel">
-                <header><div><Sparkles :size="17" /><span><strong>分镜视频生成</strong><small>使用 @ 引用角色、场景与道具，保持视觉一致性</small></span></div><AppButton variant="secondary" size="sm" :loading="saving" @click="saveScene()"><Save v-if="!saving" :size="14" />保存</AppButton></header>
-                <textarea v-model="prompt" placeholder="请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。" />
+              <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
+                <header><div><Sparkles :size="17" /><span><strong>分镜视频生成</strong><small>使用 @ 引用角色、场景与道具，保持视觉一致性</small></span></div><AppButton variant="secondary" size="sm" :loading="savingSceneIds.has(scene.id)" @click="saveScene(scene)"><Save v-if="!savingSceneIds.has(scene.id)" :size="14" />保存</AppButton></header>
+                <div v-if="draftFor(scene).videoGenerationMode === 'keyframes'" class="keyframe-inputs">
+                  <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" alt="首帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>上传首帧</strong><small>视频开始画面</small></span><i>首帧</i></label>
+                  <span>→</span>
+                  <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="draftFor(scene).lastFrameUrl" alt="尾帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>上传尾帧</strong><small>视频结束画面</small></span><i>尾帧</i></label>
+                </div>
+                <textarea v-model="draftFor(scene).prompt" placeholder="请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。" />
                 <footer>
-                  <div><AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" /><span><Clock3 :size="14" /><input v-model.number="duration" type="number" min="1" max="30" />s</span><span>{{ project?.resolution || '720p' }}</span><span>1x</span></div>
-                  <AppButton variant="primary" size="md" :disabled="!prompt.trim()" :loading="generatingVideo" @click="generateVideo"><Play v-if="!generatingVideo" :size="15" />{{ generatingVideo ? '生成中' : '生成视频' }}</AppButton>
+                  <div><AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" /><span><Clock3 :size="14" /><input v-model.number="draftFor(scene).duration" type="number" min="1" max="30" />s</span><span>{{ project?.resolution || '720p' }}</span><span>1x</span></div>
+                  <AppButton variant="primary" size="md" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Play v-if="!generatingVideoSceneIds.has(scene.id)" :size="15" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成视频' }}</AppButton>
                 </footer>
               </section>
 
               <aside class="preview-panel">
                 <header><strong>视频预览</strong><RefreshCw :size="15" /></header>
                 <div class="preview-stage">
-                  <video v-if="selectedVideo?.url" :src="selectedVideo.url" controls playsinline />
-                  <div v-else-if="generatingVideo || (selectedVideo && !terminalTaskStatuses.has(selectedVideo.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>视频生成中</strong><span>完成后将在这里自动播放</span></div>
+                  <video v-if="selectedVideoFor(scene)?.url" :src="selectedVideoFor(scene)?.url" controls playsinline />
+                  <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>视频生成中</strong><span>完成后将在这里自动播放</span></div>
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>等待生成视频</strong><span>完善提示词后点击“生成视频”</span></div>
                 </div>
-                <footer v-if="selectedVideo"><span :class="{ 'is-ready': selectedVideo.status === TaskStatusEnum.COMPLETED }">{{ selectedVideo.status === TaskStatusEnum.COMPLETED ? '已完成' : selectedVideo.status === TaskStatusEnum.FAILED ? '生成失败' : '生成中' }}</span><small>#{{ selectedVideo.id }}</small></footer>
+                <footer v-if="selectedVideoFor(scene)"><span :class="{ 'is-ready': selectedVideoFor(scene)!.status === TaskStatusEnum.COMPLETED }">{{ selectedVideoFor(scene)!.status === TaskStatusEnum.COMPLETED ? '已完成' : selectedVideoFor(scene)!.status === TaskStatusEnum.FAILED ? '生成失败' : '生成中' }}</span><small>#{{ selectedVideoFor(scene)!.id }}</small></footer>
               </aside>
             </div>
           </article>
-        </template>
+        </div>
       </section>
     </div>
   </main>
@@ -432,12 +591,12 @@ onBeforeUnmount(() => { alive = false })
 .phase-nav > span { width: 18px; height: 1px; background: #e2e4eb; }
 .phase-nav button { display: flex; width: 68px; min-height: 54px; flex-direction: column; gap: 4px; border-radius: 16px; color: #858b9a; background: #fff; font-size: 10px; }
 .phase-nav button.is-active { color: #5b5cf6; background: #f0f0ff; box-shadow: 0 8px 22px rgb(91 92 246 / 11%); }
-.storyboard-shell { display: grid; min-height: calc(100vh - 72px); grid-template-columns: 68px minmax(0,1fr); }
-.episode-rail { display: grid; align-content: start; justify-items: center; gap: 14px; padding: 24px 8px; background: #fff; box-shadow: 7px 0 24px rgb(43 47 65 / 4%); }
-.episode-rail > strong { color: #777d8d; font-size: 11px; }
-.episode-rail > div { display: grid; max-height: calc(100vh - 140px); gap: 9px; overflow-y: auto; padding: 2px 4px 12px; scrollbar-width: thin; }
-.episode-rail button { width: 38px; min-height: 38px; }
-.storyboard-main { min-width: 0; padding: 24px 26px 48px; }
+.storyboard-shell { min-height: calc(100vh - 72px); }
+.shot-rail { position: fixed; top: 72px; bottom: 0; left: 0; z-index: 24; display: grid; width: 68px; align-content: start; justify-items: center; gap: 14px; padding: 24px 8px; background: #fff; box-shadow: 7px 0 24px rgb(43 47 65 / 4%); }
+.shot-rail > strong { color: #777d8d; font-size: 11px; }
+.scene-list { display: grid; width: 100%; max-height: calc(100vh - 140px); justify-items: center; gap: 9px; padding: 2px 4px 12px; }
+.shot-rail button { width: 38px; min-height: 38px; }
+.storyboard-main { min-width: 0; margin-left: 68px; padding: 24px 26px 48px; }
 .chapter-toolbar { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .chapter-toolbar > div:first-child { min-width: 0; }
 .chapter-toolbar > div:first-child > span { color: #8c91a0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
@@ -451,13 +610,14 @@ onBeforeUnmount(() => { alive = false })
 .storyboard-state p { max-width: 460px; margin: 0; color: #9297a6; font-size: 11px; }
 .storyboard-state.is-error svg { color: #bf6470; animation: none; }
 .storyboard-state button { margin-top: 8px; }
-.shot-strip { display: flex; min-width: 0; gap: 7px; margin-bottom: 11px; overflow-x: auto; padding: 2px 2px 7px; scrollbar-width: thin; }
-.shot-strip button { flex: 0 0 auto; }
-.shot-strip button > span { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 6px; color: #7678e9; background: #fff; font-size: 8px; }
-.shot-strip button.is-active > span { color: #fff; background: #6668ef; }
-.shot-editor { overflow: hidden; border-radius: 18px; background: #fff; box-shadow: 0 16px 46px rgb(39 43 61 / 7%); }
+.shot-editor-list { display: grid; gap: 22px; }
+.shot-editor { overflow: hidden; scroll-margin-top: 88px; border-radius: 18px; background: #fff; box-shadow: 0 16px 46px rgb(39 43 61 / 7%); transition: box-shadow .2s ease; }
+.shot-editor.is-active { box-shadow: 0 18px 52px rgb(39 43 61 / 10%), 0 0 0 1px rgb(91 92 246 / 16%); }
 .shot-editor-header { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 14px; background: #fbfbfd; }
 .shot-editor-header > div { display: flex; align-items: center; gap: 8px; }
+.shot-editor-header > nav { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 11px; background: #f0f1f6; }
+.shot-editor-header > nav button { color: #747a89; background: transparent; box-shadow: none; }
+.shot-editor-header > nav button.is-active { color: #585aeb; background: #fff; box-shadow: 0 4px 12px rgb(46 49 70 / 8%); }
 .shot-editor-header strong { font-size: 12px; }
 .shot-editor-header small { padding: 3px 5px; border-radius: 5px; color: #7476df; background: #efefff; font-size: 8px; }
 .drag-mark { color: #9ba0ae; font-size: 17px; }
@@ -481,10 +641,22 @@ onBeforeUnmount(() => { alive = false })
 .asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .shot-assets > p { display: grid; min-height: 52px; margin: 0; place-items: center; border-radius: 9px; color: #a1a6b3; background: #f7f8fb; font-size: 9px; }
 .prompt-panel { display: grid; grid-template-rows: auto minmax(0,1fr) auto; }
+.prompt-panel.has-keyframes { grid-template-rows: auto auto minmax(0,1fr) auto; }
 .prompt-panel > header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 0 16px; }
 .prompt-panel > header > div { display: flex; min-width: 0; align-items: center; gap: 10px; color: #6264ec; }
 .prompt-panel > header span { display: grid; min-width: 0; gap: 3px; }
 .prompt-panel > header small { color: #9a9fac; font-size: 9px; font-weight: 400; }
+.keyframe-inputs { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 10px; padding: 0 16px 14px; }
+.keyframe-inputs > span { color: #a0a5b2; font-size: 16px; }
+.keyframe-inputs label { position: relative; display: grid; min-height: 112px; overflow: hidden; place-items: center; border-radius: 12px; color: #858b9a; background: #f7f8fb; box-shadow: inset 0 0 0 1px #e8eaf1; cursor: pointer; }
+.keyframe-inputs label:hover { color: #5d5fee; background: #f4f4ff; box-shadow: inset 0 0 0 1px #cdcffa; }
+.keyframe-inputs input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.keyframe-inputs img { width: 100%; height: 112px; object-fit: cover; }
+.keyframe-inputs label > span { display: grid; place-items: center; gap: 4px; }
+.keyframe-inputs label > span svg { margin-bottom: 2px; }
+.keyframe-inputs label > span strong { color: currentColor; font-size: 11px; }
+.keyframe-inputs label > span small { color: #a1a6b3; font-size: 9px; }
+.keyframe-inputs label > i { position: absolute; top: 8px; left: 8px; padding: 4px 7px; border-radius: 7px; color: #5e60e9; background: rgb(255 255 255 / 92%); box-shadow: 0 3px 10px rgb(37 40 58 / 8%); font-size: 9px; font-style: normal; font-weight: 700; }
 .prompt-panel > textarea { min-height: 420px; padding: 18px; background: #fff; font-size: 12px; line-height: 1.85; white-space: pre-wrap; }
 .prompt-panel > footer { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; background: #fbfbfd; }
 .prompt-panel > footer > div { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -506,7 +678,7 @@ onBeforeUnmount(() => { alive = false })
 .preview-panel > footer small { color: #a0a5b1; font-size: 9px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@media (max-width: 820px) { .storyboard-topbar { grid-template-columns: 1fr; gap: 8px; padding: 10px 14px; }.phase-nav { grid-column: 1; justify-content: center; }.storyboard-shell { grid-template-columns: 1fr; }.episode-rail { display: flex; align-items: center; justify-items: initial; padding: 9px 14px; overflow: hidden; }.episode-rail > div { display: flex; max-height: none; overflow-x: auto; padding: 0; }.storyboard-main { padding: 18px 14px 36px; }.chapter-toolbar { flex-direction: column; }.chapter-actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@media (max-width: 820px) { .storyboard-topbar { grid-template-columns: 1fr; gap: 8px; padding: 10px 14px; }.phase-nav { grid-column: 1; justify-content: center; }.shot-rail { top: 126px; bottom: auto; z-index: 20; display: flex; width: 100%; height: 56px; align-items: center; justify-items: initial; padding: 9px 14px; overflow: hidden; }.shot-rail > .scene-list { display: flex; max-height: none; justify-items: initial; overflow-x: auto; overflow-y: hidden; padding: 0; }.storyboard-main { margin-left: 0; padding: 74px 14px 36px; }.chapter-toolbar { flex-direction: column; }.chapter-actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-header > nav button { flex: 1; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
 @media (max-width: 520px) { .phase-nav button { width: 54px; }.phase-nav > span { width: 7px; }.chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 </style>

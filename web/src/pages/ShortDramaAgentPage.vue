@@ -128,9 +128,9 @@ const analysisStatus = computed(() => {
 })
 const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', '#8d73db']
 const activeModels = computed(() => ({
-  llm: configs.value.find(item => item.is_active && [1, 3].includes(item.task_type)),
-  image: configs.value.find(item => item.is_active && item.task_type === 2),
-  video: configs.value.find(item => item.is_active && item.task_type === 4),
+  llm: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).some(value => [1, 3].includes(value))),
+  image: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).includes(2)),
+  video: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).includes(4)),
 }))
 
 async function loadModels() {
@@ -141,10 +141,16 @@ async function loadModels() {
   }
 }
 
-async function loadProject() {
-  if (!Number.isFinite(projectId.value) || projectId.value <= 0) return
+async function loadProject(): Promise<boolean> {
+  if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
   try {
     const response = await api.novel(projectId.value)
+    const contentLength = (response.data.content || '').trim().length
+    if (contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
+      notice.error(`书稿约 ${contentLength.toLocaleString()} 字但只拆分出 ${response.data.total_chapters || 0} 章，已阻止进入。请重新上传并检查文件编码或章节标题。`)
+      await router.replace('/create/short-drama')
+      return false
+    }
     const settings = readShortDramaSettings(response.data)
     project.value = {
       ...project.value,
@@ -156,15 +162,21 @@ async function loadProject() {
       fileName: settings.sourceFile || project.value.fileName,
       cover: response.data.cover,
     }
+    return true
   } catch (error) {
     notice.error((error as Error).message)
+    return false
   }
 }
 
 async function loadChapters() {
   try {
     chapters.value = (await api.chapters(projectId.value)).data.items
-    if (chapters.value.length && !chapters.value.some(item => item.number === activeEpisode.value)) {
+    const requestedChapterId = Number(route.query.chapter)
+    const requestedChapter = chapters.value.find(item => item.id === requestedChapterId)
+    if (requestedChapter) {
+      activeEpisode.value = requestedChapter.number
+    } else if (chapters.value.length && !chapters.value.some(item => item.number === activeEpisode.value)) {
       activeEpisode.value = chapters.value[0].number
     }
     await loadChapterContent(selectedEpisodeBrief.value)
@@ -244,12 +256,16 @@ async function regenerateAnalysis() {
 
 function continueToSettings() {
   notice.success('剧本分析已确认，正在进入角色与场景设定')
-  void router.push(`/create/short-drama/manual/${projectId.value}`)
+  void router.push({
+    path: `/create/short-drama/manual/${projectId.value}`,
+    query: selectedEpisodeBrief.value ? { chapter: String(selectedEpisodeBrief.value.id) } : undefined,
+  })
 }
 
 async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
   activeEpisode.value = chapterNumber
   const chapter = chapters.value.find(item => item.number === chapterNumber)
+  if (chapter) void router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   void loadChapterContent(chapter)
   await nextTick()
   const button = event?.currentTarget as HTMLElement | null
@@ -259,8 +275,8 @@ async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadModels(), loadProject()])
-  await loadAnalysis()
+  const [, projectReady] = await Promise.all([loadModels(), loadProject()])
+  if (projectReady) await loadAnalysis()
 })
 onBeforeUnmount(stopPolling)
 </script>

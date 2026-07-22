@@ -12,6 +12,7 @@ class AiModelConfigProperties(BaseModel):
     """AI 模型配置属性。"""
 
     task_type: Optional[int] = Field(None, description=AiTaskTypeEnum.__doc__)
+    task_types: Optional[list[int]] = Field(None, description="模型支持的任务类型列表")
     name: Optional[str] = Field(None, description="配置名称", max_length=100)
     base_url: Optional[str] = Field(None, description="API 地址", max_length=500)
     api_key: Optional[str] = Field(None, description="API Key", max_length=500)
@@ -30,6 +31,7 @@ class AiModelConfigCreate(AiModelConfigProperties):
     """创建请求：必填字段。"""
 
     task_type: int = Field(..., description=AiTaskTypeEnum.__doc__)
+    task_types: list[int] = Field(default_factory=list, description="模型支持的任务类型列表")
     name: str = Field(..., description="配置名称", max_length=100)
     base_url: str = Field(..., description="API 地址", max_length=500)
     api_key: str = Field(..., description="API Key", max_length=500)
@@ -55,6 +57,7 @@ class AiModelConfigOut(AiModelConfigProperties, BaseResponse):
 
     id: int = Field(..., description="配置ID")
     task_type: int = Field(..., description=AiTaskTypeEnum.__doc__)
+    task_types: list[int] = Field(default_factory=list, description="模型支持的任务类型列表")
     name: str = Field(..., description="配置名称")
     is_active: bool = Field(..., description="是否启用")
     concurrency: int = Field(..., description="并发数")

@@ -17,7 +17,7 @@ import {
   X,
   Zap,
 } from 'lucide-vue-next'
-import AppSelect from '@/components/AppSelect.vue'
+import AppMultiSelect from '@/components/AppMultiSelect.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import type { AiModelConfig, EnumItem } from '@/types'
@@ -68,22 +68,29 @@ const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_type: '1', name: '', base_url: '', api_key: '', model: '', concurrency: 1, supports_json_output: false })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', concurrency: 1, supports_json_output: false })
+
+function configTaskTypes(item: AiModelConfig) {
+  return item.task_types?.length ? item.task_types : [item.task_type]
+}
 
 const selectedCategory = computed(() => categories.find(item => item.id === selectedCategoryId.value) ?? categories[0])
 const isEditing = computed(() => editingConfigId.value !== null)
-const selectedConfigs = computed(() => configs.value.filter(item => selectedCategory.value.taskTypes.includes(item.task_type)))
+const selectedConfigs = computed(() => configs.value.filter(item => configTaskTypes(item).some(value => selectedCategory.value.taskTypes.includes(value))))
 const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value => ({
   value: String(value),
   label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成' }[value] ?? `任务 ${value}`),
 })))
 
 function configsFor(category: ModelCategory) {
-  return configs.value.filter(item => category.taskTypes.includes(item.task_type))
+  return configs.value.filter(item => configTaskTypes(item).some(value => category.taskTypes.includes(value)))
 }
 
 function activeCount(category: ModelCategory) {
-  return configsFor(category).filter(item => item.is_active).length
+  return new Set(configsFor(category)
+    .filter(item => item.is_active)
+    .flatMap(item => configTaskTypes(item).filter(value => category.taskTypes.includes(value))))
+    .size
 }
 
 function taskLabel(value: number) {
@@ -115,7 +122,7 @@ async function load() {
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_type: String(category.taskTypes[0]), name: '', base_url: '', api_key: '', model: '', concurrency: 1, supports_json_output: false }
+  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: '', api_key: '', model: '', concurrency: 1, supports_json_output: false }
   editingConfigId.value = null
   showApiKey.value = false
   showCreate.value = true
@@ -127,7 +134,7 @@ function openEdit(item: AiModelConfig) {
   editingConfigId.value = item.id
   showApiKey.value = false
   form.value = {
-    task_type: String(item.task_type),
+    task_types: configTaskTypes(item).map(String),
     name: item.name,
     base_url: item.base_url || '',
     api_key: item.api_key || '',
@@ -139,9 +146,14 @@ function openEdit(item: AiModelConfig) {
 }
 
 async function saveConfig() {
+  if (!form.value.task_types.length) {
+    notice.error('请至少选择一个能力用途')
+    return
+  }
   creating.value = true
   try {
-    const payload = { ...form.value, task_type: Number(form.value.task_type) }
+    const taskTypes = form.value.task_types.map(Number)
+    const payload = { ...form.value, task_type: taskTypes[0], task_types: taskTypes }
     if (editingConfigId.value !== null) {
       await api.updateConfig(editingConfigId.value, payload)
     } else {
@@ -226,7 +238,7 @@ onMounted(load)
           <span class="config-provider-icon"><component :is="selectedCategory.icon" :size="19" /></span>
           <div class="config-main">
             <div class="config-title"><h3>{{ item.name }}</h3><span :class="{ 'is-active': item.is_active }">{{ item.is_active ? '当前启用' : '备用配置' }}</span></div>
-            <p>{{ taskLabel(item.task_type) }}</p>
+            <p>{{ configTaskTypes(item).map(taskLabel).join(' · ') }}</p>
             <div class="config-metadata">
               <span><Settings2 :size="13" />{{ item.model || '未设置模型名称' }}</span>
               <span><Server :size="13" />{{ providerHost(item.base_url) }}</span>
@@ -262,8 +274,8 @@ onMounted(load)
         <div class="model-form-grid">
           <label v-if="selectedCategory.taskTypes.length > 1" class="is-full">
             <span>能力用途</span>
-            <AppSelect v-model="form.task_type" ariaLabel="能力用途" :options="taskOptions" />
-            <small>同一个 LLM 可以分别配置给内容理解和分镜规划。</small>
+            <AppMultiSelect v-model="form.task_types" ariaLabel="能力用途" :options="taskOptions" />
+            <small>可同时选择多个用途，同一个 LLM 能用于内容理解和分镜规划。</small>
           </label>
           <label class="is-full"><span>配置名称</span><input v-model="form.name" required placeholder="例如：豆包 Seed 1.6" /></label>
           <label class="is-full"><span>Base URL</span><span class="input-with-icon"><Server :size="15" /><input v-model="form.base_url" required placeholder="https://api.example.com/v1" /></span></label>

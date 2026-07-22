@@ -4,7 +4,12 @@ from models.ai_task import AiTask
 from models.chapter import Chapter
 from controllers.config import ai_model_config_controller
 from services.ai_task_executor import ai_task_executor
-from services.nlp import RegexChapterRecognitionStrategy, NovelText
+from services.nlp import (
+    ChapterSplitError,
+    RegexChapterRecognitionStrategy,
+    NovelText,
+    validate_chapter_split,
+)
 from utils.crud import CRUDBase
 from models.novel import Novel
 from schemas.novel import NovelCreate, NovelUpdate
@@ -40,7 +45,12 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         service = RegexChapterRecognitionStrategy()
         parsed_chapters = service.recognize(novel_text)
 
-        # 如果没有识别到章节，默认整个小说作为一个章节
+        try:
+            validate_chapter_split(novel.content, parsed_chapters)
+        except ChapterSplitError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        # 短篇无章节标记时仍可作为单章；长篇会在上面的质量校验中被拒绝。
         if not parsed_chapters:
             parsed_chapters = [
                 type(
@@ -56,14 +66,16 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 )()
             ]
 
-        # 创建章节记录
-        for idx, chapter_result in enumerate(parsed_chapters):
-            await Chapter.create(
+        # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
+        await Chapter.bulk_create([
+            Chapter(
                 novel_id=novel.id,
                 number=idx + 1,
                 name=chapter_result.title,
                 content=chapter_result.content,
             )
+            for idx, chapter_result in enumerate(parsed_chapters)
+        ])
 
         # 更新小说的总章节数和状态
         await novel.update_from_dict(

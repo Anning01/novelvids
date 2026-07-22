@@ -99,6 +99,34 @@ async def test_split_novel_no_chapters_recognized():
 
 
 @pytest.mark.asyncio
+async def test_split_long_novel_rejects_single_chapter_fallback():
+    """长书稿未识别出多个章节时直接失败，不得伪装成第一章。"""
+    content = "这是一段没有章节标题的正文。" * 3_000
+    novel = await Novel.create(name="Invalid Long Novel", author="Author", content=content)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await novel_controller.split(novel.id)
+
+    assert exc_info.value.status_code == 422
+    assert "只识别到 0 章" in exc_info.value.detail
+    assert await Chapter.filter(novel_id=novel.id).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_split_rejects_mojibake_content():
+    """包含大量 Unicode 替换字符的乱码正文不得进入工作流。"""
+    content = ("\ufffd" * 100 + "乱码正文") * 400
+    novel = await Novel.create(name="Mojibake Novel", author="Author", content=content)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await novel_controller.split(novel.id)
+
+    assert exc_info.value.status_code == 422
+    assert "大量乱码" in exc_info.value.detail
+    assert await Chapter.filter(novel_id=novel.id).count() == 0
+
+
+@pytest.mark.asyncio
 async def test_split_novel_already_has_chapters():
     """已有章节时禁止再次分章。"""
     content = "第1章 开始\n内容"

@@ -45,6 +45,8 @@ class VeoGenerator(BaseVideoGenerator):
             payload["images"] = [
                 img for s in subjects for img in s.get("images", [])
             ]
+        if kwargs.get("generation_mode") == "keyframes":
+            payload["images"] = [kwargs.get("first_frame_url"), kwargs.get("last_frame_url")]
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(

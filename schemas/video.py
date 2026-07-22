@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
 from utils.enums import VideoModelTypeEnum, TaskStatusEnum
 
@@ -10,6 +10,9 @@ class VideoGenerateRequest(BaseModel):
     """提交视频生成请求"""
     scene_id: int = Field(..., description="分镜ID")
     model_type: VideoModelTypeEnum = Field(..., description=VideoModelTypeEnum.__doc__)
+    generation_mode: Literal["reference", "keyframes"] = Field("reference", description="参考图或首尾帧生成模式")
+    first_frame_url: Optional[str] = Field(None, description="首帧图片地址")
+    last_frame_url: Optional[str] = Field(None, description="尾帧图片地址")
 
 
 # --- 输出 Schema ---

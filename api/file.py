@@ -10,6 +10,12 @@ from pypdf import PdfReader
 
 from utils.response_format import ResponseSchema
 from config import settings
+from services.nlp import (
+    ChapterSplitError,
+    NovelText,
+    RegexChapterRecognitionStrategy,
+    validate_chapter_split,
+)
 
 router = APIRouter()
 
@@ -77,6 +83,26 @@ async def upload_files(
                 file_path,
                 ext_part,
             )
+            chapter_validation = None
+            if text_content.strip():
+                parsed_chapters = RegexChapterRecognitionStrategy().recognize(
+                    NovelText.from_string(text_content)
+                )
+                try:
+                    validate_chapter_split(text_content, parsed_chapters)
+                    chapter_validation = {
+                        "valid": True,
+                        "chapter_count": len(parsed_chapters) or 1,
+                        "text_length": len(text_content),
+                        "message": "书稿结构检查通过",
+                    }
+                except ChapterSplitError as error:
+                    chapter_validation = {
+                        "valid": False,
+                        "chapter_count": len(parsed_chapters),
+                        "text_length": len(text_content),
+                        "message": str(error),
+                    }
 
             # 记录结果
             results.append(
@@ -86,6 +112,7 @@ async def upload_files(
                     "content_type": file.content_type,
                     "file_path": file_path,
                     "text_content": text_content,
+                    "chapter_validation": chapter_validation,
                     "message": "文件上传成功",
                 }
             )

@@ -43,6 +43,54 @@ async def test_创建配置_传入is_active为True():
 
 
 @pytest.mark.asyncio
+async def test_单个模型支持多个能力用途():
+    """同一配置可同时服务内容提取与分镜生成。"""
+    config = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[AiTaskTypeEnum.extraction.value, AiTaskTypeEnum.storyboard.value],
+        name="multi-purpose-llm",
+        base_url="https://api.example.com",
+        api_key="sk-test",
+        model="deepseek-v4-pro",
+        is_active=True,
+    ))
+
+    assert config.task_types == [
+        AiTaskTypeEnum.extraction.value,
+        AiTaskTypeEnum.storyboard.value,
+    ]
+    assert await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value) == config
+    assert await ai_model_config_controller.get_active(AiTaskTypeEnum.storyboard.value) == config
+
+
+@pytest.mark.asyncio
+async def test_多能力配置会停用任一能力冲突的旧配置():
+    """启用多用途模型时，它覆盖到的每个能力都只保留一个启用配置。"""
+    old_storyboard = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.storyboard.value,
+        task_types=[AiTaskTypeEnum.storyboard.value],
+        name="old-storyboard",
+        base_url="https://old.example.com",
+        api_key="old-key",
+        model="old-model",
+        is_active=True,
+    )
+
+    await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[AiTaskTypeEnum.extraction.value, AiTaskTypeEnum.storyboard.value],
+        name="new-multi-purpose",
+        base_url="https://new.example.com",
+        api_key="new-key",
+        model="new-model",
+        is_active=True,
+    ))
+
+    await old_storyboard.refresh_from_db()
+    assert old_storyboard.is_active is False
+
+
+@pytest.mark.asyncio
 async def test_创建配置_启用时同类型旧的自动禁用():
     """创建新配置并启用，同类型下原有的应被自动禁用。"""
     old = await AiModelConfig.create(

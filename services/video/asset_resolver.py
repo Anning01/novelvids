@@ -72,17 +72,18 @@ def _collect_images(asset: Asset) -> list[str]:
         path = getattr(asset, field_name, None)
         if not path:
             continue
-        # 远程 URL 直接使用
-        if path.startswith(("http://", "https://")):
-            images.append(path)
-            continue
-        # /media/... 路径 → 转换为本地绝对路径再转 base64
-        if path.startswith("/media/"):
-            path = os.path.join(settings.MEDIA_PATH, path[len("/media/"):])
-        # 本地文件转 base64
         try:
-            images.append(image_to_base64(path))
+            images.append(resolve_image_source(path))
         except FileNotFoundError:
             logger.warning("resolve_assets: image not found: %s", path)
             continue
     return images
+
+
+def resolve_image_source(path: str) -> str:
+    """远程图片保留 URL，本地与 /media/ 图片转换为 Base64 data URI。"""
+    if path.startswith(("http://", "https://", "data:")):
+        return path
+    if path.startswith("/media/"):
+        path = os.path.join(settings.MEDIA_PATH, path[len("/media/"):])
+    return image_to_base64(path)
