@@ -9,12 +9,12 @@ import {
   Clapperboard,
   Clock3,
   Copy,
+  Ellipsis,
   Film,
   GripVertical,
   ImageIcon,
   LoaderCircle,
   MonitorPlay,
-  Play,
   Plus,
   RefreshCw,
   Save,
@@ -24,6 +24,7 @@ import {
   Upload,
   UsersRound,
   Video,
+  Volume2,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
@@ -76,6 +77,7 @@ const savingSceneIds = ref<Set<number>>(new Set())
 const generatingVideoSceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
+const openAssetPickers = ref<Set<string>>(new Set())
 const uploadingFrameKey = ref('')
 let alive = true
 let chapterLoadVersion = 0
@@ -136,6 +138,29 @@ function selectedVideoFor(scene: Scene) {
 function canGenerateSceneVideo(scene: Scene) {
   const draft = draftFor(scene)
   return Boolean(draft.prompt.trim() && (draft.videoGenerationMode === 'reference' || (draft.firstFrameUrl && draft.lastFrameUrl)))
+}
+
+function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
+  const selectedIds = draftFor(scene).selectedAssetIds
+  const sceneText = `${draftFor(scene).description}\n${draftFor(scene).prompt}`.toLocaleLowerCase()
+  return group.items.filter(item => {
+    if (selectedIds.includes(item.id)) return true
+    const referenceNames = [item.canonical_name, ...(item.aliases || [])]
+      .map(name => name.trim().toLocaleLowerCase())
+      .filter(name => name.length > 1)
+    return referenceNames.some(name => sceneText.includes(name))
+  })
+}
+
+function assetPickerKey(scene: Scene, type: number) {
+  return `${scene.id}:${type}`
+}
+
+function toggleAssetPicker(scene: Scene, type: number) {
+  const key = assetPickerKey(scene, type)
+  const next = new Set(openAssetPickers.value)
+  next.has(key) ? next.delete(key) : next.add(key)
+  openAssetPickers.value = next
 }
 
 async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
@@ -527,11 +552,13 @@ onBeforeUnmount(() => {
         <div v-else class="shot-editor-list">
           <article v-for="scene in scenes" :id="`scene-${scene.id}`" :key="scene.id" class="shot-editor" :class="{ 'is-active': activeSceneId === scene.id }" :data-scene-id="scene.id">
             <header class="shot-editor-header">
-              <div><GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ scene.sequence }}</strong><small>ID {{ scene.id }}</small></div>
-              <nav aria-label="视频生成方式">
-                <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'reference'" :aria-pressed="draftFor(scene).videoGenerationMode === 'reference'" @click="setVideoGenerationMode(scene, 'reference')">全能参考生视频</AppButton>
-                <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')">首尾帧生视频</AppButton>
-              </nav>
+              <div class="shot-editor-heading">
+                <GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ scene.sequence }}</strong><small>ID {{ scene.id }}</small>
+                <nav aria-label="视频生成方式">
+                  <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'reference'" :aria-pressed="draftFor(scene).videoGenerationMode === 'reference'" @click="setVideoGenerationMode(scene, 'reference')"><span class="mode-dot" />全能参考生视频</AppButton>
+                  <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')"><span class="mode-dot" />首尾帧生视频</AppButton>
+                </nav>
+              </div>
               <div><AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton><AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton></div>
             </header>
 
@@ -540,25 +567,34 @@ onBeforeUnmount(() => {
                 <h2>分镜信息</h2>
                 <label><span>分镜描述</span><textarea v-model="draftFor(scene).description" rows="5" placeholder="请输入分镜描述" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
-                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><small>{{ draftFor(scene).selectedAssetIds.filter(id => group.items.some(item => item.id === id)).length }}/{{ group.items.length }}</small></header>
-                  <div v-if="group.items.length">
-                    <AppButton v-for="asset in group.items" :key="asset.id" variant="ghost" size="sm" :active="draftFor(scene).selectedAssetIds.includes(asset.id)" :aria-pressed="draftFor(scene).selectedAssetIds.includes(asset.id)" @click="toggleAsset(scene, asset.id)"><span class="asset-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="15" /></span><span>{{ asset.canonical_name }}</span><Check v-if="draftFor(scene).selectedAssetIds.includes(asset.id)" :size="14" /></AppButton>
+                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.length }}</small><AppButton variant="ghost" size="sm" icon-only :aria-label="`选择${group.label}`" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
+                  <div v-if="selectedAssetsFor(scene, group).length" class="selected-assets" :class="{ 'is-scene-assets': group.type === AssetTypeEnum.SCENE }">
+                    <article v-for="asset in selectedAssetsFor(scene, group)" :key="asset.id" class="selected-asset-row">
+                      <span class="asset-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="16" /></span>
+                      <AppButton variant="soft" size="sm" class="asset-name-button"><span>{{ asset.canonical_name }}</span></AppButton>
+                      <AppButton v-if="group.type === AssetTypeEnum.PERSON" variant="soft" size="sm" class="asset-voice-button"><Volume2 :size="13" /><span>未配置音色</span></AppButton>
+                      <AppButton variant="ghost" size="sm" icon-only aria-label="管理资产" @click="toggleAssetPicker(scene, group.type)"><Ellipsis :size="15" /></AppButton>
+                    </article>
                   </div>
-                  <p v-else>暂无可用{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
+                  <p v-else>暂未选择{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
+                  <div v-if="openAssetPickers.has(assetPickerKey(scene, group.type))" class="asset-picker">
+                    <AppButton v-for="asset in group.items" :key="asset.id" variant="ghost" size="sm" :active="draftFor(scene).selectedAssetIds.includes(asset.id)" :aria-pressed="draftFor(scene).selectedAssetIds.includes(asset.id)" @click="toggleAsset(scene, asset.id)"><span class="asset-picker-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="14" /></span><span>{{ asset.canonical_name }}</span><Check v-if="draftFor(scene).selectedAssetIds.includes(asset.id)" :size="13" /></AppButton>
+                  </div>
                 </section>
               </aside>
 
               <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
-                <header><div><Sparkles :size="17" /><span><strong>分镜视频生成</strong><small>使用 @ 引用角色、场景与道具，保持视觉一致性</small></span></div><AppButton variant="secondary" size="sm" :loading="savingSceneIds.has(scene.id)" @click="saveScene(scene)"><Save v-if="!savingSceneIds.has(scene.id)" :size="14" />保存</AppButton></header>
+                <header><div><span><strong>分镜视频生成</strong><small>组合角色、场景和动作，生成连续镜头</small></span></div><AppButton variant="secondary" size="sm" :loading="savingSceneIds.has(scene.id)" @click="saveScene(scene)"><Save v-if="!savingSceneIds.has(scene.id)" :size="14" />保存</AppButton></header>
                 <div v-if="draftFor(scene).videoGenerationMode === 'keyframes'" class="keyframe-inputs">
                   <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" alt="首帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>上传首帧</strong><small>视频开始画面</small></span><i>首帧</i></label>
                   <span>→</span>
                   <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="draftFor(scene).lastFrameUrl" alt="尾帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>上传尾帧</strong><small>视频结束画面</small></span><i>尾帧</i></label>
                 </div>
+                <div class="prompt-reference-bar"><AppButton variant="soft" size="sm" icon-only aria-label="添加参考素材"><Plus :size="14" /></AppButton><span>使用 @ 引用角色、场景、道具、音色及参考素材，编辑更灵活，分镜更精准</span></div>
                 <textarea v-model="draftFor(scene).prompt" placeholder="请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。" />
                 <footer>
                   <div><AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" /><span><Clock3 :size="14" /><input v-model.number="draftFor(scene).duration" type="number" min="1" max="30" />s</span><span>{{ project?.resolution || '720p' }}</span><span>1x</span></div>
-                  <AppButton variant="primary" size="md" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Play v-if="!generatingVideoSceneIds.has(scene.id)" :size="15" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成视频' }}</AppButton>
+                  <AppButton variant="primary" size="md" :aria-label="`生成视频，预计消耗 ${draftFor(scene).duration * 150}`" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : draftFor(scene).duration * 150 }}</AppButton>
                 </footer>
               </section>
 
@@ -569,7 +605,7 @@ onBeforeUnmount(() => {
                   <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>视频生成中</strong><span>完成后将在这里自动播放</span></div>
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>等待生成视频</strong><span>完善提示词后点击“生成视频”</span></div>
                 </div>
-                <footer v-if="selectedVideoFor(scene)"><span :class="{ 'is-ready': selectedVideoFor(scene)!.status === TaskStatusEnum.COMPLETED }">{{ selectedVideoFor(scene)!.status === TaskStatusEnum.COMPLETED ? '已完成' : selectedVideoFor(scene)!.status === TaskStatusEnum.FAILED ? '生成失败' : '生成中' }}</span><small>#{{ selectedVideoFor(scene)!.id }}</small></footer>
+                <footer v-if="selectedVideoFor(scene)" class="preview-timeline"><AppButton variant="soft" size="sm" class="preview-clip" :aria-label="`当前分镜视频 ${selectedVideoFor(scene)!.id}`"><video v-if="selectedVideoFor(scene)?.url" :src="selectedVideoFor(scene)?.url" muted playsinline /><MonitorPlay v-else :size="16" /><small>当前分镜</small></AppButton></footer>
               </aside>
             </div>
           </article>
@@ -581,7 +617,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .storyboard-page { min-width: 0; min-height: 100%; overflow-x: hidden; color: #303442; background: #f7f8fb; }
-.storyboard-topbar { position: sticky; top: 0; z-index: 30; display: grid; min-height: 72px; grid-template-columns: minmax(280px,1fr) auto minmax(280px,1fr); align-items: center; padding: 7px 26px; background: rgb(255 255 255 / 96%); box-shadow: 0 8px 26px rgb(35 39 56 / 5%); backdrop-filter: blur(16px); }
+.storyboard-topbar { position: sticky; top: 0; z-index: 30; display: grid; min-height: 64px; grid-template-columns: minmax(280px,1fr) auto minmax(280px,1fr); align-items: center; padding: 5px 18px; background: rgb(255 255 255 / 97%); box-shadow: 0 1px 0 #eceef3; backdrop-filter: blur(16px); }
 .project-heading { display: flex; min-width: 0; align-items: center; gap: 12px; }
 .project-heading > div { display: grid; min-width: 0; gap: 5px; }
 .project-heading strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -589,14 +625,14 @@ onBeforeUnmount(() => {
 .project-heading i { width: 1px; height: 10px; background: #dfe2e9; }
 .phase-nav { grid-column: 2; display: flex; align-items: center; }
 .phase-nav > span { width: 18px; height: 1px; background: #e2e4eb; }
-.phase-nav button { display: flex; width: 68px; min-height: 54px; flex-direction: column; gap: 4px; border-radius: 16px; color: #858b9a; background: #fff; font-size: 10px; }
+.phase-nav button { display: flex; width: 64px; min-height: 50px; flex-direction: column; gap: 3px; border-radius: 16px; color: #858b9a; background: #fff; font-size: 10px; }
 .phase-nav button.is-active { color: #5b5cf6; background: #f0f0ff; box-shadow: 0 8px 22px rgb(91 92 246 / 11%); }
-.storyboard-shell { min-height: calc(100vh - 72px); }
-.shot-rail { position: fixed; top: 72px; bottom: 0; left: 0; z-index: 24; display: grid; width: 68px; align-content: start; justify-items: center; gap: 14px; padding: 24px 8px; background: #fff; box-shadow: 7px 0 24px rgb(43 47 65 / 4%); }
+.storyboard-shell { min-height: calc(100vh - 64px); }
+.shot-rail { position: fixed; top: 64px; bottom: 0; left: 0; z-index: 24; display: grid; width: 48px; align-content: start; justify-items: center; gap: 10px; padding: 14px 5px; background: #fff; box-shadow: 1px 0 0 #eceef3; }
 .shot-rail > strong { color: #777d8d; font-size: 11px; }
-.scene-list { display: grid; width: 100%; max-height: calc(100vh - 140px); justify-items: center; gap: 9px; padding: 2px 4px 12px; }
-.shot-rail button { width: 38px; min-height: 38px; }
-.storyboard-main { min-width: 0; margin-left: 68px; padding: 24px 26px 48px; }
+.scene-list { display: grid; width: 100%; max-height: calc(100vh - 112px); justify-items: center; gap: 8px; padding: 2px 2px 12px; }
+.shot-rail button { width: 34px; min-height: 34px; border-radius: 8px; }
+.storyboard-main { min-width: 0; margin-left: 48px; padding: 16px 16px 42px; }
 .chapter-toolbar { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .chapter-toolbar > div:first-child { min-width: 0; }
 .chapter-toolbar > div:first-child > span { color: #8c91a0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
@@ -610,40 +646,54 @@ onBeforeUnmount(() => {
 .storyboard-state p { max-width: 460px; margin: 0; color: #9297a6; font-size: 11px; }
 .storyboard-state.is-error svg { color: #bf6470; animation: none; }
 .storyboard-state button { margin-top: 8px; }
-.shot-editor-list { display: grid; gap: 22px; }
-.shot-editor { overflow: hidden; scroll-margin-top: 88px; border-radius: 18px; background: #fff; box-shadow: 0 16px 46px rgb(39 43 61 / 7%); transition: box-shadow .2s ease; }
-.shot-editor.is-active { box-shadow: 0 18px 52px rgb(39 43 61 / 10%), 0 0 0 1px rgb(91 92 246 / 16%); }
-.shot-editor-header { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 14px; background: #fbfbfd; }
-.shot-editor-header > div { display: flex; align-items: center; gap: 8px; }
-.shot-editor-header > nav { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 11px; background: #f0f1f6; }
-.shot-editor-header > nav button { color: #747a89; background: transparent; box-shadow: none; }
-.shot-editor-header > nav button.is-active { color: #585aeb; background: #fff; box-shadow: 0 4px 12px rgb(46 49 70 / 8%); }
+.shot-editor-list { display: grid; gap: 12px; }
+.shot-editor { overflow: hidden; scroll-margin-top: 78px; border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px #e9ebf2; }
+.shot-editor.is-active { box-shadow: inset 0 0 0 1px #dfe1f5; }
+.shot-editor-header { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 12px; background: #fbfbfd; }
+.shot-editor-header > div { display: flex; align-items: center; gap: 7px; }
+.shot-editor-heading > nav { display: flex; align-items: center; gap: 2px; margin-left: 8px; padding: 3px; border-radius: 9px; background: #f1f2f7; }
+.shot-editor-heading > nav button { min-height: 28px; padding-inline: 9px; color: #747a89; background: transparent; box-shadow: none; font-size: 9px; }
+.shot-editor-heading > nav button.is-active { color: #5658ea; background: #fff; box-shadow: 0 2px 8px rgb(46 49 70 / 7%); }
+.mode-dot { width: 11px; height: 11px; border: 1px solid #d9dce6; border-radius: 50%; background: #fff; }
+.shot-editor-heading > nav button.is-active .mode-dot { border: 3px solid #6264ef; }
 .shot-editor-header strong { font-size: 12px; }
 .shot-editor-header small { padding: 3px 5px; border-radius: 5px; color: #7476df; background: #efefff; font-size: 8px; }
 .drag-mark { color: #9ba0ae; font-size: 17px; }
-.shot-editor-grid { display: grid; min-height: 660px; grid-template-columns: 300px minmax(400px,1fr) minmax(300px,34%); gap: 12px; padding: 12px; background: #f7f8fb; }
-.shot-info-panel,.prompt-panel,.preview-panel { min-width: 0; border-radius: 14px; background: #fff; box-shadow: 0 5px 20px rgb(45 49 68 / 4%); }
-.shot-info-panel { display: grid; align-content: start; gap: 17px; padding: 17px; overflow-y: auto; }
+.shot-editor-grid { display: grid; min-height: 630px; grid-template-columns: 410px minmax(600px,3fr) minmax(520px,2fr); gap: 12px; padding: 12px; background: #f8f9fc; }
+.shot-info-panel,.prompt-panel,.preview-panel { min-width: 0; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 1px #e7e9f0; }
+.shot-info-panel { display: grid; align-content: start; gap: 16px; padding: 16px; overflow-y: auto; }
 .shot-info-panel h2,.prompt-panel strong,.preview-panel strong { margin: 0; font-size: 13px; }
 .shot-info-panel label { display: grid; gap: 7px; color: #686e7d; font-size: 10px; }
 .shot-info-panel textarea,.prompt-panel textarea { width: 100%; border: 0; outline: 0; color: #3e4351; background: #f7f8fb; font: inherit; resize: none; }
-.shot-info-panel textarea { padding: 11px; border-radius: 10px; font-size: 11px; line-height: 1.6; }
+.shot-info-panel textarea { padding: 11px; border-radius: 9px; font-size: 11px; line-height: 1.65; box-shadow: inset 0 0 0 1px #e1e4ec; }
 .shot-info-panel textarea:focus,.prompt-panel textarea:focus { box-shadow: inset 0 0 0 2px rgb(91 92 246 / 14%); }
 .shot-assets { display: grid; gap: 8px; }
 .shot-assets > header { display: flex; align-items: center; justify-content: space-between; color: #525867; font-size: 10px; font-weight: 650; }
 .shot-assets > header > span { display: inline-flex; align-items: center; gap: 6px; }
+.shot-assets > header > span:last-child { display: flex; align-items: center; gap: 2px; }
 .shot-assets > header small { color: #9a9fac; font-weight: 400; }
-.shot-assets > div { display: grid; gap: 5px; }
-.shot-assets button { width: 100%; justify-content: flex-start; padding: 5px 7px; color: #666c7b; background: #f7f8fb; }
-.shot-assets button > span:nth-child(2) { flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; }
-.shot-assets button.is-active { color: #5658e8; background: #eeeefe; }
-.asset-thumb { display: grid; width: 28px; height: 28px; flex: 0 0 28px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; }
+.shot-assets > header button { width: 26px; min-height: 26px; padding: 0; }
+.selected-assets { display: grid; gap: 7px; }
+.selected-asset-row { display: grid; grid-template-columns: 38px minmax(0,1fr) 116px 30px; align-items: center; gap: 6px; }
+.selected-asset-row > button { min-width: 0; justify-content: flex-start; }
+.selected-asset-row .asset-name-button { padding-inline: 9px; color: #4c5261; background: #fff; box-shadow: inset 0 0 0 1px #e0e3eb; }
+.selected-asset-row .asset-name-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selected-asset-row .asset-voice-button { color: #a0a5b2; background: #fafbfc; box-shadow: inset 0 0 0 1px #eceef3; font-size: 9px; }
+.selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: 1fr 30px; align-items: end; }
+.selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 180px; height: 108px; border-radius: 10px; }
+.selected-assets.is-scene-assets .asset-name-button { grid-column: 1; }
+.asset-thumb { display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; }
 .asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .shot-assets > p { display: grid; min-height: 52px; margin: 0; place-items: center; border-radius: 9px; color: #a1a6b3; background: #f7f8fb; font-size: 9px; }
-.prompt-panel { display: grid; grid-template-rows: auto minmax(0,1fr) auto; }
-.prompt-panel.has-keyframes { grid-template-rows: auto auto minmax(0,1fr) auto; }
+.asset-picker { display: grid; max-height: 180px; gap: 4px; overflow-y: auto; padding: 6px; border-radius: 10px; background: #f7f8fb; }
+.asset-picker button { width: 100%; justify-content: flex-start; color: #646a79; }
+.asset-picker button > span:nth-child(2) { min-width: 0; flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.asset-picker-thumb { display: grid; width: 26px; height: 26px; overflow: hidden; place-items: center; border-radius: 6px; background: #e8eaf0; }
+.asset-picker-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.prompt-panel { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; }
+.prompt-panel.has-keyframes { grid-template-rows: auto auto auto minmax(0,1fr) auto; }
 .prompt-panel > header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 0 16px; }
-.prompt-panel > header > div { display: flex; min-width: 0; align-items: center; gap: 10px; color: #6264ec; }
+.prompt-panel > header > div { display: flex; min-width: 0; align-items: center; gap: 10px; color: #343945; }
 .prompt-panel > header span { display: grid; min-width: 0; gap: 3px; }
 .prompt-panel > header small { color: #9a9fac; font-size: 9px; font-weight: 400; }
 .keyframe-inputs { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 10px; padding: 0 16px 14px; }
@@ -657,25 +707,27 @@ onBeforeUnmount(() => {
 .keyframe-inputs label > span strong { color: currentColor; font-size: 11px; }
 .keyframe-inputs label > span small { color: #a1a6b3; font-size: 9px; }
 .keyframe-inputs label > i { position: absolute; top: 8px; left: 8px; padding: 4px 7px; border-radius: 7px; color: #5e60e9; background: rgb(255 255 255 / 92%); box-shadow: 0 3px 10px rgb(37 40 58 / 8%); font-size: 9px; font-style: normal; font-weight: 700; }
-.prompt-panel > textarea { min-height: 420px; padding: 18px; background: #fff; font-size: 12px; line-height: 1.85; white-space: pre-wrap; }
+.prompt-reference-bar { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; color: #b0b4c0; font-size: 9px; }
+.prompt-reference-bar button { width: 34px; min-height: 34px; flex: 0 0 34px; border-radius: 9px; }
+.prompt-panel > textarea { min-height: 420px; padding: 8px 16px 18px; background: #fff; font-size: 11px; line-height: 1.8; white-space: pre-wrap; }
 .prompt-panel > footer { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; background: #fbfbfd; }
 .prompt-panel > footer > div { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .prompt-panel > footer > div > span { display: inline-flex; min-height: 34px; align-items: center; gap: 4px; padding: 0 10px; border-radius: 9px; color: #777d8d; background: #fff; box-shadow: 0 1px 3px rgb(35 39 55 / 8%); font-size: 10px; }
 .prompt-panel input { width: 23px; padding: 0; border: 0; outline: 0; color: #555b6a; background: transparent; font: inherit; text-align: right; }
-.preview-panel { display: grid; grid-template-rows: 48px minmax(0,1fr) auto; overflow: hidden; }
+.preview-panel { display: grid; grid-template-rows: 48px minmax(0,1fr) 58px; overflow: hidden; }
 .preview-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 0 15px; }
 .preview-panel > header svg { color: #9197a6; }
-.preview-stage { display: grid; min-height: 520px; overflow: hidden; place-items: center; background: #252a35; }
+.preview-stage { display: grid; min-height: 520px; overflow: hidden; place-items: center; background: #292e39; }
 .preview-stage video { width: 100%; height: 100%; object-fit: contain; }
 .preview-empty { display: grid; place-items: center; gap: 8px; color: #7f8798; text-align: center; }
 .preview-empty svg { color: #8e96a8; }
 .preview-empty strong { color: #c8ccd4; font-size: 12px; }
 .preview-empty span { font-size: 9px; }
 .preview-empty.is-running svg { color: #8587ff; animation: spin 1s linear infinite; }
-.preview-panel > footer { display: flex; min-height: 44px; align-items: center; justify-content: space-between; padding: 0 14px; }
-.preview-panel > footer span { color: #8a90a0; font-size: 9px; }
-.preview-panel > footer span.is-ready { color: #32916c; }
-.preview-panel > footer small { color: #a0a5b1; font-size: 9px; }
+.preview-timeline { display: grid; min-height: 58px; place-items: center; padding: 5px 10px; background: #fff; }
+.preview-timeline .preview-clip { position: relative; display: grid; width: 46px; min-height: 46px; overflow: visible; place-items: center; padding: 2px; border-radius: 7px; color: #6264ef; background: #fff; box-shadow: inset 0 0 0 2px #696bff; }
+.preview-clip video { width: 40px; height: 40px; border-radius: 5px; object-fit: cover; }
+.preview-clip small { position: absolute; right: 1px; bottom: 1px; left: 1px; padding: 2px; border-radius: 0 0 5px 5px; color: #fff; background: #6264ef; font-size: 7px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
 @media (max-width: 820px) { .storyboard-topbar { grid-template-columns: 1fr; gap: 8px; padding: 10px 14px; }.phase-nav { grid-column: 1; justify-content: center; }.shot-rail { top: 126px; bottom: auto; z-index: 20; display: flex; width: 100%; height: 56px; align-items: center; justify-items: initial; padding: 9px 14px; overflow: hidden; }.shot-rail > .scene-list { display: flex; max-height: none; justify-items: initial; overflow-x: auto; overflow-y: hidden; padding: 0; }.storyboard-main { margin-left: 0; padding: 74px 14px 36px; }.chapter-toolbar { flex-direction: column; }.chapter-actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-header > nav button { flex: 1; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
