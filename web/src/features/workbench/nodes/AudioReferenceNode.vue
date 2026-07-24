@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import { Library, Volume2 } from 'lucide-vue-next'
 import type { AudioReference, DigitalHuman } from '@/types'
 import MediaLibraryPicker from '../components/MediaLibraryPicker.vue'
+import WorkbenchAudioMedia from '../components/WorkbenchAudioMedia.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
@@ -16,10 +17,9 @@ function choose(item: AudioReference | DigitalHuman) { store.setMediaResource(pr
 <template>
   <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'audio_reference', title: resource?.nickname || '参考音频', status: resource ? 'ready' : '未选择' }">
     <div class="workbench-node-content media-resource-node">
-      <div v-if="resource" class="media-resource-preview is-audio"><img :src="resource.avatar_url" alt=""><div><strong>{{ resource.nickname }}</strong><span>{{ resource.gender }} · {{ resource.asset_id }}</span></div></div>
-      <div v-else class="media-resource-placeholder"><Volume2 :size="24" /><span>选择一段库内参考音频</span></div>
-      <audio v-if="resource" :src="resource.audio_url" controls preload="none" />
-      <AppButton type="button" class="media-resource-select" @click="pickerOpen = true"><Library :size="15" />{{ resource ? '更换音频' : '从音频库选择' }}</AppButton>
+      <WorkbenchAudioMedia v-if="resource" :src="resource.audio_url" :title="resource.nickname" :preview-url="resource.avatar_url" :source-label="`${resource.gender} · ${resource.asset_id}`" />
+      <div v-else class="media-resource-placeholder"><Volume2 :size="24" aria-hidden="true" /><span>选择一段库内参考音频</span></div>
+      <AppButton type="button" class="media-resource-select" @click="pickerOpen = true"><Library :size="15" aria-hidden="true" />{{ resource ? '更换音频' : '从音频库选择' }}</AppButton>
     </div>
     <MediaLibraryPicker :open="pickerOpen" kind="audio" :selected-asset-id="resource?.asset_id" @close="pickerOpen = false" @choose="choose" />
   </WorkbenchNodeFrame>

@@ -33,7 +33,7 @@ watch(content, () => void nextTick(resizeToContent))
 <template>
   <article class="workbench-note" :class="{ 'is-selected': selected }" :style="noteStyle" :aria-label="String(data.title || '便签')">
     <div v-if="selected" class="workbench-note__toolbar nodrag nowheel" role="toolbar" aria-label="便签操作" @pointerdown.stop @click.stop>
-      <AppButton type="button" aria-label="删除便签" title="删除便签" @click="deleteNote"><Trash2 :size="17" aria-hidden="true" /></AppButton>
+      <button type="button" aria-label="删除便签" title="删除便签" @click="deleteNote"><Trash2 :size="17" aria-hidden="true" /></button>
       <label title="便签背景颜色"><Palette :size="17" aria-hidden="true" /><input type="color" :value="color" aria-label="修改便签背景颜色" @pointerdown="beginEdit" @input="updateColor" @change="save"></label>
     </div>
     <header><StickyNote :size="16" aria-hidden="true" /><strong>{{ data.title || '便签' }}</strong></header>

@@ -12,6 +12,8 @@ interface ViewportSize {
 }
 
 const STORAGE_PREFIX = 'novel-workbench:viewport:v1:';
+export const WORKBENCH_MIN_ZOOM = 0.15;
+export const WORKBENCH_MAX_ZOOM = 4;
 
 function validNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -53,7 +55,7 @@ export function loadWorkbenchViewport(workspaceKey: string, size: ViewportSize):
     if (!serialized)
       return null;
     const focus = JSON.parse(serialized) as Partial<WorkbenchViewportFocus>;
-    if (!validNumber(focus.centerX) || !validNumber(focus.centerY) || !validNumber(focus.zoom) || focus.zoom < 0.15 || focus.zoom > 2.5)
+    if (!validNumber(focus.centerX) || !validNumber(focus.centerY) || !validNumber(focus.zoom) || focus.zoom < WORKBENCH_MIN_ZOOM || focus.zoom > WORKBENCH_MAX_ZOOM)
       return null;
     return focusToViewport(focus as WorkbenchViewportFocus, size);
   }

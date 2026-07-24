@@ -18,6 +18,12 @@ export interface WorkbenchAutoLayoutOptions {
   relationshipRules?: WorkbenchLayoutRelationshipRule[];
 }
 
+function sectionMemberKeys(node: WorkbenchNode) {
+  return Array.isArray(node.data.node_keys)
+    ? node.data.node_keys.filter((key): key is string => typeof key === 'string')
+    : [];
+}
+
 /** Higher affinity means the target column should follow its source sooner. */
 export const WORKBENCH_LAYOUT_RELATIONSHIP_RULES: WorkbenchLayoutRelationshipRule[] = [
   { sourceFamily: 'chapter', targetFamily: 'shot', affinity: 400 },
@@ -89,6 +95,48 @@ export function workbenchLayoutBand(node: WorkbenchNode) {
   if (configured)
     return configured;
   return 'main';
+}
+
+/**
+ * Treat background sections as atomic layout units. Members retain their
+ * relative positions so arranging the canvas never tears a section apart.
+ */
+export function buildWorkbenchGroupedAutoLayout(
+  nodes: WorkbenchNode[],
+  edges: WorkbenchEdge[] = [],
+  options: WorkbenchAutoLayoutOptions = {},
+) {
+  const nodeByKey = new Map(nodes.map(node => [node.key, node]));
+  const sections = nodes.filter(node => node.kind === 'section');
+  const groupedMemberKeys = new Set(sections.flatMap(sectionMemberKeys));
+  const layoutUnits = nodes.filter(node =>
+    node.kind === 'section'
+    || (node.kind !== 'note' && !groupedMemberKeys.has(node.key)),
+  );
+  const unitLayout = buildWorkbenchAutoLayout(layoutUnits, edges, options);
+  const result: Record<string, Point> = {};
+  for (const [nodeKey, position] of Object.entries(unitLayout)) {
+    const node = nodeByKey.get(nodeKey);
+    if (!node)
+      continue;
+    result[nodeKey] = position;
+    if (node.kind !== 'section')
+      continue;
+    const offset = {
+      x: position.x - node.position.x,
+      y: position.y - node.position.y,
+    };
+    for (const memberKey of sectionMemberKeys(node)) {
+      const member = nodeByKey.get(memberKey);
+      if (member) {
+        result[memberKey] = {
+          x: member.position.x + offset.x,
+          y: member.position.y + offset.y,
+        };
+      }
+    }
+  }
+  return result;
 }
 
 function orderedHeaderBandNames(names: string[]) {

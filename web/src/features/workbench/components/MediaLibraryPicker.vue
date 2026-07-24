@@ -39,17 +39,18 @@ watch(() => props.open, value => { if (value) load(true) })
 <template>
   <Teleport to="body">
     <div v-if="open" class="media-picker-backdrop" role="presentation" @mousedown.self="$emit('close')">
-      <section class="media-picker" role="dialog" aria-modal="true" :aria-label="title">
-        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><AppButton type="button" aria-label="关闭" @click="$emit('close')"><X :size="18" /></AppButton></header>
-        <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" /><input v-model="search" :placeholder="kind === 'audio' ? '搜索昵称、性别或资产 ID' : '搜索国家、职业、性别或资产 ID'" autofocus><AppButton type="submit">搜索</AppButton></form>
+      <section class="media-picker" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="loading" @keydown.esc.stop="$emit('close')">
+        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><AppButton type="button" aria-label="关闭" @click="$emit('close')"><X :size="18" aria-hidden="true" /></AppButton></header>
+        <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" aria-hidden="true" /><input v-model="search" :aria-label="kind === 'audio' ? '搜索参考音频' : '搜索数字人'" :placeholder="kind === 'audio' ? '搜索昵称、性别或资产 ID' : '搜索国家、职业、性别或资产 ID'" autofocus><AppButton type="submit" :disabled="loading">搜索</AppButton></form>
         <p v-if="error" class="media-picker-error" role="alert">{{ error }}</p>
         <div class="media-picker-grid">
           <AppButton v-for="item in items" :key="assetId(item)" type="button" :class="{ 'is-selected': selectedAssetId === assetId(item) }" @click="$emit('choose', item)">
-            <img :src="preview(item)" alt="" loading="lazy"><span><strong>{{ name(item) }}</strong><small>{{ detail(item) }}</small><code>{{ assetId(item) }}</code></span>
+            <img :src="preview(item)" alt="" loading="lazy" decoding="async"><span><strong>{{ name(item) }}</strong><small>{{ detail(item) }}</small><code>{{ assetId(item) }}</code></span>
           </AppButton>
         </div>
-        <div v-if="!items.length && !loading" class="media-picker-empty">没有匹配的资源</div>
-        <footer><span>第 {{ page }} / {{ pages || 1 }} 页</span><AppButton v-if="page < pages" type="button" :disabled="loading" @click="loadMore"><LoaderCircle v-if="loading" class="is-spinning" :size="15" />加载更多</AppButton></footer>
+        <div v-if="loading && !items.length" class="media-picker-empty" role="status"><LoaderCircle class="is-spinning" :size="24" aria-hidden="true" /><span>正在加载资源…</span></div>
+        <div v-else-if="!items.length" class="media-picker-empty">没有匹配的资源</div>
+        <footer><span>第 {{ page }} / {{ pages || 1 }} 页</span><AppButton v-if="page < pages" type="button" :disabled="loading" @click="loadMore"><LoaderCircle v-if="loading" class="is-spinning" :size="15" aria-hidden="true" />加载更多</AppButton></footer>
       </section>
     </div>
   </Teleport>

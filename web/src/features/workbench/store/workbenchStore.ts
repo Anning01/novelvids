@@ -4,11 +4,13 @@ import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Video } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
+import { sceneAssetIds } from '../graph/sceneAssets'
 
 interface HistorySnapshot {
   nodes: Record<string, { position: Point; size: NodeSize | null; zIndex: number; ui: Record<string, unknown> }>
   manualNodes: WorkbenchNode[]
   mediaEdges: WorkbenchEdge[]
+  viewport: WorkbenchViewport
 }
 interface SavedCanvasState {
   viewport?: WorkbenchViewport
@@ -49,9 +51,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     history: [] as HistorySnapshot[],
     future: [] as HistorySnapshot[],
     busySceneIds: [] as number[],
+    busyAssetIds: [] as number[],
     manualNodes: [] as WorkbenchNode[],
     mediaEdges: [] as WorkbenchEdge[],
-    viewport: { x: 40, y: 40, zoom: 0.4 } as WorkbenchViewport,
+    viewport: { x: 0, y: 0, zoom: 1 } as WorkbenchViewport,
   }),
   getters: {
     canUndo: state => state.history.length > 0,
@@ -68,6 +71,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         }])),
         manualNodes: cloneValue(this.nodes.filter(item => manualNodeKinds.has(item.kind))),
         mediaEdges: cloneValue(this.edges.filter(item => item.key.startsWith('media-edge-'))),
+        viewport: { ...this.viewport },
       }
     },
     restore(snapshot: HistorySnapshot) {
@@ -85,6 +89,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.edges = [...automaticEdges, ...this.mediaEdges.filter(item => this.nodeByKey(item.source) && this.nodeByKey(item.target))]
       this.selectedNodeKeys = this.selectedNodeKeys.filter(key => Boolean(this.nodeByKey(key)))
       this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
+      this.viewport = { ...snapshot.viewport }
       this.persistLayout()
     },
     checkpoint() {
@@ -95,8 +100,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.history.push(snapshot)
       if (this.history.length > 60) this.history.shift()
     },
-    undo() { const previous = this.history.at(-1); if (!previous) return; const current = this.capture(); this.restore(previous); this.history.pop(); this.future.push(current) },
-    redo() { const next = this.future.at(-1); if (!next) return; const current = this.capture(); this.restore(next); this.future.pop(); this.history.push(current) },
+    undo() { const previous = this.history.at(-1); if (!previous) return false; const current = this.capture(); this.restore(previous); this.history.pop(); this.future.push(current); return true },
+    redo() { const next = this.future.at(-1); if (!next) return false; const current = this.capture(); this.restore(next); this.future.pop(); this.history.push(current); return true },
     persistLayout() {
       localStorage.setItem(this.layoutKey(), JSON.stringify({
         viewport: this.viewport,
@@ -121,7 +126,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     async load(novelId: number, chapterId: number) {
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
-      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.clearSelection()
+      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
         const [chapterResponse, assetsResponse, scenesResponse, enumsResponse] = await Promise.all([api.chapter(chapterId), api.assets(novelId), api.scenes(chapterId), api.enums()])
         this.chapter = chapterResponse.data
@@ -143,7 +148,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const sceneKey = `shot-${scene.id}`
         nodes.push(node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: this.videos[scene.id] || [], modelOptions: this.modelOptions, shot_index: scene.sequence, layout_family: 'shot', ui: {} }))
         edges.push(edge(100000 + scene.id, `chapter-${sceneKey}`, 'chapter', sceneKey, 'shot_sequence', index))
-        ;(scene.asset_ids || []).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
+        sceneAssetIds(scene).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
         const latest = this.videos[scene.id]?.[0]
         if (latest) {
           const resultKey = `video-${latest.id}`
@@ -152,7 +157,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         }
       })
       const old = new Map(this.nodes.map(item => [item.key, item]))
-      this.nodes = nodes.map(item => old.has(item.key) ? { ...item, position: old.get(item.key)!.position, zIndex: old.get(item.key)!.zIndex, data: { ...item.data, ui: old.get(item.key)!.data.ui } } : item)
+      this.nodes = nodes.map(item => old.has(item.key) ? { ...item, position: old.get(item.key)!.position, size: old.get(item.key)!.size, zIndex: old.get(item.key)!.zIndex, data: { ...item.data, ui: old.get(item.key)!.data.ui } } : item)
       this.manualNodes = [...old.values()].filter(item => manualNodeKinds.has(item.kind))
       this.nodes.push(...this.manualNodes)
       this.edges = [...edges, ...this.mediaEdges.filter(item => this.nodes.some(nodeItem => nodeItem.key === item.source) && this.nodes.some(nodeItem => nodeItem.key === item.target))]
@@ -183,7 +188,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }
       if (this.clipboardNode.kind !== 'shot') return
       const source = this.clipboardNode.data.scene as Scene
-      const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: source.description, prompt: source.prompt || '', duration: source.duration, asset_ids: source.asset_ids })).data
+      const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: source.description, prompt: source.prompt || '', duration: source.duration, asset_ids: sceneAssetIds(source) })).data
       this.scenes.push(created); this.videos[created.id] = []; this.rebuildGraph()
       const item = this.nodeByKey(`shot-${created.id}`); if (item) item.position = { x: this.clipboardNode.position.x + 48, y: this.clipboardNode.position.y + 48 }
       notice.success('已复制镜头')
@@ -261,6 +266,27 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async saveScene(sceneId: number, patch: Partial<Scene>) {
       const updated = (await api.updateScene(sceneId, patch)).data
       this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item); this.rebuildGraph(); notice.success('镜头已保存')
+    },
+    async saveAsset(assetId: number, patch: Partial<Asset>) {
+      const updated = (await api.updateAsset(assetId, patch)).data
+      this.assets = this.assets.map(item => item.id === assetId ? updated : item)
+      this.rebuildGraph()
+      notice.success('资产描述已保存')
+    },
+    async generateAsset(assetId: number) {
+      if (!this.busyAssetIds.includes(assetId)) this.busyAssetIds.push(assetId)
+      try {
+        let task = (await api.generateAsset(assetId)).data
+        while (!terminal.has(task.status)) { await sleep(2500); task = (await api.task(task.id)).data }
+        if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '资产图片生成失败')
+        this.assets = (await api.assets(this.novelId)).data.items
+        this.rebuildGraph()
+        notice.success('资产图片生成完成')
+      } catch (error) {
+        notice.error(error instanceof Error ? error.message : '资产图片生成失败')
+      } finally {
+        this.busyAssetIds = this.busyAssetIds.filter(id => id !== assetId)
+      }
     },
     async addShot(position?: Point) {
       const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: '新镜头', prompt: '', duration: 6 })).data

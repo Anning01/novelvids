@@ -56,14 +56,14 @@ onBeforeUnmount(() => {
       </Transition>
     </div>
     <div class="workbench-toolbar__scroll" tabindex="0" role="group" aria-label="画布编辑工具，可横向滚动">
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="为所选节点添加背景分区" title="多选节点后添加背景分区" :disabled="running || !canCreateSection" @click="$emit('createSection')"><Palette :size="16" /></AppButton>
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="自动整理布局" :disabled="running" @click="$emit('autoArrange')"><LayoutGrid :size="16" /></AppButton>
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="删除所选" :disabled="!hasSelection" @click="$emit('deleteSelection')"><Trash2 :size="16" /></AppButton>
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="复制所选" :disabled="!canCopy" @click="$emit('copy')"><Copy :size="16" /></AppButton>
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="粘贴" :disabled="!canPaste" @click="$emit('paste')"><ClipboardPaste :size="16" /></AppButton>
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="撤销" :disabled="!canUndo" @click="$emit('undo')"><Undo2 :size="16" /></AppButton>
-      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="重做" :disabled="!canRedo" @click="$emit('redo')"><Redo2 :size="16" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="为所选节点添加背景分区" title="多选节点后添加背景分区" :disabled="running || !canCreateSection" @click="$emit('createSection')"><Palette :size="16" aria-hidden="true" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="自动整理布局" :disabled="running" @click="$emit('autoArrange')"><LayoutGrid :size="16" aria-hidden="true" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="删除所选" :disabled="!hasSelection" @click="$emit('deleteSelection')"><Trash2 :size="16" aria-hidden="true" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="复制所选" :disabled="!canCopy" @click="$emit('copy')"><Copy :size="16" aria-hidden="true" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="粘贴" :disabled="!canPaste" @click="$emit('paste')"><ClipboardPaste :size="16" aria-hidden="true" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="撤销" :disabled="!canUndo" @click="$emit('undo')"><Undo2 :size="16" aria-hidden="true" /></AppButton>
+      <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="重做" :disabled="!canRedo" @click="$emit('redo')"><Redo2 :size="16" aria-hidden="true" /></AppButton>
     </div>
-    <AppButton class="workbench-toolbar__button workbench-toolbar__button--primary" type="button" :disabled="running" @click="$emit('generate')"><Play :size="16" /><span>{{ running ? '生成中' : '生成分镜' }}</span></AppButton>
+    <AppButton class="workbench-toolbar__button workbench-toolbar__button--primary" type="button" :disabled="running" @click="$emit('generate')"><Play :size="16" aria-hidden="true" /><span>{{ running ? '生成中' : '生成分镜' }}</span></AppButton>
   </div>
 </template>
