@@ -15,6 +15,7 @@ import {
   ImageIcon,
   LoaderCircle,
   MonitorPlay,
+  PanelsTopLeft,
   Plus,
   RefreshCw,
   Save,
@@ -25,9 +26,11 @@ import {
   UsersRound,
   Video,
   Volume2,
+  Workflow,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
+import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
@@ -84,6 +87,7 @@ let chapterLoadVersion = 0
 let sceneObserver: IntersectionObserver | undefined
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
+const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
 const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
 const videoModelOptions = computed(() => (
@@ -506,6 +510,18 @@ function selectPhase(label: string) {
   if (label === '设定') void router.push({ path: `/create/short-drama/manual/${projectId.value}`, query })
 }
 
+function returnToProjects() {
+  void router.push('/projects')
+}
+
+function selectWorkspaceView(view: 'workflow' | 'storyboard') {
+  if (workspaceView.value === view) return
+  const query = { ...route.query }
+  if (view === 'workflow') query.view = 'workflow'
+  else delete query.view
+  void router.replace({ query })
+}
+
 onMounted(load)
 onBeforeUnmount(() => {
   alive = false
@@ -514,22 +530,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="storyboard-page">
+  <main class="storyboard-page" :class="{ 'is-workflow-view': workspaceView === 'workflow' }">
     <header class="storyboard-topbar">
       <div class="project-heading">
-        <AppButton variant="ghost" size="sm" icon-only aria-label="返回" @click="router.back()"><ArrowLeft :size="18" /></AppButton>
-        <div><strong>{{ project?.name || '短剧项目' }}</strong><span><Film :size="13" />{{ project?.aspectRatio || '9:16' }}<i />{{ project?.resolution || '720p' }}<i />{{ project?.style || '写实通用' }}</span></div>
+        <AppButton variant="ghost" size="sm" icon-only aria-label="返回项目" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
+        <div v-if="workspaceView === 'storyboard'"><strong>{{ project?.name || '短剧项目' }}</strong><span><Film :size="13" />{{ project?.aspectRatio || '9:16' }}<i />{{ project?.resolution || '720p' }}<i />{{ project?.style || '写实通用' }}</span></div>
       </div>
-      <nav class="phase-nav" aria-label="短剧制作流程">
+      <nav v-if="workspaceView === 'storyboard'" class="phase-nav" aria-label="短剧制作流程">
         <template v-for="(phase, index) in phaseItems" :key="phase.label">
           <span v-if="index" />
           <AppButton variant="soft" size="sm" :active="phase.active" :aria-current="phase.active ? 'step' : undefined" @click="selectPhase(phase.label)"><component :is="phase.icon" :size="16" />{{ phase.label }}</AppButton>
         </template>
       </nav>
+      <nav class="workspace-view-switch" aria-label="分镜视图">
+        <AppButton variant="ghost" size="sm" :active="workspaceView === 'workflow'" :aria-pressed="workspaceView === 'workflow'" @click="selectWorkspaceView('workflow')"><Workflow :size="14" />工作流</AppButton>
+        <AppButton variant="ghost" size="sm" :active="workspaceView === 'storyboard'" :aria-pressed="workspaceView === 'storyboard'" @click="selectWorkspaceView('storyboard')"><PanelsTopLeft :size="14" />故事板</AppButton>
+      </nav>
     </header>
 
     <div class="storyboard-shell">
-      <aside class="shot-rail">
+      <aside v-if="workspaceView === 'storyboard'" class="shot-rail">
         <strong>分镜</strong>
         <AppScrollArea class="scene-list" aria-label="本集分镜列表">
           <AppButton v-for="scene in scenes" :key="scene.id" variant="soft" size="sm" icon-only :active="activeSceneId === scene.id" :aria-label="`分镜 ${scene.sequence}`" @click="selectScene(scene)">{{ scene.sequence }}</AppButton>
@@ -537,8 +557,8 @@ onBeforeUnmount(() => {
         </AppScrollArea>
       </aside>
 
-      <section class="storyboard-main">
-        <header class="chapter-toolbar">
+      <section class="storyboard-main" :class="{ 'is-workflow-view': workspaceView === 'workflow' }">
+        <header v-if="workspaceView === 'storyboard'" class="chapter-toolbar">
           <div><span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span><h1>第 {{ activeChapter?.number || '-' }} 集 · {{ activeChapter?.name || '分镜制作' }}</h1><p>{{ activeChapter?.content?.slice(0, 120) }}</p></div>
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" align="end" />
@@ -549,6 +569,9 @@ onBeforeUnmount(() => {
 
         <div v-if="loading || generatingStoryboard" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : '正在准备本集章节、资产和视频信息。' }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
+        <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
+          <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" />
+        </div>
         <div v-else class="shot-editor-list">
           <article v-for="scene in scenes" :id="`scene-${scene.id}`" :key="scene.id" class="shot-editor" :class="{ 'is-active': activeSceneId === scene.id }" :data-scene-id="scene.id">
             <header class="shot-editor-header">
@@ -617,8 +640,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .storyboard-page { min-width: 0; min-height: 100%; overflow-x: hidden; color: #303442; background: #f7f8fb; }
+.storyboard-page.is-workflow-view { height: 100vh; overflow: hidden; }
 .storyboard-topbar { position: sticky; top: 0; z-index: 30; display: grid; min-height: 64px; grid-template-columns: minmax(280px,1fr) auto minmax(280px,1fr); align-items: center; padding: 5px 18px; background: rgb(255 255 255 / 97%); box-shadow: 0 1px 0 #eceef3; backdrop-filter: blur(16px); }
+.storyboard-page.is-workflow-view .storyboard-topbar { position: fixed; right: 0; left: 0; min-height: 0; grid-template-columns: 1fr auto; padding: 14px 18px; pointer-events: none; background: transparent; box-shadow: none; backdrop-filter: none; }
 .project-heading { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.storyboard-page.is-workflow-view .project-heading { pointer-events: auto; }
+.storyboard-page.is-workflow-view .project-heading > button { color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631, 0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
+.storyboard-page.is-workflow-view .project-heading > button:hover { color: #fff; background: #2a2622; }
 .project-heading > div { display: grid; min-width: 0; gap: 5px; }
 .project-heading strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .project-heading span { display: flex; align-items: center; gap: 7px; color: #9298a8; font-size: 10px; }
@@ -628,11 +656,13 @@ onBeforeUnmount(() => {
 .phase-nav button { display: flex; width: 64px; min-height: 50px; flex-direction: column; gap: 3px; border-radius: 16px; color: #858b9a; background: #fff; font-size: 10px; }
 .phase-nav button.is-active { color: #5b5cf6; background: #f0f0ff; box-shadow: 0 8px 22px rgb(91 92 246 / 11%); }
 .storyboard-shell { min-height: calc(100vh - 64px); }
+.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
 .shot-rail { position: fixed; top: 64px; bottom: 0; left: 0; z-index: 24; display: grid; width: 48px; align-content: start; justify-items: center; gap: 10px; padding: 14px 5px; background: #fff; box-shadow: 1px 0 0 #eceef3; }
 .shot-rail > strong { color: #777d8d; font-size: 11px; }
 .scene-list { display: grid; width: 100%; max-height: calc(100vh - 112px); justify-items: center; gap: 8px; padding: 2px 2px 12px; }
 .shot-rail button { width: 34px; min-height: 34px; border-radius: 8px; }
 .storyboard-main { min-width: 0; margin-left: 48px; padding: 16px 16px 42px; }
+.storyboard-main.is-workflow-view { height: 100%; margin-left: 0; padding: 0; }
 .chapter-toolbar { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .chapter-toolbar > div:first-child { min-width: 0; }
 .chapter-toolbar > div:first-child > span { color: #8c91a0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
@@ -640,6 +670,17 @@ onBeforeUnmount(() => {
 .chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; }
 .chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: #898f9e; font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.workspace-view-switch { grid-column: 3; display: flex; justify-self: end; align-items: center; gap: 3px; padding: 3px; border-radius: 11px; background: #f1f2f7; box-shadow: inset 0 0 0 1px #e5e7ef; }
+.workspace-view-switch button { min-height: 32px; gap: 6px; padding-inline: 11px; border-radius: 8px; color: #777d8d; background: transparent; box-shadow: none; font-size: 11px; }
+.workspace-view-switch button:hover { color: #575d6d; background: rgb(255 255 255 / 68%); }
+.workspace-view-switch button.is-active { color: #5759eb; background: #fff; box-shadow: 0 3px 10px rgb(47 50 80 / 9%); }
+.workspace-view-switch button:focus-visible { outline: 2px solid rgb(91 92 246 / 22%); outline-offset: 1px; }
+.storyboard-page.is-workflow-view .workspace-view-switch { grid-column: 2; pointer-events: auto; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631, 0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
+.storyboard-page.is-workflow-view .workspace-view-switch button { color: #c7bdb4; }
+.storyboard-page.is-workflow-view .workspace-view-switch button:hover { color: #eee9e2; background: #2a2622; }
+.storyboard-page.is-workflow-view .workspace-view-switch button.is-active { color: #eee9e2; background: #3a354f; box-shadow: inset 0 0 0 1px rgb(169 149 255 / 22%); }
+.storyboard-page.is-workflow-view .workspace-view-switch button:focus-visible { outline-color: rgb(169 149 255 / 34%); }
+.workflow-canvas-shell { width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #151412; }
 .storyboard-state { display: grid; min-height: calc(100vh - 210px); place-items: center; align-content: center; gap: 8px; color: #686ef1; text-align: center; }
 .storyboard-state svg { animation: spin 1s linear infinite; }
 .storyboard-state strong { color: #454a59; font-size: 14px; }
@@ -730,7 +771,7 @@ onBeforeUnmount(() => {
 .preview-clip small { position: absolute; right: 1px; bottom: 1px; left: 1px; padding: 2px; border-radius: 0 0 5px 5px; color: #fff; background: #6264ef; font-size: 7px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@media (max-width: 820px) { .storyboard-topbar { grid-template-columns: 1fr; gap: 8px; padding: 10px 14px; }.phase-nav { grid-column: 1; justify-content: center; }.shot-rail { top: 126px; bottom: auto; z-index: 20; display: flex; width: 100%; height: 56px; align-items: center; justify-items: initial; padding: 9px 14px; overflow: hidden; }.shot-rail > .scene-list { display: flex; max-height: none; justify-items: initial; overflow-x: auto; overflow-y: hidden; padding: 0; }.storyboard-main { margin-left: 0; padding: 74px 14px 36px; }.chapter-toolbar { flex-direction: column; }.chapter-actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-header > nav button { flex: 1; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@media (max-width: 820px) { .storyboard-topbar { position: static; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 14px; }.storyboard-page.is-workflow-view .storyboard-topbar { position: fixed; padding: 12px 14px; }.phase-nav { grid-column: 1 / -1; grid-row: 2; justify-content: center; }.workspace-view-switch { grid-column: 2; grid-row: 1; flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.shot-rail { top: 126px; bottom: auto; z-index: 20; display: flex; width: 100%; height: 56px; align-items: center; justify-items: initial; padding: 9px 14px; overflow: hidden; }.shot-rail > .scene-list { display: flex; max-height: none; justify-items: initial; overflow-x: auto; overflow-y: hidden; padding: 0; }.storyboard-main { margin-left: 0; padding: 74px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { flex-direction: column; }.chapter-actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }.workflow-canvas-shell { min-height: 520px; }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
 @media (max-width: 520px) { .phase-nav button { width: 54px; }.phase-nav > span { width: 7px; }.chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 </style>
