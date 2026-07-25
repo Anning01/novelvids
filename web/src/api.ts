@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AudioReference, Chapter, DigitalHuman, Novel, PaginationResponse, Scene, SingleResponse, Video } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AudioReference, Chapter, DigitalHuman, Novel, PaginationResponse, Scene, SingleResponse, Video, WorkbenchCapabilities } from './types'
 
 const BASE = '/api'
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -27,6 +27,7 @@ export const api = {
   chapters: (novelId: number) => request<PaginationResponse<Chapter>>(`/chapter${qs({ novel_id: novelId, page: 1, page_size: 100, sort: 'number' })}`),
   chapter: (id: number) => request<SingleResponse<Chapter>>(`/chapter/${id}`),
   createChapter: (data: Partial<Chapter>) => request<SingleResponse<Chapter>>('/chapter', { method: 'POST', body: JSON.stringify(data) }),
+  updateChapter: (id: number, data: Partial<Chapter>) => request<SingleResponse<Chapter>>(`/chapter/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteChapter: (id: number) => request<SingleResponse<null>>(`/chapter/${id}`, { method: 'DELETE' }),
   extract: (chapterId: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST' }),
   assets: (novelId: number, page = 1, pageSize = 100) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize })}`),
@@ -47,6 +48,7 @@ export const api = {
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
+  workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
   createConfig: (data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>('/config', { method: 'POST', body: JSON.stringify(data) }),
   updateConfig: (id: number, data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>(`/config/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -60,6 +62,8 @@ export const api = {
     if (!response.ok || payload.code !== 0) throw new Error(payload.message || '上传失败')
     return payload.data.files[0] as {
       filename: string
+      original_filename: string
+      content_type: string
       file_path: string
       text_content?: string
       chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string }

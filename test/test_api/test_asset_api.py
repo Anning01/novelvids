@@ -25,6 +25,24 @@ async def test_api_create_asset(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_create_product_asset(client: AsyncClient):
+    """商品资产使用稳定的扩展枚举值。"""
+    novel = await Novel.create(name="Product Asset Novel", author="Author")
+
+    response = await client.post(
+        "/api/asset",
+        json={
+            "novel_id": novel.id,
+            "asset_type": 4,
+            "canonical_name": "示例商品",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["asset_type"] == 4
+
+
+@pytest.mark.asyncio
 async def test_api_get_asset_list(client: AsyncClient):
     """获取资产列表。"""
     novel = await Novel.create(name="List Asset Novel", author="Author")

@@ -1,5 +1,13 @@
-export enum AssetTypeEnum { PERSON = 1, SCENE = 2, ITEM = 3 }
+export enum AssetTypeEnum { PERSON = 1, SCENE = 2, ITEM = 3, PRODUCT = 4, STYLE = 5 }
 export enum TaskStatusEnum { PENDING = 1, PROCESSING = 2, COMPLETED = 3, FAILED = 4, CANCELLED = 5, QUEUED = 6 }
+
+export interface WorkbenchCapabilities {
+  upload_media: boolean
+  generate_asset: boolean
+  generate_video: boolean
+  apply_watermark: boolean
+  compose_video: boolean
+}
 
 export interface Novel { id: number; name: string; author?: string; description?: string; cover?: string; total_chapters?: number; content?: string; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
