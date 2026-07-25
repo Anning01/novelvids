@@ -2,7 +2,7 @@
 
 日期：2026-07-25
 
-状态：待评审
+状态：已批准
 
 参考页面：`https://meida.sscmsc.com/create/viral-workbench/cw_eafa9fab72bb4f41831f1737543abddd`
 
