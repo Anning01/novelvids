@@ -8,6 +8,7 @@ import { sceneAssetIds } from '../graph/sceneAssets'
 import { assetTypeLabel } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
+import { nodeCapabilities } from '../config/nodeCapabilities'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
 
 interface HistorySnapshot {
@@ -195,7 +196,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
     },
     async flushLayout() { this.persistLayout() },
-    copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item && ['shot', 'note'].includes(item.kind) ? cloneValue(item) : null },
+    copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item && nodeCapabilities(item.kind).copyable ? cloneValue(item) : null },
     async paste() {
       if (!this.clipboardNode) return
       if (this.clipboardNode.kind === 'note') {
@@ -216,13 +217,18 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         .filter((item): item is WorkbenchNode => Boolean(item))
       const assets = selected.filter(item => item.kind === 'asset')
       const shots = selected.filter(item => item.kind === 'shot')
+      const hiddenResults = selected.filter(item => item.kind === 'video_result')
       const manualKeys = new Set(selected.filter(item => isManualNodeKind(item.kind)).map(item => item.key))
       await Promise.all([
         ...assets.map(item => api.deleteAsset(item.id)),
         ...shots.map(item => api.deleteScene(item.id)),
       ])
-      if (manualKeys.size) this.checkpoint()
+      if (manualKeys.size || hiddenResults.length) this.checkpoint()
+      hiddenResults.forEach((item) => {
+        item.data.ui = { ...((item.data.ui as Record<string, unknown>) || {}), hidden: true }
+      })
       const removedKeys = new Set([...manualKeys, ...assets.map(item => item.key), ...shots.map(item => item.key)])
+      const affectedKeys = new Set([...removedKeys, ...hiddenResults.map(item => item.key)])
       this.assets = this.assets.filter(item => !assets.some(nodeItem => nodeItem.id === item.id))
       this.scenes = this.scenes.filter(item => !shots.some(nodeItem => nodeItem.id === item.id))
       this.manualNodes = this.manualNodes.filter(item => !manualKeys.has(item.key))
@@ -233,11 +239,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.mediaEdges = this.mediaEdges.filter(item => !removedKeys.has(item.source) && !removedKeys.has(item.target))
       this.nodes = this.nodes.filter(item => !removedKeys.has(item.key))
       this.edges = this.edges.filter(item => !removedKeys.has(item.source) && !removedKeys.has(item.target))
-      this.selectedNodeKeys = this.selectedNodeKeys.filter(key => !removedKeys.has(key))
+      this.selectedNodeKeys = this.selectedNodeKeys.filter(key => !affectedKeys.has(key))
       this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
       this.rebuildGraph(); this.persistLayout()
-      if (removedKeys.size) notice.success(`已删除 ${removedKeys.size} 个节点`)
-      return removedKeys.size
+      if (affectedKeys.size) notice.success(`已删除 ${affectedKeys.size} 个节点`)
+      return affectedKeys.size
     },
     async deleteSelection() { return this.deleteNodeKeys([...this.selectedNodeKeys]) },
     addMediaNode(kind: 'audio_reference' | 'digital_human') {
@@ -424,6 +430,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     connectMediaNode(source: string, target: string) {
       const sourceNode = this.nodeByKey(source); const targetNode = this.nodeByKey(target)
       if (!sourceNode || !targetNode) return
+      if (!nodeCapabilities(sourceNode.kind).source || !nodeCapabilities(targetNode.kind).target) return
       const isShotReference = targetNode.kind === 'shot' && ['audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media'].includes(sourceNode.kind)
       const isWatermarkVideo = targetNode.kind === 'watermark' && ['video_result', 'video_media'].includes(sourceNode.kind)
       const isComposerShot = targetNode.kind === 'video_composer' && sourceNode.kind === 'shot'

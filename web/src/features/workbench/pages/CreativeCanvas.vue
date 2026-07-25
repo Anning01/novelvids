@@ -21,6 +21,7 @@ import { workbenchSectionActionsKey } from '../interaction/sectionActions'
 import { applyNodeSelectionChanges, isAdditiveSelectionEvent, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
 import { selectedRunState } from '../execution/workbenchCapabilities'
 import { normalizeShotConfig, SHOT_ASPECT_RATIOS, SHOT_RESOLUTIONS, shotGenerationOptions, type ShotAspectRatio, type ShotResolution } from '../config/shotConfig'
+import { nodeCapabilities } from '../config/nodeCapabilities'
 import { workbenchPromptEditorKey } from '../prompt/promptEditor'
 import { isWorkbenchFlowReady, WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
@@ -69,7 +70,10 @@ const projectDefaults = computed(() => ({
   aspectRatio: SHOT_ASPECT_RATIOS.includes(props.aspectRatio as ShotAspectRatio) ? props.aspectRatio as ShotAspectRatio : '9:16',
   resolution: SHOT_RESOLUTIONS.includes(props.resolution as ShotResolution) ? props.resolution as ShotResolution : '720p',
 }))
-const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
+const visibleStoreNodes = computed(() => store.nodes.filter(item => (item.data.ui as Record<string, unknown> | undefined)?.hidden !== true))
+const visibleNodeKeys = computed(() => new Set(visibleStoreNodes.value.map(item => item.key)))
+const visibleStoreEdges = computed(() => store.edges.filter(item => visibleNodeKeys.value.has(item.source) && visibleNodeKeys.value.has(item.target)))
+const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
   id: item.key, type: item.kind, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
   ...(item.size ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px` } } : {}),
   data: {
@@ -84,11 +88,11 @@ const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
-const flowEdges = computed<Edge[]>(() => store.edges.map(item => ({ id: item.key, source: item.source, target: item.target, type: item.type, selected: store.selectedEdgeKeys.includes(item.key), sourceHandle: item.sourceHandle || undefined, targetHandle: item.targetHandle || undefined })))
+const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map(item => ({ id: item.key, source: item.source, target: item.target, type: item.type, selected: store.selectedEdgeKeys.includes(item.key), sourceHandle: item.sourceHandle || undefined, targetHandle: item.targetHandle || undefined })))
 const panModeActive = computed(() => canvasTool.value === 'pan' || spacePanActive.value)
 const interactionState = computed(() => workbenchInteractionState(canvasLocked.value, panModeActive.value))
-const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => ['asset', 'shot', 'audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media', 'watermark', 'video_composer', 'section', 'note'].includes(store.nodeByKey(key)?.kind || '')))
-const canCopy = computed(() => store.selectedNodeKeys.length === 1 && ['shot', 'note'].includes(store.nodeByKey(store.selectedNodeKeys[0])?.kind || ''))
+const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => nodeCapabilities(store.nodeByKey(key)?.kind).deletable))
+const canCopy = computed(() => store.selectedNodeKeys.length === 1 && nodeCapabilities(store.nodeByKey(store.selectedNodeKeys[0])?.kind).copyable)
 const selectedSectionMembers = computed(() => store.selectedNodeKeys.map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')))
 const canCreateSection = computed(() => selectedSectionMembers.value.length >= 2)
 const selectedNodes = computed(() => store.selectedNodeKeys.flatMap(key => {
@@ -365,7 +369,7 @@ async function autoArrange() {
   const fixedNodeKeys = new Set(store.nodes
     .filter(node => node.zIndex >= 1_000_000 || (node.data.ui as Record<string, unknown> | undefined)?.locked === true)
     .map(node => node.key))
-  const positions = buildWorkbenchGroupedAutoLayout(store.nodes, store.edges, {
+  const positions = buildWorkbenchGroupedAutoLayout(visibleStoreNodes.value, visibleStoreEdges.value, {
     sizes: measuredSizes,
     maxColumnHeight: Math.max(1100, height * 2.2),
     fixedNodeKeys,

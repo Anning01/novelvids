@@ -199,3 +199,30 @@ it('persists the active video version without discarding scene metadata', async 
   })
   expect(store.scenes[0]?.metadata?.workbench).toMatchObject({ activeVideoId: 91 })
 })
+
+it('hides a generated video result through delete and restores it through history', async () => {
+  store.nodes = [{
+    id: 91,
+    key: 'video-91',
+    kind: 'video_result',
+    backendKind: 'video_result',
+    title: '视频结果',
+    position: { x: 0, y: 0 },
+    size: null,
+    zIndex: 1,
+    activeVersionId: null,
+    status: 'ready',
+    data: { video: { id: 91 }, ui: {} },
+    createdAt: '',
+    updatedAt: '',
+  }]
+
+  await expect(store.deleteNodeKeys(['video-91'])).resolves.toBe(1)
+  expect(store.nodeByKey('video-91')?.data.ui).toMatchObject({ hidden: true })
+
+  expect(store.undo()).toBe(true)
+  expect(store.nodeByKey('video-91')?.data.ui).toEqual({})
+
+  expect(store.redo()).toBe(true)
+  expect(store.nodeByKey('video-91')?.data.ui).toMatchObject({ hidden: true })
+})

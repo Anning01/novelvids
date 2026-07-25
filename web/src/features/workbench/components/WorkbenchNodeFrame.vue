@@ -4,6 +4,7 @@ import { Handle, Position } from '@vue-flow/core'
 import { Ban, BookOpenText, Box, ChevronDown, ChevronUp, Clapperboard, Droplet, FileAudio2, FileImage, FileVideo2, Film, Info, Layers3, Palette, Pin, ScanFace, StickyNote, Trash2, Volume2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { useWorkbenchStore } from '../store/workbenchStore'
+import { nodeCapabilities } from '../config/nodeCapabilities'
 import NodeInfoPanel from './NodeInfoPanel.vue'
 
 const props = defineProps<{ id: string; data: { title?: string; kind?: WorkbenchNodeKind; status?: string }; selected?: boolean; connectable?: unknown }>()
@@ -18,13 +19,14 @@ const ignored = computed(() => ui.value.ignored === true)
 const pinned = computed(() => (node.value?.zIndex || 0) >= 1_000_000)
 const markerColor = computed(() => typeof ui.value.color === 'string' ? ui.value.color : '')
 const icon = computed(() => ({ chapter: BookOpenText, asset: Box, audio_reference: Volume2, digital_human: ScanFace, image_media: FileImage, video_media: FileVideo2, audio_media: FileAudio2, shot: Clapperboard, video_result: FileVideo2, watermark: Droplet, video_composer: Film, section: Layers3, note: StickyNote, unsupported: Box })[props.data.kind || 'unsupported'])
-const hasTarget = computed(() => props.data.kind === 'shot' || props.data.kind === 'video_result' || props.data.kind === 'watermark')
-const hasSource = computed(() => props.data.kind === 'chapter' || props.data.kind === 'asset' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'image_media' || props.data.kind === 'video_media' || props.data.kind === 'audio_media' || props.data.kind === 'shot' || props.data.kind === 'video_result' || props.data.kind === 'watermark' || props.data.kind === 'video_composer')
+const capabilities = computed(() => nodeCapabilities(props.data.kind))
+const hasTarget = computed(() => capabilities.value.target && props.data.kind !== 'video_composer')
+const hasSource = computed(() => capabilities.value.source)
 const targetHandleId = computed(() => props.data.kind === 'watermark' ? 'video-input' : 'input')
 const targetHandleLabel = computed(() => props.data.kind === 'watermark' ? '视频输入' : '输入连接点')
 const sourceHandleId = computed(() => props.data.kind === 'watermark' ? 'watermark-output' : props.data.kind === 'video_composer' ? 'result-output' : 'output')
 const sourceHandleLabel = computed(() => props.data.kind === 'watermark' ? '处理后视频' : props.data.kind === 'video_composer' ? '结果输出端口' : '输出连接点')
-const canDelete = computed(() => props.data.kind === 'asset' || props.data.kind === 'shot' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'image_media' || props.data.kind === 'video_media' || props.data.kind === 'audio_media' || props.data.kind === 'watermark' || props.data.kind === 'video_composer')
+const canDelete = computed(() => capabilities.value.deletable)
 
 function updateUi(patch: Record<string, unknown>) { store.checkpoint(); store.updateNodeUi(props.id, { ...ui.value, ...patch }) }
 function beginCustomColor() { store.checkpoint() }

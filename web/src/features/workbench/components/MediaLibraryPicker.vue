@@ -14,6 +14,7 @@ const search = ref('')
 const loading = ref(false)
 const error = ref('')
 const title = computed(() => props.kind === 'audio' ? '选择参考音频' : '选择数字人')
+let requestId = 0
 
 function assetId(item: LibraryItem) { return item.asset_id }
 function name(item: LibraryItem) { return 'nickname' in item ? item.nickname : `${item.country} · ${item.occupation}` }
@@ -21,19 +22,32 @@ function detail(item: LibraryItem) { return 'audio_url' in item ? item.gender : 
 function preview(item: LibraryItem) { return 'avatar_url' in item ? item.avatar_url : item.image_url }
 
 async function load(reset = false) {
-  if (loading.value) return
+  if (loading.value && !reset) return
+  const currentRequestId = ++requestId
   if (reset) { page.value = 1; items.value = [] }
   loading.value = true; error.value = ''
+  const requestedPage = page.value
+  const requestedSearch = search.value.trim()
   try {
-    const response = props.kind === 'audio' ? await api.audioReferences(page.value, search.value.trim()) : await api.digitalHumans(page.value, search.value.trim())
+    const response = props.kind === 'audio' ? await api.audioReferences(requestedPage, requestedSearch) : await api.digitalHumans(requestedPage, requestedSearch)
+    if (currentRequestId !== requestId) return
     items.value = reset ? response.data.items : [...items.value, ...response.data.items]
     pages.value = response.data.pagination.pages
-  } catch (reason) { error.value = reason instanceof Error ? reason.message : '资源库加载失败' }
-  finally { loading.value = false }
+  } catch (reason) {
+    if (currentRequestId === requestId) error.value = reason instanceof Error ? reason.message : '资源库加载失败'
+  } finally {
+    if (currentRequestId === requestId) loading.value = false
+  }
 }
 function submitSearch() { load(true) }
 function loadMore() { if (page.value < pages.value) { page.value += 1; load() } }
-watch(() => props.open, value => { if (value) load(true) })
+watch(() => props.open, value => {
+  if (value) load(true)
+  else {
+    requestId += 1
+    loading.value = false
+  }
+}, { immediate: true })
 </script>
 
 <template>
