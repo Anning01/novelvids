@@ -88,3 +88,23 @@ it('replaces media in place and clears stale image metadata', async () => {
   expect(replaced?.data.width).toBeUndefined()
   expect(store.nodes.filter(node => node.kind === 'image_media')).toHaveLength(1)
 })
+
+it('persists annotations only for an uploaded image node', async () => {
+  const image = store.addUploadedMedia('image_media', {
+    filename: 'photo.png',
+    original_filename: 'photo.png',
+    content_type: 'image/png',
+  })
+  const annotation = {
+    id: 'rect-1',
+    tool: 'rectangle' as const,
+    points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }],
+    stroke: '#ff5a5f',
+    strokeWidth: 3,
+  }
+
+  expect(store.saveImageAnnotations(image.key, [annotation])).toBe(true)
+  expect(store.nodeByKey(image.key)?.data.annotations).toEqual([annotation])
+  expect(store.saveImageAnnotations('missing', [annotation])).toBe(false)
+  expect(JSON.parse(localStorage.getItem(store.layoutKey()) || '{}').manualNodes[0].data.annotations).toEqual([annotation])
+})

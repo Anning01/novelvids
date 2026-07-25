@@ -3,7 +3,7 @@ import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Video } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
+import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { assetTypeLabel } from '../config/assetConfig'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
@@ -318,6 +318,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       item.data = { ...item.data, ...next }
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
+    },
+    saveImageAnnotations(key: string, annotations: ImageAnnotation[]) {
+      const item = this.nodeByKey(key)
+      if (!item || item.kind !== 'image_media') return false
+      this.checkpoint()
+      item.data = { ...item.data, annotations: cloneValue(annotations) }
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+      this.persistLayout()
+      notice.success('图片标注已保存')
+      return true
     },
     setMediaResource(key: string, resource: AudioReference | DigitalHuman) {
       const item = this.nodeByKey(key)

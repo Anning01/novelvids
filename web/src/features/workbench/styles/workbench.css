@@ -3280,6 +3280,245 @@
 .workbench-uploaded-audio-node {
   min-width: 370px;
 }
+.workbench-uploaded-image-node__annotations {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px 7px 11px;
+  border: 1px solid #443e39;
+  border-radius: 9px;
+  color: #918980;
+  background: #211e1b;
+  font-size: 10px;
+}
+.workbench-uploaded-image-node__annotations button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #554b62;
+  border-radius: 7px;
+  color: #ded5f4;
+  background: #302a39;
+  cursor: pointer;
+}
+.workbench-uploaded-image-node__annotations button:hover {
+  border-color: #8770ba;
+  background: #3a3147;
+}
+
+.image-annotation-backdrop {
+  position: fixed;
+  z-index: 10000010;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(8 7 6 / 82%);
+  backdrop-filter: blur(8px);
+}
+.image-annotation-dialog {
+  width: min(1180px, 100%);
+  height: min(820px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid #4a443f;
+  border-radius: 18px;
+  color: #eee9e2;
+  background: #1b1917;
+  box-shadow: 0 30px 100px rgb(0 0 0 / 64%);
+}
+.image-annotation-dialog > header,
+.image-annotation-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 18px;
+}
+.image-annotation-dialog > header {
+  border-bottom: 1px solid #393531;
+}
+.image-annotation-dialog > header > div {
+  display: grid;
+  gap: 3px;
+}
+.image-annotation-dialog > header strong {
+  font-size: 16px;
+}
+.image-annotation-dialog > header small,
+.image-annotation-dialog > footer > span {
+  color: #938b83;
+  font-size: 11px;
+}
+.image-annotation-dialog button {
+  border: 1px solid #4a4540;
+  color: #ddd6cf;
+  background: #292623;
+  cursor: pointer;
+}
+.image-annotation-dialog button:hover:not(:disabled) {
+  border-color: #675b7d;
+  color: #f4efff;
+  background: #342e3d;
+}
+.image-annotation-dialog button:focus-visible,
+.image-annotation-dialog input:focus-visible {
+  outline: 2px solid #9b82dd;
+  outline-offset: 2px;
+}
+.image-annotation-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.image-annotation-dialog > header > button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+.image-annotation-dialog__toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #37332f;
+  background: #201d1a;
+}
+.image-annotation-dialog__tools,
+.image-annotation-dialog__actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.image-annotation-dialog__tools button {
+  min-width: 54px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+.image-annotation-dialog__tools button.is-active {
+  border-color: #9b82dd;
+  color: #f0eaff;
+  background: #3b314b;
+}
+.image-annotation-dialog__stroke,
+.image-annotation-dialog__brush {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #aaa198;
+  font-size: 10px;
+}
+.image-annotation-dialog__stroke input {
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid #514a44;
+  border-radius: 7px;
+  background: #292522;
+}
+.image-annotation-dialog__brush input {
+  width: 92px;
+}
+.image-annotation-dialog__actions {
+  margin-left: auto;
+}
+.image-annotation-dialog__actions button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+}
+.image-annotation-dialog__actions output {
+  min-width: 42px;
+  color: #a59d95;
+  font-size: 10px;
+  text-align: center;
+}
+.image-annotation-dialog__viewport {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 26px;
+  background:
+    linear-gradient(45deg, #201e1c 25%, transparent 25%, transparent 75%, #201e1c 75%),
+    linear-gradient(45deg, #201e1c 25%, #181614 25%, #181614 75%, #201e1c 75%);
+  background-position: 0 0, 9px 9px;
+  background-size: 18px 18px;
+}
+.image-annotation-dialog__viewport.is-moving {
+  cursor: grab;
+}
+.image-annotation-dialog__viewport.is-moving:active {
+  cursor: grabbing;
+}
+.image-annotation-dialog__surface {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center;
+  transition: transform 120ms ease-out;
+}
+.image-annotation-dialog__surface img {
+  display: block;
+  max-width: calc(100vw - 110px);
+  max-height: calc(100vh - 250px);
+  border-radius: 6px;
+  object-fit: contain;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 48%);
+  user-select: none;
+}
+.image-annotation-dialog__surface svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  touch-action: none;
+  cursor: crosshair;
+}
+.image-annotation-dialog__viewport.is-moving svg {
+  cursor: grab;
+}
+.image-annotation-dialog > footer {
+  border-top: 1px solid #393531;
+}
+.image-annotation-dialog > footer > div {
+  display: flex;
+  gap: 8px;
+}
+.image-annotation-dialog > footer button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 16px;
+  border-radius: 9px;
+}
+.image-annotation-dialog > footer button.is-primary {
+  border-color: #a88bea;
+  color: #17131d;
+  background: #a88bea;
+}
+.image-annotation-dialog > footer button.is-primary:hover {
+  color: #120f17;
+  background: #b99ef3;
+}
 .media-resource-preview { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .media-resource-preview img { width: 58px; height: 58px; flex: 0 0 auto; border: 1px solid rgb(255 255 255 / 9%); border-radius: 12px; object-fit: cover; background: #252321; }
 .media-resource-preview.is-digital-human { align-items: flex-end; }
@@ -3323,6 +3562,12 @@
 }
 
 @media (max-width: 720px) {
+  .image-annotation-backdrop { padding: 8px; }
+  .image-annotation-dialog { height: calc(100vh - 16px); }
+  .image-annotation-dialog__toolbar { align-items: flex-start; flex-wrap: wrap; }
+  .image-annotation-dialog__tools { width: 100%; overflow-x: auto; }
+  .image-annotation-dialog__actions { margin-left: 0; }
+  .image-annotation-dialog__surface img { max-width: calc(100vw - 44px); }
   .media-picker-backdrop { padding: 10px; }
   .media-picker { max-height: calc(100vh - 20px); }
   .media-picker-grid { grid-template-columns: 1fr; }
