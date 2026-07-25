@@ -24,6 +24,7 @@ const manualKinds = new Set<WorkbenchNode['kind']>([
   'image_media',
   'video_media',
   'audio_media',
+  'watermark',
   'section',
   'note',
 ])

@@ -34,7 +34,7 @@ export function selectedRunState(
       if (!capabilities.generate_video) return { enabled: false, label: '运行所选配置', reason: '当前服务不支持视频生成', runnableKeys }
       if (!node.data.scene) return { enabled: false, label: '运行所选配置', reason: `${node.title}缺少镜头配置`, runnableKeys }
     } else if (capabilityKey === 'apply_watermark') {
-      if (!capabilities.apply_watermark) return { enabled: false, label: '运行所选配置', reason: '当前服务不支持水印处理', runnableKeys }
+      if (!capabilities.apply_watermark) return { enabled: false, label: '运行所选配置', reason: '当前服务未启用水印执行', runnableKeys }
     } else if (capabilityKey === 'compose_video') {
       if (!capabilities.compose_video) return { enabled: false, label: '运行所选配置', reason: '当前服务不支持视频合成', runnableKeys }
     } else {

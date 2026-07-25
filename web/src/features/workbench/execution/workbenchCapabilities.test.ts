@@ -18,3 +18,26 @@ it('disables the CTA when selection is empty', () => {
     runnableKeys: [],
   })
 })
+
+it('shows the truthful watermark capability reason', () => {
+  expect(selectedRunState([{
+    id: -1,
+    key: 'watermark-1',
+    kind: 'watermark',
+    backendKind: 'watermark',
+    title: '新水印',
+    position: { x: 0, y: 0 },
+    size: null,
+    zIndex: 1,
+    activeVersionId: null,
+    status: 'ready',
+    data: { capability_key: 'apply_watermark', ui: {} },
+    createdAt: '',
+    updatedAt: '',
+  }], capabilities)).toEqual({
+    enabled: false,
+    label: '运行所选配置',
+    reason: '当前服务未启用水印执行',
+    runnableKeys: [],
+  })
+})

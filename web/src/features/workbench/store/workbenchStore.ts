@@ -6,6 +6,7 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { assetTypeLabel } from '../config/assetConfig'
+import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
 
 interface HistorySnapshot {
@@ -347,6 +348,30 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
       return item
     },
+    addWatermark(position?: Point) {
+      this.checkpoint()
+      const stamp = Date.now(); const key = `watermark-${stamp}`
+      const item = node(-stamp, key, 'watermark', '新水印', position || { x: 560, y: 120 + this.manualNodes.length * 320 }, {
+        config: normalizeWatermarkConfig(null),
+        capability_key: 'apply_watermark',
+        layout_family: 'result',
+        layout_lane: 'result:watermark',
+        ui: {},
+      })
+      item.size = { width: 360, height: 300 }
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      return item
+    },
+    saveWatermarkConfig(key: string, config: Partial<WatermarkConfig>) {
+      const item = this.nodeByKey(key)
+      if (!item || item.kind !== 'watermark') return false
+      this.checkpoint()
+      item.data = { ...item.data, config: normalizeWatermarkConfig(config) }
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+      this.persistLayout()
+      notice.success('水印配置已保存')
+      return true
+    },
     addSection(memberKeys: string[], position: Point, size: NodeSize, color: string) {
       const stamp = Date.now(); const key = `section-${stamp}`
       const count = this.nodes.filter(item => item.kind === 'section').length + 1
@@ -358,12 +383,20 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     connectMediaNode(source: string, target: string) {
       const sourceNode = this.nodeByKey(source); const targetNode = this.nodeByKey(target)
-      if (!sourceNode || !targetNode || targetNode.kind !== 'shot' || !['audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media'].includes(sourceNode.kind)) return
+      if (!sourceNode || !targetNode) return
+      const isShotReference = targetNode.kind === 'shot' && ['audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media'].includes(sourceNode.kind)
+      const isWatermarkVideo = targetNode.kind === 'watermark' && ['video_result', 'video_media'].includes(sourceNode.kind)
+      if (!isShotReference && !isWatermarkVideo) return
       if (this.mediaEdges.some(item => item.source === source && item.target === target)) return
       this.checkpoint()
       const stamp = Date.now()
-      const item = edge(-stamp, `media-edge-${stamp}`, source, target, 'asset_reference')
-      this.mediaEdges.push(item); this.edges.push(item); this.persistLayout(); notice.success('参考资源已连接到镜头')
+      const item = edge(-stamp, `media-edge-${stamp}`, source, target, isWatermarkVideo ? 'output_binding' : 'asset_reference')
+      if (isWatermarkVideo) {
+        item.sourceHandle = 'output'
+        item.targetHandle = 'video-input'
+      }
+      this.mediaEdges.push(item); this.edges.push(item); this.persistLayout()
+      notice.success(isWatermarkVideo ? '视频已连接到水印' : '参考资源已连接到镜头')
     },
     async saveScene(sceneId: number, patch: Partial<Scene>) {
       const updated = (await api.updateScene(sceneId, patch)).data
