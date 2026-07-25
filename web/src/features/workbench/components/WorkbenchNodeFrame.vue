@@ -20,7 +20,7 @@ const markerColor = computed(() => typeof ui.value.color === 'string' ? ui.value
 const icon = computed(() => ({ chapter: BookOpenText, asset: Box, audio_reference: Volume2, digital_human: ScanFace, shot: Clapperboard, video_result: FileVideo2, section: Layers3, note: StickyNote, unsupported: Box })[props.data.kind || 'unsupported'])
 const hasTarget = computed(() => props.data.kind === 'shot' || props.data.kind === 'video_result')
 const hasSource = computed(() => props.data.kind === 'chapter' || props.data.kind === 'asset' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'shot')
-const canDelete = computed(() => props.data.kind === 'shot' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human')
+const canDelete = computed(() => props.data.kind === 'asset' || props.data.kind === 'shot' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human')
 
 function updateUi(patch: Record<string, unknown>) { store.checkpoint(); store.updateNodeUi(props.id, { ...ui.value, ...patch }) }
 function beginCustomColor() { store.checkpoint() }

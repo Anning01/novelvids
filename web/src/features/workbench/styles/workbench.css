@@ -630,6 +630,211 @@
   border-color: #8f7ccb;
   background: #352e49;
 }
+.workbench-node-component {
+  display: contents;
+}
+.workbench-asset-config {
+  display: grid;
+  width: 100%;
+  gap: 11px;
+  color: #d8d0c7;
+}
+.workbench-asset-config__identity {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 8px;
+}
+.workbench-asset-config__generation {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #403a34;
+  border-radius: 11px;
+  background: #1a1816;
+}
+.workbench-asset-config__generation > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #eee9e2;
+  font-size: 11px;
+}
+.workbench-asset-config__generation > header small {
+  color: #7f776f;
+  font-size: 9px;
+  font-weight: 500;
+}
+.workbench-asset-digital-human {
+  display: grid;
+  gap: 7px;
+}
+.workbench-asset-digital-human > div {
+  display: grid;
+  gap: 2px;
+}
+.workbench-asset-digital-human > div strong {
+  font-size: 10px;
+}
+.workbench-asset-digital-human small {
+  color: #8f867d;
+  font-size: 9px;
+}
+.workbench-asset-digital-human > button {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 1px solid #4b443e;
+  border-radius: 9px;
+  color: #d8d0c7;
+  background: #211e1b;
+  cursor: pointer;
+  text-align: left;
+}
+.workbench-asset-digital-human > button:hover {
+  border-color: #756594;
+  background: #282230;
+}
+.workbench-asset-digital-human > button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.workbench-asset-digital-human > button strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbench-asset-generation-params {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workbench-asset-generation-params legend {
+  grid-column: 1 / -1;
+  margin-bottom: 1px;
+  color: #aaa198;
+  font-size: 10px;
+  font-weight: 650;
+}
+.workbench-asset-size-field {
+  grid-column: 2;
+}
+.workbench-asset-size-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+}
+.workbench-asset-size-control > input {
+  border-radius: 8px 0 0 8px;
+}
+.workbench-asset-size-select {
+  min-width: 0 !important;
+}
+.workbench-asset-size-select .app-select__trigger {
+  min-height: 33px;
+  padding: 0 8px;
+  border-color: #47413b;
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  color: #cfc5bd;
+  background: #27231f;
+  box-shadow: none;
+}
+.workbench-asset-size-select .app-select__value,
+.workbench-asset-size-select .app-select__chevron {
+  display: none;
+}
+.workbench-asset-size-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #7f776f;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.workbench-asset-candidates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.workbench-asset-candidates figure {
+  position: relative;
+  overflow: hidden;
+  min-height: 96px;
+  margin: 0;
+  border: 1px solid #413b35;
+  border-radius: 10px;
+  background: #141210;
+}
+.workbench-asset-candidates img {
+  display: block;
+  width: 100%;
+  height: 116px;
+  object-fit: cover;
+}
+.workbench-asset-candidates button {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 999px;
+  color: #f5f1eb;
+  background: rgb(24 21 19 / 88%);
+  cursor: pointer;
+  font-size: 9px;
+  backdrop-filter: blur(8px);
+}
+.workbench-asset-candidates button:disabled {
+  color: #d7cdf8;
+  cursor: default;
+  background: rgb(45 39 64 / 92%);
+}
+.workbench-asset-config .workbench-media-placeholder {
+  display: flex;
+  min-height: 104px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 10px;
+}
+.workbench-asset-config__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.workbench-asset-config__actions button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #4a433d;
+  border-radius: 9px;
+  color: #d8d0c7;
+  background: #292521;
+  cursor: pointer;
+  font-size: 10px;
+}
+.workbench-asset-config__actions button.is-primary {
+  border-color: #65578a;
+  color: #eee9ff;
+  background: #45386d;
+}
+.workbench-asset-config__actions button:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.workbench-asset-config__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
 .workbench-mention-editor {
   position: relative;
   overflow: visible;

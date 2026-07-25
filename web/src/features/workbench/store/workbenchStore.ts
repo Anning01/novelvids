@@ -5,6 +5,7 @@ import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Vid
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
+import { assetTypeLabel } from '../config/assetConfig'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
 
 interface HistorySnapshot {
@@ -136,7 +137,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       try {
         const [chapterResponse, assetsResponse, scenesResponse, enumsResponse] = await Promise.all([api.chapter(chapterId), api.assets(novelId), api.scenes(chapterId), api.enums()])
         this.chapter = chapterResponse.data
-        this.assets = assetsResponse.data.items
+        this.assets = await Promise.all(assetsResponse.data.items.map(async item => (await api.asset(item.id)).data))
         this.scenes = await Promise.all(scenesResponse.data.items.map(async item => (await api.scene(item.id)).data))
         this.modelOptions = enumsResponse.data.video_model_type || []
         const entries = await Promise.all(this.scenes.map(async item => [item.id, (await api.videos(item.id)).data.items] as const))
@@ -149,12 +150,13 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (!this.chapter) return
       const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', `第 ${this.chapter.number} 章 · ${this.chapter.name}`, { x: 80, y: 80 }, { chapter: this.chapter, layout_family: 'chapter', layout_lane: 'chapter' })]
       const edges: WorkbenchEdge[] = []
-      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, asset_type: ({ [AssetTypeEnum.PERSON]: 'character', [AssetTypeEnum.SCENE]: 'scene', [AssetTypeEnum.ITEM]: 'object' } as Record<number, string>)[asset.asset_type], layout_family: 'asset', ui: {}, index })))
+      const validAssetIds = new Set(this.assets.map(asset => asset.id))
+      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, asset_type: assetTypeLabel(asset.asset_type), layout_family: 'asset', ui: {}, index })))
       this.scenes.forEach((scene, index) => {
         const sceneKey = `shot-${scene.id}`
         nodes.push(node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: this.videos[scene.id] || [], modelOptions: this.modelOptions, shot_index: scene.sequence, layout_family: 'shot', ui: {} }))
         edges.push(edge(100000 + scene.id, `chapter-${sceneKey}`, 'chapter', sceneKey, 'shot_sequence', index))
-        sceneAssetIds(scene).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
+        sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
         const latest = this.videos[scene.id]?.[0]
         if (latest) {
           const resultKey = `video-${latest.id}`
@@ -207,11 +209,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const selected = [...new Set(keys)]
         .map(key => this.nodeByKey(key))
         .filter((item): item is WorkbenchNode => Boolean(item))
+      const assets = selected.filter(item => item.kind === 'asset')
       const shots = selected.filter(item => item.kind === 'shot')
       const manualKeys = new Set(selected.filter(item => isManualNodeKind(item.kind)).map(item => item.key))
-      await Promise.all(shots.map(item => api.deleteScene(item.id)))
+      await Promise.all([
+        ...assets.map(item => api.deleteAsset(item.id)),
+        ...shots.map(item => api.deleteScene(item.id)),
+      ])
       if (manualKeys.size) this.checkpoint()
-      const removedKeys = new Set([...manualKeys, ...shots.map(item => item.key)])
+      const removedKeys = new Set([...manualKeys, ...assets.map(item => item.key), ...shots.map(item => item.key)])
+      this.assets = this.assets.filter(item => !assets.some(nodeItem => nodeItem.id === item.id))
       this.scenes = this.scenes.filter(item => !shots.some(nodeItem => nodeItem.id === item.id))
       this.manualNodes = this.manualNodes.filter(item => !manualKeys.has(item.key))
       this.manualNodes.filter(item => item.kind === 'section').forEach((section) => {
@@ -287,13 +294,39 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.rebuildGraph()
       notice.success('资产描述已保存')
     },
+    async addEmptyAsset(position?: Point) {
+      const names = new Set(this.assets.map(item => item.canonical_name))
+      let suffix = 1
+      while (names.has(`资产 ${suffix}`)) suffix += 1
+      const created = (await api.createAsset({
+        novel_id: this.novelId,
+        asset_type: AssetTypeEnum.PERSON,
+        canonical_name: `资产 ${suffix}`,
+      })).data
+      this.assets.push(created)
+      this.rebuildGraph()
+      const item = this.nodeByKey(`asset-${created.id}`) || null
+      if (item && position) item.position = position
+      if (item) this.selectNode(item.key)
+      this.persistLayout()
+      notice.success('已添加空资产')
+      return item
+    },
+    async setAssetMainImage(assetId: number, url: string) {
+      const updated = (await api.updateAsset(assetId, { main_image: url })).data
+      this.assets = this.assets.map(item => item.id === assetId ? updated : item)
+      this.rebuildGraph()
+      notice.success('已设为主图')
+      return updated
+    },
     async generateAsset(assetId: number) {
       if (!this.busyAssetIds.includes(assetId)) this.busyAssetIds.push(assetId)
       try {
         let task = (await api.generateAsset(assetId)).data
         while (!terminal.has(task.status)) { await sleep(2500); task = (await api.task(task.id)).data }
         if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '资产图片生成失败')
-        this.assets = (await api.assets(this.novelId)).data.items
+        const assets = (await api.assets(this.novelId)).data.items
+        this.assets = await Promise.all(assets.map(async item => (await api.asset(item.id)).data))
         this.rebuildGraph()
         notice.success('资产图片生成完成')
       } catch (error) {

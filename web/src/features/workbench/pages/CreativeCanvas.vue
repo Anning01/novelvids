@@ -59,12 +59,19 @@ const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence:
 const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
   id: item.key, type: item.kind, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
   ...(item.size ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px` } } : {}),
-  data: { ...item.data, kind: item.kind, title: item.title, status: item.status, ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}) },
+  data: {
+    ...item.data,
+    kind: item.kind,
+    title: item.title,
+    status: item.status,
+    ...(item.kind === 'asset' ? { generate_capability: capabilities.value.generate_asset } : {}),
+    ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
+  },
 })))
 const flowEdges = computed<Edge[]>(() => store.edges.map(item => ({ id: item.key, source: item.source, target: item.target, type: item.type, selected: store.selectedEdgeKeys.includes(item.key), sourceHandle: item.sourceHandle || undefined, targetHandle: item.targetHandle || undefined })))
 const panModeActive = computed(() => canvasTool.value === 'pan' || spacePanActive.value)
 const interactionState = computed(() => workbenchInteractionState(canvasLocked.value, panModeActive.value))
-const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => ['shot', 'audio_reference', 'digital_human', 'section', 'note'].includes(store.nodeByKey(key)?.kind || '')))
+const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => ['asset', 'shot', 'audio_reference', 'digital_human', 'section', 'note'].includes(store.nodeByKey(key)?.kind || '')))
 const canCopy = computed(() => store.selectedNodeKeys.length === 1 && ['shot', 'note'].includes(store.nodeByKey(store.selectedNodeKeys[0])?.kind || ''))
 const selectedSectionMembers = computed(() => store.selectedNodeKeys.map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')))
 const canCreateSection = computed(() => selectedSectionMembers.value.length >= 2)
@@ -246,6 +253,10 @@ async function addShot() {
 function addNote() {
   const created = store.addNote(visibleNodePosition({ width: 320, height: 220 }))
   void ensureNodeVisible(created.key)
+}
+async function addAsset() {
+  const created = await store.addEmptyAsset(visibleNodePosition({ width: 350, height: 680 }))
+  if (created) await ensureNodeVisible(created.key)
 }
 function moveEnd() { store.viewport = getViewport(); saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize()); store.persistLayout() }
 function trackSelectionAutoPanPointer(event: PointerEvent) {
@@ -435,7 +446,7 @@ onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keyd
         </button>
       </Controls>
       <CanvasToolSwitcher v-model="canvasTool" />
-      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" @add-shot="addShot" @add-audio-reference="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @add-asset="notice.error('空资产节点将在资产配置阶段开放')" @add-watermark="notice.error('当前服务尚未开放水印处理')" @add-composer="notice.error('当前服务尚未开放视频合成')" @upload-image="notice.error('上传图片将在素材上传阶段开放')" @upload-video="notice.error('上传视频将在素材上传阶段开放')" @upload-audio="notice.error('上传音频将在素材上传阶段开放')" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" @add-shot="addShot" @add-audio-reference="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @add-asset="addAsset" @add-watermark="notice.error('当前服务尚未开放水印处理')" @add-composer="notice.error('当前服务尚未开放视频合成')" @upload-image="notice.error('上传图片将在素材上传阶段开放')" @upload-video="notice.error('上传视频将在素材上传阶段开放')" @upload-audio="notice.error('上传音频将在素材上传阶段开放')" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个镜头</AppButton></div>
     </VueFlow>
   </main>
