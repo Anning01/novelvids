@@ -6,7 +6,9 @@ import { PanOnScrollMode, SelectionMode, VueFlow } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
 import { Lock, Unlock } from 'lucide-vue-next'
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { api } from '@/api'
 import { notice } from '@/shared/notice'
+import type { WorkbenchCapabilities } from '@/types'
 import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
 import WorkbenchToolbar from '../components/WorkbenchToolbar.vue'
 import AssetReferenceEdge from '../edges/AssetReferenceEdge.vue'
@@ -17,6 +19,7 @@ import { canvasZoomModifier } from '../interaction/canvasZoomModifier'
 import { selectionAutoPanDelta, selectionRectAfterAutoPan } from '../interaction/selectionAutoPan'
 import { workbenchSectionActionsKey } from '../interaction/sectionActions'
 import { applyNodeSelectionChanges, isAdditiveSelectionEvent, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
+import { selectedRunState } from '../execution/workbenchCapabilities'
 import { workbenchPromptEditorKey } from '../prompt/promptEditor'
 import { isWorkbenchFlowReady, WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
@@ -39,6 +42,13 @@ const canvasTool = ref<'select' | 'pan'>('select')
 const canvasLocked = ref(false)
 const spacePanActive = ref(false)
 const generating = ref(false)
+const capabilities = ref<WorkbenchCapabilities>({
+  upload_media: false,
+  generate_asset: false,
+  generate_video: false,
+  apply_watermark: false,
+  compose_video: false,
+})
 const sectionDropTargetKey = ref<string | null>(null)
 const promptEditorNodeKey = ref<string | null>(null)
 const restoredViewportChapterId = ref<number | null>(null)
@@ -58,6 +68,11 @@ const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => 
 const canCopy = computed(() => store.selectedNodeKeys.length === 1 && ['shot', 'note'].includes(store.nodeByKey(store.selectedNodeKeys[0])?.kind || ''))
 const selectedSectionMembers = computed(() => store.selectedNodeKeys.map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')))
 const canCreateSection = computed(() => selectedSectionMembers.value.length >= 2)
+const selectedNodes = computed(() => store.selectedNodeKeys.flatMap(key => {
+  const node = store.nodeByKey(key)
+  return node ? [node] : []
+}))
+const runState = computed(() => selectedRunState(selectedNodes.value, capabilities.value))
 
 provide(workbenchPromptEditorKey, {
   activeNodeKey: promptEditorNodeKey,
@@ -342,7 +357,25 @@ function createSection() {
   const geometry = nodeGroupGeometry(selectedSectionMembers.value)
   store.addSection(memberKeys, geometry.position, geometry.size, DEFAULT_SECTION_COLOR)
 }
-async function generateScenes() { generating.value = true; try { await store.generateScenes(); await nextTick(); await fitView({ padding: 0.12, duration: 500 }) } catch (error) { notice.error(error instanceof Error ? error.message : '分镜生成失败') } finally { generating.value = false } }
+async function runSelected() {
+  if (!runState.value.enabled) return
+  generating.value = true
+  try {
+    for (const key of runState.value.runnableKeys) {
+      const node = store.nodeByKey(key)
+      if (node?.kind === 'asset') await store.generateAsset(node.id)
+      if (node?.kind === 'shot') {
+        const modelType = Number(store.modelOptions[0]?.value)
+        if (!Number.isFinite(modelType)) throw new Error('当前没有可用的视频模型')
+        await store.generateVideo(node.id, modelType)
+      }
+    }
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : '运行所选配置失败')
+  } finally {
+    generating.value = false
+  }
+}
 function handleKeydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
@@ -378,7 +411,10 @@ async function restoreViewport() {
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown); window.addEventListener('keyup', handleKeyup)
   try {
+    const capabilityRequest = api.workbenchCapabilities().catch(() => null)
     await store.load(props.novelId, props.chapterId)
+    const capabilityResponse = await capabilityRequest
+    if (capabilityResponse) capabilities.value = capabilityResponse.data
   } catch (error) {
     notice.error(error instanceof Error ? error.message : '工作区加载失败')
   }
@@ -399,7 +435,7 @@ onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keyd
         </button>
       </Controls>
       <CanvasToolSwitcher v-model="canvasTool" />
-      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" @add-shot="addShot" @add-audio="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @create-section="createSection" @generate="generateScenes" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" @add-shot="addShot" @add-audio-reference="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @add-asset="notice.error('空资产节点将在资产配置阶段开放')" @add-watermark="notice.error('当前服务尚未开放水印处理')" @add-composer="notice.error('当前服务尚未开放视频合成')" @upload-image="notice.error('上传图片将在素材上传阶段开放')" @upload-video="notice.error('上传视频将在素材上传阶段开放')" @upload-audio="notice.error('上传音频将在素材上传阶段开放')" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个镜头</AppButton></div>
     </VueFlow>
   </main>

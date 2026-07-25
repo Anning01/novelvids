@@ -31,6 +31,7 @@ import {
 import AppSelect from '@/components/AppSelect.vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
+import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
@@ -82,6 +83,7 @@ const generationErrors = ref<Record<number, string>>({})
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
 const openAssetPickers = ref<Set<string>>(new Set())
 const uploadingFrameKey = ref('')
+const savingCanvasIdentity = ref(false)
 let alive = true
 let chapterLoadVersion = 0
 let sceneObserver: IntersectionObserver | undefined
@@ -522,6 +524,21 @@ function selectWorkspaceView(view: 'workflow' | 'storyboard') {
   void router.replace({ query })
 }
 
+async function renameCanvas(name: string) {
+  if (!activeChapter.value || savingCanvasIdentity.value) return
+  savingCanvasIdentity.value = true
+  try {
+    const updated = (await api.updateChapter(activeChapter.value.id, { name })).data
+    activeChapter.value = updated
+    chapters.value = chapters.value.map(chapter => chapter.id === updated.id ? updated : chapter)
+    notice.success('画布名称已保存')
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : '画布名称保存失败')
+  } finally {
+    savingCanvasIdentity.value = false
+  }
+}
+
 onMounted(load)
 onBeforeUnmount(() => {
   alive = false
@@ -535,6 +552,7 @@ onBeforeUnmount(() => {
       <div class="project-heading">
         <AppButton variant="ghost" size="sm" icon-only aria-label="返回项目" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
         <div v-if="workspaceView === 'storyboard'"><strong>{{ project?.name || '短剧项目' }}</strong><span><Film :size="13" />{{ project?.aspectRatio || '9:16' }}<i />{{ project?.resolution || '720p' }}<i />{{ project?.style || '写实通用' }}</span></div>
+        <WorkbenchCanvasIdentity v-else-if="activeChapter" :name="activeChapter.name" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
       </div>
       <nav v-if="workspaceView === 'storyboard'" class="phase-nav" aria-label="短剧制作流程">
         <template v-for="(phase, index) in phaseItems" :key="phase.label">
@@ -644,9 +662,10 @@ onBeforeUnmount(() => {
 .storyboard-topbar { position: sticky; top: 0; z-index: 30; display: grid; min-height: 64px; grid-template-columns: minmax(280px,1fr) auto minmax(280px,1fr); align-items: center; padding: 5px 18px; background: rgb(255 255 255 / 97%); box-shadow: 0 1px 0 #eceef3; backdrop-filter: blur(16px); }
 .storyboard-page.is-workflow-view .storyboard-topbar { position: fixed; right: 0; left: 0; min-height: 0; grid-template-columns: 1fr auto; padding: 14px 18px; pointer-events: none; background: transparent; box-shadow: none; backdrop-filter: none; }
 .project-heading { display: flex; min-width: 0; align-items: center; gap: 12px; }
-.storyboard-page.is-workflow-view .project-heading { pointer-events: auto; }
-.storyboard-page.is-workflow-view .project-heading > button { color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631, 0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
+.storyboard-page.is-workflow-view .project-heading { pointer-events: none; }
+.storyboard-page.is-workflow-view .project-heading > button { pointer-events: auto; color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631, 0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
 .storyboard-page.is-workflow-view .project-heading > button:hover { color: #fff; background: #2a2622; }
+.storyboard-page.is-workflow-view .project-heading > :deep(.workbench-canvas-identity) { pointer-events: auto; }
 .project-heading > div { display: grid; min-width: 0; gap: 5px; }
 .project-heading strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .project-heading span { display: flex; align-items: center; gap: 7px; color: #9298a8; font-size: 10px; }
