@@ -21,6 +21,9 @@ export interface SavedWorkbenchStateV2 {
 const manualKinds = new Set<WorkbenchNode['kind']>([
   'audio_reference',
   'digital_human',
+  'image_media',
+  'video_media',
+  'audio_media',
   'section',
   'note',
 ])

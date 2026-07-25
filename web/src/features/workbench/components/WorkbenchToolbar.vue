@@ -4,9 +4,12 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { WorkbenchRunState } from '../execution/workbenchCapabilities'
 
 defineProps<{ running?: boolean; canUndo?: boolean; canRedo?: boolean; hasSelection?: boolean; canCopy?: boolean; canPaste?: boolean; canCreateSection?: boolean; runState: WorkbenchRunState }>()
-defineEmits<{ addAsset: []; addShot: []; addNote: []; addWatermark: []; addComposer: []; uploadImage: []; uploadVideo: []; uploadAudio: []; addAudioReference: []; addDigitalHuman: []; createSection: []; runSelected: []; deleteSelection: []; copy: []; paste: []; undo: []; redo: []; autoArrange: [] }>()
+const emit = defineEmits<{ addAsset: []; addShot: []; addNote: []; addWatermark: []; addComposer: []; uploadImage: [file: File]; uploadVideo: [file: File]; uploadAudio: [file: File]; addAudioReference: []; addDigitalHuman: []; createSection: []; runSelected: []; deleteSelection: []; copy: []; paste: []; undo: []; redo: []; autoArrange: [] }>()
 const addMenuRoot = ref<HTMLElement | null>(null)
 const addMenuTrigger = ref<HTMLButtonElement | null>(null)
+const imageInput = ref<HTMLInputElement | null>(null)
+const videoInput = ref<HTMLInputElement | null>(null)
+const audioInput = ref<HTMLInputElement | null>(null)
 const addMenuOpen = ref(false)
 
 function closeAddMenu({ restoreFocus = false } = {}) {
@@ -22,6 +25,19 @@ function handleDocumentPointerDown(event: PointerEvent) {
 }
 function handleDocumentKeydown(event: KeyboardEvent) {
   if (addMenuOpen.value && event.key === 'Escape') { event.preventDefault(); closeAddMenu({ restoreFocus: true }) }
+}
+function openFilePicker(input: HTMLInputElement | null) {
+  closeAddMenu()
+  input?.click()
+}
+function chooseFile(kind: 'image' | 'video' | 'audio', event: Event) {
+  const input = event.currentTarget as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (kind === 'image') emit('uploadImage', file)
+  if (kind === 'video') emit('uploadVideo', file)
+  if (kind === 'audio') emit('uploadAudio', file)
 }
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
@@ -48,14 +64,20 @@ onBeforeUnmount(() => {
           <button type="button" role="menuitem" aria-label="新增水印" @click="closeAddMenu(); $emit('addWatermark')"><Droplet :size="18" aria-hidden="true" /><span>水印</span></button>
           <button type="button" role="menuitem" aria-label="新增视频合成" @click="closeAddMenu(); $emit('addComposer')"><Combine :size="18" aria-hidden="true" /><span>视频合成</span></button>
           <p class="workbench-add-menu__heading workbench-add-menu__heading--resources">添加资源</p>
-          <button type="button" role="menuitem" aria-label="上传图片" @click="closeAddMenu(); $emit('uploadImage')"><Image :size="18" aria-hidden="true" /><span>上传图片</span></button>
-          <button type="button" role="menuitem" aria-label="上传视频" @click="closeAddMenu(); $emit('uploadVideo')"><Video :size="18" aria-hidden="true" /><span>上传视频</span></button>
-          <button type="button" role="menuitem" aria-label="上传音频" @click="closeAddMenu(); $emit('uploadAudio')"><Upload :size="18" aria-hidden="true" /><span>上传音频</span></button>
+          <button type="button" role="menuitem" aria-label="上传图片" @click="openFilePicker(imageInput)"><Image :size="18" aria-hidden="true" /><span>上传图片</span></button>
+          <button type="button" role="menuitem" aria-label="上传视频" @click="openFilePicker(videoInput)"><Video :size="18" aria-hidden="true" /><span>上传视频</span></button>
+          <button type="button" role="menuitem" aria-label="上传音频" @click="openFilePicker(audioInput)"><Upload :size="18" aria-hidden="true" /><span>上传音频</span></button>
           <button type="button" role="menuitem" aria-label="添加参考音频" @click="closeAddMenu(); $emit('addAudioReference')"><Volume2 :size="18" aria-hidden="true" /><span>参考音频</span></button>
           <button type="button" role="menuitem" aria-label="添加数字人" @click="closeAddMenu(); $emit('addDigitalHuman')"><ScanFace :size="18" aria-hidden="true" /><span>数字人</span></button>
         </div>
       </Transition>
     </div>
+    <button class="workbench-toolbar__media-upload" type="button" aria-label="选择上传图片文件" title="上传图片" @click="openFilePicker(imageInput)"><Image :size="19" aria-hidden="true" /></button>
+    <button class="workbench-toolbar__media-upload" type="button" aria-label="选择上传视频文件" title="上传视频" @click="openFilePicker(videoInput)"><Video :size="19" aria-hidden="true" /></button>
+    <button class="workbench-toolbar__media-upload" type="button" aria-label="选择上传音频文件" title="上传音频" @click="openFilePicker(audioInput)"><Upload :size="19" aria-hidden="true" /></button>
+    <input ref="imageInput" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="chooseFile('image', $event)">
+    <input ref="videoInput" hidden type="file" accept="video/mp4,video/webm,video/quicktime" @change="chooseFile('video', $event)">
+    <input ref="audioInput" hidden type="file" accept="audio/mpeg,audio/wav,audio/mp4,audio/webm" @change="chooseFile('audio', $event)">
     <div class="workbench-toolbar__scroll" tabindex="0" role="group" aria-label="画布编辑工具，可横向滚动">
       <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" size="sm" icon-only aria-label="为所选节点添加背景分区" :title="canCreateSection ? '为所选节点添加背景分区' : '依次点击至少两个节点即可创建背景分区'" :disabled="running || !canCreateSection" @click="$emit('createSection')"><Palette :size="18" aria-hidden="true" /></AppButton>
       <AppButton class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" size="sm" icon-only aria-label="自动整理布局" title="自动整理布局" :disabled="running" @click="$emit('autoArrange')"><LayoutGrid :size="18" aria-hidden="true" /></AppButton>

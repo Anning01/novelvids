@@ -40,3 +40,30 @@ it('shows every verified add menu item in order', async () => {
     '数字人',
   ])
 })
+
+it('exposes the three direct upload buttons and emits the chosen file', async () => {
+  const wrapper = mount(WorkbenchToolbar, {
+    props: {
+      running: false,
+      runState: selectedRunState([], capabilities),
+    },
+  })
+
+  expect(wrapper.findAll('button').filter(button => button.attributes('aria-label')?.startsWith('选择上传')).map(button => button.attributes('aria-label'))).toEqual([
+    '选择上传图片文件',
+    '选择上传视频文件',
+    '选择上传音频文件',
+  ])
+  expect(wrapper.findAll('input[type="file"]').map(input => input.attributes('accept'))).toEqual([
+    'image/png,image/jpeg,image/webp',
+    'video/mp4,video/webm,video/quicktime',
+    'audio/mpeg,audio/wav,audio/mp4,audio/webm',
+  ])
+
+  const file = new File(['image'], 'photo.png', { type: 'image/png' })
+  const imageInput = wrapper.get('input[accept^="image/"]')
+  Object.defineProperty(imageInput.element, 'files', { configurable: true, value: [file] })
+  await imageInput.trigger('change')
+
+  expect(wrapper.emitted('uploadImage')).toEqual([[file]])
+})

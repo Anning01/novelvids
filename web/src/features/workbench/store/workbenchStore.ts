@@ -3,7 +3,7 @@ import { api, sleep } from '@/api'
 import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Video } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
+import type { NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { assetTypeLabel } from '../config/assetConfig'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
@@ -17,8 +17,11 @@ interface HistorySnapshot {
   viewport: WorkbenchViewport
 }
 const terminal = new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED])
+const uploadedMediaKinds = new Set<WorkbenchNode['kind']>(['image_media', 'video_media', 'audio_media'])
 const now = () => new Date().toISOString()
 const cloneValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const mediaTitle = (filename: string) => filename.replace(/\.[^.]+$/, '') || filename
+const uploadedMediaUrl = (filename: string) => `/media/${encodeURIComponent(filename)}`
 
 function node(id: number, key: string, kind: WorkbenchNode['kind'], title: string, position: Point, data: Record<string, unknown>): WorkbenchNode {
   const timestamp = now()
@@ -248,6 +251,74 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
     },
+    addUploadedMedia(
+      kind: 'image_media' | 'video_media' | 'audio_media',
+      uploaded: { filename: string; original_filename: string; content_type: string },
+      position?: Point,
+    ) {
+      this.checkpoint()
+      const stamp = Date.now()
+      const key = `${kind.replace('_', '-')}-${stamp}`
+      const mediaData: UploadedMediaData = {
+        url: uploadedMediaUrl(uploaded.filename),
+        filename: uploaded.filename,
+        originalFilename: uploaded.original_filename || uploaded.filename,
+        mimeType: uploaded.content_type,
+      }
+      const label = kind === 'image_media' ? '图片' : kind === 'video_media' ? '视频' : '音频'
+      const item = node(-stamp, key, kind, mediaTitle(mediaData.originalFilename), position || { x: 560, y: 120 + this.manualNodes.length * 300 }, {
+        ...mediaData,
+        media_type: label,
+        layout_family: 'asset',
+        layout_lane: `asset:${kind}`,
+        ui: {},
+      })
+      item.size = kind === 'audio_media' ? { width: 420, height: 170 } : { width: 360, height: 340 }
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      notice.success(`${label}上传完成`)
+      return item
+    },
+    async uploadMedia(kind: 'image_media' | 'video_media' | 'audio_media', file: File, position?: Point) {
+      const uploaded = await api.upload(file)
+      return this.addUploadedMedia(kind, {
+        filename: uploaded.filename,
+        original_filename: uploaded.original_filename || file.name,
+        content_type: uploaded.content_type || file.type,
+      }, position)
+    },
+    async replaceUploadedMedia(key: string, file: File) {
+      const item = this.nodeByKey(key)
+      if (!item || !uploadedMediaKinds.has(item.kind)) return null
+      const uploaded = await api.upload(file)
+      this.checkpoint()
+      item.title = mediaTitle(uploaded.original_filename || file.name)
+      item.data = {
+        ...item.data,
+        url: uploadedMediaUrl(uploaded.filename),
+        filename: uploaded.filename,
+        originalFilename: uploaded.original_filename || file.name,
+        mimeType: uploaded.content_type || file.type,
+        width: undefined,
+        height: undefined,
+        durationSeconds: undefined,
+        annotations: item.kind === 'image_media' ? [] : undefined,
+      }
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+      this.persistLayout()
+      notice.success('媒体已重新上传')
+      return item
+    },
+    updateUploadedMediaMetadata(key: string, patch: Pick<UploadedMediaData, 'width' | 'height' | 'durationSeconds'>) {
+      const item = this.nodeByKey(key)
+      if (!item || !uploadedMediaKinds.has(item.kind)) return
+      const next = Object.fromEntries(Object.entries(patch).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0))
+      if (!Object.keys(next).length) return
+      const changed = Object.entries(next).some(([field, value]) => item.data[field] !== value)
+      if (!changed) return
+      item.data = { ...item.data, ...next }
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+      this.persistLayout()
+    },
     setMediaResource(key: string, resource: AudioReference | DigitalHuman) {
       const item = this.nodeByKey(key)
       if (!item || (item.kind !== 'audio_reference' && item.kind !== 'digital_human')) return
@@ -277,7 +348,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     connectMediaNode(source: string, target: string) {
       const sourceNode = this.nodeByKey(source); const targetNode = this.nodeByKey(target)
-      if (!sourceNode || !targetNode || targetNode.kind !== 'shot' || (sourceNode.kind !== 'audio_reference' && sourceNode.kind !== 'digital_human')) return
+      if (!sourceNode || !targetNode || targetNode.kind !== 'shot' || !['audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media'].includes(sourceNode.kind)) return
       if (this.mediaEdges.some(item => item.source === source && item.target === target)) return
       this.checkpoint()
       const stamp = Date.now()

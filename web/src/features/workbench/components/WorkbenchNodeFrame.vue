@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { WorkbenchNodeKind } from '../types/workbenchTypes'
 import { Handle, Position } from '@vue-flow/core'
-import { Ban, BookOpenText, Box, ChevronDown, ChevronUp, Clapperboard, FileVideo2, Info, Layers3, Palette, Pin, ScanFace, StickyNote, Trash2, Volume2 } from 'lucide-vue-next'
+import { Ban, BookOpenText, Box, ChevronDown, ChevronUp, Clapperboard, FileAudio2, FileImage, FileVideo2, Info, Layers3, Palette, Pin, ScanFace, StickyNote, Trash2, Volume2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import NodeInfoPanel from './NodeInfoPanel.vue'
@@ -17,10 +17,10 @@ const collapsed = computed(() => ui.value.collapsed === true)
 const ignored = computed(() => ui.value.ignored === true)
 const pinned = computed(() => (node.value?.zIndex || 0) >= 1_000_000)
 const markerColor = computed(() => typeof ui.value.color === 'string' ? ui.value.color : '')
-const icon = computed(() => ({ chapter: BookOpenText, asset: Box, audio_reference: Volume2, digital_human: ScanFace, shot: Clapperboard, video_result: FileVideo2, section: Layers3, note: StickyNote, unsupported: Box })[props.data.kind || 'unsupported'])
+const icon = computed(() => ({ chapter: BookOpenText, asset: Box, audio_reference: Volume2, digital_human: ScanFace, image_media: FileImage, video_media: FileVideo2, audio_media: FileAudio2, shot: Clapperboard, video_result: FileVideo2, section: Layers3, note: StickyNote, unsupported: Box })[props.data.kind || 'unsupported'])
 const hasTarget = computed(() => props.data.kind === 'shot' || props.data.kind === 'video_result')
-const hasSource = computed(() => props.data.kind === 'chapter' || props.data.kind === 'asset' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'shot')
-const canDelete = computed(() => props.data.kind === 'asset' || props.data.kind === 'shot' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human')
+const hasSource = computed(() => props.data.kind === 'chapter' || props.data.kind === 'asset' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'image_media' || props.data.kind === 'video_media' || props.data.kind === 'audio_media' || props.data.kind === 'shot')
+const canDelete = computed(() => props.data.kind === 'asset' || props.data.kind === 'shot' || props.data.kind === 'audio_reference' || props.data.kind === 'digital_human' || props.data.kind === 'image_media' || props.data.kind === 'video_media' || props.data.kind === 'audio_media')
 
 function updateUi(patch: Record<string, unknown>) { store.checkpoint(); store.updateNodeUi(props.id, { ...ui.value, ...patch }) }
 function beginCustomColor() { store.checkpoint() }
