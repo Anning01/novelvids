@@ -288,6 +288,25 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const updated = (await api.updateScene(sceneId, patch)).data
       this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item); this.rebuildGraph(); notice.success('镜头已保存')
     },
+    async setActiveVideo(sceneId: number, videoId: number) {
+      const scene = this.scenes.find(item => item.id === sceneId)
+      if (!scene || !this.videos[sceneId]?.some(video => video.id === videoId)) return null
+      const metadata = scene.metadata && typeof scene.metadata === 'object' && !Array.isArray(scene.metadata)
+        ? { ...scene.metadata }
+        : {}
+      const currentWorkbench = metadata.workbench && typeof metadata.workbench === 'object' && !Array.isArray(metadata.workbench)
+        ? metadata.workbench as Record<string, unknown>
+        : {}
+      const nextMetadata = {
+        ...metadata,
+        workbench: { ...currentWorkbench, activeVideoId: videoId },
+      }
+      const updated = (await api.updateScene(sceneId, { metadata: nextMetadata })).data
+      this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item)
+      this.rebuildGraph()
+      notice.success('已切换镜头视频版本')
+      return updated
+    },
     async saveAsset(assetId: number, patch: Partial<Asset>) {
       const updated = (await api.updateAsset(assetId, patch)).data
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
@@ -352,10 +371,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || '分镜生成失败')
       await this.load(this.novelId, this.chapterId); notice.success('分镜生成完成')
     },
-    async generateVideo(sceneId: number, modelType: number) {
+    async generateVideo(sceneId: number, modelType: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string } = {}) {
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
       try {
-        let video = (await api.generateVideo(sceneId, modelType)).data
+        let video = (await api.generateVideo(sceneId, modelType, options)).data
         this.videos[sceneId] = [video, ...(this.videos[sceneId] || [])]; this.rebuildGraph()
         while (!terminal.has(video.status)) { await sleep(4000); video = (await api.queryVideo(video.id)).data; this.videos[sceneId] = this.videos[sceneId].map(item => item.id === video.id ? video : item); this.rebuildGraph() }
         video.status === TaskStatusEnum.COMPLETED ? notice.success('视频生成完成') : notice.error(String(video.metadata?.error || '视频生成失败'))

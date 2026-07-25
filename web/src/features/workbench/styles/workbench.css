@@ -835,6 +835,188 @@
   cursor: not-allowed;
   opacity: 0.48;
 }
+.workbench-shot-config {
+  display: grid;
+  width: 100%;
+  gap: 11px;
+  color: #d8d0c7;
+}
+.workbench-shot-reference-duration {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #403a34;
+  border-radius: 9px;
+  background: #1a1816;
+  font-size: 10px;
+}
+.workbench-shot-reference-duration span {
+  color: #8f867d;
+}
+.workbench-shot-reference-duration p {
+  margin: 0;
+  color: #eee9e2;
+  font-variant-numeric: tabular-nums;
+}
+.workbench-shot-generation-params {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #403a34;
+  border-radius: 11px;
+  background: #1a1816;
+}
+.workbench-shot-generation-params legend {
+  padding: 0 4px;
+  color: #aaa198;
+  font-size: 10px;
+  font-weight: 650;
+}
+.workbench-shot-duration-field {
+  gap: 6px;
+}
+.workbench-shot-duration-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px;
+  gap: 8px;
+  align-items: center;
+}
+.workbench-shot-duration-control input[type='range'] {
+  height: 18px;
+  padding: 0;
+  border: 0;
+  accent-color: #9d87e8;
+  background: transparent;
+  box-shadow: none;
+}
+.workbench-shot-duration-control input[type='number'] {
+  text-align: center;
+}
+.workbench-shot-duration-field output {
+  color: #8f867d;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.workbench-shot-assets {
+  display: grid;
+  gap: 7px;
+}
+.workbench-shot-assets > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #403a34;
+  border-radius: 10px;
+  color: #d8d0c7;
+  background: #1a1816;
+  cursor: pointer;
+  text-align: left;
+}
+.workbench-shot-assets > button > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.workbench-shot-assets > button small {
+  color: #8f867d;
+  font-size: 9px;
+}
+.workbench-shot-assets > button > span:nth-child(2) {
+  grid-column: 1 / -1;
+  color: #7f776f;
+  font-size: 9px;
+}
+.workbench-shot-assets > button > svg {
+  grid-column: 2;
+  grid-row: 1;
+  transition: transform 140ms ease;
+}
+.workbench-shot-assets > button[aria-expanded='true'] > svg {
+  transform: rotate(180deg);
+}
+.workbench-shot-assets__list {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #3b3631;
+  border-radius: 9px;
+  background: #181614;
+}
+.workbench-shot-assets__list label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 8px;
+  align-items: center;
+}
+.workbench-shot-assets__list strong {
+  overflow: hidden;
+  color: #cfc7bf;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbench-shot-assets__list select {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid #47413b;
+  border-radius: 7px;
+  color: #eee9e2;
+  background: #211e1b;
+  font-size: 9px;
+}
+.workbench-shot-assets__list p {
+  margin: 0;
+  color: #7f776f;
+  font-size: 10px;
+  text-align: center;
+}
+.workbench-shot-versions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.workbench-shot-versions button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 8px;
+  border: 1px solid #403a34;
+  border-radius: 9px;
+  color: #bdb4ac;
+  background: #1a1816;
+  cursor: pointer;
+  text-align: left;
+}
+.workbench-shot-versions button.is-active {
+  border-color: #76629f;
+  color: #eee9ff;
+  background: #302744;
+  box-shadow: inset 0 0 0 1px rgb(169 149 255 / 20%);
+}
+.workbench-shot-versions span {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbench-shot-versions small {
+  color: #82788f;
+  font-size: 8px;
+}
+.workbench-shot-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.workbench-shot-actions > button {
+  min-width: 0;
+  padding: 0 7px;
+  font-size: 9px;
+}
 .workbench-mention-editor {
   position: relative;
   overflow: visible;

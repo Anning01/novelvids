@@ -1,11 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
-import { AssetTypeEnum } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), updateAsset: vi.fn() },
+  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), updateAsset: vi.fn(), updateScene: vi.fn() },
   sleep: vi.fn(),
 }))
 
@@ -13,6 +13,7 @@ const createAssetMock = vi.mocked(api.createAsset)
 const createSceneMock = vi.mocked(api.createScene)
 const deleteAssetMock = vi.mocked(api.deleteAsset)
 const updateAssetMock = vi.mocked(api.updateAsset)
+const updateSceneMock = vi.mocked(api.updateScene)
 let store: ReturnType<typeof useWorkbenchStore>
 
 beforeEach(() => {
@@ -156,4 +157,45 @@ it('deletes an explicit backend asset and its node', async () => {
   expect(deleteAssetMock).toHaveBeenCalledWith(83)
   expect(store.assets).toEqual([])
   expect(store.nodeByKey('asset-83')).toBeUndefined()
+})
+
+it('persists the active video version without discarding scene metadata', async () => {
+  const source = {
+    id: 10,
+    chapter_id: 2162,
+    sequence: 1,
+    metadata: { source: 'storyboard', workbench: { aspectRatio: '9:16' } },
+    created_at: '2026-07-25T00:00:00.000Z',
+    updated_at: '2026-07-25T00:00:00.000Z',
+  }
+  store.scenes = [source]
+  store.videos[10] = [{
+    id: 91,
+    scene_id: 10,
+    model_type: 1,
+    status: TaskStatusEnum.COMPLETED,
+    created_at: '2026-07-25T00:00:00.000Z',
+    updated_at: '2026-07-25T00:00:00.000Z',
+  }]
+  updateSceneMock.mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: {
+      ...source,
+      metadata: {
+        source: 'storyboard',
+        workbench: { aspectRatio: '9:16', activeVideoId: 91 },
+      },
+    },
+  })
+
+  await store.setActiveVideo(10, 91)
+
+  expect(updateSceneMock).toHaveBeenCalledWith(10, {
+    metadata: {
+      source: 'storyboard',
+      workbench: { aspectRatio: '9:16', activeVideoId: 91 },
+    },
+  })
+  expect(store.scenes[0]?.metadata?.workbench).toMatchObject({ activeVideoId: 91 })
 })

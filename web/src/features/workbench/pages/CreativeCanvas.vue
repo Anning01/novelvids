@@ -20,6 +20,7 @@ import { selectionAutoPanDelta, selectionRectAfterAutoPan } from '../interaction
 import { workbenchSectionActionsKey } from '../interaction/sectionActions'
 import { applyNodeSelectionChanges, isAdditiveSelectionEvent, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
 import { selectedRunState } from '../execution/workbenchCapabilities'
+import { normalizeShotConfig, SHOT_ASPECT_RATIOS, SHOT_RESOLUTIONS, shotGenerationOptions, type ShotAspectRatio, type ShotResolution } from '../config/shotConfig'
 import { workbenchPromptEditorKey } from '../prompt/promptEditor'
 import { isWorkbenchFlowReady, WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
@@ -36,7 +37,10 @@ import { screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
 import { loadWorkbenchViewport, saveWorkbenchViewport, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
 import './noop.css'
 
-const props = defineProps<{ novelId: number; chapterId: number }>()
+const props = withDefaults(defineProps<{ novelId: number; chapterId: number; aspectRatio?: string; resolution?: string }>(), {
+  aspectRatio: '9:16',
+  resolution: '720p',
+})
 const store = useWorkbenchStore()
 const canvasTool = ref<'select' | 'pan'>('select')
 const canvasLocked = ref(false)
@@ -56,6 +60,10 @@ const zoomActivationKeyCode = canvasZoomModifier()
 const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
+const projectDefaults = computed(() => ({
+  aspectRatio: SHOT_ASPECT_RATIOS.includes(props.aspectRatio as ShotAspectRatio) ? props.aspectRatio as ShotAspectRatio : '9:16',
+  resolution: SHOT_RESOLUTIONS.includes(props.resolution as ShotResolution) ? props.resolution as ShotResolution : '720p',
+}))
 const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
   id: item.key, type: item.kind, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
   ...(item.size ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px` } } : {}),
@@ -65,6 +73,7 @@ const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
     title: item.title,
     status: item.status,
     ...(item.kind === 'asset' ? { generate_capability: capabilities.value.generate_asset } : {}),
+    ...(item.kind === 'shot' ? { generate_capability: capabilities.value.generate_video, project_defaults: projectDefaults.value } : {}),
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
@@ -376,9 +385,11 @@ async function runSelected() {
       const node = store.nodeByKey(key)
       if (node?.kind === 'asset') await store.generateAsset(node.id)
       if (node?.kind === 'shot') {
-        const modelType = Number(store.modelOptions[0]?.value)
+        const scene = node.data.scene as import('@/types').Scene
+        const config = normalizeShotConfig(scene, projectDefaults.value)
+        const modelType = Number(config.modelType ?? store.modelOptions[0]?.value)
         if (!Number.isFinite(modelType)) throw new Error('当前没有可用的视频模型')
-        await store.generateVideo(node.id, modelType)
+        await store.generateVideo(node.id, modelType, shotGenerationOptions(config))
       }
     }
   } catch (error) {
