@@ -7,6 +7,7 @@ import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { assetTypeLabel } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
+import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
 
 interface HistorySnapshot {
@@ -372,6 +373,45 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success('水印配置已保存')
       return true
     },
+    addVideoComposer(position?: Point) {
+      this.checkpoint()
+      const stamp = Date.now(); const key = `video-composer-${stamp}`
+      const count = this.nodes.filter(item => item.kind === 'video_composer').length + 1
+      const item = node(-stamp, key, 'video_composer', '视频合成器', position || { x: 980, y: 120 + this.manualNodes.length * 440 }, {
+        config: normalizeComposerConfig({ name: count === 1 ? '视频合成器' : `视频合成器 ${count}` }),
+        capability_key: 'compose_video',
+        layout_family: 'result',
+        layout_lane: 'result:composer',
+        ui: {},
+      })
+      item.size = { width: 390, height: 420 }
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      return item
+    },
+    saveVideoComposerConfig(key: string, config: Partial<ComposerConfig>) {
+      const item = this.nodeByKey(key)
+      if (!item || item.kind !== 'video_composer') return false
+      this.checkpoint()
+      item.data = { ...item.data, config: normalizeComposerConfig(config) }
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+      this.persistLayout()
+      return true
+    },
+    moveComposerInput(composerKey: string, inputKey: string, direction: ComposerMoveDirection) {
+      const current = orderedComposerInputs(composerKey, this.nodes, this.edges).map(item => item.key)
+      const next = moveOrder(current, inputKey, direction)
+      if (next.every((key, index) => key === current[index])) return false
+      this.checkpoint()
+      const indexes = new Map(next.map((key, index) => [key, index]))
+      this.mediaEdges
+        .filter(item => item.target === composerKey && item.targetHandle !== 'watermark-input')
+        .forEach((item) => { item.orderIndex = indexes.get(item.source) ?? item.orderIndex })
+      this.edges
+        .filter(item => item.target === composerKey && item.targetHandle !== 'watermark-input')
+        .forEach((item) => { item.orderIndex = indexes.get(item.source) ?? item.orderIndex })
+      this.persistLayout()
+      return true
+    },
     addSection(memberKeys: string[], position: Point, size: NodeSize, color: string) {
       const stamp = Date.now(); const key = `section-${stamp}`
       const count = this.nodes.filter(item => item.kind === 'section').length + 1
@@ -386,17 +426,39 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (!sourceNode || !targetNode) return
       const isShotReference = targetNode.kind === 'shot' && ['audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media'].includes(sourceNode.kind)
       const isWatermarkVideo = targetNode.kind === 'watermark' && ['video_result', 'video_media'].includes(sourceNode.kind)
-      if (!isShotReference && !isWatermarkVideo) return
+      const isComposerShot = targetNode.kind === 'video_composer' && sourceNode.kind === 'shot'
+      const isComposerVideo = targetNode.kind === 'video_composer' && ['video_result', 'video_media'].includes(sourceNode.kind)
+      const isComposerWatermark = targetNode.kind === 'video_composer' && sourceNode.kind === 'watermark'
+      if (!isShotReference && !isWatermarkVideo && !isComposerShot && !isComposerVideo && !isComposerWatermark) return
       if (this.mediaEdges.some(item => item.source === source && item.target === target)) return
       this.checkpoint()
       const stamp = Date.now()
-      const item = edge(-stamp, `media-edge-${stamp}`, source, target, isWatermarkVideo ? 'output_binding' : 'asset_reference')
+      const isOutputBinding = isWatermarkVideo || isComposerShot || isComposerVideo || isComposerWatermark
+      const orderIndex = isComposerShot || isComposerVideo
+        ? this.mediaEdges.filter(item => item.target === target && item.targetHandle !== 'watermark-input').length
+        : 0
+      const item = edge(-stamp, `media-edge-${stamp}`, source, target, isOutputBinding ? 'output_binding' : 'asset_reference', orderIndex)
       if (isWatermarkVideo) {
         item.sourceHandle = 'output'
         item.targetHandle = 'video-input'
+      } else if (isComposerShot) {
+        item.sourceHandle = 'output'
+        item.targetHandle = 'shot-input'
+      } else if (isComposerVideo) {
+        item.sourceHandle = 'output'
+        item.targetHandle = 'video-input'
+      } else if (isComposerWatermark) {
+        item.sourceHandle = 'watermark-output'
+        item.targetHandle = 'watermark-input'
       }
       this.mediaEdges.push(item); this.edges.push(item); this.persistLayout()
-      notice.success(isWatermarkVideo ? '视频已连接到水印' : '参考资源已连接到镜头')
+      notice.success(isWatermarkVideo
+        ? '视频已连接到水印'
+        : isComposerWatermark
+          ? '水印已连接到视频合成器'
+          : isComposerShot || isComposerVideo
+            ? '视频已加入成片输入'
+            : '参考资源已连接到镜头')
     },
     async saveScene(sceneId: number, patch: Partial<Scene>) {
       const updated = (await api.updateScene(sceneId, patch)).data

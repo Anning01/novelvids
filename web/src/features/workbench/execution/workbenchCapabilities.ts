@@ -36,7 +36,7 @@ export function selectedRunState(
     } else if (capabilityKey === 'apply_watermark') {
       if (!capabilities.apply_watermark) return { enabled: false, label: '运行所选配置', reason: '当前服务未启用水印执行', runnableKeys }
     } else if (capabilityKey === 'compose_video') {
-      if (!capabilities.compose_video) return { enabled: false, label: '运行所选配置', reason: '当前服务不支持视频合成', runnableKeys }
+      if (!capabilities.compose_video) return { enabled: false, label: '运行所选配置', reason: '当前服务未启用视频合成', runnableKeys }
     } else {
       return { enabled: false, label: '运行所选配置', reason: `${node.title}不是可执行节点`, runnableKeys }
     }

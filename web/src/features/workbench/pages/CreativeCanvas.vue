@@ -33,6 +33,7 @@ import ImageMediaNode from '../nodes/ImageMediaNode.vue'
 import VideoMediaNode from '../nodes/VideoMediaNode.vue'
 import AudioMediaNode from '../nodes/AudioMediaNode.vue'
 import WatermarkNode from '../nodes/WatermarkNode.vue'
+import VideoComposerNode from '../nodes/VideoComposerNode.vue'
 import NoteNode from '../nodes/NoteNode.vue'
 import SectionNode from '../nodes/SectionNode.vue'
 import type { NodeSize, Point, WorkbenchNode, WorkbenchNodeKind } from '../types/workbenchTypes'
@@ -62,7 +63,7 @@ const promptEditorNodeKey = ref<string | null>(null)
 const restoredViewportChapterId = ref<number | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
 const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
-const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
+const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const projectDefaults = computed(() => ({
   aspectRatio: SHOT_ASPECT_RATIOS.includes(props.aspectRatio as ShotAspectRatio) ? props.aspectRatio as ShotAspectRatio : '9:16',
@@ -79,13 +80,14 @@ const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
     ...(item.kind === 'asset' ? { generate_capability: capabilities.value.generate_asset } : {}),
     ...(item.kind === 'shot' ? { generate_capability: capabilities.value.generate_video, project_defaults: projectDefaults.value } : {}),
     ...(item.kind === 'watermark' ? { apply_capability: capabilities.value.apply_watermark, capability_key: 'apply_watermark' } : {}),
+    ...(item.kind === 'video_composer' ? { compose_capability: capabilities.value.compose_video, capability_key: 'compose_video' } : {}),
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
 const flowEdges = computed<Edge[]>(() => store.edges.map(item => ({ id: item.key, source: item.source, target: item.target, type: item.type, selected: store.selectedEdgeKeys.includes(item.key), sourceHandle: item.sourceHandle || undefined, targetHandle: item.targetHandle || undefined })))
 const panModeActive = computed(() => canvasTool.value === 'pan' || spacePanActive.value)
 const interactionState = computed(() => workbenchInteractionState(canvasLocked.value, panModeActive.value))
-const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => ['asset', 'shot', 'audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media', 'watermark', 'section', 'note'].includes(store.nodeByKey(key)?.kind || '')))
+const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => ['asset', 'shot', 'audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media', 'watermark', 'video_composer', 'section', 'note'].includes(store.nodeByKey(key)?.kind || '')))
 const canCopy = computed(() => store.selectedNodeKeys.length === 1 && ['shot', 'note'].includes(store.nodeByKey(store.selectedNodeKeys[0])?.kind || ''))
 const selectedSectionMembers = computed(() => store.selectedNodeKeys.map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')))
 const canCreateSection = computed(() => selectedSectionMembers.value.length >= 2)
@@ -128,6 +130,7 @@ function canvasNodeSize(item: WorkbenchNode) {
   if (item.kind === 'shot') return { width: 360, height: 520 }
   if (item.kind === 'video_result') return { width: 360, height: 300 }
   if (item.kind === 'watermark') return { width: 360, height: 300 }
+  if (item.kind === 'video_composer') return { width: 390, height: 420 }
   if (item.kind === 'note') return { width: 320, height: 220 }
   return { width: 360, height: 280 }
 }
@@ -271,6 +274,10 @@ function addNote() {
 }
 function addWatermark() {
   const created = store.addWatermark(visibleNodePosition({ width: 360, height: 300 }))
+  void ensureNodeVisible(created.key)
+}
+function addVideoComposer() {
+  const created = store.addVideoComposer(visibleNodePosition({ width: 390, height: 420 }))
   void ensureNodeVisible(created.key)
 }
 async function addAsset() {
@@ -476,7 +483,7 @@ onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keyd
         </button>
       </Controls>
       <CanvasToolSwitcher v-model="canvasTool" />
-      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" @add-shot="addShot" @add-audio-reference="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="notice.error('当前服务尚未开放视频合成')" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" @add-shot="addShot" @add-audio-reference="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个镜头</AppButton></div>
     </VueFlow>
   </main>

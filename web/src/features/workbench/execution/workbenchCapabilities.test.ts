@@ -41,3 +41,26 @@ it('shows the truthful watermark capability reason', () => {
     runnableKeys: [],
   })
 })
+
+it('shows the truthful composer capability reason', () => {
+  expect(selectedRunState([{
+    id: -2,
+    key: 'composer-1',
+    kind: 'video_composer',
+    backendKind: 'video_composer',
+    title: '视频合成器',
+    position: { x: 0, y: 0 },
+    size: null,
+    zIndex: 1,
+    activeVersionId: null,
+    status: 'ready',
+    data: { capability_key: 'compose_video', ui: {} },
+    createdAt: '',
+    updatedAt: '',
+  }], capabilities)).toEqual({
+    enabled: false,
+    label: '运行所选配置',
+    reason: '当前服务未启用视频合成',
+    runnableKeys: [],
+  })
+})
