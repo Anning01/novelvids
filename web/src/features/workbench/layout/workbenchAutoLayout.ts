@@ -15,6 +15,8 @@ export interface WorkbenchAutoLayoutOptions {
   origin?: Point;
   columnGap?: number;
   rowGap?: number;
+  maxColumnHeight?: number;
+  fixedNodeKeys?: ReadonlySet<string>;
   relationshipRules?: WorkbenchLayoutRelationshipRule[];
 }
 
@@ -136,6 +138,11 @@ export function buildWorkbenchGroupedAutoLayout(
       }
     }
   }
+  for (const key of options.fixedNodeKeys ?? []) {
+    const node = nodeByKey.get(key);
+    if (node)
+      result[key] = { ...node.position };
+  }
   return result;
 }
 
@@ -237,6 +244,43 @@ function nodeSize(node: WorkbenchNode, measured: Record<string, NodeSize>) {
     width: candidate.width > 0 ? candidate.width : DEFAULT_NODE_SIZE.width,
     height: candidate.height > 0 ? candidate.height : DEFAULT_NODE_SIZE.height,
   };
+}
+
+function packLane(
+  nodes: WorkbenchNode[],
+  sizes: Record<string, NodeSize>,
+  rowGap: number,
+  maxColumnHeight: number,
+) {
+  const columns: WorkbenchNode[][] = [];
+  let height = 0;
+  for (const node of nodes) {
+    const nextHeight = height + (height ? rowGap : 0) + sizes[node.key]!.height;
+    if (height && nextHeight > maxColumnHeight) {
+      columns.push([]);
+      height = 0;
+    }
+    if (!columns.length)
+      columns.push([]);
+    columns.at(-1)!.push(node);
+    height += (height ? rowGap : 0) + sizes[node.key]!.height;
+  }
+  return columns;
+}
+
+function preserveFixedPositions(
+  nodes: WorkbenchNode[],
+  positions: Record<string, Point>,
+  fixedNodeKeys: ReadonlySet<string> | undefined,
+) {
+  if (!fixedNodeKeys?.size)
+    return;
+  const nodeByKey = new Map(nodes.map(node => [node.key, node]));
+  for (const key of fixedNodeKeys) {
+    const node = nodeByKey.get(key);
+    if (node)
+      positions[key] = { ...node.position };
+  }
 }
 
 function graphConnections(nodes: WorkbenchNode[], edges: WorkbenchEdge[]) {
@@ -426,6 +470,7 @@ export function buildWorkbenchAutoLayout(
   const origin = options.origin ?? DEFAULT_ORIGIN;
   const columnGap = options.columnGap ?? DEFAULT_COLUMN_GAP;
   const rowGap = options.rowGap ?? DEFAULT_ROW_GAP;
+  const maxColumnHeight = options.maxColumnHeight ?? Number.POSITIVE_INFINITY;
   const sizes = Object.fromEntries(nodes.map(node => [node.key, nodeSize(node, options.sizes ?? {})]));
   const positions: Record<string, Point> = {};
   const bandNodes = stableNodes(nodes).filter(node => workbenchLayoutBand(node) !== 'main');
@@ -458,6 +503,7 @@ export function buildWorkbenchAutoLayout(
       }
       footerOriginY += bandHeight + rowGap;
     }
+    preserveFixedPositions(nodes, positions, options.fixedNodeKeys);
     return positions;
   }
 
@@ -467,10 +513,16 @@ export function buildWorkbenchAutoLayout(
   const connectionCounts = graphConnectionCounts(mainNodes, mainEdges);
   const nodeByKey = new Map(mainNodes.map(node => [node.key, node]));
   const { laneNodes, lanes } = orderedLanes(mainNodes, mainEdges, options.relationshipRules ?? WORKBENCH_LAYOUT_RELATIONSHIP_RULES);
-  const columns = lanes.map(lane => laneNodes.get(lane)!);
-  enforcePinnedSequenceOrder(columns, nodeByKey, incoming, outgoing);
-  reduceEdgeCrossings(columns, incoming, outgoing, connectionCounts);
-  enforcePinnedSequenceOrder(columns, nodeByKey, incoming, outgoing);
+  const orderedColumns = lanes.map(lane => laneNodes.get(lane)!);
+  enforcePinnedSequenceOrder(orderedColumns, nodeByKey, incoming, outgoing);
+  reduceEdgeCrossings(orderedColumns, incoming, outgoing, connectionCounts);
+  enforcePinnedSequenceOrder(orderedColumns, nodeByKey, incoming, outgoing);
+  const columns = orderedColumns.flatMap((column) => {
+    const family = workbenchLayoutFamily(column[0]!);
+    return (family === 'shot' || family === 'result')
+      ? packLane(column, sizes, rowGap, maxColumnHeight)
+      : [column];
+  });
 
   const columnWidths = columns.map(column => Math.max(...column.map(node => sizes[node.key]!.width)));
   const columnHeights = columns.map(column => (
@@ -501,5 +553,6 @@ export function buildWorkbenchAutoLayout(
     }
     footerOriginY += bandHeight + rowGap;
   }
+  preserveFixedPositions(nodes, positions, options.fixedNodeKeys);
   return positions;
 }

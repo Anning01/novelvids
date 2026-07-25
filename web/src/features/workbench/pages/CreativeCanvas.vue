@@ -296,11 +296,19 @@ function startSelectionAutoPan(event: MouseEvent) {
 }
 async function autoArrange() {
   store.checkpoint()
+  const { height } = canvasSize()
   const measuredSizes = Object.fromEntries(getNodes.value.flatMap((item) => {
     const { width, height } = item.dimensions
     return width > 0 && height > 0 ? [[item.id, { width, height } satisfies NodeSize]] : []
   }))
-  const positions = buildWorkbenchGroupedAutoLayout(store.nodes, store.edges, { sizes: measuredSizes })
+  const fixedNodeKeys = new Set(store.nodes
+    .filter(node => node.zIndex >= 1_000_000 || (node.data.ui as Record<string, unknown> | undefined)?.locked === true)
+    .map(node => node.key))
+  const positions = buildWorkbenchGroupedAutoLayout(store.nodes, store.edges, {
+    sizes: measuredSizes,
+    maxColumnHeight: Math.max(1100, height * 2.2),
+    fixedNodeKeys,
+  })
   store.nodes.forEach(item => { if (positions[item.key]) item.position = positions[item.key] })
   await nextTick()
   await fitView({ padding: 0.08, minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 240 })
