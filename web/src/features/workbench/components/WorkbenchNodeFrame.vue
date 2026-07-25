@@ -34,7 +34,7 @@ function togglePalette() { paletteOpen.value = !paletteOpen.value; infoOpen.valu
 <template>
   <article class="workbench-node-frame" :class="{ 'is-selected': selected, 'is-collapsed': collapsed, 'is-ignored': ignored, 'has-marker': markerColor }" :style="markerColor ? { '--workbench-node-marker': markerColor } : undefined" :aria-label="`${data.title || '未命名'}节点`">
     <div v-if="selected" class="workbench-node-context nodrag nowheel" role="toolbar" :aria-label="`${data.title || '未命名'}节点操作`" @pointerdown.stop @click.stop>
-      <button type="button" aria-label="删除选中节点" title="删除" :disabled="!canDelete" @click="store.deleteSelection()"><Trash2 :size="16" aria-hidden="true" /></button>
+      <button type="button" aria-label="删除选中节点" title="删除" :disabled="!canDelete" @click="store.deleteNodeKeys([props.id])"><Trash2 :size="16" aria-hidden="true" /></button>
       <span class="workbench-node-context__divider" aria-hidden="true" />
       <button type="button" aria-label="查看节点信息" title="节点信息" :class="{ 'is-active': infoOpen }" @click="toggleInfo"><Info :size="16" aria-hidden="true" /></button>
       <slot name="toolbar-actions" />

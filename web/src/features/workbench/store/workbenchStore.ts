@@ -5,21 +5,16 @@ import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Vid
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
+import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
 
 interface HistorySnapshot {
   nodes: Record<string, { position: Point; size: NodeSize | null; zIndex: number; ui: Record<string, unknown> }>
   manualNodes: WorkbenchNode[]
-  mediaEdges: WorkbenchEdge[]
+  manualEdges: WorkbenchEdge[]
+  selectedNodeKeys: string[]
+  selectedEdgeKeys: string[]
   viewport: WorkbenchViewport
 }
-interface SavedCanvasState {
-  viewport?: WorkbenchViewport
-  nodes?: Record<string, { position: Point; size?: NodeSize | null; zIndex: number; ui: Record<string, unknown> }>
-  manualNodes?: WorkbenchNode[]
-  mediaNodes?: WorkbenchNode[]
-  mediaEdges?: WorkbenchEdge[]
-}
-const manualNodeKinds = new Set<WorkbenchNode['kind']>(['audio_reference', 'digital_human', 'section', 'note'])
 const terminal = new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED])
 const now = () => new Date().toISOString()
 const cloneValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -62,20 +57,23 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
   },
   actions: {
     nodeByKey(key: string) { return this.nodes.find(item => item.key === key) },
-    layoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v1` },
+    layoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v${WORKBENCH_LAYOUT_VERSION}` },
+    legacyLayoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v1` },
     capture(): HistorySnapshot {
       return {
         nodes: Object.fromEntries(this.nodes.map(item => [item.key, {
           position: { ...item.position }, size: item.size ? { ...item.size } : null, zIndex: item.zIndex,
           ui: { ...((item.data.ui as Record<string, unknown>) || {}) },
         }])),
-        manualNodes: cloneValue(this.nodes.filter(item => manualNodeKinds.has(item.kind))),
-        mediaEdges: cloneValue(this.edges.filter(item => item.key.startsWith('media-edge-'))),
+        manualNodes: cloneValue(this.nodes.filter(item => isManualNodeKind(item.kind))),
+        manualEdges: cloneValue(this.mediaEdges),
+        selectedNodeKeys: [...this.selectedNodeKeys],
+        selectedEdgeKeys: [...this.selectedEdgeKeys],
         viewport: { ...this.viewport },
       }
     },
     restore(snapshot: HistorySnapshot) {
-      const automaticNodes = this.nodes.filter(item => !manualNodeKinds.has(item.kind))
+      const automaticNodes = this.nodes.filter(item => !isManualNodeKind(item.kind))
       this.manualNodes = cloneValue(snapshot.manualNodes)
       this.nodes = [...automaticNodes, ...this.manualNodes]
       this.nodes.forEach((item) => {
@@ -85,10 +83,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         item.data.ui = { ...saved.ui }
       })
       const automaticEdges = this.edges.filter(item => !item.key.startsWith('media-edge-'))
-      this.mediaEdges = cloneValue(snapshot.mediaEdges)
+      this.mediaEdges = cloneValue(snapshot.manualEdges)
       this.edges = [...automaticEdges, ...this.mediaEdges.filter(item => this.nodeByKey(item.source) && this.nodeByKey(item.target))]
-      this.selectedNodeKeys = this.selectedNodeKeys.filter(key => Boolean(this.nodeByKey(key)))
-      this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
+      this.selectedNodeKeys = snapshot.selectedNodeKeys.filter(key => Boolean(this.nodeByKey(key)))
+      this.selectedEdgeKeys = snapshot.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
       this.viewport = { ...snapshot.viewport }
       this.persistLayout()
     },
@@ -103,25 +101,33 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     undo() { const previous = this.history.at(-1); if (!previous) return false; const current = this.capture(); this.restore(previous); this.history.pop(); this.future.push(current); return true },
     redo() { const next = this.future.at(-1); if (!next) return false; const current = this.capture(); this.restore(next); this.future.pop(); this.history.push(current); return true },
     persistLayout() {
-      localStorage.setItem(this.layoutKey(), JSON.stringify({
-        viewport: this.viewport,
-        nodes: Object.fromEntries(this.nodes.map(item => [item.key, { position: item.position, size: item.size, zIndex: item.zIndex, ui: item.data.ui || {} }])),
-        manualNodes: this.nodes.filter(item => manualNodeKinds.has(item.kind)),
-        mediaEdges: this.edges.filter(item => item.key.startsWith('media-edge-')),
-      }))
+      try {
+        localStorage.setItem(this.layoutKey(), serializeWorkbenchState({
+          version: WORKBENCH_LAYOUT_VERSION,
+          viewport: this.viewport,
+          canvasSize: { width: 0, height: 0 },
+          nodes: Object.fromEntries(this.nodes.map(item => [item.key, { position: item.position, size: item.size, zIndex: item.zIndex, ui: item.data.ui || {} }])),
+          manualNodes: this.nodes.filter(item => isManualNodeKind(item.kind)),
+          manualEdges: this.mediaEdges,
+        }))
+      } catch { /* ignore unavailable storage */ }
     },
     loadSavedLayout() {
       try {
-        const saved = JSON.parse(localStorage.getItem(this.layoutKey()) || '{}') as SavedCanvasState
-        if (saved.viewport) this.viewport = saved.viewport
-        this.manualNodes = (saved.manualNodes || saved.mediaNodes || []).filter(item => manualNodeKinds.has(item.kind))
-        this.mediaEdges = (saved.mediaEdges || []).filter(item => item.key.startsWith('media-edge-'))
+        const current = localStorage.getItem(this.layoutKey())
+        const legacy = current ? null : localStorage.getItem(this.legacyLayoutKey())
+        const saved = parseWorkbenchState(current || legacy || '')
+        if (!saved) return
+        this.viewport = saved.viewport
+        this.manualNodes = saved.manualNodes.filter(item => isManualNodeKind(item.kind))
+        this.mediaEdges = saved.manualEdges
         this.nodes.push(...this.manualNodes.filter(item => !this.nodes.some(current => current.key === item.key)))
         this.edges.push(...this.mediaEdges.filter(item => !this.edges.some(current => current.key === item.key)))
         this.nodes.forEach((item) => {
-          const value = saved.nodes?.[item.key]
+          const value = saved.nodes[item.key]
           if (value) { item.position = value.position; if (value.size !== undefined) item.size = value.size; item.zIndex = value.zIndex; item.data.ui = value.ui }
         })
+        if (!current && legacy) localStorage.setItem(this.layoutKey(), serializeWorkbenchState(saved))
       } catch { /* ignore invalid local layout */ }
     },
     async load(novelId: number, chapterId: number) {
@@ -158,7 +164,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })
       const old = new Map(this.nodes.map(item => [item.key, item]))
       this.nodes = nodes.map(item => old.has(item.key) ? { ...item, position: old.get(item.key)!.position, size: old.get(item.key)!.size, zIndex: old.get(item.key)!.zIndex, data: { ...item.data, ui: old.get(item.key)!.data.ui } } : item)
-      this.manualNodes = [...old.values()].filter(item => manualNodeKinds.has(item.kind))
+      this.manualNodes = [...old.values()].filter(item => isManualNodeKind(item.kind))
       this.nodes.push(...this.manualNodes)
       this.edges = [...edges, ...this.mediaEdges.filter(item => this.nodes.some(nodeItem => nodeItem.key === item.source) && this.nodes.some(nodeItem => nodeItem.key === item.target))]
     },
@@ -177,9 +183,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     updateNodeUi(key: string, ui: Record<string, unknown>) { const item = this.nodeByKey(key); if (item) item.data.ui = ui; this.persistLayout() },
     updateManualNodeData(key: string, patch: Record<string, unknown>) {
       const item = this.nodeByKey(key)
-      if (!item || !manualNodeKinds.has(item.kind)) return
+      if (!item || !isManualNodeKind(item.kind)) return
       item.data = { ...item.data, ...patch }
-      this.manualNodes = this.nodes.filter(nodeItem => manualNodeKinds.has(nodeItem.kind))
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
     },
     async flushLayout() { this.persistLayout() },
     copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item && ['shot', 'note'].includes(item.kind) ? cloneValue(item) : null },
@@ -197,27 +203,31 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const item = this.nodeByKey(`shot-${created.id}`); if (item) item.position = { x: this.clipboardNode.position.x + 48, y: this.clipboardNode.position.y + 48 }
       notice.success('已复制镜头')
     },
-    async deleteSelection() {
-      const shots = this.selectedNodeKeys.map(key => this.nodeByKey(key)).filter(item => item?.kind === 'shot') as WorkbenchNode[]
-      const removableKeys = new Set(this.selectedNodeKeys.filter(key => {
-        const kind = this.nodeByKey(key)?.kind
-        return Boolean(kind && manualNodeKinds.has(kind))
-      }))
-      if (removableKeys.size) this.checkpoint()
+    async deleteNodeKeys(keys: string[]) {
+      const selected = [...new Set(keys)]
+        .map(key => this.nodeByKey(key))
+        .filter((item): item is WorkbenchNode => Boolean(item))
+      const shots = selected.filter(item => item.kind === 'shot')
+      const manualKeys = new Set(selected.filter(item => isManualNodeKind(item.kind)).map(item => item.key))
       await Promise.all(shots.map(item => api.deleteScene(item.id)))
+      if (manualKeys.size) this.checkpoint()
+      const removedKeys = new Set([...manualKeys, ...shots.map(item => item.key)])
       this.scenes = this.scenes.filter(item => !shots.some(nodeItem => nodeItem.id === item.id))
-      this.manualNodes = this.manualNodes.filter(item => !removableKeys.has(item.key))
+      this.manualNodes = this.manualNodes.filter(item => !manualKeys.has(item.key))
       this.manualNodes.filter(item => item.kind === 'section').forEach((section) => {
         const keys = Array.isArray(section.data.node_keys) ? section.data.node_keys.filter((key): key is string => typeof key === 'string') : []
-        section.data.node_keys = keys.filter(key => !removableKeys.has(key))
+        section.data.node_keys = keys.filter(key => !removedKeys.has(key))
       })
-      this.mediaEdges = this.mediaEdges.filter(item => !removableKeys.has(item.source) && !removableKeys.has(item.target))
-      this.nodes = this.nodes.filter(item => !removableKeys.has(item.key))
-      this.edges = this.edges.filter(item => !removableKeys.has(item.source) && !removableKeys.has(item.target))
-      this.clearSelection(); this.rebuildGraph(); this.persistLayout()
-      const removed = shots.length + removableKeys.size
-      if (removed) notice.success(`已删除 ${removed} 个节点`)
+      this.mediaEdges = this.mediaEdges.filter(item => !removedKeys.has(item.source) && !removedKeys.has(item.target))
+      this.nodes = this.nodes.filter(item => !removedKeys.has(item.key))
+      this.edges = this.edges.filter(item => !removedKeys.has(item.source) && !removedKeys.has(item.target))
+      this.selectedNodeKeys = this.selectedNodeKeys.filter(key => !removedKeys.has(key))
+      this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
+      this.rebuildGraph(); this.persistLayout()
+      if (removedKeys.size) notice.success(`已删除 ${removedKeys.size} 个节点`)
+      return removedKeys.size
     },
+    async deleteSelection() { return this.deleteNodeKeys([...this.selectedNodeKeys]) },
     addMediaNode(kind: 'audio_reference' | 'digital_human') {
       this.checkpoint()
       const stamp = Date.now()
@@ -237,7 +247,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.checkpoint()
       item.data.resource = resource
       item.title = item.kind === 'audio_reference' && 'nickname' in resource ? resource.nickname : 'occupation' in resource ? `${resource.country} · ${resource.occupation}` : item.title
-      this.manualNodes = this.nodes.filter(nodeItem => manualNodeKinds.has(nodeItem.kind))
+      this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
       notice.success(item.kind === 'audio_reference' ? '参考音频已选择' : '数字人已选择')
     },

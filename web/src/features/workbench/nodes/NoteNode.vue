@@ -9,7 +9,7 @@ const store = useWorkbenchStore()
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const content = computed(() => typeof props.data.content === 'string' ? props.data.content : '')
 const color = computed(() => typeof props.data.color === 'string' ? props.data.color : '#8d793d')
-const noteStyle = computed(() => ({ '--workbench-note-color': color.value }))
+const noteStyle = computed(() => ({ '--workbench-note-color': color.value, overflow: 'visible' }))
 
 function resizeToContent() {
   const textarea = textareaRef.value
@@ -25,7 +25,7 @@ function updateContent(event: Event) { store.updateManualNodeData(props.id, { co
 function updateColor(event: Event) { store.updateManualNodeData(props.id, { color: (event.target as HTMLInputElement).value }) }
 function beginEdit() { store.checkpoint() }
 function save() { store.persistLayout() }
-function deleteNote() { store.selectNode(props.id); void store.deleteSelection() }
+function deleteNote() { void store.deleteNodeKeys([props.id]) }
 onMounted(() => void nextTick(resizeToContent))
 watch(content, () => void nextTick(resizeToContent))
 </script>
