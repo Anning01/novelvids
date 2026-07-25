@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { Connection, Edge, Node, NodeDragEvent, NodeTypesObject } from '@vue-flow/core'
+import type { Connection, Edge, Node, NodeChange, NodeDragEvent, NodeTypesObject } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { PanOnScrollMode, SelectionMode, useVueFlow, VueFlow } from '@vue-flow/core'
+import { PanOnScrollMode, SelectionMode, VueFlow } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
+import { Lock, Unlock } from 'lucide-vue-next'
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { notice } from '@/shared/notice'
 import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
@@ -15,7 +16,9 @@ import { buildWorkbenchGroupedAutoLayout } from '../layout/workbenchAutoLayout'
 import { canvasZoomModifier } from '../interaction/canvasZoomModifier'
 import { selectionAutoPanDelta, selectionRectAfterAutoPan } from '../interaction/selectionAutoPan'
 import { workbenchSectionActionsKey } from '../interaction/sectionActions'
+import { applyNodeSelectionChanges, isAdditiveSelectionEvent, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
 import { workbenchPromptEditorKey } from '../prompt/promptEditor'
+import { WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
 import ChapterNode from '../nodes/ChapterNode.vue'
 import ShotNode from '../nodes/ShotNode.vue'
@@ -32,12 +35,13 @@ import './noop.css'
 const props = defineProps<{ novelId: number; chapterId: number }>()
 const store = useWorkbenchStore()
 const canvasTool = ref<'select' | 'pan'>('select')
+const canvasLocked = ref(false)
 const spacePanActive = ref(false)
 const generating = ref(false)
 const sectionDropTargetKey = ref<string | null>(null)
 const promptEditorNodeKey = ref<string | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
-const { fitView, getNodes, getViewport, panBy, setViewport, userSelectionRect, viewport, vueFlowRef } = useVueFlow()
+const { fitView, getNodes, getViewport, panBy, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
@@ -47,6 +51,7 @@ const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
 })))
 const flowEdges = computed<Edge[]>(() => store.edges.map(item => ({ id: item.key, source: item.source, target: item.target, type: item.type, selected: store.selectedEdgeKeys.includes(item.key), sourceHandle: item.sourceHandle || undefined, targetHandle: item.targetHandle || undefined })))
 const panModeActive = computed(() => canvasTool.value === 'pan' || spacePanActive.value)
+const interactionState = computed(() => workbenchInteractionState(canvasLocked.value, panModeActive.value))
 const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => ['shot', 'audio_reference', 'digital_human', 'section', 'note'].includes(store.nodeByKey(key)?.kind || '')))
 const canCopy = computed(() => store.selectedNodeKeys.length === 1 && ['shot', 'note'].includes(store.nodeByKey(store.selectedNodeKeys[0])?.kind || ''))
 const selectedSectionMembers = computed(() => store.selectedNodeKeys.map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')))
@@ -66,6 +71,13 @@ provide(workbenchPromptEditorKey, {
 const SECTION_PADDING = 64
 const DEFAULT_SECTION_COLOR = '#31558f'
 let sectionDrag: { sectionKey: string; startPosition: Point; memberPositions: Record<string, Point> } | null = null
+let selectionIntent: {
+  kind: 'node'
+  key: string
+  before: string[]
+  additive: boolean
+} | { kind: 'pane'; x: number; y: number } | null = null
+let suppressNativeSelectionChanges = false
 let selectionAutoPanFrame = 0
 let selectionAutoPanPointer: { clientX: number; clientY: number } | null = null
 let selectionAutoPanPane: HTMLElement | null = null
@@ -122,6 +134,13 @@ async function fitSectionToContent(sectionKey: string) {
 provide(workbenchSectionActionsKey, { fitToContent: fitSectionToContent })
 
 function nodeDragStart(event: NodeDragEvent) {
+  if (selectionIntent?.kind === 'node' && selectionIntent.key === event.node.id) {
+    applyAuthoritativeSelection(selectionAfterNodeClick(
+      selectionIntent.before,
+      selectionIntent.key,
+      selectionIntent.additive,
+    ))
+  }
   store.checkpoint(); const item = store.nodeByKey(event.node.id)
   if (item?.kind === 'section') sectionDrag = { sectionKey: item.key, startPosition: { ...item.position }, memberPositions: Object.fromEntries(sectionMemberNodes(item).map(member => [member.key, { ...member.position }])) }
   else sectionDrag = null
@@ -142,9 +161,54 @@ function nodeDragStop(event: NodeDragEvent) {
   draggedNodes.forEach(node => store.updateNodeLayout(node.id, node.position))
   if (sectionDrag?.sectionKey === event.node.id) { absorbCoveredNodes(event.node.id); sectionDrag = null }
   else reconcileMembership(draggedNodes.map(node => node.id))
+  selectionIntent = null
   sectionDropTargetKey.value = null; store.persistLayout()
 }
-function selectNode(event: { event: MouseEvent | TouchEvent; node: Node }) { const source = event.event; store.selectNode(event.node.id, source instanceof MouseEvent && (source.metaKey || source.ctrlKey || source.shiftKey)) }
+function handleNodesChange(changes: NodeChange[]) {
+  if (selectionIntent || suppressNativeSelectionChanges) return
+  const next = applyNodeSelectionChanges(
+    store.selectedNodeKeys,
+    changes,
+    new Set(store.nodes.map(node => node.key)),
+  )
+  if (!sameSelection(next, store.selectedNodeKeys)) store.selectNodes(next)
+}
+function rememberSelectionIntent(event: PointerEvent) {
+  if (event.button !== 0 || !(event.target instanceof Element)) {
+    selectionIntent = null
+    return
+  }
+  const nodeElement = event.target.closest<HTMLElement>('.vue-flow__node[data-id]')
+  if (nodeElement?.dataset.id) {
+    selectionIntent = {
+      kind: 'node',
+      key: nodeElement.dataset.id,
+      before: [...store.selectedNodeKeys],
+      additive: isAdditiveSelectionEvent(event),
+    }
+    return
+  }
+  selectionIntent = event.target.closest('.vue-flow__pane') && !event.target.closest('.vue-flow__edge')
+    ? { kind: 'pane', x: event.clientX, y: event.clientY }
+    : null
+}
+function applySelectionIntent() {
+  const intent = selectionIntent
+  selectionIntent = null
+  if (!intent) return
+  if (intent.kind === 'pane') {
+    suppressNativeSelectionChanges = true
+    store.clearSelection()
+    void nextTick(() => { suppressNativeSelectionChanges = false })
+    return
+  }
+  applyAuthoritativeSelection(selectionAfterNodeClick(intent.before, intent.key, intent.additive))
+}
+function applyAuthoritativeSelection(keys: string[]) {
+  suppressNativeSelectionChanges = true
+  store.selectNodes(keys)
+  void nextTick(() => { suppressNativeSelectionChanges = false })
+}
 function connectNodes(connection: Connection) { if (connection.source && connection.target) store.connectMediaNode(connection.source, connection.target) }
 function canvasSize() { const canvas = document.getElementById('novel-workbench'); const bounds = canvas?.getBoundingClientRect(); return { width: Math.max(1, bounds?.width || window.innerWidth), height: Math.max(1, bounds?.height || window.innerHeight) } }
 function nextManualNodePosition(size: { width: number; height: number }) {
@@ -160,7 +224,13 @@ function nextManualNodePosition(size: { width: number; height: number }) {
 }
 function addNote() { store.addNote(nextManualNodePosition({ width: 320, height: 220 })) }
 function moveEnd() { store.viewport = getViewport(); saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize()); store.persistLayout() }
-function trackSelectionAutoPanPointer(event: PointerEvent) { selectionAutoPanPointer = { clientX: event.clientX, clientY: event.clientY } }
+function trackSelectionAutoPanPointer(event: PointerEvent) {
+  selectionAutoPanPointer = { clientX: event.clientX, clientY: event.clientY }
+  if (selectionIntent?.kind === 'pane' && selectionGestureMoved(
+    { x: selectionIntent.x, y: selectionIntent.y },
+    { x: event.clientX, y: event.clientY },
+  )) selectionIntent = null
+}
 function refreshSelectionAtPointer() {
   if (!selectionAutoPanPane || !selectionAutoPanPointer) return
   selectionAutoPanPane.dispatchEvent(new PointerEvent('pointermove', {
@@ -294,12 +364,17 @@ onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keyd
 </script>
 
 <template>
-  <main class="viral-workbench-page">
+  <main class="viral-workbench-page" @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
     <div v-if="store.loading" class="workbench-state" role="status">正在加载工作区…</div>
-    <VueFlow v-else id="novel-workbench" class="viral-workbench-canvas" :class="{ 'is-pan-mode': panModeActive, 'is-manual-pan-mode': canvasTool === 'pan' }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="panModeActive" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="!panModeActive" :elements-selectable="!panModeActive" :selection-key-code="!panModeActive" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @node-click="selectNode" @pane-click="store.clearSelection" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes">
+    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan', 'is-locked': canvasLocked }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="store.clearSelection" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes">
       <Background variant="lines" color="#2b2926" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
-      <Controls position="bottom-right" />
+      <Controls position="bottom-right" :show-interactive="false">
+        <button class="vue-flow__controls-button vue-flow__controls-interactive" type="button" :aria-pressed="canvasLocked" :aria-label="canvasLocked ? '解锁画布编辑' : '锁定画布编辑'" :title="canvasLocked ? '解锁画布编辑' : '锁定画布编辑'" @click.stop="canvasLocked = !canvasLocked">
+          <Lock v-if="canvasLocked" :size="14" aria-hidden="true" />
+          <Unlock v-else :size="14" aria-hidden="true" />
+        </button>
+      </Controls>
       <CanvasToolSwitcher v-model="canvasTool" />
       <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" @add-shot="store.addShot()" @add-audio="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @create-section="createSection" @generate="generateScenes" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="store.addShot()">添加第一个镜头</AppButton></div>

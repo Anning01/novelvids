@@ -168,6 +168,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         : [key]
       this.selectedEdgeKeys = []
     },
+    selectNodes(keys: string[]) {
+      this.selectedNodeKeys = [...new Set(keys)].filter(key => this.nodeByKey(key))
+      if (this.selectedNodeKeys.length) this.selectedEdgeKeys = []
+    },
     clearSelection() { this.selectedNodeKeys = []; this.selectedEdgeKeys = [] },
     updateNodeLayout(key: string, position: Point, size?: NodeSize | null, zIndex?: number) { const item = this.nodeByKey(key); if (!item) return; item.position = position; if (size !== undefined) item.size = size; if (zIndex !== undefined) item.zIndex = zIndex },
     updateNodeUi(key: string, ui: Record<string, unknown>) { const item = this.nodeByKey(key); if (item) item.data.ui = ui; this.persistLayout() },
