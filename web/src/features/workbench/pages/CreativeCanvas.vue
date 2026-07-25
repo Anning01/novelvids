@@ -18,7 +18,7 @@ import { selectionAutoPanDelta, selectionRectAfterAutoPan } from '../interaction
 import { workbenchSectionActionsKey } from '../interaction/sectionActions'
 import { applyNodeSelectionChanges, isAdditiveSelectionEvent, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
 import { workbenchPromptEditorKey } from '../prompt/promptEditor'
-import { WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
+import { isWorkbenchFlowReady, WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
 import ChapterNode from '../nodes/ChapterNode.vue'
 import ShotNode from '../nodes/ShotNode.vue'
@@ -29,6 +29,7 @@ import NoteNode from '../nodes/NoteNode.vue'
 import SectionNode from '../nodes/SectionNode.vue'
 import type { NodeSize, Point, WorkbenchNode } from '../types/workbenchTypes'
 import { useWorkbenchStore } from '../store/workbenchStore'
+import { screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
 import { loadWorkbenchViewport, saveWorkbenchViewport, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
 import './noop.css'
 
@@ -40,8 +41,9 @@ const spacePanActive = ref(false)
 const generating = ref(false)
 const sectionDropTargetKey = ref<string | null>(null)
 const promptEditorNodeKey = ref<string | null>(null)
+const restoredViewportChapterId = ref<number | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
-const { fitView, getNodes, getViewport, panBy, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
+const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const flowNodes = computed<Node[]>(() => store.nodes.map(item => ({
@@ -211,18 +213,25 @@ function applyAuthoritativeSelection(keys: string[]) {
 }
 function connectNodes(connection: Connection) { if (connection.source && connection.target) store.connectMediaNode(connection.source, connection.target) }
 function canvasSize() { const canvas = document.getElementById('novel-workbench'); const bounds = canvas?.getBoundingClientRect(); return { width: Math.max(1, bounds?.width || window.innerWidth), height: Math.max(1, bounds?.height || window.innerHeight) } }
-function nextManualNodePosition(size: { width: number; height: number }) {
-  const viewport = getViewport()
-  const bounds = canvasSize()
-  const zoom = Math.max(0.01, viewport.zoom)
-  const visibleLeft = -viewport.x / zoom
-  const visibleTop = -viewport.y / zoom
-  return {
-    x: Math.round(Math.max(visibleLeft + 24 / zoom, (bounds.width / 2 - viewport.x) / zoom - size.width / 2)),
-    y: Math.round(Math.max(visibleTop + 64 / zoom, (bounds.height / 2 - viewport.y) / zoom - size.height / 2)),
-  }
+function visibleNodePosition(size: NodeSize) {
+  const bounds = vueFlowRef.value?.getBoundingClientRect()
+  if (!bounds || !isWorkbenchFlowReady(bounds)) return { x: 80, y: 80 }
+  return screenToFlowCoordinate(screenPointForCenteredNode(bounds, size))
 }
-function addNote() { store.addNote(nextManualNodePosition({ width: 320, height: 220 })) }
+async function ensureNodeVisible(key: string) {
+  await nextTick()
+  if (!getNodes.value.some(node => node.id === key)) return
+  store.viewport = getViewport()
+  saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
+}
+async function addShot() {
+  const created = await store.addShot(visibleNodePosition({ width: 360, height: 520 }))
+  if (created) await ensureNodeVisible(created.key)
+}
+function addNote() {
+  const created = store.addNote(visibleNodePosition({ width: 320, height: 220 }))
+  void ensureNodeVisible(created.key)
+}
 function moveEnd() { store.viewport = getViewport(); saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize()); store.persistLayout() }
 function trackSelectionAutoPanPointer(event: PointerEvent) {
   selectionAutoPanPointer = { clientX: event.clientX, clientY: event.clientY }
@@ -342,20 +351,26 @@ watch([() => store.selectedNodeKeys[0], canvasTool], ([selectedNodeKey, tool]) =
   if (tool === 'pan' || promptEditorNodeKey.value !== selectedNodeKey) promptEditorNodeKey.value = null
 })
 
+async function restoreViewport() {
+  if (restoredViewportChapterId.value === props.chapterId) return
+  const bounds = vueFlowRef.value?.getBoundingClientRect()
+  if (!bounds || !isWorkbenchFlowReady(bounds)) return
+  restoredViewportChapterId.value = props.chapterId
+  const workspaceKey = String(props.chapterId)
+  const saved = loadWorkbenchViewport(workspaceKey, bounds)
+  if (saved) {
+    await setViewport(saved)
+  } else if (store.nodes.length) {
+    await fitView({ padding: 0.12, minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 0 })
+  }
+  store.viewport = getViewport()
+  saveWorkbenchViewport(workspaceKey, store.viewport, bounds)
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown); window.addEventListener('keyup', handleKeyup)
   try {
     await store.load(props.novelId, props.chapterId)
-    await nextTick()
-    const workspaceKey = String(props.chapterId)
-    const saved = loadWorkbenchViewport(workspaceKey, canvasSize())
-    if (saved) {
-      await setViewport(saved)
-    } else if (store.nodes.length) {
-      await fitView({ padding: 0.12, minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 0 })
-    }
-    store.viewport = getViewport()
-    saveWorkbenchViewport(workspaceKey, store.viewport, canvasSize())
   } catch (error) {
     notice.error(error instanceof Error ? error.message : '工作区加载失败')
   }
@@ -366,7 +381,7 @@ onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keyd
 <template>
   <main class="viral-workbench-page" @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
     <div v-if="store.loading" class="workbench-state" role="status">正在加载工作区…</div>
-    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan', 'is-locked': canvasLocked }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="store.clearSelection" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes">
+    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan', 'is-locked': canvasLocked }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="store.clearSelection" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes">
       <Background variant="lines" color="#2b2926" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
       <Controls position="bottom-right" :show-interactive="false">
@@ -376,8 +391,8 @@ onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keyd
         </button>
       </Controls>
       <CanvasToolSwitcher v-model="canvasTool" />
-      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" @add-shot="store.addShot()" @add-audio="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @create-section="createSection" @generate="generateScenes" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
-      <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="store.addShot()">添加第一个镜头</AppButton></div>
+      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" @add-shot="addShot" @add-audio="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @create-section="createSection" @generate="generateScenes" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个镜头</AppButton></div>
     </VueFlow>
   </main>
 </template>

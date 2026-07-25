@@ -295,8 +295,12 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async addShot(position?: Point) {
       const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: '新镜头', prompt: '', duration: 6 })).data
       this.scenes.push(created); this.videos[created.id] = []; this.rebuildGraph()
-      const item = this.nodeByKey(`shot-${created.id}`); if (item && position) item.position = position
+      const item = this.nodeByKey(`shot-${created.id}`) || null
+      if (item && position) item.position = position
+      if (item) this.selectNode(item.key)
+      this.persistLayout()
       notice.success('已添加镜头')
+      return item
     },
     async generateScenes() {
       const task = (await api.generateScenes(this.chapterId)).data
