@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { api, sleep } from '@/api'
+import { markRaw } from 'vue'
+import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Video } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -9,6 +10,7 @@ import { assetTypeLabel } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
 import { nodeCapabilities } from '../config/nodeCapabilities'
+import { isAbortError, pollUntilTerminal, WorkbenchLoadEpoch } from '../execution/workbenchAsync'
 import { isManualNodeKind, parseWorkbenchState, serializeWorkbenchState, WORKBENCH_LAYOUT_VERSION } from './workbenchPersistence'
 
 interface HistorySnapshot {
@@ -57,6 +59,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     manualNodes: [] as WorkbenchNode[],
     mediaEdges: [] as WorkbenchEdge[],
     viewport: { x: 0, y: 0, zoom: 1 } as WorkbenchViewport,
+    loadEpoch: markRaw(new WorkbenchLoadEpoch()),
+    pendingControllers: [] as AbortController[],
   }),
   getters: {
     canUndo: state => state.history.length > 0,
@@ -64,6 +68,22 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
   },
   actions: {
     nodeByKey(key: string) { return this.nodes.find(item => item.key === key) },
+    beginPendingWork() {
+      const controller = markRaw(new AbortController())
+      this.pendingControllers.push(controller)
+      return controller
+    },
+    finishPendingWork(controller: AbortController) {
+      this.pendingControllers = this.pendingControllers.filter(item => item !== controller)
+    },
+    cancelPendingWork() {
+      this.loadEpoch.begin()
+      this.pendingControllers.forEach(controller => controller.abort())
+      this.pendingControllers = []
+      this.busyAssetIds = []
+      this.busySceneIds = []
+      this.loading = false
+    },
     layoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v${WORKBENCH_LAYOUT_VERSION}` },
     legacyLayoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v1` },
     capture(): HistorySnapshot {
@@ -138,19 +158,25 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       } catch { /* ignore invalid local layout */ }
     },
     async load(novelId: number, chapterId: number) {
+      const epoch = this.loadEpoch.begin()
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
       this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
         const [chapterResponse, assetsResponse, scenesResponse, enumsResponse] = await Promise.all([api.chapter(chapterId), api.assets(novelId), api.scenes(chapterId), api.enums()])
+        const assets = await Promise.all(assetsResponse.data.items.map(async item => (await api.asset(item.id)).data))
+        const scenes = await Promise.all(scenesResponse.data.items.map(async item => (await api.scene(item.id)).data))
+        const entries = await Promise.all(scenes.map(async item => [item.id, (await api.videos(item.id)).data.items] as const))
+        if (!this.loadEpoch.isCurrent(epoch)) return
         this.chapter = chapterResponse.data
-        this.assets = await Promise.all(assetsResponse.data.items.map(async item => (await api.asset(item.id)).data))
-        this.scenes = await Promise.all(scenesResponse.data.items.map(async item => (await api.scene(item.id)).data))
+        this.assets = assets
+        this.scenes = scenes
         this.modelOptions = enumsResponse.data.video_model_type || []
-        const entries = await Promise.all(this.scenes.map(async item => [item.id, (await api.videos(item.id)).data.items] as const))
         this.videos = Object.fromEntries(entries)
         this.rebuildGraph()
         this.loadSavedLayout()
-      } finally { this.loading = false }
+      } finally {
+        if (this.loadEpoch.isCurrent(epoch)) this.loading = false
+      }
     },
     rebuildGraph() {
       if (!this.chapter) return
@@ -522,18 +548,27 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return updated
     },
     async generateAsset(assetId: number) {
+      const controller = this.beginPendingWork()
       if (!this.busyAssetIds.includes(assetId)) this.busyAssetIds.push(assetId)
       try {
         let task = (await api.generateAsset(assetId)).data
-        while (!terminal.has(task.status)) { await sleep(2500); task = (await api.task(task.id)).data }
+        if (!terminal.has(task.status)) {
+          task = await pollUntilTerminal(
+            async () => (await api.task(task.id)).data,
+            { signal: controller.signal, intervalMs: 2500, terminalStatuses: terminal },
+          )
+        }
         if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '资产图片生成失败')
         const assets = (await api.assets(this.novelId)).data.items
+        if (controller.signal.aborted) return
         this.assets = await Promise.all(assets.map(async item => (await api.asset(item.id)).data))
+        if (controller.signal.aborted) return
         this.rebuildGraph()
         notice.success('资产图片生成完成')
       } catch (error) {
-        notice.error(error instanceof Error ? error.message : '资产图片生成失败')
+        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : '资产图片生成失败')
       } finally {
+        this.finishPendingWork(controller)
         this.busyAssetIds = this.busyAssetIds.filter(id => id !== assetId)
       }
     },
@@ -548,20 +583,50 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return item
     },
     async generateScenes() {
-      const task = (await api.generateScenes(this.chapterId)).data
-      let current = task
-      while (!terminal.has(current.status)) { await sleep(2500); current = (await api.task(task.id)).data }
-      if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || '分镜生成失败')
-      await this.load(this.novelId, this.chapterId); notice.success('分镜生成完成')
+      const controller = this.beginPendingWork()
+      try {
+        const task = (await api.generateScenes(this.chapterId)).data
+        const current = terminal.has(task.status)
+          ? task
+          : await pollUntilTerminal(
+              async () => (await api.task(task.id)).data,
+              { signal: controller.signal, intervalMs: 2500, terminalStatuses: terminal },
+            )
+        if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || '分镜生成失败')
+        if (controller.signal.aborted) return
+        await this.load(this.novelId, this.chapterId)
+        notice.success('分镜生成完成')
+      } catch (error) {
+        if (!isAbortError(error)) throw error
+      } finally {
+        this.finishPendingWork(controller)
+      }
     },
     async generateVideo(sceneId: number, modelType: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string } = {}) {
+      const controller = this.beginPendingWork()
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
       try {
         let video = (await api.generateVideo(sceneId, modelType, options)).data
+        if (controller.signal.aborted) return
         this.videos[sceneId] = [video, ...(this.videos[sceneId] || [])]; this.rebuildGraph()
-        while (!terminal.has(video.status)) { await sleep(4000); video = (await api.queryVideo(video.id)).data; this.videos[sceneId] = this.videos[sceneId].map(item => item.id === video.id ? video : item); this.rebuildGraph() }
+        if (!terminal.has(video.status)) {
+          video = await pollUntilTerminal(async () => {
+            const current = (await api.queryVideo(video.id)).data
+            if (!controller.signal.aborted) {
+              this.videos[sceneId] = this.videos[sceneId].map(item => item.id === current.id ? current : item)
+              this.rebuildGraph()
+            }
+            return current
+          }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal })
+        }
         video.status === TaskStatusEnum.COMPLETED ? notice.success('视频生成完成') : notice.error(String(video.metadata?.error || '视频生成失败'))
-      } finally { this.busySceneIds = this.busySceneIds.filter(id => id !== sceneId); this.rebuildGraph() }
+      } catch (error) {
+        if (!isAbortError(error)) throw error
+      } finally {
+        this.finishPendingWork(controller)
+        this.busySceneIds = this.busySceneIds.filter(id => id !== sceneId)
+        this.rebuildGraph()
+      }
     },
     async refreshVideo(videoId: number) {
       const updated = (await api.queryVideo(videoId)).data

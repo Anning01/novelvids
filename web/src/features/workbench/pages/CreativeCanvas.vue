@@ -471,7 +471,7 @@ onMounted(async () => {
     notice.error(error instanceof Error ? error.message : '工作区加载失败')
   }
 })
-onBeforeUnmount(() => { stopSelectionAutoPan(); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('keyup', handleKeyup) })
+onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('keyup', handleKeyup) })
 </script>
 
 <template>
