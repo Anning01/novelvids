@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AudioReference, Chapter, DigitalHuman, Novel, PaginationResponse, Scene, SingleResponse, Video, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetVariant, AudioReference, Chapter, DigitalHuman, Novel, PaginationResponse, Scene, SingleResponse, Video, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 const BASE = '/api'
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -14,6 +14,32 @@ function qs(params: Record<string, unknown>) {
   return value ? `?${value}` : ''
 }
 
+async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) => string, pageSize = 100): Promise<PaginationResponse<T>> {
+  const first = await request<PaginationResponse<T>>(urlForPage(1, pageSize))
+  const pageCount = first.data.pagination.pages
+  if (pageCount <= 1) return first
+  const remaining: PaginationResponse<T>[] = []
+  // 有上千章节时也不一次性并发打满服务端；按小批次顺序聚合全部页。
+  for (let firstPage = 2; firstPage <= pageCount; firstPage += 4) {
+    const lastPage = Math.min(pageCount, firstPage + 3)
+    const batch = await Promise.all(
+      Array.from(
+        { length: lastPage - firstPage + 1 },
+        (_, index) => request<PaginationResponse<T>>(urlForPage(firstPage + index, pageSize)),
+      ),
+    )
+    remaining.push(...batch)
+  }
+  const items = [first, ...remaining].flatMap(response => response.data.items)
+  return {
+    ...first,
+    data: {
+      items,
+      pagination: { ...first.data.pagination, total: items.length, page: 1, page_size: items.length },
+    },
+  }
+}
+
 export const api = {
   enums: () => request<SingleResponse<AllEnums>>('/config/enums/all'),
   novels: () => request<PaginationResponse<Novel>>('/novel?page=1&page_size=100'),
@@ -24,19 +50,27 @@ export const api = {
   splitNovel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}/split`, { method: 'POST' }),
   analyzeNovel: (id: number) => request<SingleResponse<AiTask>>(`/novel/${id}/analyze`, { method: 'POST' }),
   novelAnalysis: (id: number) => request<SingleResponse<AiTask | null>>(`/novel/${id}/analysis`),
-  chapters: (novelId: number) => request<PaginationResponse<Chapter>>(`/chapter${qs({ novel_id: novelId, page: 1, page_size: 100, sort: 'number' })}`),
+  chapters: (novelId: number) => requestAllPages<Chapter>(
+    (page, pageSize) => `/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`,
+  ),
   chapter: (id: number) => request<SingleResponse<Chapter>>(`/chapter/${id}`),
   createChapter: (data: Partial<Chapter>) => request<SingleResponse<Chapter>>('/chapter', { method: 'POST', body: JSON.stringify(data) }),
   updateChapter: (id: number, data: Partial<Chapter>) => request<SingleResponse<Chapter>>(`/chapter/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteChapter: (id: number) => request<SingleResponse<null>>(`/chapter/${id}`, { method: 'DELETE' }),
   extract: (chapterId: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST' }),
   assets: (novelId: number, page = 1, pageSize = 100) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize })}`),
+  projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
   assetLibrary: (assetType: number, page = 1, pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, page, page_size: pageSize, sort: '-id' })}`),
-  createAsset: (data: Partial<Asset> & { novel_id: number; asset_type: number; canonical_name: string }) => request<SingleResponse<Asset>>('/asset', { method: 'POST', body: JSON.stringify(data) }),
+  createAsset: (data: Partial<Asset> & { novel_id: number; chapter_id?: number; asset_type: number; canonical_name: string }) => request<SingleResponse<Asset>>('/asset', { method: 'POST', body: JSON.stringify(data) }),
   updateAsset: (id: number, data: Partial<Asset>) => request<SingleResponse<Asset>>(`/asset/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteAsset: (id: number) => request<SingleResponse<null>>(`/asset/${id}`, { method: 'DELETE' }),
-  generateAsset: (id: number) => request<SingleResponse<AiTask>>(`/asset/reference/${id}`),
+  reuseAsset: (assetId: number, chapterId: number) => request<SingleResponse<Asset>>(`/asset/${assetId}/chapters/${chapterId}`, { method: 'POST' }),
+  assetVariants: (assetId: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants`),
+  createAssetVariant: (assetId: number, data: Partial<AssetVariant> & { name: string }) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants`, { method: 'POST', body: JSON.stringify(data) }),
+  updateAssetVariant: (assetId: number, variantId: number, data: Partial<AssetVariant>) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants/${variantId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteAssetVariant: (assetId: number, variantId: number) => request<SingleResponse<null>>(`/asset/${assetId}/variants/${variantId}`, { method: 'DELETE' }),
+  generateAsset: (id: number, variantId?: number) => request<SingleResponse<AiTask>>(`/asset/reference/${id}${qs({ variant_id: variantId })}`),
   scenes: (chapterId: number) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page: 1, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),
   createScene: (data: Partial<Scene> & { chapter_id: number; sequence: number; prompt: string }) => request<SingleResponse<Scene>>('/scene/', { method: 'POST', body: JSON.stringify(data) }),
@@ -50,6 +84,7 @@ export const api = {
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
+  workbenchBootstrap: (novelId: number, chapterId: number) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
   createConfig: (data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>('/config', { method: 'POST', body: JSON.stringify(data) }),
   updateConfig: (id: number, data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>(`/config/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

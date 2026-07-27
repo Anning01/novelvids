@@ -33,6 +33,7 @@ import AppScrollArea from '@/components/AppScrollArea.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { api, sleep } from '@/api'
+import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -77,6 +78,7 @@ const selectedVideoModel = ref('3')
 const videos = ref<Record<number, VideoResult[]>>({})
 const loading = ref(true)
 const generatingChapterIds = ref<Set<number>>(new Set())
+const extractingChapterIds = ref<Set<number>>(new Set())
 const savingSceneIds = ref<Set<number>>(new Set())
 const generatingVideoSceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
@@ -91,6 +93,7 @@ let sceneObserver: IntersectionObserver | undefined
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
+const extractingChapterAssets = computed(() => extractingChapterIds.value.has(activeChapterId.value))
 const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
 const videoModelOptions = computed(() => (
   videoModelTypes.value.length
@@ -215,13 +218,18 @@ function setGenerationError(chapterId: number, message = '') {
 }
 
 async function fetchChapterScenes(chapterId: number) {
-  const briefScenes = (await api.scenes(chapterId)).data.items
-  const chapterScenes = await Promise.all(briefScenes.map(async item => (await api.scene(item.id)).data))
-  const entries = await Promise.all(chapterScenes.map(async scene => [scene.id, (await api.videos(scene.id)).data.items] as const))
-  return { scenes: chapterScenes, videos: Object.fromEntries(entries) as Record<number, VideoResult[]> }
+  const response = await api.workbenchBootstrap(projectId.value, chapterId)
+  return {
+    chapter: response.data.chapter,
+    assets: response.data.assets,
+    scenes: response.data.scenes,
+    videos: response.data.videos as Record<number, VideoResult[]>,
+  }
 }
 
 function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>>) {
+  activeChapter.value = result.chapter
+  assets.value = result.assets
   scenes.value = result.scenes
   videos.value = result.videos
   activeSceneId.value = result.scenes[0]?.id || 0
@@ -273,11 +281,42 @@ async function generateChapterStoryboard(chapterId: number) {
   }
 }
 
+async function extractChapterAssets() {
+  const chapterId = activeChapterId.value
+  if (!chapterId || extractingChapterIds.value.has(chapterId)) return
+  extractingChapterIds.value = new Set([...extractingChapterIds.value, chapterId])
+  try {
+    let task = (await api.extract(chapterId)).data
+    while (alive && !terminalTaskStatuses.has(task.status)) {
+      await sleep(1500)
+      task = (await api.task(task.id)).data
+    }
+    if (!alive) return
+    if (task.status !== TaskStatusEnum.COMPLETED) {
+      throw new Error(task.error_message || '本章资产提取失败')
+    }
+    const result = await fetchChapterScenes(chapterId)
+    if (activeChapterId.value === chapterId) showChapterScenes(result)
+    notice.success(`第 ${activeChapter.value?.number || '-'} 章资产提取完成`)
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    const next = new Set(extractingChapterIds.value)
+    next.delete(chapterId)
+    extractingChapterIds.value = next
+  }
+}
+
 async function regenerateStoryboard() {
   const chapterId = activeChapterId.value
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
-  if (!confirm('重新生成会替换本集现有分镜，是否继续？')) return
   const chapterScenes = [...scenes.value]
+  if (!await appConfirm({
+    title: '重新生成本集分镜？',
+    message: `本集现有 ${chapterScenes.length} 个分镜将被替换，此操作无法撤销。`,
+    confirmLabel: '重新生成',
+    tone: 'warning',
+  })) return
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
@@ -307,12 +346,8 @@ async function loadChapter(chapterId: number) {
   loading.value = true
   setGenerationError(chapterId)
   try {
-    const [chapterResponse, result] = await Promise.all([
-      api.chapter(chapterId),
-      fetchChapterScenes(chapterId),
-    ])
+    const result = await fetchChapterScenes(chapterId)
     if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
-    activeChapter.value = chapterResponse.data
     showChapterScenes(result)
     loading.value = false
     if (!result.scenes.length) {
@@ -332,10 +367,9 @@ async function loadChapter(chapterId: number) {
 async function load() {
   loading.value = true
   try {
-    const [novelResponse, chapterResponse, assetResponse, configResponse, enumResponse] = await Promise.all([
+    const [novelResponse, chapterResponse, configResponse, enumResponse] = await Promise.all([
       api.novel(projectId.value),
       api.chapters(projectId.value),
-      api.assets(projectId.value),
       api.configs(),
       api.enums(),
     ])
@@ -348,7 +382,6 @@ async function load() {
       creationMode: novelResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     chapters.value = chapterResponse.data.items
-    assets.value = assetResponse.data.items
     configs.value = configResponse.data.items
     videoModelTypes.value = enumResponse.data.video_model_type || []
     const preferredChapter = Number(route.query.chapter)
@@ -463,7 +496,12 @@ async function duplicateScene(scene: Scene) {
 }
 
 async function removeScene(scene: Scene) {
-  if (!scene || !confirm(`删除分镜 ${scene.sequence}？`)) return
+  if (!scene || !await appConfirm({
+    title: `删除分镜 ${scene.sequence}？`,
+    message: '删除后无法恢复，后续分镜序号不会自动调整。',
+    confirmLabel: '删除分镜',
+    tone: 'danger',
+  })) return
   try {
     await api.deleteScene(scene.id)
     scenes.value = scenes.value.filter(item => item.id !== scene.id)
@@ -550,7 +588,7 @@ onBeforeUnmount(() => {
   <main class="storyboard-page" :class="{ 'is-workflow-view': workspaceView === 'workflow' }">
     <header class="storyboard-topbar">
       <div class="project-heading">
-        <AppButton variant="ghost" size="sm" icon-only aria-label="返回项目" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
+        <AppButton :class="{ 'workbench-exit': workspaceView === 'workflow' }" variant="ghost" size="sm" icon-only :aria-label="workspaceView === 'workflow' ? '返回进入页' : '返回项目'" :title="workspaceView === 'workflow' ? '返回进入页' : '返回项目'" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
         <div v-if="workspaceView === 'storyboard'"><strong>{{ project?.name || '短剧项目' }}</strong><span><Film :size="13" />{{ project?.aspectRatio || '9:16' }}<i />{{ project?.resolution || '720p' }}<i />{{ project?.style || '写实通用' }}</span></div>
         <WorkbenchCanvasIdentity v-else-if="activeChapter" :name="activeChapter.name" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
       </div>
@@ -560,7 +598,7 @@ onBeforeUnmount(() => {
           <AppButton variant="soft" size="sm" :active="phase.active" :aria-current="phase.active ? 'step' : undefined" @click="selectPhase(phase.label)"><component :is="phase.icon" :size="16" />{{ phase.label }}</AppButton>
         </template>
       </nav>
-      <nav class="workspace-view-switch" aria-label="分镜视图">
+      <nav class="workspace-view-switch" aria-label="工作区视图切换">
         <AppButton variant="ghost" size="sm" :active="workspaceView === 'workflow'" :aria-pressed="workspaceView === 'workflow'" @click="selectWorkspaceView('workflow')"><Workflow :size="14" />工作流</AppButton>
         <AppButton variant="ghost" size="sm" :active="workspaceView === 'storyboard'" :aria-pressed="workspaceView === 'storyboard'" @click="selectWorkspaceView('storyboard')"><PanelsTopLeft :size="14" />故事板</AppButton>
       </nav>
@@ -580,6 +618,7 @@ onBeforeUnmount(() => {
           <div><span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span><h1>第 {{ activeChapter?.number || '-' }} 集 · {{ activeChapter?.name || '分镜制作' }}</h1><p>{{ activeChapter?.content?.slice(0, 120) }}</p></div>
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" align="end" />
+            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="extractingChapterAssets" :disabled="extractingChapterAssets" @click="extractChapterAssets"><Boxes v-if="!extractingChapterAssets" :size="15" />{{ extractingChapterAssets ? '正在提取本章' : '提取本章资产' }}</AppButton>
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
             <AppButton variant="primary" size="sm" @click="addScene"><Plus :size="15" />添加分镜</AppButton>
           </div>

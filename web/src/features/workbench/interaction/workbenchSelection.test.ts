@@ -1,6 +1,6 @@
 import type { NodeChange } from '@vue-flow/core'
 import { describe, expect, it } from 'vitest'
-import { applyNodeSelectionChanges, selectionAfterNodeClick, selectionGestureMoved } from './workbenchSelection'
+import { applyNodeSelectionChanges, isInteractiveSelectionTarget, selectionAfterNodeClick, selectionGestureMoved } from './workbenchSelection'
 
 describe('applyNodeSelectionChanges', () => {
   const valid = new Set(['a', 'b', 'c'])
@@ -32,5 +32,16 @@ describe('applyNodeSelectionChanges', () => {
   it('distinguishes a blank click from a lasso gesture', () => {
     expect(selectionGestureMoved({ x: 20, y: 20 }, { x: 22, y: 22 })).toBe(false)
     expect(selectionGestureMoved({ x: 20, y: 20 }, { x: 24, y: 20 })).toBe(true)
+  })
+
+  it('does not treat form-control clicks as node-selection clicks', () => {
+    const button = document.createElement('button')
+    const option = document.createElement('span')
+    option.setAttribute('role', 'option')
+    const plain = document.createElement('div')
+
+    expect(isInteractiveSelectionTarget(button)).toBe(true)
+    expect(isInteractiveSelectionTarget(option)).toBe(true)
+    expect(isInteractiveSelectionTarget(plain)).toBe(false)
   })
 })

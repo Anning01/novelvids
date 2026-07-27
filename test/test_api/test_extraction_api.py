@@ -207,7 +207,7 @@ async def test_extract_stale_task_cleaned(client: AsyncClient):
         task_type=AiTaskTypeEnum.extraction.value,
         status=TaskStatusEnum.running.value,
         request_params={"chapter_id": chapter.id, "novel_id": novel.id},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=700),
     )
 
     # 提交新任务 - 应先清理超时任务再通过
@@ -231,7 +231,7 @@ async def test_extract_no_config_returns_404(client: AsyncClient):
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
     assert body["code"] == 404
-    assert "未配置" in body["message"]
+    assert "启用一个模型" in body["message"]
 
 
 @pytest.mark.asyncio

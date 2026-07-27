@@ -28,6 +28,7 @@ describe('asset workbench configuration', () => {
       size: '1424x800',
       format: 'PNG',
       digitalHumanAssetId: '',
+      digitalHumanPreviewUrl: '',
     })
   })
 
@@ -40,6 +41,7 @@ describe('asset workbench configuration', () => {
           size: '1584x2816',
           format: 'PNG',
           digitalHumanAssetId: 'human-9',
+          digitalHumanPreviewUrl: '/media/human-9.png',
         },
       },
     }))).toMatchObject({
@@ -47,6 +49,7 @@ describe('asset workbench configuration', () => {
       resolution: '2K',
       size: '1584x2816',
       digitalHumanAssetId: 'human-9',
+      digitalHumanPreviewUrl: '/media/human-9.png',
     })
 
     expect(normalizeAssetConfig(makeAsset({
@@ -57,6 +60,7 @@ describe('asset workbench configuration', () => {
           size: 'broken',
           format: 'JPEG',
           digitalHumanAssetId: 9,
+          digitalHumanPreviewUrl: 9,
         },
       },
     }))).toEqual({
@@ -65,6 +69,7 @@ describe('asset workbench configuration', () => {
       size: '1424x800',
       format: 'PNG',
       digitalHumanAssetId: '',
+      digitalHumanPreviewUrl: '',
     })
   })
 

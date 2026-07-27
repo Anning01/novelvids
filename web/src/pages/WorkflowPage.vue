@@ -3,6 +3,7 @@ import { ArrowLeft, Box, Check, Image, MapPin, Pencil, RefreshCw, Sparkles, Tras
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, sleep } from '@/api'
+import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { Asset, Chapter } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -13,14 +14,24 @@ const chapter = ref<Chapter | null>(null); const assets = ref<Asset[]>([]); cons
 const batchGenerating = ref(false)
 const steps = [{ id: 1, label: '内容理解', sub: '提取角色与场景', icon: User }, { id: 2, label: '视觉资产', sub: '统一人物与世界观', icon: Image }, { id: 3, label: '创作画布', sub: '分镜与视频生成', icon: Workflow }]
 const groups = computed(() => [{ type: AssetTypeEnum.PERSON, label: '角色', icon: User }, { type: AssetTypeEnum.SCENE, label: '场景', icon: MapPin }, { type: AssetTypeEnum.ITEM, label: '道具', icon: Box }].map(group => ({ ...group, items: assets.value.filter(item => item.asset_type === group.type) })))
-async function load() { try { chapter.value = (await api.chapter(chapterId.value)).data; assets.value = (await api.assets(novelId.value)).data.items } catch (error) { notice.error((error as Error).message) } }
+async function load() { try { const response = await api.workbenchBootstrap(novelId.value, chapterId.value); chapter.value = response.data.chapter; assets.value = response.data.assets } catch (error) { notice.error((error as Error).message) } }
 async function poll(id: string) { let task = (await api.task(id)).data; while (![TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED].includes(task.status)) { await sleep(2500); task = (await api.task(id)).data } return task }
 async function extract() { extracting.value = true; try { const task = await poll((await api.extract(chapterId.value)).data.id); if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '提取失败'); await load(); notice.success('内容理解完成') } catch (error) { notice.error((error as Error).message) } finally { extracting.value = false } }
 async function generate(asset: Asset) { processing.value.push(asset.id); try { const task = await poll((await api.generateAsset(asset.id)).data.id); if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '生成失败'); await load(); notice.success(`${asset.canonical_name} 主图已生成`) } catch (error) { notice.error((error as Error).message) } finally { processing.value = processing.value.filter(id => id !== asset.id) } }
 async function batchGenerate() { const pending = assets.value.filter(item => !item.main_image); if (!pending.length) return notice.info('所有资产都已有主图'); batchGenerating.value = true; try { for (const asset of pending) await generate(asset); notice.success('批量生成完成') } finally { batchGenerating.value = false } }
 async function upload(asset: Asset, event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { main_image: `/media/${result.filename}` }); await load(); notice.success('主图已更新') } catch (error) { notice.error((error as Error).message) } }
 async function uploadAngle(asset: Asset, field: 'angle_image_1' | 'angle_image_2', event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { [field]: `/media/${result.filename}` }); await load(); notice.success('参考图已更新') } catch (error) { notice.error((error as Error).message) } }
-async function removeAsset(asset: Asset) { if (!confirm(`删除资产「${asset.canonical_name}」？`)) return; await api.deleteAsset(asset.id); await load(); notice.success('资产已删除') }
+async function removeAsset(asset: Asset) {
+  if (!await appConfirm({
+    title: `删除资产「${asset.canonical_name}」？`,
+    message: '资产及其参考图片将被删除，且无法恢复。',
+    confirmLabel: '删除资产',
+    tone: 'danger',
+  })) return
+  await api.deleteAsset(asset.id)
+  await load()
+  notice.success('资产已删除')
+}
 function openEdit(asset: Asset) { editing.value = asset; editForm.value = { canonical_name: asset.canonical_name, aliases: asset.aliases?.join(', ') || '', description: asset.description || '', base_traits: asset.base_traits || '' } }
 async function saveAsset() { if (!editing.value) return; await api.updateAsset(editing.value.id, { ...editForm.value, aliases: editForm.value.aliases.split(/[,，]/).map(value => value.trim()).filter(Boolean) }); editing.value = null; await load(); notice.success('资产已保存') }
 function go(value: number) { router.push(`/novel/${novelId.value}/chapter/${chapterId.value}/step/${value}`) }

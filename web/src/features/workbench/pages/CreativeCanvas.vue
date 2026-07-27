@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import type { Connection, Edge, Node, NodeChange, NodeDragEvent, NodeTypesObject } from '@vue-flow/core'
+import type { Connection, Edge, Node, NodeChange, NodeDragEvent, NodeTypesObject, OnConnectStartParams } from '@vue-flow/core'
+import type { CompatibleNodeCreation, WorkbenchConnectionOrigin, WorkbenchNodeCreationCandidate } from '../graph/nodeCreationRules'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { PanOnScrollMode, SelectionMode, VueFlow } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
-import { Lock, Unlock } from 'lucide-vue-next'
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import type { WorkbenchCapabilities } from '@/types'
 import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
+import ConnectionNodePicker from '../components/ConnectionNodePicker.vue'
+import ProjectAssetPicker from '../components/ProjectAssetPicker.vue'
+import WorkbenchRunStatus from '../components/WorkbenchRunStatus.vue'
 import WorkbenchToolbar from '../components/WorkbenchToolbar.vue'
 import AssetReferenceEdge from '../edges/AssetReferenceEdge.vue'
 import OutputBindingEdge from '../edges/OutputBindingEdge.vue'
@@ -18,11 +21,17 @@ import { buildWorkbenchGroupedAutoLayout } from '../layout/workbenchAutoLayout'
 import { canvasZoomModifier } from '../interaction/canvasZoomModifier'
 import { selectionAutoPanDelta, selectionRectAfterAutoPan } from '../interaction/selectionAutoPan'
 import { workbenchSectionActionsKey } from '../interaction/sectionActions'
-import { applyNodeSelectionChanges, isAdditiveSelectionEvent, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
+import { applyNodeSelectionChanges, isAdditiveSelectionEvent, isInteractiveSelectionTarget, sameSelection, selectionAfterNodeClick, selectionGestureMoved } from '../interaction/workbenchSelection'
 import { selectedRunState } from '../execution/workbenchCapabilities'
 import { normalizeShotConfig, SHOT_ASPECT_RATIOS, SHOT_RESOLUTIONS, shotGenerationOptions, type ShotAspectRatio, type ShotResolution } from '../config/shotConfig'
 import { nodeCapabilities } from '../config/nodeCapabilities'
-import { workbenchPromptEditorKey } from '../prompt/promptEditor'
+import { nodeExposesHandle, workbenchNodeHandles } from '../graph/handleCapabilities'
+import { compatibleNodeCreations } from '../graph/nodeCreationRules'
+import { createWorkbenchPromptActionRegistry, workbenchPromptActionRegistryKey } from '../prompt/promptActionRegistry'
+import { promptEditorForNode, workbenchPromptEditorKey } from '../prompt/promptEditor'
+import { createWorkbenchNodeRunRegistry, workbenchNodeRunRegistryKey } from '../run/nodeRunRegistry'
+import type { KeyboardHandleActivation } from '../keyboard/keyboardConnection'
+import { workbenchKeyboardConnectorKey } from '../keyboard/keyboardConnection'
 import { isWorkbenchFlowReady, WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
 import ChapterNode from '../nodes/ChapterNode.vue'
@@ -37,7 +46,7 @@ import WatermarkNode from '../nodes/WatermarkNode.vue'
 import VideoComposerNode from '../nodes/VideoComposerNode.vue'
 import NoteNode from '../nodes/NoteNode.vue'
 import SectionNode from '../nodes/SectionNode.vue'
-import type { NodeSize, Point, WorkbenchNode, WorkbenchNodeKind } from '../types/workbenchTypes'
+import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchNodeKind, WorkbenchPromptEditor } from '../types/workbenchTypes'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import { screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
 import { loadWorkbenchViewport, saveWorkbenchViewport, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
@@ -49,7 +58,6 @@ const props = withDefaults(defineProps<{ novelId: number; chapterId: number; asp
 })
 const store = useWorkbenchStore()
 const canvasTool = ref<'select' | 'pan'>('select')
-const canvasLocked = ref(false)
 const spacePanActive = ref(false)
 const generating = ref(false)
 const capabilities = ref<WorkbenchCapabilities>({
@@ -58,14 +66,51 @@ const capabilities = ref<WorkbenchCapabilities>({
   generate_video: false,
   apply_watermark: false,
   compose_video: false,
+  prompt_editors: [],
+  refresh_policy: {
+    poll_interval_ms: 1500,
+    poll_max_interval_ms: 12000,
+  },
 })
 const sectionDropTargetKey = ref<string | null>(null)
 const promptEditorNodeKey = ref<string | null>(null)
+const keyboardStatus = ref('尚未选择连线起点')
+const projectAssetPickerOpen = ref(false)
+const promptActionRegistry = createWorkbenchPromptActionRegistry()
+provide(workbenchPromptActionRegistryKey, promptActionRegistry)
+const nodeRunRegistry = createWorkbenchNodeRunRegistry()
+provide(workbenchNodeRunRegistryKey, nodeRunRegistry)
+const promptEditors = computed<WorkbenchPromptEditor[]>(() => (capabilities.value.prompt_editors ?? []).map(editor => ({
+  editorKey: editor.editor_key,
+  nodeKind: editor.node_kind,
+  fieldKey: editor.field_key,
+  label: editor.label,
+  placeholder: editor.placeholder,
+  hint: editor.hint,
+  allowedAssetTypes: editor.allowed_asset_types,
+  excludedAssetTypes: editor.excluded_asset_types,
+  referenceLimits: { ...editor.reference_limits },
+  allowPromptInjection: editor.allow_prompt_injection,
+})))
 const restoredViewportChapterId = ref<number | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
 const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
+const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
+  { id: 'asset', label: '空白资产', description: '创建可编辑的昵称与 Prompt 资产', kind: 'asset', data: {} },
+  { id: 'shot', label: '镜头', description: '创建一个可编辑的镜头生产节点', kind: 'shot', data: {} },
+  { id: 'watermark', label: '创建水印', description: '创建水印配置节点', kind: 'watermark', data: {} },
+  { id: 'operation:video_composer', label: '视频合成器', description: '创建成片合成节点', kind: 'video_composer', data: {} },
+]
+const connectionPicker = ref<{
+  x: number
+  y: number
+  position: Point
+  origin: WorkbenchConnectionOrigin
+  options: CompatibleNodeCreation[]
+  accentClass: string
+} | null>(null)
 const projectDefaults = computed(() => ({
   aspectRatio: SHOT_ASPECT_RATIOS.includes(props.aspectRatio as ShotAspectRatio) ? props.aspectRatio as ShotAspectRatio : '9:16',
   resolution: SHOT_RESOLUTIONS.includes(props.resolution as ShotResolution) ? props.resolution as ShotResolution : '720p',
@@ -83,14 +128,31 @@ const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
     status: item.status,
     ...(item.kind === 'asset' ? { generate_capability: capabilities.value.generate_asset } : {}),
     ...(item.kind === 'shot' ? { generate_capability: capabilities.value.generate_video, project_defaults: projectDefaults.value } : {}),
+    ...(() => {
+      const editor = promptEditorForNode(item, promptEditors.value)
+      return editor
+        ? { prompt_editor: editor, prompt_editor_open: promptEditorNodeKey.value === item.key }
+        : { prompt_editor: null, prompt_editor_open: false }
+    })(),
     ...(item.kind === 'watermark' ? { apply_capability: capabilities.value.apply_watermark, capability_key: 'apply_watermark' } : {}),
     ...(item.kind === 'video_composer' ? { compose_capability: capabilities.value.compose_video, capability_key: 'compose_video' } : {}),
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
-const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map(item => ({ id: item.key, source: item.source, target: item.target, type: item.type, selected: store.selectedEdgeKeys.includes(item.key), sourceHandle: item.sourceHandle || undefined, targetHandle: item.targetHandle || undefined })))
+const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map((item) => {
+  const handles = canonicalEdgeHandles(item)
+  return {
+    id: item.key,
+    source: item.source,
+    target: item.target,
+    type: item.type,
+    selected: store.selectedEdgeKeys.includes(item.key),
+    sourceHandle: handles.sourceHandle,
+    targetHandle: handles.targetHandle,
+  }
+}))
 const panModeActive = computed(() => canvasTool.value === 'pan' || spacePanActive.value)
-const interactionState = computed(() => workbenchInteractionState(canvasLocked.value, panModeActive.value))
+const interactionState = computed(() => workbenchInteractionState(false, panModeActive.value))
 const hasDeletableSelection = computed(() => store.selectedNodeKeys.some(key => nodeCapabilities(store.nodeByKey(key)?.kind).deletable))
 const canCopy = computed(() => store.selectedNodeKeys.length === 1 && nodeCapabilities(store.nodeByKey(store.selectedNodeKeys[0])?.kind).copyable)
 const selectedSectionMembers = computed(() => store.selectedNodeKeys.map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')))
@@ -101,14 +163,49 @@ const selectedNodes = computed(() => store.selectedNodeKeys.flatMap(key => {
 }))
 const runState = computed(() => selectedRunState(selectedNodes.value, capabilities.value))
 
+function canonicalEdgeHandles(edge: WorkbenchEdge) {
+  const source = store.nodeByKey(edge.source)
+  const target = store.nodeByKey(edge.target)
+  const sourceHandleIsValid = workbenchNodeHandles(source?.kind ?? 'unsupported', source?.data).source
+    .some(handle => handle.id === edge.sourceHandle)
+  const targetHandleIsValid = workbenchNodeHandles(target?.kind ?? 'unsupported', target?.data).target
+    .some(handle => handle.id === edge.targetHandle)
+  if (sourceHandleIsValid && targetHandleIsValid) {
+    return { sourceHandle: edge.sourceHandle || undefined, targetHandle: edge.targetHandle || undefined }
+  }
+  if (edge.type === 'asset_reference') return { sourceHandle: 'asset-output', targetHandle: 'asset-input' }
+  if (edge.type === 'shot_sequence') return { sourceHandle: 'sequence-output', targetHandle: 'sequence-input' }
+  if (edge.type === 'output_binding') {
+    if (source?.kind === 'watermark') return { sourceHandle: 'watermark-output', targetHandle: 'watermark-input' }
+    if (target?.kind === 'watermark') return { sourceHandle: 'output-output', targetHandle: 'watermark-video-input' }
+    if (target?.kind === 'video_result') return { sourceHandle: 'output-output', targetHandle: 'output-input' }
+    if (target?.kind === 'video_composer') {
+      if (source?.kind === 'shot') return { sourceHandle: 'sequence-output', targetHandle: 'shot-input' }
+      return { sourceHandle: 'output-output', targetHandle: 'video-input' }
+    }
+  }
+  return {
+    sourceHandle: edge.sourceHandle || undefined,
+    targetHandle: edge.targetHandle || undefined,
+  }
+}
+
 provide(workbenchPromptEditorKey, {
-  activeNodeKey: promptEditorNodeKey,
-  open(nodeKey) {
-    store.selectNode(nodeKey)
-    promptEditorNodeKey.value = nodeKey
-  },
   close(nodeKey) {
-    if (!nodeKey || promptEditorNodeKey.value === nodeKey) promptEditorNodeKey.value = null
+    if (promptEditorNodeKey.value === nodeKey) promptEditorNodeKey.value = null
+  },
+  async focusReference(nodeKey) {
+    if (!getNodes.value.some(node => node.id === nodeKey)) return
+    await fitView({
+      nodes: [nodeKey],
+      padding: 0.4,
+      minZoom: 0.5,
+      maxZoom: 1.25,
+      duration: 260,
+    })
+  },
+  removeReference(edgeKey) {
+    void store.removeReferenceEdge(edgeKey)
   },
 })
 
@@ -126,6 +223,51 @@ let selectionAutoPanFrame = 0
 let selectionAutoPanPointer: { clientX: number; clientY: number } | null = null
 let selectionAutoPanPane: HTMLElement | null = null
 let selectionAutoPanMoved = false
+let keyboardSource: KeyboardHandleActivation | null = null
+let pointerConnectionOrigin: WorkbenchConnectionOrigin | null = null
+let pointerConnectionCompleted = false
+
+function activateKeyboardHandle(handle: KeyboardHandleActivation) {
+  if (handle.type === 'source') {
+    if (!nodeExposesHandle(store.nodeByKey(handle.nodeId), handle.handleId, 'source')) {
+      keyboardSource = null
+      keyboardStatus.value = '输出端口不可用，请重新选择'
+      return
+    }
+    keyboardSource = handle
+    keyboardStatus.value = `已选择 ${handle.nodeId} 的输出端口，请选择兼容的输入端口`
+    return
+  }
+  if (!keyboardSource) {
+    keyboardStatus.value = '请先选择一个输出端口'
+    return
+  }
+  const source = keyboardSource
+  keyboardSource = null
+  if (!nodeExposesHandle(store.nodeByKey(source.nodeId), source.handleId, 'source')) {
+    keyboardStatus.value = '已选择的输出端口已失效，请重新选择'
+    return
+  }
+  if (!nodeExposesHandle(store.nodeByKey(handle.nodeId), handle.handleId, 'target')) {
+    keyboardStatus.value = '目标输入端口不可用，请重新选择'
+    return
+  }
+  const connected = store.connectMediaNode(source.nodeId, handle.nodeId, {
+    sourceHandle: source.handleId,
+    targetHandle: handle.handleId,
+  })
+  keyboardStatus.value = connected ? '连线已创建' : '连线创建失败'
+}
+
+function cancelKeyboardConnection() {
+  keyboardSource = null
+  keyboardStatus.value = '已取消键盘连线'
+}
+
+provide(workbenchKeyboardConnectorKey, {
+  activateHandle: activateKeyboardHandle,
+  cancel: cancelKeyboardConnection,
+})
 
 function canvasNodeSize(item: WorkbenchNode) {
   const rendered = getNodes.value.find(candidate => candidate.id === item.key)?.dimensions
@@ -217,10 +359,18 @@ function handleNodesChange(changes: NodeChange[]) {
     changes,
     new Set(store.nodes.map(node => node.key)),
   )
-  if (!sameSelection(next, store.selectedNodeKeys)) store.selectNodes(next)
+  if (!sameSelection(next, store.selectedNodeKeys)) {
+    store.selectNodes(next)
+    if (next.length !== 1 || !promptEditorNodeKey.value || !next.includes(promptEditorNodeKey.value))
+      promptEditorNodeKey.value = null
+  }
 }
 function rememberSelectionIntent(event: PointerEvent) {
   if (event.button !== 0 || !(event.target instanceof Element)) {
+    selectionIntent = null
+    return
+  }
+  if (isInteractiveSelectionTarget(event.target)) {
     selectionIntent = null
     return
   }
@@ -245,17 +395,102 @@ function applySelectionIntent() {
   if (intent.kind === 'pane') {
     suppressNativeSelectionChanges = true
     store.clearSelection()
+    promptEditorNodeKey.value = null
     void nextTick(() => { suppressNativeSelectionChanges = false })
     return
   }
-  applyAuthoritativeSelection(selectionAfterNodeClick(intent.before, intent.key, intent.additive))
+  const nextSelection = selectionAfterNodeClick(intent.before, intent.key, intent.additive)
+  applyAuthoritativeSelection(nextSelection)
+  const selectedNode = nextSelection.length === 1 ? store.nodeByKey(nextSelection[0]) : null
+  promptEditorNodeKey.value = selectedNode && canvasTool.value === 'select'
+    && promptEditorForNode(selectedNode, promptEditors.value)
+    ? selectedNode.key
+    : null
 }
 function applyAuthoritativeSelection(keys: string[]) {
   suppressNativeSelectionChanges = true
   store.selectNodes(keys)
   void nextTick(() => { suppressNativeSelectionChanges = false })
 }
-function connectNodes(connection: Connection) { if (connection.source && connection.target) store.connectMediaNode(connection.source, connection.target) }
+function connectNodes(connection: Connection) {
+  pointerConnectionCompleted = true
+  if (connection.source && connection.target) {
+    store.connectMediaNode(connection.source, connection.target, {
+      sourceHandle: connection.sourceHandle,
+      targetHandle: connection.targetHandle,
+    })
+  }
+}
+function handleConnectStart(params: OnConnectStartParams) {
+  connectionPicker.value = null
+  pointerConnectionCompleted = false
+  pointerConnectionOrigin = params.nodeId && params.handleId && (params.handleType === 'source' || params.handleType === 'target')
+    ? { nodeId: params.nodeId, handleId: params.handleId, handleType: params.handleType }
+    : null
+}
+function connectionEndPoint(event: MouseEvent | TouchEvent) {
+  if ('changedTouches' in event) {
+    const touch = event.changedTouches[0]
+    return touch ? { x: touch.clientX, y: touch.clientY } : null
+  }
+  return { x: event.clientX, y: event.clientY }
+}
+function handleConnectEnd(event?: MouseEvent | TouchEvent) {
+  const origin = pointerConnectionOrigin
+  pointerConnectionOrigin = null
+  if (!origin || pointerConnectionCompleted || !event) return
+  const eventTarget = event.target
+  if (eventTarget instanceof Element && eventTarget.closest('.vue-flow__handle, .vue-flow__node')) return
+  const point = connectionEndPoint(event)
+  const originNode = store.nodeByKey(origin.nodeId)
+  if (!point || !originNode) return
+  const options = compatibleNodeCreations(origin, originNode, nodeCreationCandidates)
+  if (!options.length) return
+  const originHandle = workbenchNodeHandles(originNode.kind, originNode.data)[origin.handleType]
+    .find(handle => handle.id === origin.handleId)
+  connectionPicker.value = {
+    x: point.x,
+    y: point.y,
+    position: screenToFlowCoordinate(point),
+    origin,
+    options,
+    accentClass: originHandle?.className.replace('workbench-handle--', 'workbench-connection-picker--') ?? '',
+  }
+}
+async function createCompatibleNode(option: CompatibleNodeCreation) {
+  const picker = connectionPicker.value
+  if (!picker) return
+  connectionPicker.value = null
+  const position = {
+    x: Math.round(picker.position.x + (picker.origin.handleType === 'source' ? 18 : -370)),
+    y: Math.round(picker.position.y - 100),
+  }
+  const created = option.candidate.id === 'asset'
+    ? await store.addEmptyAsset(position)
+    : option.candidate.id === 'shot'
+      ? await store.addShot(position)
+      : option.candidate.id === 'watermark'
+        ? addWatermark(position)
+        : option.candidate.id === 'operation:video_composer'
+          ? addVideoComposer(position)
+          : null
+  if (!created) return
+  if (picker.origin.handleType === 'source') {
+    store.connectMediaNode(picker.origin.nodeId, created.key, {
+      sourceHandle: picker.origin.handleId,
+      targetHandle: option.candidateHandleId,
+    })
+  } else {
+    store.connectMediaNode(created.key, picker.origin.nodeId, {
+      sourceHandle: option.candidateHandleId,
+      targetHandle: picker.origin.handleId,
+    })
+  }
+}
+function clearPane() {
+  connectionPicker.value = null
+  store.clearSelection()
+}
 function canvasSize() { const canvas = document.getElementById('novel-workbench'); const bounds = canvas?.getBoundingClientRect(); return { width: Math.max(1, bounds?.width || window.innerWidth), height: Math.max(1, bounds?.height || window.innerHeight) } }
 function visibleNodePosition(size: NodeSize) {
   const bounds = vueFlowRef.value?.getBoundingClientRect()
@@ -276,16 +511,22 @@ function addNote() {
   const created = store.addNote(visibleNodePosition({ width: 320, height: 220 }))
   void ensureNodeVisible(created.key)
 }
-function addWatermark() {
-  const created = store.addWatermark(visibleNodePosition({ width: 360, height: 300 }))
+function addWatermark(position = visibleNodePosition({ width: 360, height: 300 })) {
+  const created = store.addWatermark(position)
   void ensureNodeVisible(created.key)
+  return created
 }
-function addVideoComposer() {
-  const created = store.addVideoComposer(visibleNodePosition({ width: 390, height: 420 }))
+function addVideoComposer(position = visibleNodePosition({ width: 390, height: 420 })) {
+  const created = store.addVideoComposer(position)
   void ensureNodeVisible(created.key)
+  return created
 }
 async function addAsset() {
   const created = await store.addEmptyAsset(visibleNodePosition({ width: 350, height: 680 }))
+  if (created) await ensureNodeVisible(created.key)
+}
+async function reuseAsset(assetId: number) {
+  const created = await store.reuseAsset(assetId, visibleNodePosition({ width: 350, height: 680 }))
   if (created) await ensureNodeVisible(created.key)
 }
 async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'video_media' | 'audio_media'>, file: File) {
@@ -412,6 +653,11 @@ async function runSelected() {
   generating.value = true
   try {
     for (const key of runState.value.runnableKeys) {
+      const command = nodeRunRegistry.commands.get(key)
+      if (command?.enabled.value) {
+        await command.run()
+        continue
+      }
       const node = store.nodeByKey(key)
       if (node?.kind === 'asset') await store.generateAsset(node.id)
       if (node?.kind === 'shot') {
@@ -477,17 +723,16 @@ onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); windo
 <template>
   <main class="viral-workbench-page" @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
     <div v-if="store.loading" class="workbench-state" role="status">正在加载工作区…</div>
-    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan', 'is-locked': canvasLocked }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="store.clearSelection" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes">
+    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
       <Background variant="lines" color="#2b2926" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
-      <Controls position="bottom-right" :show-interactive="false">
-        <button class="vue-flow__controls-button vue-flow__controls-interactive" type="button" :aria-pressed="canvasLocked" :aria-label="canvasLocked ? '解锁画布编辑' : '锁定画布编辑'" :title="canvasLocked ? '解锁画布编辑' : '锁定画布编辑'" @click.stop="canvasLocked = !canvasLocked">
-          <Lock v-if="canvasLocked" :size="14" aria-hidden="true" />
-          <Unlock v-else :size="14" aria-hidden="true" />
-        </button>
-      </Controls>
+      <Controls position="bottom-right" />
       <CanvasToolSwitcher v-model="canvasTool" />
-      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" @add-shot="addShot" @add-audio-reference="store.addMediaNode('audio_reference')" @add-digital-human="store.addMediaNode('digital_human')" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @reuse-asset="projectAssetPickerOpen = true" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <div class="workbench-status-stack"><WorkbenchRunStatus :status="generating ? 'RUNNING' : 'IDLE'" :progress="generating ? 0 : undefined" /></div>
+      <ConnectionNodePicker v-if="connectionPicker" :options="connectionPicker.options" :x="connectionPicker.x" :y="connectionPicker.y" :accent-class="connectionPicker.accentClass" @select="createCompatibleNode" @close="connectionPicker = null" />
+      <p class="workbench-keyboard-status" role="status" aria-label="键盘连线状态" aria-live="polite">{{ keyboardStatus }}</p>
+      <ProjectAssetPicker :open="projectAssetPickerOpen" :novel-id="props.novelId" :excluded-ids="store.assets.map(asset => asset.id)" @close="projectAssetPickerOpen = false" @choose="reuseAsset($event.id)" />
       <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个镜头</AppButton></div>
     </VueFlow>
   </main>

@@ -10,7 +10,7 @@ export interface WorkbenchNodeCapabilities {
 
 export const NODE_CAPABILITIES: Record<WorkbenchNodeKind, WorkbenchNodeCapabilities> = {
   chapter: { deletable: false, copyable: false, runnable: false, target: false, source: true },
-  asset: { deletable: true, copyable: false, runnable: true, target: false, source: true },
+  asset: { deletable: true, copyable: false, runnable: true, target: true, source: true },
   audio_reference: { deletable: true, copyable: false, runnable: false, target: false, source: true },
   digital_human: { deletable: true, copyable: false, runnable: false, target: false, source: true },
   image_media: { deletable: true, copyable: false, runnable: false, target: false, source: true },

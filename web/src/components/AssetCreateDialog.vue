@@ -410,7 +410,8 @@ onMounted(() => { if (props.open) void loadSources() })
 .asset-mode :deep(.app-button.is-active) { color: #5658eb; background: #fff; box-shadow: 0 5px 18px rgb(47 50 80 / 8%); }
 .asset-upload { position: relative; display: grid; min-height: 250px; place-items: center; align-content: center; gap: 8px; overflow: hidden; border-radius: 17px; color: #9399a8; background: #fafbfe; box-shadow: inset 0 0 0 1.5px #dde1ef; cursor: pointer; transition: .18s ease; }
 .asset-upload:hover,.asset-upload.is-dragging { color: #6567ef; background: #f7f7ff; box-shadow: inset 0 0 0 1.5px #a8a9fa; }
-.asset-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.asset-upload input { position: absolute; inset: 0; width: 100%; height: 100%; color: transparent; opacity: 0; cursor: pointer; font-size: 0; }
+.asset-upload input::file-selector-button { display: none; }
 .asset-upload strong { color: #515766; font-size: 13px; }
 .asset-upload span { font-size: 11px; }
 .asset-upload img { width: 100%; height: 300px; object-fit: contain; background: #f2f3f7; }
@@ -421,7 +422,7 @@ onMounted(() => { if (props.open) void loadSources() })
 .asset-library nav { display: flex; gap: 4px; }
 .asset-library__grid { display: grid; max-height: 320px; grid-template-columns: repeat(3,1fr); gap: 10px; overflow-y: auto; padding: 0 11px 11px; }
 .asset-library__card { position: relative; display: grid; height: auto; min-height: 0; grid-template-columns: 64px 1fr; gap: 9px; justify-content: stretch; overflow: hidden; padding: 7px; border-radius: 13px; text-align: left; background: #fff; box-shadow: 0 4px 14px rgb(38 42 62 / 5%); }
-.asset-library__card.is-active { color: #4f51e6; box-shadow: 0 0 0 2px #7779f4,0 8px 20px rgb(73 75 190 / 12%); }
+.asset-library__card.is-active { color: #4f51e6; box-shadow: inset 0 0 0 2px #7779f4,0 8px 20px rgb(73 75 190 / 12%); }
 .asset-library__card img { width: 64px; height: 72px; border-radius: 9px; object-fit: cover; }
 .asset-library__card > span { display: grid; min-width: 0; align-content: center; gap: 5px; }
 .asset-library__card strong,.asset-library__card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

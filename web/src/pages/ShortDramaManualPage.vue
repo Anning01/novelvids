@@ -19,9 +19,11 @@ import {
   UsersRound,
   Video,
 } from 'lucide-vue-next'
+import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
 import { api, sleep } from '@/api'
+import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { AssetTypeEnum, TaskStatusEnum, type Asset } from '@/types'
@@ -161,6 +163,12 @@ function saveEditedAsset(asset: Asset) {
 }
 
 async function removeAsset(asset: Asset) {
+  if (!await appConfirm({
+    title: `删除${activeTabConfig.value.label}「${asset.canonical_name}」？`,
+    message: '该资产及其参考图片将被删除，且无法恢复。',
+    confirmLabel: `删除${activeTabConfig.value.label}`,
+    tone: 'danger',
+  })) return
   try {
     await api.deleteAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)
@@ -330,9 +338,9 @@ onBeforeUnmount(() => { pageAlive = false })
           <div class="asset-visual">
             <img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
             <component v-else :is="activeTabConfig.icon" :size="30" />
-            <span v-if="asset.main_image" class="ready-badge"><Check :size="12" />已完成</span>
-            <span v-else-if="generatingAssetIds.has(asset.id)" class="generation-badge"><LoaderCircle :size="12" />生成中</span>
-            <span v-else-if="failedAssetIds.has(asset.id)" class="generation-badge is-failed">生成失败</span>
+            <AppBadge v-if="asset.main_image" class="asset-state-badge" tone="success" size="sm"><Check :size="12" />已完成</AppBadge>
+            <AppBadge v-else-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
+            <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>
           </div>
           <div class="asset-card-copy">
             <div><strong>{{ asset.canonical_name }}</strong><span class="asset-card-actions"><AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="`编辑${asset.canonical_name}`" @click.stop="openAssetDialog(asset)"><Pencil :size="14" /></AppButton><AppButton type="button" variant="danger" size="xs" icon-only :aria-label="`删除${asset.canonical_name}`" @click.stop="removeAsset(asset)"><Trash2 :size="14" /></AppButton></span></div>
@@ -412,10 +420,8 @@ onBeforeUnmount(() => { pageAlive = false })
 .asset-card:hover,.asset-card:focus-visible { border-color: #cfd0fb; box-shadow: 0 14px 34px rgba(54,57,98,.1); transform: translateY(-2px); }
 .asset-visual { position: relative; display: grid; place-items: center; height: 190px; color: #aeb4c2; background: #f0f2f7; }
 .asset-visual img { width: 100%; height: 100%; object-fit: cover; }
-.ready-badge { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 3px; padding: 4px 7px; color: #2f9b72; border-radius: 999px; background: rgba(255,255,255,.92); font-size: 10px; }
-.generation-badge { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; color: #6264ec; background: rgba(255,255,255,.94); box-shadow: 0 5px 14px rgba(43,46,80,.08); font-size: 10px; }
-.generation-badge svg { animation: spin .8s linear infinite; }
-.generation-badge.is-failed { color: #cf5f70; }
+.asset-state-badge { position: absolute; top: 10px; right: 10px; box-shadow: 0 5px 14px rgba(43,46,80,.08); }
+.asset-state-badge.is-running svg { animation: spin .8s linear infinite; }
 .asset-card-copy { padding: 13px 14px 14px; }
 .asset-card-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .asset-card-copy button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; }

@@ -22,26 +22,30 @@ it('shows every verified add menu item in order', async () => {
       canCopy: false,
       canPaste: false,
       canCreateSection: false,
+      watermarkEnabled: true,
+      composerEnabled: true,
       runState: selectedRunState([], capabilities),
     },
   })
 
   await wrapper.get('[aria-label="添加节点"]').trigger('click')
   expect(wrapper.findAll('[role="menuitem"]').map(item => item.text())).toEqual([
-    '空资产',
+    '空白资产',
+    '复用项目资产',
     '镜头',
     '便签',
     '水印',
-    '视频合成',
+    '视频合成器',
     '上传图片',
     '上传视频',
     '上传音频',
-    '参考音频',
-    '数字人',
   ])
+
+  await wrapper.get('[aria-label="复用项目资产"]').trigger('click')
+  expect(wrapper.emitted('reuseAsset')).toHaveLength(1)
 })
 
-it('exposes the three direct upload buttons and emits the chosen file', async () => {
+it('keeps the three upload inputs visually hidden and emits every chosen file', async () => {
   const wrapper = mount(WorkbenchToolbar, {
     props: {
       running: false,
@@ -49,21 +53,22 @@ it('exposes the three direct upload buttons and emits the chosen file', async ()
     },
   })
 
-  expect(wrapper.findAll('button').filter(button => button.attributes('aria-label')?.startsWith('选择上传')).map(button => button.attributes('aria-label'))).toEqual([
+  expect(wrapper.findAll('input[type="file"]').map(input => input.attributes('aria-label'))).toEqual([
     '选择上传图片文件',
     '选择上传视频文件',
     '选择上传音频文件',
   ])
   expect(wrapper.findAll('input[type="file"]').map(input => input.attributes('accept'))).toEqual([
-    'image/png,image/jpeg,image/webp',
-    'video/mp4,video/webm,video/quicktime',
-    'audio/mpeg,audio/wav,audio/mp4,audio/webm',
+    'image/jpeg,image/png,image/webp,image/gif',
+    'video/mp4,video/quicktime,.mp4,.mov',
+    'audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3',
   ])
 
-  const file = new File(['image'], 'photo.png', { type: 'image/png' })
+  const firstFile = new File(['image'], 'photo.png', { type: 'image/png' })
+  const secondFile = new File(['image'], 'photo-2.webp', { type: 'image/webp' })
   const imageInput = wrapper.get('input[accept^="image/"]')
-  Object.defineProperty(imageInput.element, 'files', { configurable: true, value: [file] })
+  Object.defineProperty(imageInput.element, 'files', { configurable: true, value: [firstFile, secondFile] })
   await imageInput.trigger('change')
 
-  expect(wrapper.emitted('uploadImage')).toEqual([[file]])
+  expect(wrapper.emitted('uploadImage')).toEqual([[firstFile], [secondFile]])
 })

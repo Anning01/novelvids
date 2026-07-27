@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import type { NodeProps } from '@vue-flow/core'
-import { ChevronDown, LoaderCircle, Pencil, Play, Save } from 'lucide-vue-next'
+import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
+import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 import { computed, inject, ref, watch } from 'vue'
 import type { EnumItem, Scene, Video } from '@/types'
+import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
+import WorkbenchSelect from '../components/WorkbenchSelect.vue'
 import {
   normalizeShotConfig,
   patchShotWorkbenchConfig,
@@ -15,8 +18,9 @@ import {
   type ShotReferenceMode,
   type ShotWorkbenchConfig,
 } from '../config/shotConfig'
-import { sceneAssetIds, sceneAssets } from '../graph/sceneAssets'
-import { workbenchPromptEditorKey } from '../prompt/promptEditor'
+import { registerWorkbenchPromptAction } from '../prompt/promptActionRegistry'
+import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
+import { promptEditorFromData, workbenchPromptEditorKey } from '../prompt/promptEditor'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -44,30 +48,91 @@ watch(options, value => {
 }, { immediate: true })
 
 const busy = computed(() => store.busySceneIds.includes(scene.value.id))
-const promptEditorOpen = computed(() => promptEditor?.activeNodeKey.value === props.id)
+const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
+const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
 const canGenerate = computed(() => backendCanGenerate.value && config.value.modelType !== null && !busy.value && !saving.value)
-const generationReason = computed(() => {
-  if (!backendCanGenerate.value) return '当前服务未开放镜头视频生成'
-  if (config.value.modelType === null) return '当前没有可用的视频模型'
-  return '保存并生成镜头视频'
-})
-const referencedAssets = computed(() => sceneAssets(scene.value, store.assets))
-const imageReferenceCount = computed(() => referencedAssets.value.filter(asset => asset.main_image).length)
 const activeVideoId = computed(() => {
   const configured = config.value.activeVideoId
   return configured && videos.value.some(video => video.id === configured) ? configured : videos.value[0]?.id || null
 })
-const promptReferences = computed(() => referencedAssets.value.flatMap((asset) => {
-  if (!asset.main_image) return []
-  return [{
-    key: String(asset.id),
-    name: asset.canonical_name,
-    url: asset.main_image,
-    nodeKey: `asset-${asset.id}`,
-    removable: true,
-  }]
-}))
+function mediaKindForNode(node: WorkbenchNode): MaterialMentionOption['mediaKind'] {
+  if (node.kind === 'video_media' || node.kind === 'video_result') return 'video'
+  if (node.kind === 'audio_media' || node.kind === 'audio_reference') return 'audio'
+  if (node.kind === 'image_media' || node.kind === 'digital_human') return 'image'
+  if (node.kind === 'asset')
+    return (node.data.asset as { main_image?: string } | undefined)?.main_image ? 'image' : 'text'
+  return 'text'
+}
+
+function previewUrlForNode(node: WorkbenchNode) {
+  if (node.kind === 'asset')
+    return (node.data.asset as { main_image?: string } | undefined)?.main_image || ''
+  if (node.kind === 'digital_human')
+    return (node.data.resource as { image_url?: string } | undefined)?.image_url || ''
+  if (node.kind === 'audio_reference')
+    return (node.data.resource as { avatar_url?: string } | undefined)?.avatar_url || ''
+  return typeof node.data.url === 'string' ? node.data.url : ''
+}
+
+function promptForNode(node: WorkbenchNode) {
+  if (node.kind === 'asset') {
+    const asset = node.data.asset as { description?: string; base_traits?: string } | undefined
+    return asset?.description || asset?.base_traits || ''
+  }
+  return typeof node.data.prompt === 'string' ? node.data.prompt : ''
+}
+
+function referenceMode(edge: WorkbenchEdge, node: WorkbenchNode): MaterialMentionMode {
+  const configured = (edge.config as AssetReferenceEdgeConfig | null)?.inputMode
+  if (configured && configured !== 'auto') return configured
+  if (node.kind === 'asset') {
+    const localMode = config.value.referenceModes[String(node.id)]
+    if (localMode === 'prompt') return 'prompt_injection'
+    if (localMode === 'image') return 'reference_image'
+  }
+  const mediaKind = mediaKindForNode(node)
+  if (mediaKind === 'video') return 'reference_video'
+  if (mediaKind === 'audio') return 'reference_audio'
+  if (mediaKind === 'image') return 'reference_image'
+  return 'prompt_injection'
+}
+
+const referenceEdges = computed(() => store.edges
+  .filter(edge => edge.type === 'asset_reference' && edge.target === props.id)
+  .sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id))
+
+const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMaterialMentionNames(
+  referenceEdges.value.flatMap((edge) => {
+    const source = store.nodeByKey(edge.source)
+    if (!source) return []
+    const mediaKind = mediaKindForNode(source)
+    const previewUrl = previewUrlForNode(source)
+    return [{
+      nodeKey: source.key,
+      name: source.title.trim() || source.key,
+      prompt: promptForNode(source),
+      previewUrl,
+      hasImage: mediaKind === 'image' && Boolean(previewUrl),
+      mediaKind,
+    }]
+  }),
+))
+
+const materialMentions = computed<MaterialMention[]>(() => {
+  const optionByNode = new Map(materialOptions.value.map(option => [option.nodeKey, option]))
+  return disambiguateMaterialMentionNames(referenceEdges.value.flatMap((edge) => {
+    const source = store.nodeByKey(edge.source)
+    const option = optionByNode.get(edge.source)
+    if (!source || !option) return []
+    return [{
+      ...option,
+      edgeKey: edge.key,
+      connectionKey: edge.key,
+      mode: referenceMode(edge, source),
+    }]
+  }))
+})
 
 function normalizedDraftConfig(): ShotWorkbenchConfig {
   const duration = Math.max(1, Math.min(30, Number(config.value.duration) || 1))
@@ -87,6 +152,10 @@ async function save() {
       description: description.value,
       prompt: prompt.value,
       duration: nextConfig.duration,
+      asset_ids: referenceEdges.value
+        .map(edge => store.nodeByKey(edge.source))
+        .filter((node): node is WorkbenchNode => node?.kind === 'asset')
+        .map(node => node.id),
       metadata: patchShotWorkbenchConfig(scene.value.metadata, nextConfig),
     })
   } finally {
@@ -100,31 +169,64 @@ async function generate() {
   await store.generateVideo(scene.value.id, config.value.modelType, shotGenerationOptions(config.value))
 }
 
-function focusReference(nodeKey: string) {
-  promptEditor?.close(props.id)
-  store.selectNode(nodeKey)
+registerWorkbenchPromptAction(props.id, {
+  id: 'shot-video-generation',
+  label: '生成镜头',
+  busyLabel: '提交生成中',
+  enabled: canGenerate,
+  busy,
+  run: generate,
+})
+registerWorkbenchNodeRun(props.id, { enabled: canGenerate, run: generate })
+
+function addMaterialReference(material: MaterialMentionOption, nextPrompt: string) {
+  if (!referenceEdges.value.some(edge => edge.source === material.nodeKey)) return
+  prompt.value = nextPrompt
 }
 
-async function removeReference(key: string) {
-  const assetId = Number(key)
-  if (!Number.isFinite(assetId)) return
-  await store.saveScene(scene.value.id, {
-    asset_ids: sceneAssetIds(scene.value).filter(id => id !== assetId),
+function handlePromptFocusOut(event: FocusEvent) {
+  const panel = event.currentTarget as HTMLElement | null
+  if (event.relatedTarget instanceof Node && panel?.contains(event.relatedTarget)) return
+  void save()
+}
+
+function handleNodeFocusOut(event: FocusEvent) {
+  const content = event.currentTarget as HTMLElement | null
+  if (event.relatedTarget instanceof Node && content?.contains(event.relatedTarget)) return
+  void save()
+}
+
+function materialInputModeOptions(material: MaterialMention) {
+  if (material.mediaKind === 'video') return [{ value: 'reference_video', label: '参考视频' }]
+  if (material.mediaKind === 'audio') return [{ value: 'reference_audio', label: '参考音频' }]
+  if (material.mediaKind === 'image') {
+    return [
+      { value: 'prompt_injection', label: '提示词注入' },
+      { value: 'reference_image', label: '参考图片' },
+    ]
+  }
+  return [{ value: 'prompt_injection', label: '提示词注入' }]
+}
+
+function updateReferenceMode(material: MaterialMention, value: string) {
+  if (!['prompt_injection', 'reference_image', 'reference_video', 'reference_audio'].includes(value)) return
+  store.updateMediaEdgeConfig(material.edgeKey, {
+    inputMode: value as AssetReferenceEdgeConfig['inputMode'],
+    strategy: 'follow_primary',
   })
-}
-
-function referenceModeFor(assetId: number): ShotReferenceMode {
-  return config.value.referenceModes[String(assetId)] || (store.assets.find(asset => asset.id === assetId)?.main_image ? 'image' : 'prompt')
-}
-
-function updateReferenceMode(assetId: number, event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  if (value !== 'prompt' && value !== 'image') return
-  config.value.referenceModes = {
-    ...config.value.referenceModes,
-    [String(assetId)]: value,
+  const source = store.nodeByKey(material.nodeKey)
+  if (source?.kind === 'asset') {
+    const mode: ShotReferenceMode = value === 'reference_image' ? 'image' : 'prompt'
+    config.value.referenceModes = { ...config.value.referenceModes, [String(source.id)]: mode }
   }
 }
+
+const referenceImageCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_image').length)
+const referenceVideoCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_video').length)
+const referenceAudioCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_audio').length)
+const promptInjectionCount = computed(() => materialMentions.value.filter(item => item.mode === 'prompt_injection').length)
+const aspectRatioOptions = SHOT_ASPECT_RATIOS.map(value => ({ value, label: value }))
+const resolutionOptions = SHOT_RESOLUTIONS.map(value => ({ value, label: value }))
 
 async function chooseVideo(videoId: number) {
   if (videoId === activeVideoId.value) return
@@ -139,92 +241,59 @@ async function chooseVideo(videoId: number) {
       v-bind="props"
       :data="{ ...data, kind: 'shot', title: `镜头 ${String(scene.sequence).padStart(2, '0')}`, status: busy ? 'running' : 'ready' }"
     >
-      <div class="workbench-shot-config">
-        <label class="workbench-field">
-          <span>画面描述</span>
-          <textarea v-model="description" aria-label="画面描述" rows="2" />
-        </label>
-
-        <section class="workbench-prompt-summary">
-          <div>
-            <span>生成提示词</span>
-            <button type="button" aria-label="打开生成提示词编辑器" @click.stop="promptEditor?.open(props.id)">
-              <Pencil :size="13" aria-hidden="true" />编辑
-            </button>
-          </div>
-          <p>{{ prompt || '暂未填写生成提示词' }}</p>
-        </section>
-
-        <section class="workbench-shot-reference-duration" aria-label="镜头参考时长">
+      <div class="workbench-node-content" @focusout="handleNodeFocusOut">
+        <div class="workbench-shot-reference__row workbench-shot-reference__row--duration" aria-label="镜头参考时长">
           <span>参考时长</span><p>{{ scene.duration || 6 }} 秒</p>
-        </section>
+        </div>
 
-        <fieldset class="workbench-shot-generation-params">
+        <fieldset class="workbench-form workbench-capability-form">
           <legend>生成参数</legend>
-          <label class="workbench-field workbench-shot-duration-field">
+          <label class="workbench-field">
             <span>视频时长（秒）</span>
-            <span class="workbench-shot-duration-control">
+            <div class="workbench-duration-slider nodrag nowheel">
               <input v-model.number="config.duration" type="range" min="1" max="30" step="1" aria-label="视频时长（秒）">
-              <input v-model.number="config.duration" type="number" min="1" max="30" step="1" aria-label="视频时长数值">
-            </span>
-            <output aria-label="视频时长（秒）当前值">{{ config.duration }} 秒</output>
+              <span :aria-label="`视频时长（秒）当前值`">{{ config.duration }} 秒</span>
+            </div>
           </label>
-          <div class="workbench-form-row">
-            <label class="workbench-field">
-              <span>画面比例</span>
-              <select v-model="config.aspectRatio" aria-label="画面比例">
-                <option v-for="ratio in SHOT_ASPECT_RATIOS" :key="ratio" :value="ratio">{{ ratio }}</option>
-              </select>
-            </label>
-            <label class="workbench-field">
-              <span>分辨率</span>
-              <select v-model="config.resolution" aria-label="分辨率">
-                <option v-for="resolution in SHOT_RESOLUTIONS" :key="resolution" :value="resolution">{{ resolution }}</option>
-              </select>
-            </label>
-          </div>
+          <label class="workbench-field">
+            <span>画面比例</span>
+            <WorkbenchSelect v-model="config.aspectRatio" :options="aspectRatioOptions" label="画面比例" />
+          </label>
+          <label class="workbench-field">
+            <span>分辨率</span>
+            <WorkbenchSelect v-model="config.resolution" :options="resolutionOptions" label="分辨率" />
+          </label>
           <label class="workbench-field workbench-field--switch">
             <span>返回末帧图片</span>
-            <input v-model="config.useLastFrame" type="checkbox" role="switch" aria-label="返回末帧图片">
+            <button class="workbench-inline-switch" type="button" role="switch" aria-label="返回末帧图片" :aria-checked="config.useLastFrame" @click="config.useLastFrame = !config.useLastFrame"><i /></button>
             <small>开启后生成视频并将模型返回的末帧及时保存为独立图片。</small>
           </label>
-          <div v-if="config.useLastFrame" class="workbench-form-row">
-            <label class="workbench-field"><span>首帧图片</span><input v-model.trim="config.firstFrameUrl" aria-label="首帧图片 URL" placeholder="/path/to/first-frame.png"></label>
-            <label class="workbench-field"><span>尾帧图片</span><input v-model.trim="config.lastFrameUrl" aria-label="尾帧图片 URL" placeholder="/path/to/last-frame.png"></label>
-          </div>
         </fieldset>
 
-        <section class="workbench-shot-assets" aria-label="资产引用策略">
-          <button type="button" :aria-label="assetInputOpen ? '收起资产输入' : '展开资产输入'" :aria-expanded="assetInputOpen" @click="assetInputOpen = !assetInputOpen">
-            <span><strong>资产输入</strong><small>{{ referencedAssets.length }} 个</small></span>
-            <span>图片 {{ imageReferenceCount }}/9 · 视频 0/3 · 音频 0/3 · 提示词 {{ referencedAssets.length - imageReferenceCount }}</span>
-            <ChevronDown :size="14" aria-hidden="true" />
+        <section v-if="materialMentions.length" class="workbench-reference-list workbench-reference-list--compact" aria-label="资产引用策略">
+          <button type="button" class="workbench-reference-list__toggle" :aria-label="assetInputOpen ? '收起资产输入' : '展开资产输入'" :aria-expanded="assetInputOpen" aria-controls="shot-asset-inputs" @click="assetInputOpen = !assetInputOpen">
+            <span><strong>资产输入</strong><small>{{ materialMentions.length }} 个</small></span>
+            <span>图片 {{ referenceImageCount }}/9 · 视频 {{ referenceVideoCount }}/3 · 音频 {{ referenceAudioCount }}/3 · 提示词 {{ promptInjectionCount }} <i aria-hidden="true">⌄</i></span>
           </button>
-          <div v-if="assetInputOpen" class="workbench-shot-assets__list">
-            <label v-for="asset in referencedAssets" :key="asset.id">
-              <strong>{{ asset.canonical_name }}</strong>
-              <select :value="referenceModeFor(asset.id)" :aria-label="`${asset.canonical_name}使用方式`" @change="updateReferenceMode(asset.id, $event)">
-                <option value="prompt">提示词注入</option>
-                <option value="image" :disabled="!asset.main_image">参考图片</option>
-              </select>
-            </label>
-            <p v-if="!referencedAssets.length">尚未连接资产输入</p>
+          <div v-if="assetInputOpen" id="shot-asset-inputs" class="workbench-reference-list__body">
+            <div v-for="material in materialMentions" :key="material.edgeKey" class="workbench-shot-asset-input">
+              <strong>{{ material.name }}</strong>
+              <WorkbenchSelect
+                :model-value="material.mode"
+                :options="materialInputModeOptions(material)"
+                :label="`${material.name}使用方式`"
+                @update:model-value="updateReferenceMode(material, $event)"
+              />
+            </div>
           </div>
         </section>
 
-        <label class="workbench-field">
-          <span>视频模型</span>
-          <select v-model.number="config.modelType" aria-label="视频模型">
-            <option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-        </label>
-
-        <section v-if="videos.length" class="workbench-shot-versions" aria-label="镜头视频版本">
+        <section v-if="videos.length" class="workbench-result-list" aria-label="镜头视频版本">
           <button
             v-for="(video, index) in videos"
             :key="video.id"
             type="button"
-            :class="{ 'is-active': video.id === activeVideoId }"
+            :class="{ 'is-current': video.id === activeVideoId }"
             :aria-label="`采用视频 镜头 ${scene.sequence} 视频 ${index + 1}`"
             :aria-pressed="video.id === activeVideoId"
             @click="chooseVideo(video.id)"
@@ -232,36 +301,54 @@ async function chooseVideo(videoId: number) {
             <span>镜头 {{ scene.sequence }} 视频 {{ index + 1 }}</span><small>#{{ video.id }}</small>
           </button>
         </section>
-
-        <footer class="workbench-node-actions workbench-shot-actions">
-          <AppButton type="button" :disabled="saving || busy" @click="save">
-            <LoaderCircle v-if="saving" class="is-spinning" :size="14" aria-hidden="true" /><Save v-else :size="14" aria-hidden="true" />{{ saving ? '保存中' : '保存' }}
-          </AppButton>
-          <AppButton type="button" class="is-primary" :disabled="!canGenerate" :title="generationReason" @click="generate">
-            <LoaderCircle v-if="busy" class="is-spinning" :size="14" aria-hidden="true" /><Play v-else :size="14" aria-hidden="true" />{{ busy ? '生成中' : '保存并生成' }}
-          </AppButton>
-          <AppButton type="button" :disabled="!canGenerate" :title="generationReason" @click="generate">运行此配置</AppButton>
-        </footer>
       </div>
     </WorkbenchNodeFrame>
 
     <WorkbenchPromptEditorPanel
+      v-if="promptEditorConfig"
       :open="promptEditorOpen"
       :node-key="props.id"
-      label="镜头生成提示词"
-      v-model="prompt"
-      placeholder="描述镜头主体、动作、镜头运动、光线和风格…"
-      hint="编辑区会跟随当前镜头，也可以进入专注模式"
-      :busy="busy || saving"
-      :run-enabled="canGenerate"
-      :references="promptReferences"
-      run-label="保存并生成视频"
-      busy-label="处理中"
+      :config="promptEditorConfig"
+      :model-value="prompt"
+      :materials="materialOptions"
+      :mentions="materialMentions"
+      @update:model-value="prompt = $event"
+      @add="addMaterialReference"
       @close="promptEditor?.close(props.id)"
-      @save="save"
-      @run="generate"
-      @focus-reference="focusReference"
-      @remove-reference="removeReference"
+      @focus-reference="promptEditor?.focusReference($event)"
+      @remove-reference="promptEditor?.removeReference($event)"
+      @focusout="handlePromptFocusOut"
     />
   </div>
 </template>
+
+<style scoped>
+.workbench-inline-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: #5b5651;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.workbench-inline-switch[aria-checked='true'] {
+  background: #9675ef;
+}
+
+.workbench-inline-switch > i {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f3eee9;
+  transition: transform 140ms ease;
+}
+
+.workbench-inline-switch[aria-checked='true'] > i {
+  transform: translateX(14px);
+}
+</style>

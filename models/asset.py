@@ -7,6 +7,7 @@ from utils.enums import ImageSourceEnum
 
 
 if TYPE_CHECKING:
+    from models.asset_variant import AssetVariant
     from models.novel import Novel
     
 class Asset(AbstractBaseModel):
@@ -46,11 +47,11 @@ class Asset(AbstractBaseModel):
 
     # 元数据
     metadata = fields.JSONField(default=dict, description="元数据")
+    variants: fields.ReverseRelation["AssetVariant"]
 
 
     class Meta:
         table = "assets"
         unique_together = (("novel", "asset_type", "canonical_name"),)
-
 
 

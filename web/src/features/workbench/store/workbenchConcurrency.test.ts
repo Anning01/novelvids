@@ -1,18 +1,12 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { expect, it, vi } from 'vitest'
 import { api } from '@/api'
-import type { Chapter, SingleResponse } from '@/types'
+import type { Chapter, SingleResponse, WorkbenchBootstrap } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
   api: {
-    chapter: vi.fn(),
-    assets: vi.fn().mockResolvedValue({
-      data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
-    }),
-    scenes: vi.fn().mockResolvedValue({
-      data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
-    }),
+    workbenchBootstrap: vi.fn(),
     enums: vi.fn().mockResolvedValue({ data: { video_model_type: [] } }),
   },
   sleep: vi.fn(),
@@ -38,17 +32,17 @@ function chapter(id: number, name: string): Chapter {
 it('ignores a chapter load that resolves after a newer load', async () => {
   setActivePinia(createPinia())
   const store = useWorkbenchStore()
-  const first = deferred<SingleResponse<Chapter>>()
-  const second = deferred<SingleResponse<Chapter>>()
-  vi.mocked(api.chapter)
+  const first = deferred<SingleResponse<WorkbenchBootstrap>>()
+  const second = deferred<SingleResponse<WorkbenchBootstrap>>()
+  vi.mocked(api.workbenchBootstrap)
     .mockReturnValueOnce(first.promise)
     .mockReturnValueOnce(second.promise)
 
   const loadingFirst = store.load(9, 1)
   const loadingSecond = store.load(9, 2)
-  second.resolve({ code: 0, message: 'ok', data: chapter(2, '第二章') })
+  second.resolve({ code: 0, message: 'ok', data: { chapter: chapter(2, '第二章'), assets: [], scenes: [], videos: {} } })
   await loadingSecond
-  first.resolve({ code: 0, message: 'ok', data: chapter(1, '第一章') })
+  first.resolve({ code: 0, message: 'ok', data: { chapter: chapter(1, '第一章'), assets: [], scenes: [], videos: {} } })
   await loadingFirst
 
   expect(store.chapter?.id).toBe(2)

@@ -30,8 +30,10 @@ it('uses centralized deletion capabilities for frame actions', () => {
 })
 
 it('renders the specialized watermark and composer ports', () => {
+  expect(mountFrame('asset').findAll('.handle-stub').map(handle => handle.attributes('data-id')))
+    .toEqual(['asset-input', 'asset-output'])
   expect(mountFrame('watermark').findAll('.handle-stub').map(handle => handle.attributes('data-id')))
-    .toEqual(['video-input', 'watermark-output'])
+    .toEqual(['watermark-video-input', 'watermark-output', 'output-output'])
   expect(mountFrame('video_composer').findAll('.handle-stub').map(handle => handle.attributes('data-id')))
-    .toEqual(['shot-input', 'video-input', 'watermark-input', 'result-output'])
+    .toEqual(['shot-input', 'video-input', 'watermark-input', 'output-output'])
 })

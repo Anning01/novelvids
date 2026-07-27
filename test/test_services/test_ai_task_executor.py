@@ -188,7 +188,9 @@ async def test_cleanup_清理超时running任务():
         task_type=AiTaskTypeEnum.extraction.value,
         status=TaskStatusEnum.running.value,
         request_params={"chapter_id": 1},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(
+            seconds=TASK_TIMEOUT[AiTaskTypeEnum.extraction] + 1
+        ),
     )
 
     await executor.cleanup_stale_tasks(AiTaskTypeEnum.extraction)
@@ -209,7 +211,9 @@ async def test_cleanup_清理超时pending任务():
         request_params={"chapter_id": 1},
     )
     # 手动设置 created_at 为很久以前
-    stale.created_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    stale.created_at = datetime.now(timezone.utc) - timedelta(
+        seconds=TASK_TIMEOUT[AiTaskTypeEnum.extraction] + 1
+    )
     await stale.save(update_fields=["created_at"])
 
     await executor.cleanup_stale_tasks(AiTaskTypeEnum.extraction)

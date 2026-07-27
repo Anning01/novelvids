@@ -224,7 +224,7 @@ async def test_generate_stale_task_cleaned():
         task_type=AiTaskTypeEnum.storyboard.value,
         status=TaskStatusEnum.running.value,
         request_params={"chapter_id": chapter.id},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=1000),
     )
 
     # 提交新任务应成功（超时任务被清理）

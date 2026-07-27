@@ -7,6 +7,7 @@ export interface AssetWorkbenchConfig {
   size: string
   format: 'PNG'
   digitalHumanAssetId: string
+  digitalHumanPreviewUrl: string
 }
 
 export interface AssetSizePreset {
@@ -18,9 +19,10 @@ export interface AssetSizePreset {
 }
 
 export interface AssetImageCandidate {
-  key: 'main_image' | 'angle_image_1' | 'angle_image_2'
+  key: string
   url: string
   isMain: boolean
+  label?: string
 }
 
 export const ASSET_SIZE_PRESETS: readonly AssetSizePreset[] = [
@@ -60,6 +62,7 @@ const DEFAULT_CONFIG: AssetWorkbenchConfig = {
   size: '1424x800',
   format: 'PNG',
   digitalHumanAssetId: '',
+  digitalHumanPreviewUrl: '',
 }
 
 function recordValue(value: unknown): Record<string, unknown> {
@@ -86,6 +89,7 @@ export function normalizeAssetConfig(asset: Asset): AssetWorkbenchConfig {
     size: validSize(workbench.size) ? workbench.size.trim() : DEFAULT_CONFIG.size,
     format: workbench.format === 'PNG' ? 'PNG' : DEFAULT_CONFIG.format,
     digitalHumanAssetId: typeof workbench.digitalHumanAssetId === 'string' ? workbench.digitalHumanAssetId : '',
+    digitalHumanPreviewUrl: typeof workbench.digitalHumanPreviewUrl === 'string' ? workbench.digitalHumanPreviewUrl : '',
   }
 }
 
@@ -100,18 +104,37 @@ export function patchAssetWorkbenchConfig(
 }
 
 export function assetImageCandidates(asset: Asset): AssetImageCandidate[] {
-  const values: Array<[AssetImageCandidate['key'], string | undefined]> = asset.angle_image_1 || asset.angle_image_2
+  const baseValues: Array<[AssetImageCandidate['key'], string | undefined, string?]> = asset.angle_image_1 || asset.angle_image_2
     ? [
         ['angle_image_1', asset.angle_image_1],
         ['angle_image_2', asset.angle_image_2],
         ['main_image', asset.main_image],
       ]
     : [['main_image', asset.main_image]]
+  const gallery = Array.isArray(recordValue(asset.metadata).image_gallery)
+    ? recordValue(asset.metadata).image_gallery as unknown[]
+    : []
+  const values: Array<[string, string | undefined, string?]> = [
+    ...baseValues,
+    ...gallery.flatMap((url, index) => typeof url === 'string'
+      ? [[`gallery-${index}`, url, `生成图 ${index + 1}`] as [string, string, string]]
+      : []),
+    ...(asset.variants || []).flatMap(variant => variant.images.map((url, index): [string, string, string] => [
+      `variant-${variant.id}-${index}`,
+      url,
+      variant.name,
+    ])),
+  ]
   const seen = new Set<string>()
-  return values.flatMap(([key, url]) => {
+  return values.flatMap(([key, url, label]) => {
     if (!url || seen.has(url)) return []
     seen.add(url)
-    return [{ key, url, isMain: url === asset.main_image }]
+    return [{
+      key,
+      url,
+      ...(label ? { label } : {}),
+      isMain: url === asset.main_image,
+    }]
   })
 }
 

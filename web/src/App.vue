@@ -3,9 +3,20 @@ import { Clapperboard, FolderKanban, Images, Settings, Sparkles } from 'lucide-v
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { notice } from '@/shared/notice'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
+import AppThemeToggle from '@/components/AppThemeToggle.vue'
+import { useAppThemeController } from '@/shared/appTheme'
+import { isWorkflowThemeSurface } from '@/shared/themeScope'
 
 const route = useRoute()
+const { resolvedTheme } = useAppThemeController()
 const isFullscreen = computed(() => route.meta.fullscreen === true)
+const isWorkflowSurface = computed(() => isWorkflowThemeSurface({
+  name: route.name,
+  path: route.path,
+  view: route.query.view,
+}))
+const confirmDialogDark = computed(() => isWorkflowSurface.value || resolvedTheme.value === 'dark')
 const creationItems = [
   { path: '/create/short-drama', label: '短剧制作', icon: Clapperboard, active: () => route.path.startsWith('/create/short-drama') },
 ]
@@ -16,7 +27,7 @@ const personalItems = [
 ]
 </script>
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'is-workflow-surface': isWorkflowSurface }">
     <aside v-if="!isFullscreen" class="app-sidebar">
       <RouterLink to="/" class="app-brand" aria-label="猫影首页">
         <img src="/logo.png" alt="" />
@@ -47,8 +58,11 @@ const personalItems = [
           </RouterLink>
         </section>
       </nav>
+      <AppThemeToggle v-if="!isWorkflowSurface" placement="sidebar" />
     </aside>
     <section class="app-content" :class="{ 'is-fullscreen': isFullscreen }"><RouterView /></section>
+    <AppThemeToggle v-if="isFullscreen && !isWorkflowSurface" />
+    <AppConfirmDialog :dark="confirmDialogDark" />
     <div class="notice-stack" aria-live="polite"><div v-for="item in notice.state.notices" :key="item.id" class="notice" :class="`is-${item.tone}`">{{ item.message }}</div></div>
   </div>
 </template>

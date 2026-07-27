@@ -7,13 +7,31 @@ export interface WorkbenchCapabilities {
   generate_video: boolean
   apply_watermark: boolean
   compose_video: boolean
+  prompt_editors?: Array<{
+    editor_key: string
+    node_kind: 'asset' | 'shot'
+    field_key: string
+    label: string
+    placeholder: string
+    hint: string
+    allowed_asset_types: string[] | null
+    excluded_asset_types: string[] | null
+    reference_limits: { image: number; video: number; audio: number }
+    allow_prompt_injection: boolean
+  }>
+  refresh_policy?: {
+    poll_interval_ms: number
+    poll_max_interval_ms: number
+  }
 }
 
 export interface Novel { id: number; name: string; author?: string; description?: string; cover?: string; total_chapters?: number; content?: string; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
-export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; angle_image_1?: string; angle_image_2?: string; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; created_at: string; updated_at: string }
+export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
+export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; angle_image_1?: string; angle_image_2?: string; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
 export interface Scene { id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
+export interface WorkbenchBootstrap { chapter: Chapter; assets: Asset[]; scenes: Scene[]; videos: Record<number, Video[]> }
 export interface AiTask {
   id: string
   task_type: number

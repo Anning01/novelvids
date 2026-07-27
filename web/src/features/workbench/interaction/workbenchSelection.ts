@@ -30,6 +30,21 @@ export function isAdditiveSelectionEvent(event: MouseEvent | TouchEvent) {
   return 'metaKey' in event && (event.metaKey || event.ctrlKey || event.shiftKey)
 }
 
+export function isInteractiveSelectionTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest([
+    'button',
+    'input',
+    'select',
+    'textarea',
+    'a',
+    '[contenteditable="true"]',
+    '[role="button"]',
+    '[role="option"]',
+    '[role="listbox"]',
+    '[role="switch"]',
+  ].join(',')))
+}
+
 export function selectionGestureMoved(
   start: { x: number; y: number },
   current: { x: number; y: number },

@@ -18,7 +18,9 @@ import {
   Zap,
 } from 'lucide-vue-next'
 import AppMultiSelect from '@/components/AppMultiSelect.vue'
+import AppIconTile from '@/components/AppIconTile.vue'
 import { api } from '@/api'
+import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { AiModelConfig, EnumItem } from '@/types'
 
@@ -81,6 +83,12 @@ const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value =>
   value: String(value),
   label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成' }[value] ?? `任务 ${value}`),
 })))
+
+function iconTone(categoryId: ModelCategoryId) {
+  if (categoryId === 'image') return 'image' as const
+  if (categoryId === 'video') return 'video' as const
+  return 'accent' as const
+}
 
 function configsFor(category: ModelCategory) {
   return configs.value.filter(item => configTaskTypes(item).some(value => category.taskTypes.includes(value)))
@@ -180,7 +188,12 @@ async function activate(item: AiModelConfig) {
 }
 
 async function remove(item: AiModelConfig) {
-  if (!confirm(`删除「${item.name}」？`)) return
+  if (!await appConfirm({
+    title: `删除模型配置「${item.name}」？`,
+    message: '删除后该模型将无法继续用于新的生成任务。',
+    confirmLabel: '删除配置',
+    tone: 'danger',
+  })) return
   try {
     await api.deleteConfig(item.id)
     await load()
@@ -216,7 +229,7 @@ onMounted(load)
         :aria-pressed="selectedCategoryId === category.id"
         @click="selectedCategoryId = category.id"
       >
-        <span class="category-icon"><component :is="category.icon" :size="22" /></span>
+        <AppIconTile :tone="iconTone(category.id)" size="lg"><component :is="category.icon" :size="22" /></AppIconTile>
         <span class="category-copy"><small>{{ category.eyebrow }}</small><strong>{{ category.label }}</strong><p>{{ category.description }}</p></span>
         <span class="category-status"><i :class="{ 'is-ready': activeCount(category) }" />{{ activeCount(category) ? `${activeCount(category)} 个用途已就绪` : '尚未启用' }}</span>
       </AppButton>
@@ -235,7 +248,7 @@ onMounted(load)
       <div v-if="loading" class="model-state">正在读取模型配置…</div>
       <div v-else-if="selectedConfigs.length" class="model-config-list">
         <article v-for="item in selectedConfigs" :key="item.id" class="model-config-card" :class="{ 'is-active': item.is_active }">
-          <span class="config-provider-icon"><component :is="selectedCategory.icon" :size="19" /></span>
+          <AppIconTile :tone="iconTone(selectedCategory.id)"><component :is="selectedCategory.icon" :size="19" /></AppIconTile>
           <div class="config-main">
             <div class="config-title"><h3>{{ item.name }}</h3><span :class="{ 'is-active': item.is_active }">{{ item.is_active ? '当前启用' : '备用配置' }}</span></div>
             <p>{{ configTaskTypes(item).map(taskLabel).join(' · ') }}</p>
@@ -265,9 +278,9 @@ onMounted(load)
     </section>
 
     <div v-if="showCreate" class="model-modal-backdrop" @click.self="showCreate = false">
-      <form class="model-modal" @submit.prevent="saveConfig">
+      <form class="model-modal" autocomplete="off" @submit.prevent="saveConfig">
         <header>
-          <div><span><component :is="selectedCategory.icon" :size="18" /></span><div><small>{{ isEditing ? 'EDIT MODEL' : 'ADD MODEL' }}</small><h2>{{ isEditing ? '编辑' : '添加' }}{{ selectedCategory.label }}</h2></div></div>
+          <div><AppIconTile :tone="iconTone(selectedCategory.id)" size="sm"><component :is="selectedCategory.icon" :size="18" /></AppIconTile><div><small>{{ isEditing ? 'EDIT MODEL' : 'ADD MODEL' }}</small><h2>{{ isEditing ? '编辑' : '添加' }}{{ selectedCategory.label }}</h2></div></div>
           <AppButton variant="soft" size="sm" icon-only type="button" aria-label="关闭" @click="showCreate = false"><X :size="18" /></AppButton>
         </header>
 
@@ -277,21 +290,21 @@ onMounted(load)
             <AppMultiSelect v-model="form.task_types" ariaLabel="能力用途" :options="taskOptions" />
             <small>可同时选择多个用途，同一个 LLM 能用于内容理解和分镜规划。</small>
           </label>
-          <label class="is-full"><span>配置名称</span><input v-model="form.name" required placeholder="例如：豆包 Seed 1.6" /></label>
-          <label class="is-full"><span>Base URL</span><span class="input-with-icon"><Server :size="15" /><input v-model="form.base_url" required placeholder="https://api.example.com/v1" /></span></label>
+          <label class="is-full"><span>配置名称</span><input v-model="form.name" name="model-config-name" required autocomplete="off" placeholder="例如：豆包 Seed 1.6" /></label>
+          <label class="is-full"><span>Base URL</span><span class="input-with-icon"><Server :size="15" /><input v-model="form.base_url" name="model-service-base-url" required autocomplete="off" inputmode="url" spellcheck="false" placeholder="https://api.example.com/v1" /></span></label>
           <label class="is-full">
             <span>API Key</span>
             <span class="input-with-icon secret-input">
               <KeyRound :size="15" />
-              <input v-model="form.api_key" :type="showApiKey ? 'text' : 'password'" required autocomplete="off" placeholder="输入模型服务密钥" />
+              <input v-model="form.api_key" name="model-service-api-key" :type="showApiKey ? 'text' : 'password'" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="输入模型服务密钥" />
               <AppButton variant="ghost" size="sm" icon-only type="button" :aria-label="showApiKey ? '隐藏 API Key' : '显示 API Key'" :title="showApiKey ? '隐藏 API Key' : '显示 API Key'" @click="showApiKey = !showApiKey">
                 <EyeOff v-if="showApiKey" :size="16" />
                 <Eye v-else :size="16" />
               </AppButton>
             </span>
           </label>
-          <label><span>模型名称</span><input v-model="form.model" required placeholder="模型 ID" /></label>
-          <label><span>并发数</span><input v-model.number="form.concurrency" type="number" min="1" required /></label>
+          <label><span>模型名称</span><input v-model="form.model" name="model-id" required autocomplete="off" spellcheck="false" placeholder="模型 ID" /></label>
+          <label><span>并发数</span><input v-model.number="form.concurrency" name="model-concurrency" type="number" min="1" required /></label>
           <label v-if="selectedCategory.id === 'llm'" class="is-full json-capability-field">
             <span class="json-capability-copy">
               <strong>结构化 JSON 输出</strong>
@@ -320,9 +333,6 @@ onMounted(load)
 .model-category-card { position: relative; display: grid; min-height: 158px; grid-template-columns: 46px minmax(0, 1fr); align-content: start; gap: 13px; padding: 18px; overflow: hidden; border: 1px solid #e6e8ef; border-radius: 15px; color: #303442; background: #fff; cursor: pointer; text-align: left; box-shadow: 0 10px 30px rgb(37 41 57 / 4%); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .model-category-card:hover { border-color: #d6d9e5; box-shadow: 0 14px 34px rgb(37 41 57 / 7%); transform: translateY(-1px); }
 .model-category-card.is-active { border-color: #bfc1ff; box-shadow: 0 14px 34px rgb(91 92 246 / 10%); }
-.category-icon { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 12px; color: #5b5cf6; background: #eff0ff; }
-.is-image .category-icon { color: #a45e87; background: #faedf5; }
-.is-video .category-icon { color: #397f85; background: #eaf5f5; }
 .category-copy { display: grid; gap: 4px; }
 .category-copy small { color: #989dac; font-size: 8px; font-weight: 750; letter-spacing: .14em; }
 .category-copy strong { font-size: 14px; }
@@ -338,7 +348,6 @@ onMounted(load)
 .model-config-list { display: grid; gap: 9px; }
 .model-config-card { display: grid; min-height: 96px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 15px 16px; border: 1px solid #e5e7ee; border-radius: 13px; background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
 .model-config-card.is-active { border-color: #d5d6fb; box-shadow: 0 10px 26px rgb(91 92 246 / 6%); }
-.config-provider-icon { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 12px; color: #5b5cf6; background: #eff0ff; }
 .config-main { display: grid; min-width: 0; gap: 5px; }
 .config-title { display: flex; align-items: center; gap: 8px; }
 .config-title h3 { margin: 0; font-size: 13px; }
@@ -361,40 +370,42 @@ onMounted(load)
 .model-empty-state h3 { margin: 0; color: #434858; font-size: 14px; }
 .model-empty-state p { max-width: 360px; margin: 0 0 8px; color: #8d92a1; font-size: 10px; line-height: 1.6; }
 .model-empty-state button { min-height: 36px; }
-.model-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(31 35 48 / 38%); backdrop-filter: blur(8px); }
-.model-modal { display: grid; width: min(600px, 100%); max-height: calc(100vh - 40px); gap: 20px; overflow: auto; padding: 22px; border: 1px solid #e1e3ea; border-radius: 17px; color: #303442; background: #fff; box-shadow: 0 24px 70px rgb(31 35 48 / 20%); }
+.model-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(8 9 12 / 64%); backdrop-filter: blur(8px); }
+.model-modal { display: grid; width: min(600px, 100%); max-height: calc(100vh - 40px); gap: 20px; overflow: auto; padding: 22px; border: 1px solid var(--app-border); border-radius: 17px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 24px 70px rgb(0 0 0 / 28%); }
 .model-modal > header, .model-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .model-modal > header > div { display: flex; align-items: center; gap: 11px; }
-.model-modal > header > div > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
-.model-modal header small { color: #7779ef; font-size: 8px; font-weight: 750; letter-spacing: .14em; }
+.model-modal header small { color: var(--app-accent); font-size: 8px; font-weight: 750; letter-spacing: .14em; }
 .model-modal h2 { margin: 3px 0 0; font-size: 17px; }
-.model-modal header > button { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 8px; color: #7c8292; background: transparent; cursor: pointer; }
-.model-modal header > button:hover { background: #f2f3f6; }
+.model-modal header > button { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 8px; cursor: pointer; }
 .model-form-grid { display: grid; grid-template-columns: 1fr 140px; gap: 13px; }
-.model-form-grid label { display: grid; gap: 7px; color: #626879; font-size: 10px; }
+.model-form-grid label { display: grid; gap: 7px; color: var(--app-text-secondary); font-size: 10px; }
 .model-form-grid label.is-full { grid-column: 1 / -1; }
 .model-form-grid label > span:first-child { font-weight: 600; }
-.model-form-grid label > small { color: #9a9ead; font-size: 9px; }
-.model-form-grid input { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid #dfe2e9; border-radius: 9px; outline: 0; color: #303442; background: #fafbfc; font-size: 11px; }
-.model-form-grid input:focus { border-color: #7a7bf8; background: #fff; box-shadow: 0 0 0 3px rgb(91 92 246 / 8%); }
-.json-capability-field { display: flex !important; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px !important; padding: 12px 14px; border-radius: 12px; background: #f7f7fc; }
+.model-form-grid label > small { color: var(--app-text-muted); font-size: 9px; }
+.model-form-grid input { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid var(--app-border); border-radius: 9px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); caret-color: var(--app-text); font-size: 11px; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.model-form-grid input::placeholder { color: var(--app-text-muted); opacity: 1; }
+.model-form-grid input:hover { border-color: var(--app-border-strong); }
+.model-form-grid input:focus { border-color: var(--app-accent); color: var(--app-text); background: var(--app-surface-hover); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
+.model-form-grid input:-webkit-autofill,
+.model-form-grid input:-webkit-autofill:hover,
+.model-form-grid input:-webkit-autofill:focus { border-color: var(--app-border-strong); -webkit-text-fill-color: var(--app-text); caret-color: var(--app-text); box-shadow: 0 0 0 1000px var(--app-surface-muted) inset; }
+.json-capability-field { display: flex !important; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px !important; padding: 12px 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
 .json-capability-copy { display: grid; gap: 4px; }
-.json-capability-copy strong { color: #404554; font-size: 11px; }
-.json-capability-copy small { color: #8d92a1; font-size: 9px; line-height: 1.5; }
-.model-form-grid .json-capability-field > input { position: relative; width: 38px; min-width: 38px; height: 22px; min-height: 22px; margin: 0; padding: 0; border: 0; border-radius: 999px; appearance: none; background: #d9dce5; cursor: pointer; transition: background .16s ease; }
-.model-form-grid .json-capability-field > input::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgb(35 39 52 / 20%); content: ''; transition: transform .16s ease; }
-.model-form-grid .json-capability-field > input:checked { background: #5b5cf6; }
+.json-capability-copy strong { color: var(--app-text); font-size: 11px; }
+.json-capability-copy small { color: var(--app-text-muted); font-size: 9px; line-height: 1.5; }
+.model-form-grid .json-capability-field > input { position: relative; width: 38px; min-width: 38px; height: 22px; min-height: 22px; margin: 0; padding: 0; border: 0; border-radius: 999px; appearance: none; background: var(--app-border-strong); cursor: pointer; transition: background .16s ease; }
+.model-form-grid .json-capability-field > input::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--app-surface); box-shadow: 0 1px 4px rgb(0 0 0 / 24%); content: ''; transition: transform .16s ease; }
+.model-form-grid .json-capability-field > input:checked { background: var(--app-accent); }
 .model-form-grid .json-capability-field > input:checked::after { transform: translateX(16px); }
-.model-form-grid .json-capability-field > input:focus-visible { outline: 3px solid rgb(91 92 246 / 18%); outline-offset: 2px; box-shadow: none; }
+.model-form-grid .json-capability-field > input:focus-visible { outline: 3px solid color-mix(in srgb,var(--app-accent) 20%,transparent); outline-offset: 2px; box-shadow: none; }
 .input-with-icon { position: relative; display: flex; align-items: center; }
-.input-with-icon > svg { position: absolute; left: 11px; z-index: 1; color: #9095a4; }
+.input-with-icon > svg { position: absolute; left: 11px; z-index: 1; color: var(--app-text-muted); }
 .input-with-icon > input { padding-left: 34px; }
 .secret-input > input { padding-right: 42px; }
-.secret-input > button { position: absolute; right: 5px; display: grid; width: 32px; height: 30px; place-items: center; border: 0; border-radius: 7px; color: #858a99; background: transparent; cursor: pointer; }
-.secret-input > button:hover { color: #5b5cf6; background: #f0f0ff; }
+.secret-input > button { position: absolute; right: 5px; display: grid; width: 32px; height: 30px; place-items: center; border: 0; border-radius: 7px; color: var(--app-text-muted); background: transparent; cursor: pointer; }
+.secret-input > button:hover { color: var(--app-accent); background: var(--app-accent-soft); }
 .model-modal > footer { justify-content: flex-end; padding-top: 3px; }
-.model-modal > footer button { min-height: 38px; padding: 0 14px; border: 1px solid #dfe2ea; border-radius: 9px; color: #555b6b; background: #fff; cursor: pointer; font-size: 11px; }
-.model-modal > footer button.is-primary { border-color: #5b5cf6; color: #fff; background: #5b5cf6; }
+.model-modal > footer .app-button { min-height: 38px; padding: 0 14px; border-radius: 9px; cursor: pointer; font-size: 11px; }
 .model-modal > footer button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 860px) {
   .model-category-grid { grid-template-columns: 1fr; }

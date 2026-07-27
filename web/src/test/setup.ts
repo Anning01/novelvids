@@ -1,4 +1,5 @@
 import { enableAutoUnmount } from '@vue/test-utils'
+import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
 
 enableAutoUnmount(afterEach)

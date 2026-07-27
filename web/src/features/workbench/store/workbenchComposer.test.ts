@@ -74,10 +74,29 @@ it('connects shot, video, and watermark sources to distinct composer inputs', ()
     targetHandle: edge.targetHandle,
     orderIndex: edge.orderIndex,
   }))).toEqual([
-    { source: 'shot-1', sourceHandle: 'output', targetHandle: 'shot-input', orderIndex: 0 },
-    { source: 'video-1', sourceHandle: 'output', targetHandle: 'video-input', orderIndex: 1 },
+    { source: 'shot-1', sourceHandle: 'sequence-output', targetHandle: 'shot-input', orderIndex: 0 },
+    { source: 'video-1', sourceHandle: 'output-output', targetHandle: 'video-input', orderIndex: 1 },
     { source: 'watermark-1', sourceHandle: 'watermark-output', targetHandle: 'watermark-input', orderIndex: 0 },
   ])
+})
+
+it('preserves an explicit shot result connection to the composer video input', () => {
+  vi.spyOn(Date, 'now')
+    .mockReturnValueOnce(4150)
+    .mockReturnValueOnce(4151)
+  const composer = store.addVideoComposer()
+  store.nodes.push(source('shot-1', 'shot'))
+
+  expect(store.connectMediaNode('shot-1', composer.key, {
+    sourceHandle: 'output-output',
+    targetHandle: 'video-input',
+  })).toBe(true)
+
+  expect(store.edges.at(-1)).toMatchObject({
+    sourceHandle: 'output-output',
+    targetHandle: 'video-input',
+    type: 'output_binding',
+  })
 })
 
 it('moves an input and reindexes related edges through undo and redo', () => {

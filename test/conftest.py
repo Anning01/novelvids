@@ -106,6 +106,7 @@ async def clear_db():
     from models.novel import Novel
     from models.chapter import Chapter
     from models.asset import Asset
+    from models.asset_variant import AssetVariant
     from models.scene import Scene
     from models.ai_task import AiTask
     from models.config import AiModelConfig
@@ -119,6 +120,7 @@ async def clear_db():
     await AiTask.all().delete()
     await Scene.all().delete()
     await Chapter.all().delete()
+    await AssetVariant.all().delete()
     await Asset.all().delete()
     await Novel.all().delete()
     await AiModelConfig.all().delete()

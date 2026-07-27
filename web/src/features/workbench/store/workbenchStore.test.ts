@@ -93,6 +93,7 @@ it('creates, positions, selects, and persists an empty asset', async () => {
 
   expect(createAssetMock).toHaveBeenCalledWith({
     novel_id: 9,
+    chapter_id: 2162,
     asset_type: AssetTypeEnum.PERSON,
     canonical_name: '资产 1',
   })

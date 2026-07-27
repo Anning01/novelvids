@@ -40,6 +40,7 @@ async def generate_for_sora_consistency(
     model="doubao-seedream-4-5-251128",
     resolution="2K",
     aspect_ratio="1:1",
+    count=1,
 ):
     """
     执行生成任务，支持多图参考 (异步)
@@ -62,7 +63,7 @@ async def generate_for_sora_consistency(
             prompt=final_prompt,
             size=resolution,
             response_format="url",
-            n=1, # 显式指定只生成一张
+            n=max(1, min(4, int(count))),
             extra_body=extra_body
         )
         return response.data

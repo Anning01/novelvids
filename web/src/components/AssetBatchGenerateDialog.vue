@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Check, ImageIcon, ListChecks, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
+import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { api } from '@/api'
@@ -115,10 +116,10 @@ watch(() => props.open, value => {
               <span class="batch-checkbox"><Check v-if="selectedIds.includes(asset.id)" :size="13" /></span>
               <span class="batch-thumb"><img v-if="asset.main_image" :src="asset.main_image" alt="" /><ImageIcon v-else :size="18" /></span>
               <span class="batch-copy"><strong>{{ asset.canonical_name }}</strong><small>{{ asset.description || '尚未填写描述' }}</small></span>
-              <span v-if="asset.main_image" class="batch-status is-complete">已完成，不重复生成</span>
-              <span v-else-if="generatingIds.has(asset.id)" class="batch-status is-running"><LoaderCircle :size="12" />生成中</span>
-              <span v-else-if="failedIds.has(asset.id)" class="batch-status is-failed">上次失败，可重试</span>
-              <span v-else class="batch-status">待生成</span>
+              <AppBadge v-if="asset.main_image" class="batch-status" tone="warning" size="sm">已完成，不重复生成</AppBadge>
+              <AppBadge v-else-if="generatingIds.has(asset.id)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
+              <AppBadge v-else-if="failedIds.has(asset.id)" class="batch-status" tone="danger" size="sm">上次失败，可重试</AppBadge>
+              <AppBadge v-else class="batch-status" tone="accent" size="sm">待生成</AppBadge>
             </AppButton>
           </div>
         </div>
@@ -161,11 +162,8 @@ watch(() => props.open, value => {
 .batch-copy strong,.batch-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .batch-copy strong { font-size: 12px; }
 .batch-copy small { color: #969cab; font-size: 10px; font-weight: 450; }
-.batch-status { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 999px; color: #7779e8; background: #efefff; font-size: 9px; white-space: nowrap; }
-.batch-status.is-complete { color: #d58b4d; background: #fff3e9; }
-.batch-status.is-running { color: #5e60ef; }
+.batch-status { white-space: nowrap; }
 .batch-status.is-running svg { animation: batch-spin .8s linear infinite; }
-.batch-status.is-failed { color: #ce5e70; background: #fff0f2; }
 .batch-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 22px 18px; background: #fbfbfd; box-shadow: 0 -10px 30px rgb(36 40 57 / 4%); }
 .batch-options,.batch-actions { display: flex; align-items: center; gap: 8px; }
 .batch-options :deep(.app-select:first-child) { width: 220px; }

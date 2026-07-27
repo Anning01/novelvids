@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Any
 from schemas._base import BaseResponse
+from schemas.asset_variant import AssetVariantOut
 from utils.enums import AssetTypeEnum, ImageSourceEnum
 
 
@@ -79,3 +80,7 @@ class AssetOut(AssetFullProperties, BaseResponse):
     novel_id: int = Field(..., description="所属小说/剧本")
 
     id: int = Field(..., description="小说/剧本ID")
+
+
+class AssetWithVariantsOut(AssetOut):
+    variants: Optional[list[AssetVariantOut]] = Field(None, description="人物变装、场景升级或道具形态")

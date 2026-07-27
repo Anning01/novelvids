@@ -20,6 +20,7 @@ import {
   Video,
 } from 'lucide-vue-next'
 import { api } from '@/api'
+import AppBadge from '@/components/AppBadge.vue'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { TaskStatusEnum } from '@/types'
@@ -315,15 +316,20 @@ onBeforeUnmount(stopPolling)
           </template>
         </div>
         <div class="analysis-hero-copy">
-          <span class="analysis-ready" :class="{ 'is-processing': analysisRunning || startingAnalysis, 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED }">
+          <AppBadge
+            class="analysis-ready"
+            :tone="analysisTask?.status === TaskStatusEnum.FAILED ? 'danger' : analysisRunning || startingAnalysis ? 'accent' : analysisResult ? 'success' : 'neutral'"
+          >
             <RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="13" />
             <Check v-else-if="analysisResult" :size="13" />
             <FileText v-else :size="13" />
             {{ analysisStatus }}
-          </span>
+          </AppBadge>
           <h1>{{ project.name }}</h1>
           <p><FileText :size="14" />{{ analysisResult?.chapter_count || chapters.length || 0 }} 章 <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
-          <div v-if="analysisResult?.book_types.length" class="genre-tags"><span v-for="genre in analysisResult.book_types" :key="genre">{{ genre }}</span></div>
+          <div v-if="analysisResult?.book_types.length" class="genre-tags">
+            <AppBadge v-for="(genre, index) in analysisResult.book_types" :key="genre" :tone="index % 2 ? 'success' : 'accent'" size="sm">{{ genre }}</AppBadge>
+          </div>
         </div>
         <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />重新分析</AppButton>
       </div>
@@ -371,7 +377,7 @@ onBeforeUnmount(stopPolling)
           <article v-for="(character, index) in visibleCharacters" :key="character.name" class="character-card">
             <div class="character-title"><span :style="{ '--character-accent': characterColors[index % characterColors.length] }">{{ character.name.slice(0, 1) }}</span><div><h3>{{ character.name }}</h3><small>{{ character.role }}</small></div></div>
             <p>{{ character.description }}</p>
-            <div class="episode-appearances"><small>出场章节</small><span v-for="chapterNumber in character.chapter_numbers" :key="chapterNumber">第 {{ chapterNumber }} 章</span></div>
+            <div class="episode-appearances"><small>出场章节</small><AppBadge v-for="chapterNumber in character.chapter_numbers" :key="chapterNumber" size="sm">第 {{ chapterNumber }} 章</AppBadge></div>
           </article>
         </div>
         <AppButton v-if="characters.length > 4" class="show-more" variant="ghost" size="sm" block type="button" @click="showingAllCharacters = !showingAllCharacters">
@@ -426,16 +432,12 @@ onBeforeUnmount(stopPolling)
 .orbit-one { width: 170px; height: 170px; transform: translate(45px, -45px); }
 .orbit-two { width: 100px; height: 100px; transform: translate(-52px, 62px); }
 .analysis-hero-copy { display: grid; justify-items: start; }
-.analysis-ready { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 9px; padding: 5px 8px; border-radius: 999px; color: #278363; background: #eaf7f1; font-size: 10px; font-weight: 600; }
-.analysis-ready.is-processing { color: #5b5cf6; background: #f0f0ff; }
-.analysis-ready.is-failed { color: #bb5b68; background: #fff0f2; }
+.analysis-ready { margin-bottom: 9px; }
 .status-spinner { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .analysis-hero h1 { margin: 0 0 10px; color: #282c3a; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.035em; }
 .analysis-hero-copy p { margin: 0; font-size: 11px; }
 .genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
-.genre-tags span { padding: 5px 9px; border-radius: 7px; color: #6568dc; background: #f0f0ff; font-size: 10px; }
-.genre-tags span:nth-child(2n) { color: #6b8568; background: #eef6ed; }
 .secondary-action { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 9px; color: #626879; background: #f3f4f8; cursor: pointer; font-size: 11px; }
 .secondary-action:hover { color: #4f51e8; background: #ededff; }
 .secondary-action:disabled { opacity: .55; cursor: wait; }
@@ -483,7 +485,6 @@ onBeforeUnmount(stopPolling)
 .character-card > p { margin: 0; color: #707687; font-size: 11px; line-height: 1.7; }
 .episode-appearances { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 4px; }
 .episode-appearances small { margin-right: 3px; }
-.episode-appearances span { padding: 4px 6px; border-radius: 5px; color: #7378a1; background: #f5f5f9; font-size: 8px; }
 .show-more { display: flex; width: 100%; min-height: 35px; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; border: 0; border-radius: 9px; color: #777c8c; background: transparent; cursor: pointer; font-size: 10px; }
 .show-more:hover { background: #f1f2f6; }
 .show-more svg { transition: transform .15s ease; }

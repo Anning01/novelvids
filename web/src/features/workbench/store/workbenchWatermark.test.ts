@@ -57,7 +57,7 @@ it('saves watermark configuration through undo and redo', () => {
   expect(store.nodeByKey(created.key)?.data.config).toMatchObject({ x: 0.14, y: 0.14, scale: 0.35 })
 })
 
-it.each(['video_media', 'video_result'] as const)('connects %s to the watermark video input', (kind) => {
+it.each(['shot', 'video_media', 'video_result'] as const)('connects %s to the watermark video input', (kind) => {
   vi.spyOn(Date, 'now')
     .mockReturnValueOnce(3100)
     .mockReturnValueOnce(3101)
@@ -84,7 +84,7 @@ it.each(['video_media', 'video_result'] as const)('connects %s to the watermark 
     source: `source-${kind}`,
     target: created.key,
     type: 'output_binding',
-    sourceHandle: 'output',
-    targetHandle: 'video-input',
+    sourceHandle: 'output-output',
+    targetHandle: 'watermark-video-input',
   })
 })

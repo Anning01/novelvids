@@ -162,16 +162,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
       this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
-        const [chapterResponse, assetsResponse, scenesResponse, enumsResponse] = await Promise.all([api.chapter(chapterId), api.assets(novelId), api.scenes(chapterId), api.enums()])
-        const assets = await Promise.all(assetsResponse.data.items.map(async item => (await api.asset(item.id)).data))
-        const scenes = await Promise.all(scenesResponse.data.items.map(async item => (await api.scene(item.id)).data))
-        const entries = await Promise.all(scenes.map(async item => [item.id, (await api.videos(item.id)).data.items] as const))
+        const [bootstrapResponse, enumsResponse] = await Promise.all([
+          api.workbenchBootstrap(novelId, chapterId),
+          api.enums(),
+        ])
         if (!this.loadEpoch.isCurrent(epoch)) return
-        this.chapter = chapterResponse.data
-        this.assets = assets
-        this.scenes = scenes
+        this.chapter = bootstrapResponse.data.chapter
+        this.assets = bootstrapResponse.data.assets
+        this.scenes = bootstrapResponse.data.scenes
         this.modelOptions = enumsResponse.data.video_model_type || []
-        this.videos = Object.fromEntries(entries)
+        this.videos = bootstrapResponse.data.videos
         this.rebuildGraph()
         this.loadSavedLayout()
       } finally {
@@ -220,6 +220,18 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (!item || !isManualNodeKind(item.kind)) return
       item.data = { ...item.data, ...patch }
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+    },
+    updateNodeDraft(key: string, patch: Record<string, unknown>) {
+      const item = this.nodeByKey(key)
+      if (!item) return
+      item.data = { ...item.data, ...patch }
+      if (isManualNodeKind(item.kind)) {
+        this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+      }
+    },
+    async flushNodeDraft(key: string) {
+      if (!this.nodeByKey(key)) return
+      this.persistLayout()
     },
     async flushLayout() { this.persistLayout() },
     copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item && nodeCapabilities(item.kind).copyable ? cloneValue(item) : null },
@@ -453,45 +465,125 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
       return item
     },
-    connectMediaNode(source: string, target: string) {
+    connectMediaNode(
+      source: string,
+      target: string,
+      handles: { sourceHandle?: string | null; targetHandle?: string | null } = {},
+    ) {
       const sourceNode = this.nodeByKey(source); const targetNode = this.nodeByKey(target)
-      if (!sourceNode || !targetNode) return
-      if (!nodeCapabilities(sourceNode.kind).source || !nodeCapabilities(targetNode.kind).target) return
-      const isShotReference = targetNode.kind === 'shot' && ['audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media'].includes(sourceNode.kind)
-      const isWatermarkVideo = targetNode.kind === 'watermark' && ['video_result', 'video_media'].includes(sourceNode.kind)
-      const isComposerShot = targetNode.kind === 'video_composer' && sourceNode.kind === 'shot'
-      const isComposerVideo = targetNode.kind === 'video_composer' && ['video_result', 'video_media'].includes(sourceNode.kind)
-      const isComposerWatermark = targetNode.kind === 'video_composer' && sourceNode.kind === 'watermark'
-      if (!isShotReference && !isWatermarkVideo && !isComposerShot && !isComposerVideo && !isComposerWatermark) return
-      if (this.mediaEdges.some(item => item.source === source && item.target === target)) return
+      if (!sourceNode || !targetNode) return false
+      if (!nodeCapabilities(sourceNode.kind).source || !nodeCapabilities(targetNode.kind).target) return false
+      const hasExplicitHandles = Boolean(handles.sourceHandle || handles.targetHandle)
+      const usesHandles = (sourceHandle: string, targetHandle: string) => !hasExplicitHandles
+        || (handles.sourceHandle === sourceHandle && handles.targetHandle === targetHandle)
+      const isShotReference = targetNode.kind === 'shot'
+        && ['asset', 'audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media', 'video_result'].includes(sourceNode.kind)
+        && usesHandles('asset-output', 'asset-input')
+      const isAssetReference = targetNode.kind === 'asset'
+        && ['asset', 'digital_human', 'image_media'].includes(sourceNode.kind)
+        && source !== target
+        && usesHandles('asset-output', 'asset-input')
+      const isShotSequence = sourceNode.kind === 'shot'
+        && targetNode.kind === 'shot'
+        && source !== target
+        && usesHandles('sequence-output', 'sequence-input')
+      const isWatermarkVideo = targetNode.kind === 'watermark'
+        && ['shot', 'video_result', 'video_media', 'video_composer', 'watermark'].includes(sourceNode.kind)
+        && source !== target
+        && usesHandles('output-output', 'watermark-video-input')
+      const isComposerShot = targetNode.kind === 'video_composer'
+        && sourceNode.kind === 'shot'
+        && usesHandles('sequence-output', 'shot-input')
+      const isComposerVideo = targetNode.kind === 'video_composer'
+        && ['shot', 'video_result', 'video_media'].includes(sourceNode.kind)
+        && usesHandles('output-output', 'video-input')
+      const isComposerWatermark = targetNode.kind === 'video_composer'
+        && sourceNode.kind === 'watermark'
+        && usesHandles('watermark-output', 'watermark-input')
+      if (!isShotReference && !isAssetReference && !isShotSequence && !isWatermarkVideo && !isComposerShot && !isComposerVideo && !isComposerWatermark) return false
+      if (isShotReference && sourceNode.kind === 'asset') {
+        const scene = targetNode.data.scene as Scene
+        const assetIds = sceneAssetIds(scene)
+        if (assetIds.includes(sourceNode.id)) return false
+        this.checkpoint()
+        void this.saveScene(scene.id, { asset_ids: [...assetIds, sourceNode.id] })
+        return true
+      }
+      if (this.mediaEdges.some(item => item.source === source && item.target === target)) return false
       this.checkpoint()
       const stamp = Date.now()
       const isOutputBinding = isWatermarkVideo || isComposerShot || isComposerVideo || isComposerWatermark
       const orderIndex = isComposerShot || isComposerVideo
         ? this.mediaEdges.filter(item => item.target === target && item.targetHandle !== 'watermark-input').length
         : 0
-      const item = edge(-stamp, `media-edge-${stamp}`, source, target, isOutputBinding ? 'output_binding' : 'asset_reference', orderIndex)
-      if (isWatermarkVideo) {
-        item.sourceHandle = 'output'
-        item.targetHandle = 'video-input'
+      const edgeType = isShotSequence ? 'shot_sequence' : isOutputBinding ? 'output_binding' : 'asset_reference'
+      const item = edge(-stamp, `media-edge-${stamp}`, source, target, edgeType, orderIndex)
+      if (isAssetReference || isShotReference) {
+        item.sourceHandle = 'asset-output'
+        item.targetHandle = 'asset-input'
+      } else if (isShotSequence) {
+        item.sourceHandle = 'sequence-output'
+        item.targetHandle = 'sequence-input'
+      } else if (isWatermarkVideo) {
+        item.sourceHandle = 'output-output'
+        item.targetHandle = 'watermark-video-input'
       } else if (isComposerShot) {
-        item.sourceHandle = 'output'
+        item.sourceHandle = 'sequence-output'
         item.targetHandle = 'shot-input'
       } else if (isComposerVideo) {
-        item.sourceHandle = 'output'
+        item.sourceHandle = 'output-output'
         item.targetHandle = 'video-input'
       } else if (isComposerWatermark) {
         item.sourceHandle = 'watermark-output'
         item.targetHandle = 'watermark-input'
       }
       this.mediaEdges.push(item); this.edges.push(item); this.persistLayout()
-      notice.success(isWatermarkVideo
-        ? '视频已连接到水印'
-        : isComposerWatermark
-          ? '水印已连接到视频合成器'
-          : isComposerShot || isComposerVideo
-            ? '视频已加入成片输入'
-            : '参考资源已连接到镜头')
+      notice.success(isAssetReference
+        ? '参考图片已连接到资产'
+        : isShotSequence
+          ? '镜头顺序已连接'
+          : isWatermarkVideo
+            ? '视频已连接到水印'
+            : isComposerWatermark
+              ? '水印已连接到视频合成器'
+              : isComposerShot || isComposerVideo
+                ? '视频已加入成片输入'
+                : '参考资源已连接到镜头')
+      return true
+    },
+    deleteMediaEdge(edgeKey: string) {
+      if (!this.mediaEdges.some(item => item.key === edgeKey)) return false
+      this.checkpoint()
+      this.mediaEdges = this.mediaEdges.filter(item => item.key !== edgeKey)
+      this.edges = this.edges.filter(item => item.key !== edgeKey)
+      this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => key !== edgeKey)
+      this.persistLayout()
+      notice.success('已移除参考资源')
+      return true
+    },
+    updateMediaEdgeConfig(edgeKey: string, patch: Record<string, unknown>) {
+      const mediaEdge = this.mediaEdges.find(item => item.key === edgeKey)
+      if (!mediaEdge) return false
+      this.checkpoint()
+      mediaEdge.config = { ...(mediaEdge.config || {}), ...patch }
+      const graphEdge = this.edges.find(item => item.key === edgeKey)
+      if (graphEdge) graphEdge.config = { ...mediaEdge.config }
+      this.persistLayout()
+      return true
+    },
+    async removeReferenceEdge(edgeKey: string) {
+      if (this.mediaEdges.some(item => item.key === edgeKey))
+        return this.deleteMediaEdge(edgeKey)
+      const target = this.edges.find(item => item.key === edgeKey && item.type === 'asset_reference')
+      if (!target) return false
+      const sourceNode = this.nodeByKey(target.source)
+      const targetNode = this.nodeByKey(target.target)
+      const scene = targetNode?.kind === 'shot' ? targetNode.data.scene as Scene | undefined : undefined
+      if (!sourceNode || sourceNode.kind !== 'asset' || !scene) return false
+      await this.saveScene(scene.id, {
+        asset_ids: sceneAssetIds(scene).filter(id => id !== sourceNode.id),
+      })
+      return true
     },
     async saveScene(sceneId: number, patch: Partial<Scene>) {
       const updated = (await api.updateScene(sceneId, patch)).data
@@ -528,6 +620,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       while (names.has(`资产 ${suffix}`)) suffix += 1
       const created = (await api.createAsset({
         novel_id: this.novelId,
+        chapter_id: this.chapterId,
         asset_type: AssetTypeEnum.PERSON,
         canonical_name: `资产 ${suffix}`,
       })).data
@@ -540,6 +633,22 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success('已添加空资产')
       return item
     },
+    async reuseAsset(assetId: number, position?: Point) {
+      const existing = this.nodeByKey(`asset-${assetId}`)
+      if (existing) {
+        this.selectNode(existing.key)
+        return existing
+      }
+      const reused = (await api.reuseAsset(assetId, this.chapterId)).data
+      this.assets.push(reused)
+      this.rebuildGraph()
+      const item = this.nodeByKey(`asset-${reused.id}`) || null
+      if (item && position) item.position = position
+      if (item) this.selectNode(item.key)
+      this.persistLayout()
+      notice.success(`已复用资产「${reused.canonical_name}」`)
+      return item
+    },
     async setAssetMainImage(assetId: number, url: string) {
       const updated = (await api.updateAsset(assetId, { main_image: url })).data
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
@@ -547,11 +656,28 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success('已设为主图')
       return updated
     },
-    async generateAsset(assetId: number) {
+    async createAssetVariant(assetId: number, data: { name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; metadata?: Record<string, unknown> }) {
+      const created = (await api.createAssetVariant(assetId, data)).data
+      this.assets = this.assets.map(asset => asset.id === assetId
+        ? { ...asset, variants: [...(asset.variants || []), created] }
+        : asset)
+      this.rebuildGraph()
+      notice.success(`已新增形态「${created.name}」`)
+      return created
+    },
+    async deleteAssetVariant(assetId: number, variantId: number) {
+      await api.deleteAssetVariant(assetId, variantId)
+      this.assets = this.assets.map(asset => asset.id === assetId
+        ? { ...asset, variants: (asset.variants || []).filter(variant => variant.id !== variantId) }
+        : asset)
+      this.rebuildGraph()
+      notice.success('资产形态已删除')
+    },
+    async generateAsset(assetId: number, variantId?: number) {
       const controller = this.beginPendingWork()
       if (!this.busyAssetIds.includes(assetId)) this.busyAssetIds.push(assetId)
       try {
-        let task = (await api.generateAsset(assetId)).data
+        let task = (await api.generateAsset(assetId, variantId)).data
         if (!terminal.has(task.status)) {
           task = await pollUntilTerminal(
             async () => (await api.task(task.id)).data,
@@ -559,10 +685,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           )
         }
         if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '资产图片生成失败')
-        const assets = (await api.assets(this.novelId)).data.items
+        const updated = (await api.asset(assetId)).data
         if (controller.signal.aborted) return
-        this.assets = await Promise.all(assets.map(async item => (await api.asset(item.id)).data))
-        if (controller.signal.aborted) return
+        this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
         this.rebuildGraph()
         notice.success('资产图片生成完成')
       } catch (error) {

@@ -100,6 +100,7 @@ onUnmounted(() => {
   <div ref="root" class="app-select" :class="{ 'is-open': open, 'is-disabled': disabled }" @keydown.esc="closeFromEscape">
     <AppButton
       type="button"
+      variant="secondary"
       class="app-select__trigger"
       :aria-label="ariaLabel"
       aria-haspopup="listbox"
@@ -163,10 +164,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid #e0e3eb;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
-  color: #4f5464;
-  background: #fff;
+  color: var(--app-text-secondary);
+  background: var(--app-surface);
   cursor: pointer;
   font-size: 12px;
   box-shadow: 0 1px 2px rgb(32 36 49 / 3%);
@@ -174,17 +175,18 @@ onUnmounted(() => {
 }
 
 .app-select__trigger:hover {
-  border-color: #cfd3df;
-  background: #fcfcfe;
+  border-color: var(--app-border-strong);
+  color: var(--app-text);
+  background: var(--app-surface-hover);
 }
 
 .app-select.is-open .app-select__trigger {
-  border-color: #9495f8;
-  box-shadow: 0 0 0 3px rgb(91 92 246 / 10%);
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent);
 }
 
 .app-select__trigger:focus-visible {
-  outline: 2px solid #7778f3;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
@@ -198,7 +200,7 @@ onUnmounted(() => {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  color: #767c8d;
+  color: var(--app-text-muted);
 }
 
 .app-select__leading:empty,
@@ -225,7 +227,7 @@ onUnmounted(() => {
 
 .app-select__chevron {
   flex: 0 0 auto;
-  color: #8d92a1;
+  color: var(--app-text-muted);
   transition: transform .15s ease;
 }
 
@@ -238,15 +240,16 @@ onUnmounted(() => {
   z-index: 1000;
   overflow: auto;
   padding: 6px;
-  border: 1px solid #e1e4eb;
+  border: 1px solid var(--app-border);
   border-radius: 11px;
-  background: #fff;
-  box-shadow: 0 18px 44px rgb(32 36 49 / 14%);
+  color: var(--app-text);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
 }
 
 .app-select__menu-label {
   margin: 4px 8px 6px;
-  color: #969baa;
+  color: var(--app-text-muted);
   font-size: 11px;
 }
 
@@ -259,7 +262,7 @@ onUnmounted(() => {
   padding: 5px 8px;
   border: 0;
   border-radius: 7px;
-  color: #444958;
+  color: var(--app-text-secondary);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
@@ -267,24 +270,25 @@ onUnmounted(() => {
 }
 
 .app-select__option:hover {
-  background: #f5f6fa;
+  color: var(--app-text);
+  background: var(--app-surface-hover);
 }
 
 .app-select__option.is-selected {
-  color: #5557e8;
-  background: #f0f0ff;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
 }
 
 .app-select__option.has-separator {
   margin-top: 5px;
   padding-top: 9px;
-  border-top: 1px solid #eceef3;
+  border-top: 1px solid var(--app-border);
   border-radius: 0 0 7px 7px;
 }
 
 .app-select__check {
   margin-left: auto;
   flex: 0 0 auto;
-  color: #5b5cf6;
+  color: var(--app-accent);
 }
 </style>

@@ -1,49 +1,59 @@
 <script setup lang="ts">
-import { Check, ChevronDown, Pencil } from 'lucide-vue-next'
-import { nextTick, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 
 const props = defineProps<{ name: string; chapterNumber: number; saving?: boolean }>()
 const emit = defineEmits<{ rename: [name: string] }>()
+const expanded = ref(false)
 const editing = ref(false)
 const draft = ref(props.name)
-const input = ref<HTMLInputElement | null>(null)
 
-watch(() => props.name, value => { if (!editing.value) draft.value = value })
+watch(() => props.name, (value) => {
+  if (!editing.value) draft.value = value
+})
 
-function beginEdit() {
+function beginEditing() {
   draft.value = props.name
   editing.value = true
-  void nextTick(() => { input.value?.focus(); input.value?.select() })
 }
+
 function save() {
   const value = draft.value.trim()
   editing.value = false
   if (value && value !== props.name) emit('rename', value)
 }
+
+function cancel() {
+  draft.value = props.name
+  editing.value = false
+}
 </script>
 
 <template>
-  <div class="workbench-canvas-identity">
-    <button v-if="!editing" type="button" aria-label="编辑画布名称" @click="beginEdit">
-      <span>第 {{ chapterNumber }} 章</span>
-      <strong>{{ name || '未命名画布' }}</strong>
-      <ChevronDown :size="14" aria-hidden="true" />
+  <div class="workbench-identity nodrag nowheel" :class="{ 'is-expanded': expanded }">
+    <button
+      type="button"
+      class="workbench-identity__trigger"
+      :aria-expanded="expanded"
+      aria-label="展开画布信息"
+      title="展开或收起画布信息"
+      @click="expanded = !expanded"
+    >
+      <span aria-hidden="true">画</span>
     </button>
-    <form v-else @submit.prevent="save">
-      <span>第 {{ chapterNumber }} 章</span>
-      <input ref="input" v-model="draft" maxlength="120" aria-label="画布名称" @keydown.esc.prevent="editing = false" @blur="save">
-      <button type="submit" aria-label="保存画布名称" :disabled="saving"><Check v-if="!saving" :size="14" /><Pencil v-else :size="14" /></button>
-    </form>
+    <label>
+      <span class="sr-only">画布名称</span>
+      <input
+        v-model="draft"
+        maxlength="120"
+        aria-label="画布名称"
+        :disabled="saving"
+        @focus="beginEditing"
+        @blur="save"
+        @keydown.enter.prevent.stop="save"
+        @keydown.esc.prevent.stop="cancel"
+        @keydown.stop
+      >
+      <small>{{ saving ? '保存中…' : `第 ${chapterNumber} 章 · 点击修改名称` }}</small>
+    </label>
   </div>
 </template>
-
-<style scoped>
-.workbench-canvas-identity { min-width: 0; }
-.workbench-canvas-identity > button,
-.workbench-canvas-identity form { display: flex; min-height: 34px; align-items: center; gap: 7px; padding: 3px 9px; border: 1px solid #3b3631; border-radius: 10px; color: #d8d0c8; background: rgb(33 30 27 / 92%); box-shadow: 0 8px 24px rgb(0 0 0 / 22%); }
-.workbench-canvas-identity > button { cursor: pointer; }
-.workbench-canvas-identity span { color: #91877e; font-size: 10px; white-space: nowrap; }
-.workbench-canvas-identity strong { max-width: 260px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.workbench-canvas-identity input { width: min(260px, 34vw); border: 0; outline: 0; color: #eee9e2; background: transparent; font: inherit; font-size: 12px; font-weight: 650; }
-.workbench-canvas-identity form button { display: grid; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; place-items: center; color: #cfc5bb; background: #3a354f; cursor: pointer; }
-</style>

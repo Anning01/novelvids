@@ -100,13 +100,17 @@ function mountNode() {
   })
 }
 
-it('renders reference inputs, options, and truthful disabled reason', () => {
+it('renders reference inputs, options, and truthful disabled reason', async () => {
   const wrapper = mountNode()
 
   expect(wrapper.get('[aria-label="成片输入顺序"]').findAll('strong').map(item => item.text())).toEqual(['片段 A', '片段 B'])
-  expect(wrapper.get('[aria-label="分辨率"]').findAll('option').map(item => item.text())).toEqual(['480p', '720p', '1080p', '4k'])
-  expect(wrapper.get('[aria-label="画面比例"]').findAll('option').map(item => item.text())).toEqual(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
-  expect(wrapper.get('[aria-label="当前服务未启用视频合成"]').attributes('disabled')).toBeDefined()
+  await wrapper.get('[aria-label="分辨率"]').trigger('click')
+  expect(wrapper.get('[aria-label="分辨率选项"]').findAll('[role="option"]').map(item => item.text())).toEqual(['480p', '720p', '1080p', '4k'])
+  await wrapper.get('[aria-label="分辨率"]').trigger('click')
+  await wrapper.get('[aria-label="画面比例"]').trigger('click')
+  expect(wrapper.get('[aria-label="画面比例选项"]').findAll('[role="option"]').map(item => item.text())).toEqual(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
+  expect(wrapper.get('[aria-label="合成并预览"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[role="alert"]').text()).toBe('当前服务未启用视频合成')
 })
 
 it('moves clips with the exact reference controls', async () => {

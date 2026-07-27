@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeProps } from '@vue-flow/core'
-import { ChevronDown, ChevronUp, Film, Play } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Film } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import {
   COMPOSER_ASPECT_RATIOS,
@@ -10,6 +10,8 @@ import {
   type ComposerConfig,
 } from '../config/composerConfig'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
+import WorkbenchRunButton from '../components/WorkbenchRunButton.vue'
+import WorkbenchSelect from '../components/WorkbenchSelect.vue'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -20,6 +22,8 @@ const storedConfig = computed(() => normalizeComposerConfig(
 const draft = ref(storedConfig.value)
 watch(storedConfig, value => { draft.value = value }, { deep: true })
 const inputs = computed(() => orderedComposerInputs(props.id, store.nodes, store.edges))
+const resolutionOptions = COMPOSER_RESOLUTIONS.map(value => ({ value, label: value }))
+const aspectRatioOptions = COMPOSER_ASPECT_RATIOS.map(value => ({ value, label: value }))
 const disabledReason = computed(() => {
   if (!props.data.compose_capability) return '当前服务未启用视频合成'
   if (!inputs.value.length) return '请连接至少一个镜头或视频'
@@ -64,21 +68,15 @@ function saveConfig() {
       <fieldset class="workbench-composer-node__params">
         <legend>生成参数</legend>
         <label class="workbench-field">分辨率
-          <select v-model="draft.resolution" aria-label="分辨率" @change="saveConfig">
-            <option v-for="resolution in COMPOSER_RESOLUTIONS" :key="resolution" :value="resolution">{{ resolution }}</option>
-          </select>
+          <WorkbenchSelect v-model="draft.resolution" :options="resolutionOptions" label="分辨率" @update:model-value="saveConfig" />
         </label>
         <label class="workbench-field">画面比例
-          <select v-model="draft.aspectRatio" aria-label="画面比例" @change="saveConfig">
-            <option v-for="ratio in COMPOSER_ASPECT_RATIOS" :key="ratio" :value="ratio">{{ ratio }}</option>
-          </select>
+          <WorkbenchSelect v-model="draft.aspectRatio" :options="aspectRatioOptions" label="画面比例" @update:model-value="saveConfig" />
         </label>
       </fieldset>
 
       <p class="workbench-composer-node__alert" role="alert">{{ disabledReason }}</p>
-      <button type="button" class="workbench-composer-node__run" :aria-label="disabledReason" :title="disabledReason" disabled>
-        <Play :size="15" aria-hidden="true" /><span>合成并预览</span>
-      </button>
+      <WorkbenchRunButton label="合成并预览" :disabled="Boolean(disabledReason)" />
       <span class="workbench-composer-node__output"><Film :size="13" aria-hidden="true" />结果输出端口</span>
     </div>
   </WorkbenchNodeFrame>

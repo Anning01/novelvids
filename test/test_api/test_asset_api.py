@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient
 from models.novel import Novel
 from models.asset import Asset
+from models.chapter import Chapter
 from utils.enums import AssetTypeEnum
 
 
@@ -80,6 +81,100 @@ async def test_api_get_asset_detail(client: AsyncClient):
     data = response.json()["data"]
     assert data["id"] == asset.id
     assert data["canonical_name"] == "宝剑"
+
+
+@pytest.mark.asyncio
+async def test_api_asset_variants_support_multiple_images(client: AsyncClient):
+    """同一资产可以保存人物变装、场景升级或道具形态的多张参考图。"""
+    novel = await Novel.create(name="Variant Asset Novel", author="Author")
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="李火旺",
+    )
+
+    response = await client.post(
+        f"/api/asset/{asset.id}/variants",
+        json={
+            "name": "红衣变装",
+            "description": "进入后期后的红色道袍造型",
+            "chapter_numbers": [101, 102, 103],
+            "images": ["/media/a.png", "/media/b.png", "/media/c.png"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    variant = response.json()["data"]
+    assert variant["asset_id"] == asset.id
+    assert variant["images"] == ["/media/a.png", "/media/b.png", "/media/c.png"]
+
+    detail = await client.get(f"/api/asset/{asset.id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["data"]["variants"][0]["name"] == "红衣变装"
+
+
+@pytest.mark.asyncio
+async def test_api_reuse_asset_in_chapter_is_idempotent(client: AsyncClient):
+    """复用项目资产只追加章节关联，重复操作不会复制资产或章节号。"""
+    novel = await Novel.create(name="Reusable Asset Novel", author="Author")
+    first_chapter = await Chapter.create(
+        novel=novel,
+        number=1,
+        name="第一章",
+        content="第一章内容",
+    )
+    second_chapter = await Chapter.create(
+        novel=novel,
+        number=205,
+        name="第二百零五章",
+        content="第二百零五章内容",
+    )
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="李火旺",
+        source_chapters=[first_chapter.number],
+        last_updated_chapter=first_chapter.number,
+    )
+
+    first_response = await client.post(
+        f"/api/asset/{asset.id}/chapters/{second_chapter.id}"
+    )
+    second_response = await client.post(
+        f"/api/asset/{asset.id}/chapters/{second_chapter.id}"
+    )
+
+    assert first_response.status_code == 200, first_response.text
+    assert second_response.status_code == 200, second_response.text
+    assert second_response.json()["data"]["source_chapters"] == [1, 205]
+    assert await Asset.filter(novel=novel, canonical_name="李火旺").count() == 1
+
+
+@pytest.mark.asyncio
+async def test_api_reuse_asset_rejects_cross_project_chapter(client: AsyncClient):
+    """资产不能复用到其他项目的章节。"""
+    source_novel = await Novel.create(name="Source Novel", author="Author")
+    target_novel = await Novel.create(name="Target Novel", author="Author")
+    target_chapter = await Chapter.create(
+        novel=target_novel,
+        number=1,
+        name="目标章节",
+        content="目标章节内容",
+    )
+    asset = await Asset.create(
+        novel=source_novel,
+        asset_type=AssetTypeEnum.scene.value,
+        canonical_name="白玉京",
+    )
+
+    response = await client.post(
+        f"/api/asset/{asset.id}/chapters/{target_chapter.id}"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["code"] == 400
+    await asset.refresh_from_db()
+    assert asset.source_chapters == []
 
 
 @pytest.mark.asyncio

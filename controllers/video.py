@@ -68,7 +68,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         # 解析 @资产昵称
         prompt = scene.prompt or ""
-        subjects = await resolve_assets(prompt, novel_id)
+        subjects = await resolve_assets(
+            prompt,
+            novel_id,
+            chapter_number=scene.chapter.number,
+        )
         logger.info(
             "Video resolve_assets: scene_id=%s, novel_id=%s, prompt_len=%d, subjects=%s",
             scene.id, novel_id, len(prompt),

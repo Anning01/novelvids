@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from controllers.asset import asset_controller
 from models.novel import Novel
 from models.asset import Asset
+from models.chapter import Chapter
 from schemas.asset import AssetCreate, AssetUpdate, AssetPatch
 from utils.enums import AssetTypeEnum
 from utils.page import QueryParams
@@ -197,6 +198,12 @@ async def test_列表查询_按类型过滤():
 async def test_列表查询_按chapter_id过滤():
     """通过 chapter_id 过滤 source_chapters JSON 数组。"""
     novel = await Novel.create(name="Chapter Filter Novel", author="Author")
+    chapter = await Chapter.create(
+        novel_id=novel.id,
+        number=3,
+        name="第三章",
+        content="正文",
+    )
     await Asset.create(
         novel_id=novel.id,
         asset_type=AssetTypeEnum.person.value,
@@ -211,7 +218,7 @@ async def test_列表查询_按chapter_id过滤():
     )
 
     from schemas.asset import AssetBriefOut
-    params = QueryParams(page=1, page_size=10, filters={"chapter_id": "3"})
+    params = QueryParams(page=1, page_size=10, filters={"chapter_id": str(chapter.id)})
     result = await asset_controller.list(params, AssetBriefOut)
     assert result["pagination"]["total"] == 1
     assert result["items"][0].canonical_name == "出场人物"
@@ -371,7 +378,7 @@ async def test_reference_超时任务被清理后可重新提交():
         task_type=AiTaskTypeEnum.reference_image.value,
         status=TaskStatusEnum.running.value,
         request_params={"asset_id": asset.id},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=700),
     )
 
     task = await asset_controller.reference(asset.id)

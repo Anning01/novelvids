@@ -54,7 +54,7 @@ watch(() => props.open, value => {
   <Teleport to="body">
     <div v-if="open" class="media-picker-backdrop" role="presentation" @mousedown.self="$emit('close')">
       <section class="media-picker" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="loading" @keydown.esc.stop="$emit('close')">
-        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><AppButton type="button" aria-label="关闭" @click="$emit('close')"><X :size="18" aria-hidden="true" /></AppButton></header>
+        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><AppButton type="button" size="sm" icon-only aria-label="关闭" @click="$emit('close')"><X :size="20" aria-hidden="true" /></AppButton></header>
         <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" aria-hidden="true" /><input v-model="search" :aria-label="kind === 'audio' ? '搜索参考音频' : '搜索数字人'" :placeholder="kind === 'audio' ? '搜索昵称、性别或资产 ID' : '搜索国家、职业、性别或资产 ID'" autofocus><AppButton type="submit" :disabled="loading">搜索</AppButton></form>
         <p v-if="error" class="media-picker-error" role="alert">{{ error }}</p>
         <div class="media-picker-grid">
