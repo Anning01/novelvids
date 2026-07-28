@@ -98,7 +98,7 @@ const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewpo
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
-  { id: 'asset', label: '空白资产', description: '创建可编辑的昵称与 Prompt 资产', kind: 'asset', data: {} },
+  { id: 'asset', label: '资产', description: '创建可编辑的昵称、Prompt 与图片资产', kind: 'asset', data: {} },
   { id: 'shot', label: '镜头', description: '创建一个可编辑的镜头生产节点', kind: 'shot', data: {} },
   { id: 'watermark', label: '创建水印', description: '创建水印配置节点', kind: 'watermark', data: {} },
   { id: 'operation:video_composer', label: '视频合成器', description: '创建成片合成节点', kind: 'video_composer', data: {} },
@@ -522,18 +522,20 @@ function addVideoComposer(position = visibleNodePosition({ width: 390, height: 4
   return created
 }
 async function addAsset() {
-  const created = await store.addEmptyAsset(visibleNodePosition({ width: 350, height: 680 }))
+  const created = await store.addEmptyAsset(visibleNodePosition({ width: 520, height: 680 }))
   if (created) await ensureNodeVisible(created.key)
 }
 async function reuseAsset(assetId: number) {
-  const created = await store.reuseAsset(assetId, visibleNodePosition({ width: 350, height: 680 }))
+  const created = await store.reuseAsset(assetId, visibleNodePosition({ width: 520, height: 680 }))
   if (created) await ensureNodeVisible(created.key)
 }
 async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'video_media' | 'audio_media'>, file: File) {
-  const size = kind === 'audio_media' ? { width: 420, height: 170 } : { width: 360, height: 340 }
+  const size = kind === 'audio_media' ? { width: 420, height: 170 } : kind === 'image_media' ? { width: 520, height: 360 } : { width: 360, height: 340 }
   try {
-    const created = await store.uploadMedia(kind, file, visibleNodePosition(size))
-    await ensureNodeVisible(created.key)
+    const created = kind === 'image_media'
+      ? await store.uploadImageAsset(file, visibleNodePosition(size))
+      : await store.uploadMedia(kind, file, visibleNodePosition(size))
+    if (created) await ensureNodeVisible(created.key)
   } catch (error) {
     notice.error(error instanceof Error ? error.message : '媒体上传失败')
   }

@@ -88,16 +88,17 @@ function updatePosition() {
   }
   const anchorRect = anchor.getBoundingClientRect();
   const gap = 12;
-  const width = Math.min(960, Math.max(360, window.innerWidth - viewportPadding * 2));
+  const width = Math.min(960, Math.max(360, window.innerWidth * 0.4), window.innerWidth - viewportPadding * 2);
   const left = anchorRect.left + anchorRect.width / 2 - width / 2;
   const top = anchorRect.bottom + gap;
   const availableHeight = Math.max(160, window.innerHeight - top - viewportPadding);
+  const height = Math.min(availableHeight, Math.max(320, window.innerHeight * 0.4));
   panelStyle.value = {
     top: `${top}px`,
     left: `${left}px`,
     width: `${width}px`,
-    height: 'auto',
-    maxHeight: `${availableHeight}px`,
+    height: `${height}px`,
+    maxHeight: `${height}px`,
     bottom: 'auto',
     transform: 'none',
     visibility: 'visible',

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { Check, ChevronDown } from 'lucide-vue-next'
+import type { Component } from 'vue'
 import { computed, nextTick, ref } from 'vue'
 
 const props = defineProps<{
   modelValue: string
-  options: Array<{ label: string; value: string; disabled?: boolean }>
+  options: Array<{ label: string; value: string; disabled?: boolean; icon?: Component }>
   label: string
   placeholder?: string
+  iconOnly?: boolean
+  fallbackIcon?: Component
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
@@ -92,8 +95,14 @@ function closeAndFocus() {
       @keydown.up.prevent="openAndFocus(true)"
       @keydown.esc.stop.prevent="close"
     >
-      <span :class="{ 'is-placeholder': !selectedOption }">{{ selectedOption?.label || placeholder || '请选择' }}</span>
-      <ChevronDown :size="15" aria-hidden="true" />
+      <component
+        :is="selectedOption?.icon || fallbackIcon"
+        v-if="iconOnly && (selectedOption?.icon || fallbackIcon)"
+        :size="18"
+        aria-hidden="true"
+      />
+      <span v-else :class="{ 'is-placeholder': !selectedOption }">{{ selectedOption?.label || placeholder || '请选择' }}</span>
+      <ChevronDown v-if="!iconOnly" :size="15" aria-hidden="true" />
     </button>
     <div
       v-if="open"
@@ -119,7 +128,10 @@ function closeAndFocus() {
         @pointerdown.prevent
         @click="select(option.value)"
       >
-        <span>{{ option.label }}</span>
+        <span class="workbench-select__option">
+          <component :is="option.icon" v-if="option.icon" :size="16" aria-hidden="true" />
+          {{ option.label }}
+        </span>
         <Check v-if="option.value === modelValue" :size="13" aria-hidden="true" />
       </button>
     </div>

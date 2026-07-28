@@ -1,19 +1,93 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
+import { AssetTypeEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: { upload: vi.fn() },
+  api: { createAsset: vi.fn(), updateAsset: vi.fn(), upload: vi.fn() },
   sleep: vi.fn(),
 }))
 
+const createAssetMock = vi.mocked(api.createAsset)
+const updateAssetMock = vi.mocked(api.updateAsset)
 const uploadMock = vi.mocked(api.upload)
 let store: ReturnType<typeof useWorkbenchStore>
 
 beforeEach(() => {
   setActivePinia(createPinia())
   store = useWorkbenchStore()
+  store.novelId = 9
+  store.chapterId = 2162
+  store.chapter = {
+    id: 2162,
+    novel_id: 9,
+    number: 1,
+    name: '章节',
+    created_at: '2026-07-28T00:00:00.000Z',
+    updated_at: '2026-07-28T00:00:00.000Z',
+  }
+})
+
+it('uploads a new image into a persistent asset node', async () => {
+  const file = new File(['image'], 'hero.png', { type: 'image/png' })
+  uploadMock.mockResolvedValueOnce({
+    filename: 'stored-hero.png',
+    original_filename: 'hero.png',
+    content_type: 'image/png',
+    file_path: '/tmp/stored-hero.png',
+  })
+  createAssetMock.mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 91,
+      novel_id: 9,
+      asset_type: AssetTypeEnum.ITEM,
+      canonical_name: 'hero',
+      main_image: '/media/stored-hero.png',
+      metadata: {
+        workbenchImage: {
+          source: 'upload',
+          assetTypeExplicit: false,
+          filename: 'stored-hero.png',
+          originalFilename: 'hero.png',
+          mimeType: 'image/png',
+          annotations: [],
+        },
+      },
+      created_at: '2026-07-28T00:00:00.000Z',
+      updated_at: '2026-07-28T00:00:00.000Z',
+    },
+  })
+
+  const created = await store.uploadImageAsset(file, { x: 120, y: 240 })
+
+  expect(createAssetMock).toHaveBeenCalledWith({
+    novel_id: 9,
+    chapter_id: 2162,
+    asset_type: AssetTypeEnum.ITEM,
+    canonical_name: 'hero',
+    main_image: '/media/stored-hero.png',
+    metadata: {
+      workbenchImage: {
+        source: 'upload',
+        assetTypeExplicit: false,
+        filename: 'stored-hero.png',
+        originalFilename: 'hero.png',
+        mimeType: 'image/png',
+        annotations: [],
+      },
+    },
+  })
+  expect(created).toMatchObject({
+    key: 'asset-91',
+    kind: 'asset',
+    title: 'hero',
+    position: { x: 120, y: 240 },
+  })
+  expect(store.manualNodes).toEqual([])
+  expect(store.selectedNodeKeys).toEqual(['asset-91'])
 })
 
 it('uploads an image before creating a persistent media node', async () => {
@@ -107,4 +181,104 @@ it('persists annotations only for an uploaded image node', async () => {
   expect(store.nodeByKey(image.key)?.data.annotations).toEqual([annotation])
   expect(store.saveImageAnnotations('missing', [annotation])).toBe(false)
   expect(JSON.parse(localStorage.getItem(store.layoutKey()) || '{}').manualNodes[0].data.annotations).toEqual([annotation])
+})
+
+it('stores image annotations on a backend asset without replacing its generation metadata', async () => {
+  const source = {
+    id: 92,
+    novel_id: 9,
+    asset_type: AssetTypeEnum.ITEM,
+    canonical_name: '道具',
+    main_image: '/media/prop.png',
+    metadata: { workbench: { size: '1424x800' } },
+    created_at: '2026-07-28T00:00:00.000Z',
+    updated_at: '2026-07-28T00:00:00.000Z',
+  }
+  const annotation = {
+    id: 'rect-2',
+    tool: 'rectangle' as const,
+    points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }],
+    stroke: '#ff5a5f',
+    strokeWidth: 3,
+  }
+  store.assets = [source]
+  updateAssetMock.mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: {
+      ...source,
+      metadata: {
+        workbench: { size: '1424x800' },
+        workbenchImage: { annotations: [annotation] },
+      },
+    },
+  })
+
+  await store.saveAssetImageAnnotations(92, [annotation])
+
+  expect(updateAssetMock).toHaveBeenCalledWith(92, {
+    metadata: {
+      workbench: { size: '1424x800' },
+      workbenchImage: { annotations: [annotation] },
+    },
+  })
+  expect(store.assets[0]?.metadata?.workbench).toEqual({ size: '1424x800' })
+})
+
+it('keeps an existing asset type explicit when replacing its image', async () => {
+  const source = {
+    id: 93,
+    novel_id: 9,
+    asset_type: AssetTypeEnum.PERSON,
+    canonical_name: '主角',
+    main_image: '/media/old.png',
+    metadata: { workbench: { size: '1024x1024' } },
+    created_at: '2026-07-28T00:00:00.000Z',
+    updated_at: '2026-07-28T00:00:00.000Z',
+  }
+  store.assets = [source]
+  uploadMock.mockResolvedValueOnce({
+    filename: 'new.png',
+    original_filename: 'new.png',
+    content_type: 'image/png',
+    file_path: '/tmp/new.png',
+  })
+  updateAssetMock.mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: {
+      ...source,
+      main_image: '/media/new.png',
+      metadata: {
+        workbench: { size: '1024x1024' },
+        workbenchImage: {
+          source: 'upload',
+          assetTypeExplicit: true,
+          filename: 'new.png',
+          originalFilename: 'new.png',
+          mimeType: 'image/png',
+          annotations: [],
+        },
+      },
+    },
+  })
+
+  await store.replaceAssetImage(93, new File(['new'], 'new.png', { type: 'image/png' }))
+
+  expect(updateAssetMock).toHaveBeenCalledWith(93, {
+    main_image: '/media/new.png',
+    metadata: {
+      workbench: { size: '1024x1024' },
+      workbenchImage: {
+        source: 'upload',
+        assetTypeExplicit: true,
+        filename: 'new.png',
+        originalFilename: 'new.png',
+        mimeType: 'image/png',
+        width: undefined,
+        height: undefined,
+        annotations: [],
+      },
+    },
+  })
 })

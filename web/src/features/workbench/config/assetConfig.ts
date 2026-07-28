@@ -1,4 +1,5 @@
 import type { Asset } from '@/types'
+import type { ImageAnnotation } from '../types/workbenchTypes'
 import { AssetTypeEnum } from '@/types'
 
 export interface AssetWorkbenchConfig {
@@ -23,6 +24,17 @@ export interface AssetImageCandidate {
   url: string
   isMain: boolean
   label?: string
+}
+
+export interface AssetImageMediaMetadata {
+  source?: 'upload' | 'generation'
+  assetTypeExplicit?: boolean
+  filename?: string
+  originalFilename?: string
+  mimeType?: string
+  width?: number
+  height?: number
+  annotations?: ImageAnnotation[]
 }
 
 export const ASSET_SIZE_PRESETS: readonly AssetSizePreset[] = [
@@ -67,6 +79,35 @@ const DEFAULT_CONFIG: AssetWorkbenchConfig = {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+export function assetImageMediaMetadata(asset: Asset): AssetImageMediaMetadata {
+  const image = recordValue(recordValue(asset.metadata).workbenchImage)
+  return {
+    source: image.source === 'upload' || image.source === 'generation' ? image.source : undefined,
+    assetTypeExplicit: image.assetTypeExplicit === true,
+    filename: typeof image.filename === 'string' ? image.filename : undefined,
+    originalFilename: typeof image.originalFilename === 'string' ? image.originalFilename : undefined,
+    mimeType: typeof image.mimeType === 'string' ? image.mimeType : undefined,
+    width: typeof image.width === 'number' && Number.isFinite(image.width) ? image.width : undefined,
+    height: typeof image.height === 'number' && Number.isFinite(image.height) ? image.height : undefined,
+    annotations: Array.isArray(image.annotations) ? image.annotations as ImageAnnotation[] : [],
+  }
+}
+
+export function patchAssetImageMediaMetadata(
+  metadata: Asset['metadata'],
+  patch: Partial<AssetImageMediaMetadata>,
+): Record<string, unknown> {
+  const current = recordValue(metadata)
+  const image = recordValue(current.workbenchImage)
+  return {
+    ...current,
+    workbenchImage: {
+      ...image,
+      ...patch,
+    },
+  }
 }
 
 function validSize(value: unknown): value is string {

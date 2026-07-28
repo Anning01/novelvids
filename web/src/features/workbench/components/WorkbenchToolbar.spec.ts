@@ -30,7 +30,7 @@ it('shows every verified add menu item in order', async () => {
 
   await wrapper.get('[aria-label="添加节点"]').trigger('click')
   expect(wrapper.findAll('[role="menuitem"]').map(item => item.text())).toEqual([
-    '空白资产',
+    '资产',
     '复用项目资产',
     '镜头',
     '便签',

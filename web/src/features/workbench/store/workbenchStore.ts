@@ -6,7 +6,7 @@ import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Vid
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
-import { assetTypeLabel } from '../config/assetConfig'
+import { assetImageMediaMetadata, assetTypeLabel, patchAssetImageMediaMetadata } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
 import { nodeCapabilities } from '../config/nodeCapabilities'
@@ -332,6 +332,34 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         content_type: uploaded.content_type || file.type,
       }, position)
     },
+    async uploadImageAsset(file: File, position?: Point) {
+      const uploaded = await api.upload(file)
+      const originalFilename = uploaded.original_filename || file.name
+      const canonicalName = mediaTitle(originalFilename)
+      const created = (await api.createAsset({
+        novel_id: this.novelId,
+        chapter_id: this.chapterId,
+        asset_type: AssetTypeEnum.ITEM,
+        canonical_name: canonicalName,
+        main_image: uploadedMediaUrl(uploaded.filename),
+        metadata: patchAssetImageMediaMetadata(undefined, {
+          source: 'upload',
+          assetTypeExplicit: false,
+          filename: uploaded.filename,
+          originalFilename,
+          mimeType: uploaded.content_type || file.type,
+          annotations: [],
+        }),
+      })).data
+      this.assets.push(created)
+      this.rebuildGraph()
+      const item = this.nodeByKey(`asset-${created.id}`) || null
+      if (item && position) item.position = position
+      if (item) this.selectNode(item.key)
+      this.persistLayout()
+      notice.success('图片已作为资产添加')
+      return item
+    },
     async replaceUploadedMedia(key: string, file: File) {
       const item = this.nodeByKey(key)
       if (!item || !uploadedMediaKinds.has(item.kind)) return null
@@ -654,6 +682,58 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
       this.rebuildGraph()
       notice.success('已设为主图')
+      return updated
+    },
+    async replaceAssetImage(assetId: number, file: File) {
+      const asset = this.assets.find(item => item.id === assetId)
+      if (!asset) return null
+      const currentImageMetadata = assetImageMediaMetadata(asset)
+      const uploaded = await api.upload(file)
+      const originalFilename = uploaded.original_filename || file.name
+      const updated = (await api.updateAsset(assetId, {
+        main_image: uploadedMediaUrl(uploaded.filename),
+        metadata: patchAssetImageMediaMetadata(asset.metadata, {
+          source: 'upload',
+          assetTypeExplicit: currentImageMetadata.source === 'upload'
+            ? currentImageMetadata.assetTypeExplicit
+            : true,
+          filename: uploaded.filename,
+          originalFilename,
+          mimeType: uploaded.content_type || file.type,
+          width: undefined,
+          height: undefined,
+          annotations: [],
+        }),
+      })).data
+      this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
+      this.rebuildGraph()
+      notice.success('资产图片已更新')
+      return updated
+    },
+    async updateAssetImageMetadata(assetId: number, patch: { width?: number; height?: number }) {
+      const asset = this.assets.find(item => item.id === assetId)
+      if (!asset) return null
+      const next = Object.fromEntries(Object.entries(patch)
+        .filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0))
+      if (!Object.keys(next).length) return asset
+      const updated = (await api.updateAsset(assetId, {
+        metadata: patchAssetImageMediaMetadata(asset.metadata, next),
+      })).data
+      this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
+      this.rebuildGraph()
+      return updated
+    },
+    async saveAssetImageAnnotations(assetId: number, annotations: ImageAnnotation[]) {
+      const asset = this.assets.find(item => item.id === assetId)
+      if (!asset) return null
+      const updated = (await api.updateAsset(assetId, {
+        metadata: patchAssetImageMediaMetadata(asset.metadata, {
+          annotations: cloneValue(annotations),
+        }),
+      })).data
+      this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
+      this.rebuildGraph()
+      notice.success('图片标注已保存')
       return updated
     },
     async createAssetVariant(assetId: number, data: { name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; metadata?: Record<string, unknown> }) {

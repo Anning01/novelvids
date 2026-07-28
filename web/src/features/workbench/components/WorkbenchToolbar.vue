@@ -147,7 +147,7 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
           <p class="workbench-add-menu__heading">添加节点</p>
           <button type="button" role="menuitem" aria-label="新增资产" @click="addNode('addAsset')">
             <Box :size="18" aria-hidden="true" />
-            <span>空白资产</span>
+            <span>资产</span>
           </button>
           <button type="button" role="menuitem" aria-label="复用项目资产" @click="addNode('reuseAsset')">
             <Library :size="18" aria-hidden="true" />

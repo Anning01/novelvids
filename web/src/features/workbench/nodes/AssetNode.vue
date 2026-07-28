@@ -1,23 +1,28 @@
 <script setup lang="ts">
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionOption } from '../components/materialMentionTypes'
-import type { WorkbenchNode } from '../types/workbenchTypes'
-import { Plus, ScanFace, Trash2 } from 'lucide-vue-next'
+import type { ImageAnnotation, WorkbenchNode } from '../types/workbenchTypes'
+import { Download, ImageUp, LoaderCircle, Pencil, Plus, ScanFace, Trash2 } from 'lucide-vue-next'
 import { computed, inject, ref, watch } from 'vue'
 import type { Asset, DigitalHuman } from '@/types'
 import { AssetTypeEnum } from '@/types'
+import { downloadFile } from '@/shared/downloadFile'
+import { notice } from '@/shared/notice'
+import ImageAnnotationDialog from '../components/ImageAnnotationDialog.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import MediaLibraryPicker from '../components/MediaLibraryPicker.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import WorkbenchSelect from '../components/WorkbenchSelect.vue'
 import WorkbenchSuggestedInput from '../components/WorkbenchSuggestedInput.vue'
+import { assetTypeIconFor, assetTypePresentationOptions } from '../components/assetTypePresentation'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import {
   ASSET_SIZE_PRESETS,
-  ASSET_TYPE_OPTIONS,
+  assetImageMediaMetadata,
   assetImageCandidates,
   assetSizeResolution,
   normalizeAssetConfig,
+  patchAssetImageMediaMetadata,
   patchAssetWorkbenchConfig,
   type AssetWorkbenchConfig,
 } from '../config/assetConfig'
@@ -31,11 +36,17 @@ const store = useWorkbenchStore()
 const promptEditor = inject(workbenchPromptEditorKey, null)
 const asset = computed(() => props.data.asset as Asset)
 const assetType = ref<AssetTypeEnum>(AssetTypeEnum.PERSON)
+const assetTypeExplicit = ref(true)
 const nickname = ref('')
 const description = ref('')
 const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value))
 const saving = ref(false)
 const changingMainImage = ref(false)
+const uploadingImage = ref(false)
+const downloadingImage = ref(false)
+const annotationOpen = ref(false)
+const loadedImageWidth = ref(0)
+const loadedImageHeight = ref(0)
 const digitalHumanPickerOpen = ref(false)
 const selectedVariantValue = ref('base')
 const addingVariant = ref(false)
@@ -44,6 +55,8 @@ const creatingVariant = ref(false)
 
 watch(asset, value => {
   assetType.value = value.asset_type
+  const media = assetImageMediaMetadata(value)
+  assetTypeExplicit.value = media.source !== 'upload' || media.assetTypeExplicit === true
   nickname.value = value.canonical_name
   description.value = value.description || ''
   config.value = normalizeAssetConfig(value)
@@ -57,6 +70,24 @@ const busy = computed(() => store.busyAssetIds.includes(asset.value.id))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
 const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
 const candidates = computed(() => assetImageCandidates(asset.value))
+const secondaryCandidates = computed(() => candidates.value.filter(candidate => !candidate.isMain))
+const imageMetadata = computed(() => assetImageMediaMetadata(asset.value))
+const annotations = computed(() => imageMetadata.value.annotations || [])
+const imagePixelSize = computed(() => {
+  const width = imageMetadata.value.width || loadedImageWidth.value
+  const height = imageMetadata.value.height || loadedImageHeight.value
+  return width > 0 && height > 0 ? `${Math.round(width)} × ${Math.round(height)}` : ''
+})
+const imageDownloadFilename = computed(() => {
+  const extension = imageMetadata.value.mimeType?.includes('webp')
+    ? 'webp'
+    : imageMetadata.value.mimeType?.includes('jpeg')
+      ? 'jpg'
+      : asset.value.main_image?.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || 'png'
+  const safeName = (nickname.value.trim() || asset.value.canonical_name || `asset-${asset.value.id}`)
+    .replace(/[\\/:*?"<>|]+/g, '-')
+  return `${safeName}.${extension}`
+})
 const variantOptions = computed(() => [
   { value: 'base', label: '基础形态' },
   ...(asset.value.variants || []).map(variant => ({
@@ -103,18 +134,20 @@ const sizeSuggestions = ASSET_SIZE_PRESETS.map(item => ({
   value: item.value,
   label: `${item.resolution} · ${item.ratio} · ${item.dimensions}${item.default ? '（默认）' : item.resolution === '2K' ? '（成本约 2 倍）' : ''}`,
 }))
-const assetTypeOptions = ASSET_TYPE_OPTIONS.map(option => ({ value: String(option.value), label: option.label }))
+const assetTypeOptions = assetTypePresentationOptions
 const assetTypeValue = computed({
-  get: () => String(assetType.value),
-  set: value => { assetType.value = Number(value) as AssetTypeEnum },
+  get: () => imageMetadata.value.source === 'upload' && !assetTypeExplicit.value ? 'image' : String(assetType.value),
+  set: (value) => {
+    if (value === 'image') {
+      assetTypeExplicit.value = false
+      void save()
+      return
+    }
+    assetType.value = Number(value) as AssetTypeEnum
+    assetTypeExplicit.value = true
+    void save()
+  },
 })
-const assetTypeBadgeClass = computed(() => ({
-  'is-character': assetType.value === AssetTypeEnum.PERSON,
-  'is-object': assetType.value === AssetTypeEnum.ITEM,
-  'is-scene': assetType.value === AssetTypeEnum.SCENE,
-  'is-product': assetType.value === AssetTypeEnum.PRODUCT,
-  'is-style': assetType.value === AssetTypeEnum.STYLE,
-}))
 function updateSize(value: string) {
   config.value.size = value
   config.value.resolution = assetSizeResolution(value)
@@ -143,7 +176,10 @@ async function save() {
       asset_type: assetType.value,
       canonical_name: nickname.value.trim() || asset.value.canonical_name,
       description: description.value,
-      metadata: patchAssetWorkbenchConfig(asset.value.metadata, nextConfig),
+      metadata: patchAssetImageMediaMetadata(
+        patchAssetWorkbenchConfig(asset.value.metadata, nextConfig),
+        { assetTypeExplicit: assetTypeExplicit.value },
+      ),
     })
   } finally {
     saving.value = false
@@ -220,6 +256,49 @@ async function setMainImage(url: string) {
   }
 }
 
+async function replaceImage(event: Event) {
+  const input = event.currentTarget as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || uploadingImage.value) return
+  uploadingImage.value = true
+  try {
+    await store.replaceAssetImage(asset.value.id, file)
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : '资产图片上传失败')
+  } finally {
+    uploadingImage.value = false
+  }
+}
+
+function captureImageDimensions(event: Event) {
+  const image = event.currentTarget as HTMLImageElement
+  loadedImageWidth.value = image.naturalWidth
+  loadedImageHeight.value = image.naturalHeight
+  if (imageMetadata.value.width === image.naturalWidth && imageMetadata.value.height === image.naturalHeight) return
+  void store.updateAssetImageMetadata(asset.value.id, {
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+  })
+}
+
+async function saveAnnotations(next: ImageAnnotation[]) {
+  await store.saveAssetImageAnnotations(asset.value.id, next)
+  annotationOpen.value = false
+}
+
+async function downloadImage() {
+  if (!asset.value.main_image || downloadingImage.value) return
+  downloadingImage.value = true
+  try {
+    await downloadFile(asset.value.main_image, imageDownloadFilename.value)
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : '资产图片下载失败')
+  } finally {
+    downloadingImage.value = false
+  }
+}
+
 function chooseDigitalHuman(item: DigitalHuman) {
   config.value.digitalHumanAssetId = item.asset_id
   config.value.digitalHumanPreviewUrl = item.image_url
@@ -230,19 +309,71 @@ function chooseDigitalHuman(item: DigitalHuman) {
 
 <template>
   <div class="workbench-node-component">
-    <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'asset', title: nickname || asset.canonical_name, status: busy ? 'running' : 'ready' }">
-      <div class="workbench-node-content" @focusout="handleNodeFocusOut">
+    <WorkbenchNodeFrame
+      v-bind="props"
+      :data="{
+        ...data,
+        kind: 'asset',
+        title: nickname || asset.canonical_name,
+        status: busy ? 'running' : 'ready',
+        floating_header: Boolean(asset.main_image),
+      }"
+    >
+      <template #icon>
         <WorkbenchSelect
-          class="workbench-badge workbench-asset-type-picker"
-          :class="assetTypeBadgeClass"
+          class="workbench-node-frame__icon-select"
           v-model="assetTypeValue"
           :options="assetTypeOptions"
           label="资产类型"
-          placeholder="选择类型"
+          :fallback-icon="assetTypeIconFor(assetTypeValue)"
+          icon-only
         />
-        <label class="workbench-field">
-          <span>昵称</span>
-          <input v-model="nickname" aria-label="资产昵称" maxlength="80">
+      </template>
+      <template #title>
+        <input
+          class="workbench-node-frame__title-input nodrag"
+          v-model="nickname"
+          aria-label="资产昵称"
+          maxlength="80"
+          @focusout="save"
+          @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
+          @pointerdown.stop
+        >
+      </template>
+      <template v-if="imagePixelSize" #meta>
+        <span class="workbench-node-frame__media-size">{{ imagePixelSize }}</span>
+      </template>
+      <template v-if="asset.main_image" #toolbar-actions>
+        <button type="button" aria-label="标注资产图片" title="标注图片" @click="annotationOpen = true">
+          <Pencil :size="16" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          :disabled="downloadingImage"
+          :aria-label="`下载图片，保存为 ${imageDownloadFilename}`"
+          :title="`下载 · ${imageDownloadFilename}`"
+          @click="downloadImage"
+        >
+          <LoaderCircle v-if="downloadingImage" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
+          <Download v-else :size="16" aria-hidden="true" />
+        </button>
+      </template>
+      <div class="workbench-node-content" @focusout="handleNodeFocusOut">
+        <img
+          v-if="asset.main_image"
+          class="workbench-uploaded-image-preview"
+          :src="asset.main_image"
+          :alt="`${nickname || asset.canonical_name}预览`"
+          draggable="false"
+          loading="lazy"
+          decoding="async"
+          @load="captureImageDimensions"
+        >
+        <div v-else class="workbench-media-placeholder">上传或生成图片后，资产与图片会在同一节点展示</div>
+        <label class="workbench-asset-image-upload nodrag" :class="{ 'is-disabled': uploadingImage }">
+          <ImageUp :size="14" aria-hidden="true" />
+          {{ uploadingImage ? '上传中…' : asset.main_image ? '替换图片' : '上传图片' }}
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="uploadingImage" aria-label="上传资产图片" @change="replaceImage">
         </label>
 
         <section class="workbench-asset-generation nodrag" aria-label="资产图片生成">
@@ -299,8 +430,8 @@ function chooseDigitalHuman(item: DigitalHuman) {
           </fieldset>
         </section>
 
-        <div v-if="candidates.length" class="workbench-candidates" aria-label="图片候选">
-          <figure v-for="(candidate, index) in candidates" :key="candidate.url">
+        <div v-if="secondaryCandidates.length" class="workbench-candidates" aria-label="图片候选">
+          <figure v-for="(candidate, index) in secondaryCandidates" :key="candidate.url">
             <img :src="candidate.url" :alt="`候选图片 ${index + 1}`" loading="lazy" decoding="async">
             <figcaption v-if="candidate.label">{{ candidate.label }}</figcaption>
             <button type="button" :aria-label="candidate.isMain ? `候选图片 ${index + 1} 当前为主图` : `设候选图片 ${index + 1}为主图`" :aria-pressed="candidate.isMain" :disabled="candidate.isMain || changingMainImage" @click="setMainImage(candidate.url)">
@@ -333,6 +464,13 @@ function chooseDigitalHuman(item: DigitalHuman) {
       :selected-asset-id="config.digitalHumanAssetId"
       @close="digitalHumanPickerOpen = false"
       @choose="chooseDigitalHuman($event as DigitalHuman)"
+    />
+    <ImageAnnotationDialog
+      :open="annotationOpen"
+      :image-url="asset.main_image || ''"
+      :model-value="annotations"
+      @close="annotationOpen = false"
+      @save="saveAnnotations"
     />
   </div>
 </template>

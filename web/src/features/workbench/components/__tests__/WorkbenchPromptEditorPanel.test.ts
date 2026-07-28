@@ -40,10 +40,10 @@ describe('workbenchPromptEditorPanel positioning', () => {
       },
     });
     const panel = await waitFor(() => view.getByRole('dialog', { name: '图片 Prompt编辑器' }));
-    await waitFor(() => expect(panel).toHaveStyle({ top: '412px', left: '395px' }));
+    await waitFor(() => expect(panel).toHaveStyle({ top: '412px', left: '619px', width: '512px', height: '320px' }));
 
     anchorRect = DOMRect.fromRect({ x: 200, y: 150, width: 350, height: 300 });
-    await waitFor(() => expect(panel).toHaveStyle({ top: '462px', left: '-105px' }));
+    await waitFor(() => expect(panel).toHaveStyle({ top: '462px', left: '119px' }));
 
     view.unmount();
     anchor.remove();

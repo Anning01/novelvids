@@ -179,7 +179,13 @@ function togglePalette() {
 <template>
   <article
     class="workbench-node-frame"
-    :class="{ 'is-selected': selected, 'is-collapsed': collapsed, 'is-ignored': ignored, 'has-marker': markerColor }"
+    :class="{
+      'is-selected': selected,
+      'is-collapsed': collapsed,
+      'is-ignored': ignored,
+      'has-marker': markerColor,
+      'has-floating-header': data.floating_header === true,
+    }"
     :style="markerColor ? { '--workbench-node-marker': markerColor } : undefined"
     :aria-label="`${data.title || '未命名'}节点`"
   >
@@ -246,12 +252,29 @@ function togglePalette() {
     </span>
 
     <header class="workbench-node-frame__header">
-      <component :is="icon" :size="17" aria-hidden="true" />
-      <span>{{ data.title || '未命名节点' }}</span>
+      <span class="workbench-node-frame__header-icon">
+        <slot name="icon">
+          <component :is="icon" :size="17" aria-hidden="true" />
+        </slot>
+      </span>
+      <span class="workbench-node-frame__header-title">
+        <slot name="title">
+          <span>{{ data.title || '未命名节点' }}</span>
+        </slot>
+      </span>
       <span v-if="ignored" class="workbench-node-frame__ignored">已忽略</span>
-      <span class="workbench-node-frame__status">{{ data.status || 'ready' }}</span>
+      <slot name="meta" />
+      <span v-if="data.floating_header !== true" class="workbench-node-frame__status">{{ data.status || 'ready' }}</span>
     </header>
-    <div v-if="!collapsed" class="workbench-node-frame__body nodrag">
+    <div
+      v-if="!collapsed"
+      class="workbench-node-frame__body"
+      :class="{
+        'nodrag': data.body_draggable !== true,
+        'workbench-node-frame__body--draggable': data.body_draggable === true,
+        'workbench-node-frame__body--flush': data.body_flush === true,
+      }"
+    >
       <slot>
         <span>{{ kind === 'unsupported' ? '暂不支持此节点类型' : '等待节点内容' }}</span>
       </slot>
