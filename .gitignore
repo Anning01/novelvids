@@ -87,3 +87,5 @@ temp/
 media
 novelvids.db*
 .playwright-mcp
+
+.codex-pet-runs
