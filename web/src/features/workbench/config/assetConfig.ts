@@ -23,7 +23,9 @@ export interface AssetImageCandidate {
   key: string
   url: string
   isMain: boolean
+  displayIndex: number
   label?: string
+  source?: 'asset' | 'digital_human'
 }
 
 export interface AssetImageMediaMetadata {
@@ -175,8 +177,21 @@ export function assetImageCandidates(asset: Asset): AssetImageCandidate[] {
       url,
       ...(label ? { label } : {}),
       isMain: url === asset.main_image,
+      displayIndex: seen.size - 1,
+      source: 'asset' as const,
     }]
   })
+}
+
+export function assetSelectedImageCandidates(asset: Asset): AssetImageCandidate[] {
+  const candidates = assetImageCandidates(asset)
+  const selectedValue = recordValue(asset.metadata).selected_image_urls
+  if (!Array.isArray(selectedValue)) {
+    const primary = candidates.find(candidate => candidate.isMain)
+    return primary ? [primary] : candidates.slice(0, 1)
+  }
+  const selected = new Set(selectedValue.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())))
+  return candidates.filter(candidate => selected.has(candidate.url.trim()))
 }
 
 export function assetSizeResolution(size: string): AssetWorkbenchConfig['resolution'] {

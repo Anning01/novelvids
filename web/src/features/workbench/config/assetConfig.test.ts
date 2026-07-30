@@ -4,6 +4,7 @@ import { AssetTypeEnum } from '@/types'
 import {
   ASSET_SIZE_PRESETS,
   assetImageCandidates,
+  assetSelectedImageCandidates,
   normalizeAssetConfig,
   patchAssetWorkbenchConfig,
 } from './assetConfig'
@@ -80,9 +81,26 @@ describe('asset workbench configuration', () => {
       angle_image_2: '/b.png',
     })
     expect(assetImageCandidates(asset)).toEqual([
-      { key: 'angle_image_1', url: '/a.png', isMain: true },
-      { key: 'angle_image_2', url: '/b.png', isMain: false },
+      { key: 'angle_image_1', url: '/a.png', isMain: true, displayIndex: 0, source: 'asset' },
+      { key: 'angle_image_2', url: '/b.png', isMain: false, displayIndex: 1, source: 'asset' },
     ])
+  })
+
+  it('uses only the primary image by default and honors an explicit multi-image selection', () => {
+    const base = makeAsset({
+      main_image: '/main.png',
+      angle_image_1: '/side.png',
+      metadata: { image_gallery: ['/main.png', '/side.png', '/back.png'] },
+    })
+
+    expect(assetSelectedImageCandidates(base).map(item => item.url)).toEqual(['/main.png'])
+    expect(assetSelectedImageCandidates({
+      ...base,
+      metadata: {
+        ...base.metadata,
+        selected_image_urls: ['/side.png', '/back.png'],
+      },
+    }).map(item => item.url)).toEqual(['/side.png', '/back.png'])
   })
 
   it('keeps candidate thumbnail order stable when another image becomes main', () => {

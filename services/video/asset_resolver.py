@@ -106,16 +106,32 @@ def _find_chapter_variant(
 
 
 def _collect_images(asset: Asset, variant: AssetVariant | None = None) -> list[str]:
-    """收集资产的所有参考图（URL 直接返回，本地路径转 base64）。"""
-    sources = list(variant.images or []) if variant else [
-        asset.main_image,
-        asset.angle_image_1,
-        asset.angle_image_2,
-    ]
-    if not variant:
+    """收集资产采用的参考图（URL 直接返回，本地路径转 base64）。
+
+    基础资产默认只传当前主图；只有显式配置 ``selected_image_urls`` 时才传多张。
+    视觉形态仍保留自身的多图语义。
+    """
+    if variant:
+        sources = list(variant.images or [])
+    else:
+        sources = [
+            asset.main_image,
+            asset.angle_image_1,
+            asset.angle_image_2,
+        ]
         gallery = (asset.metadata or {}).get("image_gallery")
         if isinstance(gallery, list):
             sources.extend(item for item in gallery if isinstance(item, str))
+        selected_value = (asset.metadata or {}).get("selected_image_urls")
+        if isinstance(selected_value, list):
+            selected_urls = {
+                value.strip()
+                for value in selected_value
+                if isinstance(value, str) and value.strip()
+            }
+            sources = [source for source in sources if source in selected_urls]
+        else:
+            sources = [next((source for source in sources if source), None)]
     images: list[str] = []
     seen: set[str] = set()
     for path in sources:

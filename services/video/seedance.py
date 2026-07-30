@@ -57,9 +57,9 @@ class SeedanceGenerator(BaseVideoGenerator):
                 break
             images = subj.get("images", [])
             if images:
-                # 取该资产的第一张图（主图）
-                ref_images.append(images[0])
-                name_to_index[subj["name"]] = len(ref_images)  # 1-based
+                name_to_index[subj["name"]] = len(ref_images) + 1  # 1-based
+                remaining = MAX_REF_IMAGES - len(ref_images)
+                ref_images.extend(images[:remaining])
 
         # 替换 prompt 中的 @引用
         def _replace(m: re.Match) -> str:

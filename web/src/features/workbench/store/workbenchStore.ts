@@ -677,11 +677,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success(`已复用资产「${reused.canonical_name}」`)
       return item
     },
-    async setAssetMainImage(assetId: number, url: string) {
-      const updated = (await api.updateAsset(assetId, { main_image: url })).data
+    async setAssetMainImage(assetId: number, url: string | null) {
+      const updated = (await api.updateAsset(assetId, { main_image: url } as Partial<Asset>)).data
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
       this.rebuildGraph()
-      notice.success('已设为主图')
+      notice.success(url ? '已设为主图' : '已清除主图')
       return updated
     },
     async replaceAssetImage(assetId: number, file: File) {

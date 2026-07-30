@@ -3,11 +3,12 @@ import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 import { computed, inject, ref, watch } from 'vue'
-import type { EnumItem, Scene, Video } from '@/types'
+import type { Asset, EnumItem, Scene, Video } from '@/types'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import WorkbenchSelect from '../components/WorkbenchSelect.vue'
+import { assetSelectedImageCandidates } from '../config/assetConfig'
 import {
   normalizeShotConfig,
   patchShotWorkbenchConfig,
@@ -66,8 +67,10 @@ function mediaKindForNode(node: WorkbenchNode): MaterialMentionOption['mediaKind
 }
 
 function previewUrlForNode(node: WorkbenchNode) {
-  if (node.kind === 'asset')
-    return (node.data.asset as { main_image?: string } | undefined)?.main_image || ''
+  if (node.kind === 'asset') {
+    const asset = node.data.asset as Asset | undefined
+    return asset ? assetSelectedImageCandidates(asset).at(0)?.url || '' : ''
+  }
   if (node.kind === 'digital_human')
     return (node.data.resource as { image_url?: string } | undefined)?.image_url || ''
   if (node.kind === 'audio_reference')
@@ -108,29 +111,40 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
     if (!source) return []
     const mediaKind = mediaKindForNode(source)
     const previewUrl = previewUrlForNode(source)
-    return [{
+    const base = {
       nodeKey: source.key,
       name: source.title.trim() || source.key,
       prompt: promptForNode(source),
       previewUrl,
       hasImage: mediaKind === 'image' && Boolean(previewUrl),
       mediaKind,
-    }]
+    }
+    if (source.kind !== 'asset' || referenceMode(edge, source) !== 'reference_image') return [base]
+    const candidates = assetSelectedImageCandidates(source.data.asset as Asset)
+    if (candidates.length <= 1) return [base]
+    return candidates.map(candidate => ({
+      ...base,
+      mentionKey: `${source.key}:image:${candidate.displayIndex}`,
+      name: `${base.name}-图${candidate.displayIndex + 1}`,
+      previewUrl: candidate.url,
+      hasImage: true,
+      mediaKind: 'image' as const,
+    }))
   }),
 ))
 
 const materialMentions = computed<MaterialMention[]>(() => {
-  const optionByNode = new Map(materialOptions.value.map(option => [option.nodeKey, option]))
   return disambiguateMaterialMentionNames(referenceEdges.value.flatMap((edge) => {
     const source = store.nodeByKey(edge.source)
-    const option = optionByNode.get(edge.source)
-    if (!source || !option) return []
-    return [{
-      ...option,
-      edgeKey: edge.key,
-      connectionKey: edge.key,
-      mode: referenceMode(edge, source),
-    }]
+    if (!source) return []
+    return materialOptions.value
+      .filter(option => option.nodeKey === edge.source)
+      .map((option, index) => ({
+        ...option,
+        edgeKey: `${edge.key}:${option.mentionKey || index}`,
+        connectionKey: edge.key,
+        mode: referenceMode(edge, source),
+      }))
   }))
 })
 
