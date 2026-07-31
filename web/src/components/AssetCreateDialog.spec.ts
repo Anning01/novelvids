@@ -12,6 +12,8 @@ vi.mock('@/api', () => ({
     configs: vi.fn(),
     digitalHumans: vi.fn(),
     assetLibrary: vi.fn(),
+    asset: vi.fn(),
+    referencePromptPreview: vi.fn(),
   },
 }))
 
@@ -56,7 +58,8 @@ const editedAsset: Asset = {
   novel_id: 9,
   asset_type: AssetTypeEnum.PERSON,
   canonical_name: '李火旺',
-  description: '角色描述',
+  description: '被困在诡异溶洞中的少年，性格偏执。',
+  base_traits: '时代基底：架空；脸型：清瘦冷硬；发型：黑发粗麻绳束起',
   metadata: {},
   created_at: '2026-07-26T00:00:00.000Z',
   updated_at: '2026-07-26T00:00:00.000Z',
@@ -78,6 +81,15 @@ it('keeps the selected library card outline inside the scroll viewport', async (
     message: 'ok',
     data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
   })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: editedAsset })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: {
+      prompt: '任务：完成角色的上半身正面平视特写和该角色的全身三视图。\n\n角色描述：\n时代基底：架空；脸型：清瘦冷硬；发型：黑发粗麻绳束起',
+      prompt_language: 'zh',
+    },
+  })
 
   const wrapper = mount(AssetCreateDialog, {
     attachTo: document.body,
@@ -85,6 +97,9 @@ it('keeps the selected library card outline inside the scroll viewport', async (
     global: { components: { AppButton }, stubs: { Teleport: true } },
   })
   await flushPromises()
+
+  expect(wrapper.get('textarea').element.value).toContain('上半身正面平视特写')
+  expect(wrapper.get('textarea').element.value).not.toContain(editedAsset.description)
 
   const libraryMode = wrapper.findAll('button').find(button => button.text().includes('从角色库选择'))
   expect(libraryMode).toBeDefined()

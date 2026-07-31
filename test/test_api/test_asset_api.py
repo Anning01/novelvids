@@ -3,6 +3,7 @@ from httpx import AsyncClient
 from models.novel import Novel
 from models.asset import Asset
 from models.chapter import Chapter
+from models.config import GeneralConfig
 from utils.enums import AssetTypeEnum
 
 
@@ -81,6 +82,73 @@ async def test_api_get_asset_detail(client: AsyncClient):
     data = response.json()["data"]
     assert data["id"] == asset.id
     assert data["canonical_name"] == "宝剑"
+
+
+@pytest.mark.asyncio
+async def test_api_previews_exact_reference_prompt_without_narrative_description(
+    client: AsyncClient,
+):
+    await GeneralConfig.create(id=1, prompt_language="zh")
+
+    response = await client.post(
+        "/api/asset/reference-prompt/preview",
+        json={
+            "asset_type": AssetTypeEnum.person.value,
+            "canonical_name": "李火旺",
+            "base_traits": "时代基底：架空；脸型：清瘦冷硬；发型：黑发粗麻绳束起",
+            "description": "被困在诡异溶洞中的少年，性格偏执。",
+            "metadata": {"reference_layout": "character_turnaround"},
+            "aspect_ratio": "16:9",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    prompt = response.json()["data"]["prompt"]
+    assert prompt.startswith("任务：完成角色的上半身正面平视特写")
+    assert "正面全身、侧面全身、背面全身" in prompt
+    assert "时代基底：架空" in prompt
+    assert "被困在诡异溶洞" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_api_merge_assets_keeps_target_id_and_incremental_fields(
+    client: AsyncClient,
+):
+    novel = await Novel.create(name="Merge API Novel")
+    target = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.item.value,
+        canonical_name="旧腰牌",
+        description="旧资料",
+        main_image="/media/waist-token.png",
+        source_chapters=[1],
+        last_updated_chapter=1,
+    )
+    source = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.item.value,
+        canonical_name="腐朽桃木腰牌",
+        description="新资料",
+        source_chapters=[8],
+        last_updated_chapter=8,
+    )
+
+    response = await client.post(
+        "/api/asset/merge",
+        json={
+            "source_asset_id": source.id,
+            "target_asset_id": target.id,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["asset"]["id"] == target.id
+    assert data["asset"]["canonical_name"] == "腐朽桃木腰牌"
+    assert data["asset"]["description"] == "新资料"
+    assert data["asset"]["main_image"] == "/media/waist-token.png"
+    assert data["asset"]["source_chapters"] == [1, 8]
+    assert data["removed_asset_id"] == source.id
 
 
 @pytest.mark.asyncio

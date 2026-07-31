@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 
-from models.config import AiModelConfig
-from schemas.config import AiModelConfigCreate, AiModelConfigUpdate
+from models.config import AiModelConfig, GeneralConfig
+from schemas.config import AiModelConfigCreate, AiModelConfigUpdate, GeneralConfigUpdate
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum
 
@@ -92,3 +92,26 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
 
 
 ai_model_config_controller = AiModelConfigController()
+
+
+class GeneralConfigController:
+    """管理应用级单例配置。"""
+
+    async def get(self) -> GeneralConfig:
+        config, _ = await GeneralConfig.get_or_create(
+            id=1,
+            defaults={"prompt_language": "en"},
+        )
+        return config
+
+    async def update(self, obj_in: GeneralConfigUpdate) -> GeneralConfig:
+        config = await self.get()
+        config.prompt_language = obj_in.prompt_language
+        await config.save(update_fields=["prompt_language", "updated_at"])
+        return config
+
+    async def get_prompt_language(self) -> str:
+        return (await self.get()).prompt_language
+
+
+general_config_controller = GeneralConfigController()

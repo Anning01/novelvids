@@ -51,6 +51,17 @@ async def delete_chapter(chapter_id: int):
     await chapter_controller.remove(chapter_id)
     return ResponseSchema()
 
+
+@router.get(
+    "/extract/{chapter_id}/latest",
+    summary="获取章节最近一次提取任务",
+    response_model=ResponseSchema[AiTaskOut | None],
+)
+async def get_latest_extraction_task(chapter_id: int):
+    task = await chapter_controller.latest_extraction_task(chapter_id)
+    return ResponseSchema(data=task)
+
+
 @router.post("/extract/{chapter_id}", summary="连通分量+增量式状态机提取", response_model=ResponseSchema[AiTaskOut])
 async def extract_chapter(chapter_id: int, bg: BackgroundTasks):
     task = await chapter_controller.extract(chapter_id)

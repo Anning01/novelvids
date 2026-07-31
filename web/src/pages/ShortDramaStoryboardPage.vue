@@ -78,7 +78,6 @@ const selectedVideoModel = ref('3')
 const videos = ref<Record<number, VideoResult[]>>({})
 const loading = ref(true)
 const generatingChapterIds = ref<Set<number>>(new Set())
-const extractingChapterIds = ref<Set<number>>(new Set())
 const savingSceneIds = ref<Set<number>>(new Set())
 const generatingVideoSceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
@@ -93,7 +92,6 @@ let sceneObserver: IntersectionObserver | undefined
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
-const extractingChapterAssets = computed(() => extractingChapterIds.value.has(activeChapterId.value))
 const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
 const videoModelOptions = computed(() => (
   videoModelTypes.value.length
@@ -278,32 +276,6 @@ async function generateChapterStoryboard(chapterId: number) {
     notice.error(message)
   } finally {
     setChapterGenerating(chapterId, false)
-  }
-}
-
-async function extractChapterAssets() {
-  const chapterId = activeChapterId.value
-  if (!chapterId || extractingChapterIds.value.has(chapterId)) return
-  extractingChapterIds.value = new Set([...extractingChapterIds.value, chapterId])
-  try {
-    let task = (await api.extract(chapterId)).data
-    while (alive && !terminalTaskStatuses.has(task.status)) {
-      await sleep(1500)
-      task = (await api.task(task.id)).data
-    }
-    if (!alive) return
-    if (task.status !== TaskStatusEnum.COMPLETED) {
-      throw new Error(task.error_message || '本章资产提取失败')
-    }
-    const result = await fetchChapterScenes(chapterId)
-    if (activeChapterId.value === chapterId) showChapterScenes(result)
-    notice.success(`第 ${activeChapter.value?.number || '-'} 章资产提取完成`)
-  } catch (error) {
-    notice.error((error as Error).message)
-  } finally {
-    const next = new Set(extractingChapterIds.value)
-    next.delete(chapterId)
-    extractingChapterIds.value = next
   }
 }
 
@@ -617,8 +589,7 @@ onBeforeUnmount(() => {
         <header v-if="workspaceView === 'storyboard'" class="chapter-toolbar">
           <div><span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span><h1>第 {{ activeChapter?.number || '-' }} 集 · {{ activeChapter?.name || '分镜制作' }}</h1><p>{{ activeChapter?.content?.slice(0, 120) }}</p></div>
           <div class="chapter-actions">
-            <AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" align="end" />
-            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="extractingChapterAssets" :disabled="extractingChapterAssets" @click="extractChapterAssets"><Boxes v-if="!extractingChapterAssets" :size="15" />{{ extractingChapterAssets ? '正在提取本章' : '提取本章资产' }}</AppButton>
+            <AppSelect v-model="selectedVideoModel" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" align="end" />
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
             <AppButton variant="primary" size="sm" @click="addScene"><Plus :size="15" />添加分镜</AppButton>
           </div>
@@ -673,7 +644,7 @@ onBeforeUnmount(() => {
                 <div class="prompt-reference-bar"><AppButton variant="soft" size="sm" icon-only aria-label="添加参考素材"><Plus :size="14" /></AppButton><span>使用 @ 引用角色、场景、道具、音色及参考素材，编辑更灵活，分镜更精准</span></div>
                 <textarea v-model="draftFor(scene).prompt" placeholder="请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。" />
                 <footer>
-                  <div><AppSelect v-model="selectedVideoModel" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="220" /><span><Clock3 :size="14" /><input v-model.number="draftFor(scene).duration" type="number" min="1" max="30" />s</span><span>{{ project?.resolution || '720p' }}</span><span>1x</span></div>
+                  <div><AppSelect v-model="selectedVideoModel" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" /><span><Clock3 :size="14" /><input v-model.number="draftFor(scene).duration" type="number" min="1" max="30" />s</span><span>{{ project?.resolution || '720p' }}</span><span>1x</span></div>
                   <AppButton variant="primary" size="md" :aria-label="`生成视频，预计消耗 ${draftFor(scene).duration * 150}`" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : draftFor(scene).duration * 150 }}</AppButton>
                 </footer>
               </section>
@@ -728,6 +699,7 @@ onBeforeUnmount(() => {
 .chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; }
 .chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: #898f9e; font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.video-model-select { width: 148px; min-width: 148px; }
 .workspace-view-switch { grid-column: 3; display: flex; justify-self: end; align-items: center; gap: 3px; padding: 3px; border-radius: 11px; background: #f1f2f7; box-shadow: inset 0 0 0 1px #e5e7ef; }
 .workspace-view-switch button { min-height: 32px; gap: 6px; padding-inline: 11px; border-radius: 8px; color: #777d8d; background: transparent; box-shadow: none; font-size: 11px; }
 .workspace-view-switch button:hover { color: #575d6d; background: rgb(255 255 255 / 68%); }

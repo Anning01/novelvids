@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 from openai import AsyncOpenAI
 
@@ -23,6 +24,31 @@ EXTRACTOR_ASSET_MAP = [
 ]
 
 
+def _identity_key(value: str) -> str:
+    return re.sub(r"[\W_]+", "", (value or "").casefold())
+
+
+def _identity_keys(asset: Asset) -> set[str]:
+    return {
+        key
+        for key in (
+            _identity_key(asset.canonical_name),
+            *(_identity_key(alias) for alias in (asset.aliases or [])),
+        )
+        if key
+    }
+
+
+def _ordered_strings(*groups: list[str] | None) -> list[str]:
+    result: list[str] = []
+    for values in groups:
+        for value in values or []:
+            value = value.strip()
+            if value and value not in result:
+                result.append(value)
+    return result
+
+
 class ExtractionTaskHandler(BaseTaskHandler):
     """提取任务处理器 - 人物/场景/物品提取并写入资产表。"""
 
@@ -44,6 +70,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
         model = request_params["model"]
         concurrency = request_params.get("concurrency", 1)
         supports_json_output = request_params.get("supports_json_output", False)
+        prompt_language = request_params.get("prompt_language", "en")
 
         chapter = await Chapter.get(id=chapter_id)
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -55,6 +82,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                     client,
                     model=model,
                     supports_json_output=supports_json_output,
+                    prompt_language=prompt_language,
                 )
                 result = await extractor.extract(chapter.content, chapter.number)
                 return asset_type, result_key, result
@@ -86,42 +114,89 @@ class ExtractionTaskHandler(BaseTaskHandler):
     ) -> list[dict]:
         """保存/更新资产，增量式合并。"""
         saved = []
+        existing_assets = await Asset.filter(
+            novel_id=novel_id,
+            asset_type=asset_type.value,
+        )
         for item in items:
-            # 按 novel + asset_type + canonical_name 查找已有资产
-            existing = await Asset.get_or_none(
-                novel_id=novel_id,
-                asset_type=asset_type.value,
-                canonical_name=item.name,
+            item_metadata = {}
+            if asset_type == AssetTypeEnum.person:
+                item_metadata["reference_layout"] = getattr(
+                    item,
+                    "reference_layout",
+                    "character_turnaround",
+                )
+
+            incoming_keys = {
+                key
+                for key in (
+                    _identity_key(item.name),
+                    *(_identity_key(alias) for alias in item.aliases),
+                )
+                if key
+            }
+            # Canonical names and known aliases share one identity space. This
+            # keeps later chapters from creating a duplicate just because the
+            # novel switches to a nickname.
+            existing = next(
+                (
+                    asset
+                    for asset in existing_assets
+                    if incoming_keys & _identity_keys(asset)
+                ),
+                None,
             )
 
             if existing:
-                # 增量更新：合并别名、追加章节、更新描述
-                merged_aliases = list(set(existing.aliases + item.aliases))
-                source_chapters = existing.source_chapters
+                # Incremental update: newer non-empty semantic data wins, while
+                # images and other fields already on the asset remain intact.
+                # Re-extracting an earlier chapter must never roll a later
+                # state backwards.
+                existing_last_chapter = int(existing.last_updated_chapter or 0)
+                incoming_is_current = chapter_number >= existing_last_chapter
+                merged_aliases = _ordered_strings(
+                    existing.aliases,
+                    [item.name] if item.name != existing.canonical_name else [],
+                    item.aliases,
+                )
+                source_chapters = list(existing.source_chapters or [])
                 if chapter_number not in source_chapters:
                     source_chapters.append(chapter_number)
 
                 existing.aliases = merged_aliases
-                existing.description = item.description
-                existing.base_traits = item.base_traits
-                existing.source_chapters = source_chapters
-                existing.last_updated_chapter = chapter_number
+                if incoming_is_current and item.description.strip():
+                    existing.description = item.description
+                if incoming_is_current and item.base_traits.strip():
+                    existing.base_traits = item.base_traits
+                existing_metadata = (
+                    dict(existing.metadata)
+                    if isinstance(existing.metadata, dict)
+                    else {}
+                )
+                existing.metadata = {**existing_metadata, **item_metadata}
+                existing.source_chapters = sorted(source_chapters)
+                existing.last_updated_chapter = max(
+                    existing_last_chapter,
+                    chapter_number,
+                )
                 await existing.save(update_fields=[
-                    "aliases", "description", "base_traits",
+                    "aliases", "description", "base_traits", "metadata",
                     "source_chapters", "last_updated_chapter", "updated_at",
                 ])
                 saved.append({"name": item.name, "action": "updated"})
             else:
-                await Asset.create(
+                created = await Asset.create(
                     novel_id=novel_id,
                     asset_type=asset_type.value,
                     canonical_name=item.name,
                     aliases=item.aliases,
                     description=item.description,
                     base_traits=item.base_traits,
+                    metadata=item_metadata,
                     source_chapters=[chapter_number],
                     last_updated_chapter=chapter_number,
                 )
+                existing_assets.append(created)
                 saved.append({"name": item.name, "action": "created"})
 
         return saved

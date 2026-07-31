@@ -53,3 +53,17 @@ class AiModelConfig(AbstractBaseModel):
     def __str__(self):
         status = "✓" if self.is_active else "✗"
         return f"[{status}] {self.name}({AiTaskTypeEnum(self.task_type).nickname})"
+
+
+class GeneralConfig(AbstractBaseModel):
+    """应用级通用配置。固定使用 id=1 的单例记录。"""
+
+    prompt_language = fields.CharField(
+        max_length=8,
+        default="en",
+        description="新生成提示词使用的语言：zh/en",
+    )
+
+    class Meta:
+        table = "general_configs"
+        table_description = "应用级通用配置表"

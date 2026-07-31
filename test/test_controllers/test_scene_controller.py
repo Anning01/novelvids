@@ -161,6 +161,7 @@ async def test_generate_submits_task():
     assert task.status == TaskStatusEnum.pending.value
     assert task.request_params["chapter_id"] == chapter.id
     assert task.request_params["supports_json_output"] is True
+    assert task.request_params["prompt_language"] == "en"
     print(f"    提交任务 id={task.id}, type=storyboard, status=pending, chapter_id={chapter.id}")
 
 

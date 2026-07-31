@@ -5,6 +5,36 @@ from utils.enums import AiTaskTypeEnum
 
 
 @pytest.mark.asyncio
+async def test_api_general_config_defaults_to_english(client: AsyncClient):
+    response = await client.get("/api/config/general")
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["prompt_language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_api_update_general_prompt_language(client: AsyncClient):
+    response = await client.put(
+        "/api/config/general",
+        json={"prompt_language": "zh"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["prompt_language"] == "zh"
+
+    persisted = await client.get("/api/config/general")
+    assert persisted.json()["data"]["prompt_language"] == "zh"
+
+
+@pytest.mark.asyncio
+async def test_api_rejects_invalid_prompt_language(client: AsyncClient):
+    response = await client.put(
+        "/api/config/general",
+        json={"prompt_language": "ja"},
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == 422
+
+
+@pytest.mark.asyncio
 async def test_api_create_config(client: AsyncClient):
     """创建模型配置。"""
     payload = {

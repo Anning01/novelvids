@@ -165,7 +165,11 @@ async def test_analyze_novel_submits_one_safe_task():
 
     assert first.id == second.id
     assert first.task_type == AiTaskTypeEnum.project_analysis.value
-    assert first.request_params == {"novel_id": novel.id, "resolution": "1K"}
+    assert first.request_params == {
+        "novel_id": novel.id,
+        "resolution": "1K",
+        "prompt_language": "en",
+    }
     assert "api_key" not in first.request_params
 
 

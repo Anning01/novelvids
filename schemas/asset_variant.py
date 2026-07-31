@@ -8,7 +8,7 @@ from schemas._base import BaseResponse
 class AssetVariantProperties(BaseModel):
     name: Optional[str] = Field(None, max_length=100, description="形态名称")
     description: Optional[str] = Field(None, description="该形态的中文描述")
-    base_traits: Optional[str] = Field(None, description="该形态的英文视觉描述")
+    base_traits: Optional[str] = Field(None, description="该形态的视觉描述（语言由通用配置决定）")
     chapter_numbers: Optional[list[int]] = Field(None, description="适用章节序号")
     images: Optional[list[str]] = Field(None, description="多张参考图")
     metadata: Optional[Any] = Field(None, description="扩展生成参数")

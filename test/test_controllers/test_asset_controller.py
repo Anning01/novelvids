@@ -4,7 +4,9 @@ from fastapi import HTTPException
 from controllers.asset import asset_controller
 from models.novel import Novel
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from models.chapter import Chapter
+from models.scene import Scene
 from schemas.asset import AssetCreate, AssetUpdate, AssetPatch
 from utils.enums import AssetTypeEnum
 from utils.page import QueryParams
@@ -105,6 +107,118 @@ async def test_删除资产():
     await asset_controller.remove(asset.id)
     exists = await Asset.filter(id=asset.id).exists()
     assert not exists
+
+
+@pytest.mark.asyncio
+async def test_增量合并_较新资料继承旧资产图片与引用():
+    novel = await Novel.create(name="Merge Asset Novel", author="Author")
+    chapter = await Chapter.create(
+        novel=novel,
+        number=8,
+        name="第八章",
+        content="正文",
+    )
+    target = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.item.value,
+        canonical_name="桃木洞窟牌",
+        aliases=["旧腰牌"],
+        description="旧描述",
+        base_traits="旧视觉资料",
+        main_image="/media/old-main.png",
+        source_chapters=[1],
+        last_updated_chapter=1,
+        metadata={"resolution": "2K", "legacy": {"keep": True}},
+    )
+    source = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.item.value,
+        canonical_name="腐朽桃木腰牌",
+        aliases=["洞窟腰牌"],
+        description="第八章确认的完整新描述",
+        base_traits="新的稳定视觉资料",
+        source_chapters=[8],
+        last_updated_chapter=8,
+        metadata={"aspect_ratio": "16:9", "legacy": {"new": True}},
+    )
+    scene = await Scene.create(chapter=chapter, sequence=1)
+    await scene.assets.add(source)
+    await AssetVariant.create(
+        asset=target,
+        name="破损形态",
+        chapter_numbers=[1],
+        images=["/media/old-variant.png"],
+        metadata={"old": True},
+    )
+    await AssetVariant.create(
+        asset=source,
+        name="破损形态",
+        description="新形态描述",
+        chapter_numbers=[8],
+        images=["/media/new-variant.png"],
+        metadata={"new": True},
+    )
+    await AssetVariant.create(
+        asset=source,
+        name="燃烧形态",
+        chapter_numbers=[8],
+        images=["/media/fire.png"],
+    )
+
+    result = await asset_controller.merge(source.id, target.id)
+    merged = result["asset"]
+    await merged.refresh_from_db()
+
+    assert merged.id == target.id
+    assert merged.canonical_name == "腐朽桃木腰牌"
+    assert merged.description == "第八章确认的完整新描述"
+    assert merged.base_traits == "新的稳定视觉资料"
+    assert merged.main_image == "/media/old-main.png"
+    assert merged.source_chapters == [1, 8]
+    assert set(merged.aliases) == {"桃木洞窟牌", "旧腰牌", "洞窟腰牌"}
+    assert merged.metadata["resolution"] == "2K"
+    assert merged.metadata["aspect_ratio"] == "16:9"
+    assert merged.metadata["legacy"] == {"keep": True, "new": True}
+    assert merged.metadata["merge_history"][-1]["source_asset_id"] == source.id
+    assert result["data_source_asset_id"] == source.id
+    assert result["image_source_asset_id"] == target.id
+    assert not await Asset.filter(id=source.id).exists()
+
+    scene_asset_ids = set(await scene.assets.all().values_list("id", flat=True))
+    assert scene_asset_ids == {target.id}
+
+    variants = await AssetVariant.filter(asset_id=target.id).order_by("name")
+    assert {variant.name for variant in variants} == {"破损形态", "燃烧形态"}
+    broken = next(variant for variant in variants if variant.name == "破损形态")
+    assert broken.description == "新形态描述"
+    assert broken.chapter_numbers == [1, 8]
+    assert broken.images == ["/media/new-variant.png", "/media/old-variant.png"]
+
+
+@pytest.mark.asyncio
+async def test_增量合并_拒绝跨项目或跨类型():
+    first_novel = await Novel.create(name="First Merge Novel")
+    second_novel = await Novel.create(name="Second Merge Novel")
+    person = await Asset.create(
+        novel=first_novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="人物",
+    )
+    scene = await Asset.create(
+        novel=first_novel,
+        asset_type=AssetTypeEnum.scene.value,
+        canonical_name="场景",
+    )
+    other_person = await Asset.create(
+        novel=second_novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="其他人物",
+    )
+
+    with pytest.raises(HTTPException, match="相同类型"):
+        await asset_controller.merge(person.id, scene.id)
+    with pytest.raises(HTTPException, match="同一项目"):
+        await asset_controller.merge(person.id, other_person.id)
 
 
 # =====================================================================
@@ -258,6 +372,7 @@ async def test_reference_提交参考图任务():
     assert task.status == TaskStatusEnum.pending.value
     assert task.request_params["asset_id"] == asset.id
     assert task.request_params["novel_id"] == novel.id
+    assert task.request_params["prompt_language"] == "en"
     print(f"    提交参考图任务 id={task.id}, asset_id={asset.id}, status=pending")
 
 

@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends
 
-from controllers.config import ai_model_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from schemas.config import (
     AiModelConfigCreate,
     AiModelConfigOut,
     AiModelConfigPatch,
     AiModelConfigUpdate,
+    GeneralConfigOut,
+    GeneralConfigUpdate,
 )
 from utils.enums import (
     AssetTypeEnum,
@@ -54,6 +56,26 @@ async def create_config(config: AiModelConfigCreate):
 async def get_config_list(params: QueryParams = Depends(get_list_params)):
     result = await ai_model_config_controller.list(params, AiModelConfigOut)
     return ResponseSchema(data=result)
+
+
+@router.get(
+    "/general",
+    summary="获取通用配置",
+    response_model=ResponseSchema[GeneralConfigOut],
+)
+async def get_general_config():
+    instance = await general_config_controller.get()
+    return ResponseSchema(data=instance)
+
+
+@router.put(
+    "/general",
+    summary="更新通用配置",
+    response_model=ResponseSchema[GeneralConfigOut],
+)
+async def update_general_config(config: GeneralConfigUpdate):
+    instance = await general_config_controller.update(config)
+    return ResponseSchema(data=instance)
 
 
 @router.get("/{config_id}", summary="获取模型配置详情", response_model=ResponseSchema[AiModelConfigOut])

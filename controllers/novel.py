@@ -2,7 +2,7 @@ from fastapi import HTTPException
 
 from models.ai_task import AiTask
 from models.chapter import Chapter
-from controllers.config import ai_model_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from services.ai_task_executor import ai_task_executor
 from services.nlp import (
     ChapterSplitError,
@@ -94,6 +94,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
 
         await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value)
         await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
+        prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 
         active_tasks = await AiTask.filter(
@@ -106,7 +107,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
 
         return await ai_task_executor.submit(
             AiTaskTypeEnum.project_analysis,
-            {"novel_id": novel_id, "resolution": "1K"},
+            {
+                "novel_id": novel_id,
+                "resolution": "1K",
+                "prompt_language": prompt_language,
+            },
         )
 
     async def latest_analysis(self, novel_id: int) -> AiTask | None:

@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetVariant, AudioReference, Chapter, DigitalHuman, Novel, PaginationResponse, Scene, SingleResponse, Video, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, Chapter, DigitalHuman, GeneralConfig, Novel, PaginationResponse, Scene, SingleResponse, Video, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 const BASE = '/api'
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -58,13 +58,16 @@ export const api = {
   updateChapter: (id: number, data: Partial<Chapter>) => request<SingleResponse<Chapter>>(`/chapter/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteChapter: (id: number) => request<SingleResponse<null>>(`/chapter/${id}`, { method: 'DELETE' }),
   extract: (chapterId: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST' }),
+  latestExtraction: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/chapter/extract/${chapterId}/latest`),
   assets: (novelId: number, page = 1, pageSize = 100) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize })}`),
+  referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),
   projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
   assetLibrary: (assetType: number, page = 1, pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, page, page_size: pageSize, sort: '-id' })}`),
   createAsset: (data: Partial<Asset> & { novel_id: number; chapter_id?: number; asset_type: number; canonical_name: string }) => request<SingleResponse<Asset>>('/asset', { method: 'POST', body: JSON.stringify(data) }),
   updateAsset: (id: number, data: Partial<Asset>) => request<SingleResponse<Asset>>(`/asset/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteAsset: (id: number) => request<SingleResponse<null>>(`/asset/${id}`, { method: 'DELETE' }),
+  mergeAssets: (sourceAssetId: number, targetAssetId: number) => request<SingleResponse<AssetMergeResult>>('/asset/merge', { method: 'POST', body: JSON.stringify({ source_asset_id: sourceAssetId, target_asset_id: targetAssetId }) }),
   reuseAsset: (assetId: number, chapterId: number) => request<SingleResponse<Asset>>(`/asset/${assetId}/chapters/${chapterId}`, { method: 'POST' }),
   assetVariants: (assetId: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants`),
   createAssetVariant: (assetId: number, data: Partial<AssetVariant> & { name: string }) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants`, { method: 'POST', body: JSON.stringify(data) }),
@@ -86,6 +89,8 @@ export const api = {
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
   workbenchBootstrap: (novelId: number, chapterId: number) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
+  generalConfig: () => request<SingleResponse<GeneralConfig>>('/config/general'),
+  updateGeneralConfig: (data: Pick<GeneralConfig, 'prompt_language'>) => request<SingleResponse<GeneralConfig>>('/config/general', { method: 'PUT', body: JSON.stringify(data) }),
   createConfig: (data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>('/config', { method: 'POST', body: JSON.stringify(data) }),
   updateConfig: (id: number, data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>(`/config/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   activateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/activate`, { method: 'POST' }),

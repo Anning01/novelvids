@@ -109,7 +109,7 @@ async def clear_db():
     from models.asset_variant import AssetVariant
     from models.scene import Scene
     from models.ai_task import AiTask
-    from models.config import AiModelConfig
+    from models.config import AiModelConfig, GeneralConfig
     from models.video import Video
     from models.audio_reference import AudioReference
     from models.digital_human import DigitalHuman
@@ -124,6 +124,7 @@ async def clear_db():
     await Asset.all().delete()
     await Novel.all().delete()
     await AiModelConfig.all().delete()
+    await GeneralConfig.all().delete()
 
 
 @pytest.fixture(scope="module")

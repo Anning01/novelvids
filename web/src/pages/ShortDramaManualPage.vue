@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -11,6 +11,7 @@ import {
   ImagePlus,
   Layers3,
   LoaderCircle,
+  Merge as MergeIcon,
   Pencil,
   Plus,
   RefreshCw,
@@ -22,11 +23,11 @@ import {
 import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
-import { api, sleep } from '@/api'
+import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
-import { AssetTypeEnum, TaskStatusEnum, type Asset } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type Chapter } from '@/types'
 
 type AssetTab = 'character' | 'scene' | 'prop'
 
@@ -59,7 +60,9 @@ function readProjectMeta(): ManualProjectMeta {
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
+const selectedChapterId = computed(() => Number(route.query.chapter))
 const project = ref(readProjectMeta())
+const selectedChapter = ref<Chapter | null>(null)
 const assets = ref<Asset[]>([])
 const activeTab = ref<AssetTab>('character')
 const editingName = ref(false)
@@ -69,9 +72,20 @@ const showAssetDialog = ref(false)
 const editingAsset = ref<Asset | null>(null)
 const showBatchDialog = ref(false)
 const batchGenerating = ref(false)
+const submittingExtraction = ref(false)
+const extractionTask = ref<AiTask | null>(null)
+const extractionSubmissionError = ref('')
 const generatingAssetIds = ref(new Set<number>())
 const failedAssetIds = ref(new Set<number>())
+const mergingAssetIds = ref(new Set<number>())
+const draggingAssetId = ref<number | null>(null)
+const mergeHoverTargetId = ref<number | null>(null)
+const mergeArmedTargetId = ref<number | null>(null)
+const mergeProgressKey = ref(0)
 let pageAlive = true
+let extractionPollVersion = 0
+let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
+let suppressAssetClickUntil = 0
 
 const terminalTaskStatuses = new Set([
   TaskStatusEnum.COMPLETED,
@@ -97,13 +111,87 @@ const visibleAssets = computed(() => assets.value.filter(item => item.asset_type
 const completedCount = computed(() => visibleAssets.value.filter(item => item.main_image).length)
 const generatingCount = computed(() => visibleAssets.value.filter(item => generatingAssetIds.value.has(item.id)).length)
 const failedCount = computed(() => visibleAssets.value.filter(item => failedAssetIds.value.has(item.id)).length)
+const draggingAsset = computed(() => assets.value.find(item => item.id === draggingAssetId.value) ?? null)
+const mergeTargetAsset = computed(() => assets.value.find(item => item.id === mergeHoverTargetId.value) ?? null)
+const mergeDataAsset = computed(() => {
+  const source = draggingAsset.value
+  const target = mergeTargetAsset.value
+  if (!source || !target) return null
+  const rank = (asset: Asset) => [
+    asset.last_updated_chapter ?? -1,
+    Date.parse(asset.updated_at || '') || 0,
+    asset.id,
+  ]
+  const sourceRank = rank(source)
+  const targetRank = rank(target)
+  for (let index = 0; index < sourceRank.length; index++) {
+    if (sourceRank[index] !== targetRank[index]) {
+      return sourceRank[index] > targetRank[index] ? source : target
+    }
+  }
+  return target
+})
+const mergeImageCount = computed(() => {
+  const urls = new Set<string>()
+  for (const asset of [draggingAsset.value, mergeTargetAsset.value]) {
+    if (!asset) continue
+    for (const image of [asset.main_image, asset.angle_image_1, asset.angle_image_2]) {
+      if (image) urls.add(image)
+    }
+  }
+  return urls.size
+})
+const extractionTaskActive = computed(() => {
+  const status = extractionTask.value?.status
+  return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
+})
+const extractionBusy = computed(() => submittingExtraction.value || extractionTaskActive.value)
+const extractionStatusVisible = computed(() => {
+  if (extractionTask.value?.status === TaskStatusEnum.COMPLETED) return false
+  return submittingExtraction.value
+    || extractionTaskActive.value
+    || Boolean(extractionSubmissionError.value)
+    || extractionTask.value?.status === TaskStatusEnum.FAILED
+    || extractionTask.value?.status === TaskStatusEnum.CANCELLED
+})
+const extractionStatusText = computed(() => (
+  extractionSubmissionError.value
+    ? '提交失败'
+    : submittingExtraction.value && !extractionTask.value
+      ? '提交中'
+    : statusLabel(extractionTask.value?.status)
+))
+const extractionStatusMessage = computed(() => {
+  if (extractionSubmissionError.value) return extractionSubmissionError.value
+  const task = extractionTask.value
+  if (!task) return submittingExtraction.value ? '正在创建本章资产提取任务。' : ''
+  if (task.status === TaskStatusEnum.PENDING) return '任务已提交，正在等待模型执行。'
+  if (task.status === TaskStatusEnum.QUEUED) return '任务正在队列中等待处理。'
+  if (task.status === TaskStatusEnum.PROCESSING) return '正在分析本章人物、场景和道具，并与项目资产增量合并。'
+  if (task.status === TaskStatusEnum.CANCELLED) return '任务已取消，可以重新提取本章资产。'
+  return extractionErrorMessage(new Error(task.error_message || '本章资产提取失败'))
+})
+const extractionStatusClass = computed(() => ({
+  'is-running': extractionTaskActive.value || submittingExtraction.value,
+  'is-error': Boolean(extractionSubmissionError.value)
+    || extractionTask.value?.status === TaskStatusEnum.FAILED
+    || extractionTask.value?.status === TaskStatusEnum.CANCELLED,
+}))
 
 async function loadProject() {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return
   try {
-    const [projectResponse, assetResponse] = await Promise.all([
+    const chapterRequest = Number.isFinite(selectedChapterId.value) && selectedChapterId.value > 0
+      ? api.chapter(selectedChapterId.value)
+      : Promise.resolve(null)
+    const extractionRequest = Number.isFinite(selectedChapterId.value) && selectedChapterId.value > 0
+      ? api.latestExtraction(selectedChapterId.value)
+      : Promise.resolve(null)
+    const [projectResponse, assetResponse, chapterResponse, extractionResponse] = await Promise.all([
       api.novel(projectId.value),
       api.assets(projectId.value),
+      chapterRequest,
+      extractionRequest,
     ])
     const settings = readShortDramaSettings(projectResponse.data)
     project.value = {
@@ -115,11 +203,83 @@ async function loadProject() {
       style: settings.style || project.value.style,
       creationMode: projectResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
+    selectedChapter.value = chapterResponse?.data ?? null
     assets.value = assetResponse.data.items
+    extractionTask.value = extractionResponse?.data?.status === TaskStatusEnum.COMPLETED
+      ? null
+      : extractionResponse?.data ?? null
+    extractionSubmissionError.value = ''
+    if (extractionTaskActive.value && extractionTask.value) {
+      void monitorExtractionTask(extractionTask.value.id)
+    }
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
     loading.value = false
+  }
+}
+
+function extractionErrorMessage(error: unknown) {
+  const message = (error as Error).message || '本章资产提取失败'
+  return /insufficient balance/i.test(message)
+    ? '模型余额不足，请充值或切换可用模型后重试'
+    : message
+}
+
+async function refreshAssets() {
+  assets.value = (await api.assets(projectId.value)).data.items
+}
+
+async function monitorExtractionTask(taskId: string, notifyWhenComplete = false) {
+  const pollVersion = ++extractionPollVersion
+  try {
+    let task = extractionTask.value?.id === taskId
+      ? extractionTask.value
+      : (await api.task(taskId)).data
+    extractionTask.value = task
+    while (pageAlive && pollVersion === extractionPollVersion && !terminalTaskStatuses.has(task.status)) {
+      await sleep(1500)
+      task = (await api.task(task.id)).data
+      extractionTask.value = task
+    }
+    if (!pageAlive || pollVersion !== extractionPollVersion) return
+    if (task.status === TaskStatusEnum.COMPLETED) {
+      extractionTask.value = null
+      await refreshAssets()
+      if (notifyWhenComplete) notice.success(`第 ${selectedChapter.value?.number || '-'} 章资产提取完成`)
+    }
+  } catch (error) {
+    extractionSubmissionError.value = `任务状态读取失败：${extractionErrorMessage(error)}`
+    notice.error(extractionSubmissionError.value)
+  }
+}
+
+async function extractSelectedChapterAssets() {
+  const chapter = selectedChapter.value
+  if (!chapter || extractionBusy.value) return
+  submittingExtraction.value = true
+  extractionSubmissionError.value = ''
+  try {
+    const task = (await api.extract(chapter.id)).data
+    extractionTask.value = task
+    await monitorExtractionTask(task.id, true)
+  } catch (error) {
+    const message = (error as Error).message || ''
+    const existingTaskId = message.match(/\(([0-9a-f-]{36})\)/i)?.[1]
+    if (existingTaskId) {
+      try {
+        extractionTask.value = (await api.task(existingTaskId)).data
+        await monitorExtractionTask(existingTaskId, true)
+        return
+      } catch (taskError) {
+        extractionSubmissionError.value = extractionErrorMessage(taskError)
+      }
+    } else {
+      extractionSubmissionError.value = extractionErrorMessage(error)
+    }
+    notice.error(extractionSubmissionError.value)
+  } finally {
+    submittingExtraction.value = false
   }
 }
 
@@ -176,6 +336,104 @@ async function removeAsset(asset: Asset) {
   } catch (error) {
     notice.error((error as Error).message)
   }
+}
+
+function setAssetMerging(assetId: number, value: boolean) {
+  const next = new Set(mergingAssetIds.value)
+  value ? next.add(assetId) : next.delete(assetId)
+  mergingAssetIds.value = next
+}
+
+function clearMergeHover(clearSource = false) {
+  if (mergeHoverTimer) clearTimeout(mergeHoverTimer)
+  mergeHoverTimer = null
+  mergeHoverTargetId.value = null
+  mergeArmedTargetId.value = null
+  if (clearSource) draggingAssetId.value = null
+}
+
+function startAssetDrag(event: DragEvent, asset: Asset) {
+  if (generatingAssetIds.value.has(asset.id) || mergingAssetIds.value.has(asset.id)) {
+    event.preventDefault()
+    return
+  }
+  clearMergeHover(true)
+  draggingAssetId.value = asset.id
+  suppressAssetClickUntil = Date.now() + 600
+  event.dataTransfer?.setData('text/plain', String(asset.id))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function enterMergeTarget(target: Asset) {
+  const sourceId = draggingAssetId.value
+  if (!sourceId || sourceId === target.id || mergingAssetIds.value.has(target.id)) return
+  if (mergeHoverTargetId.value === target.id) return
+  clearMergeHover()
+  mergeHoverTargetId.value = target.id
+  mergeProgressKey.value++
+  mergeHoverTimer = setTimeout(() => {
+    if (draggingAssetId.value === sourceId && mergeHoverTargetId.value === target.id) {
+      mergeArmedTargetId.value = target.id
+    }
+  }, 2000)
+}
+
+function leaveMergeTarget(event: DragEvent, target: Asset) {
+  const nextElement = event.relatedTarget
+  if (nextElement instanceof Node && event.currentTarget instanceof Node && event.currentTarget.contains(nextElement)) return
+  if (mergeHoverTargetId.value === target.id) clearMergeHover()
+}
+
+function allowAssetDrop(event: DragEvent, target: Asset) {
+  if (!draggingAssetId.value || draggingAssetId.value === target.id) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+async function dropAsset(event: DragEvent, target: Asset) {
+  event.preventDefault()
+  event.stopPropagation()
+  const sourceId = draggingAssetId.value || Number(event.dataTransfer?.getData('text/plain'))
+  const armed = mergeArmedTargetId.value === target.id
+  suppressAssetClickUntil = Date.now() + 600
+  clearMergeHover(true)
+  if (!sourceId || sourceId === target.id) return
+  if (!armed) {
+    notice.info('请在目标资产上停留 2 秒，出现“释放合并”后再放手')
+    return
+  }
+
+  const sourceIndex = assets.value.findIndex(item => item.id === sourceId)
+  const targetIndex = assets.value.findIndex(item => item.id === target.id)
+  const insertionIndex = targetIndex - (
+    sourceIndex >= 0 && sourceIndex < targetIndex ? 1 : 0
+  )
+  setAssetMerging(sourceId, true)
+  setAssetMerging(target.id, true)
+  try {
+    const result = (await api.mergeAssets(sourceId, target.id)).data
+    const remaining = assets.value.filter(item => item.id !== sourceId && item.id !== target.id)
+    remaining.splice(Math.min(Math.max(insertionIndex, 0), remaining.length), 0, result.asset)
+    assets.value = remaining
+    setAssetFailed(sourceId, false)
+    setAssetFailed(target.id, false)
+    notice.success(result.summary.length ? result.summary.join('，') : '资产已增量合并')
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    setAssetMerging(sourceId, false)
+    setAssetMerging(target.id, false)
+  }
+}
+
+function finishAssetDrag() {
+  suppressAssetClickUntil = Date.now() + 600
+  clearMergeHover(true)
+}
+
+function handleAssetClick(asset: Asset) {
+  if (Date.now() < suppressAssetClickUntil || mergingAssetIds.value.has(asset.id)) return
+  openAssetDialog(asset)
 }
 
 function setAssetGenerating(assetId: number, value: boolean) {
@@ -262,6 +520,10 @@ function goToStoryboard() {
   })
 }
 
+function returnToProjects() {
+  void router.push('/projects')
+}
+
 function selectPhase(label: string) {
   if (label === '剧本' && project.value.creationMode === 'agent') {
     void router.push({
@@ -274,14 +536,19 @@ function selectPhase(label: string) {
 }
 
 onMounted(loadProject)
-onBeforeUnmount(() => { pageAlive = false })
+watch(activeTab, () => clearMergeHover(true))
+onBeforeUnmount(() => {
+  pageAlive = false
+  extractionPollVersion++
+  clearMergeHover(true)
+})
 </script>
 
 <template>
   <main class="manual-page">
     <header class="manual-topbar">
       <div class="manual-project-nav">
-        <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="返回上一页" @click="router.back()"><ArrowLeft :size="18" /></AppButton>
+        <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="返回项目" title="返回项目" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
         <div>
           <div class="project-name-line">
             <template v-if="editingName">
@@ -315,6 +582,22 @@ onBeforeUnmount(() => { pageAlive = false })
           </AppButton>
         </nav>
         <div class="asset-summary">
+          <span v-if="project.creationMode === 'agent'" class="chapter-context"><BookOpenText :size="13" />{{ selectedChapter ? `当前第 ${selectedChapter.number} 章` : '未选择章节' }}</span>
+          <AppButton
+            v-if="project.creationMode === 'agent'"
+            type="button"
+            variant="secondary"
+            size="sm"
+            :loading="extractionBusy"
+            :disabled="!selectedChapter || extractionBusy"
+            aria-label="提取本章资产"
+            :title="selectedChapter ? `提取第 ${selectedChapter.number} 章资产` : '请先在剧本阶段选择章节'"
+            @click="extractSelectedChapterAssets"
+          >
+            <Boxes v-if="!extractionBusy" :size="15" />
+            {{ extractionBusy ? '正在提取本章' : '提取本章资产' }}
+          </AppButton>
+          <i v-if="project.creationMode === 'agent'" />
           <span>{{ activeTabConfig.label }}总计 <strong>{{ visibleAssets.length }}</strong></span>
           <i />
           <span><Check :size="13" />已完成 {{ completedCount }}</span>
@@ -326,6 +609,24 @@ onBeforeUnmount(() => { pageAlive = false })
         </div>
       </header>
 
+      <div
+        v-if="project.creationMode === 'agent' && extractionStatusVisible"
+        class="extraction-task-status"
+        :class="extractionStatusClass"
+        role="status"
+        aria-live="polite"
+      >
+        <span>
+          <LoaderCircle v-if="extractionBusy" :size="19" />
+          <RefreshCw v-else :size="19" />
+        </span>
+        <div>
+          <strong>第 {{ selectedChapter?.number || '-' }} 章资产提取 · {{ extractionStatusText }}</strong>
+          <p>{{ extractionStatusMessage }}</p>
+          <small v-if="extractionTask">任务 ID：{{ extractionTask.id }}</small>
+        </div>
+      </div>
+
       <div v-if="loading" class="workspace-state"><RefreshCw class="is-spinning" :size="28" /><span>正在加载项目…</span></div>
       <div v-else-if="!visibleAssets.length" class="workspace-state empty-state">
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
@@ -334,7 +635,31 @@ onBeforeUnmount(() => { pageAlive = false })
         <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
-        <article v-for="asset in visibleAssets" :key="asset.id" class="asset-card" role="button" tabindex="0" :aria-label="`编辑${activeTabConfig.label}：${asset.canonical_name}`" @click="openAssetDialog(asset)" @keydown.enter="openAssetDialog(asset)" @keydown.space.prevent="openAssetDialog(asset)">
+        <article
+          v-for="asset in visibleAssets"
+          :key="asset.id"
+          class="asset-card"
+          :class="{
+            'is-drag-source': draggingAssetId === asset.id,
+            'is-merge-target': mergeHoverTargetId === asset.id,
+            'is-merge-armed': mergeArmedTargetId === asset.id,
+            'is-merging': mergingAssetIds.has(asset.id),
+          }"
+          role="button"
+          tabindex="0"
+          :draggable="!generatingAssetIds.has(asset.id) && !mergingAssetIds.has(asset.id)"
+          :aria-grabbed="draggingAssetId === asset.id"
+          :aria-label="`编辑${activeTabConfig.label}：${asset.canonical_name}`"
+          @click="handleAssetClick(asset)"
+          @keydown.enter="handleAssetClick(asset)"
+          @keydown.space.prevent="handleAssetClick(asset)"
+          @dragstart="startAssetDrag($event, asset)"
+          @dragenter.prevent="enterMergeTarget(asset)"
+          @dragover="allowAssetDrop($event, asset)"
+          @dragleave="leaveMergeTarget($event, asset)"
+          @drop="dropAsset($event, asset)"
+          @dragend="finishAssetDrag"
+        >
           <div class="asset-visual">
             <img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
             <component v-else :is="activeTabConfig.icon" :size="30" />
@@ -343,12 +668,33 @@ onBeforeUnmount(() => { pageAlive = false })
             <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>
           </div>
           <div class="asset-card-copy">
-            <div><strong>{{ asset.canonical_name }}</strong><span class="asset-card-actions"><AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="`编辑${asset.canonical_name}`" @click.stop="openAssetDialog(asset)"><Pencil :size="14" /></AppButton><AppButton type="button" variant="danger" size="xs" icon-only :aria-label="`删除${asset.canonical_name}`" @click.stop="removeAsset(asset)"><Trash2 :size="14" /></AppButton></span></div>
+            <div><strong>{{ asset.canonical_name }}</strong><span class="asset-card-actions"><AppButton type="button" variant="ghost" size="xs" icon-only :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click.stop="openAssetDialog(asset)"><Pencil :size="14" /></AppButton><AppButton type="button" variant="danger" size="xs" icon-only :disabled="mergingAssetIds.has(asset.id)" :aria-label="`删除${asset.canonical_name}`" @click.stop="removeAsset(asset)"><Trash2 :size="14" /></AppButton></span></div>
             <p>{{ asset.description || `尚未填写${activeTabConfig.label}描述` }}</p>
+          </div>
+          <div
+            v-if="mergeHoverTargetId === asset.id"
+            :key="mergeProgressKey"
+            class="asset-merge-overlay"
+            aria-hidden="true"
+          >
+            <span><MergeIcon :size="22" /></span>
+            <strong>{{ mergeArmedTargetId === asset.id ? '释放鼠标，立即合并' : '停留 2 秒准备合并' }}</strong>
+            <small>{{ mergeArmedTargetId === asset.id ? '保留较新资料，并继承双方图片' : '继续停留即可进入合并状态' }}</small>
+            <i />
           </div>
         </article>
       </div>
     </section>
+
+    <Transition name="merge-ready">
+      <aside v-if="mergeArmedTargetId && draggingAsset && mergeTargetAsset" class="asset-merge-ready" role="status" aria-live="assertive">
+        <span><MergeIcon :size="20" /></span>
+        <div>
+          <strong>释放后合并至「{{ mergeTargetAsset.canonical_name }}」</strong>
+          <p>资料采用「{{ mergeDataAsset?.canonical_name }}」的较新版本<span v-if="mergeImageCount">，保留双方 {{ mergeImageCount }} 张图片</span></p>
+        </div>
+      </aside>
+    </Transition>
 
     <AppButton class="manual-next-step" type="button" variant="dark" size="lg" @click="goToStoryboard">
       <Clapperboard :size="17" />已确认，进入下一步
@@ -403,8 +749,19 @@ onBeforeUnmount(() => { pageAlive = false })
 .asset-toolbar nav button.is-active::after { opacity: 1; transform: scaleX(1); }
 .asset-summary { display: flex; align-items: center; gap: 14px; color: #858c9b; font-size: 12px; }
 .asset-summary span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.asset-summary .chapter-context { color: #5d5ff5; font-weight: 700; }
 .asset-summary > i { width: 1px; height: 13px; background: #dfe1e8; }
 .asset-summary strong { color: #303442; }
+.extraction-task-status { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 14px; padding: 13px 15px; border: 1px solid #dfe2eb; border-radius: 12px; color: #626979; background: #fff; }
+.extraction-task-status > span { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; color: #6668f6; background: #eff0ff; }
+.extraction-task-status > div { display: grid; min-width: 0; gap: 3px; }
+.extraction-task-status strong { color: #343947; font-size: 12px; }
+.extraction-task-status p { margin: 0; font-size: 11px; line-height: 1.5; }
+.extraction-task-status small { overflow: hidden; color: #969dac; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.extraction-task-status.is-running { border-color: #cfd0fb; background: #f7f7ff; }
+.extraction-task-status.is-running svg { animation: spin .8s linear infinite; }
+.extraction-task-status.is-error { border-color: #f1cfd3; background: #fff7f8; }
+.extraction-task-status.is-error > span { color: #bd5f6b; background: #fdebed; }
 .icon-button,.text-action { display: inline-flex; align-items: center; gap: 6px; color: #424857; background: transparent; }
 .icon-button { padding: 6px; border-radius: 7px; }
 .icon-button:hover,.text-action:hover { color: #5d5ff5; background: #f1f1ff; }
@@ -416,8 +773,12 @@ onBeforeUnmount(() => { pageAlive = false })
 .empty-state p { margin: 6px 0 18px; font-size: 12px; }
 .empty-state > button { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; color: #fff; border-radius: 9px; background: #5e60f5; font-size: 12px; box-shadow: 0 8px 18px rgba(94,96,245,.2); }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 16px; padding-top: 24px; }
-.asset-card { overflow: hidden; border: 1px solid #e4e6ed; border-radius: 14px; outline: 0; background: #fff; cursor: pointer; transition: transform .18s ease,box-shadow .18s ease,border-color .18s ease; }
+.asset-card { position: relative; overflow: hidden; border: 1px solid #e4e6ed; border-radius: 14px; outline: 0; background: #fff; cursor: grab; transition: transform .18s ease,box-shadow .18s ease,border-color .18s ease,opacity .18s ease; }
+.asset-card:active { cursor: grabbing; }
 .asset-card:hover,.asset-card:focus-visible { border-color: #cfd0fb; box-shadow: 0 14px 34px rgba(54,57,98,.1); transform: translateY(-2px); }
+.asset-card.is-drag-source { opacity: .38; transform: scale(.985); }
+.asset-card.is-merge-target { border-color: var(--app-accent); box-shadow: 0 0 0 3px var(--app-accent-soft),var(--app-shadow); transform: translateY(-2px); }
+.asset-card.is-merging { pointer-events: none; opacity: .62; }
 .asset-visual { position: relative; display: grid; place-items: center; height: 190px; color: #aeb4c2; background: #f0f2f7; }
 .asset-visual img { width: 100%; height: 100%; object-fit: cover; }
 .asset-state-badge { position: absolute; top: 10px; right: 10px; box-shadow: 0 5px 14px rgba(43,46,80,.08); }
@@ -427,9 +788,23 @@ onBeforeUnmount(() => { pageAlive = false })
 .asset-card-copy button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; }
 .asset-card-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .asset-card-copy p { min-height: 34px; margin: 7px 0 0; color: #8a91a1; font-size: 11px; line-height: 1.55; }
+.asset-merge-overlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 18px; color: var(--app-text); background: var(--app-surface-raised); text-align: center; }
+.asset-merge-overlay > span { display: grid; width: 44px; height: 44px; place-items: center; color: var(--app-accent); border: 1px solid var(--app-border-strong); border-radius: 14px; background: var(--app-accent-soft); }
+.asset-merge-overlay strong { font-size: 13px; }
+.asset-merge-overlay small { color: var(--app-text-muted); font-size: 10px; }
+.asset-merge-overlay > i { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; background: var(--app-accent); transform-origin: left; animation: merge-hold-progress 2s linear both; }
+.asset-card.is-merge-armed .asset-merge-overlay { color: var(--app-accent); background: var(--app-accent-soft); }
+.asset-card.is-merge-armed .asset-merge-overlay > i { animation: none; transform: scaleX(1); }
+.asset-merge-ready { position: fixed; top: 88px; right: 24px; z-index: 42; display: grid; grid-template-columns: 40px minmax(0,1fr); align-items: center; gap: 11px; width: min(380px,calc(100vw - 32px)); padding: 12px 14px; color: var(--app-text); border: 1px solid var(--app-border-strong); border-radius: 13px; background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
+.asset-merge-ready > span { display: grid; width: 40px; height: 40px; place-items: center; color: var(--app-accent); border-radius: 11px; background: var(--app-accent-soft); }
+.asset-merge-ready strong { font-size: 12px; }
+.asset-merge-ready p { margin: 3px 0 0; color: var(--app-text-muted); font-size: 10px; line-height: 1.45; }
+.merge-ready-enter-active,.merge-ready-leave-active { transition: opacity .16s ease,transform .16s ease; }
+.merge-ready-enter-from,.merge-ready-leave-to { opacity: 0; transform: translateY(-7px); }
 .manual-next-step { position: fixed; bottom: 22px; left: 50%; z-index: 18; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 22px; color: #fff; border-radius: 15px; background: #23252c; box-shadow: 0 10px 28px rgba(21,23,31,.2); transform: translateX(-50%); }
 .is-spinning { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes merge-hold-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .manual-dialog-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(28,31,43,.32); backdrop-filter: blur(4px); }
 .manual-dialog { width: min(460px,100%); padding: 22px; border: 1px solid #e1e3eb; border-radius: 18px; background: #fff; box-shadow: 0 24px 70px rgba(28,31,43,.22); }
 .manual-dialog header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
@@ -449,5 +824,9 @@ onBeforeUnmount(() => { pageAlive = false })
   .asset-toolbar { align-items: flex-start; flex-direction: column; gap: 8px; }
   .asset-summary { width: 100%; overflow-x: auto; padding-bottom: 4px; }
   .asset-grid { grid-template-columns: 1fr; }
+  .asset-merge-ready { top: auto; right: 16px; bottom: 78px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .asset-merge-overlay > i { animation-timing-function: steps(4,end); }
 }
 </style>

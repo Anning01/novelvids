@@ -17,7 +17,7 @@ class AssetProperties(BaseModel):
     aliases: Optional[list[str]] = Field(None, description="别名列表", examples=["张三", "小张"])
     # 描述信息
     description: Optional[str] = Field(None, description="详细描述")
-    base_traits: Optional[str] = Field(None, description="固有特征 (英文, 用于 prompt)")
+    base_traits: Optional[str] = Field(None, description="固有特征（语言由通用配置决定，用于 prompt）")
     # 图片资产
     main_image: Optional[str] = Field(None, description="三视主图")
     angle_image_1: Optional[str] = Field(None, description="可选参考图1")
@@ -60,6 +60,22 @@ class AssetPatch(AssetFullProperties):
     pass
 
 
+class AssetReferencePromptPreview(BaseModel):
+    """Build the exact prompt that will be sent to the reference-image model."""
+
+    asset_type: AssetTypeEnum
+    canonical_name: str = ""
+    base_traits: str = ""
+    description: str = ""
+    metadata: Optional[Any] = None
+    aspect_ratio: str = "16:9"
+
+
+class AssetReferencePromptOut(BaseModel):
+    prompt: str
+    prompt_language: str
+
+
 # --- 输出 Schema (Out-bound) ---
 
 class AssetBriefOut(AssetProperties, BaseResponse):
@@ -84,3 +100,18 @@ class AssetOut(AssetFullProperties, BaseResponse):
 
 class AssetWithVariantsOut(AssetOut):
     variants: Optional[list[AssetVariantOut]] = Field(None, description="人物变装、场景升级或道具形态")
+
+
+class AssetMergeRequest(BaseModel):
+    """Merge source into target while keeping the target asset identity."""
+
+    source_asset_id: int
+    target_asset_id: int
+
+
+class AssetMergeOut(BaseModel):
+    asset: AssetWithVariantsOut
+    removed_asset_id: int
+    data_source_asset_id: int
+    image_source_asset_id: Optional[int] = None
+    summary: list[str] = Field(default_factory=list)

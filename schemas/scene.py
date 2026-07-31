@@ -25,7 +25,7 @@ class AssetSimple(BaseModel):
     canonical_name: str = Field(..., description="资产名称")
     main_image: Optional[str] = Field(None, description="资产主图")
     description: Optional[str] = Field(None, description="详细描述")
-    base_traits: Optional[str] = Field(None, description="固有特征 (英文, 用于 prompt)")
+    base_traits: Optional[str] = Field(None, description="固有特征（语言由通用配置决定，用于 prompt）")
     is_global: Optional[bool] = Field(None, description="是否全局资产")
 
 

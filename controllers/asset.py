@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional, Type
 
 from fastapi import HTTPException
 from pydantic import BaseModel
 from tortoise.queryset import QuerySet
 
-from controllers.config import ai_model_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from models.ai_task import AiTask
 from models.asset import Asset
 from models.asset_variant import AssetVariant
@@ -18,6 +19,45 @@ from utils.crud import CRUDBase
 from utils.decorators import atomic
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from utils.page import QueryParams
+
+
+def _non_empty(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _ordered_union(*values: list[Any] | None) -> list[Any]:
+    result: list[Any] = []
+    for items in values:
+        for item in items or []:
+            if item not in result:
+                result.append(item)
+    return result
+
+
+def _deep_merge(older: Any, newer: Any) -> Any:
+    """Recursively merge dictionaries without letting empty new values erase data."""
+    if not isinstance(older, dict) or not isinstance(newer, dict):
+        return newer if _non_empty(newer) else older
+    result = dict(older)
+    for key, value in newer.items():
+        if key in result:
+            result[key] = _deep_merge(result[key], value)
+        elif _non_empty(value):
+            result[key] = value
+    return result
+
+
+def _asset_rank(asset: Asset) -> tuple[int, float, int]:
+    updated_at = asset.updated_at or asset.created_at
+    if updated_at is None:
+        updated_at = datetime.min.replace(tzinfo=timezone.utc)
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return (
+        int(asset.last_updated_chapter or 0),
+        updated_at.timestamp(),
+        int(asset.id),
+    )
 
 
 class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
@@ -134,6 +174,187 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         await instance.fetch_related("variants")
         return instance
 
+    @atomic()
+    async def merge(self, source_asset_id: int, target_asset_id: int) -> dict[str, Any]:
+        """Merge source into target, preserving target identity and every useful field."""
+        if source_asset_id == target_asset_id:
+            raise HTTPException(status_code=400, detail="不能合并同一个资产")
+
+        locked_assets = await Asset.filter(
+            id__in=[source_asset_id, target_asset_id]
+        ).select_for_update()
+        by_id = {asset.id: asset for asset in locked_assets}
+        source = by_id.get(source_asset_id)
+        target = by_id.get(target_asset_id)
+        if source is None or target is None:
+            raise HTTPException(status_code=404, detail="待合并资产不存在")
+        if source.novel_id != target.novel_id:
+            raise HTTPException(status_code=400, detail="只能合并同一项目内的资产")
+        if source.asset_type != target.asset_type:
+            raise HTTPException(status_code=400, detail="只能合并相同类型的资产")
+
+        active_tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.reference_image.value,
+            status__in=[
+                TaskStatusEnum.pending.value,
+                TaskStatusEnum.running.value,
+                TaskStatusEnum.queued.value,
+            ],
+        )
+        busy_ids = {
+            int(task.request_params.get("asset_id"))
+            for task in active_tasks
+            if task.request_params.get("asset_id") is not None
+        }
+        if source.id in busy_ids or target.id in busy_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="资产正在生成参考图，请等待任务完成后再合并",
+            )
+
+        newer, older = sorted((source, target), key=_asset_rank, reverse=True)
+        final_name = newer.canonical_name or older.canonical_name
+        aliases = _ordered_union(
+            [source.canonical_name, target.canonical_name],
+            source.aliases,
+            target.aliases,
+        )
+        aliases = [value for value in aliases if value and value != final_name]
+        source_chapters = sorted({
+            int(chapter)
+            for chapter in _ordered_union(
+                source.source_chapters,
+                target.source_chapters,
+            )
+        })
+
+        image_candidates: list[tuple[str, Asset]] = []
+        for asset in (newer, older):
+            for image in (
+                asset.main_image,
+                asset.angle_image_1,
+                asset.angle_image_2,
+            ):
+                if image and all(existing[0] != image for existing in image_candidates):
+                    image_candidates.append((image, asset))
+        selected_images = image_candidates[:3]
+        image_source_asset = selected_images[0][1] if selected_images else None
+
+        merged_metadata = _deep_merge(
+            older.metadata if isinstance(older.metadata, dict) else {},
+            newer.metadata if isinstance(newer.metadata, dict) else {},
+        )
+        merge_history = list(merged_metadata.get("merge_history") or [])
+        merge_history.append({
+            "source_asset_id": source.id,
+            "source_name": source.canonical_name,
+            "target_asset_id": target.id,
+            "target_name": target.canonical_name,
+            "data_source_asset_id": newer.id,
+            "image_source_asset_id": image_source_asset.id if image_source_asset else None,
+            "merged_at": datetime.now(timezone.utc).isoformat(),
+        })
+        merged_metadata["merge_history"] = merge_history
+        extra_images = [image for image, _ in image_candidates[3:]]
+        if extra_images:
+            merged_metadata["merged_reference_images"] = _ordered_union(
+                merged_metadata.get("merged_reference_images"),
+                extra_images,
+            )
+
+        await source.fetch_related("scenes", "variants")
+        await target.fetch_related("scenes", "variants")
+        target_scene_ids = {scene.id for scene in target.scenes}
+        for scene in source.scenes:
+            if scene.id not in target_scene_ids:
+                await scene.assets.add(target)
+
+        target_variants = {variant.name: variant for variant in target.variants}
+        for source_variant in list(source.variants):
+            target_variant = target_variants.get(source_variant.name)
+            if target_variant is None:
+                source_variant.asset_id = target.id
+                await source_variant.save(update_fields=["asset_id", "updated_at"])
+                target_variants[source_variant.name] = source_variant
+                continue
+
+            variant_newer, variant_older = sorted(
+                (source_variant, target_variant),
+                key=lambda variant: (
+                    variant.updated_at or variant.created_at,
+                    variant.id,
+                ),
+                reverse=True,
+            )
+            target_variant.description = (
+                variant_newer.description or variant_older.description
+            )
+            target_variant.base_traits = (
+                variant_newer.base_traits or variant_older.base_traits
+            )
+            target_variant.chapter_numbers = sorted({
+                int(chapter)
+                for chapter in _ordered_union(
+                    source_variant.chapter_numbers,
+                    target_variant.chapter_numbers,
+                )
+            })
+            target_variant.images = _ordered_union(
+                variant_newer.images,
+                variant_older.images,
+            )
+            target_variant.metadata = _deep_merge(
+                variant_older.metadata,
+                variant_newer.metadata,
+            )
+            await target_variant.save()
+            await source_variant.delete()
+
+        # Delete the source before applying a source canonical name to avoid the
+        # project/type/name unique constraint. Scene and variant links are already moved.
+        await source.delete()
+
+        target.canonical_name = final_name
+        target.aliases = aliases
+        target.description = newer.description or older.description
+        target.base_traits = newer.base_traits or older.base_traits
+        target.main_image = selected_images[0][0] if len(selected_images) > 0 else None
+        target.angle_image_1 = selected_images[1][0] if len(selected_images) > 1 else None
+        target.angle_image_2 = selected_images[2][0] if len(selected_images) > 2 else None
+        target.image_source = (
+            image_source_asset.image_source
+            if image_source_asset is not None
+            else newer.image_source
+        )
+        target.is_global = bool(source.is_global or target.is_global)
+        target.source_chapters = source_chapters
+        target.last_updated_chapter = max(
+            int(source.last_updated_chapter or 0),
+            int(target.last_updated_chapter or 0),
+        )
+        target.metadata = merged_metadata
+        await target.save()
+        await target.fetch_related("variants")
+
+        summary = [
+            f"资料采用「{newer.canonical_name}」的较新版本",
+            f"合并 {len(source_chapters)} 个出现章节",
+        ]
+        if selected_images:
+            summary.append(f"保留 {len(image_candidates)} 张参考图片")
+        if target.variants:
+            summary.append(f"保留 {len(target.variants)} 个视觉形态")
+
+        return {
+            "asset": target,
+            "removed_asset_id": source.id,
+            "data_source_asset_id": newer.id,
+            "image_source_asset_id": (
+                image_source_asset.id if image_source_asset else None
+            ),
+            "summary": summary,
+        }
+
     async def list_variants(self, asset_id: int) -> list[AssetVariant]:
         await self.get(asset_id)
         return await AssetVariant.filter(asset_id=asset_id).order_by("id")
@@ -182,6 +403,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 AiTaskTypeEnum.reference_image.value
             )
 
+        prompt_language = await general_config_controller.get_prompt_language()
+
         # 2. 清理超时异常任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.reference_image)
 
@@ -209,6 +432,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "api_key": config.api_key,
             "model": config.model,
             "variant_id": variant.id if variant else None,
+            "prompt_language": prompt_language,
         }
 
         task = await ai_task_executor.submit(

@@ -91,7 +91,7 @@ const phases = [
   { label: '剧本', icon: BookOpenText, active: true },
   { label: '设定', icon: Settings2 },
   { label: '分镜', icon: Clapperboard },
-  { label: '视频', icon: Video },
+  { label: '视频', icon: Video, disabled: true },
 ]
 
 const analysisResult = computed<ProjectAnalysisResult | null>(() => {
@@ -263,6 +263,17 @@ function continueToSettings() {
   })
 }
 
+function selectPhase(label: string) {
+  if (label === '设定') {
+    continueToSettings()
+  } else if (label === '分镜') {
+    void router.push({
+      path: `/create/short-drama/storyboard/${projectId.value}`,
+      query: selectedEpisodeBrief.value ? { chapter: String(selectedEpisodeBrief.value.id) } : undefined,
+    })
+  }
+}
+
 async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
   activeEpisode.value = chapterNumber
   const chapter = chapters.value.find(item => item.number === chapterNumber)
@@ -296,7 +307,7 @@ onBeforeUnmount(stopPolling)
       <nav class="agent-phases" aria-label="短剧制作流程">
         <template v-for="(phase, index) in phases" :key="phase.label">
           <span v-if="index" class="phase-line" />
-          <AppButton type="button" variant="soft" size="sm" :active="phase.active" :aria-current="phase.active ? 'step' : undefined">
+          <AppButton type="button" variant="soft" size="sm" :active="phase.active" :disabled="phase.disabled" :aria-current="phase.active ? 'step' : undefined" @click="selectPhase(phase.label)">
             <component :is="phase.icon" :size="16" />
             {{ phase.label }}
           </AppButton>

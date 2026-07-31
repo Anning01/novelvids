@@ -17,12 +17,14 @@ const props = withDefaults(defineProps<{
   menuWidth?: number
   maxMenuHeight?: number
   align?: 'start' | 'end'
+  density?: 'default' | 'compact'
   disabled?: boolean
 }>(), {
   menuLabel: '',
   menuWidth: undefined,
   maxMenuHeight: 360,
   align: 'start',
+  density: 'default',
   disabled: false,
 })
 
@@ -97,7 +99,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="root" class="app-select" :class="{ 'is-open': open, 'is-disabled': disabled }" @keydown.esc="closeFromEscape">
+  <div
+    ref="root"
+    class="app-select"
+    :class="{ 'is-open': open, 'is-disabled': disabled, 'is-compact': density === 'compact' }"
+    @keydown.esc="closeFromEscape"
+  >
     <AppButton
       type="button"
       variant="secondary"
@@ -122,7 +129,7 @@ onUnmounted(() => {
         v-if="open"
         ref="menu"
         class="app-select__menu"
-        :class="{ 'is-up': opensUp, 'is-end': align === 'end' }"
+        :class="{ 'is-up': opensUp, 'is-end': align === 'end', 'is-compact': density === 'compact' }"
         :style="menuStyle"
         role="listbox"
         :aria-label="ariaLabel"
@@ -258,6 +265,7 @@ onUnmounted(() => {
   width: 100%;
   min-height: 36px;
   align-items: center;
+  justify-content: flex-start;
   gap: 9px;
   padding: 5px 8px;
   border: 0;
@@ -290,5 +298,26 @@ onUnmounted(() => {
   margin-left: auto;
   flex: 0 0 auto;
   color: var(--app-accent);
+}
+
+.app-select.is-compact .app-select__trigger {
+  min-height: 34px;
+  gap: 7px;
+  padding-inline: 10px 8px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+.app-select__menu.is-compact {
+  padding: 5px;
+  border-radius: 10px;
+}
+
+.app-select__menu.is-compact .app-select__option {
+  min-height: 32px;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
 }
 </style>

@@ -16,6 +16,7 @@ import {
   Volume2,
 } from 'lucide-vue-next'
 import SearchFilterBar from '@/components/SearchFilterBar.vue'
+import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
 import type { SearchFilterDefinition } from '@/components/SearchFilterBar.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
@@ -27,6 +28,10 @@ type PublicCategory = 'character' | 'audio'
 type ProjectCategory = 'character' | 'scene' | 'prop'
 
 const scope = ref<AssetScope>('public')
+const scopeTabs: AppTabItem[] = [
+  { value: 'public', label: '公共资产', icon: Library },
+  { value: 'project', label: '项目资产', icon: FolderKanban },
+]
 const publicCategory = ref<PublicCategory>('character')
 const projectCategory = ref<ProjectCategory>('character')
 const search = ref('')
@@ -49,19 +54,19 @@ let publicSearchTimer: ReturnType<typeof setTimeout> | undefined
 let publicQueryVersion = 0
 
 const publicCategories = [
-  { id: 'character' as const, label: '角色库', icon: UsersRound },
-  { id: 'audio' as const, label: '音频库', icon: Volume2 },
-]
+  { value: 'character', label: '角色库', icon: UsersRound },
+  { value: 'audio', label: '音频库', icon: Volume2 },
+] satisfies Array<AppTabItem & { value: PublicCategory }>
 
 const projectCategories = [
-  { id: 'character' as const, label: '角色', icon: UserRound, type: AssetTypeEnum.PERSON },
-  { id: 'scene' as const, label: '场景', icon: Map, type: AssetTypeEnum.SCENE },
-  { id: 'prop' as const, label: '道具', icon: Box, type: AssetTypeEnum.ITEM },
-]
+  { value: 'character', label: '角色', icon: UserRound, type: AssetTypeEnum.PERSON },
+  { value: 'scene', label: '场景', icon: Map, type: AssetTypeEnum.SCENE },
+  { value: 'prop', label: '道具', icon: Box, type: AssetTypeEnum.ITEM },
+] satisfies Array<AppTabItem & { value: ProjectCategory, type: AssetTypeEnum }>
 
 const projectOptions = computed(() => projects.value.map(item => ({ value: String(item.id), label: item.name })))
 const selectedProject = computed(() => projects.value.find(item => String(item.id) === selectedProjectId.value))
-const activeProjectType = computed(() => projectCategories.find(item => item.id === projectCategory.value)?.type ?? AssetTypeEnum.PERSON)
+const activeProjectType = computed(() => projectCategories.find(item => item.value === projectCategory.value)?.type ?? AssetTypeEnum.PERSON)
 
 const filteredCharacters = computed(() => {
   const keyword = search.value.trim().toLowerCase()
@@ -168,7 +173,7 @@ const resultCountLabel = computed(() => {
 })
 
 const searchPlaceholder = computed(() => {
-  if (scope.value === 'project') return `搜索${projectCategories.find(item => item.id === projectCategory.value)?.label || '项目资产'}`
+  if (scope.value === 'project') return `搜索${projectCategories.find(item => item.value === projectCategory.value)?.label || '项目资产'}`
   return publicCategory.value === 'character' ? '搜索职业、国家、性别或年龄' : '搜索音色名称或性别'
 })
 
@@ -324,14 +329,26 @@ function changeScope(value: AssetScope) {
   search.value = ''
 }
 
+function changeScopeFromTab(value: string) {
+  changeScope(value as AssetScope)
+}
+
 function selectPublicCategory(value: PublicCategory) {
   publicCategory.value = value
   search.value = ''
 }
 
+function changePublicCategoryFromTab(value: string) {
+  selectPublicCategory(value as PublicCategory)
+}
+
 function selectProjectCategory(value: ProjectCategory) {
   projectCategory.value = value
   search.value = ''
+}
+
+function changeProjectCategoryFromTab(value: string) {
+  selectProjectCategory(value as ProjectCategory)
 }
 
 async function copyAssetId(assetId: string) {
@@ -387,25 +404,12 @@ onBeforeUnmount(() => {
       <AppButton class="refresh-assets" variant="secondary" size="sm" type="button" :loading="refreshing" @click="refresh"><RefreshCw v-if="!refreshing" :size="16" />刷新</AppButton>
     </header>
 
-    <section class="asset-scope-switch" aria-label="资产范围">
-      <AppButton type="button" variant="soft" size="sm" :active="scope === 'public'" @click="changeScope('public')"><Library :size="15" />公共资产</AppButton>
-      <AppButton type="button" variant="soft" size="sm" :active="scope === 'project'" @click="changeScope('project')"><FolderKanban :size="15" />项目资产</AppButton>
-    </section>
+    <AppTabs class="asset-scope-tabs" :model-value="scope" :items="scopeTabs" label="资产范围" @update:model-value="changeScopeFromTab" />
 
     <section class="asset-workspace">
       <header class="workspace-header">
-        <div v-if="scope === 'public'" class="asset-category-tabs" role="tablist" aria-label="公共资产分类">
-          <AppButton v-for="item in publicCategories" :key="item.id" type="button" variant="ghost" size="sm" role="tab" :active="publicCategory === item.id" :aria-selected="publicCategory === item.id" @click="selectPublicCategory(item.id)">
-            <component :is="item.icon" :size="16" />{{ item.label }}
-          </AppButton>
-        </div>
-        <div v-else class="project-toolbar">
-          <div class="asset-category-tabs" role="tablist" aria-label="项目资产分类">
-            <AppButton v-for="item in projectCategories" :key="item.id" type="button" variant="ghost" size="sm" role="tab" :active="projectCategory === item.id" :aria-selected="projectCategory === item.id" @click="selectProjectCategory(item.id)">
-              <component :is="item.icon" :size="16" />{{ item.label }}
-            </AppButton>
-          </div>
-        </div>
+        <AppTabs v-if="scope === 'public'" class="asset-category-tabs" :model-value="publicCategory" :items="publicCategories" label="公共资产分类" @update:model-value="changePublicCategoryFromTab" />
+        <AppTabs v-else class="asset-category-tabs" :model-value="projectCategory" :items="projectCategories" label="项目资产分类" @update:model-value="changeProjectCategoryFromTab" />
 
         <SearchFilterBar v-model="search" v-model:filter-values="activeFilterValues" :filters="activeFilterDefinitions" :placeholder="searchPlaceholder" :search-aria-label="searchPlaceholder" :result-label="resultCountLabel" />
       </header>
@@ -445,7 +449,7 @@ onBeforeUnmount(() => {
           </article>
         </div>
 
-        <div v-else class="asset-state is-empty"><span><component :is="projectCategory === 'character' ? UserRound : projectCategory === 'scene' ? Map : Box" :size="26" /></span><h2>暂无{{ projectCategories.find(item => item.id === projectCategory)?.label }}资产</h2><p>{{ selectedProject?.name }}还没有生成这一类资产。</p></div>
+        <div v-else class="asset-state is-empty"><span><component :is="projectCategory === 'character' ? UserRound : projectCategory === 'scene' ? Map : Box" :size="26" /></span><h2>暂无{{ projectCategories.find(item => item.value === projectCategory)?.label }}资产</h2><p>{{ selectedProject?.name }}还没有生成这一类资产。</p></div>
       </template>
 
       <div ref="loadMoreTarget" class="load-more-sentinel" aria-live="polite">
@@ -467,19 +471,9 @@ onBeforeUnmount(() => {
 .refresh-assets { display: inline-flex; min-height: 38px; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--app-border); border-radius: 9px; color: var(--app-text-secondary); background: var(--app-surface); cursor: pointer; font-size: 11px; }
 .refresh-assets:hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
 .refresh-assets:disabled { cursor: wait; opacity: .6; }
-.asset-scope-switch { display: flex; width: 100%; gap: 4px; margin: 0 0 22px; padding: 4px; border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface); }
-.asset-scope-switch button { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 13px; border: 1px solid transparent; border-radius: 8px; color: var(--app-text-muted); background: transparent; cursor: pointer; font-size: 11px; }
-.asset-scope-switch button:hover { color: var(--app-text-secondary); background: var(--app-surface-hover); }
-.asset-scope-switch button.is-active { border-color: color-mix(in srgb,var(--app-accent) 20%,var(--app-border)); color: var(--app-accent); background: var(--app-accent-soft); box-shadow: none; }
+.asset-scope-tabs { margin: 0 0 22px; }
 .asset-workspace { width: 100%; min-height: 520px; margin: 0; }
 .workspace-header { display: grid; gap: 14px; padding-bottom: 13px; border-bottom: 1px solid var(--app-border); }
-.project-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-.asset-category-tabs { display: flex; align-items: center; gap: 20px; }
-.asset-category-tabs button { position: relative; display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 1px; border: 0; color: var(--app-text-muted); background: transparent; cursor: pointer; font-size: 13px; font-weight: 600; }
-.asset-category-tabs button::after { position: absolute; right: 0; bottom: -15px; left: 0; height: 2px; border-radius: 99px; background: transparent; content: ''; }
-.asset-category-tabs button:hover { color: var(--app-text-secondary); background: transparent; }
-.asset-category-tabs button.is-active { color: var(--app-text); background: transparent; }
-.asset-category-tabs button.is-active::after { background: var(--app-accent); }
 .public-character-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 13px; padding-top: 20px; }
 .public-character-card { overflow: hidden; border: 1px solid var(--app-border); border-radius: 13px; background: var(--app-surface); box-shadow: var(--app-shadow); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .public-character-card:hover { border-color: var(--app-border-strong); box-shadow: 0 16px 34px rgb(0 0 0 / 14%); transform: translateY(-2px); }
@@ -523,17 +517,12 @@ onBeforeUnmount(() => {
   .assets-page { padding: 30px 16px 60px; }
   .assets-heading { align-items: stretch; flex-direction: column; }
   .refresh-assets { justify-content: center; }
-  .asset-scope-switch { display: grid; grid-template-columns: 1fr 1fr; }
-  .asset-scope-switch button { justify-content: center; }
-  .project-toolbar { align-items: stretch; flex-direction: column; }
   .public-character-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
   .audio-reference-card { grid-template-columns: 48px minmax(0, 1fr) 30px; }
   .audio-reference-card > img { width: 48px; height: 48px; }
   .audio-reference-card audio { grid-column: 1 / -1; }
 }
 @media (max-width: 420px) {
-  .asset-category-tabs { gap: 14px; }
-  .asset-category-tabs button { font-size: 12px; }
   .public-character-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {

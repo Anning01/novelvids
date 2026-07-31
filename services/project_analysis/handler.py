@@ -19,6 +19,7 @@ from models.novel import Novel
 from services.ai_task_executor import BaseTaskHandler
 from services.llm.json_output import create_json_completion
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum, ImageSourceEnum
+from utils.prompt_language import normalize_prompt_language, prompt_language_name
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class KeyCharacter(BaseModel):
     aliases: list[str] = Field(default_factory=list, description="人物别名")
     role: str = Field(description="人物在故事中的身份和作用")
     description: str = Field(description="人物性格、背景、动机与人物弧光的中文概述")
-    base_traits: str = Field(description="用于人物视觉生成的详细英文外观描述")
+    base_traits: str = Field(description="按任务指定语言撰写的详细人物外观描述")
     chapter_numbers: list[int] = Field(default_factory=list, description="人物出现的章节序号")
 
 
@@ -42,7 +43,7 @@ class BookAnalysis(BaseModel):
 
 ANALYSIS_SYSTEM_PROMPT = """你是一名资深影视开发编辑。请严格依据给定书稿完成结构化分析，不要虚构书稿中不存在的信息。
 类型标签应简洁准确；故事大纲应覆盖开端、主要冲突、关键转折和结局走向；关键人物只保留真正推动主线的人物。
-人物的 chapter_numbers 必须使用材料中给出的章节序号。base_traits 必须用英文描述可见且相对稳定的外貌、服装和气质，便于后续生图。"""
+人物的 chapter_numbers 必须使用材料中给出的章节序号。base_traits 必须使用任务指定的提示词语言，描述可见且相对稳定的外貌、服装和气质，便于后续生图。"""
 
 
 def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
@@ -83,8 +84,13 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
     return "\n\n".join(blocks)
 
 
-def _cover_prompt(novel: Novel, analysis: BookAnalysis) -> str:
+def _cover_prompt(novel: Novel, analysis: BookAnalysis, prompt_language: str = "en") -> str:
     types = "、".join(analysis.book_types)
+    if normalize_prompt_language(prompt_language) == "en":
+        return f"""Create a vertical cinematic short-drama cover key visual for the novel "{novel.name}".
+Genres: {types}.
+Story outline: {analysis.story_outline}
+Requirements: center the story's core conflict and atmosphere with cinematic composition and lighting; use a clear visual focal point suitable for a 2:3 vertical cover; do not include any text, title, subtitle, logo, watermark, or border; avoid distorted faces and extra limbs. Output at approximately 1K resolution."""
     return f"""为小说《{novel.name}》创作一张竖版影视短剧封面主视觉。
 题材：{types}。
 故事大纲：{analysis.story_outline}
@@ -159,6 +165,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
 
     async def execute(self, request_params: dict) -> dict:
         novel_id = int(request_params["novel_id"])
+        prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
         novel = await Novel.get(id=novel_id)
         if not (novel.content or "").strip():
             raise ValueError("项目没有可分析的书稿内容")
@@ -177,7 +184,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             llm_client,
             model=llm_config.model,
             messages=[
-                {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": (
+                        f"{ANALYSIS_SYSTEM_PROMPT}\n"
+                        f"本任务的提示词语言是{prompt_language_name(prompt_language)}；"
+                        "base_traits 必须严格使用该语言。"
+                    ),
+                },
                 {
                     "role": "user",
                     "content": f"书名：《{novel.name}》\n共 {len(chapters)} 章。\n\n以下是书稿材料：\n{material}",
@@ -192,7 +206,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         image_client = AsyncOpenAI(api_key=image_config.api_key, base_url=image_config.base_url)
         image_response = await image_client.images.generate(
             model=image_config.model,
-            prompt=_cover_prompt(novel, analysis),
+            prompt=_cover_prompt(novel, analysis, prompt_language),
             size="1K",
             response_format="url",
             n=1,

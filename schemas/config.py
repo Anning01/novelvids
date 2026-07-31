@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -62,3 +62,20 @@ class AiModelConfigOut(AiModelConfigProperties, BaseResponse):
     is_active: bool = Field(..., description="是否启用")
     concurrency: int = Field(..., description="并发数")
     supports_json_output: bool = Field(False, description="是否支持结构化 JSON 输出")
+
+
+class GeneralConfigUpdate(BaseModel):
+    """应用级通用配置更新请求。"""
+
+    prompt_language: Literal["zh", "en"] = Field(
+        ...,
+        description="新生成的图片提示词与镜头提示词语言",
+    )
+
+
+class GeneralConfigOut(GeneralConfigUpdate, BaseResponse):
+    """应用级通用配置输出。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="配置ID")

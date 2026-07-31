@@ -2,9 +2,22 @@ from fastapi import APIRouter, Depends, BackgroundTasks, Query
 
 from controllers.asset import asset_controller
 from schemas.ai_task import AiTaskOut
-from schemas.asset import AssetBriefOut, AssetCreate, AssetUpdate, AssetPatch, AssetOut, AssetWithVariantsOut
+from schemas.asset import (
+    AssetBriefOut,
+    AssetCreate,
+    AssetMergeOut,
+    AssetMergeRequest,
+    AssetOut,
+    AssetPatch,
+    AssetReferencePromptOut,
+    AssetReferencePromptPreview,
+    AssetUpdate,
+    AssetWithVariantsOut,
+)
 from schemas.asset_variant import AssetVariantCreate, AssetVariantOut, AssetVariantPatch
+from controllers.config import general_config_controller
 from services.ai_task_executor import ai_task_executor
+from services.reference.generator import build_sora_compatible_prompt
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
@@ -35,6 +48,37 @@ async def patch_asset(asset_id: int, asset: AssetPatch):
 async def get_asset_list(params: QueryParams = Depends(get_list_params)):
     assets = await asset_controller.list(params, AssetBriefOut)
     return ResponseSchema(data=assets)
+
+
+@router.post(
+    "/reference-prompt/preview",
+    summary="预览资产最终生图提示词",
+    response_model=ResponseSchema[AssetReferencePromptOut],
+)
+async def preview_asset_reference_prompt(payload: AssetReferencePromptPreview):
+    prompt_language = await general_config_controller.get_prompt_language()
+    data = payload.model_dump()
+    data["type"] = payload.asset_type.name
+    return ResponseSchema(data={
+        "prompt": build_sora_compatible_prompt(data, prompt_language),
+        "prompt_language": prompt_language,
+    })
+
+
+@router.post(
+    "/merge",
+    summary="增量合并两个重复资产",
+    response_model=ResponseSchema[AssetMergeOut],
+)
+async def merge_assets(payload: AssetMergeRequest):
+    result = await asset_controller.merge(
+        payload.source_asset_id,
+        payload.target_asset_id,
+    )
+    result["asset"] = AssetWithVariantsOut.model_validate(result["asset"])
+    return ResponseSchema(
+        data=result
+    )
 
 
 @router.get(

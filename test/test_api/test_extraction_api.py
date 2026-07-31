@@ -192,6 +192,40 @@ async def test_extract_duplicate_task_blocked(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_get_latest_extraction_task_for_chapter(client: AsyncClient):
+    """设定页可以恢复当前章节最近一次提取任务状态。"""
+    novel, chapter, config = await _setup_extraction_env()
+    task = await AiTask.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        status=TaskStatusEnum.running.value,
+        request_params={"chapter_id": chapter.id, "novel_id": novel.id},
+    )
+    await AiTask.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={"chapter_id": chapter.id + 1, "novel_id": novel.id},
+    )
+
+    response = await client.get(f"/api/chapter/extract/{chapter.id}/latest")
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["id"] == str(task.id)
+    assert data["status"] == TaskStatusEnum.running.value
+
+
+@pytest.mark.asyncio
+async def test_get_latest_extraction_task_returns_none_when_missing(client: AsyncClient):
+    """从未提取过的章节返回空任务。"""
+    novel, chapter, config = await _setup_extraction_env()
+
+    response = await client.get(f"/api/chapter/extract/{chapter.id}/latest")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] is None
+
+
+@pytest.mark.asyncio
 @patch(
     "services.extraction.extractor.BaseExtractor.extract",
     new=_mock_extract,

@@ -3,6 +3,7 @@ from openai import AsyncOpenAI
 
 from schemas.scene import SceneEntity, Storyboard
 from services.llm.json_output import create_json_completion
+from utils.prompt_language import normalize_prompt_language
 
 
 async def generate_storyboard(
@@ -11,6 +12,7 @@ async def generate_storyboard(
     entities: List[SceneEntity],
     model: str,
     supports_json_output: bool = False,
+    prompt_language: str = "en",
 ) -> tuple[Storyboard, dict]:
     """
     调用 OpenAI API 生成分镜板
@@ -23,10 +25,25 @@ async def generate_storyboard(
     for e in entities:
         entities_context += f"- Entity Name: {e.name}\n  Aliases: {', '.join(e.aliases)}\n  Visual Description: {e.description} (RULE: DO NOT re-describe this look, simply use @{{{e.name}}})\n\n"
 
+    language = normalize_prompt_language(prompt_language)
+    language_instruction = (
+        "Write every descriptive output field, shot title, visual description, action, "
+        "camera note, and sound note in Simplified Chinese. Keep entity references in "
+        "the exact @{实体名} syntax and retain standard equipment names where necessary."
+        if language == "zh"
+        else
+        "Write every descriptive output field, shot title, visual description, action, "
+        "camera note, and sound note in English. Keep entity references in the exact "
+        "@{Entity Name} syntax."
+    )
+
     # 系统提示词 (System Prompt) - 融入了摄影指导思维
     system_prompt = f"""
 You are an elite Cinematographer (DP) and Sora 2 Prompt Engineering Expert.
 Your goal is to break down a narrative text into a "Sora 2 Ultra-Detailed Storyboard".
+
+### 0. OUTPUT LANGUAGE
+{language_instruction}
 
 ### 1. INPUT CONTEXT
 - **Narrative**: A segment of a story.
@@ -62,7 +79,7 @@ You must act like a film director using professional equipment. Fill the specifi
 {long_text}
 \"\"\"
 
-Generate the storyboard now.
+Generate the storyboard now and strictly follow the output language requirement.
 """
 
     storyboard, completion = await create_json_completion(

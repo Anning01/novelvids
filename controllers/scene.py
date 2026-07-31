@@ -6,7 +6,7 @@ from schemas.scene import SceneCreate, SceneUpdate
 from models.asset import Asset
 from models.chapter import Chapter
 from models.ai_task import AiTask
-from controllers.config import ai_model_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from services.ai_task_executor import ai_task_executor
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
@@ -76,6 +76,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.storyboard.value
         )
+        prompt_language = await general_config_controller.get_prompt_language()
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.storyboard)
@@ -98,6 +99,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "api_key": config.api_key,
             "model": config.model,
             "supports_json_output": config.supports_json_output,
+            "prompt_language": prompt_language,
         }
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.storyboard, request_params

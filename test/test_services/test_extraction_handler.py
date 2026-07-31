@@ -126,6 +126,9 @@ async def test_正常提取_写入所有类型资产():
     )
     assert len(persons) == 2
     assert {p.canonical_name for p in persons} == {"张三", "李四"}
+    assert {p.metadata["reference_layout"] for p in persons} == {
+        "character_turnaround"
+    }
 
     scenes = await Asset.filter(
         novel_id=novel.id, asset_type=AssetTypeEnum.scene.value
@@ -262,6 +265,82 @@ async def test_增量提取_同一章节重复提取不重复追加():
     )
     # chapter 1 只应出现一次
     assert person.source_chapters.count(1) == 1
+
+
+@pytest.mark.asyncio
+async def test_增量提取_别名命中且空字段不覆盖旧资料():
+    novel = await Novel.create(name="别名合并小说")
+    existing = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="李火旺",
+        aliases=["红中"],
+        description="保留的旧描述",
+        base_traits="保留的旧视觉资料",
+        main_image="/media/li-huowang.png",
+        source_chapters=[1],
+        last_updated_chapter=1,
+    )
+    handler = ExtractionTaskHandler()
+    alias_person = Person(
+        name="红中",
+        aliases=["李兄"],
+        description="",
+        base_traits="",
+        appearances=[],
+    )
+
+    result = await handler._save_assets(
+        novel.id,
+        9,
+        AssetTypeEnum.person,
+        [alias_person],
+    )
+    await existing.refresh_from_db()
+
+    assert result == [{"name": "红中", "action": "updated"}]
+    assert await Asset.filter(novel=novel).count() == 1
+    assert existing.description == "保留的旧描述"
+    assert existing.base_traits == "保留的旧视觉资料"
+    assert existing.main_image == "/media/li-huowang.png"
+    assert existing.source_chapters == [1, 9]
+    assert set(existing.aliases) == {"红中", "李兄"}
+
+
+@pytest.mark.asyncio
+async def test_增量提取_较早章节重跑不会回滚较新资料():
+    novel = await Novel.create(name="状态机防回滚")
+    existing = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.item.value,
+        canonical_name="桃木牌",
+        aliases=["洞窟铭牌"],
+        description="第八十八章确认的完整新资料",
+        base_traits="完整的新形态",
+        source_chapters=[88],
+        last_updated_chapter=88,
+    )
+    handler = ExtractionTaskHandler()
+    older_item = Item(
+        name="洞窟铭牌",
+        aliases=[],
+        description="第一章的早期旧资料",
+        base_traits="旧形态",
+        appearances=[],
+    )
+
+    await handler._save_assets(
+        novel.id,
+        1,
+        AssetTypeEnum.item,
+        [older_item],
+    )
+    await existing.refresh_from_db()
+
+    assert existing.description == "第八十八章确认的完整新资料"
+    assert existing.base_traits == "完整的新形态"
+    assert existing.source_chapters == [1, 88]
+    assert existing.last_updated_chapter == 88
 
 
 @pytest.mark.asyncio

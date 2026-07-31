@@ -8,6 +8,43 @@ from models.scene import Scene
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from schemas.scene import SceneEntity
+from utils.prompt_language import normalize_prompt_language
+
+
+PROMPT_LABELS = {
+    "en": (
+        ("Visual Prose", "visual_prose"),
+        ("Actions", "actions"),
+        ("Format and Look", "format_and_look"),
+        ("Lenses and Filtration", "lenses_and_filtration"),
+        ("Lighting and Atmosphere", "lighting_and_atmosphere"),
+        ("Grade and Palette", "grade_and_palette"),
+        ("Camera Movement", "camera_movement"),
+        ("Sound Design", "sound_design"),
+    ),
+    "zh": (
+        ("视觉描述", "visual_prose"),
+        ("动作", "actions"),
+        ("画面格式与风格", "format_and_look"),
+        ("镜头与滤镜", "lenses_and_filtration"),
+        ("光线与氛围", "lighting_and_atmosphere"),
+        ("色调与调色", "grade_and_palette"),
+        ("运镜", "camera_movement"),
+        ("声音设计", "sound_design"),
+    ),
+}
+
+
+def format_storyboard_prompt(shot, prompt_language: str = "en") -> str:
+    """Render the stored prompt using labels matching the configured language."""
+    language = normalize_prompt_language(prompt_language)
+    lines = []
+    for label, field_name in PROMPT_LABELS[language]:
+        value = getattr(shot, field_name)
+        if isinstance(value, list):
+            value = " ".join(value)
+        lines.append(f"{label}: {value}")
+    return "\n".join(lines)
 
 
 class StoryboardTaskHandler(BaseTaskHandler):
@@ -27,6 +64,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         api_key = request_params["api_key"]
         model = request_params["model"]
         supports_json_output = request_params.get("supports_json_output", False)
+        prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
 
         # 1. 获取章节和相关资产
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
@@ -55,6 +93,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 entities=entities,
                 model=model,
                 supports_json_output=supports_json_output,
+                prompt_language=prompt_language,
             )
 
             end_time = time.time()
@@ -65,7 +104,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 chapter_id=chapter_id,
                 storyboard=storyboard,
                 api_metadata=api_metadata,
-                request_duration=request_duration
+                request_duration=request_duration,
+                prompt_language=prompt_language,
             )
 
             # 5. 返回结果
@@ -88,7 +128,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
         chapter_id: int,
         storyboard,
         api_metadata: dict,
-        request_duration: float
+        request_duration: float,
+        prompt_language: str = "en",
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
         scenes_created = []
@@ -125,22 +166,13 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "token_usage": api_metadata.get("usage", {}),
                 # 请求参数
                 "request_duration": round(request_duration, 2),
+                "prompt_language": normalize_prompt_language(prompt_language),
             }
 
             # 如果有拒绝信息，添加到 metadata
             if "refusal" in api_metadata:
                 scene_metadata["refusal"] = api_metadata["refusal"]
-            # 评价成prompt字符串
-            prompt = (
-                f"Visual Prose: {shot.visual_prose}\n"
-                f"Actions: {shot.actions}\n"
-                f"Format and Look: {shot.format_and_look}\n"
-                f"Lenses and Filtration: {shot.lenses_and_filtration}\n"
-                f"Lighting and Atmosphere: {shot.lighting_and_atmosphere}\n"
-                f"Grade and Palette: {shot.grade_and_palette}\n"
-                f"Camera Movement: {shot.camera_movement}\n"
-                f"Sound Design: {shot.sound_design}"
-            )
+            prompt = format_storyboard_prompt(shot, prompt_language)
             # 创建 Scene 记录
             scene = await Scene.create(
                 chapter_id=chapter_id,

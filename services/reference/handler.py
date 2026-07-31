@@ -66,6 +66,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         api_key = request_params["api_key"]
         model = request_params["model"]
         variant_id = request_params.get("variant_id")
+        prompt_language = request_params.get("prompt_language", "en")
 
         asset = await Asset.get(id=asset_id)
         variant = None
@@ -86,18 +87,33 @@ class AssetReferenceHandler(BaseTaskHandler):
             else:
                 asset_type_name = "unknown"
 
+        metadata = {
+            **(asset.metadata or {}),
+            **((variant.metadata or {}) if variant else {}),
+        }
+        workbench = (
+            metadata.get("workbench")
+            if isinstance(metadata.get("workbench"), dict)
+            else {}
+        )
+        resolution = metadata.get("resolution") or workbench.get("resolution") or "2K"
+        aspect_ratio = (
+            metadata.get("aspect_ratio")
+            or workbench.get("aspectRatio")
+            or "16:9"
+        )
+        generation_count = (
+            metadata.get("generation_count")
+            or workbench.get("generationCount")
+            or 1
+        )
         data = {
             "type": asset_type_name,
             "canonical_name": asset.canonical_name,
             "base_traits": variant.base_traits if variant and variant.base_traits else asset.base_traits,
             "description": variant.description if variant and variant.description else asset.description,
+            "metadata": metadata,
         }
-
-        metadata = {**(asset.metadata or {}), **((variant.metadata or {}) if variant else {})}
-        workbench = metadata.get("workbench") if isinstance(metadata.get("workbench"), dict) else {}
-        resolution = metadata.get("resolution") or workbench.get("resolution") or "2K"
-        aspect_ratio = metadata.get("aspect_ratio", "1:1")
-        generation_count = metadata.get("generation_count") or workbench.get("generationCount") or 1
 
         # 初始化客户端 (AsyncOpenAI)
         client = AsyncOpenAI(base_url=base_url, api_key=api_key)
@@ -110,6 +126,7 @@ class AssetReferenceHandler(BaseTaskHandler):
                 resolution=resolution,
                 aspect_ratio=aspect_ratio,
                 count=generation_count,
+                prompt_language=prompt_language,
             )
 
             result_urls = []

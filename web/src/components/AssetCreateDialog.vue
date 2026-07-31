@@ -47,6 +47,10 @@ const ageOptions = [
   { value: '中年', label: '中年' },
   { value: '老年', label: '老年' },
 ]
+const referenceLayoutOptions = [
+  { value: 'character_turnaround', label: '单人多视图' },
+  { value: 'group_portrait', label: '人物群像' },
+]
 
 const mode = ref<CreateMode>('ai')
 const name = ref('')
@@ -57,6 +61,7 @@ const age = ref('')
 const voice = ref('')
 const ratio = ref('16:9')
 const resolution = ref('1K')
+const referenceLayout = ref('character_turnaround')
 const modelId = ref('')
 const models = ref<AiModelConfig[]>([])
 const libraryItems = ref<LibraryItem[]>([])
@@ -67,6 +72,9 @@ const uploadFile = ref<File | null>(null)
 const uploadPreview = ref('')
 const dragging = ref(false)
 const saving = ref(false)
+const promptTouched = ref(false)
+const promptLanguage = ref<'zh' | 'en'>('en')
+const promptSourceAsset = ref<Asset | null>(null)
 const loadingLibrary = ref(false)
 const loadingMoreLibrary = ref(false)
 const publicPage = ref(0)
@@ -84,6 +92,10 @@ const filteredLibraryItems = computed(() => libraryItems.value.filter(item => {
 const selectedLibrary = computed(() => libraryItems.value.find(item => item.key === selectedLibraryKey.value))
 const publicHasMore = computed(() => props.kind === 'character' && publicPage.value < publicPages.value)
 const projectHasMore = computed(() => projectPage.value < projectPages.value)
+const isGroupPortrait = computed(() => props.kind === 'character' && referenceLayout.value === 'group_portrait')
+const promptPlaceholder = computed(() => isGroupPortrait.value
+  ? '描述群像中的人物、各自固定特征、服装与人物关系'
+  : `描述${config.value.label}的外观、材质、光影和视角要求`)
 const libraryHasMore = computed(() => {
   if (libraryScope.value === 'public') return publicHasMore.value
   if (libraryScope.value === 'project') return projectHasMore.value
@@ -92,7 +104,7 @@ const libraryHasMore = computed(() => {
 const canSubmit = computed(() => {
   if (isEditing.value) return Boolean(name.value.trim())
   if (mode.value === 'library') return Boolean(selectedLibrary.value)
-  const characterReady = props.kind !== 'character' || Boolean(gender.value && age.value)
+  const characterReady = props.kind !== 'character' || isGroupPortrait.value || Boolean(gender.value && age.value)
   if (mode.value === 'upload') return Boolean(name.value.trim() && uploadFile.value && characterReady)
   return Boolean(name.value.trim() && prompt.value.trim() && characterReady && modelId.value)
 })
@@ -102,11 +114,14 @@ function reset() {
   name.value = ''
   description.value = ''
   prompt.value = ''
+  promptTouched.value = false
+  promptSourceAsset.value = null
   gender.value = ''
   age.value = ''
   voice.value = ''
   ratio.value = '16:9'
   resolution.value = '1K'
+  referenceLayout.value = 'character_turnaround'
   selectedLibraryKey.value = ''
   libraryScope.value = 'all'
   search.value = ''
@@ -129,8 +144,39 @@ function reset() {
     gender.value = typeof metadata.gender === 'string' ? metadata.gender : ''
     age.value = typeof metadata.age_group === 'string' ? metadata.age_group : ''
     voice.value = typeof metadata.voice === 'string' ? metadata.voice : ''
+    referenceLayout.value = metadata.reference_layout === 'group_portrait'
+      ? 'group_portrait'
+      : 'character_turnaround'
     if (typeof metadata.aspect_ratio === 'string' && ratios.includes(metadata.aspect_ratio)) ratio.value = metadata.aspect_ratio
     if (typeof metadata.resolution === 'string' && resolutions.includes(metadata.resolution.toUpperCase())) resolution.value = metadata.resolution.toUpperCase()
+  }
+}
+
+async function loadReferencePrompt() {
+  if (!props.asset || promptTouched.value) return
+  try {
+    const source = (await api.asset(props.asset.id)).data
+    promptSourceAsset.value = source
+    const metadata = source.metadata && typeof source.metadata === 'object'
+      ? source.metadata as Record<string, unknown>
+      : {}
+    const preview = await api.referencePromptPreview({
+      asset_type: source.asset_type,
+      canonical_name: source.canonical_name,
+      base_traits: source.base_traits,
+      description: source.description,
+      metadata: {
+        ...metadata,
+        reference_layout: referenceLayout.value,
+      },
+      aspect_ratio: ratio.value,
+    })
+    if (!promptTouched.value && props.asset?.id === source.id) {
+      prompt.value = preview.data.prompt
+      promptLanguage.value = preview.data.prompt_language
+    }
+  } catch (error) {
+    notice.error(`提示词预览失败：${(error as Error).message}`)
   }
 }
 
@@ -181,6 +227,7 @@ async function loadSources() {
     const configResponse = await configPromise
     models.value = configResponse.data.items.filter(item => item.task_type === 2)
     modelId.value = String(models.value.find(item => item.is_active)?.id || models.value[0]?.id || '')
+    await loadReferencePrompt()
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -248,7 +295,14 @@ async function submit() {
       model_config_id: Number(modelId.value) || undefined,
     }
 
-    if (props.kind === 'character') Object.assign(metadata, { gender: gender.value, age_group: age.value, voice: voice.value })
+    if (props.kind === 'character') {
+      Object.assign(metadata, {
+        gender: isGroupPortrait.value ? '' : gender.value,
+        age_group: isGroupPortrait.value ? '' : age.value,
+        voice: isGroupPortrait.value ? '' : voice.value,
+        reference_layout: referenceLayout.value,
+      })
+    }
 
     if (mode.value === 'upload' && uploadFile.value) {
       const uploaded = await api.upload(uploadFile.value)
@@ -271,7 +325,9 @@ async function submit() {
       asset_type: config.value.type,
       canonical_name: assetName,
       description: assetDescription,
-      base_traits: prompt.value.trim(),
+      base_traits: promptTouched.value
+        ? prompt.value.trim()
+        : promptSourceAsset.value?.base_traits || prompt.value.trim(),
       main_image: mainImage,
       image_source: imageSource,
       metadata,
@@ -307,6 +363,9 @@ watch(() => props.open, value => {
 })
 watch(() => props.kind, () => { if (props.open) { reset(); void loadSources() } })
 watch(() => props.asset?.id, () => { if (props.open) reset() })
+watch([referenceLayout, ratio], () => {
+  if (props.open && props.asset && !promptTouched.value) void loadReferencePrompt()
+})
 onMounted(() => { if (props.open) void loadSources() })
 </script>
 
@@ -321,11 +380,11 @@ onMounted(() => { if (props.open) void loadSources() })
         </header>
 
         <div class="asset-dialog__body">
-          <div class="asset-form-grid" :class="{ 'is-character': kind === 'character' }">
+          <div class="asset-form-grid" :class="{ 'is-character': kind === 'character' && !isGroupPortrait }">
             <label class="asset-field"><span><i>*</i>名称</span><input v-model="name" maxlength="100" placeholder="请输入" /></label>
-            <label v-if="kind === 'character'" class="asset-field"><span><i>*</i>性别</span><AppSelect v-model="gender" :options="genderOptions" ariaLabel="选择性别" menu-label="性别" /></label>
-            <label v-if="kind === 'character'" class="asset-field"><span><i>*</i>年龄</span><AppSelect v-model="age" :options="ageOptions" ariaLabel="选择年龄阶段" menu-label="年龄" /></label>
-            <label v-if="kind === 'character'" class="asset-field"><span>音色选择</span><AppButton type="button" variant="secondary" block @click="notice.info('音频库将在下一步开放选择')"><Volume2 :size="15" />{{ voice || '选择音色' }}</AppButton></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>性别</span><AppSelect v-model="gender" :options="genderOptions" ariaLabel="选择性别" menu-label="性别" /></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>年龄</span><AppSelect v-model="age" :options="ageOptions" ariaLabel="选择年龄阶段" menu-label="年龄" /></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span>音色选择</span><AppButton type="button" variant="secondary" block @click="notice.info('音频库将在下一步开放选择')"><Volume2 :size="15" />{{ voice || '选择音色' }}</AppButton></label>
           </div>
 
           <fieldset class="asset-mode">
@@ -338,7 +397,11 @@ onMounted(() => { if (props.open) void loadSources() })
           </fieldset>
 
           <template v-if="mode === 'ai'">
-            <label class="asset-field"><span><i>*</i>提示词</span><textarea v-model="prompt" rows="5" :placeholder="`描述${config.label}的外观、材质、光影和视角要求`" /></label>
+            <label v-if="kind === 'character'" class="asset-field"><span>参考图版式</span><AppSelect v-model="referenceLayout" :options="referenceLayoutOptions" ariaLabel="选择人物参考图版式" menu-label="参考图版式" /></label>
+            <label class="asset-field">
+              <span><i>*</i>提示词<small v-if="isEditing">最终发送 · {{ promptLanguage === 'zh' ? '中文' : 'English' }}</small></span>
+              <textarea v-model="prompt" rows="8" :placeholder="promptPlaceholder" @input="promptTouched = true" />
+            </label>
           </template>
 
           <section v-else-if="mode === 'library'" class="asset-library">
@@ -398,6 +461,8 @@ onMounted(() => { if (props.open) void loadSources() })
 .asset-form-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
 .asset-form-grid.is-character { grid-template-columns: 1fr 1fr; }
 .asset-field { display: grid; gap: 7px; color: #535968; font-size: 12px; font-weight: 650; }
+.asset-field > span { display: flex; align-items: center; gap: 6px; }
+.asset-field > span small { margin-left: auto; color: var(--app-text-muted); font-size: 9px; font-weight: 500; }
 .asset-field > span i,.asset-mode legend i { margin-right: 3px; color: #ec5e73; font-style: normal; }
 .asset-field input,.asset-field textarea { width: 100%; padding: 10px 12px; border: 0; border-radius: 11px; outline: 0; color: #343847; background: #f6f7fa; font: inherit; font-weight: 450; box-shadow: inset 0 0 0 1px transparent; transition: .16s ease; resize: vertical; }
 .asset-field input { height: 40px; }
