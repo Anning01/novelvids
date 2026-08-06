@@ -212,6 +212,23 @@ class QueryBuilder:
             # 获取字段对象
             field_obj = model._meta.fields_map[field_name]
 
+            # 集合过滤：?gender__in=男,男性
+            if operator == "in":
+                raw_values = value.split(",") if isinstance(value, str) else value
+                if not isinstance(raw_values, (list, tuple, set)):
+                    continue
+                try:
+                    processed_values = [
+                        QueryBuilder._convert_value(field_obj, item)
+                        for item in raw_values
+                        if item != ""
+                    ]
+                except (ValueError, TypeError):
+                    continue
+                if processed_values:
+                    query = query.filter(**{f"{field_name}__in": processed_values})
+                continue
+
             # 转换值类型
             try:
                 processed_value = QueryBuilder._convert_value(field_obj, value)

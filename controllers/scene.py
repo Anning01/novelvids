@@ -1,9 +1,12 @@
 from utils.crud import CRUDBase
 from models.scene import Scene
+from pydantic import BaseModel
+
 from schemas.scene import SceneCreate, SceneUpdate
+from models.asset import Asset
 from models.chapter import Chapter
 from models.ai_task import AiTask
-from controllers.config import ai_model_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from services.ai_task_executor import ai_task_executor
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
@@ -21,22 +24,34 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         return instance
 
     async def create(self, obj_in: SceneCreate, **kwargs) -> Scene:
-        instance = await super().create(obj_in, **kwargs)
+        data = obj_in.model_dump(exclude_unset=True)
+        asset_ids = data.pop("asset_ids", None)
+        instance = await super().create(data, **kwargs)
+        if asset_ids:
+            await instance.assets.add(*await Asset.filter(id__in=asset_ids))
         # 直接在当前实例上 fetch，无需重新数据库查询
         await instance.fetch_related("assets")
         return instance
     
-    async def _perform_update(self, scene_id: int, obj_in: SceneUpdate, method: str) -> Scene:
+    async def _perform_update(self, scene_id: int, obj_in: BaseModel, method: str) -> Scene:
         """
         统一处理 update 和 patch 的内部逻辑
         method: 'update' | 'patch'
         """
         instance = await self.get(scene_id)
         
+        data = obj_in.model_dump(exclude_unset=True)
+        asset_ids = data.pop("asset_ids", None)
+
         if method == "patch":
-            instance = await super().patch(instance, obj_in)
+            instance = await super().patch(instance, data)
         else:
-            instance = await super().update(instance, obj_in)
+            instance = await super().update(instance, data)
+
+        if asset_ids is not None:
+            await instance.assets.clear()
+            if asset_ids:
+                await instance.assets.add(*await Asset.filter(id__in=asset_ids))
             
         # 使用 fetch_related 填充已有的实例，避免重复执行 SELECT ... WHERE id = ...
         await instance.fetch_related("assets")
@@ -45,7 +60,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
     async def update(self, scene_id: int, obj_in: SceneUpdate) -> Scene:
         return await self._perform_update(scene_id, obj_in, "update")
 
-    async def patch(self, scene_id: int, obj_in: SceneUpdate) -> Scene:
+    async def patch(self, scene_id: int, obj_in: BaseModel) -> Scene:
         return await self._perform_update(scene_id, obj_in, "patch")
 
     async def remove(self, scene_id: int) -> None:
@@ -61,6 +76,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.storyboard.value
         )
+        prompt_language = await general_config_controller.get_prompt_language()
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.storyboard)
@@ -82,6 +98,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "base_url": config.base_url,
             "api_key": config.api_key,
             "model": config.model,
+            "supports_json_output": config.supports_json_output,
+            "prompt_language": prompt_language,
         }
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.storyboard, request_params

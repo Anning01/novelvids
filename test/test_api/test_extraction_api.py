@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from httpx import AsyncClient
@@ -7,27 +9,66 @@ from models.chapter import Chapter
 from models.asset import Asset
 from models.ai_task import AiTask
 from models.config import AiModelConfig
-from services.ai_task_executor import ai_task_executor
+from services.ai_task_executor import AiTaskExecutor, ai_task_executor
 from services.extraction.handler import ExtractionTaskHandler
-from services.extraction.extractor import PersonList, SceneList, ItemList, Person, Scene, Item
+from services.extraction.extractor import (
+    AssetExtractionGatewayError,
+    AssetExtractionResult,
+    PersonList,
+    SceneList,
+    ItemList,
+    Person,
+    Scene,
+    Item,
+)
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum, AssetTypeEnum
 
 
 # ---- Mock 数据 ----
+
+ZHANG_SAN_TRAITS = """时代基底: modern
+国家/朝代: China
+人种: Chinese
+类型基底: realistic
+脸型: oval face, calm dark eyes
+发型: short black hair
+耳饰: does not wear earrings
+身材: medium height, lean build
+头身比: realistic seven-and-a-half-head proportion
+上身着装: charcoal cotton jacket
+下身着装: straight black trousers
+鞋子: brown leather shoes
+性别: male
+年龄: young adult"""
+
+LI_SI_TRAITS = """时代基底: modern
+国家/朝代: China
+人种: Chinese
+类型基底: realistic
+脸型: angular face, sharp eyes, stable left-cheek scar
+发型: short dark hair
+耳饰: does not wear earrings
+身材: tall, broad-shouldered build
+头身比: realistic eight-head proportion
+上身着装: fitted black wool coat
+下身着装: dark straight trousers
+鞋子: black leather boots
+性别: male
+年龄: middle-aged"""
 
 MOCK_PERSONS = PersonList(persons=[
     Person(
         name="张三",
         aliases=["小张", "张哥"],
         description="主角，沉稳冷静",
-        base_traits="young man, calm expression, black hair, medium build",
+        base_traits=ZHANG_SAN_TRAITS,
         appearances=[],
     ),
     Person(
         name="李四",
         aliases=[],
         description="反派，阴险狡诈",
-        base_traits="tall man, sharp eyes, scar on left cheek",
+        base_traits=LI_SI_TRAITS,
         appearances=[],
     ),
 ])
@@ -53,14 +94,27 @@ MOCK_ITEMS = ItemList(items=[
 ])
 
 
-async def _mock_extract(self, text, chapter_number):
-    """根据提取器类型返回对应的 mock 数据。"""
+async def _mock_extract(self, messages):
+    """返回统一的三类资产测试数据。"""
+    if self.response_model == AssetExtractionResult:
+        return AssetExtractionResult(
+            persons=MOCK_PERSONS.persons,
+            scenes=MOCK_SCENES.scenes,
+            items=MOCK_ITEMS.items,
+        )
     if self.response_model == PersonList:
         return MOCK_PERSONS
     elif self.response_model == SceneList:
         return MOCK_SCENES
     elif self.response_model == ItemList:
         return MOCK_ITEMS
+
+
+async def _raise_gateway_error_with_provider_context(self, messages):
+    try:
+        raise RuntimeError("PRIVATE-PROVIDER-CONTEXT-MARKER")
+    except RuntimeError:
+        raise AssetExtractionGatewayError()
 
 
 # ---- 辅助函数 ----
@@ -96,7 +150,7 @@ async def _setup_extraction_env():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_extract_creates_task_and_assets(client: AsyncClient):
@@ -118,7 +172,17 @@ async def test_extract_creates_task_and_assets(client: AsyncClient):
     # 验证任务完成
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.completed.value
-    assert task.response_data is not None
+    assert set(task.response_data) == {"persons", "scenes", "items"}
+    assert [entry["name"] for entry in task.response_data["persons"]] == [
+        "张三",
+        "李四",
+    ]
+    assert task.response_data["scenes"] == [
+        {"name": "皇宫大殿", "action": "created"}
+    ]
+    assert task.response_data["items"] == [
+        {"name": "尚方宝剑", "action": "created"}
+    ]
 
     # 验证资产写入
     persons = await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.person.value)
@@ -136,7 +200,7 @@ async def test_extract_creates_task_and_assets(client: AsyncClient):
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_extract_incremental_merge(client: AsyncClient):
@@ -192,8 +256,42 @@ async def test_extract_duplicate_task_blocked(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_get_latest_extraction_task_for_chapter(client: AsyncClient):
+    """设定页可以恢复当前章节最近一次提取任务状态。"""
+    novel, chapter, config = await _setup_extraction_env()
+    task = await AiTask.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        status=TaskStatusEnum.running.value,
+        request_params={"chapter_id": chapter.id, "novel_id": novel.id},
+    )
+    await AiTask.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={"chapter_id": chapter.id + 1, "novel_id": novel.id},
+    )
+
+    response = await client.get(f"/api/chapter/extract/{chapter.id}/latest")
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["id"] == str(task.id)
+    assert data["status"] == TaskStatusEnum.running.value
+
+
+@pytest.mark.asyncio
+async def test_get_latest_extraction_task_returns_none_when_missing(client: AsyncClient):
+    """从未提取过的章节返回空任务。"""
+    novel, chapter, config = await _setup_extraction_env()
+
+    response = await client.get(f"/api/chapter/extract/{chapter.id}/latest")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] is None
+
+
+@pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_extract_stale_task_cleaned(client: AsyncClient):
@@ -207,7 +305,7 @@ async def test_extract_stale_task_cleaned(client: AsyncClient):
         task_type=AiTaskTypeEnum.extraction.value,
         status=TaskStatusEnum.running.value,
         request_params={"chapter_id": chapter.id, "novel_id": novel.id},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=700),
     )
 
     # 提交新任务 - 应先清理超时任务再通过
@@ -231,25 +329,125 @@ async def test_extract_no_config_returns_404(client: AsyncClient):
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
     assert body["code"] == 404
-    assert "未配置" in body["message"]
+    assert "启用一个模型" in body["message"]
 
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
-    side_effect=Exception("LLM API error"),
+    "services.extraction.extractor.AssetExtractor.extract",
+    side_effect=Exception("secret-injected-extractor-marker"),
 )
-async def test_extract_llm_failure_marks_task_failed(mock_extract, client: AsyncClient):
-    """LLM 调用失败时任务标记为 failed。"""
+async def test_extract_injected_failure_is_sanitized_in_task_and_logs(
+    mock_extract,
+    client: AsyncClient,
+    caplog,
+):
+    """注入的模型异常不得进入任务错误或日志。"""
+    marker = "secret-injected-extractor-marker"
+    expected_error = (
+        "资产提取模型调用失败"
+        "（错误代码：asset_extraction_gateway_error）"
+    )
     novel, chapter, config = await _setup_extraction_env()
 
     resp = await client.post(f"/api/chapter/extract/{chapter.id}")
     task = await AiTask.get(id=resp.json()["data"]["id"])
-    await ai_task_executor.run(task)
+    with caplog.at_level(logging.INFO):
+        await ai_task_executor.run(task)
 
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.failed.value
-    assert "LLM API error" in task.error_message
+    assert task.error_message == expected_error
+    assert marker not in task.error_message
+    assert marker not in caplog.text
+    assert "roles=(system,user,user,user) call_status=failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_extract_gateway_failure_sanitizes_task_error_and_logs(
+    caplog,
+):
+    marker = "secret-provider-response-marker"
+    expected_error = (
+        "资产提取模型调用失败"
+        "（错误代码：asset_extraction_gateway_error）"
+    )
+    novel, chapter, config = await _setup_extraction_env()
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
+    task = await executor.submit(
+        AiTaskTypeEnum.extraction,
+        {
+            "chapter_id": chapter.id,
+            "novel_id": novel.id,
+            "base_url": config.base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+            "supports_json_output": config.supports_json_output,
+            "prompt_language": "en",
+        },
+    )
+
+    with (
+        patch(
+            "services.extraction.extractor.create_json_completion",
+            new=AsyncMock(side_effect=RuntimeError(marker)),
+        ),
+        caplog.at_level(logging.INFO),
+    ):
+        await executor.run(task)
+
+    await task.refresh_from_db()
+    assert task.status == TaskStatusEnum.failed.value
+    assert task.error_message == expected_error
+    assert marker not in task.error_message
+    assert marker not in caplog.text
+    assert "roles=(system,user,user,user) call_status=started" in caplog.text
+    assert "roles=(system,user,user,user) call_status=failed" in caplog.text
+    assert (
+        "error_type=AssetExtractionGatewayError "
+        "error_code=asset_extraction_gateway_error"
+    ) in caplog.text
+
+
+@pytest.mark.asyncio
+@patch(
+    "services.extraction.extractor.AssetExtractor.extract",
+    new=_raise_gateway_error_with_provider_context,
+)
+async def test_extract_existing_gateway_context_is_absent_from_task_and_logs(
+    caplog,
+):
+    marker = "PRIVATE-PROVIDER-CONTEXT-MARKER"
+    expected_error = (
+        "资产提取模型调用失败"
+        "（错误代码：asset_extraction_gateway_error）"
+    )
+    novel, chapter, config = await _setup_extraction_env()
+
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
+    task = await executor.submit(
+        AiTaskTypeEnum.extraction,
+        {
+            "chapter_id": chapter.id,
+            "novel_id": novel.id,
+            "base_url": config.base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+            "supports_json_output": config.supports_json_output,
+            "prompt_language": "en",
+        },
+    )
+
+    with caplog.at_level(logging.INFO):
+        await executor.run(task)
+
+    await task.refresh_from_db()
+    assert task.status == TaskStatusEnum.failed.value
+    assert task.error_message == expected_error
+    assert marker not in task.error_message
+    assert marker not in caplog.text
 
 
 @pytest.mark.asyncio

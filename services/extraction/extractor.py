@@ -1,123 +1,130 @@
-"""人物/场景/物品提取器。
+"""Schema-validated model gateway for prepared asset extraction messages."""
 
-使用 OpenAI 结构化输出（response_format），直接返回 Pydantic 模型。
-不涉及数据库操作，调用方自行处理存储。
-
-用法：
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key="sk-xxx", base_url="https://...")
-    extractor = PersonExtractor(client, model="gpt-4o-mini")
-    result = await extractor.extract("小说文本...", chapter_number=1)
-    # result.persons -> list[Person]
-"""
+import asyncio
+from typing import Literal
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from prompts.extraction import (
-    ITEM_EXTRACTION_PROMPT,
-    ITEM_SYSTEM_PROMPT,
-    PERSON_EXTRACTION_PROMPT,
-    PERSON_SYSTEM_PROMPT,
-    SCENE_EXTRACTION_PROMPT,
-    SCENE_SYSTEM_PROMPT,
+    GROUP_PORTRAIT_TRAIT_LABELS,
+    SINGLE_CHARACTER_TRAIT_LABELS,
+    ensure_ordered_trait_labels,
+)
+from services.llm.json_output import create_json_completion
+
+
+ASSET_EXTRACTION_GATEWAY_ERROR_CODE = "asset_extraction_gateway_error"
+ASSET_EXTRACTION_GATEWAY_ERROR_MESSAGE = (
+    "资产提取模型调用失败"
+    f"（错误代码：{ASSET_EXTRACTION_GATEWAY_ERROR_CODE}）"
 )
 
 
+class AssetExtractionGatewayError(RuntimeError):
+    """Stable, content-free extraction boundary failure."""
 
-# ---- 结构化输出模型 ----
+    error_code = ASSET_EXTRACTION_GATEWAY_ERROR_CODE
 
-class Appearance(BaseModel):
-    line: int = Field(description="出现的行号")
-    context: str = Field(description="出现的上下文")
+    def __init__(self) -> None:
+        super().__init__(ASSET_EXTRACTION_GATEWAY_ERROR_MESSAGE)
 
 
 class Person(BaseModel):
     name: str = Field(description="标准名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
-    description: str = Field(description="中文描述：性格、身份、背景等")
-    base_traits: str = Field(description="详细英文视觉描述，用于AI图像生成")
-    appearances: list[Appearance] = Field(default_factory=list, description="出现位置")
+    label: Literal["人物", "动物", "群像"] = Field(
+        default="人物",
+        description="资产形态",
+    )
+    description: str = Field(default="", description="中文剧情语义说明")
+    base_traits: str = Field(description="目标提示词语言的稳定视觉描述")
+
+    @model_validator(mode="after")
+    def validate_visual_contract(self) -> "Person":
+        if self.label == "群像":
+            ensure_ordered_trait_labels(
+                self.base_traits,
+                GROUP_PORTRAIT_TRAIT_LABELS,
+                "群像视觉描述",
+            )
+        else:
+            ensure_ordered_trait_labels(
+                self.base_traits,
+                SINGLE_CHARACTER_TRAIT_LABELS,
+                "单人或动物视觉描述",
+            )
+        return self
+
+    @property
+    def reference_layout(self) -> Literal["character_turnaround", "group_portrait"]:
+        return "group_portrait" if self.label == "群像" else "character_turnaround"
 
 
 class Scene(BaseModel):
     name: str = Field(description="场景名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
-    description: str = Field(description="中文描述：环境、氛围、特点等")
-    base_traits: str = Field(description="详细英文视觉描述，用于AI图像生成")
-    appearances: list[Appearance] = Field(default_factory=list, description="出现位置")
+    description: str = Field(default="", description="中文剧情语义说明")
+    base_traits: str = Field(description="目标提示词语言的稳定场景视觉描述")
 
 
 class Item(BaseModel):
-    name: str = Field(description="物品名称")
+    name: str = Field(description="道具名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
-    description: str = Field(description="中文描述：外观、功能、来源等")
-    base_traits: str = Field(description="详细英文视觉描述，用于AI图像生成")
-    appearances: list[Appearance] = Field(default_factory=list, description="出现位置")
+    description: str = Field(default="", description="中文剧情语义说明")
+    base_traits: str = Field(description="目标提示词语言的稳定道具视觉描述")
 
 
+class AssetExtractionResult(BaseModel):
+    """一次模型响应同时返回全部资产类型。"""
+
+    persons: list[Person] = Field(description="人物资产列表")
+    scenes: list[Scene] = Field(description="场景资产列表")
+    items: list[Item] = Field(description="道具资产列表")
+
+
+# 保留结果容器，兼容已有内部调用和历史测试数据构造。
 class PersonList(BaseModel):
-    persons: list[Person]
+    persons: list[Person] = Field(default_factory=list)
 
 
 class SceneList(BaseModel):
-    scenes: list[Scene]
+    scenes: list[Scene] = Field(default_factory=list)
 
 
 class ItemList(BaseModel):
-    items: list[Item]
+    items: list[Item] = Field(default_factory=list)
 
 
-# ---- 提取器 ----
+class AssetExtractor:
+    """Send prepared extraction messages through the shared Schema boundary."""
 
-class BaseExtractor:
-    """提取器基类。子类定义 prompt 和 response_model 即可。"""
+    response_model = AssetExtractionResult
 
-    system_prompt: str = ""
-    user_prompt_template: str = ""
-    response_model: type[BaseModel]
-
-    def __init__(self, client: AsyncOpenAI, model: str = "gpt-4o-mini", max_text_length: int = 8000):
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        supports_json_output: bool = False,
+    ) -> None:
         self.client = client
         self.model = model
-        self.max_text_length = max_text_length
+        self.supports_json_output = supports_json_output
 
-    async def extract(self, text: str, chapter_number: int) -> BaseModel:
-        """提取实体，直接返回结构化的 Pydantic 模型。"""
-        prompt = self.user_prompt_template.format(
-            chapter_number=chapter_number,
-            text=text[:self.max_text_length],
-        )
-
-        response = await self.client.beta.chat.completions.parse(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            response_format=self.response_model,
-        )
-
-        parsed = response.choices[0].message.parsed
-        if parsed is None:
-            raise ValueError("LLM 返回结果解析失败")
-        return parsed
-
-
-class PersonExtractor(BaseExtractor):
-    system_prompt = PERSON_SYSTEM_PROMPT
-    user_prompt_template = PERSON_EXTRACTION_PROMPT
-    response_model = PersonList
-
-
-class SceneExtractor(BaseExtractor):
-    system_prompt = SCENE_SYSTEM_PROMPT
-    user_prompt_template = SCENE_EXTRACTION_PROMPT
-    response_model = SceneList
-
-
-class ItemExtractor(BaseExtractor):
-    system_prompt = ITEM_SYSTEM_PROMPT
-    user_prompt_template = ITEM_EXTRACTION_PROMPT
-    response_model = ItemList
+    async def extract(
+        self,
+        messages: list[dict[str, str]],
+    ) -> AssetExtractionResult:
+        try:
+            parsed, _ = await create_json_completion(
+                self.client,
+                model=self.model,
+                messages=messages,
+                response_model=self.response_model,
+                supports_json_output=self.supports_json_output,
+            )
+            return AssetExtractionResult.model_validate(parsed)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise AssetExtractionGatewayError() from None

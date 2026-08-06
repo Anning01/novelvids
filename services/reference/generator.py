@@ -1,63 +1,188 @@
-from openai import AsyncOpenAI
+from typing import Any
 
-def build_sora_compatible_prompt(data):
-    """
-    为 Sora 2 优化的结构化提示词
-    核心逻辑：使用身份锚点(Identity Anchors) + 空间多视角描述
-    """
-    asset_type = data.get("type")
-    name = data.get("canonical_name")
-    traits = data.get("base_traits")
-    desc = data.get("description")
+from services.image_generation import generate_images
+from utils.prompt_language import normalize_prompt_language
 
-    # 通用电影级引导词：增强光影稳定性，降低 Sora 2 生成时的噪点
-    cinema_prefix = "二次元风格，视频静帧画面，电影感构图，极高保真度，4K分辨率。"
+
+CHARACTER_TURNAROUND = "character_turnaround"
+GROUP_PORTRAIT = "group_portrait"
+
+SINGLE_CHARACTER_PROMPT_PREFIX_ZH = (
+    "任务：完成角色的上半身正面平视特写和该角色的全身三视图，"
+    "左边是角色的上半身正面平视特写，右边是该角色的全身三视图。"
+    "中性浅灰白色、无缝摄影棚背景、无环境元素、无墙角和地平线、仅保留浅接触阴影。"
+    "三视图不可以有分割线，比例是16:9，左侧为角色胸部以上特写大图，占画面约 40% 宽度，"
+    "用于展示面部、发型、表情、眼神、上半身服装和配饰细节，右侧为同一角色的三视图，"
+    "占画面约 60% 宽度，依次展示正面全身、侧面全身、背面全身。"
+)
+
+SCENE_PROMPT_PREFIX_ZH = (
+    "生成四宫格画面，展示同一个场景中的四个不同视角。"
+    "左上角为正视图，主体正面清晰可见，构图居中，细节完整；右上角为俯视图，"
+    "从高空俯视整体空间布局，展示环境关系和场景结构；左下角为背视图，从主体后方观察，"
+    "突出背部轮廓、空间纵深和环境延展；右下角为侧视图，从主体侧面观察，展示主体比例、"
+    "层次和空间关系。四个画面保持同一场景、同一光照、同一色调、同一时间状态。"
+    "不输出文字信息。\n\n"
+    "1. 只出现场景，不出现人物、道具等无关内容,\n"
+    "2. 必须只展示静态事物，不能包含人，动物等可以自行运行的事物\n"
+    "3. 无动态、特效、技能、光效及战斗相关描写。"
+)
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _reference_layout(data: dict[str, Any]) -> str:
+    metadata = data.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    workbench = metadata.get("workbench")
+    workbench = workbench if isinstance(workbench, dict) else {}
+    layout = _text(
+        data.get("reference_layout")
+        or metadata.get("reference_layout")
+        or metadata.get("referenceLayout")
+        or workbench.get("referenceLayout")
+    ).lower()
+    if layout in {"group", "ensemble", "group_portrait", "group-portrait"}:
+        return GROUP_PORTRAIT
+    return CHARACTER_TURNAROUND
+
+
+def _details(data: dict[str, Any]) -> str:
+    """Return visual identity only; narrative description is not an image prompt."""
+    return _text(data.get("base_traits"))
+
+
+def _is_complete_reference_prompt(value: str) -> bool:
+    markers = (
+        "任务：完成角色的上半身正面平视特写",
+        "任务：生成同一组角色的群像关系参考图",
+        "生成四宫格画面，展示同一个场景",
+        "【道具描述】",
+        "Task: Create an upper-body, front-facing, eye-level close-up",
+        "Task: Create an ensemble character relationship reference image",
+        "Create a four-panel environment reference sheet",
+        "[Prop description]",
+    )
+    return any(value.startswith(marker) for marker in markers)
+
+
+def _character_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
+    details = _details(data)
+    if _reference_layout(data) == GROUP_PORTRAIT:
+        # shengshimedia keeps the model-produced 15-field ensemble description
+        # verbatim instead of forcing the single-character turnaround layout.
+        return details
+
+    if language == "zh":
+        prefix = SINGLE_CHARACTER_PROMPT_PREFIX_ZH.replace("比例是16:9", f"比例是{ratio}")
+        return f"{prefix}\n\n角色描述：\n{details}"
+    return (
+        "Task: Create an upper-body, front-facing, eye-level close-up of the character together with a "
+        "full-body three-view turnaround. Place the upper-body close-up on the left and the full-body "
+        "turnaround on the right. Use a seamless neutral light gray-white studio background with no "
+        "environment, corners, or horizon line, retaining only soft contact shadows. "
+        f"Use a {ratio} aspect ratio. The left close-up occupies about 40% of the canvas and clearly shows "
+        "the face, hairstyle, expression, eyes, upper-body clothing, and accessories. The right side "
+        "occupies about 60% and shows the same character in front, side, and back full-body views in that "
+        "order. Identity, proportions, clothing, hairstyle, and accessories must remain exactly consistent "
+        "across every view. Do not output text, labels, watermarks, borders, or divider lines.\n\n"
+        f"Character description:\n{details}"
+    )
+
+
+def _scene_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
+    details = _details(data)
+    if language == "zh":
+        ratio_requirement = "" if ratio == "16:9" else f"\n4. 画面比例为 {ratio}。"
+        return f"{SCENE_PROMPT_PREFIX_ZH}{ratio_requirement}\n\n场景描述: {details}"
+    return (
+        f"Create a four-panel environment reference sheet in a {ratio} aspect ratio, showing the same scene "
+        "from four different viewpoints. Top-left: a centered front view with the main spatial subject "
+        "clearly visible and complete. Top-right: a high-angle aerial view revealing the full layout, "
+        "environmental relationships, and spatial structure. Bottom-left: a rear view emphasizing the back "
+        "silhouette, depth, and continuation of the environment. Bottom-right: a side view showing scale, "
+        "layers, and spatial relationships. All four panels must depict the exact same environment, "
+        "architecture, set dressing, lighting, color palette, time of day, and weather state.\n\n"
+        "Show only the environment. Do not include people, animals, hero props, or unrelated objects. "
+        "Depict a static environment with no motion, effects, abilities, glowing effects, or combat. "
+        "Do not output text, labels, or watermarks.\n\n"
+        f"Scene description:\n{details}"
+    )
+
+
+def _item_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
+    details = _details(data)
+    if language == "zh":
+        return f"【道具描述】{details}"
+    return f"[Prop description] {details}"
+
+
+def build_sora_compatible_prompt(data: dict[str, Any], prompt_language: str = "en") -> str:
+    """Build a stable reference-sheet prompt in the configured language."""
+    language = normalize_prompt_language(prompt_language)
+    asset_type = _text(data.get("type")).lower()
+    ratio = _text(data.get("aspect_ratio")) or "16:9"
+    supplied_prompt = _text(data.get("base_traits"))
+
+    if _is_complete_reference_prompt(supplied_prompt):
+        return supplied_prompt
 
     if asset_type == "person":
-        # 针对 Sora 2 的人物一致性：生成三视图模式
-        # 这种模式能让 Sora 学习到人物的全方位特征
-        prompt = (f"{cinema_prefix}角色设计稿：{name}的全身三视图（正面、侧面、背面）。"
-                  f"视觉特征锚点：{traits}。{desc}。"
-                  "白色背景，平铺光，人体比例严谨，面部特征高度清晰且一致。")
-    elif asset_type == "item":
-        # 物品一致性：强调多角度细节和材质感
-        prompt = (f"{cinema_prefix}{name}的多角度产品展示，具有{traits}的特征。{desc}。"
-                  "摄影棚灯光，微距镜头，皮肤/材质纹理锐利，工作室渲染效果。")
-    elif asset_type == "scene":
-        # 场景一致性：强调空间深度，为 Sora 2 预留运镜空间
-        prompt = (f"{cinema_prefix}{name}的宏大全景图，空间架构：{traits}。{desc}。"
-                  "广角视角，丁达尔效应，细腻的光影层次，具有极强的空间立体感。")
-    else:
-        prompt = f"{cinema_prefix}{name}, {traits}, {desc}"
+        return _character_prompt(data, language, ratio)
+    if asset_type == "scene":
+        return _scene_prompt(data, language, ratio)
+    if asset_type in {"item", "object", "prop"}:
+        return _item_prompt(data, language, ratio)
 
-    return prompt
+    details = _details(data)
+    if language == "zh":
+        return f"生成画面比例为 {ratio} 的资产参考图。不输出文字、标签或水印。\n\n资产描述：\n{details}"
+    return (
+        f"Create an asset reference image in a {ratio} aspect ratio. Do not output text, labels, or "
+        f"watermarks.\n\nAsset description:\n{details}"
+    )
 
 
-async def generate_for_sora_consistency(client: AsyncOpenAI, data, reference_images=None, model="doubao-seedream-4-5-251128"):
-    """
-    执行生成任务，支持多图参考 (异步)
-    """
-    final_prompt = build_sora_compatible_prompt(data)
+async def generate_for_sora_consistency(
+    data,
+    *,
+    base_url,
+    api_key,
+    api_protocol="openai_compatible",
+    reference_images=None,
+    model="doubao-seedream-4-5-251128",
+    resolution="2K",
+    aspect_ratio="16:9",
+    count=1,
+    prompt_language="en",
+):
+    """Execute a reference-image generation task with optional image references."""
+    final_prompt = build_sora_compatible_prompt(
+        {**data, "aspect_ratio": aspect_ratio},
+        prompt_language,
+    )
 
-    extra_body = {
-        "sequential_image_generation": "disabled",
-        "watermark": False
-    }
+    extra_body = {}
 
-    # 兼容 OpenAI 格式，将 image 参数放入 extra_body
     if reference_images:
         extra_body["image"] = reference_images
 
     try:
-        response = await client.images.generate(
+        return await generate_images(
+            base_url=base_url,
+            api_key=api_key,
             model=model,
             prompt=final_prompt,
-            size="2K",  # 建议 2K，若需更高精度可在控制台设为 4K
-            response_format="url",
-            n=1, # 显式指定只生成一张
-            extra_body=extra_body
+            api_protocol=api_protocol,
+            resolution=resolution,
+            aspect_ratio=aspect_ratio,
+            count=count,
+            extra_body=extra_body,
         )
-        return response.data
-    except Exception as e:
-        print(f"生成异常: {e}")
-        raise e
+    except Exception as error:
+        print(f"生成异常: {error}")
+        raise

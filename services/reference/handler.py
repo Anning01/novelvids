@@ -4,10 +4,10 @@ import os
 from urllib.parse import urlparse
 
 import httpx
-from openai import AsyncOpenAI
 
 from config import settings
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from services.ai_task_executor import BaseTaskHandler
 from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
@@ -64,8 +64,14 @@ class AssetReferenceHandler(BaseTaskHandler):
         base_url = request_params["base_url"]
         api_key = request_params["api_key"]
         model = request_params["model"]
+        api_protocol = request_params.get("api_protocol", "openai_compatible")
+        variant_id = request_params.get("variant_id")
+        prompt_language = request_params.get("prompt_language", "en")
 
         asset = await Asset.get(id=asset_id)
+        variant = None
+        if variant_id is not None:
+            variant = await AssetVariant.get(id=variant_id, asset_id=asset_id)
 
         # 构造生成所需的数据
         try:
@@ -81,43 +87,90 @@ class AssetReferenceHandler(BaseTaskHandler):
             else:
                 asset_type_name = "unknown"
 
+        metadata = {
+            **(asset.metadata or {}),
+            **((variant.metadata or {}) if variant else {}),
+        }
+        workbench = (
+            metadata.get("workbench")
+            if isinstance(metadata.get("workbench"), dict)
+            else {}
+        )
+        resolution = metadata.get("resolution") or workbench.get("resolution") or "2K"
+        aspect_ratio = (
+            metadata.get("aspect_ratio")
+            or workbench.get("aspectRatio")
+            or "16:9"
+        )
+        generation_count = (
+            metadata.get("generation_count")
+            or workbench.get("generationCount")
+            or 1
+        )
         data = {
             "type": asset_type_name,
             "canonical_name": asset.canonical_name,
-            "base_traits": asset.base_traits,
-            "description": asset.description,
+            "base_traits": variant.base_traits if variant and variant.base_traits else asset.base_traits,
+            "description": variant.description if variant and variant.description else asset.description,
+            "metadata": metadata,
         }
 
-        # 初始化客户端 (AsyncOpenAI)
-        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-
         try:
-            image_list = await generate_for_sora_consistency(client, data, model=model)
+            image_list = await generate_for_sora_consistency(
+                data,
+                base_url=base_url,
+                api_key=api_key,
+                api_protocol=api_protocol,
+                model=model,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                count=generation_count,
+                prompt_language=prompt_language,
+            )
 
             result_urls = []
             if image_list:
-                # 下载第一张图作为主图
-                first_image = image_list[0]
-                local_url = await _download_image(first_image.url, asset_id)
-                asset.main_image = local_url
-                asset.image_source = ImageSourceEnum.ai.value
-
-                await asset.save(update_fields=["main_image", "image_source", "updated_at"])
-
-                result_urls = [local_url]
-
-                # 如果有多张图，下载后续角度图
-                for i, img in enumerate(image_list[1:3], start=1):
+                for index, image in enumerate(image_list):
                     try:
-                        angle_url = await _download_image(img.url, asset_id, f"_angle{i}")
-                        field_name = f"angle_image_{i}"
-                        setattr(asset, field_name, angle_url)
-                        await asset.save(update_fields=[field_name, "updated_at"])
-                        result_urls.append(angle_url)
+                        suffix = (
+                            f"_variant{variant.id}_{index + 1}"
+                            if variant
+                            else "" if index == 0 else f"_candidate{index + 1}"
+                        )
+                        result_urls.append(
+                            await _download_image(image.url, asset_id, suffix)
+                        )
                     except Exception:
-                        logger.warning("Failed to download angle image %d for asset %s", i, asset_id)
+                        logger.warning(
+                            "Failed to download image %d for asset %s",
+                            index + 1,
+                            asset_id,
+                        )
 
-            return {"images": result_urls}
+                if variant:
+                    variant.images = result_urls
+                    await variant.save(update_fields=["images", "updated_at"])
+                elif result_urls:
+                    asset.main_image = result_urls[0]
+                    asset.angle_image_1 = result_urls[1] if len(result_urls) > 1 else None
+                    asset.angle_image_2 = result_urls[2] if len(result_urls) > 2 else None
+                    asset.image_source = ImageSourceEnum.ai.value
+                    asset.metadata = {
+                        **(asset.metadata or {}),
+                        "image_gallery": result_urls,
+                    }
+                    await asset.save(
+                        update_fields=[
+                            "main_image",
+                            "angle_image_1",
+                            "angle_image_2",
+                            "image_source",
+                            "metadata",
+                            "updated_at",
+                        ]
+                    )
+
+            return {"images": result_urls, "variant_id": variant.id if variant else None}
 
         except Exception as e:
             error_str = str(e)

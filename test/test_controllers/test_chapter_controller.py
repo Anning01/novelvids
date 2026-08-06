@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 from controllers.chapter import chapter_controller
 from models.novel import Novel
@@ -88,3 +91,44 @@ async def test_delete_chapter():
 
     exists = await Chapter.filter(id=chapter.id).exists()
     assert not exists
+
+
+@pytest.mark.asyncio
+async def test_extract_snapshots_context_limit(monkeypatch):
+    novel = await Novel.create(name="Context Limit Novel", author="Author")
+    chapter = await Chapter.create(
+        novel_id=novel.id,
+        number=1,
+        name="Context Limit Chapter",
+        content="Content",
+    )
+    config = SimpleNamespace(
+        base_url="https://api.example.com/v1",
+        api_key="key",
+        model="model",
+        concurrency=1,
+        supports_json_output=False,
+        max_context_characters=120000,
+    )
+
+    monkeypatch.setattr(
+        "controllers.chapter.ai_model_config_controller.get_active",
+        AsyncMock(return_value=config),
+    )
+    monkeypatch.setattr(
+        "controllers.chapter.general_config_controller.get_prompt_language",
+        AsyncMock(return_value="en"),
+    )
+    monkeypatch.setattr(
+        "controllers.chapter.ai_task_executor.cleanup_stale_tasks",
+        AsyncMock(),
+    )
+
+    async def submit(_task_type, request_params):
+        return SimpleNamespace(request_params=request_params)
+
+    monkeypatch.setattr("controllers.chapter.ai_task_executor.submit", submit)
+
+    task = await chapter_controller.extract(chapter.id)
+
+    assert task.request_params["max_context_characters"] == 120000

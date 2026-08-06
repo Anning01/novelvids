@@ -151,6 +151,7 @@ async def test_generate_submits_task():
         api_key="sk-test",
         model="mock-model",
         is_active=True,
+        supports_json_output=True,
     )
 
     task = await scene_controller.generate(chapter.id)
@@ -159,6 +160,8 @@ async def test_generate_submits_task():
     assert task.task_type == AiTaskTypeEnum.storyboard.value
     assert task.status == TaskStatusEnum.pending.value
     assert task.request_params["chapter_id"] == chapter.id
+    assert task.request_params["supports_json_output"] is True
+    assert task.request_params["prompt_language"] == "en"
     print(f"    提交任务 id={task.id}, type=storyboard, status=pending, chapter_id={chapter.id}")
 
 
@@ -222,7 +225,7 @@ async def test_generate_stale_task_cleaned():
         task_type=AiTaskTypeEnum.storyboard.value,
         status=TaskStatusEnum.running.value,
         request_params={"chapter_id": chapter.id},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=1000),
     )
 
     # 提交新任务应成功（超时任务被清理）

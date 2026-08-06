@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from controllers.novel import novel_controller
+from schemas.ai_task import AiTaskOut
 from schemas.novel import NovelBriefOut, NovelCreate, NovelUpdate, NovelPatch, NovelOut
+from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
@@ -50,7 +52,25 @@ async def delete_novel(novel_id: int):
     return ResponseSchema()
 
 
-@router.get("/{novel_id}/split", summary="使用nlp智能拆分章节", response_model=ResponseSchema[NovelOut])
+@router.post("/{novel_id}/split", summary="使用nlp智能拆分章节", response_model=ResponseSchema[NovelOut])
+@router.get("/{novel_id}/split", summary="使用nlp智能拆分章节（兼容）", response_model=ResponseSchema[NovelOut])
 async def split_novel(novel_id: int):
     novel = await novel_controller.split(novel_id)
     return ResponseSchema(data=novel)
+
+
+@router.post("/{novel_id}/analyze", summary="分析 Agent 项目", response_model=ResponseSchema[AiTaskOut])
+async def analyze_novel(novel_id: int, bg: BackgroundTasks):
+    task = await novel_controller.analyze(novel_id)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.get(
+    "/{novel_id}/analysis",
+    summary="获取最近一次 Agent 项目分析任务",
+    response_model=ResponseSchema[AiTaskOut | None],
+)
+async def get_novel_analysis(novel_id: int):
+    task = await novel_controller.latest_analysis(novel_id)
+    return ResponseSchema(data=task)

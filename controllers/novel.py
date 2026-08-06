@@ -1,10 +1,19 @@
 from fastapi import HTTPException
 
+from models.ai_task import AiTask
 from models.chapter import Chapter
-from services.nlp import RegexChapterRecognitionStrategy, NovelText
+from controllers.config import ai_model_config_controller, general_config_controller
+from services.ai_task_executor import ai_task_executor
+from services.nlp import (
+    ChapterSplitError,
+    RegexChapterRecognitionStrategy,
+    NovelText,
+    validate_chapter_split,
+)
 from utils.crud import CRUDBase
 from models.novel import Novel
-from schemas.novel import NovelCreate, NovelUpdate
+from schemas.novel import NovelCreate, NovelPatch, NovelUpdate
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
@@ -15,7 +24,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         instance = await self.get(novel_id)
         return await super().update(instance, obj_in)
 
-    async def patch(self, novel_id: int, obj_in: NovelUpdate) -> Novel:
+    async def patch(self, novel_id: int, obj_in: NovelPatch) -> Novel:
         instance = await self.get(novel_id)
         return await super().patch(instance, obj_in)
 
@@ -36,7 +45,12 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         service = RegexChapterRecognitionStrategy()
         parsed_chapters = service.recognize(novel_text)
 
-        # 如果没有识别到章节，默认整个小说作为一个章节
+        try:
+            validate_chapter_split(novel.content, parsed_chapters)
+        except ChapterSplitError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        # 短篇无章节标记时仍可作为单章；长篇会在上面的质量校验中被拒绝。
         if not parsed_chapters:
             parsed_chapters = [
                 type(
@@ -52,14 +66,16 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 )()
             ]
 
-        # 创建章节记录
-        for idx, chapter_result in enumerate(parsed_chapters):
-            await Chapter.create(
+        # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
+        await Chapter.bulk_create([
+            Chapter(
                 novel_id=novel.id,
                 number=idx + 1,
                 name=chapter_result.title,
                 content=chapter_result.content,
             )
+            for idx, chapter_result in enumerate(parsed_chapters)
+        ])
 
         # 更新小说的总章节数和状态
         await novel.update_from_dict(
@@ -69,6 +85,44 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         )
         await novel.save()
         return novel
+
+    async def analyze(self, novel_id: int) -> AiTask:
+        """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
+        novel = await self.get(novel_id)
+        if not (novel.content or "").strip():
+            raise HTTPException(status_code=400, detail="项目没有可分析的书稿内容")
+
+        await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value)
+        await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
+        prompt_language = await general_config_controller.get_prompt_language()
+        await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
+
+        active_tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.project_analysis.value,
+            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
+        )
+        for task in active_tasks:
+            if task.request_params.get("novel_id") == novel_id:
+                return task
+
+        return await ai_task_executor.submit(
+            AiTaskTypeEnum.project_analysis,
+            {
+                "novel_id": novel_id,
+                "resolution": "1K",
+                "prompt_language": prompt_language,
+            },
+        )
+
+    async def latest_analysis(self, novel_id: int) -> AiTask | None:
+        await self.get(novel_id)
+        tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.project_analysis.value,
+        ).order_by("-created_at")
+        return next(
+            (task for task in tasks if task.request_params.get("novel_id") == novel_id),
+            None,
+        )
 
 
 novel_controller = NovelController()

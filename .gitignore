@@ -87,3 +87,5 @@ media
 novelvids.db*
 .playwright-mcp
 test.py
+.codex-pet-runs
+.worktrees/

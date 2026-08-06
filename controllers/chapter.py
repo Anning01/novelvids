@@ -1,10 +1,10 @@
 from fastapi import HTTPException
 
-from controllers.config import ai_model_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.novel import Novel
-from schemas.chapter import ChapterCreate, ChapterUpdate
+from schemas.chapter import ChapterCreate, ChapterPatch, ChapterUpdate
 from services.ai_task_executor import ai_task_executor
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -41,7 +41,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         instance = await self.get(chapter_id)
         return await super().update(instance, obj_in)
 
-    async def patch(self, chapter_id: int, obj_in: ChapterUpdate) -> Chapter:
+    async def patch(self, chapter_id: int, obj_in: ChapterPatch) -> Chapter:
         instance = await self.get(chapter_id)
         return await super().patch(instance, obj_in)
 
@@ -66,6 +66,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.extraction.value
         )
+        prompt_language = await general_config_controller.get_prompt_language()
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.extraction)
@@ -89,11 +90,29 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             "api_key": config.api_key,
             "model": config.model,
             "concurrency": config.concurrency,
+            "supports_json_output": config.supports_json_output,
+            "max_context_characters": config.max_context_characters,
+            "prompt_language": prompt_language,
         }
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.extraction, request_params
         )
         return task
+
+    async def latest_extraction_task(self, chapter_id: int) -> AiTask | None:
+        """返回章节最近一次提取任务，用于页面恢复任务状态。"""
+        await self.get(chapter_id)
+        tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.extraction.value,
+        ).order_by("-created_at")
+        return next(
+            (
+                task
+                for task in tasks
+                if task.request_params.get("chapter_id") == chapter_id
+            ),
+            None,
+        )
 
 
 chapter_controller = ChapterController()

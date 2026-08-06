@@ -75,6 +75,35 @@ async def test_api_patch_novel(client: AsyncClient):
     assert data["name"] == "Patched Name"
     # Content should remain unchanged (None or whatever default)
 
+
+@pytest.mark.asyncio
+async def test_api_patch_novel_analysis_editor_fields(client: AsyncClient):
+    novel = await Novel.create(name="Editable Analysis", author="Author")
+
+    response = await client.patch(
+        f"/api/novel/{novel.id}",
+        json={
+            "name": "新的小说昵称",
+            "tags": ["都市", "成长"],
+            "story_outline": "人工调整后的故事大纲。",
+            "project_type": "都市精品短剧",
+            "project_setting": "采用现实主义世界观。",
+            "storyboard_strategy": "快节奏动作叙事",
+            "storyboard_setting": "重点突出动作连续性与情绪反应。",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["name"] == "新的小说昵称"
+    assert body["data"]["tags"] == ["都市", "成长"]
+    assert body["data"]["story_outline"] == "人工调整后的故事大纲。"
+    assert body["data"]["project_type"] == "都市精品短剧"
+    assert body["data"]["project_setting"] == "采用现实主义世界观。"
+    assert body["data"]["storyboard_strategy"] == "快节奏动作叙事"
+    assert body["data"]["storyboard_setting"] == "重点突出动作连续性与情绪反应。"
+
 @pytest.mark.asyncio
 async def test_api_delete_novel(client: AsyncClient):
     """Test deleting a novel."""

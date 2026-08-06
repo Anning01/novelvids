@@ -97,7 +97,7 @@ async def test_生成视频_无配置报404():
     with pytest.raises(HTTPException) as exc_info:
         await video_controller.generate(req)
     assert exc_info.value.status_code == 404
-    assert "未配置" in exc_info.value.detail
+    assert "启用一个模型" in exc_info.value.detail
     print(f"    无配置: {exc_info.value.detail}")
 
 
@@ -146,6 +146,51 @@ async def test_生成视频_解析资产引用():
 
     assert video.external_task_id == "ext-task-002"
     print(f"    解析资产引用: subjects={[s['name'] for s in subjects]}")
+
+
+@pytest.mark.asyncio
+async def test_首尾帧生成_必须同时提供两张图片():
+    """首尾帧模式缺少任意一帧时，不提交外部生成任务。"""
+    scene, _ = await _create_scene_with_config()
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_type=VideoModelTypeEnum.seedance.value,
+        generation_mode="keyframes",
+        first_frame_url="https://cdn.example.com/first.png",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await video_controller.generate(req)
+
+    assert exc_info.value.status_code == 400
+    assert "首帧和尾帧" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_首尾帧生成_传递关键帧并记录模式():
+    """首尾帧地址传给视频生成器，并写入视频元数据。"""
+    scene, _ = await _create_scene_with_config()
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_type=VideoModelTypeEnum.seedance.value,
+        generation_mode="keyframes",
+        first_frame_url="https://cdn.example.com/first.png",
+        last_frame_url="https://cdn.example.com/last.png",
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "keyframe-task-001"
+        mock_factory.return_value = mock_gen
+
+        video = await video_controller.generate(req)
+
+    kwargs = mock_gen.submit.call_args.kwargs
+    assert kwargs["generation_mode"] == "keyframes"
+    assert kwargs["first_frame_url"] == "https://cdn.example.com/first.png"
+    assert kwargs["last_frame_url"] == "https://cdn.example.com/last.png"
+    assert kwargs["subjects"] is None
+    assert video.metadata["generation_mode"] == "keyframes"
 
 
 # =====================================================================
@@ -295,7 +340,7 @@ async def test_查询视频_配置不存在():
     with pytest.raises(HTTPException) as exc_info:
         await video_controller.query_status(video.id)
     assert exc_info.value.status_code == 404
-    assert "配置不存在" in exc_info.value.detail
+    assert "启用一个模型" in exc_info.value.detail
     print(f"    配置不存在: {exc_info.value.detail}")
 
 

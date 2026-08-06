@@ -2,13 +2,17 @@ from typing import List
 from openai import AsyncOpenAI
 
 from schemas.scene import SceneEntity, Storyboard
+from services.llm.json_output import create_json_completion
+from utils.prompt_language import normalize_prompt_language
 
 
 async def generate_storyboard(
     client: AsyncOpenAI,
     long_text: str,
     entities: List[SceneEntity],
-    model: str
+    model: str,
+    supports_json_output: bool = False,
+    prompt_language: str = "en",
 ) -> tuple[Storyboard, dict]:
     """
     调用 OpenAI API 生成分镜板
@@ -21,10 +25,25 @@ async def generate_storyboard(
     for e in entities:
         entities_context += f"- Entity Name: {e.name}\n  Aliases: {', '.join(e.aliases)}\n  Visual Description: {e.description} (RULE: DO NOT re-describe this look, simply use @{{{e.name}}})\n\n"
 
+    language = normalize_prompt_language(prompt_language)
+    language_instruction = (
+        "Write every descriptive output field, shot title, visual description, action, "
+        "camera note, and sound note in Simplified Chinese. Keep entity references in "
+        "the exact @{实体名} syntax and retain standard equipment names where necessary."
+        if language == "zh"
+        else
+        "Write every descriptive output field, shot title, visual description, action, "
+        "camera note, and sound note in English. Keep entity references in the exact "
+        "@{Entity Name} syntax."
+    )
+
     # 系统提示词 (System Prompt) - 融入了摄影指导思维
     system_prompt = f"""
 You are an elite Cinematographer (DP) and Sora 2 Prompt Engineering Expert.
 Your goal is to break down a narrative text into a "Sora 2 Ultra-Detailed Storyboard".
+
+### 0. OUTPUT LANGUAGE
+{language_instruction}
 
 ### 1. INPUT CONTEXT
 - **Narrative**: A segment of a story.
@@ -60,18 +79,19 @@ You must act like a film director using professional equipment. Fill the specifi
 {long_text}
 \"\"\"
 
-Generate the storyboard now.
+Generate the storyboard now and strictly follow the output language requirement.
 """
 
-    completion = await client.beta.chat.completions.parse(
+    storyboard, completion = await create_json_completion(
+        client,
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        response_format=Storyboard,
+        response_model=Storyboard,
+        supports_json_output=supports_json_output,
         timeout=600,
-        max_completion_tokens=10000  # o1 系列需要这个参数来增加输出长度
     )
 
     # 收集元数据
@@ -101,4 +121,4 @@ Generate the storyboard now.
     if hasattr(completion.choices[0].message, 'refusal') and completion.choices[0].message.refusal:
         metadata["refusal"] = completion.choices[0].message.refusal
 
-    return completion.choices[0].message.parsed, metadata
+    return storyboard, metadata

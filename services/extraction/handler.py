@@ -1,30 +1,62 @@
 import asyncio
 import logging
+from collections.abc import Callable, Mapping
 
 from openai import AsyncOpenAI
 
-from models.asset import Asset
-from models.chapter import Chapter
 from services.ai_task_executor import BaseTaskHandler
-from services.extraction.extractor import (
-    ItemExtractor,
-    PersonExtractor,
-    SceneExtractor,
-)
-from utils.enums import AssetTypeEnum
+from services.extraction.budget import ContextBudgetPolicy
+from services.extraction.context import ExtractionContextLoader
+from services.extraction.extractor import AssetExtractionGatewayError, AssetExtractor
+from services.extraction.messages import ExtractionMessageBuilder
+from services.extraction.persistence import AssetUpsertService
 
 logger = logging.getLogger(__name__)
+EXPECTED_EXTRACTION_MESSAGE_ROLES = ("system", "user", "user", "user")
+SAFE_EXTRACTION_MESSAGE_ROLES = frozenset(
+    {"system", "user", "assistant", "tool", "developer"}
+)
+ASSET_EXTRACTION_MESSAGE_PROTOCOL_ERROR_CODE = (
+    "asset_extraction_message_protocol_error"
+)
 
-# 提取器类型与 AssetTypeEnum 的映射
-EXTRACTOR_ASSET_MAP = [
-    (PersonExtractor, AssetTypeEnum.person, "persons"),
-    (SceneExtractor, AssetTypeEnum.scene, "scenes"),
-    (ItemExtractor, AssetTypeEnum.item, "items"),
-]
+
+def _derive_message_roles(messages: object) -> tuple[str, ...]:
+    if not isinstance(messages, list):
+        return ("invalid",)
+    return tuple(
+        role if isinstance(role, str) and role in SAFE_EXTRACTION_MESSAGE_ROLES
+        else "invalid"
+        for message in messages
+        for role in (
+            message.get("role") if isinstance(message, Mapping) else None,
+        )
+    )
+
+
+def _format_message_roles(roles: tuple[str, ...]) -> str:
+    return f"({','.join(roles)})"
 
 
 class ExtractionTaskHandler(BaseTaskHandler):
     """提取任务处理器 - 人物/场景/物品提取并写入资产表。"""
+
+    def __init__(
+        self,
+        *,
+        context_loader: ExtractionContextLoader | None = None,
+        message_builder: ExtractionMessageBuilder | None = None,
+        upsert_service: AssetUpsertService | None = None,
+        budget_policy_factory: Callable[
+            [int | None], ContextBudgetPolicy
+        ] = ContextBudgetPolicy,
+        extractor_factory: Callable[..., AssetExtractor] = AssetExtractor,
+    ) -> None:
+        self.context_loader = context_loader or ExtractionContextLoader()
+        self.message_builder = message_builder or ExtractionMessageBuilder()
+        self.upsert_service = upsert_service or AssetUpsertService()
+        self.budget_policy_factory = budget_policy_factory
+        self.extractor_factory = extractor_factory
 
     async def execute(self, request_params: dict) -> dict:
         """
@@ -34,88 +66,107 @@ class ExtractionTaskHandler(BaseTaskHandler):
             base_url: str
             api_key: str
             model: str
-            concurrency: int
+            concurrency: int（旧任务兼容字段；统一提取只调用模型一次）
+            supports_json_output: bool
         """
         chapter_id = request_params["chapter_id"]
         novel_id = request_params["novel_id"]
-        base_url = request_params["base_url"]
-        api_key = request_params["api_key"]
-        model = request_params["model"]
-        concurrency = request_params.get("concurrency", 1)
-
-        chapter = await Chapter.get(id=chapter_id)
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        semaphore = asyncio.Semaphore(concurrency)
-
-        async def run_extractor(extractor_cls, asset_type, result_key):
-            async with semaphore:
-                extractor = extractor_cls(client, model=model)
-                result = await extractor.extract(chapter.content, chapter.number)
-                return asset_type, result_key, result
-
-        # 并发提取（受 semaphore 控制）
-        tasks = [
-            run_extractor(cls, asset_type, key)
-            for cls, asset_type, key in EXTRACTOR_ASSET_MAP
-        ]
-        results = await asyncio.gather(*tasks)
-
-        # 写入资产表
-        summary = {}
-        for asset_type, result_key, result in results:
-            items = getattr(result, result_key, [])
-            saved = await self._save_assets(
-                novel_id, chapter.number, asset_type, items
+        context = await self.context_loader.load(
+            novel_id=novel_id,
+            chapter_id=chapter_id,
+        )
+        messages = self.message_builder.build(
+            context,
+            prompt_language=request_params.get("prompt_language", "en"),
+        )
+        message_roles = _derive_message_roles(messages)
+        formatted_message_roles = _format_message_roles(message_roles)
+        if message_roles != EXPECTED_EXTRACTION_MESSAGE_ROLES:
+            logger.warning(
+                "Extraction model call: novel_id=%s chapter_id=%s "
+                "roles=%s call_status=failed "
+                "error_type=AssetExtractionGatewayError error_code=%s",
+                novel_id,
+                chapter_id,
+                formatted_message_roles,
+                ASSET_EXTRACTION_MESSAGE_PROTOCOL_ERROR_CODE,
             )
-            summary[result_key] = saved
+            raise AssetExtractionGatewayError() from None
 
-        return summary
-
-    async def _save_assets(
-        self,
-        novel_id: int,
-        chapter_number: int,
-        asset_type: AssetTypeEnum,
-        items: list,
-    ) -> list[dict]:
-        """保存/更新资产，增量式合并。"""
-        saved = []
-        for item in items:
-            # 按 novel + asset_type + canonical_name 查找已有资产
-            existing = await Asset.get_or_none(
-                novel_id=novel_id,
-                asset_type=asset_type.value,
-                canonical_name=item.name,
+        report = self.budget_policy_factory(
+            request_params.get("max_context_characters")
+        ).validate(
+            messages,
+            asset_count=len(context.assets),
+            chapter_characters=len(context.chapter.content),
+        )
+        logger.info(
+            "Extraction context prepared: novel_id=%s chapter_id=%s "
+            "assets=%s message_chars=%s total_chars=%s",
+            novel_id,
+            chapter_id,
+            len(context.assets),
+            report.message_characters,
+            report.total_characters,
+        )
+        extractor = self.extractor_factory(
+            AsyncOpenAI(
+                api_key=request_params["api_key"],
+                base_url=request_params["base_url"],
+            ),
+            model=request_params["model"],
+            supports_json_output=request_params.get(
+                "supports_json_output",
+                False,
+            ),
+        )
+        logger.info(
+            "Extraction model call: novel_id=%s chapter_id=%s "
+            "roles=%s call_status=started",
+            novel_id,
+            chapter_id,
+            formatted_message_roles,
+        )
+        try:
+            result = await extractor.extract(messages)
+        except asyncio.CancelledError:
+            logger.warning(
+                "Extraction model call: novel_id=%s chapter_id=%s "
+                "roles=%s call_status=failed "
+                "error_type=CancelledError error_code=cancelled",
+                novel_id,
+                chapter_id,
+                formatted_message_roles,
             )
+            raise
+        except Exception as error:
+            error_code = (
+                error.error_code
+                if isinstance(error, AssetExtractionGatewayError)
+                else "unexpected_error"
+            )
+            logger.warning(
+                "Extraction model call: novel_id=%s chapter_id=%s "
+                "roles=%s call_status=failed error_type=%s error_code=%s",
+                novel_id,
+                chapter_id,
+                formatted_message_roles,
+                type(error).__name__,
+                error_code,
+            )
+            if isinstance(error, AssetExtractionGatewayError):
+                raise error from None
+            raise AssetExtractionGatewayError() from None
+        logger.info(
+            "Extraction model call: novel_id=%s chapter_id=%s "
+            "roles=%s call_status=succeeded",
+            novel_id,
+            chapter_id,
+            formatted_message_roles,
+        )
 
-            if existing:
-                # 增量更新：合并别名、追加章节、更新描述
-                merged_aliases = list(set(existing.aliases + item.aliases))
-                source_chapters = existing.source_chapters
-                if chapter_number not in source_chapters:
-                    source_chapters.append(chapter_number)
-
-                existing.aliases = merged_aliases
-                existing.description = item.description
-                existing.base_traits = item.base_traits
-                existing.source_chapters = source_chapters
-                existing.last_updated_chapter = chapter_number
-                await existing.save(update_fields=[
-                    "aliases", "description", "base_traits",
-                    "source_chapters", "last_updated_chapter", "updated_at",
-                ])
-                saved.append({"name": item.name, "action": "updated"})
-            else:
-                await Asset.create(
-                    novel_id=novel_id,
-                    asset_type=asset_type.value,
-                    canonical_name=item.name,
-                    aliases=item.aliases,
-                    description=item.description,
-                    base_traits=item.base_traits,
-                    source_chapters=[chapter_number],
-                    last_updated_chapter=chapter_number,
-                )
-                saved.append({"name": item.name, "action": "created"})
-
-        return saved
+        return await self.upsert_service.save_result(
+            novel_id=novel_id,
+            chapter_number=context.chapter.number,
+            result=result,
+        )

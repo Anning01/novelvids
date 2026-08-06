@@ -5,10 +5,11 @@ from httpx import AsyncClient
 from models.novel import Novel
 from models.chapter import Chapter
 from models.scene import Scene
+from models.asset import Asset
 from models.ai_task import AiTask
 from models.config import AiModelConfig
 from services.ai_task_executor import ai_task_executor
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum, AssetTypeEnum, TaskStatusEnum
 
 
 # ---- Mock Handler ----
@@ -103,6 +104,38 @@ async def test_api_create_scene(client: AsyncClient):
     assert scene.description == "Test Shot"
     assert scene.prompt == "test prompt"
     print(f"    POST /api/scene/ -> 200, 写入分镜 id={scene.id}, description='{scene.description}'")
+
+
+@pytest.mark.asyncio
+async def test_api_scene_assets_can_be_bound_and_cleared(client: AsyncClient):
+    """分镜支持绑定项目资产，并可通过局部更新清空。"""
+    novel = await Novel.create(name="Scene Asset Novel", author="Author")
+    chapter = await Chapter.create(
+        novel_id=novel.id, number=1, name="Ch1", content="Content"
+    )
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="主角",
+        main_image="/uploads/hero.png",
+    )
+
+    response = await client.post("/api/scene/", json={
+        "chapter_id": chapter.id,
+        "sequence": 1,
+        "prompt": "hero enters",
+        "asset_ids": [asset.id],
+    })
+    assert response.status_code == 200, response.text
+    created = response.json()["data"]
+    assert created["assets"][0]["id"] == asset.id
+    assert created["assets"][0]["canonical_name"] == "主角"
+
+    response = await client.patch(
+        f"/api/scene/{created['id']}", json={"asset_ids": []}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["assets"] == []
 
 
 @pytest.mark.asyncio
@@ -329,7 +362,7 @@ async def test_generate_stale_task_cleaned(client: AsyncClient):
         task_type=AiTaskTypeEnum.storyboard.value,
         status=TaskStatusEnum.running.value,
         request_params={"chapter_id": chapter.id},
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=1000),
     )
 
     # 提交新任务应先清理超时任务再通过

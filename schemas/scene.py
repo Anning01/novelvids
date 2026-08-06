@@ -22,8 +22,10 @@ class AssetSimple(BaseModel):
 
     id: int = Field(..., description="资产ID")
     asset_type: AssetTypeEnum = Field(..., description=AssetTypeEnum.__doc__)
+    canonical_name: str = Field(..., description="资产名称")
+    main_image: Optional[str] = Field(None, description="资产主图")
     description: Optional[str] = Field(None, description="详细描述")
-    base_traits: Optional[str] = Field(None, description="固有特征 (英文, 用于 prompt)")
+    base_traits: Optional[str] = Field(None, description="固有特征（语言由通用配置决定，用于 prompt）")
     is_global: Optional[bool] = Field(None, description="是否全局资产")
 
 
@@ -148,4 +150,5 @@ class SceneOut(SceneFullProperties, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="分镜ID")
-    prompt_params: Optional[SoraScenePromptConfig] = Field(None, description="提示词参数配置")
+    chapter_id: int = Field(..., description="所属章节ID")
+    prompt_params: Optional[dict[str, Any]] = Field(None, description="提示词参数配置")

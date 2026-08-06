@@ -69,12 +69,12 @@ async def test_api_patch_chapter(client: AsyncClient):
 
     response = await client.patch(
         f"/api/chapter/{chapter.id}",
-        json={"name": "Patched Name"},
+        json={"name": "Patched Name", "content": "Patched Content"},
     )
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["name"] == "Patched Name"
-    assert data["content"] == "Original Content"  # 未改动
+    assert data["content"] == "Patched Content"
 
 
 @pytest.mark.asyncio

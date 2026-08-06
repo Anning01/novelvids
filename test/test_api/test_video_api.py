@@ -155,5 +155,5 @@ async def test_api_生成视频_无配置(client: AsyncClient):
     })
     body = resp.json()
     assert body["code"] == 404
-    assert "未配置" in body["message"]
+    assert "启用一个模型" in body["message"]
     print(f"    API 无配置: code={body['code']}, message={body['message']}")

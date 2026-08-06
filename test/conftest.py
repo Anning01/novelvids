@@ -106,18 +106,25 @@ async def clear_db():
     from models.novel import Novel
     from models.chapter import Chapter
     from models.asset import Asset
+    from models.asset_variant import AssetVariant
     from models.scene import Scene
     from models.ai_task import AiTask
-    from models.config import AiModelConfig
+    from models.config import AiModelConfig, GeneralConfig
     from models.video import Video
+    from models.audio_reference import AudioReference
+    from models.digital_human import DigitalHuman
 
+    await AudioReference.all().delete()
+    await DigitalHuman.all().delete()
     await Video.all().delete()
     await AiTask.all().delete()
     await Scene.all().delete()
     await Chapter.all().delete()
+    await AssetVariant.all().delete()
     await Asset.all().delete()
     await Novel.all().delete()
     await AiModelConfig.all().delete()
+    await GeneralConfig.all().delete()
 
 
 @pytest.fixture(scope="module")

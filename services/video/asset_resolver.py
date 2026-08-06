@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from services.video.base import image_to_base64
 from config import settings
 
@@ -17,7 +18,11 @@ logger = logging.getLogger(__name__)
 MENTION_PATTERN = re.compile(r"@\{([^}]+)\}|@([\w\u4e00-\u9fff·]+)")
 
 
-async def resolve_assets(prompt: str, novel_id: int) -> list[dict[str, Any]]:
+async def resolve_assets(
+    prompt: str,
+    novel_id: int,
+    chapter_number: int | None = None,
+) -> list[dict[str, Any]]:
     """从 prompt 中解析 @mentions，返回 subjects 列表。"""
     mentions = [m1 or m2 for m1, m2 in MENTION_PATTERN.findall(prompt)]
     logger.info("resolve_assets: mentions=%s (prompt[:100]=%r)", mentions, prompt[:100])
@@ -25,7 +30,7 @@ async def resolve_assets(prompt: str, novel_id: int) -> list[dict[str, Any]]:
         return []
 
     # 查找该小说下的所有资产（一次查询）
-    assets = await Asset.filter(novel_id=novel_id).all()
+    assets = await Asset.filter(novel_id=novel_id).prefetch_related("variants")
     logger.info(
         "resolve_assets: novel_id=%s, total_assets=%d, names=%s",
         novel_id, len(assets), [a.canonical_name for a in assets],
@@ -34,23 +39,39 @@ async def resolve_assets(prompt: str, novel_id: int) -> list[dict[str, Any]]:
     subjects: list[dict[str, Any]] = []
     seen_ids: set[int] = set()
 
-    for name in mentions:
+    for mention in mentions:
+        name, _, variant_name = mention.partition("#")
         matched = _find_asset(name, assets)
         if matched and matched.id not in seen_ids:
             seen_ids.add(matched.id)
-            images = _collect_images(matched)
+            variants = list(matched.variants)
+            variant = (
+                _find_variant(variant_name, variants)
+                if variant_name
+                else _find_chapter_variant(chapter_number, variants)
+            )
+            images = _collect_images(matched, variant)
             logger.info(
                 "resolve_assets: matched %r -> asset_id=%s, images=%d (main=%s, a1=%s, a2=%s)",
-                name, matched.id, len(images),
+                mention, matched.id, len(images),
                 bool(matched.main_image), bool(matched.angle_image_1), bool(matched.angle_image_2),
             )
             subjects.append({
-                "name": matched.canonical_name,
+                "name": (
+                    f"{matched.canonical_name}#{variant.name}"
+                    if variant and variant_name
+                    else matched.canonical_name
+                ),
+                "variant_name": variant.name if variant else None,
                 "images": images,
-                "description": matched.description or matched.base_traits or "",
+                "description": (
+                    variant.description or variant.base_traits
+                    if variant
+                    else matched.description or matched.base_traits or ""
+                ),
             })
         elif not matched:
-            logger.warning("resolve_assets: mention %r not found in assets", name)
+            logger.warning("resolve_assets: mention %r not found in assets", mention)
 
     return subjects
 
@@ -65,24 +86,72 @@ def _find_asset(name: str, assets: list[Asset]) -> Asset | None:
     return None
 
 
-def _collect_images(asset: Asset) -> list[str]:
-    """收集资产的所有参考图（URL 直接返回，本地路径转 base64）。"""
+def _find_variant(name: str, variants: list[AssetVariant]) -> AssetVariant | None:
+    return next((variant for variant in variants if variant.name == name), None)
+
+
+def _find_chapter_variant(
+    chapter_number: int | None,
+    variants: list[AssetVariant],
+) -> AssetVariant | None:
+    """同章存在多个形态时，以最后创建的形态作为本章覆盖版本。"""
+    if chapter_number is None:
+        return None
+    matching = [
+        variant
+        for variant in variants
+        if chapter_number in (variant.chapter_numbers or [])
+    ]
+    return max(matching, key=lambda variant: variant.id, default=None)
+
+
+def _collect_images(asset: Asset, variant: AssetVariant | None = None) -> list[str]:
+    """收集资产采用的参考图（URL 直接返回，本地路径转 base64）。
+
+    基础资产默认只传当前主图；只有显式配置 ``selected_image_urls`` 时才传多张。
+    视觉形态仍保留自身的多图语义。
+    """
+    if variant:
+        sources = list(variant.images or [])
+    else:
+        sources = [
+            asset.main_image,
+            asset.angle_image_1,
+            asset.angle_image_2,
+        ]
+        gallery = (asset.metadata or {}).get("image_gallery")
+        if isinstance(gallery, list):
+            sources.extend(item for item in gallery if isinstance(item, str))
+        selected_value = (asset.metadata or {}).get("selected_image_urls")
+        if isinstance(selected_value, list):
+            selected_urls = {
+                value.strip()
+                for value in selected_value
+                if isinstance(value, str) and value.strip()
+            }
+            sources = [source for source in sources if source in selected_urls]
+        else:
+            sources = [next((source for source in sources if source), None)]
     images: list[str] = []
-    for field_name in ("main_image", "angle_image_1", "angle_image_2"):
-        path = getattr(asset, field_name, None)
+    seen: set[str] = set()
+    for path in sources:
         if not path:
             continue
-        # 远程 URL 直接使用
-        if path.startswith(("http://", "https://")):
-            images.append(path)
+        if path in seen:
             continue
-        # /media/... 路径 → 转换为本地绝对路径再转 base64
-        if path.startswith("/media/"):
-            path = os.path.join(settings.MEDIA_PATH, path[len("/media/"):])
-        # 本地文件转 base64
+        seen.add(path)
         try:
-            images.append(image_to_base64(path))
+            images.append(resolve_image_source(path))
         except FileNotFoundError:
             logger.warning("resolve_assets: image not found: %s", path)
             continue
-    return images
+    return images[:9]
+
+
+def resolve_image_source(path: str) -> str:
+    """远程图片保留 URL，本地与 /media/ 图片转换为 Base64 data URI。"""
+    if path.startswith(("http://", "https://", "data:")):
+        return path
+    if path.startswith("/media/"):
+        path = os.path.join(settings.MEDIA_PATH, path[len("/media/"):])
+    return image_to_base64(path)

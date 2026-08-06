@@ -51,6 +51,8 @@ class AssetTypeEnum(NicknameIntEnum):
     person = 1, "人物"
     scene = 2, "场景"
     item = 3, "物品"
+    product = 4, "商品"
+    style = 5, "风格"
 
 @enum_description
 class ImageSourceEnum(NicknameIntEnum):
@@ -119,6 +121,7 @@ class AiTaskTypeEnum(NicknameIntEnum):
     reference_image = 2, "生成参考图"
     storyboard = 3, "生成分镜"
     video = 4, "生成视频"
+    project_analysis = 5, "项目分析"
 
 
 @enum_description

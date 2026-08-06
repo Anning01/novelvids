@@ -2,7 +2,9 @@ import pytest
 
 from models.novel import Novel
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from services.video.asset_resolver import resolve_assets, MENTION_PATTERN
+from services.video.seedance import SeedanceGenerator
 from utils.enums import AssetTypeEnum
 
 
@@ -95,11 +97,140 @@ async def test_重复引用不重复():
     print(f"    去重: subjects count={len(subjects)}")
 
 
+@pytest.mark.asyncio
+async def test_通过形态名称选择资产多图():
+    novel = await Novel.create(name="Variant Resolver Novel", author="Author")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="李火旺",
+        main_image="https://example.com/base.png",
+    )
+    await AssetVariant.create(
+        asset=asset,
+        name="红衣变装",
+        description="红色道袍造型",
+        images=[
+            "https://example.com/red-front.png",
+            "https://example.com/red-side.png",
+        ],
+    )
+
+    subjects = await resolve_assets("@{李火旺#红衣变装} 进入大殿", novel.id)
+
+    assert subjects == [{
+        "name": "李火旺#红衣变装",
+        "variant_name": "红衣变装",
+        "images": [
+            "https://example.com/red-front.png",
+            "https://example.com/red-side.png",
+        ],
+        "description": "红色道袍造型",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_按章节自动采用资产升级形态():
+    novel = await Novel.create(name="Chapter Variant Novel", author="Author")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.scene.value,
+        canonical_name="白玉京",
+        main_image="https://example.com/base.png",
+    )
+    await AssetVariant.create(
+        asset=asset,
+        name="战后废墟",
+        description="坍塌后的白玉京",
+        chapter_numbers=[205],
+        images=["https://example.com/ruin.png"],
+    )
+
+    subjects = await resolve_assets("@白玉京", novel.id, chapter_number=205)
+
+    assert subjects[0]["name"] == "白玉京"
+    assert subjects[0]["variant_name"] == "战后废墟"
+    assert subjects[0]["images"] == ["https://example.com/ruin.png"]
+
+
+@pytest.mark.asyncio
+async def test_多图资产默认只采用当前主图():
+    novel = await Novel.create(name="Primary Image Novel", author="Author")
+    await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="女主",
+        main_image="https://example.com/main.png",
+        angle_image_1="https://example.com/side.png",
+        metadata={
+            "image_gallery": [
+                "https://example.com/main.png",
+                "https://example.com/side.png",
+                "https://example.com/back.png",
+            ],
+        },
+    )
+
+    subjects = await resolve_assets("@女主 走入画面", novel.id)
+
+    assert subjects[0]["images"] == ["https://example.com/main.png"]
+
+
+@pytest.mark.asyncio
+async def test_多图资产采用显式选择的图片():
+    novel = await Novel.create(name="Selected Images Novel", author="Author")
+    await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.product.value,
+        canonical_name="面膜",
+        main_image="https://example.com/front.png",
+        angle_image_1="https://example.com/side.png",
+        metadata={
+            "image_gallery": [
+                "https://example.com/front.png",
+                "https://example.com/side.png",
+                "https://example.com/back.png",
+            ],
+            "selected_image_urls": [
+                "https://example.com/side.png",
+                "https://example.com/back.png",
+            ],
+        },
+    )
+
+    subjects = await resolve_assets("@面膜 产品特写", novel.id)
+
+    assert subjects[0]["images"] == [
+        "https://example.com/side.png",
+        "https://example.com/back.png",
+    ]
+
+
 def test_mention正则匹配():
     """验证 MENTION_PATTERN 能匹配中英文。"""
     text = "@张三 和 @Alice 在 @大殿 里"
-    matches = MENTION_PATTERN.findall(text)
+    matches = [braced or plain for braced, plain in MENTION_PATTERN.findall(text)]
     assert "张三" in matches
     assert "Alice" in matches
     assert "大殿" in matches
     print(f"    正则匹配: {matches}")
+
+
+def test_seedance_传递资产显式选择的多张图片():
+    prompt, images = SeedanceGenerator._process_prompt(
+        "@面膜 产品特写",
+        [{
+            "name": "面膜",
+            "images": [
+                "https://example.com/front.png",
+                "https://example.com/side.png",
+            ],
+            "description": "白色面膜包装",
+        }],
+    )
+
+    assert prompt == "[图1] 产品特写"
+    assert images == [
+        "https://example.com/front.png",
+        "https://example.com/side.png",
+    ]

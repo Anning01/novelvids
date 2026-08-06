@@ -48,7 +48,7 @@ async def get_scene_list(params: QueryParams = Depends(get_list_params)):
     "/{scene_id}", summary="获取分镜详情", response_model=ResponseSchema[SceneOut]
 )
 async def get_scene(scene_id: int):
-    scene = await scene_controller.get(scene_id)
+    scene = await scene_controller._get_with_assets(scene_id)
     return ResponseSchema(data=scene)
 
 

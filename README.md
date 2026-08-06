@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/FastAPI-00584c?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/React_19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
+  <img src="https://img.shields.io/badge/Vue_3-42B883?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue 3">
   <img src="https://img.shields.io/badge/Python_3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/Tortoise_ORM-3B82F6?style=for-the-badge&logo=data:image/svg+xml;base64,&logoColor=white" alt="Tortoise ORM">
@@ -251,6 +251,12 @@ pytest
 pytest 已配置自动覆盖率报告（`--cov=models --cov=controllers --cov=api --cov-report=term-missing`），确保每次提交都能看到覆盖率变化。
 
 ## 开发指南
+
+### 音频与数字人种子库
+
+服务启动时会扫描 `audio_references` 和 `digital_humans` 两张表：表为空时分别从
+`seeds/audio_references.csv`、`seeds/digital_humans.csv` 批量初始化；表内已有任何数据时整表跳过，
+不会覆盖或重复创建已有资源。数字人模型不包含真人类型字段，CSV 与接口只提供纯数字人。
 
 ### 后端开发规范
 

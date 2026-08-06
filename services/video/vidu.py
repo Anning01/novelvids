@@ -46,10 +46,13 @@ class ViduGenerator(BaseVideoGenerator):
         }
         if subjects:
             payload["subjects"] = subjects
+        generation_mode = kwargs.get("generation_mode", "reference")
+        if generation_mode == "keyframes":
+            payload["images"] = [kwargs.get("first_frame_url"), kwargs.get("last_frame_url")]
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"{self.config.base_url}/reference2video",
+                f"{self.config.base_url}/{'start-end2video' if generation_mode == 'keyframes' else 'reference2video'}",
                 headers=headers,
                 json=payload,
             )
