@@ -30,6 +30,7 @@ import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type Chapter } from '@/types'
 
 type AssetTab = 'character' | 'scene' | 'prop'
+type AssetScope = 'project' | 'chapter'
 
 interface ManualProjectMeta {
   projectId?: number
@@ -65,6 +66,7 @@ const project = ref(readProjectMeta())
 const selectedChapter = ref<Chapter | null>(null)
 const assets = ref<Asset[]>([])
 const activeTab = ref<AssetTab>('character')
+const assetScope = ref<AssetScope>('project')
 const editingName = ref(false)
 const nameDraft = ref('')
 const loading = ref(true)
@@ -227,7 +229,23 @@ function extractionErrorMessage(error: unknown) {
 }
 
 async function refreshAssets() {
-  assets.value = (await api.assets(projectId.value)).data.items
+  const chapterId = assetScope.value === 'chapter' ? selectedChapter.value?.id : undefined
+  assets.value = (await api.assets(projectId.value, 1, 100, chapterId)).data.items
+}
+
+async function setAssetScope(nextScope: AssetScope) {
+  if (nextScope === assetScope.value) return
+  const previousScope = assetScope.value
+  assetScope.value = nextScope
+  loading.value = true
+  try {
+    await refreshAssets()
+  } catch (error) {
+    assetScope.value = previousScope
+    notice.error((error as Error).message)
+  } finally {
+    loading.value = false
+  }
 }
 
 async function monitorExtractionTask(taskId: string, notifyWhenComplete = false) {
@@ -583,6 +601,10 @@ onBeforeUnmount(() => {
         </nav>
         <div class="asset-summary">
           <span v-if="project.creationMode === 'agent'" class="chapter-context"><BookOpenText :size="13" />{{ selectedChapter ? `当前第 ${selectedChapter.number} 章` : '未选择章节' }}</span>
+          <div v-if="project.creationMode === 'agent' && selectedChapter" class="asset-scope-switch" role="group" aria-label="资产范围">
+            <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">全部项目</AppButton>
+            <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">当前章节</AppButton>
+          </div>
           <AppButton
             v-if="project.creationMode === 'agent'"
             type="button"
@@ -750,6 +772,9 @@ onBeforeUnmount(() => {
 .asset-summary { display: flex; align-items: center; gap: 14px; color: #858c9b; font-size: 12px; }
 .asset-summary span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .asset-summary .chapter-context { color: #5d5ff5; font-weight: 700; }
+.asset-scope-switch { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid #e1e3ec; border-radius: 10px; background: #f4f5f9; }
+.asset-scope-switch button { min-height: 27px; padding: 0 9px; color: #7d8493; border-radius: 7px; }
+.asset-scope-switch button.is-active { color: #5658ec; background: #fff; box-shadow: 0 2px 7px rgb(45 49 72 / 8%); }
 .asset-summary > i { width: 1px; height: 13px; background: #dfe1e8; }
 .asset-summary strong { color: #303442; }
 .extraction-task-status { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 14px; padding: 13px 15px; border: 1px solid #dfe2eb; border-radius: 12px; color: #626979; background: #fff; }

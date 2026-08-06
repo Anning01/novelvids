@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import httpx
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from config import settings
 from controllers.config import ai_model_config_controller
@@ -16,7 +16,13 @@ from controllers.novel import novel_controller
 from models.asset import Asset
 from models.chapter import Chapter
 from models.novel import Novel
+from prompts.extraction import (
+    SINGLE_CHARACTER_TRAIT_LABELS,
+    SINGLE_CHARACTER_VISUAL_RULES,
+    ensure_ordered_trait_labels,
+)
 from services.ai_task_executor import BaseTaskHandler
+from services.image_generation import generate_images
 from services.llm.json_output import create_json_completion
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum, ImageSourceEnum
 from utils.prompt_language import normalize_prompt_language, prompt_language_name
@@ -34,6 +40,15 @@ class KeyCharacter(BaseModel):
     base_traits: str = Field(description="按任务指定语言撰写的详细人物外观描述")
     chapter_numbers: list[int] = Field(default_factory=list, description="人物出现的章节序号")
 
+    @field_validator("base_traits")
+    @classmethod
+    def validate_base_traits(cls, value: str) -> str:
+        return ensure_ordered_trait_labels(
+            value,
+            SINGLE_CHARACTER_TRAIT_LABELS,
+            "关键人物视觉描述",
+        )
+
 
 class BookAnalysis(BaseModel):
     book_types: list[str] = Field(description="3 至 6 个准确、简短的中文题材或类型标签")
@@ -41,7 +56,7 @@ class BookAnalysis(BaseModel):
     key_characters: list[KeyCharacter] = Field(description="推动主线的关键人物，通常为 3 至 10 位")
 
 
-ANALYSIS_SYSTEM_PROMPT = """你是一名资深影视开发编辑。请严格依据给定书稿完成结构化分析，不要虚构书稿中不存在的信息。
+ANALYSIS_SYSTEM_PROMPT = """你是一名资深影视开发编辑。请严格依据给定书稿完成结构化分析，不要虚构书稿中不存在的剧情事实；人物必填视觉字段缺失时，按后述视觉规则结合小说语境进行克制、一致的设计推断。
 类型标签应简洁准确；故事大纲应覆盖开端、主要冲突、关键转折和结局走向；关键人物只保留真正推动主线的人物。
 人物的 chapter_numbers 必须使用材料中给出的章节序号。base_traits 必须使用任务指定的提示词语言，描述可见且相对稳定的外貌、服装和气质，便于后续生图。"""
 
@@ -144,7 +159,8 @@ async def _sync_character_assets(novel: Novel, characters: list[KeyCharacter], c
             "base_traits": character.base_traits,
             "is_global": False,
             "source_chapters": chapter_numbers,
-            "last_updated_chapter": max(chapter_numbers, default=0),
+            # 项目分析只建立全书人物档案，不代表某一章的增量提取版本。
+            "last_updated_chapter": 0,
             "metadata": {"role": character.role, "analysis_source": "project_analysis"},
         }
         if asset is None:
@@ -189,7 +205,8 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                     "content": (
                         f"{ANALYSIS_SYSTEM_PROMPT}\n"
                         f"本任务的提示词语言是{prompt_language_name(prompt_language)}；"
-                        "base_traits 必须严格使用该语言。"
+                        "base_traits 必须严格使用该语言。\n\n"
+                        f"{SINGLE_CHARACTER_VISUAL_RULES.format(prompt_language_name=prompt_language_name(prompt_language))}"
                     ),
                 },
                 {
@@ -203,22 +220,31 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
 
         await _sync_character_assets(novel, analysis.key_characters, len(chapters))
 
-        image_client = AsyncOpenAI(api_key=image_config.api_key, base_url=image_config.base_url)
-        image_response = await image_client.images.generate(
+        images = await generate_images(
+            base_url=image_config.base_url,
+            api_key=image_config.api_key,
             model=image_config.model,
             prompt=_cover_prompt(novel, analysis, prompt_language),
-            size="1K",
-            response_format="url",
-            n=1,
-            extra_body={"watermark": False},
+            api_protocol=image_config.api_protocol,
+            resolution="2K",
+            aspect_ratio="2:3",
+            count=1,
         )
-        if not image_response.data:
-            raise ValueError("生图模型未返回封面")
-        cover = await _save_cover(image_response.data[0], novel_id)
+        cover = await _save_cover(images[0], novel_id)
 
         novel.cover = cover
         novel.total_chapters = len(chapters)
-        await novel.save(update_fields=["cover", "total_chapters", "updated_at"])
+        novel.tags = analysis.book_types
+        novel.story_outline = analysis.story_outline
+        await novel.save(
+            update_fields=[
+                "cover",
+                "total_chapters",
+                "tags",
+                "story_outline",
+                "updated_at",
+            ]
+        )
 
         return {
             **analysis.model_dump(),

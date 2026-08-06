@@ -431,6 +431,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "base_url": config.base_url,
             "api_key": config.api_key,
             "model": config.model,
+            "api_protocol": config.api_protocol,
             "variant_id": variant.id if variant else None,
             "prompt_language": prompt_language,
         }

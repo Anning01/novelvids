@@ -4,7 +4,6 @@ import os
 from urllib.parse import urlparse
 
 import httpx
-from openai import AsyncOpenAI
 
 from config import settings
 from models.asset import Asset
@@ -65,6 +64,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         base_url = request_params["base_url"]
         api_key = request_params["api_key"]
         model = request_params["model"]
+        api_protocol = request_params.get("api_protocol", "openai_compatible")
         variant_id = request_params.get("variant_id")
         prompt_language = request_params.get("prompt_language", "en")
 
@@ -115,13 +115,12 @@ class AssetReferenceHandler(BaseTaskHandler):
             "metadata": metadata,
         }
 
-        # 初始化客户端 (AsyncOpenAI)
-        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-
         try:
             image_list = await generate_for_sora_consistency(
-                client,
                 data,
+                base_url=base_url,
+                api_key=api_key,
+                api_protocol=api_protocol,
                 model=model,
                 resolution=resolution,
                 aspect_ratio=aspect_ratio,

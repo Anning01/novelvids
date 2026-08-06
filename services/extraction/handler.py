@@ -1,56 +1,62 @@
 import asyncio
 import logging
-import re
+from collections.abc import Callable, Mapping
 
 from openai import AsyncOpenAI
 
-from models.asset import Asset
-from models.chapter import Chapter
 from services.ai_task_executor import BaseTaskHandler
-from services.extraction.extractor import (
-    ItemExtractor,
-    PersonExtractor,
-    SceneExtractor,
-)
-from utils.enums import AssetTypeEnum
+from services.extraction.budget import ContextBudgetPolicy
+from services.extraction.context import ExtractionContextLoader
+from services.extraction.extractor import AssetExtractionGatewayError, AssetExtractor
+from services.extraction.messages import ExtractionMessageBuilder
+from services.extraction.persistence import AssetUpsertService
 
 logger = logging.getLogger(__name__)
-
-# 提取器类型与 AssetTypeEnum 的映射
-EXTRACTOR_ASSET_MAP = [
-    (PersonExtractor, AssetTypeEnum.person, "persons"),
-    (SceneExtractor, AssetTypeEnum.scene, "scenes"),
-    (ItemExtractor, AssetTypeEnum.item, "items"),
-]
-
-
-def _identity_key(value: str) -> str:
-    return re.sub(r"[\W_]+", "", (value or "").casefold())
+EXPECTED_EXTRACTION_MESSAGE_ROLES = ("system", "user", "user", "user")
+SAFE_EXTRACTION_MESSAGE_ROLES = frozenset(
+    {"system", "user", "assistant", "tool", "developer"}
+)
+ASSET_EXTRACTION_MESSAGE_PROTOCOL_ERROR_CODE = (
+    "asset_extraction_message_protocol_error"
+)
 
 
-def _identity_keys(asset: Asset) -> set[str]:
-    return {
-        key
-        for key in (
-            _identity_key(asset.canonical_name),
-            *(_identity_key(alias) for alias in (asset.aliases or [])),
+def _derive_message_roles(messages: object) -> tuple[str, ...]:
+    if not isinstance(messages, list):
+        return ("invalid",)
+    return tuple(
+        role if isinstance(role, str) and role in SAFE_EXTRACTION_MESSAGE_ROLES
+        else "invalid"
+        for message in messages
+        for role in (
+            message.get("role") if isinstance(message, Mapping) else None,
         )
-        if key
-    }
+    )
 
 
-def _ordered_strings(*groups: list[str] | None) -> list[str]:
-    result: list[str] = []
-    for values in groups:
-        for value in values or []:
-            value = value.strip()
-            if value and value not in result:
-                result.append(value)
-    return result
+def _format_message_roles(roles: tuple[str, ...]) -> str:
+    return f"({','.join(roles)})"
 
 
 class ExtractionTaskHandler(BaseTaskHandler):
     """提取任务处理器 - 人物/场景/物品提取并写入资产表。"""
+
+    def __init__(
+        self,
+        *,
+        context_loader: ExtractionContextLoader | None = None,
+        message_builder: ExtractionMessageBuilder | None = None,
+        upsert_service: AssetUpsertService | None = None,
+        budget_policy_factory: Callable[
+            [int | None], ContextBudgetPolicy
+        ] = ContextBudgetPolicy,
+        extractor_factory: Callable[..., AssetExtractor] = AssetExtractor,
+    ) -> None:
+        self.context_loader = context_loader or ExtractionContextLoader()
+        self.message_builder = message_builder or ExtractionMessageBuilder()
+        self.upsert_service = upsert_service or AssetUpsertService()
+        self.budget_policy_factory = budget_policy_factory
+        self.extractor_factory = extractor_factory
 
     async def execute(self, request_params: dict) -> dict:
         """
@@ -60,143 +66,107 @@ class ExtractionTaskHandler(BaseTaskHandler):
             base_url: str
             api_key: str
             model: str
-            concurrency: int
+            concurrency: int（旧任务兼容字段；统一提取只调用模型一次）
             supports_json_output: bool
         """
         chapter_id = request_params["chapter_id"]
         novel_id = request_params["novel_id"]
-        base_url = request_params["base_url"]
-        api_key = request_params["api_key"]
-        model = request_params["model"]
-        concurrency = request_params.get("concurrency", 1)
-        supports_json_output = request_params.get("supports_json_output", False)
-        prompt_language = request_params.get("prompt_language", "en")
-
-        chapter = await Chapter.get(id=chapter_id)
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        semaphore = asyncio.Semaphore(concurrency)
-
-        async def run_extractor(extractor_cls, asset_type, result_key):
-            async with semaphore:
-                extractor = extractor_cls(
-                    client,
-                    model=model,
-                    supports_json_output=supports_json_output,
-                    prompt_language=prompt_language,
-                )
-                result = await extractor.extract(chapter.content, chapter.number)
-                return asset_type, result_key, result
-
-        # 并发提取（受 semaphore 控制）
-        tasks = [
-            run_extractor(cls, asset_type, key)
-            for cls, asset_type, key in EXTRACTOR_ASSET_MAP
-        ]
-        results = await asyncio.gather(*tasks)
-
-        # 写入资产表
-        summary = {}
-        for asset_type, result_key, result in results:
-            items = getattr(result, result_key, [])
-            saved = await self._save_assets(
-                novel_id, chapter.number, asset_type, items
-            )
-            summary[result_key] = saved
-
-        return summary
-
-    async def _save_assets(
-        self,
-        novel_id: int,
-        chapter_number: int,
-        asset_type: AssetTypeEnum,
-        items: list,
-    ) -> list[dict]:
-        """保存/更新资产，增量式合并。"""
-        saved = []
-        existing_assets = await Asset.filter(
+        context = await self.context_loader.load(
             novel_id=novel_id,
-            asset_type=asset_type.value,
+            chapter_id=chapter_id,
         )
-        for item in items:
-            item_metadata = {}
-            if asset_type == AssetTypeEnum.person:
-                item_metadata["reference_layout"] = getattr(
-                    item,
-                    "reference_layout",
-                    "character_turnaround",
-                )
-
-            incoming_keys = {
-                key
-                for key in (
-                    _identity_key(item.name),
-                    *(_identity_key(alias) for alias in item.aliases),
-                )
-                if key
-            }
-            # Canonical names and known aliases share one identity space. This
-            # keeps later chapters from creating a duplicate just because the
-            # novel switches to a nickname.
-            existing = next(
-                (
-                    asset
-                    for asset in existing_assets
-                    if incoming_keys & _identity_keys(asset)
-                ),
-                None,
+        messages = self.message_builder.build(
+            context,
+            prompt_language=request_params.get("prompt_language", "en"),
+        )
+        message_roles = _derive_message_roles(messages)
+        formatted_message_roles = _format_message_roles(message_roles)
+        if message_roles != EXPECTED_EXTRACTION_MESSAGE_ROLES:
+            logger.warning(
+                "Extraction model call: novel_id=%s chapter_id=%s "
+                "roles=%s call_status=failed "
+                "error_type=AssetExtractionGatewayError error_code=%s",
+                novel_id,
+                chapter_id,
+                formatted_message_roles,
+                ASSET_EXTRACTION_MESSAGE_PROTOCOL_ERROR_CODE,
             )
+            raise AssetExtractionGatewayError() from None
 
-            if existing:
-                # Incremental update: newer non-empty semantic data wins, while
-                # images and other fields already on the asset remain intact.
-                # Re-extracting an earlier chapter must never roll a later
-                # state backwards.
-                existing_last_chapter = int(existing.last_updated_chapter or 0)
-                incoming_is_current = chapter_number >= existing_last_chapter
-                merged_aliases = _ordered_strings(
-                    existing.aliases,
-                    [item.name] if item.name != existing.canonical_name else [],
-                    item.aliases,
-                )
-                source_chapters = list(existing.source_chapters or [])
-                if chapter_number not in source_chapters:
-                    source_chapters.append(chapter_number)
+        report = self.budget_policy_factory(
+            request_params.get("max_context_characters")
+        ).validate(
+            messages,
+            asset_count=len(context.assets),
+            chapter_characters=len(context.chapter.content),
+        )
+        logger.info(
+            "Extraction context prepared: novel_id=%s chapter_id=%s "
+            "assets=%s message_chars=%s total_chars=%s",
+            novel_id,
+            chapter_id,
+            len(context.assets),
+            report.message_characters,
+            report.total_characters,
+        )
+        extractor = self.extractor_factory(
+            AsyncOpenAI(
+                api_key=request_params["api_key"],
+                base_url=request_params["base_url"],
+            ),
+            model=request_params["model"],
+            supports_json_output=request_params.get(
+                "supports_json_output",
+                False,
+            ),
+        )
+        logger.info(
+            "Extraction model call: novel_id=%s chapter_id=%s "
+            "roles=%s call_status=started",
+            novel_id,
+            chapter_id,
+            formatted_message_roles,
+        )
+        try:
+            result = await extractor.extract(messages)
+        except asyncio.CancelledError:
+            logger.warning(
+                "Extraction model call: novel_id=%s chapter_id=%s "
+                "roles=%s call_status=failed "
+                "error_type=CancelledError error_code=cancelled",
+                novel_id,
+                chapter_id,
+                formatted_message_roles,
+            )
+            raise
+        except Exception as error:
+            error_code = (
+                error.error_code
+                if isinstance(error, AssetExtractionGatewayError)
+                else "unexpected_error"
+            )
+            logger.warning(
+                "Extraction model call: novel_id=%s chapter_id=%s "
+                "roles=%s call_status=failed error_type=%s error_code=%s",
+                novel_id,
+                chapter_id,
+                formatted_message_roles,
+                type(error).__name__,
+                error_code,
+            )
+            if isinstance(error, AssetExtractionGatewayError):
+                raise error from None
+            raise AssetExtractionGatewayError() from None
+        logger.info(
+            "Extraction model call: novel_id=%s chapter_id=%s "
+            "roles=%s call_status=succeeded",
+            novel_id,
+            chapter_id,
+            formatted_message_roles,
+        )
 
-                existing.aliases = merged_aliases
-                if incoming_is_current and item.description.strip():
-                    existing.description = item.description
-                if incoming_is_current and item.base_traits.strip():
-                    existing.base_traits = item.base_traits
-                existing_metadata = (
-                    dict(existing.metadata)
-                    if isinstance(existing.metadata, dict)
-                    else {}
-                )
-                existing.metadata = {**existing_metadata, **item_metadata}
-                existing.source_chapters = sorted(source_chapters)
-                existing.last_updated_chapter = max(
-                    existing_last_chapter,
-                    chapter_number,
-                )
-                await existing.save(update_fields=[
-                    "aliases", "description", "base_traits", "metadata",
-                    "source_chapters", "last_updated_chapter", "updated_at",
-                ])
-                saved.append({"name": item.name, "action": "updated"})
-            else:
-                created = await Asset.create(
-                    novel_id=novel_id,
-                    asset_type=asset_type.value,
-                    canonical_name=item.name,
-                    aliases=item.aliases,
-                    description=item.description,
-                    base_traits=item.base_traits,
-                    metadata=item_metadata,
-                    source_chapters=[chapter_number],
-                    last_updated_chapter=chapter_number,
-                )
-                existing_assets.append(created)
-                saved.append({"name": item.name, "action": "created"})
-
-        return saved
+        return await self.upsert_service.save_result(
+            novel_id=novel_id,
+            chapter_number=context.chapter.number,
+            result=result,
+        )

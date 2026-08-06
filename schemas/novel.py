@@ -22,6 +22,20 @@ class NovelFullProperties(NovelProperties):
     用于创建、更新、详情。
     """
     content: Optional[str] = Field(None, description="正文内容")
+    tags: Optional[list[str]] = Field(None, description="项目标签", max_length=30)
+    story_outline: Optional[str] = Field(None, description="故事大纲")
+    project_type: Optional[str] = Field(
+        None,
+        description="项目设定类型",
+        max_length=120,
+    )
+    project_setting: Optional[str] = Field(None, description="项目设定说明")
+    storyboard_strategy: Optional[str] = Field(
+        None,
+        description="分镜策略名称",
+        max_length=120,
+    )
+    storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")
 
 
 # --- 输入 Schema (In-bound) ---

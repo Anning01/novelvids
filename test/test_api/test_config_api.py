@@ -44,6 +44,7 @@ async def test_api_create_config(client: AsyncClient):
         "api_key": "sk-test-key",
         "model": "deepseek-chat",
         "supports_json_output": True,
+        "max_context_characters": 120000,
     }
     response = await client.post("/api/config", json=payload)
     assert response.status_code == 200, response.text
@@ -52,6 +53,50 @@ async def test_api_create_config(client: AsyncClient):
     assert data["is_active"] is False
     assert data["concurrency"] == 1
     assert data["supports_json_output"] is True
+    assert data["api_protocol"] == "openai_compatible"
+    assert data["max_context_characters"] == 120000
+
+    invalid = await client.post(
+        "/api/config",
+        json={**payload, "name": "invalid-context", "max_context_characters": 0},
+    )
+    assert invalid.json()["code"] == 422
+
+
+@pytest.mark.asyncio
+async def test_api_accepts_configured_image_protocol(client: AsyncClient):
+    response = await client.post(
+        "/api/config",
+        json={
+            "task_type": AiTaskTypeEnum.reference_image.value,
+            "name": "seedream",
+            "base_url": "https://ark.example.com/api/v3",
+            "api_key": "ark-key",
+            "model": "configured-seedream-model",
+            "api_protocol": "volcengine_ark",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["api_protocol"] == "volcengine_ark"
+
+
+@pytest.mark.asyncio
+async def test_api_rejects_unknown_image_protocol(client: AsyncClient):
+    response = await client.post(
+        "/api/config",
+        json={
+            "task_type": AiTaskTypeEnum.reference_image.value,
+            "name": "unknown-image-api",
+            "base_url": "https://image.example.com/v1",
+            "api_key": "key",
+            "model": "model",
+            "api_protocol": "provider-name-guess",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["code"] == 422
 
 
 @pytest.mark.asyncio

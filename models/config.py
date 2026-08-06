@@ -2,6 +2,7 @@ from tortoise import fields
 
 from models._base import AbstractBaseModel
 from utils.enums import AiTaskTypeEnum
+from utils.image_protocol import ImageApiProtocol
 
 
 class AiModelConfig(AbstractBaseModel):
@@ -31,6 +32,11 @@ class AiModelConfig(AbstractBaseModel):
         max_length=200,
         description="模型名称",
     )
+    api_protocol = fields.CharField(
+        max_length=40,
+        default=ImageApiProtocol.openai_compatible.value,
+        description="接口协议，生图任务用于选择供应商请求适配器",
+    )
     is_active = fields.BooleanField(
         default=False,
         db_index=True,
@@ -43,6 +49,10 @@ class AiModelConfig(AbstractBaseModel):
     supports_json_output = fields.BooleanField(
         default=False,
         description="是否支持 response_format=json_object",
+    )
+    max_context_characters = fields.IntField(
+        null=True,
+        description="四层业务消息允许的最大总字符数；留空表示不预检",
     )
 
     class Meta:

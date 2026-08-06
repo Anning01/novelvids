@@ -1,5 +1,29 @@
-# 提取人物、场景、物品等资产的服务模块
+"""Public service types for layered asset extraction."""
 
-from .extractor import PersonExtractor, SceneExtractor, ItemExtractor
+from .budget import ContextBudgetExceededError, ContextBudgetPolicy
+from .context import ExtractionContext, ExtractionContextLoader
+from .extractor import (
+    AssetExtractionGatewayError,
+    AssetExtractionResult,
+    AssetExtractor,
+    Item,
+    Person,
+    Scene,
+)
+from .messages import ExtractionMessageBuilder
+from .persistence import AssetUpsertService
 
-__all__ = ["PersonExtractor", "SceneExtractor", "ItemExtractor"]
+__all__ = [
+    "AssetExtractionGatewayError",
+    "AssetExtractionResult",
+    "AssetExtractor",
+    "AssetUpsertService",
+    "ContextBudgetExceededError",
+    "ContextBudgetPolicy",
+    "ExtractionContext",
+    "ExtractionContextLoader",
+    "ExtractionMessageBuilder",
+    "Person",
+    "Scene",
+    "Item",
+]

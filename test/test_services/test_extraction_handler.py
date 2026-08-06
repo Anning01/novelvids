@@ -1,5 +1,8 @@
 import asyncio
-from unittest.mock import patch, AsyncMock
+import logging
+import traceback
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -7,29 +10,66 @@ from models.novel import Novel
 from models.chapter import Chapter
 from models.asset import Asset
 from models.config import AiModelConfig
+from services.extraction.budget import ContextBudgetExceededError
 from services.extraction.handler import ExtractionTaskHandler
 from services.extraction.extractor import (
-    PersonList, SceneList, ItemList,
-    Person, Scene, Item,
+    AssetExtractionGatewayError,
+    AssetExtractionResult,
+    Item,
+    ItemList,
+    Person,
+    PersonList,
+    Scene,
+    SceneList,
 )
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum
 
 
 # ---- Mock 数据 ----
 
+ZHANG_SAN_TRAITS = """时代基底: modern
+国家/朝代: China
+人种: Chinese
+类型基底: realistic
+脸型: oval face, calm dark eyes
+发型: short black hair
+耳饰: does not wear earrings
+身材: medium height, lean build
+头身比: realistic seven-and-a-half-head proportion
+上身着装: charcoal cotton jacket
+下身着装: straight black trousers
+鞋子: brown leather shoes
+性别: male
+年龄: young adult"""
+
+LI_SI_TRAITS = """时代基底: modern
+国家/朝代: China
+人种: Chinese
+类型基底: realistic
+脸型: angular face, sharp eyes, stable cheek scar
+发型: short dark hair
+耳饰: does not wear earrings
+身材: tall, broad-shouldered build
+头身比: realistic eight-head proportion
+上身着装: fitted black wool coat
+下身着装: dark straight trousers
+鞋子: black leather boots
+性别: male
+年龄: middle-aged"""
+
 MOCK_PERSONS = PersonList(persons=[
     Person(
         name="张三",
         aliases=["小张", "张哥"],
         description="主角，沉稳冷静",
-        base_traits="young man, calm expression, black hair",
+        base_traits=ZHANG_SAN_TRAITS,
         appearances=[],
     ),
     Person(
         name="李四",
         aliases=["老李"],
         description="反派角色",
-        base_traits="tall man, sharp eyes, scar on cheek",
+        base_traits=LI_SI_TRAITS,
         appearances=[],
     ),
 ])
@@ -59,8 +99,14 @@ MOCK_EMPTY_SCENES = SceneList(scenes=[])
 MOCK_EMPTY_ITEMS = ItemList(items=[])
 
 
-async def _mock_extract(self, text, chapter_number):
-    """根据提取器类型返回对应的 mock 数据。"""
+async def _mock_extract(self, messages):
+    """返回统一的三类资产测试数据。"""
+    if self.response_model == AssetExtractionResult:
+        return AssetExtractionResult(
+            persons=MOCK_PERSONS.persons,
+            scenes=MOCK_SCENES.scenes,
+            items=MOCK_ITEMS.items,
+        )
     if self.response_model == PersonList:
         return MOCK_PERSONS
     elif self.response_model == SceneList:
@@ -69,8 +115,10 @@ async def _mock_extract(self, text, chapter_number):
         return MOCK_ITEMS
 
 
-async def _mock_extract_empty(self, text, chapter_number):
+async def _mock_extract_empty(self, messages):
     """返回空结果的 mock。"""
+    if self.response_model == AssetExtractionResult:
+        return AssetExtractionResult(persons=[], scenes=[], items=[])
     if self.response_model == PersonList:
         return MOCK_EMPTY_PERSONS
     elif self.response_model == SceneList:
@@ -91,13 +139,252 @@ async def _setup_env():
     return novel, chapter
 
 
+def _orchestration_case(*, assets=("known-asset",)):
+    messages = [
+        {"role": "system", "content": "rules-marker"},
+        {"role": "user", "content": "novel-marker"},
+        {"role": "user", "content": "assets-marker"},
+        {"role": "user", "content": "private-chapter-marker"},
+    ]
+    context = SimpleNamespace(
+        assets=assets,
+        chapter=SimpleNamespace(number=3, content="private-chapter-marker"),
+    )
+    extraction_result = AssetExtractionResult(persons=[], scenes=[], items=[])
+    summary = {"persons": [], "scenes": [], "items": []}
+    report = SimpleNamespace(
+        message_characters=(12, 12, 13, 22),
+        total_characters=59,
+    )
+    context_loader = SimpleNamespace(load=AsyncMock(return_value=context))
+    message_builder = SimpleNamespace(build=Mock(return_value=messages))
+    budget_policy = SimpleNamespace(validate=Mock(return_value=report))
+    budget_policy_factory = Mock(return_value=budget_policy)
+    extractor = SimpleNamespace(extract=AsyncMock(return_value=extraction_result))
+    extractor_factory = Mock(return_value=extractor)
+    upsert_service = SimpleNamespace(save_result=AsyncMock(return_value=summary))
+    handler = ExtractionTaskHandler(
+        context_loader=context_loader,
+        message_builder=message_builder,
+        upsert_service=upsert_service,
+        budget_policy_factory=budget_policy_factory,
+        extractor_factory=extractor_factory,
+    )
+    request_params = {
+        "chapter_id": 31,
+        "novel_id": 17,
+        "base_url": "https://mock.com",
+        "api_key": "secret-api-key-marker",
+        "model": "mock-model",
+        "prompt_language": "zh",
+        "supports_json_output": True,
+        "max_context_characters": 120000,
+    }
+    return SimpleNamespace(
+        handler=handler,
+        request_params=request_params,
+        messages=messages,
+        context=context,
+        extraction_result=extraction_result,
+        summary=summary,
+        context_loader=context_loader,
+        message_builder=message_builder,
+        budget_policy=budget_policy,
+        budget_policy_factory=budget_policy_factory,
+        extractor=extractor,
+        extractor_factory=extractor_factory,
+        upsert_service=upsert_service,
+    )
+
+
+@pytest.mark.asyncio
+async def test_handler_orchestrates_injected_collaborators_once(caplog):
+    case = _orchestration_case()
+    llm_client = SimpleNamespace()
+
+    with (
+        patch("services.extraction.handler.AsyncOpenAI", return_value=llm_client),
+        caplog.at_level(logging.INFO, logger="services.extraction.handler"),
+    ):
+        summary = await case.handler.execute(case.request_params)
+
+    assert summary == case.summary
+    case.context_loader.load.assert_awaited_once_with(
+        novel_id=case.request_params["novel_id"],
+        chapter_id=case.request_params["chapter_id"],
+    )
+    case.message_builder.build.assert_called_once_with(
+        case.context,
+        prompt_language="zh",
+    )
+    case.budget_policy_factory.assert_called_once_with(120000)
+    case.budget_policy.validate.assert_called_once_with(
+        case.messages,
+        asset_count=len(case.context.assets),
+        chapter_characters=len(case.context.chapter.content),
+    )
+    case.extractor_factory.assert_called_once_with(
+        llm_client,
+        model="mock-model",
+        supports_json_output=True,
+    )
+    case.extractor.extract.assert_awaited_once_with(case.messages)
+    case.upsert_service.save_result.assert_awaited_once_with(
+        novel_id=case.request_params["novel_id"],
+        chapter_number=case.context.chapter.number,
+        result=case.extraction_result,
+    )
+    assert "assets=1" in caplog.text
+    assert "message_chars=(12, 12, 13, 22)" in caplog.text
+    assert (
+        "roles=(system,user,user,user) call_status=started" in caplog.text
+    )
+    assert (
+        "roles=(system,user,user,user) call_status=succeeded" in caplog.text
+    )
+    assert "call_status=failed" not in caplog.text
+    assert "private-chapter-marker" not in caplog.text
+    assert "secret-api-key-marker" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_handler_budget_failure_stops_model_and_persistence():
+    case = _orchestration_case()
+    case.budget_policy.validate.side_effect = ContextBudgetExceededError(
+        "资产上下文超限"
+    )
+
+    with pytest.raises(ContextBudgetExceededError, match="资产上下文超限"):
+        await case.handler.execute(case.request_params)
+
+    case.extractor_factory.assert_not_called()
+    case.extractor.extract.assert_not_awaited()
+    case.upsert_service.save_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_maps_injected_extractor_failure_without_logging_content(
+    caplog,
+):
+    case = _orchestration_case()
+    marker = "secret-schema-marker"
+    case.extractor.extract.side_effect = ValueError(marker)
+
+    with caplog.at_level(logging.INFO, logger="services.extraction.handler"):
+        with pytest.raises(AssetExtractionGatewayError) as captured:
+            await case.handler.execute(case.request_params)
+
+    case.extractor.extract.assert_awaited_once_with(case.messages)
+    case.upsert_service.save_result.assert_not_awaited()
+    assert str(captured.value) == (
+        "资产提取模型调用失败"
+        "（错误代码：asset_extraction_gateway_error）"
+    )
+    assert captured.value.__suppress_context__ is True
+    assert marker not in repr(captured.value)
+    assert "roles=(system,user,user,user) call_status=started" in caplog.text
+    assert "roles=(system,user,user,user) call_status=failed" in caplog.text
+    assert "error_type=ValueError error_code=unexpected_error" in caplog.text
+    assert "call_status=succeeded" not in caplog.text
+    assert marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_handler_suppresses_existing_gateway_error_context(caplog):
+    case = _orchestration_case()
+    marker = "PRIVATE-PROVIDER-CONTEXT-MARKER"
+    raised_errors = []
+
+    async def raise_gateway_error_with_provider_context(messages):
+        try:
+            raise RuntimeError(marker)
+        except RuntimeError:
+            error = AssetExtractionGatewayError()
+            raised_errors.append(error)
+            raise error
+
+    case.extractor.extract.side_effect = (
+        raise_gateway_error_with_provider_context
+    )
+
+    with caplog.at_level(logging.INFO, logger="services.extraction.handler"):
+        with pytest.raises(AssetExtractionGatewayError) as captured:
+            await case.handler.execute(case.request_params)
+
+    assert captured.value is raised_errors[0]
+    assert captured.value.__suppress_context__ is True
+    assert marker not in "".join(traceback.format_exception(captured.value))
+    assert marker not in caplog.text
+    case.upsert_service.save_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_preserves_extractor_cancellation():
+    case = _orchestration_case()
+    case.extractor.extract.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await case.handler.execute(case.request_params)
+
+    case.upsert_service.save_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_unexpected_message_roles_before_model_call(caplog):
+    case = _orchestration_case()
+    case.messages[1]["role"] = "assistant"
+
+    with caplog.at_level(logging.INFO, logger="services.extraction.handler"):
+        with pytest.raises(AssetExtractionGatewayError):
+            await case.handler.execute(case.request_params)
+
+    case.extractor_factory.assert_not_called()
+    case.extractor.extract.assert_not_awaited()
+    case.upsert_service.save_result.assert_not_awaited()
+    assert "roles=(system,assistant,user,user) call_status=failed" in caplog.text
+    assert "error_code=asset_extraction_message_protocol_error" in caplog.text
+    assert "private-chapter-marker" not in caplog.text
+    assert "secret-api-key-marker" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_handler_context_failure_stops_following_collaborators():
+    case = _orchestration_case()
+    case.context_loader.load.side_effect = ValueError("章节不属于小说")
+
+    with pytest.raises(ValueError, match="不属于小说"):
+        await case.handler.execute(case.request_params)
+
+    case.message_builder.build.assert_not_called()
+    case.budget_policy_factory.assert_not_called()
+    case.extractor_factory.assert_not_called()
+    case.extractor.extract.assert_not_awaited()
+    case.upsert_service.save_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_empty_asset_registry_still_calls_model_once():
+    case = _orchestration_case(assets=())
+
+    summary = await case.handler.execute(case.request_params)
+
+    assert summary == case.summary
+    case.budget_policy.validate.assert_called_once_with(
+        case.messages,
+        asset_count=0,
+        chapter_characters=len(case.context.chapter.content),
+    )
+    case.extractor.extract.assert_awaited_once_with(case.messages)
+    case.upsert_service.save_result.assert_awaited_once()
+
+
 # =====================================================================
 # 正常提取
 # =====================================================================
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_正常提取_写入所有类型资产():
@@ -143,8 +430,95 @@ async def test_正常提取_写入所有类型资产():
 
 
 @pytest.mark.asyncio
+async def test_统一提取只请求模型一次():
+    novel, chapter = await _setup_env()
+    await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="宫平",
+        aliases=["宫先生"],
+        description="公司老实员工，遭雷劈后获得看见运势的能力。",
+        base_traits="二十多岁的青年，衣着朴素，性格温和。",
+        source_chapters=[99],
+        metadata={"analysis_source": "project_analysis"},
+    )
+    result = AssetExtractionResult(
+        persons=MOCK_PERSONS.persons,
+        scenes=MOCK_SCENES.scenes,
+        items=MOCK_ITEMS.items,
+    )
+
+    with patch(
+        "services.extraction.extractor.AssetExtractor.extract",
+        new=AsyncMock(return_value=result),
+    ) as extract:
+        await ExtractionTaskHandler().execute({
+            "chapter_id": chapter.id,
+            "novel_id": novel.id,
+            "base_url": "https://mock.com",
+            "api_key": "sk-mock",
+            "model": "mock-model",
+            "concurrency": 3,
+            "prompt_language": "zh",
+        })
+
+    extract.assert_awaited_once()
+    messages = extract.await_args.args[0]
+    assert [message["role"] for message in messages] == [
+        "system",
+        "user",
+        "user",
+        "user",
+    ]
+    assert "宫平" in messages[2]["content"]
+    assert "公司老实员工，遭雷劈后获得看见运势的能力。" in messages[2]["content"]
+    assert "二十多岁的青年，衣着朴素，性格温和。" in messages[2]["content"]
+    assert chapter.content in messages[3]["content"]
+
+
+@pytest.mark.asyncio
+async def test_Handler只委托资产保存阶段():
+    novel, chapter = await _setup_env()
+    extraction_result = AssetExtractionResult(
+        persons=MOCK_PERSONS.persons,
+        scenes=MOCK_SCENES.scenes,
+        items=MOCK_ITEMS.items,
+    )
+    expected_summary = {
+        "persons": [{"name": "张三", "action": "created"}],
+        "scenes": [],
+        "items": [],
+    }
+
+    with (
+        patch(
+            "services.extraction.extractor.AssetExtractor.extract",
+            new=AsyncMock(return_value=extraction_result),
+        ),
+        patch("services.extraction.handler.AssetUpsertService") as service_type,
+    ):
+        service_type.return_value.save_result = AsyncMock(
+            return_value=expected_summary
+        )
+        summary = await ExtractionTaskHandler().execute({
+            "chapter_id": chapter.id,
+            "novel_id": novel.id,
+            "base_url": "https://mock.com",
+            "api_key": "sk-mock",
+            "model": "mock-model",
+        })
+
+    assert summary == expected_summary
+    service_type.return_value.save_result.assert_awaited_once_with(
+        novel_id=novel.id,
+        chapter_number=chapter.number,
+        result=extraction_result,
+    )
+
+
+@pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_正常提取_source_chapters记录章节号():
@@ -176,7 +550,7 @@ async def test_正常提取_source_chapters记录章节号():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_增量提取_合并别名和章节():
@@ -232,7 +606,7 @@ async def test_增量提取_合并别名和章节():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_增量提取_同一章节重复提取不重复追加():
@@ -268,84 +642,8 @@ async def test_增量提取_同一章节重复提取不重复追加():
 
 
 @pytest.mark.asyncio
-async def test_增量提取_别名命中且空字段不覆盖旧资料():
-    novel = await Novel.create(name="别名合并小说")
-    existing = await Asset.create(
-        novel=novel,
-        asset_type=AssetTypeEnum.person.value,
-        canonical_name="李火旺",
-        aliases=["红中"],
-        description="保留的旧描述",
-        base_traits="保留的旧视觉资料",
-        main_image="/media/li-huowang.png",
-        source_chapters=[1],
-        last_updated_chapter=1,
-    )
-    handler = ExtractionTaskHandler()
-    alias_person = Person(
-        name="红中",
-        aliases=["李兄"],
-        description="",
-        base_traits="",
-        appearances=[],
-    )
-
-    result = await handler._save_assets(
-        novel.id,
-        9,
-        AssetTypeEnum.person,
-        [alias_person],
-    )
-    await existing.refresh_from_db()
-
-    assert result == [{"name": "红中", "action": "updated"}]
-    assert await Asset.filter(novel=novel).count() == 1
-    assert existing.description == "保留的旧描述"
-    assert existing.base_traits == "保留的旧视觉资料"
-    assert existing.main_image == "/media/li-huowang.png"
-    assert existing.source_chapters == [1, 9]
-    assert set(existing.aliases) == {"红中", "李兄"}
-
-
-@pytest.mark.asyncio
-async def test_增量提取_较早章节重跑不会回滚较新资料():
-    novel = await Novel.create(name="状态机防回滚")
-    existing = await Asset.create(
-        novel=novel,
-        asset_type=AssetTypeEnum.item.value,
-        canonical_name="桃木牌",
-        aliases=["洞窟铭牌"],
-        description="第八十八章确认的完整新资料",
-        base_traits="完整的新形态",
-        source_chapters=[88],
-        last_updated_chapter=88,
-    )
-    handler = ExtractionTaskHandler()
-    older_item = Item(
-        name="洞窟铭牌",
-        aliases=[],
-        description="第一章的早期旧资料",
-        base_traits="旧形态",
-        appearances=[],
-    )
-
-    await handler._save_assets(
-        novel.id,
-        1,
-        AssetTypeEnum.item,
-        [older_item],
-    )
-    await existing.refresh_from_db()
-
-    assert existing.description == "第八十八章确认的完整新资料"
-    assert existing.base_traits == "完整的新形态"
-    assert existing.source_chapters == [1, 88]
-    assert existing.last_updated_chapter == 88
-
-
-@pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_增量提取_合并别名去重():
@@ -391,7 +689,7 @@ async def test_增量提取_合并别名去重():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract_empty,
 )
 async def test_空提取结果_不写入任何资产():
@@ -422,15 +720,15 @@ async def test_空提取结果_不写入任何资产():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
-    side_effect=Exception("LLM 接口调用失败"),
+    "services.extraction.extractor.AssetExtractor.extract",
+    side_effect=Exception("secret-handler-integration-marker"),
 )
-async def test_提取异常_抛出到上层(mock_extract):
-    """LLM 调用失败时应向上抛出异常，由 executor 处理。"""
+async def test_提取异常_以脱敏网关异常抛出到上层(mock_extract):
+    """LLM 调用失败时向 executor 抛出稳定且脱敏的异常。"""
     novel, chapter = await _setup_env()
     handler = ExtractionTaskHandler()
 
-    with pytest.raises(Exception, match="LLM 接口调用失败"):
+    with pytest.raises(AssetExtractionGatewayError) as captured:
         await handler.execute({
             "chapter_id": chapter.id,
             "novel_id": novel.id,
@@ -440,6 +738,12 @@ async def test_提取异常_抛出到上层(mock_extract):
             "concurrency": 1,
         })
 
+    assert str(captured.value) == (
+        "资产提取模型调用失败"
+        "（错误代码：asset_extraction_gateway_error）"
+    )
+    assert "secret-handler-integration-marker" not in repr(captured.value)
+
 
 # =====================================================================
 # 并发控制
@@ -447,11 +751,11 @@ async def test_提取异常_抛出到上层(mock_extract):
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
-async def test_并发数为1时串行提取():
-    """concurrency=1 时三个提取器应串行运行。"""
+async def test_统一提取器一次返回三类资产():
+    """人物、场景、道具必须由一次统一提取调用返回。"""
     novel, chapter = await _setup_env()
     handler = ExtractionTaskHandler()
 
@@ -464,7 +768,6 @@ async def test_并发数为1时串行提取():
         "concurrency": 1,
     })
 
-    # 只要结果完整即可（串行也能完成）
     assert len(result["persons"]) == 2
     assert len(result["scenes"]) == 1
     assert len(result["items"]) == 1
@@ -472,11 +775,11 @@ async def test_并发数为1时串行提取():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
-async def test_并发数为3时并行提取():
-    """concurrency=3 时三个提取器可以全部并行。"""
+async def test_旧任务并发参数不改变统一提取结果():
+    """旧任务保留 concurrency 参数时仍走一次统一资产提取。"""
     novel, chapter = await _setup_env()
     handler = ExtractionTaskHandler()
 
@@ -500,7 +803,7 @@ async def test_并发数为3时并行提取():
 
 @pytest.mark.asyncio
 @patch(
-    "services.extraction.extractor.BaseExtractor.extract",
+    "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
 async def test_不同小说的资产互相隔离():

@@ -25,7 +25,7 @@ import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
 import { api } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import type { AiModelConfig, EnumItem, GeneralConfig } from '@/types'
+import type { AiModelConfig, EnumItem, GeneralConfig, ImageApiProtocol } from '@/types'
 
 type ModelCategoryId = 'llm' | 'image' | 'video'
 type SettingsSection = 'models' | 'general'
@@ -82,7 +82,7 @@ const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', concurrency: 1, supports_json_output: false })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' })
 
 function configTaskTypes(item: AiModelConfig) {
   return item.task_types?.length ? item.task_types : [item.task_type]
@@ -115,6 +115,12 @@ function activeCount(category: ModelCategory) {
 
 function taskLabel(value: number) {
   return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成' }[value] ?? `任务 ${value}`)
+}
+
+function protocolLabel(value: ImageApiProtocol) {
+  if (value === 'volcengine_ark') return '火山方舟 Seedream'
+  if (value === 'openrouter_compatible') return 'OpenRouter 兼容'
+  return 'OpenAI 兼容'
 }
 
 function providerHost(baseUrl?: string) {
@@ -166,7 +172,7 @@ function changeSettingsSection(value: string) {
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: '', api_key: '', model: '', concurrency: 1, supports_json_output: false }
+  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' }
   editingConfigId.value = null
   showApiKey.value = false
   showCreate.value = true
@@ -183,8 +189,10 @@ function openEdit(item: AiModelConfig) {
     base_url: item.base_url || '',
     api_key: item.api_key || '',
     model: item.model || '',
+    api_protocol: item.api_protocol || 'openai_compatible',
     concurrency: item.concurrency,
     supports_json_output: item.supports_json_output ?? false,
+    max_context_characters: item.max_context_characters ?? '',
   }
   showCreate.value = true
 }
@@ -197,7 +205,12 @@ async function saveConfig() {
   creating.value = true
   try {
     const taskTypes = form.value.task_types.map(Number)
-    const payload = { ...form.value, task_type: taskTypes[0], task_types: taskTypes }
+    const payload = {
+      ...form.value,
+      task_type: taskTypes[0],
+      task_types: taskTypes,
+      max_context_characters: form.value.max_context_characters || null,
+    }
     if (editingConfigId.value !== null) {
       await api.updateConfig(editingConfigId.value, payload)
     } else {
@@ -295,6 +308,7 @@ onMounted(load)
               <span><Settings2 :size="13" />{{ item.model || '未设置模型名称' }}</span>
               <span><Server :size="13" />{{ providerHost(item.base_url) }}</span>
               <span><Zap :size="13" />并发 {{ item.concurrency }}</span>
+              <span v-if="selectedCategory.id === 'image'">{{ protocolLabel(item.api_protocol) }}</span>
               <span v-if="selectedCategory.id === 'llm'">{{ item.supports_json_output ? 'JSON 格式化' : '提示词 JSON' }}</span>
             </div>
           </div>
@@ -403,6 +417,25 @@ onMounted(load)
           </label>
           <label><span>模型名称</span><input v-model="form.model" name="model-id" required autocomplete="off" spellcheck="false" placeholder="模型 ID" /></label>
           <label><span>并发数</span><input v-model.number="form.concurrency" name="model-concurrency" type="number" min="1" required /></label>
+          <label v-if="selectedCategory.id === 'image'" class="is-full">
+            <span>接口协议</span>
+            <select v-model="form.api_protocol" name="image-api-protocol">
+              <option value="openai_compatible">OpenAI 兼容（GPT Image / 中转服务）</option>
+              <option value="openrouter_compatible">OpenRouter 兼容（/images）</option>
+              <option value="volcengine_ark">火山方舟 Seedream</option>
+            </select>
+            <small>协议决定请求字段与尺寸适配，不依赖模型名称猜测供应商。</small>
+          </label>
+          <label v-if="selectedCategory.id === 'llm'">
+            <span>上下文字符上限</span>
+            <input
+              v-model.number="form.max_context_characters"
+              name="model-max-context-characters"
+              type="number"
+              min="1"
+              placeholder="留空表示不预检"
+            />
+          </label>
           <label v-if="selectedCategory.id === 'llm'" class="is-full json-capability-field">
             <span class="json-capability-copy">
               <strong>结构化 JSON 输出</strong>
@@ -504,10 +537,11 @@ onMounted(load)
 .model-form-grid label.is-full { grid-column: 1 / -1; }
 .model-form-grid label > span:first-child { font-weight: 600; }
 .model-form-grid label > small { color: var(--app-text-muted); font-size: 9px; }
-.model-form-grid input { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid var(--app-border); border-radius: 9px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); caret-color: var(--app-text); font-size: 11px; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.model-form-grid input, .model-form-grid select { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid var(--app-border); border-radius: 9px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); caret-color: var(--app-text); font-size: 11px; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
 .model-form-grid input::placeholder { color: var(--app-text-muted); opacity: 1; }
-.model-form-grid input:hover { border-color: var(--app-border-strong); }
+.model-form-grid input:hover, .model-form-grid select:hover { border-color: var(--app-border-strong); }
 .model-form-grid input:focus { border-color: var(--app-accent); color: var(--app-text); background: var(--app-surface-hover); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
+.model-form-grid select:focus { border-color: var(--app-accent); color: var(--app-text); background: var(--app-surface-hover); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
 .model-form-grid input:-webkit-autofill,
 .model-form-grid input:-webkit-autofill:hover,
 .model-form-grid input:-webkit-autofill:focus { border-color: var(--app-border-strong); -webkit-text-fill-color: var(--app-text); caret-color: var(--app-text); box-shadow: 0 0 0 1000px var(--app-surface-muted) inset; }

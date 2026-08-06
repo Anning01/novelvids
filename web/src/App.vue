@@ -32,7 +32,7 @@ const personalItems = [
       <RouterLink to="/" class="app-brand" aria-label="猫影首页">
         <img src="/logo.png" alt="" />
         <span>
-          <strong>猫影</strong>
+          <strong>灵思</strong>
           <small>NOVEL STUDIO</small>
         </span>
       </RouterLink>

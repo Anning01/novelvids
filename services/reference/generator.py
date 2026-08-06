@@ -1,7 +1,6 @@
 from typing import Any
 
-from openai import AsyncOpenAI
-
+from services.image_generation import generate_images
 from utils.prompt_language import normalize_prompt_language
 
 
@@ -149,8 +148,11 @@ def build_sora_compatible_prompt(data: dict[str, Any], prompt_language: str = "e
 
 
 async def generate_for_sora_consistency(
-    client: AsyncOpenAI,
     data,
+    *,
+    base_url,
+    api_key,
+    api_protocol="openai_compatible",
     reference_images=None,
     model="doubao-seedream-4-5-251128",
     resolution="2K",
@@ -164,25 +166,23 @@ async def generate_for_sora_consistency(
         prompt_language,
     )
 
-    extra_body = {
-        "sequential_image_generation": "disabled",
-        "watermark": False,
-        "aspect_ratio": aspect_ratio,
-    }
+    extra_body = {}
 
     if reference_images:
         extra_body["image"] = reference_images
 
     try:
-        response = await client.images.generate(
+        return await generate_images(
+            base_url=base_url,
+            api_key=api_key,
             model=model,
             prompt=final_prompt,
-            size=resolution,
-            response_format="url",
-            n=max(1, min(4, int(count))),
+            api_protocol=api_protocol,
+            resolution=resolution,
+            aspect_ratio=aspect_ratio,
+            count=count,
             extra_body=extra_body,
         )
-        return response.data
     except Exception as error:
         print(f"生成异常: {error}")
         raise

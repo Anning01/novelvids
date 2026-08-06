@@ -12,7 +12,7 @@ from services.nlp import (
 )
 from utils.crud import CRUDBase
 from models.novel import Novel
-from schemas.novel import NovelCreate, NovelUpdate
+from schemas.novel import NovelCreate, NovelPatch, NovelUpdate
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
@@ -24,7 +24,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         instance = await self.get(novel_id)
         return await super().update(instance, obj_in)
 
-    async def patch(self, novel_id: int, obj_in: NovelUpdate) -> Novel:
+    async def patch(self, novel_id: int, obj_in: NovelPatch) -> Novel:
         instance = await self.get(novel_id)
         return await super().patch(instance, obj_in)
 

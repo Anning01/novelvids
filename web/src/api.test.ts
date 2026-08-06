@@ -90,3 +90,43 @@ it('loads every chapter page instead of truncating projects at 100 chapters', as
   expect(response.data.items.at(-1)?.number).toBe(205)
   expect(fetchMock).toHaveBeenCalledTimes(3)
 })
+
+it('requests only assets associated with the selected chapter when chapterId is provided', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  await api.assets(9, 1, 100, 2162)
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/asset?novel_id=9&page=1&page_size=100&chapter_id=2162',
+    { headers: { 'Content-Type': 'application/json' } },
+  )
+})
+
+it('preserves max context characters in configuration create and update requests', async () => {
+  const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({
+    code: 0,
+    message: 'ok',
+    data: {},
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+  const payload = { max_context_characters: 120000 }
+
+  await api.createConfig(payload)
+  await api.updateConfig(21, payload)
+
+  expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/config', {
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/config/21', {
+    headers: { 'Content-Type': 'application/json' },
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+})

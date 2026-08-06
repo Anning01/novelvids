@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from controllers.config import ai_model_config_controller, general_config_controller
 from models.ai_task import AiTask
 from models.chapter import Chapter
-from schemas.chapter import ChapterCreate, ChapterUpdate
+from schemas.chapter import ChapterCreate, ChapterPatch, ChapterUpdate
 from services.ai_task_executor import ai_task_executor
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -17,7 +17,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         instance = await self.get(chapter_id)
         return await super().update(instance, obj_in)
 
-    async def patch(self, chapter_id: int, obj_in: ChapterUpdate) -> Chapter:
+    async def patch(self, chapter_id: int, obj_in: ChapterPatch) -> Chapter:
         instance = await self.get(chapter_id)
         return await super().patch(instance, obj_in)
 
@@ -58,6 +58,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             "model": config.model,
             "concurrency": config.concurrency,
             "supports_json_output": config.supports_json_output,
+            "max_context_characters": config.max_context_characters,
             "prompt_language": prompt_language,
         }
         task = await ai_task_executor.submit(

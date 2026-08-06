@@ -397,6 +397,7 @@ async def test_reference_使用资产指定的生图模型():
         base_url="https://selected.example.com/v1",
         api_key="selected-key",
         model="selected-model",
+        api_protocol="volcengine_ark",
         is_active=False,
     )
     asset = await Asset.create(
@@ -411,6 +412,7 @@ async def test_reference_使用资产指定的生图模型():
     assert selected_config.id != active_config.id
     assert task.request_params["base_url"] == selected_config.base_url
     assert task.request_params["model"] == selected_config.model
+    assert task.request_params["api_protocol"] == "volcengine_ark"
 
 
 @pytest.mark.asyncio

@@ -13,18 +13,32 @@ import {
   Film,
   Image,
   MonitorPlay,
+  Pencil,
   RefreshCw,
+  Save,
   Settings2,
   Sparkles,
   UsersRound,
   Video,
+  X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppBadge from '@/components/AppBadge.vue'
 import { notice } from '@/shared/notice'
+import {
+  chapterDraftChanged,
+  createChapterEditDraft,
+  createProjectAnalysisDraft,
+  normalizeTags,
+  projectPatchFromDraft,
+} from '@/shared/projectAnalysisEditor'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
-import { TaskStatusEnum } from '@/types'
-import type { AiModelConfig, AiTask, Chapter } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum } from '@/types'
+import type {
+  ChapterEditDraft,
+  ProjectAnalysisDraft,
+} from '@/shared/projectAnalysisEditor'
+import type { AiModelConfig, AiTask, Asset, Chapter, Novel } from '@/types'
 
 interface AgentProjectMeta {
   projectId?: number
@@ -73,6 +87,7 @@ function readProjectMeta(): AgentProjectMeta {
 }
 
 const project = ref(readProjectMeta())
+const novel = ref<Novel | null>(null)
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
@@ -82,8 +97,13 @@ const showingAllCharacters = ref(false)
 const analysisTask = ref<AiTask | null>(null)
 const chapters = ref<Chapter[]>([])
 const chapterDetails = ref<Record<number, Chapter>>({})
+const chapterAssets = ref<Record<number, Asset[]>>({})
 const loadingChapterId = ref<number | null>(null)
 const startingAnalysis = ref(false)
+const editing = ref(false)
+const savingEdits = ref(false)
+const projectDraft = ref<ProjectAnalysisDraft | null>(null)
+const chapterDrafts = ref<Record<number, ChapterEditDraft>>({})
 const episodeTabs = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
 
@@ -98,6 +118,14 @@ const analysisResult = computed<ProjectAnalysisResult | null>(() => {
   if (analysisTask.value?.status !== TaskStatusEnum.COMPLETED || !analysisTask.value.response_data) return null
   return analysisTask.value.response_data as unknown as ProjectAnalysisResult
 })
+const projectView = computed(() => createProjectAnalysisDraft(
+  novel.value ?? { name: project.value.name },
+  analysisResult.value,
+))
+const displayedProjectName = computed(() => editing.value && projectDraft.value
+  ? projectDraft.value.name
+  : project.value.name)
+const displayedTags = computed(() => normalizeTags(projectView.value.tagsText))
 const characters = computed(() => analysisResult.value?.key_characters ?? [])
 const visibleCharacters = computed(() => showingAllCharacters.value ? characters.value : characters.value.slice(0, 4))
 const selectedEpisodeBrief = computed(() => chapters.value.find(item => item.number === activeEpisode.value) ?? chapters.value[0])
@@ -105,17 +133,21 @@ const selectedEpisode = computed(() => {
   const chapter = selectedEpisodeBrief.value
   return chapter ? (chapterDetails.value[chapter.id] ?? chapter) : undefined
 })
+const selectedEpisodeDraft = computed(() => {
+  const chapter = selectedEpisode.value
+  return chapter ? chapterDrafts.value[chapter.id] : undefined
+})
 const selectedEpisodeLoading = computed(() => {
   const chapter = selectedEpisodeBrief.value
   return Boolean(chapter && loadingChapterId.value === chapter.id && !chapterDetails.value[chapter.id])
 })
 const selectedEpisodeCharacters = computed(() => {
-  const chapterNumber = selectedEpisode.value?.number
-  if (!chapterNumber) return '暂无关键人物标记'
-  return characters.value
-    .filter(character => character.chapter_numbers.includes(chapterNumber))
-    .map(character => character.name)
-    .join('、') || '暂无关键人物标记'
+  const chapter = selectedEpisodeBrief.value
+  if (!chapter) return '暂无当前章节角色'
+  return (chapterAssets.value[chapter.id] || [])
+    .filter(asset => asset.asset_type === AssetTypeEnum.PERSON)
+    .map(asset => asset.canonical_name)
+    .join('、') || '暂无当前章节角色'
 })
 const analysisRunning = computed(() => {
   const status = analysisTask.value?.status
@@ -146,6 +178,7 @@ async function loadProject(): Promise<boolean> {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
   try {
     const response = await api.novel(projectId.value)
+    novel.value = response.data
     const contentLength = (response.data.content || '').trim().length
     if (contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
       notice.error(`书稿约 ${contentLength.toLocaleString()} 字但只拆分出 ${response.data.total_chapters || 0} 章，已阻止进入。请重新上传并检查文件编码或章节标题。`)
@@ -187,15 +220,27 @@ async function loadChapters() {
 }
 
 async function loadChapterContent(chapter?: Chapter) {
-  if (!chapter || chapterDetails.value[chapter.id]) return
-  loadingChapterId.value = chapter.id
+  if (!chapter) return
+  const needsContent = !chapterDetails.value[chapter.id]
+  if (needsContent) loadingChapterId.value = chapter.id
   try {
-    const detail = (await api.chapter(chapter.id)).data
-    chapterDetails.value = { ...chapterDetails.value, [chapter.id]: detail }
+    const [detailResponse, assetResponse] = await Promise.all([
+      needsContent ? api.chapter(chapter.id) : Promise.resolve(null),
+      api.assets(projectId.value, 1, 100, chapter.id),
+    ])
+    chapterAssets.value = {
+      ...chapterAssets.value,
+      [chapter.id]: assetResponse.data.items,
+    }
+    if (detailResponse) {
+      const detail = detailResponse.data
+      chapterDetails.value = { ...chapterDetails.value, [chapter.id]: detail }
+      if (editing.value) ensureChapterDraft(detail)
+    }
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
-    if (loadingChapterId.value === chapter.id) loadingChapterId.value = null
+    if (needsContent && loadingChapterId.value === chapter.id) loadingChapterId.value = null
   }
 }
 
@@ -255,6 +300,76 @@ async function regenerateAnalysis() {
   await startAnalysis()
 }
 
+function ensureChapterDraft(chapter: Chapter) {
+  if (chapterDrafts.value[chapter.id]) return
+  chapterDrafts.value = {
+    ...chapterDrafts.value,
+    [chapter.id]: createChapterEditDraft(chapter),
+  }
+}
+
+function beginEditing() {
+  if (!novel.value || !analysisResult.value) return
+  projectDraft.value = createProjectAnalysisDraft(novel.value, analysisResult.value)
+  chapterDrafts.value = {}
+  if (selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
+  editing.value = true
+}
+
+function cancelEditing() {
+  editing.value = false
+  projectDraft.value = null
+  chapterDrafts.value = {}
+}
+
+async function saveEdits() {
+  if (!novel.value || !projectDraft.value || savingEdits.value) return
+  const projectPatch = projectPatchFromDraft(projectDraft.value)
+  if (!projectPatch.name) {
+    notice.error('小说昵称不能为空')
+    return
+  }
+
+  const changedChapterDrafts = Object.values(chapterDrafts.value).filter((draft) => {
+    const chapter = chapterDetails.value[draft.id]
+    return chapter ? chapterDraftChanged(draft, chapter) : false
+  })
+  if (changedChapterDrafts.some(draft => !draft.name.trim())) {
+    notice.error('章节标题不能为空')
+    return
+  }
+
+  savingEdits.value = true
+  try {
+    const [projectResponse, chapterResponses] = await Promise.all([
+      api.updateNovel(projectId.value, projectPatch),
+      Promise.all(changedChapterDrafts.map(draft => api.updateChapter(draft.id, {
+        name: draft.name.trim(),
+        content: draft.content,
+      }))),
+    ])
+    novel.value = projectResponse.data
+    project.value = {
+      ...project.value,
+      name: projectResponse.data.name,
+      cover: projectResponse.data.cover,
+    }
+    for (const response of chapterResponses) {
+      const updated = response.data
+      chapterDetails.value = { ...chapterDetails.value, [updated.id]: updated }
+      chapters.value = chapters.value.map(chapter => chapter.id === updated.id
+        ? { ...chapter, name: updated.name }
+        : chapter)
+    }
+    cancelEditing()
+    notice.success(`修改已保存${changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : ''}`)
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    savingEdits.value = false
+  }
+}
+
 function continueToSettings() {
   notice.success('剧本分析已确认，正在进入角色与场景设定')
   void router.push({
@@ -278,7 +393,8 @@ async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
   activeEpisode.value = chapterNumber
   const chapter = chapters.value.find(item => item.number === chapterNumber)
   if (chapter) void router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
-  void loadChapterContent(chapter)
+  await loadChapterContent(chapter)
+  if (editing.value && selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
   await nextTick()
   const button = event?.currentTarget as HTMLElement | null
   if (!button || !episodeTabs.value) return
@@ -299,7 +415,7 @@ onBeforeUnmount(stopPolling)
       <div class="agent-project-nav">
         <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="返回上一页" @click="router.back()"><ArrowLeft :size="18" /></AppButton>
         <div>
-          <strong>{{ project.name }}</strong>
+          <strong>{{ displayedProjectName }}</strong>
           <span><Film :size="13" />{{ project.aspectRatio }}<i />{{ project.resolution }}<i />{{ project.style }}</span>
         </div>
       </div>
@@ -318,7 +434,7 @@ onBeforeUnmount(stopPolling)
     <section class="agent-content">
       <div class="analysis-hero">
         <div class="project-cover-art" aria-label="项目封面">
-          <img v-if="project.cover || analysisResult?.cover" :src="project.cover || analysisResult?.cover" :alt="`${project.name}封面`" />
+          <img v-if="project.cover || analysisResult?.cover" :src="project.cover || analysisResult?.cover" :alt="`${displayedProjectName}封面`" />
           <template v-else>
           <span class="cover-orbit orbit-one" />
           <span class="cover-orbit orbit-two" />
@@ -336,13 +452,27 @@ onBeforeUnmount(stopPolling)
             <FileText v-else :size="13" />
             {{ analysisStatus }}
           </AppBadge>
-          <h1>{{ project.name }}</h1>
+          <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" aria-label="小说昵称" maxlength="255" />
+          <h1 v-else>{{ project.name }}</h1>
           <p><FileText :size="14" />{{ analysisResult?.chapter_count || chapters.length || 0 }} 章 <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
-          <div v-if="analysisResult?.book_types.length" class="genre-tags">
-            <AppBadge v-for="(genre, index) in analysisResult.book_types" :key="genre" :tone="index % 2 ? 'success' : 'accent'" size="sm">{{ genre }}</AppBadge>
+          <label v-if="editing && projectDraft" class="tag-editor">
+            <span>项目标签</span>
+            <input v-model="projectDraft.tagsText" placeholder="使用逗号分隔，例如：都市，热血，成长" />
+          </label>
+          <div v-else-if="displayedTags.length" class="genre-tags">
+            <AppBadge v-for="(genre, index) in displayedTags" :key="genre" :tone="index % 2 ? 'success' : 'accent'" size="sm">{{ genre }}</AppBadge>
           </div>
         </div>
-        <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />重新分析</AppButton>
+        <div class="analysis-hero-actions">
+          <template v-if="editing">
+            <AppButton variant="ghost" size="sm" type="button" :disabled="savingEdits" @click="cancelEditing"><X :size="15" />取消</AppButton>
+            <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />保存修改</AppButton>
+          </template>
+          <template v-else>
+            <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />重新分析</AppButton>
+            <AppButton v-if="analysisResult" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />编辑内容</AppButton>
+          </template>
+        </div>
       </div>
 
       <section v-if="!analysisResult" class="analysis-progress-card" :class="{ 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED }">
@@ -360,8 +490,28 @@ onBeforeUnmount(stopPolling)
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>项目设定</h2></div></header>
         <div class="profile-grid">
-          <article class="profile-card"><span><Bot :size="18" /></span><div><small>剧本类型</small><strong>AI 精品短剧</strong><p>自动理解完整剧本，规划分集节奏、人物关系与视觉生产流程。</p></div></article>
-          <article class="profile-card"><span><Clapperboard :size="18" /></span><div><small>分镜策略</small><strong>电影化叙事 1.5</strong><p>强调连续动作、景别变化与情绪转折，适配竖屏短剧节奏。</p></div></article>
+          <article class="profile-card">
+            <span><Bot :size="18" /></span>
+            <div>
+              <small>剧本类型</small>
+              <template v-if="editing && projectDraft">
+                <input v-model="projectDraft.projectType" aria-label="剧本类型" maxlength="120" />
+                <textarea v-model="projectDraft.projectSetting" aria-label="项目设定说明" rows="3" />
+              </template>
+              <template v-else><strong>{{ projectView.projectType }}</strong><p>{{ projectView.projectSetting }}</p></template>
+            </div>
+          </article>
+          <article class="profile-card">
+            <span><Clapperboard :size="18" /></span>
+            <div>
+              <small>分镜策略</small>
+              <template v-if="editing && projectDraft">
+                <input v-model="projectDraft.storyboardStrategy" aria-label="分镜策略" maxlength="120" />
+                <textarea v-model="projectDraft.storyboardSetting" aria-label="分镜策略说明" rows="3" />
+              </template>
+              <template v-else><strong>{{ projectView.storyboardStrategy }}</strong><p>{{ projectView.storyboardSetting }}</p></template>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -378,7 +528,8 @@ onBeforeUnmount(stopPolling)
         <header><div><span class="section-kicker">STORY OVERVIEW</span><h2>故事大纲</h2></div></header>
         <article class="outline-card">
           <span><BookOpenText :size="20" /></span>
-          <p>{{ analysisResult.story_outline }}</p>
+          <textarea v-if="editing && projectDraft" v-model="projectDraft.storyOutline" aria-label="故事大纲" rows="8" />
+          <p v-else>{{ projectView.storyOutline }}</p>
         </article>
       </section>
 
@@ -405,8 +556,19 @@ onBeforeUnmount(stopPolling)
           <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only type="button" role="tab" :active="activeEpisode === chapter.number" :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</AppButton>
         </div>
         <article v-if="selectedEpisode" class="episode-content">
-          <header><span>{{ String(selectedEpisode.number).padStart(2, '0') }}</span><div><small>EPISODE {{ selectedEpisode.number }}</small><h3>第 {{ selectedEpisode.number }} 集 · {{ selectedEpisode.name }}</h3></div></header>
+          <header>
+            <span>{{ String(selectedEpisode.number).padStart(2, '0') }}</span>
+            <div>
+              <small>EPISODE {{ selectedEpisode.number }}</small>
+              <label v-if="editing && selectedEpisodeDraft" class="chapter-title-editor">
+                <span>第 {{ selectedEpisode.number }} 集</span>
+                <input v-model="selectedEpisodeDraft.name" aria-label="章节标题" maxlength="255" />
+              </label>
+              <h3 v-else>第 {{ selectedEpisode.number }} 集 · {{ selectedEpisode.name }}</h3>
+            </div>
+          </header>
           <p v-if="selectedEpisodeLoading" class="episode-content-state">正在加载章节正文…</p>
+          <textarea v-else-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" aria-label="章节内容" />
           <p v-else-if="selectedEpisode.content">{{ selectedEpisode.content }}</p>
           <p v-else class="episode-content-state">该章节暂无正文内容</p>
           <footer><span><UsersRound :size="14" />{{ selectedEpisodeCharacters }}</span><span>第 {{ selectedEpisode.number }} 章</span></footer>
@@ -447,8 +609,12 @@ onBeforeUnmount(stopPolling)
 .status-spinner { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .analysis-hero h1 { margin: 0 0 10px; color: #282c3a; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.035em; }
+.analysis-title-input { width: min(620px, 100%); margin: 0 0 10px; padding: 5px 9px; color: #282c3a; font-size: clamp(22px, 3vw, 30px); font-weight: 700; letter-spacing: -.035em; }
 .analysis-hero-copy p { margin: 0; font-size: 11px; }
 .genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.tag-editor { display: grid; width: min(620px, 100%); gap: 5px; margin-top: 13px; }
+.tag-editor > span { color: #777c8d; font-size: 9px; font-weight: 650; }
+.analysis-hero-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .secondary-action { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 9px; color: #626879; background: #f3f4f8; cursor: pointer; font-size: 11px; }
 .secondary-action:hover { color: #4f51e8; background: #ededff; }
 .secondary-action:disabled { opacity: .55; cursor: wait; }
@@ -474,6 +640,10 @@ onBeforeUnmount(stopPolling)
 .profile-card small, .model-readiness-grid small { color: #969baa; font-size: 9px; }
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
+.analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid #dfe1ea; border-radius: 9px; outline: 0; background: #fbfbfe; box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: #7779ef; background: #fff; box-shadow: 0 0 0 3px rgb(91 92 246 / 10%); }
+.tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: #454a59; font-size: 11px; }
+.profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: #656b7b; font: inherit; font-size: 10px; line-height: 1.6; }
 .model-readiness-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .model-readiness-grid article { position: relative; display: grid; min-width: 0; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 11px; padding: 12px; border-radius: 13px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .model-kind { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; }
@@ -487,6 +657,7 @@ onBeforeUnmount(stopPolling)
 .outline-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 20px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .outline-card > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .outline-card p { margin: 0; color: #5e6474; font-size: 12px; line-height: 1.9; }
+.outline-card textarea { width: 100%; min-height: 190px; padding: 12px 14px; resize: vertical; color: #5e6474; font: inherit; font-size: 12px; line-height: 1.9; }
 .character-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .character-card { display: grid; gap: 12px; padding: 17px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .character-title { display: flex; align-items: center; gap: 11px; }
@@ -513,8 +684,12 @@ onBeforeUnmount(stopPolling)
 .episode-content > header > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; font-size: 16px; font-weight: 700; }
 .episode-content > header small { color: #8b8ff1; font-size: 8px; font-weight: 700; letter-spacing: .12em; }
 .episode-content h3 { margin: 4px 0 0; font-size: 14px; }
+.episode-content > header > div { min-width: 0; flex: 1; }
+.chapter-title-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 5px; }
+.chapter-title-editor > span { color: #555b6b; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .episode-content > p { margin: 0; padding: 20px 22px; color: #5e6474; font-size: 12px; line-height: 2; overflow-wrap: anywhere; white-space: pre-wrap; }
 .episode-content > p.episode-content-state { min-height: 100px; display: grid; place-items: center; color: #9a9ead; }
+.chapter-content-editor { display: block; width: calc(100% - 36px); min-height: 520px; margin: 0 18px 18px; padding: 18px 20px; resize: vertical; color: #515767; font: inherit; font-size: 12px; line-height: 2; white-space: pre-wrap; }
 .episode-content > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 18px; color: #8b909f; background: #f5f6f9; font-size: 9px; }
 .episode-content > footer span { display: inline-flex; align-items: center; gap: 5px; }
 .continue-button { position: relative; display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; margin-top: 28px; padding: 0 52px; border: 0; border-radius: 13px; color: #fff; background: #5b5cf6; box-shadow: 0 14px 30px rgb(91 92 246 / 22%); cursor: pointer; font-size: 13px; font-weight: 700; }
@@ -529,7 +704,7 @@ onBeforeUnmount(stopPolling)
   .agent-phases button { width: 52px; }
   .analysis-hero { grid-template-columns: 118px minmax(0, 1fr); }
   .project-cover-art { height: 150px; }
-  .analysis-hero > .secondary-action { grid-column: 2; justify-self: start; }
+  .analysis-hero > .analysis-hero-actions { grid-column: 2; justify-self: start; }
 }
 @media (max-width: 720px) {
   .agent-topbar { position: static; display: flex; min-height: auto; align-items: stretch; flex-direction: column; gap: 12px; padding: 12px 14px; }
@@ -552,7 +727,7 @@ onBeforeUnmount(stopPolling)
   .agent-phases button { width: 48px; }
   .analysis-hero { grid-template-columns: 1fr; }
   .project-cover-art { display: none; }
-  .analysis-hero > .secondary-action { grid-column: 1; }
+  .analysis-hero > .analysis-hero-actions { grid-column: 1; flex-wrap: wrap; justify-self: stretch; }
   .analysis-section > header { align-items: flex-start; flex-direction: column; }
 }
 </style>

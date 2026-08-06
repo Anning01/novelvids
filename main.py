@@ -27,7 +27,10 @@ from services.project_analysis.handler import ProjectAnalysisTaskHandler
 from services.storyboard.handler import StoryboardTaskHandler
 from utils.enums import AiTaskTypeEnum
 from services.media_library_seed import ensure_media_library_seed_data
-from services.schema_compat import ensure_ai_model_config_schema
+from services.schema_compat import (
+    ensure_ai_model_config_schema,
+    ensure_novel_analysis_schema,
+)
 
 
 # 定义包含时区的配置字典
@@ -50,6 +53,7 @@ async def lifespan(_: FastAPI):
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
+    await ensure_novel_analysis_schema()
     await ensure_media_library_seed_data()
     try:
         yield
