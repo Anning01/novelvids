@@ -521,7 +521,7 @@ async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId:
     }
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
     if (!pageAlive) return
-    await loadProject()
+    await refreshAssets()
     if (failed) notice.info(`批量生成完成：成功 ${succeeded} 个，失败 ${failed} 个`)
     else notice.success(`${succeeded} 个${activeTabConfig.value.label}参考图已生成`)
   } catch (error) {
@@ -623,9 +623,9 @@ onBeforeUnmount(() => {
           <span>{{ activeTabConfig.label }}总计 <strong>{{ visibleAssets.length }}</strong></span>
           <i />
           <span><Check :size="13" />已完成 {{ completedCount }}</span>
-          <span>生成中 {{ generatingCount }}</span>
+          <span><i v-if="generatingCount" class="generating-summary-dot" />生成中 {{ generatingCount }}</span>
           <span>失败 {{ failedCount }}</span>
-          <AppButton type="button" variant="secondary" size="sm" icon-only aria-label="刷新" @click="loadProject"><RefreshCw :size="14" /></AppButton>
+          <AppButton type="button" variant="secondary" size="sm" icon-only aria-label="刷新" @click="refreshAssets"><RefreshCw :size="14" /></AppButton>
           <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
           <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="visibleAssets.length ? showBatchDialog = true : notice.info(`请先添加${activeTabConfig.label}资产`)"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? '批量生成中' : '批量生成' }}</AppButton>
         </div>
@@ -682,8 +682,13 @@ onBeforeUnmount(() => {
           @drop="dropAsset($event, asset)"
           @dragend="finishAssetDrag"
         >
-          <div class="asset-visual">
+          <div class="asset-visual" :class="{ 'is-generating': generatingAssetIds.has(asset.id) }">
             <img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
+            <div v-else-if="generatingAssetIds.has(asset.id)" class="asset-generating-placeholder" role="status" aria-live="polite">
+              <span><LoaderCircle :size="24" /></span>
+              <strong>正在生成参考图</strong>
+              <small>完成后将在这里自动显示</small>
+            </div>
             <component v-else :is="activeTabConfig.icon" :size="30" />
             <AppBadge v-if="asset.main_image" class="asset-state-badge" tone="success" size="sm"><Check :size="12" />已完成</AppBadge>
             <AppBadge v-else-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
@@ -777,6 +782,7 @@ onBeforeUnmount(() => {
 .asset-scope-switch button.is-active { color: #5658ec; background: #fff; box-shadow: 0 2px 7px rgb(45 49 72 / 8%); }
 .asset-summary > i { width: 1px; height: 13px; background: #dfe1e8; }
 .asset-summary strong { color: #303442; }
+.generating-summary-dot { width: 6px; height: 6px; border-radius: 999px; background: #686af5; box-shadow: 0 0 0 0 rgb(104 106 245 / 32%); animation: generation-pulse 1.6s ease-out infinite; }
 .extraction-task-status { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 14px; padding: 13px 15px; border: 1px solid #dfe2eb; border-radius: 12px; color: #626979; background: #fff; }
 .extraction-task-status > span { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; color: #6668f6; background: #eff0ff; }
 .extraction-task-status > div { display: grid; min-width: 0; gap: 3px; }
@@ -804,8 +810,15 @@ onBeforeUnmount(() => {
 .asset-card.is-drag-source { opacity: .38; transform: scale(.985); }
 .asset-card.is-merge-target { border-color: var(--app-accent); box-shadow: 0 0 0 3px var(--app-accent-soft),var(--app-shadow); transform: translateY(-2px); }
 .asset-card.is-merging { pointer-events: none; opacity: .62; }
-.asset-visual { position: relative; display: grid; place-items: center; height: 190px; color: #aeb4c2; background: #f0f2f7; }
+.asset-visual { position: relative; display: grid; height: 190px; place-items: center; overflow: hidden; color: #aeb4c2; background: #f0f2f7; }
+.asset-visual.is-generating { color: #696bf3; background: linear-gradient(145deg,#f6f6ff,#eceefe); }
+.asset-visual.is-generating::before { position: absolute; inset: 0; background: linear-gradient(105deg,transparent 28%,rgb(255 255 255 / 72%) 48%,transparent 68%); content: ''; transform: translateX(-100%); animation: generation-shimmer 1.8s ease-in-out infinite; }
 .asset-visual img { width: 100%; height: 100%; object-fit: cover; }
+.asset-generating-placeholder { position: relative; z-index: 1; display: grid; place-items: center; gap: 7px; text-align: center; }
+.asset-generating-placeholder > span { display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid rgb(104 106 245 / 18%); border-radius: 15px; background: rgb(255 255 255 / 72%); box-shadow: 0 10px 24px rgb(74 77 150 / 10%); }
+.asset-generating-placeholder svg { animation: spin 1s linear infinite; }
+.asset-generating-placeholder strong { color: #5b5de7; font-size: 12px; }
+.asset-generating-placeholder small { color: #9196b0; font-size: 10px; }
 .asset-state-badge { position: absolute; top: 10px; right: 10px; box-shadow: 0 5px 14px rgba(43,46,80,.08); }
 .asset-state-badge.is-running svg { animation: spin .8s linear infinite; }
 .asset-card-copy { padding: 13px 14px 14px; }
@@ -829,6 +842,8 @@ onBeforeUnmount(() => {
 .manual-next-step { position: fixed; bottom: 22px; left: 50%; z-index: 18; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 22px; color: #fff; border-radius: 15px; background: #23252c; box-shadow: 0 10px 28px rgba(21,23,31,.2); transform: translateX(-50%); }
 .is-spinning { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes generation-shimmer { 55%,100% { transform: translateX(100%); } }
+@keyframes generation-pulse { 70%,100% { box-shadow: 0 0 0 7px rgb(104 106 245 / 0%); } }
 @keyframes merge-hold-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .manual-dialog-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(28,31,43,.32); backdrop-filter: blur(4px); }
 .manual-dialog { width: min(460px,100%); padding: 22px; border: 1px solid #e1e3eb; border-radius: 18px; background: #fff; box-shadow: 0 24px 70px rgba(28,31,43,.22); }
@@ -852,6 +867,8 @@ onBeforeUnmount(() => {
   .asset-merge-ready { top: auto; right: 16px; bottom: 78px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .asset-visual.is-generating::before,.asset-generating-placeholder svg,.generating-summary-dot { animation: none; }
+  .asset-visual.is-generating::before { opacity: .3; transform: none; }
   .asset-merge-overlay > i { animation-timing-function: steps(4,end); }
 }
 </style>

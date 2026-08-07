@@ -1,0 +1,111 @@
+import base64
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from models.asset import Asset
+from models.novel import Novel
+from services.reference.handler import AssetReferenceHandler
+from utils.enums import AssetTypeEnum
+
+
+async def _asset() -> Asset:
+    novel = await Novel.create(name="参考图任务")
+    return await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="宫平",
+        base_traits="稳定人物视觉描述",
+    )
+
+
+def _request(asset: Asset) -> dict:
+    return {
+        "asset_id": asset.id,
+        "base_url": "https://images.example.test/v1",
+        "api_key": "test-key",
+        "model": "test-image-model",
+    }
+
+
+@pytest.mark.asyncio
+async def test_参考图服务没有返回图片时任务必须失败():
+    asset = await _asset()
+
+    with patch(
+        "services.reference.handler.generate_for_sora_consistency",
+        new=AsyncMock(return_value=[]),
+    ):
+        with pytest.raises(RuntimeError, match="没有可持久化的图片"):
+            await AssetReferenceHandler().execute(_request(asset))
+
+
+@pytest.mark.asyncio
+async def test_参考图全部下载失败时任务必须失败():
+    asset = await _asset()
+    generated = [SimpleNamespace(url="https://cdn.example.test/result.png")]
+
+    with (
+        patch(
+            "services.reference.handler.generate_for_sora_consistency",
+            new=AsyncMock(return_value=generated),
+        ),
+        patch(
+            "services.reference.handler._download_image",
+            new=AsyncMock(side_effect=RuntimeError("download failed")),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="没有可持久化的图片"):
+            await AssetReferenceHandler().execute(_request(asset))
+
+
+@pytest.mark.asyncio
+async def test_参考图至少一张落盘后才返回成功并更新资产():
+    asset = await _asset()
+    generated = [
+        SimpleNamespace(url="https://cdn.example.test/first.png"),
+        SimpleNamespace(url="https://cdn.example.test/second.png"),
+    ]
+
+    with (
+        patch(
+            "services.reference.handler.generate_for_sora_consistency",
+            new=AsyncMock(return_value=generated),
+        ),
+        patch(
+            "services.reference.handler._download_image",
+            new=AsyncMock(
+                side_effect=[
+                    "/media/assets/first.png",
+                    RuntimeError("second download failed"),
+                ]
+            ),
+        ),
+    ):
+        result = await AssetReferenceHandler().execute(_request(asset))
+
+    await asset.refresh_from_db()
+    assert result == {"images": ["/media/assets/first.png"], "variant_id": None}
+    assert asset.main_image == "/media/assets/first.png"
+
+
+@pytest.mark.asyncio
+async def test_参考图base64返回会落盘并更新资产(tmp_path, monkeypatch):
+    asset = await _asset()
+    png_bytes = b"\x89PNG\r\n\x1a\nreference-image"
+    encoded = base64.b64encode(png_bytes).decode("ascii")
+    generated = [SimpleNamespace(url=None, b64_json=encoded)]
+    monkeypatch.setattr("services.reference.handler.settings.MEDIA_PATH", str(tmp_path))
+
+    with patch(
+        "services.reference.handler.generate_for_sora_consistency",
+        new=AsyncMock(return_value=generated),
+    ):
+        result = await AssetReferenceHandler().execute(_request(asset))
+
+    await asset.refresh_from_db()
+    saved_path = tmp_path / "assets" / f"{asset.id}.png"
+    assert saved_path.read_bytes() == png_bytes
+    assert result["images"] == [f"/media/assets/{asset.id}.png"]
+    assert asset.main_image == f"/media/assets/{asset.id}.png"

@@ -16,6 +16,7 @@ import {
 import AppSelect from '@/components/AppSelect.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
+import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
 import { AssetTypeEnum, type AiModelConfig, type Asset, type DigitalHuman } from '@/types'
 
 type AssetKind = 'character' | 'scene' | 'prop'
@@ -141,8 +142,9 @@ function reset() {
     name.value = props.asset.canonical_name || ''
     description.value = props.asset.description || ''
     prompt.value = props.asset.base_traits || ''
-    gender.value = typeof metadata.gender === 'string' ? metadata.gender : ''
-    age.value = typeof metadata.age_group === 'string' ? metadata.age_group : ''
+    const characterMetadata = resolveCharacterFormMetadata(props.asset)
+    gender.value = characterMetadata.gender
+    age.value = characterMetadata.ageGroup
     voice.value = typeof metadata.voice === 'string' ? metadata.voice : ''
     referenceLayout.value = metadata.reference_layout === 'group_portrait'
       ? 'group_portrait'
@@ -160,6 +162,9 @@ async function loadReferencePrompt() {
     const metadata = source.metadata && typeof source.metadata === 'object'
       ? source.metadata as Record<string, unknown>
       : {}
+    const characterMetadata = resolveCharacterFormMetadata(source)
+    if (!gender.value) gender.value = characterMetadata.gender
+    if (!age.value) age.value = characterMetadata.ageGroup
     const preview = await api.referencePromptPreview({
       asset_type: source.asset_type,
       canonical_name: source.canonical_name,

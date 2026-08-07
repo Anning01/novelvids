@@ -1,4 +1,6 @@
 
+import base64
+import binascii
 import logging
 import os
 from urllib.parse import urlparse
@@ -13,6 +15,35 @@ from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
 
 logger = logging.getLogger(__name__)
+
+
+def _image_extension(content: bytes) -> str:
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return ".webp"
+    raise RuntimeError("生图供应商返回了不支持的图片格式")
+
+
+def _save_base64_image(encoded: str, asset_id: int, suffix: str = "") -> str:
+    payload = (
+        encoded.split(",", 1)[1]
+        if encoded.startswith("data:") and "," in encoded
+        else encoded
+    )
+    try:
+        content = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise RuntimeError("生图供应商返回了无效的 base64 图片") from error
+    extension = _image_extension(content)
+    asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
+    os.makedirs(asset_dir, exist_ok=True)
+    filename = f"{asset_id}{suffix}{extension}"
+    with open(os.path.join(asset_dir, filename), "wb") as file:
+        file.write(content)
+    return f"/media/assets/{filename}"
 
 
 async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> str:
@@ -38,7 +69,7 @@ async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> s
     filename = f"{asset_id}{suffix}{ext}"
     local_path = os.path.join(asset_dir, filename)
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         resp = await client.get(remote_url)
         resp.raise_for_status()
         with open(local_path, "wb") as f:
@@ -47,6 +78,16 @@ async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> s
     media_url = f"/media/assets/{filename}"
     logger.info("Image downloaded: asset_id=%s -> %s", asset_id, media_url)
     return media_url
+
+
+async def _persist_generated_image(image, asset_id: int, suffix: str) -> str:
+    remote_url = getattr(image, "url", None)
+    if isinstance(remote_url, str) and remote_url:
+        return await _download_image(remote_url, asset_id, suffix)
+    encoded = getattr(image, "b64_json", None)
+    if isinstance(encoded, str) and encoded:
+        return _save_base64_image(encoded, asset_id, suffix)
+    raise RuntimeError("生图供应商返回的图片缺少 URL 和 base64 内容")
 
 
 class AssetReferenceHandler(BaseTaskHandler):
@@ -110,8 +151,16 @@ class AssetReferenceHandler(BaseTaskHandler):
         data = {
             "type": asset_type_name,
             "canonical_name": asset.canonical_name,
-            "base_traits": variant.base_traits if variant and variant.base_traits else asset.base_traits,
-            "description": variant.description if variant and variant.description else asset.description,
+            "base_traits": (
+                variant.base_traits
+                if variant and variant.base_traits
+                else asset.base_traits
+            ),
+            "description": (
+                variant.description
+                if variant and variant.description
+                else asset.description
+            ),
             "metadata": metadata,
         }
 
@@ -138,13 +187,17 @@ class AssetReferenceHandler(BaseTaskHandler):
                             else "" if index == 0 else f"_candidate{index + 1}"
                         )
                         result_urls.append(
-                            await _download_image(image.url, asset_id, suffix)
+                            await _persist_generated_image(image, asset_id, suffix)
                         )
-                    except Exception:
+                    except Exception as error:
+                        remote_url = getattr(image, "url", None)
                         logger.warning(
-                            "Failed to download image %d for asset %s",
-                            index + 1,
+                            "Reference image download failed: asset_id=%s "
+                            "image=%d host=%s error=%s",
                             asset_id,
+                            index + 1,
+                            urlparse(remote_url).netloc if remote_url else "base64",
+                            type(error).__name__,
                         )
 
                 if variant:
@@ -170,11 +223,15 @@ class AssetReferenceHandler(BaseTaskHandler):
                         ]
                     )
 
+            if not result_urls:
+                raise RuntimeError("参考图生成完成，但没有可持久化的图片")
+
             return {"images": result_urls, "variant_id": variant.id if variant else None}
 
-        except Exception as e:
-            error_str = str(e)
+        except Exception as error:
+            error_str = str(error)
             if "OutputImageSensitiveContentDetected" in error_str:
-                raise Exception("生成图像描述词过于血腥或者暴力，请修改提示词再次尝试") from e
-            print(f"Asset reference generation failed for asset {asset_id}")
-            raise e
+                raise RuntimeError(
+                    "生成图像描述词过于血腥或者暴力，请修改提示词再次尝试"
+                ) from error
+            raise

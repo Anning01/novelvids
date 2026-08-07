@@ -59,7 +59,11 @@ const editedAsset: Asset = {
   asset_type: AssetTypeEnum.PERSON,
   canonical_name: '李火旺',
   description: '被困在诡异溶洞中的少年，性格偏执。',
-  base_traits: '时代基底：架空；脸型：清瘦冷硬；发型：黑发粗麻绳束起',
+  base_traits: `**时代基底**: 架空
+**脸型**: 清瘦冷硬
+**发型**: 黑发粗麻绳束起
+**性别**: 男
+**年龄**: 中年，约45岁`,
   metadata: {},
   created_at: '2026-07-26T00:00:00.000Z',
   updated_at: '2026-07-26T00:00:00.000Z',
@@ -114,4 +118,35 @@ it('keeps the selected library card outline inside the scroll viewport', async (
   const selectedCard = wrapper.get('.asset-library__card.is-active')
   expect(getComputedStyle(selectedCard.element).boxShadow).toMatch(/^inset 0 0 0 2px/)
   style.remove()
+})
+
+it('fills legacy character gender and age from returned traits without another AI request', async () => {
+  vi.clearAllMocks()
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  })
+  vi.mocked(api.configs).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: editedAsset })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' },
+  })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: editedAsset },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  expect(wrapper.get('button[aria-label="选择性别"]').text()).toContain('男')
+  expect(wrapper.get('button[aria-label="选择年龄阶段"]').text()).toContain('中年')
+  expect(api.asset).toHaveBeenCalledTimes(1)
 })

@@ -2,7 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
-import { AssetTypeEnum } from '@/types'
+import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
+import { AssetTypeEnum, TaskStatusEnum, type Asset } from '@/types'
 import ShortDramaManualPage from './ShortDramaManualPage.vue'
 
 vi.mock('vue-router', () => ({
@@ -16,6 +17,9 @@ vi.mock('@/api', () => ({
     assets: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
+    updateAsset: vi.fn(),
+    generateAsset: vi.fn(),
+    task: vi.fn(),
   },
   sleep: vi.fn(),
   statusLabel: vi.fn(() => ''),
@@ -32,6 +36,7 @@ const chapter = {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   vi.mocked(api.novel).mockResolvedValue({
     code: 0,
     message: 'ok',
@@ -77,7 +82,51 @@ beforeEach(() => {
       },
     }
   })
+  vi.mocked(api.updateAsset).mockImplementation(async (_assetId, payload) => ({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 31,
+      novel_id: 9,
+      asset_type: AssetTypeEnum.PERSON,
+      canonical_name: '宫平',
+      source_chapters: [1],
+      metadata: payload.metadata,
+      created_at: '2026-08-06T00:00:00.000Z',
+      updated_at: '2026-08-06T00:00:00.000Z',
+    } as Asset,
+  }))
+  vi.mocked(api.generateAsset).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 'completed-reference-task',
+      task_type: 2,
+      status: TaskStatusEnum.COMPLETED,
+      request_params: {},
+      created_at: '2026-08-06T00:00:00.000Z',
+      updated_at: '2026-08-06T00:00:00.000Z',
+    },
+  })
 })
+
+async function mountInCurrentChapterScope() {
+  const wrapper = mount(ShortDramaManualPage, {
+    global: {
+      components: { AppButton },
+      stubs: {
+        AssetCreateDialog: true,
+        AssetBatchGenerateDialog: true,
+      },
+    },
+  })
+  await flushPromises()
+  const currentChapterButton = wrapper.findAll('button').find(button => button.text().includes('当前章节'))
+  expect(currentChapterButton).toBeDefined()
+  await currentChapterButton!.trigger('click')
+  await flushPromises()
+  return wrapper
+}
 
 it('switches the settings cards and counts between all project assets and current chapter assets', async () => {
   const wrapper = mount(ShortDramaManualPage, {
@@ -103,5 +152,33 @@ it('switches the settings cards and counts between all project assets and curren
   expect(cards).toHaveLength(1)
   expect(cards[0].text()).toContain('宫平')
   expect(wrapper.text()).toContain('角色总计 1')
+  expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
+})
+
+it('keeps the current chapter filter when the toolbar refreshes assets', async () => {
+  const wrapper = await mountInCurrentChapterScope()
+  vi.mocked(api.assets).mockClear()
+
+  await wrapper.get('button[aria-label="刷新"]').trigger('click')
+  await flushPromises()
+
+  expect(api.assets).toHaveBeenCalledTimes(1)
+  expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
+})
+
+it('keeps the current chapter filter after batch generation finishes', async () => {
+  const wrapper = await mountInCurrentChapterScope()
+  vi.mocked(api.assets).mockClear()
+
+  wrapper.findComponent(AssetBatchGenerateDialog).vm.$emit('generate', {
+    assetIds: [31],
+    modelConfigId: 2,
+    concurrency: 1,
+    resolution: '1K',
+    ratio: '16:9',
+  })
+  await flushPromises()
+
+  expect(api.assets).toHaveBeenCalledTimes(1)
   expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
 })

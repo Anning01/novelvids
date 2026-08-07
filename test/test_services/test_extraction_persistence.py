@@ -45,6 +45,29 @@ UPDATED_PERSON_TRAITS = """时代基底: modern
 性别: male
 年龄: young adult"""
 
+GROUP_TRAITS = """人物特征: a disciplined office team
+年龄段: adults from 25 to 45 years old
+性别: mixed genders
+种族: Chinese
+人数规模: twelve people
+身材: varied realistic builds
+脸型: varied adult facial structures
+眉毛: naturally varied dark eyebrows
+眼镜: several people wear glasses
+鼻子: naturally varied nose shapes
+嘴唇: naturally varied lip shapes
+皮肤: natural East Asian skin tones
+特殊标记: no shared special marking
+发型: varied professional hairstyles
+服饰和道具: coordinated modern business clothing"""
+
+
+def _person_traits(*, gender: str, age: str) -> str:
+    return PERSON_TRAITS.replace("性别: male", f"性别: {gender}").replace(
+        "年龄: young adult",
+        f"年龄: {age}",
+    )
+
 
 def _person(
     *,
@@ -72,6 +95,104 @@ def _result(
         scenes=scenes or [],
         items=items or [],
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gender_value", "age_value", "expected_gender", "expected_age"),
+    [
+        ("女性", "19岁", "女", "青年"),
+        ("male", "middle-aged", "男", "中年"),
+        ("woman", "32-year-old", "女", "青年"),
+        ("男性", "七十多岁", "男", "老年"),
+    ],
+)
+async def test_人物提取结果自动归一化性别和年龄元数据(
+    gender_value,
+    age_value,
+    expected_gender,
+    expected_age,
+):
+    novel = await Novel.create(name="人物元数据归一化")
+
+    await AssetUpsertService().save_result(
+        novel_id=novel.id,
+        chapter_number=1,
+        result=_result(
+            persons=[
+                _person(
+                    base_traits=_person_traits(
+                        gender=gender_value,
+                        age=age_value,
+                    )
+                )
+            ]
+        ),
+    )
+
+    person = await Asset.get(novel=novel, canonical_name="宫平")
+    assert person.metadata["gender"] == expected_gender
+    assert person.metadata["age_group"] == expected_age
+
+
+@pytest.mark.asyncio
+async def test_动物和群像不会被误写为单个人类字段():
+    novel = await Novel.create(name="人物形态元数据")
+
+    await AssetUpsertService().save_result(
+        novel_id=novel.id,
+        chapter_number=1,
+        result=_result(
+            persons=[
+                Person(
+                    name="小白",
+                    label="动物",
+                    base_traits=_person_traits(gender="female", age="child"),
+                ),
+                Person(
+                    name="物业团队",
+                    label="群像",
+                    base_traits=GROUP_TRAITS,
+                ),
+            ]
+        ),
+    )
+
+    animal = await Asset.get(novel=novel, canonical_name="小白")
+    group = await Asset.get(novel=novel, canonical_name="物业团队")
+    assert animal.metadata["gender"] == "其他（动物）"
+    assert animal.metadata["age_group"] == "儿童"
+    assert group.metadata == {"reference_layout": "group_portrait"}
+
+
+@pytest.mark.asyncio
+async def test_较早章节重跑不会回滚人物归一化元数据():
+    novel = await Novel.create(name="人物元数据防回滚")
+    existing = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="宫平",
+        base_traits=_person_traits(gender="female", age="middle-aged"),
+        metadata={"gender": "女", "age_group": "中年"},
+        source_chapters=[8],
+        last_updated_chapter=8,
+    )
+
+    await AssetUpsertService().save_result(
+        novel_id=novel.id,
+        chapter_number=1,
+        result=_result(
+            persons=[
+                _person(
+                    base_traits=_person_traits(gender="male", age="young adult")
+                )
+            ]
+        ),
+    )
+    await existing.refresh_from_db()
+
+    assert existing.metadata["gender"] == "女"
+    assert existing.metadata["age_group"] == "中年"
 
 
 @pytest.mark.asyncio
