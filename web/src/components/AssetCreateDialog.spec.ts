@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
-import { AssetTypeEnum, type Asset, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
+import { AssetTypeEnum, type Asset, type AssetVariant, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
 import AppButton from './AppButton.vue'
 import AssetCreateDialog from './AssetCreateDialog.vue'
 import assetDialogSource from './AssetCreateDialog.vue?raw'
@@ -14,6 +14,14 @@ vi.mock('@/api', () => ({
     assetLibrary: vi.fn(),
     asset: vi.fn(),
     assetGenerationHistory: vi.fn(),
+    assetVariants: vi.fn(),
+    createAssetVariant: vi.fn(),
+    updateAssetVariant: vi.fn(),
+    assignAssetVariantToChapter: vi.fn(),
+    deleteAssetVariant: vi.fn(),
+    generateAsset: vi.fn(),
+    task: vi.fn(),
+    upload: vi.fn(),
     restoreAssetGeneration: vi.fn(),
     referencePromptPreview: vi.fn(),
   },
@@ -21,6 +29,7 @@ vi.mock('@/api', () => ({
 
 beforeEach(() => {
   vi.mocked(api.assetGenerationHistory).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: [] })
 })
 
 const humans: DigitalHuman[] = [
@@ -235,6 +244,40 @@ it('shows an existing generated image and closes quickly with Escape', async () 
   wrapper.unmount()
 })
 
+it('switches the top preview with the selected variant and shows a blank state for variants without images', async () => {
+  vi.clearAllMocks()
+  const assetWithImage = { ...editedAsset, main_image: '/media/base.png' }
+  const variants: AssetVariant[] = [
+    { id: 31, asset_id: 7, name: '练气期', images: ['/media/variant.png'], created_at: editedAsset.created_at, updated_at: editedAsset.updated_at },
+    { id: 32, asset_id: 7, name: '受伤状态', images: [], created_at: editedAsset.created_at, updated_at: editedAsset.updated_at },
+  ]
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: 'ok', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithImage })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: variants })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' } })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithImage },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/base.png')
+  await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/variant.png')
+  expect(wrapper.get('.asset-generated-preview > header strong').text()).toContain('练气期')
+
+  await wrapper.get('button[aria-label="切换到受伤状态"]').trigger('click')
+  expect(wrapper.find('.asset-generated-preview img').exists()).toBe(false)
+  expect(wrapper.get('.asset-generated-preview__empty').text()).toContain('暂无图片')
+  expect(wrapper.get('.asset-generated-preview > header span').text()).toBe('尚未生成')
+
+  await wrapper.get('button[aria-label="切换到主形象"]').trigger('click')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/base.png')
+})
+
 it('renders as a right drawer and lists previous generation images', async () => {
   vi.clearAllMocks()
   const assetWithImage = { ...editedAsset, main_image: '/media/current.png' }
@@ -326,6 +369,7 @@ it('renders as a right drawer and lists previous generation images', async () =>
   expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/history.png')
 
   await wrapper.get('.asset-generated-preview__viewer').trigger('click')
+  await wrapper.vm.$nextTick()
   expect(wrapper.get('.image-lightbox').attributes('aria-label')).toBe('图片放大查看')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   await wrapper.vm.$nextTick()

@@ -1064,6 +1064,7 @@ onBeforeUnmount(() => {
       :kind="editingAssetKind(editingAsset)"
       :novel-id="projectId"
       :asset="editingAsset"
+      :chapter-number="activeChapter?.number"
       @close="closeAssetEditor"
       @saved="saveEditedAsset"
       @regenerate="regenerateEditedAsset"

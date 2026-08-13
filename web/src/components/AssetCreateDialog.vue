@@ -19,18 +19,19 @@ import {
   X,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import AssetVariantStrip from '@/components/AssetVariantStrip.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
-import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetGenerationRecord, type DigitalHuman, type ImageGenerationModel } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetGenerationRecord, type AssetVariant, type DigitalHuman, type ImageGenerationModel } from '@/types'
 
 type AssetKind = 'character' | 'scene' | 'prop'
 type CreateMode = 'ai' | 'library' | 'upload'
 type LibraryItem = { key: string; name: string; detail: string; image: string; source: 'public' | 'project'; asset?: Asset; human?: DigitalHuman }
 
-const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; initialMode?: CreateMode }>(), {
+const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; initialMode?: CreateMode }>(), {
   initialMode: 'ai',
 })
 const emit = defineEmits<{ close: []; created: [asset: Asset]; saved: [asset: Asset]; regenerate: [asset: Asset] }>()
@@ -88,6 +89,7 @@ const loadingHistory = ref(false)
 const generationHistory = ref<AssetGenerationRecord[]>([])
 const selectedErrorRecordId = ref('')
 const restoringRecordId = ref('')
+const selectedVariant = ref<AssetVariant | null>(null)
 const imageInfo = ref<Record<string, { dimensions: string; format: string }>>({})
 const lightboxImage = ref('')
 const lightboxAlt = ref('')
@@ -98,7 +100,10 @@ const projectPage = ref(0)
 const projectPages = ref(0)
 let previousBodyOverflow = ''
 const isEditing = computed(() => Boolean(props.asset))
-const generatedImage = computed(() => promptSourceAsset.value?.main_image || props.asset?.main_image || '')
+const generatedImage = computed(() => selectedVariant.value
+  ? selectedVariant.value.images?.[0] || ''
+  : promptSourceAsset.value?.main_image || props.asset?.main_image || '')
+const currentImageName = computed(() => selectedVariant.value?.name || name.value || props.asset?.canonical_name || config.value.label)
 const currentImageFormat = computed(() => {
   const historyFormat = generationHistory.value.find(record => record.images.includes(generatedImage.value))?.output_format
   const metadata = props.asset?.metadata && typeof props.asset.metadata === 'object'
@@ -170,6 +175,7 @@ function reset() {
   generationHistory.value = []
   selectedErrorRecordId.value = ''
   restoringRecordId.value = ''
+  selectedVariant.value = null
   imageInfo.value = {}
   lightboxImage.value = ''
 
@@ -245,7 +251,13 @@ function isLongError(message: string) {
 }
 
 function isCurrentGeneration(record: AssetGenerationRecord) {
+  if (selectedVariant.value) return false
   return Boolean(record.images[0] && record.images[0] === generatedImage.value)
+}
+
+function selectVariantPreview(variant: AssetVariant | null) {
+  selectedVariant.value = variant
+  closeImageLightbox()
 }
 
 async function restoreGeneration(record: AssetGenerationRecord) {
@@ -578,12 +590,13 @@ onUnmounted(() => {
         </header>
 
         <div class="asset-dialog__body">
-          <section v-if="generatedImage" class="asset-generated-preview" aria-label="当前图片">
-            <header><strong>当前图片</strong><span>{{ imageInfoLabel(generatedImage, currentImageFormat) }}</span></header>
-            <button type="button" class="asset-generated-preview__viewer" aria-label="放大查看当前图片" @click="openImageLightbox(generatedImage, `${name || asset?.canonical_name || config.label}的生成图片`, currentImageFormat)">
-              <img :src="generatedImage" :alt="`${name || asset?.canonical_name || config.label}的生成图片`" @load="recordImageInfo(generatedImage, $event, currentImageFormat)" />
+          <section v-if="isEditing || generatedImage" class="asset-generated-preview" aria-label="当前图片">
+            <header><strong>当前图片 · {{ currentImageName }}</strong><span>{{ generatedImage ? imageInfoLabel(generatedImage, currentImageFormat) : '尚未生成' }}</span></header>
+            <button v-if="generatedImage" type="button" class="asset-generated-preview__viewer" aria-label="放大查看当前图片" @click="openImageLightbox(generatedImage, `${currentImageName}的生成图片`, currentImageFormat)">
+              <img :src="generatedImage" :alt="`${currentImageName}的生成图片`" @load="recordImageInfo(generatedImage, $event, currentImageFormat)" />
               <span><Maximize2 :size="15" />放大查看</span>
             </button>
+            <div v-else class="asset-generated-preview__empty" role="status"><ImagePlus :size="30" /><strong>暂无图片</strong><span>可以上传或生成该衍生形象</span></div>
           </section>
 
           <section v-if="isEditing" class="asset-generation-history" aria-labelledby="asset-history-title">
@@ -647,6 +660,13 @@ onUnmounted(() => {
               </section>
             </Transition>
           </section>
+
+          <AssetVariantStrip
+            v-if="isEditing && asset"
+            :asset="asset"
+            :chapter-number="chapterNumber"
+            @select="selectVariantPreview"
+          />
 
           <div class="asset-form-grid" :class="{ 'is-character': kind === 'character' && !isGroupPortrait }">
             <label class="asset-field"><span><i>*</i>名称</span><input v-model="name" maxlength="100" placeholder="请输入" /></label>
@@ -744,6 +764,9 @@ onUnmounted(() => {
 .asset-generated-preview__viewer:hover img { transform: scale(1.012); }
 .asset-generated-preview__viewer:hover > span,.asset-generated-preview__viewer:focus-visible > span { opacity: 1; transform: translateY(0); }
 .asset-generated-preview__viewer:focus-visible { box-shadow: 0 0 0 3px rgb(91 93 240 / 18%); }
+.asset-generated-preview__empty { display: grid; min-height: 220px; place-items: center; align-content: center; gap: 6px; border-radius: 16px; color: var(--app-text-muted); background: var(--app-surface-muted); }
+.asset-generated-preview__empty strong { color: var(--app-text-secondary); font-size: 12px; }
+.asset-generated-preview__empty span { font-size: 9px; }
 .asset-generation-history { display: grid; gap: 10px; padding-top: 4px; }
 .asset-generation-history > header,.asset-generation-history > header > div { display: flex; align-items: center; gap: 7px; }
 .asset-generation-history > header { justify-content: space-between; color: #656b7a; }
