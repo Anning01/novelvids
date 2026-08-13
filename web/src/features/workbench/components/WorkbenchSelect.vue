@@ -130,7 +130,7 @@ function closeAndFocus() {
       >
         <span class="workbench-select__option">
           <component :is="option.icon" v-if="option.icon" :size="16" aria-hidden="true" />
-          {{ option.label }}
+          <span class="workbench-select__option-label">{{ option.label }}</span>
         </span>
         <Check v-if="option.value === modelValue" :size="13" aria-hidden="true" />
       </button>

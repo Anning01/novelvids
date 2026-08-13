@@ -17,6 +17,8 @@ class ImageGenerationInput:
     resolution: str | None = None
     aspect_ratio: str | None = None
     count: int = 1
+    output_format: str = "png"
+    quality: str | None = None
     extra_body: dict[str, Any] | None = None
 
 
@@ -56,28 +58,34 @@ class OpenAICompatibleImageAdapter:
             "model": request.model,
             "prompt": request.prompt,
             "n": max(1, min(4, int(request.count))),
-            "response_format": "url",
         }
         size = _openai_size(request.resolution, request.aspect_ratio)
         if size:
             payload["size"] = size
+        payload["output_format"] = request.output_format
+        if request.quality:
+            payload["quality"] = request.quality
         payload.update(request.extra_body or {})
         return PreparedImageRequest(path="/images/generations", payload=payload)
 
 
 class OpenRouterCompatibleImageAdapter:
-    """OpenRouter-style image endpoint with explicit resolution and aspect ratio."""
+    """OpenRouter-style image endpoint with mutually exclusive size controls."""
 
     def prepare(self, request: ImageGenerationInput) -> PreparedImageRequest:
         payload: dict[str, Any] = {
             "model": request.model,
             "prompt": request.prompt,
             "n": max(1, min(10, int(request.count))),
-            "output_format": "png",
+            "output_format": request.output_format,
         }
-        if request.resolution:
-            payload["resolution"] = request.resolution
-        if request.aspect_ratio:
+        resolution = (request.resolution or "").strip()
+        has_explicit_size = "x" in resolution.lower()
+        if has_explicit_size:
+            payload["size"] = resolution.lower()
+        elif resolution:
+            payload["resolution"] = resolution
+        if request.aspect_ratio and not has_explicit_size:
             payload["aspect_ratio"] = request.aspect_ratio
         payload.update(request.extra_body or {})
         return PreparedImageRequest(path="/images", payload=payload)
@@ -96,6 +104,7 @@ class VolcengineArkImageAdapter:
         }
         if request.resolution:
             payload["size"] = request.resolution
+        payload["output_format"] = request.output_format
         payload.update(request.extra_body or {})
         return PreparedImageRequest(path="/images/generations", payload=payload)
 

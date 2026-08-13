@@ -158,6 +158,8 @@ async def generate_for_sora_consistency(
     resolution="2K",
     aspect_ratio="16:9",
     count=1,
+    output_format="png",
+    quality=None,
     prompt_language="en",
 ):
     """Execute a reference-image generation task with optional image references."""
@@ -172,17 +174,22 @@ async def generate_for_sora_consistency(
         extra_body["image"] = reference_images
 
     try:
-        return await generate_images(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            prompt=final_prompt,
-            api_protocol=api_protocol,
-            resolution=resolution,
-            aspect_ratio=aspect_ratio,
-            count=count,
-            extra_body=extra_body,
-        )
+        result = []
+        for _ in range(max(1, int(count))):
+            result.extend(await generate_images(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                prompt=final_prompt,
+                api_protocol=api_protocol,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                count=1,
+                output_format=output_format,
+                quality=quality,
+                extra_body=extra_body,
+            ))
+        return result
     except Exception as error:
         print(f"生成异常: {error}")
         raise

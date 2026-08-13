@@ -4,16 +4,19 @@ import { Check, ImageIcon, ListChecks, LoaderCircle, Sparkles, X } from 'lucide-
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
+import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
-import type { AiModelConfig, Asset } from '@/types'
+import type { Asset, ImageGenerationModel } from '@/types'
 
 interface BatchGenerateOptions {
   assetIds: number[]
   modelConfigId: number
   concurrency: number
-  resolution: string
+  clarity: string
   ratio: string
+  outputFormat: string
+  generationCount: number
 }
 
 const props = defineProps<{
@@ -26,32 +29,29 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; generate: [options: BatchGenerateOptions] }>()
 
-const resolutions = ['1K', '2K']
-const ratios = ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '16:9', '9:16', '21:9']
-const models = ref<AiModelConfig[]>([])
+const models = ref<ImageGenerationModel[]>([])
 const modelId = ref('')
-const resolution = ref('1K')
-const ratio = ref('16:9')
+const imageParameters = ref<ImageGenerationParameters>({ clarity: '1.5K', aspectRatio: '16:9', outputFormat: 'png', generationCount: 1 })
 const selectedIds = ref<number[]>([])
 const loadingModels = ref(false)
 
 const eligibleAssets = computed(() => props.assets.filter(asset => !asset.main_image && !props.generatingIds.has(asset.id)))
-const modelOptions = computed(() => models.value.map(item => ({ value: String(item.id), label: item.name || item.model || `生图模型 ${item.id}` })))
+const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || `生图模型 ${item.config_id}` })))
+const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
 const allSelected = computed(() => Boolean(eligibleAssets.value.length) && eligibleAssets.value.every(asset => selectedIds.value.includes(asset.id)))
 const canGenerate = computed(() => selectedIds.value.length > 0 && Boolean(modelId.value) && !props.submitting)
 
 function reset() {
   selectedIds.value = []
-  resolution.value = '1K'
-  ratio.value = '16:9'
+  imageParameters.value = { clarity: '1.5K', aspectRatio: '16:9', outputFormat: 'png', generationCount: 1 }
 }
 
 async function loadModels() {
   loadingModels.value = true
   try {
-    const response = await api.configs()
-    models.value = response.data.items.filter(item => item.task_type === 2)
-    modelId.value = String(models.value.find(item => item.is_active)?.id || models.value[0]?.id || '')
+    const response = await api.imageGenerationModels()
+    models.value = response.data
+    modelId.value = String(models.value[0]?.config_id || '')
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -72,13 +72,15 @@ function toggleAll() {
 
 function submit() {
   if (!canGenerate.value) return
-  const model = models.value.find(item => item.id === Number(modelId.value))
+  const model = selectedModel.value
   emit('generate', {
     assetIds: selectedIds.value,
     modelConfigId: Number(modelId.value),
     concurrency: model?.concurrency || 1,
-    resolution: resolution.value,
-    ratio: ratio.value,
+    clarity: imageParameters.value.clarity,
+    ratio: imageParameters.value.aspectRatio,
+    outputFormat: imageParameters.value.outputFormat,
+    generationCount: 1,
   })
 }
 
@@ -87,6 +89,17 @@ watch(() => props.open, value => {
   reset()
   void loadModels()
 })
+watch(selectedModel, model => {
+  if (!model) return
+  const current = imageParameters.value
+  const capabilities = model.capabilities
+  imageParameters.value = {
+    clarity: capabilities.clarities.includes(current.clarity) ? current.clarity : capabilities.default_clarity,
+    aspectRatio: capabilities.aspect_ratios.includes(current.aspectRatio) ? current.aspectRatio : capabilities.default_aspect_ratio,
+    outputFormat: capabilities.output_formats.includes(current.outputFormat) ? current.outputFormat : capabilities.default_output_format,
+    generationCount: capabilities.generation_counts.includes(current.generationCount) ? current.generationCount : capabilities.default_generation_count,
+  }
+}, { immediate: true })
 </script>
 
 <template>
@@ -127,8 +140,7 @@ watch(() => props.open, value => {
         <footer class="batch-dialog__footer">
           <div class="batch-options">
             <AppSelect v-model="modelId" :options="modelOptions" :disabled="loadingModels" ariaLabel="选择生图模型"><template #leading><Sparkles :size="14" /></template></AppSelect>
-            <AppSelect v-model="resolution" :options="resolutions" ariaLabel="选择生成分辨率" />
-            <AppSelect v-model="ratio" :options="ratios" ariaLabel="选择生成比例" />
+            <ImageGenerationParameterPanel v-model="imageParameters" :capabilities="selectedModel?.capabilities" />
           </div>
           <div class="batch-actions">
             <AppButton type="button" variant="soft" :disabled="!eligibleAssets.length" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</AppButton>
@@ -167,7 +179,6 @@ watch(() => props.open, value => {
 .batch-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 22px 18px; background: #fbfbfd; box-shadow: 0 -10px 30px rgb(36 40 57 / 4%); }
 .batch-options,.batch-actions { display: flex; align-items: center; gap: 8px; }
 .batch-options :deep(.app-select:first-child) { width: 220px; }
-.batch-options :deep(.app-select) { width: 94px; }
 @keyframes batch-spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) {
   .batch-dialog-backdrop { padding: 0; }

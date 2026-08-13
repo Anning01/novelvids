@@ -1,10 +1,13 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
+import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import { AssetTypeEnum, TaskStatusEnum, type Asset } from '@/types'
 import ShortDramaManualPage from './ShortDramaManualPage.vue'
+import manualPageSource from './ShortDramaManualPage.vue?raw'
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { projectId: '9' }, query: { chapter: '2162' } }),
@@ -14,6 +17,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api', () => ({
   api: {
     novel: vi.fn(),
+    chapters: vi.fn(),
     assets: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
@@ -50,6 +54,11 @@ beforeEach(() => {
     },
   })
   vi.mocked(api.chapter).mockResolvedValue({ code: 0, message: 'ok', data: chapter })
+  vi.mocked(api.chapters).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { items: [chapter], pagination: { total: 1, page: 1, page_size: 100, pages: 1 } },
+  })
   vi.mocked(api.latestExtraction).mockResolvedValue({ code: 0, message: 'ok', data: null })
   vi.mocked(api.assets).mockImplementation(async (_novelId, _page, _pageSize, chapterId) => {
     const allAssets = [
@@ -58,6 +67,7 @@ beforeEach(() => {
           novel_id: 9,
           asset_type: AssetTypeEnum.PERSON,
           canonical_name: '宫平',
+          description: '这是一段很长很长的角色简介，用于验证卡片底部信息超过限制后会显示三个英文点并保持卡片简洁。',
           source_chapters: [1],
           created_at: '2026-08-06T00:00:00.000Z',
           updated_at: '2026-08-06T00:00:00.000Z',
@@ -155,6 +165,28 @@ it('switches the settings cards and counts between all project assets and curren
   expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
 })
 
+it('uses image-first cards with five hover actions and opens upload in the drawer', async () => {
+  const wrapper = await mountInCurrentChapterScope()
+  const card = wrapper.get('.asset-card')
+
+  expect(card.findAll('.asset-card-action')).toHaveLength(5)
+  expect(card.get('.asset-visual').classes()).toContain('is-empty')
+  expect(card.get('.asset-card-info p').text()).toMatch(/\.\.\.$/)
+  const styles = parse(manualPageSource).descriptor.styles.map(block => block.content).join('\n')
+  expect(styles).toContain('flex-direction: row-reverse')
+  expect(styles).toContain('.asset-visual.is-empty .asset-card-info')
+  expect(styles).toContain('opacity: 1')
+  expect(styles).toContain('background: var(--app-surface-raised)')
+  expect(styles).toContain('rgb(20 22 28 / 94%)')
+
+  await card.get('button[aria-label="为宫平本地上传图片"]').trigger('click')
+  await flushPromises()
+
+  const drawer = wrapper.findComponent(AssetCreateDialog)
+  expect(drawer.props('open')).toBe(true)
+  expect(drawer.props('initialMode')).toBe('upload')
+})
+
 it('keeps the current chapter filter when the toolbar refreshes assets', async () => {
   const wrapper = await mountInCurrentChapterScope()
   vi.mocked(api.assets).mockClear()
@@ -174,8 +206,10 @@ it('keeps the current chapter filter after batch generation finishes', async () 
     assetIds: [31],
     modelConfigId: 2,
     concurrency: 1,
-    resolution: '1K',
+    clarity: '1.5K',
     ratio: '16:9',
+    outputFormat: 'png',
+    generationCount: 1,
   })
   await flushPromises()
 

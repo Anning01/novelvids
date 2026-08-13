@@ -2,9 +2,10 @@ import pytest
 from httpx import AsyncClient
 from models.novel import Novel
 from models.asset import Asset
+from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.config import GeneralConfig
-from utils.enums import AssetTypeEnum
+from utils.enums import AiTaskTypeEnum, AssetTypeEnum, TaskStatusEnum
 
 
 @pytest.mark.asyncio
@@ -82,6 +83,81 @@ async def test_api_get_asset_detail(client: AsyncClient):
     data = response.json()["data"]
     assert data["id"] == asset.id
     assert data["canonical_name"] == "宝剑"
+
+
+@pytest.mark.asyncio
+async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
+    client: AsyncClient,
+):
+    novel = await Novel.create(name="Generation History Novel")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="历史人物",
+    )
+    other_asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="其他人物",
+    )
+    completed = await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={
+            "asset_id": asset.id,
+            "variant_id": None,
+            "api_key": "secret-must-not-leak",
+            "base_url": "https://private.example.test",
+            "model": "image-model",
+            "clarity": "2K",
+            "aspect_ratio": "16:9",
+            "output_format": "png",
+        },
+        response_data={"images": ["/media/assets/history.png"]},
+    )
+    failed = await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.failed.value,
+        request_params={"asset_id": asset.id, "variant_id": None},
+        error_message="生成失败",
+    )
+    other_record = await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={"asset_id": other_asset.id},
+        response_data={"images": ["/media/assets/other.png"]},
+    )
+
+    response = await client.get(f"/api/asset/{asset.id}/generation-history")
+
+    assert response.status_code == 200, response.text
+    records = response.json()["data"]
+    assert len(records) == 2
+    completed_record = next(record for record in records if record["id"] == str(completed.id))
+    assert completed_record["images"] == ["/media/assets/history.png"]
+    assert completed_record["model"] == "image-model"
+    assert completed_record["clarity"] == "2K"
+    assert "secret-must-not-leak" not in response.text
+    assert "private.example.test" not in response.text
+
+    restore_response = await client.post(
+        f"/api/asset/{asset.id}/generation-history/{completed.id}/restore"
+    )
+    assert restore_response.status_code == 200, restore_response.text
+    restored = restore_response.json()["data"]
+    assert restored["main_image"] == "/media/assets/history.png"
+    assert restored["metadata"]["restored_generation_task_id"] == str(completed.id)
+
+    failed_response = await client.post(
+        f"/api/asset/{asset.id}/generation-history/{failed.id}/restore"
+    )
+    assert failed_response.json()["code"] == 400
+    assert "只有生成成功" in failed_response.json()["message"]
+
+    foreign_response = await client.post(
+        f"/api/asset/{asset.id}/generation-history/{other_record.id}/restore"
+    )
+    assert foreign_response.json()["code"] == 404
 
 
 @pytest.mark.asyncio
@@ -341,6 +417,7 @@ async def test_api_reference_asset(client: AsyncClient):
         base_url="https://mock.api.com/v1",
         api_key="sk-test",
         model="mock-model",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
 

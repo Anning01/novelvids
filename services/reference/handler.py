@@ -3,6 +3,7 @@ import base64
 import binascii
 import logging
 import os
+import re
 from urllib.parse import urlparse
 
 import httpx
@@ -15,6 +16,21 @@ from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
 
 logger = logging.getLogger(__name__)
+
+
+def _generation_suffix(
+    run_id: object,
+    index: int,
+    variant_id: int | None = None,
+) -> str:
+    safe_run_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(run_id or ""))
+    if not safe_run_id:
+        if variant_id is not None:
+            return f"_variant{variant_id}_{index + 1}"
+        return "" if index == 0 else f"_candidate{index + 1}"
+    variant_part = f"_variant{variant_id}" if variant_id is not None else ""
+    image_part = "" if index == 0 else f"_{index + 1}"
+    return f"{variant_part}_generation_{safe_run_id}{image_part}"
 
 
 def _image_extension(content: bytes) -> str:
@@ -107,6 +123,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         model = request_params["model"]
         api_protocol = request_params.get("api_protocol", "openai_compatible")
         variant_id = request_params.get("variant_id")
+        generation_run_id = request_params.get("generation_run_id")
         prompt_language = request_params.get("prompt_language", "en")
 
         asset = await Asset.get(id=asset_id)
@@ -137,17 +154,21 @@ class AssetReferenceHandler(BaseTaskHandler):
             if isinstance(metadata.get("workbench"), dict)
             else {}
         )
-        resolution = metadata.get("resolution") or workbench.get("resolution") or "2K"
+        resolution = request_params.get("resolution") or metadata.get("resolution") or workbench.get("resolution") or "2K"
         aspect_ratio = (
-            metadata.get("aspect_ratio")
+            request_params.get("aspect_ratio")
+            or metadata.get("aspect_ratio")
             or workbench.get("aspectRatio")
             or "16:9"
         )
         generation_count = (
-            metadata.get("generation_count")
+            request_params.get("generation_count")
+            or metadata.get("generation_count")
             or workbench.get("generationCount")
             or 1
         )
+        output_format = request_params.get("output_format") or "png"
+        quality = request_params.get("quality")
         data = {
             "type": asset_type_name,
             "canonical_name": asset.canonical_name,
@@ -174,6 +195,8 @@ class AssetReferenceHandler(BaseTaskHandler):
                 resolution=resolution,
                 aspect_ratio=aspect_ratio,
                 count=generation_count,
+                output_format=output_format,
+                quality=quality,
                 prompt_language=prompt_language,
             )
 
@@ -181,10 +204,10 @@ class AssetReferenceHandler(BaseTaskHandler):
             if image_list:
                 for index, image in enumerate(image_list):
                     try:
-                        suffix = (
-                            f"_variant{variant.id}_{index + 1}"
-                            if variant
-                            else "" if index == 0 else f"_candidate{index + 1}"
+                        suffix = _generation_suffix(
+                            generation_run_id,
+                            index,
+                            variant.id if variant else None,
                         )
                         result_urls.append(
                             await _persist_generated_image(image, asset_id, suffix)

@@ -362,6 +362,7 @@ async def test_reference_提交参考图任务():
         base_url="https://mock.api.com/v1",
         api_key="sk-test",
         model="mock-model",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
 
@@ -373,12 +374,13 @@ async def test_reference_提交参考图任务():
     assert task.request_params["asset_id"] == asset.id
     assert task.request_params["novel_id"] == novel.id
     assert task.request_params["prompt_language"] == "en"
+    assert task.request_params["generation_run_id"] == str(task.id)
     print(f"    提交参考图任务 id={task.id}, asset_id={asset.id}, status=pending")
 
 
 @pytest.mark.asyncio
 async def test_reference_使用资产指定的生图模型():
-    """资产元数据指定模型时，生成任务使用该模型而不是全局启用模型。"""
+    """资产元数据指定已启用模型时，生成任务使用该模型而不是自动选择模型。"""
     from models.config import AiModelConfig
     from utils.enums import AiTaskTypeEnum
 
@@ -389,6 +391,7 @@ async def test_reference_使用资产指定的生图模型():
         base_url="https://active.example.com/v1",
         api_key="active-key",
         model="active-model",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
     selected_config = await AiModelConfig.create(
@@ -398,7 +401,8 @@ async def test_reference_使用资产指定的生图模型():
         api_key="selected-key",
         model="selected-model",
         api_protocol="volcengine_ark",
-        is_active=False,
+        image_model_type="seedream_5_lite",
+        is_active=True,
     )
     asset = await Asset.create(
         novel_id=novel.id,
@@ -413,6 +417,36 @@ async def test_reference_使用资产指定的生图模型():
     assert task.request_params["base_url"] == selected_config.base_url
     assert task.request_params["model"] == selected_config.model
     assert task.request_params["api_protocol"] == "volcengine_ark"
+
+
+@pytest.mark.asyncio
+async def test_reference_拒绝资产指定的停用模型():
+    """资产保存的模型被停用后，不允许继续提交新的生成任务。"""
+    from models.config import AiModelConfig
+    from utils.enums import AiTaskTypeEnum
+
+    novel = await Novel.create(name="Disabled Ref Config Novel", author="Author")
+    disabled_config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        task_types=[AiTaskTypeEnum.reference_image.value],
+        name="disabled-ref-config",
+        base_url="https://disabled.example.com/v1",
+        api_key="disabled-key",
+        model="disabled-model",
+        is_active=False,
+    )
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="停用模型测试",
+        metadata={"model_config_id": disabled_config.id},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await asset_controller.reference(asset.id)
+
+    assert exc_info.value.status_code == 400
+    assert "未启用" in exc_info.value.detail
 
 
 @pytest.mark.asyncio
@@ -434,6 +468,7 @@ async def test_reference_重复提交被拦截():
         base_url="https://mock.api.com/v1",
         api_key="sk-test",
         model="mock-model",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
 
@@ -487,6 +522,7 @@ async def test_reference_超时任务被清理后可重新提交():
         base_url="https://mock.api.com/v1",
         api_key="sk-test",
         model="mock-model",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
 

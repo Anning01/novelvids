@@ -1,5 +1,8 @@
-from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime
 from typing import Optional, Any
+from uuid import UUID
+
+from pydantic import BaseModel, Field, ConfigDict
 from schemas._base import BaseResponse
 from schemas.asset_variant import AssetVariantOut
 from utils.enums import AssetTypeEnum, ImageSourceEnum
@@ -74,6 +77,21 @@ class AssetReferencePromptPreview(BaseModel):
 class AssetReferencePromptOut(BaseModel):
     prompt: str
     prompt_language: str
+
+
+class AssetGenerationRecordOut(BaseModel):
+    """Safe, presentation-ready summary of one asset image-generation run."""
+
+    id: UUID
+    status: int
+    images: list[str] = Field(default_factory=list)
+    error_message: Optional[str] = None
+    model: Optional[str] = None
+    clarity: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    output_format: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
 
 
 # --- 输出 Schema (Out-bound) ---

@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 from services.video.base import BaseVideoGenerator
+from services.video.capabilities import capabilities_for
 from utils.enums import TaskStatusEnum
 
 logger = logging.getLogger(__name__)
@@ -16,7 +18,59 @@ logger = logging.getLogger(__name__)
 # 匹配 @{Name} 和 @Name（兼容旧格式）
 _ENTITY_RE = re.compile(r"@\{([^}]+)\}|@([\w\u4e00-\u9fff·]+)")
 
-MAX_REF_IMAGES = 4
+
+class SeedanceGenerationError(RuntimeError):
+    """脱敏后可安全返回给调用方的 Seedance 接口错误。"""
+
+
+def _safe_endpoint(value: str) -> str:
+    parsed = urlsplit(value)
+    hostname = parsed.hostname or ""
+    if parsed.port is not None:
+        hostname = f"{hostname}:{parsed.port}"
+    return urlunsplit((parsed.scheme, hostname, parsed.path, "", ""))
+
+
+def _request_id(response: httpx.Response) -> str | None:
+    for name in ("x-request-id", "request-id", "x-volc-request-id"):
+        if value := response.headers.get(name):
+            return value[:120]
+    return None
+
+
+def _provider_error(data: Any) -> str | None:
+    if not isinstance(data, dict):
+        return None
+    error = data.get("error")
+    if isinstance(error, dict):
+        code = str(error.get("code") or error.get("type") or "PROVIDER_ERROR")[:80]
+        message = str(error.get("message") or "视频生成任务失败")[:500]
+        return f"{message}（{code}）"
+    if isinstance(error, str) and error.strip():
+        return error.strip()[:500]
+    return None
+
+
+def _video_url(data: Any) -> str | None:
+    """兼容查询接口中字符串或对象形式的 video_url。"""
+    if not isinstance(data, dict):
+        return None
+    for key in ("video_url", "url"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("url")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    content = data.get("content")
+    if isinstance(content, dict):
+        return _video_url(content)
+    if isinstance(content, list):
+        for item in content:
+            if url := _video_url(item):
+                return url
+    return None
 
 
 class SeedanceGenerator(BaseVideoGenerator):
@@ -33,6 +87,7 @@ class SeedanceGenerator(BaseVideoGenerator):
     def _process_prompt(
         prompt: str,
         subjects: list[dict[str, Any]] | None,
+        max_ref_images: int = 30,
     ) -> tuple[str, list[str]]:
         """处理 prompt 中的 @资产引用，返回 (处理后的 prompt, 参考图列表)。
 
@@ -53,12 +108,12 @@ class SeedanceGenerator(BaseVideoGenerator):
         name_to_index: dict[str, int] = {}
 
         for subj in subjects:
-            if len(ref_images) >= MAX_REF_IMAGES:
+            if len(ref_images) >= max_ref_images:
                 break
             images = subj.get("images", [])
             if images:
                 name_to_index[subj["name"]] = len(ref_images) + 1  # 1-based
-                remaining = MAX_REF_IMAGES - len(ref_images)
+                remaining = max_ref_images - len(ref_images)
                 ref_images.extend(images[:remaining])
 
         # 替换 prompt 中的 @引用
@@ -95,34 +150,21 @@ class SeedanceGenerator(BaseVideoGenerator):
         generation_mode = kwargs.get("generation_mode", "reference")
         first_frame_url = kwargs.get("first_frame_url")
         last_frame_url = kwargs.get("last_frame_url")
+        resolution = str(kwargs.get("resolution") or "720p")
+        output_format = str(kwargs.get("output_format") or "mp4")
+        generate_audio = bool(kwargs.get("generate_audio", True))
+        capabilities = capabilities_for(self.config.video_model_type)
 
         # 首尾帧模式只使用两张关键帧；参考图模式继续解析 @资产。
         processed_prompt, ref_images = self._process_prompt(
             prompt,
             subjects if generation_mode == "reference" else None,
+            capabilities.max_reference_images,
         )
         logger.info(
-            "Seedance _process_prompt: subjects=%d, ref_images=%d, prompt[:80]=%r",
-            len(subjects or []), len(ref_images), processed_prompt[:80],
+            "seedance_prompt_prepared subjects=%d reference_images=%d prompt_length=%d",
+            len(subjects or []), len(ref_images), len(processed_prompt),
         )
-
-        # 自动切换 t2v / i2v 模型；首尾帧同样属于图生视频。
-        model_name = self.config.model
-        supports_images = "i2v" in model_name or "t2v" in model_name
-        has_input_images = bool(ref_images) or generation_mode == "keyframes"
-        if has_input_images and "t2v" in model_name:
-            model_name = model_name.replace("t2v", "i2v")
-            logger.info("Seedance auto-switch: t2v -> i2v (has images)")
-        elif not has_input_images and "i2v" in model_name:
-            model_name = model_name.replace("i2v", "t2v")
-            logger.info("Seedance auto-switch: i2v -> t2v (no images)")
-        elif ref_images and not supports_images:
-            # 模型名中无 t2v/i2v，不支持参考图，丢弃图片避免 r2v 错误
-            logger.warning(
-                "Seedance model %s does not support reference images, skipping %d images",
-                model_name, len(ref_images),
-            )
-            ref_images = []
 
         # 构建 content 数组（官方格式）
         content: list[dict[str, Any]] = [
@@ -142,76 +184,115 @@ class SeedanceGenerator(BaseVideoGenerator):
                 })
 
         payload: dict[str, Any] = {
-            "model": model_name,
+            "model": self.config.model,
             "content": content,
             "duration": int(duration),
+            "resolution": resolution,
+            "ratio": aspect_ratio,
+            "generate_audio": generate_audio,
             "watermark": False,
         }
+        if "mov" in capabilities.output_formats:
+            payload["output_format"] = output_format
 
+        url = f"{self.config.base_url.rstrip('/')}/contents/generations/tasks"
+        safe_url = _safe_endpoint(url)
+        logger.info(
+            "seedance_outbound endpoint=%s model=%s mode=%s images=%d duration=%s "
+            "resolution=%s ratio=%s format=%s audio=%s",
+            safe_url,
+            self.config.model,
+            generation_mode,
+            len(content) - 1,
+            payload["duration"],
+            resolution,
+            aspect_ratio,
+            output_format,
+            generate_audio,
+        )
         async with httpx.AsyncClient(timeout=30) as client:
-            url = f"{self.config.base_url}/contents/generations/tasks"
-            logger.info("Seedance request: POST %s\npayload: %s", url, {
-                **payload,
-                "content": [
-                    {**c, "image_url": {"url": c["image_url"]["url"][:80] + "..."}} if c.get("image_url") else c
-                    for c in payload["content"]
-                ],
-            })
-            resp = await client.post(url, headers=headers, json=payload)
+            try:
+                resp = await client.post(url, headers=headers, json=payload)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "seedance_network_error endpoint=%s error_type=%s",
+                    safe_url,
+                    type(exc).__name__,
+                )
+                raise SeedanceGenerationError("视频供应商网络请求失败") from exc
 
-            if resp.status_code != 200:
-                logger.error("Seedance error %s: %s", resp.status_code, resp.text)
-            resp.raise_for_status()
+        request_id = _request_id(resp)
+        if resp.status_code >= 400:
+            logger.warning(
+                "seedance_http_error endpoint=%s status=%s request_id=%s",
+                safe_url,
+                resp.status_code,
+                request_id or "-",
+            )
+            suffix = f"，request_id={request_id}" if request_id else ""
+            raise SeedanceGenerationError(f"视频供应商请求失败（HTTP {resp.status_code}{suffix}）")
+        try:
             data = resp.json()
+        except ValueError as exc:
+            raise SeedanceGenerationError("视频供应商返回了无法解析的响应") from exc
+        if error := _provider_error(data):
+            suffix = f"，request_id={request_id}" if request_id else ""
+            raise SeedanceGenerationError(f"视频供应商返回错误：{error}{suffix}")
 
         task_id = data.get("id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise SeedanceGenerationError("视频供应商未返回任务 ID")
         logger.info("Seedance submit: task_id=%s, images=%d", task_id, len(ref_images))
-        return task_id
+        return task_id.strip()
 
     async def query(self, external_task_id: str) -> dict[str, Any]:
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
         }
-        url = f"{self.config.base_url}/contents/generations/tasks/{external_task_id}"
+        url = f"{self.config.base_url.rstrip('/')}/contents/generations/tasks/{external_task_id}"
 
+        safe_url = _safe_endpoint(url)
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
+            try:
+                resp = await client.get(url, headers=headers)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "seedance_query_network_error endpoint=%s error_type=%s",
+                    safe_url,
+                    type(exc).__name__,
+                )
+                raise SeedanceGenerationError("查询视频任务时网络请求失败") from exc
+        request_id = _request_id(resp)
+        if resp.status_code >= 400:
+            suffix = f"，request_id={request_id}" if request_id else ""
+            raise SeedanceGenerationError(f"查询视频任务失败（HTTP {resp.status_code}{suffix}）")
+        try:
             data = resp.json()
+        except ValueError as exc:
+            raise SeedanceGenerationError("视频供应商返回了无法解析的任务状态") from exc
 
         status = data.get("status", "")
         logger.info("Seedance query: task=%s, status=%s, keys=%s", external_task_id, status, list(data.keys()))
 
         if status in ("succeeded", "completed", "success"):
-            # 打印完整响应结构（截断长字段）
-            logger.info("Seedance succeeded response: %s", {
-                k: (str(v)[:200] + "..." if isinstance(v, (str, list)) and len(str(v)) > 200 else v)
-                for k, v in data.items()
-            })
-            # 从 content 提取视频地址（content 可能是 dict 或 list）
-            video_url = None
-            resp_content = data.get("content")
-            if isinstance(resp_content, dict):
-                video_url = resp_content.get("video_url") or resp_content.get("url")
-            elif isinstance(resp_content, list):
-                for item in resp_content:
-                    if isinstance(item, dict):
-                        video_url = item.get("video_url") or item.get("url")
-                        if video_url:
-                            break
-            # 备选字段
-            if not video_url:
-                video_url = data.get("video_url") or data.get("url")
-            logger.info("Seedance video_url: %s", video_url)
+            video_url = _video_url(data)
+            logger.info(
+                "seedance_query_completed task=%s has_video_url=%s request_id=%s",
+                external_task_id,
+                bool(video_url),
+                request_id or "-",
+            )
             return self._build_result(
-                TaskStatusEnum.completed, progress=100, url=video_url,
+                TaskStatusEnum.completed,
+                progress=100,
+                url=video_url,
+                duration=data.get("duration"),
+                frames=data.get("frames"),
             )
 
-        if status == "failed":
-            error_msg = data.get("error", {})
-            if isinstance(error_msg, dict):
-                error_msg = error_msg.get("message", str(error_msg))
+        if status in ("failed", "expired", "cancelled", "canceled"):
+            error_msg = _provider_error(data) or "视频生成任务失败"
             # 翻译常见错误为中文
             if isinstance(error_msg, str) and "sensitive" in error_msg.lower():
                 error_msg = "生成的视频可能包含敏感内容，请修改提示词后重试"
@@ -220,4 +301,6 @@ class SeedanceGenerator(BaseVideoGenerator):
                 error=error_msg,
             )
 
+        if status == "queued":
+            return self._build_result(TaskStatusEnum.queued)
         return self._build_result(TaskStatusEnum.running)

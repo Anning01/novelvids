@@ -6,7 +6,7 @@ from utils.image_protocol import ImageApiProtocol
 
 
 class AiModelConfig(AbstractBaseModel):
-    """AI 模型配置表 - 每种任务类型可配置多个，启用仅一个。"""
+    """AI 模型配置表 - 每种任务类型可配置并同时启用多个。"""
 
     task_type = fields.IntField(
         db_index=True,
@@ -36,6 +36,16 @@ class AiModelConfig(AbstractBaseModel):
         max_length=40,
         default=ImageApiProtocol.openai_compatible.value,
         description="接口协议，生图任务用于选择供应商请求适配器",
+    )
+    image_model_type = fields.CharField(
+        max_length=40,
+        null=True,
+        description="生图模型能力类型；非生图配置留空",
+    )
+    video_model_type = fields.CharField(
+        max_length=40,
+        null=True,
+        description="视频生成模型能力类型；非视频配置留空",
     )
     is_active = fields.BooleanField(
         default=False,

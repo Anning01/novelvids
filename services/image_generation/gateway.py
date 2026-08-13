@@ -96,6 +96,8 @@ async def generate_images(
     resolution: str | None = None,
     aspect_ratio: str | None = None,
     count: int = 1,
+    output_format: str = "png",
+    quality: str | None = None,
     extra_body: dict[str, Any] | None = None,
     timeout: float = 300,
 ) -> list[GeneratedImage]:
@@ -107,6 +109,8 @@ async def generate_images(
             resolution=resolution,
             aspect_ratio=aspect_ratio,
             count=count,
+            output_format=output_format,
+            quality=quality,
             extra_body=extra_body,
         )
     )

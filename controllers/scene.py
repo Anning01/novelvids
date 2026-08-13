@@ -10,6 +10,7 @@ from controllers.config import ai_model_config_controller, general_config_contro
 from services.ai_task_executor import ai_task_executor
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
+from tortoise.transactions import in_transaction
 
 
 class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
@@ -66,6 +67,33 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
     async def remove(self, scene_id: int) -> None:
         instance = await self.get(scene_id)
         await super().remove(instance)
+
+    async def insert_after(self, scene_id: int) -> Scene:
+        """在目标分镜后原子插入一个空白分镜，并保持序号连续。"""
+        async with in_transaction() as connection:
+            target = await Scene.filter(id=scene_id).using_db(connection).first()
+            if target is None:
+                raise HTTPException(status_code=404, detail="分镜不存在")
+
+            following = await Scene.filter(
+                chapter_id=target.chapter_id,
+                sequence__gt=target.sequence,
+            ).using_db(connection).order_by("-sequence")
+            for scene in following:
+                scene.sequence += 1
+                await scene.save(using_db=connection, update_fields=["sequence", "updated_at"])
+
+            created = await Scene.create(
+                using_db=connection,
+                chapter_id=target.chapter_id,
+                sequence=target.sequence + 1,
+                description="新分镜",
+                prompt="",
+                duration=6,
+            )
+
+        await created.fetch_related("assets")
+        return created
 
     async def generate(self, chapter_id: int):
         """提交分镜生成任务，返回任务记录供前端轮询。"""

@@ -32,7 +32,7 @@ async def extraction_project():
     chapter = await Chapter.create(
         novel_id=novel.id,
         number=1,
-        name="能力觉醒",
+        name="第1章 能力觉醒",
         content="宫平在蓝都保健中心外看见一辆黑色自行车。",
     )
     second_chapter = await Chapter.create(
@@ -105,6 +105,7 @@ async def test_loader_returns_immutable_project_wide_extraction_context(
     assert context.novel.tags == ("都市异能", "复仇")
     assert context.novel.story_outline == "宫平获得能力并反抗压迫。"
     assert context.chapter.number == 1
+    assert context.chapter.name == "能力觉醒"
     assert context.chapter.content == chapter.content
     assert tuple(asset.canonical_name for asset in context.assets) == (
         "宫平",

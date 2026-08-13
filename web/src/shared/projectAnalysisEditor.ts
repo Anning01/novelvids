@@ -1,4 +1,5 @@
 import type { Chapter, Novel } from '@/types'
+import { stripChapterOrdinal } from './chapterTitle'
 
 export const DEFAULT_PROJECT_TYPE = 'AI 精品短剧'
 export const DEFAULT_PROJECT_SETTING = '自动理解完整剧本，规划分集节奏、人物关系与视觉生产流程。'
@@ -77,11 +78,11 @@ export function projectPatchFromDraft(draft: ProjectAnalysisDraft): Partial<Nove
 export function createChapterEditDraft(chapter: Chapter): ChapterEditDraft {
   return {
     id: chapter.id,
-    name: chapter.name,
+    name: stripChapterOrdinal(chapter.name) || '未命名',
     content: chapter.content ?? '',
   }
 }
 
 export function chapterDraftChanged(draft: ChapterEditDraft, chapter: Chapter): boolean {
-  return draft.name !== chapter.name || draft.content !== (chapter.content ?? '')
+  return draft.name !== (stripChapterOrdinal(chapter.name) || '未命名') || draft.content !== (chapter.content ?? '')
 }

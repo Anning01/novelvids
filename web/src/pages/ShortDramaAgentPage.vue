@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft,
   ArrowRight,
   BookOpenText,
   Bot,
@@ -16,7 +15,6 @@ import {
   Pencil,
   RefreshCw,
   Save,
-  Settings2,
   Sparkles,
   UsersRound,
   Video,
@@ -24,7 +22,9 @@ import {
 } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppBadge from '@/components/AppBadge.vue'
+import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { notice } from '@/shared/notice'
+import { episodeDisplayLabel } from '@/shared/chapterTitle'
 import {
   chapterDraftChanged,
   createChapterEditDraft,
@@ -107,13 +107,6 @@ const chapterDrafts = ref<Record<number, ChapterEditDraft>>({})
 const episodeTabs = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
 
-const phases = [
-  { label: '剧本', icon: BookOpenText, active: true },
-  { label: '设定', icon: Settings2 },
-  { label: '分镜', icon: Clapperboard },
-  { label: '视频', icon: Video, disabled: true },
-]
-
 const analysisResult = computed<ProjectAnalysisResult | null>(() => {
   if (analysisTask.value?.status !== TaskStatusEnum.COMPLETED || !analysisTask.value.response_data) return null
   return analysisTask.value.response_data as unknown as ProjectAnalysisResult
@@ -161,7 +154,7 @@ const analysisStatus = computed(() => {
 })
 const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', '#8d73db']
 const activeModels = computed(() => ({
-  llm: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).some(value => [1, 3].includes(value))),
+  llm: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).some(value => [1, 3, 5].includes(value))),
   image: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).includes(2)),
   video: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).includes(4)),
 }))
@@ -378,17 +371,6 @@ function continueToSettings() {
   })
 }
 
-function selectPhase(label: string) {
-  if (label === '设定') {
-    continueToSettings()
-  } else if (label === '分镜') {
-    void router.push({
-      path: `/create/short-drama/storyboard/${projectId.value}`,
-      query: selectedEpisodeBrief.value ? { chapter: String(selectedEpisodeBrief.value.id) } : undefined,
-    })
-  }
-}
-
 async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
   activeEpisode.value = chapterNumber
   const chapter = chapters.value.find(item => item.number === chapterNumber)
@@ -411,27 +393,18 @@ onBeforeUnmount(stopPolling)
 
 <template>
   <main class="agent-page">
-    <header class="agent-topbar">
-      <div class="agent-project-nav">
-        <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="返回上一页" @click="router.back()"><ArrowLeft :size="18" /></AppButton>
-        <div>
-          <strong>{{ displayedProjectName }}</strong>
-          <span><Film :size="13" />{{ project.aspectRatio }}<i />{{ project.resolution }}<i />{{ project.style }}</span>
-        </div>
-      </div>
-
-      <nav class="agent-phases" aria-label="短剧制作流程">
-        <template v-for="(phase, index) in phases" :key="phase.label">
-          <span v-if="index" class="phase-line" />
-          <AppButton type="button" variant="soft" size="sm" :active="phase.active" :disabled="phase.disabled" :aria-current="phase.active ? 'step' : undefined" @click="selectPhase(phase.label)">
-            <component :is="phase.icon" :size="16" />
-            {{ phase.label }}
-          </AppButton>
-        </template>
-      </nav>
-    </header>
-
-    <section class="agent-content">
+    <ShortDramaWorkspaceShell
+      :project-id="projectId"
+      :project-name="displayedProjectName"
+      :aspect-ratio="project.aspectRatio"
+      :resolution="project.resolution"
+      :style-name="project.style"
+      active-phase="script"
+      creation-mode="agent"
+      :show-episode-rail="false"
+      :active-chapter-id="selectedEpisodeBrief?.id || 0"
+    >
+      <section class="agent-content">
       <div class="analysis-hero">
         <div class="project-cover-art" aria-label="项目封面">
           <img v-if="project.cover || analysisResult?.cover" :src="project.cover || analysisResult?.cover" :alt="`${displayedProjectName}封面`" />
@@ -564,7 +537,7 @@ onBeforeUnmount(stopPolling)
                 <span>第 {{ selectedEpisode.number }} 集</span>
                 <input v-model="selectedEpisodeDraft.name" aria-label="章节标题" maxlength="255" />
               </label>
-              <h3 v-else>第 {{ selectedEpisode.number }} 集 · {{ selectedEpisode.name }}</h3>
+              <h3 v-else>{{ episodeDisplayLabel(selectedEpisode) }}</h3>
             </div>
           </header>
           <p v-if="selectedEpisodeLoading" class="episode-content-state">正在加载章节正文…</p>
@@ -577,24 +550,15 @@ onBeforeUnmount(stopPolling)
 
       <AppButton class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />确认分析，进入设定</span><ArrowRight :size="18" /></AppButton>
       </template>
-    </section>
+      </section>
+    </ShortDramaWorkspaceShell>
   </main>
 </template>
 
 <style scoped>
 .agent-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f9fafc; }
-.agent-topbar { position: sticky; top: 0; z-index: 30; display: grid; min-height: 74px; grid-template-columns: minmax(260px, 1fr) auto minmax(260px, 1fr); align-items: center; padding: 0 26px; background: rgb(255 255 255 / 94%); box-shadow: 0 8px 28px rgb(36 40 60 / 4%); backdrop-filter: blur(16px); }
-.agent-project-nav { display: flex; min-width: 0; align-items: center; gap: 12px; }
-.agent-project-nav > button { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 9px; color: #686e7f; background: transparent; }
-.agent-project-nav > button:hover { color: #4f51e8; background: #f0f0ff; }
-.agent-project-nav > div { display: grid; min-width: 0; gap: 5px; }
-.agent-project-nav strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.agent-project-nav span, .analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
-.agent-project-nav i, .analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }
-.agent-phases { display: flex; align-items: center; }
-.agent-phases button { display: grid; width: 64px; min-height: 54px; place-items: center; align-content: center; gap: 4px; border: 1px solid transparent; border-radius: 15px; color: #858a99; background: transparent; font-size: 10px; }
-.agent-phases button.is-active { border-color: transparent; color: #5b5cf6; background: #f2f2ff; box-shadow: 0 7px 20px rgb(91 92 246 / 10%); }
-.phase-line { width: 14px; height: 1px; background: transparent; }
+.analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
+.analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }
 .agent-content { width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 36px 22px 80px; box-sizing: border-box; }
 .analysis-hero { display: grid; grid-template-columns: 142px minmax(0, 1fr) auto; align-items: center; gap: 26px; padding: 24px; border-radius: 20px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
 .project-cover-art { position: relative; display: grid; height: 180px; overflow: hidden; place-items: center; align-content: center; gap: 9px; border-radius: 13px; color: #fff; background: linear-gradient(145deg, #6f70f4, #4c3e91 58%, #201d45); box-shadow: 0 12px 25px rgb(48 42 105 / 22%); }
@@ -697,18 +661,11 @@ onBeforeUnmount(stopPolling)
 .continue-button > svg { position: absolute; right: 20px; }
 .continue-button:hover { background: #4d4ee9; transform: translateY(-1px); }
 @media (max-width: 960px) {
-  .agent-topbar { grid-template-columns: 1fr auto; }
-  .agent-phases { justify-self: end; }
-  .agent-project-nav { grid-row: 1; }
-  .phase-line { width: 8px; }
-  .agent-phases button { width: 52px; }
   .analysis-hero { grid-template-columns: 118px minmax(0, 1fr); }
   .project-cover-art { height: 150px; }
   .analysis-hero > .analysis-hero-actions { grid-column: 2; justify-self: start; }
 }
 @media (max-width: 720px) {
-  .agent-topbar { position: static; display: flex; min-height: auto; align-items: stretch; flex-direction: column; gap: 12px; padding: 12px 14px; }
-  .agent-phases { justify-content: center; }
   .agent-content { width: 100%; padding: 22px 14px 60px; }
   .analysis-hero { grid-template-columns: 86px minmax(0, 1fr); gap: 15px; padding: 15px; }
   .project-cover-art { height: 116px; }
@@ -723,8 +680,6 @@ onBeforeUnmount(stopPolling)
   .episode-content > footer { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 480px) {
-  .agent-project-nav strong { max-width: 250px; }
-  .agent-phases button { width: 48px; }
   .analysis-hero { grid-template-columns: 1fr; }
   .project-cover-art { display: none; }
   .analysis-hero > .analysis-hero-actions { grid-column: 1; flex-wrap: wrap; justify-self: stretch; }

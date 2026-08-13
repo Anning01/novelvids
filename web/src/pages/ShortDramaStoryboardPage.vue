@@ -2,15 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft,
-  BookOpenText,
   Boxes,
-  Check,
   Clapperboard,
   Clock3,
   Copy,
-  Ellipsis,
-  Film,
   GripVertical,
   ImageIcon,
   LoaderCircle,
@@ -19,25 +14,31 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Settings2,
   Sparkles,
   Trash2,
   Upload,
   UsersRound,
-  Video,
   Volume2,
   Workflow,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
-import AppScrollArea from '@/components/AppScrollArea.vue'
+import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
+import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
+import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
+import ShortDramaBatchVideoDialog, { type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
+import ShortDramaSceneStatusRail from '@/components/ShortDramaSceneStatusRail.vue'
+import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { api, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
+import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
+import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
+import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { AiModelConfig, Asset, Chapter, EnumItem, Novel, Scene, Video as VideoResult } from '@/types'
+import type { Asset, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel } from '@/types'
 
 interface ProjectView extends Novel {
   aspectRatio: string
@@ -51,6 +52,7 @@ interface SceneDraft {
   prompt: string
   duration: number
   selectedAssetIds: number[]
+  selectedVariantIds: Record<number, number | null>
   videoGenerationMode: 'reference' | 'keyframes'
   firstFrameUrl: string
   lastFrameUrl: string
@@ -72,9 +74,9 @@ const activeChapter = ref<Chapter | null>(null)
 const assets = ref<Asset[]>([])
 const scenes = ref<Scene[]>([])
 const activeSceneId = ref(0)
-const configs = ref<AiModelConfig[]>([])
-const videoModelTypes = ref<EnumItem[]>([])
-const selectedVideoModel = ref('3')
+const chapterToolbarHeight = ref(104)
+const videoModels = ref<VideoGenerationModel[]>([])
+const selectedVideoModel = ref('')
 const videos = ref<Record<number, VideoResult[]>>({})
 const loading = ref(true)
 const generatingChapterIds = ref<Set<number>>(new Set())
@@ -82,28 +84,44 @@ const savingSceneIds = ref<Set<number>>(new Set())
 const generatingVideoSceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
-const openAssetPickers = ref<Set<string>>(new Set())
+const openAssetPickerKey = ref('')
+const assetPickerFocusIds = ref<Record<string, number>>({})
+const assetPickerReplaceAssetIds = ref<Record<string, number>>({})
+const openAssetActionKey = ref('')
+const editingAsset = ref<Asset | null>(null)
 const uploadingFrameKey = ref('')
 const savingCanvasIdentity = ref(false)
+const batchGeneratingVideos = ref(false)
+const batchVideoDialogOpen = ref(false)
 let alive = true
 let chapterLoadVersion = 0
-let sceneObserver: IntersectionObserver | undefined
+let chapterToolbarObserver: ResizeObserver | undefined
+let sceneScrollContainer: HTMLElement | null = null
+let sceneScrollFrame = 0
+let sceneScrollUnlockTimer: ReturnType<typeof setTimeout> | undefined
+let programmaticSceneId = 0
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
 const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
-const videoModelOptions = computed(() => (
-  videoModelTypes.value.length
-    ? videoModelTypes.value.map(item => ({ value: String(item.value), label: item.label }))
-    : [{ value: '3', label: configs.value.find(item => item.is_active && item.task_type === 4)?.model || 'Seedance' }]
-))
-const phaseItems = computed(() => [
-  ...(isAgent.value ? [{ label: '剧本', icon: BookOpenText }] : []),
-  { label: '设定', icon: Settings2 },
-  { label: '分镜', icon: Clapperboard, active: true },
-  { label: '视频', icon: Video },
-])
+const videoModelOptions = computed(() => videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })))
+const selectedVideoModelConfig = computed(() => videoModels.value.find(item => String(item.config_id) === selectedVideoModel.value) || null)
+const sceneStatusItems = computed<SceneStatusRailItem[]>(() => scenes.value.map(scene => ({
+  sceneId: scene.id,
+  sequence: scene.sequence,
+  state: resolveSceneGenerationState(selectedVideoFor(scene)),
+})))
+const batchVideoSceneOptions = computed<BatchVideoSceneOption[]>(() => scenes.value.map(scene => {
+  const disabledReason = batchVideoDisabledReason(scene)
+  return {
+    id: scene.id,
+    sequence: scene.sequence,
+    cost: Math.round(draftFor(scene).duration * 150),
+    disabled: Boolean(disabledReason),
+    disabledReason,
+  }
+}))
 const assetGroups = computed(() => [
   { type: AssetTypeEnum.PERSON, label: '出镜角色', icon: UsersRound, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.PERSON) },
   { type: AssetTypeEnum.SCENE, label: '分镜场景', icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
@@ -112,15 +130,39 @@ const assetGroups = computed(() => [
 
 function makeSceneDraft(scene: Scene): SceneDraft {
   const metadata = scene?.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}
+  const linkedAssetIds = scene.assets?.map(item => item.id) ?? scene.asset_ids ?? []
+  const sceneText = `${scene.description || ''}\n${scene.prompt || ''}`.toLocaleLowerCase()
+  const inferredAssetIds = assets.value.filter(item => {
+    const names = [item.canonical_name, ...(item.aliases || [])]
+      .map(name => name.trim().toLocaleLowerCase())
+      .filter(name => name.length > 1)
+    return names.some(name => sceneText.includes(name))
+  }).map(item => item.id)
   return {
     description: scene.description || '',
     prompt: scene.prompt || '',
     duration: scene.duration || 6,
-    selectedAssetIds: scene.assets?.map(item => item.id) ?? scene.asset_ids ?? [],
+    selectedAssetIds: [...new Set([...linkedAssetIds, ...inferredAssetIds])],
+    selectedVariantIds: readSelectedVariantIds(metadata.asset_variant_ids),
     videoGenerationMode: metadata.video_generation_mode === 'keyframes' ? 'keyframes' : 'reference',
     firstFrameUrl: typeof metadata.first_frame_url === 'string' ? metadata.first_frame_url : '',
     lastFrameUrl: typeof metadata.last_frame_url === 'string' ? metadata.last_frame_url : '',
   }
+}
+
+function readSelectedVariantIds(value: unknown): Record<number, number | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const selections: Record<number, number | null> = {}
+  for (const [assetIdValue, variantIdValue] of Object.entries(value)) {
+    const assetId = Number(assetIdValue)
+    if (!Number.isInteger(assetId) || assetId < 1) continue
+    if (variantIdValue === null) selections[assetId] = null
+    else {
+      const variantId = Number(variantIdValue)
+      if (Number.isInteger(variantId) && variantId > 0) selections[assetId] = variantId
+    }
+  }
+  return selections
 }
 
 function draftFor(scene: Scene) {
@@ -144,30 +186,185 @@ function selectedVideoFor(scene: Scene) {
 
 function canGenerateSceneVideo(scene: Scene) {
   const draft = draftFor(scene)
-  return Boolean(draft.prompt.trim() && (draft.videoGenerationMode === 'reference' || (draft.firstFrameUrl && draft.lastFrameUrl)))
+  const model = selectedVideoModelConfig.value
+  return Boolean(model
+    && model.capabilities.generation_modes.includes(draft.videoGenerationMode)
+    && draft.prompt.trim()
+    && (draft.videoGenerationMode === 'reference' || (draft.firstFrameUrl && draft.lastFrameUrl)))
+}
+
+function modelResolution(model: VideoGenerationModel | null) {
+  if (!model) return project.value?.resolution || '720p'
+  const projectResolution = project.value?.resolution || ''
+  return model.capabilities.resolutions.includes(projectResolution)
+    ? projectResolution
+    : model.capabilities.default_resolution
+}
+
+function modelAspectRatio(model: VideoGenerationModel, mode: SceneDraft['videoGenerationMode']) {
+  const supported = model.capabilities.aspect_ratios_by_mode[mode] || model.capabilities.aspect_ratios
+  const projectRatio = project.value?.aspectRatio || ''
+  if (supported.includes(projectRatio)) return projectRatio
+  if (supported.includes(model.capabilities.default_aspect_ratio)) return model.capabilities.default_aspect_ratio
+  return supported[0]
 }
 
 function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
   const selectedIds = draftFor(scene).selectedAssetIds
-  const sceneText = `${draftFor(scene).description}\n${draftFor(scene).prompt}`.toLocaleLowerCase()
-  return group.items.filter(item => {
-    if (selectedIds.includes(item.id)) return true
-    const referenceNames = [item.canonical_name, ...(item.aliases || [])]
-      .map(name => name.trim().toLocaleLowerCase())
-      .filter(name => name.length > 1)
-    return referenceNames.some(name => sceneText.includes(name))
-  })
+  return group.items.filter(item => selectedIds.includes(item.id))
 }
 
 function assetPickerKey(scene: Scene, type: number) {
   return `${scene.id}:${type}`
 }
 
+function assetRowPickerAnchorId(scene: Scene, asset: Asset) {
+  return `asset-row-picker-trigger-${scene.id}-${asset.id}`
+}
+
+function assetPickerAnchorId(scene: Scene, type: number) {
+  const key = assetPickerKey(scene, type)
+  const replaceAssetId = assetPickerReplaceAssetIds.value[key]
+  return replaceAssetId
+    ? `asset-row-picker-trigger-${scene.id}-${replaceAssetId}`
+    : `asset-picker-trigger-${key}`
+}
+
+function assetActionKey(scene: Scene, asset: Asset) {
+  return `${scene.id}:${asset.id}`
+}
+
+function toggleAssetActionMenu(scene: Scene, asset: Asset) {
+  const key = assetActionKey(scene, asset)
+  openAssetActionKey.value = openAssetActionKey.value === key ? '' : key
+}
+
+function closeAssetActionsFromOutside(event: PointerEvent) {
+  if (!openAssetActionKey.value) return
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('.scene-asset-actions')) openAssetActionKey.value = ''
+}
+
+function closeAssetActionsFromEscape(event: KeyboardEvent) {
+  if (event.key === 'Escape') openAssetActionKey.value = ''
+}
+
+function editSceneAsset(asset: Asset) {
+  openAssetActionKey.value = ''
+  editingAsset.value = asset
+}
+
+function closeAssetEditor() {
+  editingAsset.value = null
+}
+
+function saveEditedAsset(asset: Asset) {
+  assets.value = assets.value.map(item => item.id === asset.id ? asset : item)
+  if (editingAsset.value?.id === asset.id) editingAsset.value = asset
+}
+
+async function regenerateEditedAsset(asset: Asset) {
+  try {
+    await api.generateAsset(asset.id)
+  } catch (error) {
+    notice.error((error as Error).message)
+  }
+}
+
+async function removeAssetFromScene(scene: Scene, asset: Asset) {
+  const confirmed = await appConfirm({
+    title: `移除「${asset.canonical_name}」？`,
+    message: '只会从当前分镜移除，不会删除项目资产及其衍生状态。',
+    confirmLabel: '确认移除',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  updateAssetSelection(scene, { assetId: asset.id, variantId: null, selected: false })
+  openAssetActionKey.value = ''
+  notice.success(`已从当前分镜移除「${asset.canonical_name}」`)
+}
+
+function editingAssetKind(asset: Asset | null): 'character' | 'scene' | 'prop' {
+  if (asset?.asset_type === AssetTypeEnum.SCENE) return 'scene'
+  if (asset?.asset_type === AssetTypeEnum.ITEM) return 'prop'
+  return 'character'
+}
+
 function toggleAssetPicker(scene: Scene, type: number) {
   const key = assetPickerKey(scene, type)
-  const next = new Set(openAssetPickers.value)
-  next.has(key) ? next.delete(key) : next.add(key)
-  openAssetPickers.value = next
+  const isSameAddPicker = openAssetPickerKey.value === key && !assetPickerReplaceAssetIds.value[key]
+  assetPickerFocusIds.value = { ...assetPickerFocusIds.value, [key]: 0 }
+  assetPickerReplaceAssetIds.value = { ...assetPickerReplaceAssetIds.value, [key]: 0 }
+  openAssetPickerKey.value = isSameAddPicker ? '' : key
+}
+
+function toggleAssetReplacementPicker(scene: Scene, type: number, asset: Asset) {
+  const key = assetPickerKey(scene, type)
+  const isSameReplacement = openAssetPickerKey.value === key && assetPickerReplaceAssetIds.value[key] === asset.id
+  assetPickerFocusIds.value = { ...assetPickerFocusIds.value, [key]: asset.id }
+  assetPickerReplaceAssetIds.value = { ...assetPickerReplaceAssetIds.value, [key]: asset.id }
+  openAssetPickerKey.value = isSameReplacement ? '' : key
+}
+
+function closeAssetPicker(key: string) {
+  if (openAssetPickerKey.value === key) openAssetPickerKey.value = ''
+}
+
+function updateAssetSelection(scene: Scene, selection: SceneAssetVariantSelection) {
+  const draft = draftFor(scene)
+  if (selection.selected) {
+    if (!draft.selectedAssetIds.includes(selection.assetId)) {
+      draft.selectedAssetIds = [...draft.selectedAssetIds, selection.assetId]
+    }
+    draft.selectedVariantIds = {
+      ...draft.selectedVariantIds,
+      [selection.assetId]: selection.variantId,
+    }
+    return
+  }
+  draft.selectedAssetIds = draft.selectedAssetIds.filter(id => id !== selection.assetId)
+  const nextSelections = { ...draft.selectedVariantIds }
+  delete nextSelections[selection.assetId]
+  draft.selectedVariantIds = nextSelections
+}
+
+function replaceAssetSelection(scene: Scene, replaceAssetId: number, selection: SceneAssetVariantSelection) {
+  const draft = draftFor(scene)
+  const replacement = replaceSceneAssetSelection(draft, replaceAssetId, selection)
+  draft.selectedAssetIds = replacement.selectedAssetIds
+  draft.selectedVariantIds = replacement.selectedVariantIds
+}
+
+function handleAssetPickerSelection(scene: Scene, type: number, selection: SceneAssetVariantSelection) {
+  const key = assetPickerKey(scene, type)
+  const replaceAssetId = assetPickerReplaceAssetIds.value[key]
+  if (!replaceAssetId) {
+    updateAssetSelection(scene, selection)
+    return
+  }
+  replaceAssetSelection(scene, replaceAssetId, selection)
+  closeAssetPicker(key)
+}
+
+function selectedVariantFor(scene: Scene, asset: Asset) {
+  const draft = draftFor(scene)
+  if (Object.prototype.hasOwnProperty.call(draft.selectedVariantIds, asset.id)) {
+    const variantId = draft.selectedVariantIds[asset.id]
+    return variantId === null ? null : asset.variants?.find(variant => variant.id === variantId) || null
+  }
+  const chapterNumber = activeChapter.value?.number
+  const matching = (asset.variants || []).filter(variant => chapterNumber && variant.chapter_numbers?.includes(chapterNumber))
+  return matching.reduce((latest, variant) => !latest || variant.id > latest.id ? variant : latest, null as NonNullable<Asset['variants']>[number] | null)
+}
+
+function selectedAssetLabel(scene: Scene, asset: Asset) {
+  const variant = selectedVariantFor(scene, asset)
+  return variant ? `${asset.canonical_name} · ${variant.name}` : asset.canonical_name
+}
+
+function selectedAssetImage(scene: Scene, asset: Asset) {
+  const variant = selectedVariantFor(scene, asset)
+  return variant?.images[0] || asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
 }
 
 async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
@@ -232,7 +429,7 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   videos.value = result.videos
   activeSceneId.value = result.scenes[0]?.id || 0
   initializeSceneDrafts(result.scenes)
-  void nextTick(setupSceneObserver)
+  void nextTick(setupSceneTracking)
 }
 
 async function createManualScene(chapterId = activeChapterId.value) {
@@ -241,7 +438,7 @@ async function createManualScene(chapterId = activeChapterId.value) {
   const created = (await api.createScene({
     chapter_id: chapterId,
     sequence: 1,
-    description: chapter.name || '新分镜',
+    description: stripChapterOrdinal(chapter.name) || '新分镜',
     prompt: '',
     duration: 6,
   })).data
@@ -250,7 +447,7 @@ async function createManualScene(chapterId = activeChapterId.value) {
   activeSceneId.value = created.id
   videos.value[created.id] = []
   initializeSceneDrafts([created])
-  void nextTick(setupSceneObserver)
+  void nextTick(setupSceneTracking)
 }
 
 async function generateChapterStoryboard(chapterId: number) {
@@ -339,11 +536,10 @@ async function loadChapter(chapterId: number) {
 async function load() {
   loading.value = true
   try {
-    const [novelResponse, chapterResponse, configResponse, enumResponse] = await Promise.all([
+    const [novelResponse, chapterResponse, videoModelResponse] = await Promise.all([
       api.novel(projectId.value),
       api.chapters(projectId.value),
-      api.configs(),
-      api.enums(),
+      api.videoGenerationModels(),
     ])
     const settings = readShortDramaSettings(novelResponse.data)
     project.value = {
@@ -354,8 +550,10 @@ async function load() {
       creationMode: novelResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     chapters.value = chapterResponse.data.items
-    configs.value = configResponse.data.items
-    videoModelTypes.value = enumResponse.data.video_model_type || []
+    videoModels.value = videoModelResponse.data
+    if (!videoModels.value.some(item => String(item.config_id) === selectedVideoModel.value)) {
+      selectedVideoModel.value = String(videoModels.value[0]?.config_id || '')
+    }
     const preferredChapter = Number(route.query.chapter)
     const firstChapter = chapters.value.find(item => item.id === preferredChapter) ?? chapters.value[0]
     if (firstChapter) {
@@ -373,27 +571,90 @@ async function load() {
   }
 }
 
+function sceneViewportAnchor() {
+  const fixedHeaderHeight = document.querySelector<HTMLElement>('.short-drama-workspace-header')?.getBoundingClientRect().height || 72
+  return Math.ceil(fixedHeaderHeight + chapterToolbarHeight.value + 12)
+}
+
+function syncActiveSceneFromViewport() {
+  if (programmaticSceneId) return
+  const elements = [...document.querySelectorAll<HTMLElement>('[data-scene-id]')]
+  if (!elements.length) return
+  const container = sceneScrollContainer
+  if (container && container.scrollTop + container.clientHeight >= container.scrollHeight - 2) {
+    activeSceneId.value = Number(elements.at(-1)?.dataset.sceneId) || activeSceneId.value
+    return
+  }
+  const anchor = sceneViewportAnchor()
+  let active = elements[0]
+  for (const element of elements) {
+    if (element.getBoundingClientRect().top > anchor) break
+    active = element
+  }
+  activeSceneId.value = Number(active?.dataset.sceneId) || activeSceneId.value
+}
+
+function scheduleProgrammaticSceneUnlock(delay: number) {
+  if (sceneScrollUnlockTimer) clearTimeout(sceneScrollUnlockTimer)
+  sceneScrollUnlockTimer = setTimeout(() => {
+    programmaticSceneId = 0
+    syncActiveSceneFromViewport()
+  }, delay)
+}
+
+function handleSceneScroll() {
+  if (programmaticSceneId) {
+    scheduleProgrammaticSceneUnlock(180)
+    return
+  }
+  if (sceneScrollFrame) return
+  sceneScrollFrame = requestAnimationFrame(() => {
+    sceneScrollFrame = 0
+    syncActiveSceneFromViewport()
+  })
+}
+
 function selectScene(scene: Scene) {
+  programmaticSceneId = scene.id
   activeSceneId.value = scene.id
   document.getElementById(`scene-${scene.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  scheduleProgrammaticSceneUnlock(700)
 }
 
-function setupSceneObserver() {
-  sceneObserver?.disconnect()
-  if (typeof IntersectionObserver === 'undefined') return
-  sceneObserver = new IntersectionObserver((entries) => {
-    const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
-    const sceneId = Number((visible?.target as HTMLElement | undefined)?.dataset.sceneId)
-    if (sceneId) activeSceneId.value = sceneId
-  }, { rootMargin: '-84px 0px -42% 0px', threshold: [0.08, 0.25, 0.5, 0.75] })
-  document.querySelectorAll<HTMLElement>('[data-scene-id]').forEach(element => sceneObserver?.observe(element))
+function selectSceneById(sceneId: number) {
+  const scene = scenes.value.find(item => item.id === sceneId)
+  if (scene) selectScene(scene)
 }
 
-function toggleAsset(scene: Scene, assetId: number) {
-  const draft = draftFor(scene)
-  draft.selectedAssetIds = draft.selectedAssetIds.includes(assetId)
-    ? draft.selectedAssetIds.filter(id => id !== assetId)
-    : [...draft.selectedAssetIds, assetId]
+function setupChapterToolbarObserver() {
+  chapterToolbarObserver?.disconnect()
+  const toolbar = document.querySelector<HTMLElement>('.chapter-toolbar')
+  if (!toolbar) return
+  const syncHeight = () => {
+    chapterToolbarHeight.value = Math.max(1, Math.ceil(toolbar.getBoundingClientRect().height))
+  }
+  syncHeight()
+  if (typeof ResizeObserver !== 'undefined') {
+    chapterToolbarObserver = new ResizeObserver(syncHeight)
+    chapterToolbarObserver.observe(toolbar)
+  }
+}
+
+async function selectChapter(chapter: Chapter) {
+  if (chapter.id === activeChapterId.value) return
+  await router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
+  await loadChapter(chapter.id)
+}
+
+function setupSceneTracking() {
+  setupChapterToolbarObserver()
+  const nextContainer = document.querySelector<HTMLElement>('.app-content')
+  if (sceneScrollContainer !== nextContainer) {
+    sceneScrollContainer?.removeEventListener('scroll', handleSceneScroll)
+    sceneScrollContainer = nextContainer
+    sceneScrollContainer?.addEventListener('scroll', handleSceneScroll, { passive: true })
+  }
+  syncActiveSceneFromViewport()
 }
 
 async function saveScene(scene: Scene, showNotice = true) {
@@ -410,6 +671,7 @@ async function saveScene(scene: Scene, showNotice = true) {
         video_generation_mode: draft.videoGenerationMode,
         first_frame_url: draft.firstFrameUrl || undefined,
         last_frame_url: draft.lastFrameUrl || undefined,
+        asset_variant_ids: draft.selectedVariantIds,
       },
     })).data
     scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
@@ -421,23 +683,22 @@ async function saveScene(scene: Scene, showNotice = true) {
   }
 }
 
-async function addScene() {
-  if (!activeChapter.value) return
+async function insertSceneAfter(scene: Scene) {
+  if (!scene || !activeChapter.value) return
   try {
-    const created = (await api.createScene({
-      chapter_id: activeChapter.value.id,
-      sequence: Math.max(0, ...scenes.value.map(item => item.sequence)) + 1,
-      description: '新分镜',
-      prompt: '',
-      duration: 6,
-    })).data
-    scenes.value.push(created)
+    const created = (await api.insertSceneAfter(scene.id)).data
+    const insertIndex = scenes.value.findIndex(item => item.id === scene.id) + 1
+    scenes.value = [
+      ...scenes.value.slice(0, insertIndex),
+      created,
+      ...scenes.value.slice(insertIndex).map(item => ({ ...item, sequence: item.sequence + 1 })),
+    ]
     videos.value[created.id] = []
     sceneDrafts.value[created.id] = makeSceneDraft(created)
     await nextTick()
-    setupSceneObserver()
+    setupSceneTracking()
     selectScene(created)
-    notice.success('已添加分镜')
+    notice.success(`已在分镜 ${scene.sequence} 下方添加新分镜`)
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -454,12 +715,19 @@ async function duplicateScene(scene: Scene) {
       prompt: draft.prompt,
       duration: draft.duration,
       asset_ids: draft.selectedAssetIds,
+      metadata: {
+        ...(scene.metadata || {}),
+        asset_variant_ids: draft.selectedVariantIds,
+        video_generation_mode: draft.videoGenerationMode,
+        first_frame_url: draft.firstFrameUrl || undefined,
+        last_frame_url: draft.lastFrameUrl || undefined,
+      },
     })).data
     scenes.value.push(created)
     videos.value[created.id] = []
     sceneDrafts.value[created.id] = makeSceneDraft(created)
     await nextTick()
-    setupSceneObserver()
+    setupSceneTracking()
     selectScene(created)
     notice.success('分镜已复制')
   } catch (error) {
@@ -481,7 +749,7 @@ async function removeScene(scene: Scene) {
     const next = scenes.value.find(item => item.sequence > scene.sequence) ?? scenes.value.at(-1)
     activeSceneId.value = next?.id || 0
     await nextTick()
-    setupSceneObserver()
+    setupSceneTracking()
     if (next) selectScene(next)
     notice.success('分镜已删除')
   } catch (error) {
@@ -489,8 +757,14 @@ async function removeScene(scene: Scene) {
   }
 }
 
-async function generateVideo(scene: Scene) {
+async function generateVideo(scene: Scene, showNotice = true): Promise<boolean> {
   const draft = draftFor(scene)
+  const selectedModel = selectedVideoModelConfig.value
+  if (!selectedModel) {
+    if (showNotice) notice.error('请先在设置中启用一个视频模型')
+    return false
+  }
+  if (generatingVideoSceneIds.value.has(scene.id)) return false
   setSceneBusy(generatingVideoSceneIds, scene.id, true)
   try {
     await saveScene(scene, false)
@@ -498,6 +772,14 @@ async function generateVideo(scene: Scene) {
       generation_mode: draft.videoGenerationMode,
       first_frame_url: draft.firstFrameUrl || undefined,
       last_frame_url: draft.lastFrameUrl || undefined,
+      duration: Math.max(
+        selectedModel.capabilities.duration_min,
+        Math.min(selectedModel.capabilities.duration_max, Math.round(draft.duration)),
+      ),
+      resolution: modelResolution(selectedModel),
+      aspect_ratio: modelAspectRatio(selectedModel, draft.videoGenerationMode),
+      output_format: selectedModel.capabilities.default_output_format,
+      generate_audio: selectedModel.capabilities.default_generate_audio,
     })).data
     videos.value[scene.id] = [result, ...(videos.value[scene.id] || [])]
     while (alive && !terminalTaskStatuses.has(result.status)) {
@@ -505,25 +787,78 @@ async function generateVideo(scene: Scene) {
       result = (await api.queryVideo(result.id)).data
       videos.value[scene.id] = videos.value[scene.id].map(item => item.id === result.id ? result : item)
     }
-    if (!alive) return
-    result.status === TaskStatusEnum.COMPLETED
-      ? notice.success('分镜视频生成完成')
-      : notice.error(String(result.metadata?.error || '视频生成失败'))
+    if (!alive) return false
+    const completed = result.status === TaskStatusEnum.COMPLETED
+    if (showNotice) {
+      completed
+        ? notice.success('分镜视频生成完成')
+        : notice.error(String(result.metadata?.error || '视频生成失败'))
+    }
+    return completed
   } catch (error) {
-    notice.error((error as Error).message)
+    if (showNotice) notice.error((error as Error).message)
+    return false
   } finally {
     setSceneBusy(generatingVideoSceneIds, scene.id, false)
   }
 }
 
-function selectPhase(label: string) {
-  const query = activeChapterId.value ? { chapter: String(activeChapterId.value) } : undefined
-  if (label === '剧本' && isAgent.value) void router.push({ path: `/create/short-drama/agent/${projectId.value}`, query })
-  if (label === '设定') void router.push({ path: `/create/short-drama/manual/${projectId.value}`, query })
+function batchVideoDisabledReason(scene: Scene) {
+  const draft = draftFor(scene)
+  const video = selectedVideoFor(scene)
+  const model = selectedVideoModelConfig.value
+  if (video?.status === TaskStatusEnum.COMPLETED) return '已完成'
+  if (generatingVideoSceneIds.value.has(scene.id)) return '正在生成'
+  if (!model) return '未配置视频模型'
+  if (!model.capabilities.generation_modes.includes(draft.videoGenerationMode)) return '当前模型不支持该生成方式'
+  if (!draft.prompt.trim()) return '提示词不完整'
+  if (draft.videoGenerationMode === 'keyframes' && (!draft.firstFrameUrl || !draft.lastFrameUrl)) return '请先补全首尾帧'
+  return ''
 }
 
-function returnToProjects() {
-  void router.push('/projects')
+function openBatchVideoDialog() {
+  const model = selectedVideoModelConfig.value
+  if (!model || batchGeneratingVideos.value) {
+    if (!model) notice.error('请先在设置中启用一个视频模型')
+    return
+  }
+  if (!batchVideoSceneOptions.value.some(scene => !scene.disabled)) {
+    notice.info('当前没有需要批量生成的视频')
+    return
+  }
+  batchVideoDialogOpen.value = true
+}
+
+async function batchGenerateVideos(sceneIds: number[]) {
+  const model = selectedVideoModelConfig.value
+  if (!model || batchGeneratingVideos.value) return
+  const selectedIdSet = new Set(sceneIds)
+  const targets = scenes.value.filter(scene => selectedIdSet.has(scene.id) && !batchVideoDisabledReason(scene))
+  if (!targets.length) {
+    notice.info('所选分镜当前无法生成视频')
+    return
+  }
+
+  batchVideoDialogOpen.value = false
+  batchGeneratingVideos.value = true
+  let nextIndex = 0
+  let completedCount = 0
+  const workerCount = Math.max(1, Math.min(model.concurrency, targets.length))
+  const worker = async () => {
+    while (nextIndex < targets.length) {
+      const scene = targets[nextIndex++]
+      if (scene && await generateVideo(scene, false)) completedCount += 1
+    }
+  }
+  try {
+    await Promise.all(Array.from({ length: workerCount }, worker))
+    const failedCount = targets.length - completedCount
+    failedCount
+      ? notice.error(`批量生成完成：成功 ${completedCount} 条，失败 ${failedCount} 条`)
+      : notice.success(`批量生成完成：成功 ${completedCount} 条`)
+  } finally {
+    batchGeneratingVideos.value = false
+  }
 }
 
 function selectWorkspaceView(view: 'workflow' | 'storyboard') {
@@ -550,48 +885,64 @@ async function renameCanvas(name: string) {
 }
 
 onMounted(load)
+onMounted(() => {
+  window.addEventListener('pointerdown', closeAssetActionsFromOutside)
+  window.addEventListener('keydown', closeAssetActionsFromEscape)
+})
 onBeforeUnmount(() => {
   alive = false
-  sceneObserver?.disconnect()
+  chapterToolbarObserver?.disconnect()
+  sceneScrollContainer?.removeEventListener('scroll', handleSceneScroll)
+  if (sceneScrollFrame) cancelAnimationFrame(sceneScrollFrame)
+  if (sceneScrollUnlockTimer) clearTimeout(sceneScrollUnlockTimer)
+  window.removeEventListener('pointerdown', closeAssetActionsFromOutside)
+  window.removeEventListener('keydown', closeAssetActionsFromEscape)
 })
 </script>
 
 <template>
   <main class="storyboard-page" :class="{ 'is-workflow-view': workspaceView === 'workflow' }">
-    <header class="storyboard-topbar">
-      <div class="project-heading">
-        <AppButton :class="{ 'workbench-exit': workspaceView === 'workflow' }" variant="ghost" size="sm" icon-only :aria-label="workspaceView === 'workflow' ? '返回进入页' : '返回项目'" :title="workspaceView === 'workflow' ? '返回进入页' : '返回项目'" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
-        <div v-if="workspaceView === 'storyboard'"><strong>{{ project?.name || '短剧项目' }}</strong><span><Film :size="13" />{{ project?.aspectRatio || '9:16' }}<i />{{ project?.resolution || '720p' }}<i />{{ project?.style || '写实通用' }}</span></div>
-        <WorkbenchCanvasIdentity v-else-if="activeChapter" :name="activeChapter.name" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
-      </div>
-      <nav v-if="workspaceView === 'storyboard'" class="phase-nav" aria-label="短剧制作流程">
-        <template v-for="(phase, index) in phaseItems" :key="phase.label">
-          <span v-if="index" />
-          <AppButton variant="soft" size="sm" :active="phase.active" :aria-current="phase.active ? 'step' : undefined" @click="selectPhase(phase.label)"><component :is="phase.icon" :size="16" />{{ phase.label }}</AppButton>
-        </template>
-      </nav>
-      <nav class="workspace-view-switch" aria-label="工作区视图切换">
-        <AppButton variant="ghost" size="sm" :active="workspaceView === 'workflow'" :aria-pressed="workspaceView === 'workflow'" @click="selectWorkspaceView('workflow')"><Workflow :size="14" />工作流</AppButton>
-        <AppButton variant="ghost" size="sm" :active="workspaceView === 'storyboard'" :aria-pressed="workspaceView === 'storyboard'" @click="selectWorkspaceView('storyboard')"><PanelsTopLeft :size="14" />故事板</AppButton>
-      </nav>
-    </header>
+    <ShortDramaWorkspaceShell
+      :project-id="projectId"
+      :project-name="project?.name || '短剧项目'"
+      :aspect-ratio="project?.aspectRatio || '9:16'"
+      :resolution="project?.resolution || '720p'"
+      :style-name="project?.style || '写实通用'"
+      active-phase="storyboard"
+      :creation-mode="project?.creationMode || 'agent'"
+      :chapters="chapters"
+      :active-chapter-id="activeChapterId"
+      :show-episode-rail="workspaceView === 'storyboard'"
+      :show-project-meta="workspaceView === 'storyboard'"
+      :immersive="workspaceView === 'workflow'"
+      @select-chapter="selectChapter"
+    >
+      <template v-if="workspaceView === 'workflow' && activeChapter" #project-name>
+        <WorkbenchCanvasIdentity :name="stripChapterOrdinal(activeChapter.name) || '未命名'" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
+      </template>
+      <template #header-end>
+        <nav class="workspace-view-switch" aria-label="工作区视图切换">
+          <AppButton variant="ghost" size="sm" :active="workspaceView === 'workflow'" :aria-pressed="workspaceView === 'workflow'" @click="selectWorkspaceView('workflow')"><Workflow :size="14" />工作流</AppButton>
+          <AppButton variant="ghost" size="sm" :active="workspaceView === 'storyboard'" :aria-pressed="workspaceView === 'storyboard'" @click="selectWorkspaceView('storyboard')"><PanelsTopLeft :size="14" />故事板</AppButton>
+        </nav>
+      </template>
 
-    <div class="storyboard-shell">
-      <aside v-if="workspaceView === 'storyboard'" class="shot-rail">
-        <strong>分镜</strong>
-        <AppScrollArea class="scene-list" aria-label="本集分镜列表">
-          <AppButton v-for="scene in scenes" :key="scene.id" variant="soft" size="sm" icon-only :active="activeSceneId === scene.id" :aria-label="`分镜 ${scene.sequence}`" @click="selectScene(scene)">{{ scene.sequence }}</AppButton>
-          <AppButton v-if="!loading && !generatingStoryboard" variant="ghost" size="sm" icon-only aria-label="添加分镜" @click="addScene"><Plus :size="16" /></AppButton>
-        </AppScrollArea>
-      </aside>
+      <div class="storyboard-shell">
 
       <section class="storyboard-main" :class="{ 'is-workflow-view': workspaceView === 'workflow' }">
+        <ShortDramaSceneStatusRail
+          v-if="workspaceView === 'storyboard'"
+          :items="sceneStatusItems"
+          :active-scene-id="activeSceneId"
+          :style="{ '--short-drama-scene-status-offset': `${chapterToolbarHeight}px` }"
+          @select="selectSceneById"
+        />
         <header v-if="workspaceView === 'storyboard'" class="chapter-toolbar">
-          <div><span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span><h1>第 {{ activeChapter?.number || '-' }} 集 · {{ activeChapter?.name || '分镜制作' }}</h1><p>{{ activeChapter?.content?.slice(0, 120) }}</p></div>
+          <div><span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span><h1>{{ activeChapter ? episodeDisplayLabel(activeChapter) : '分镜制作' }}</h1><p>{{ activeChapter?.content?.slice(0, 120) }}</p></div>
           <div class="chapter-actions">
-            <AppSelect v-model="selectedVideoModel" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" align="end" />
+            <AppSelect v-model="selectedVideoModel" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
-            <AppButton variant="primary" size="sm" @click="addScene"><Plus :size="15" />添加分镜</AppButton>
+            <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? '批量生成中' : '批量生视频' }}</AppButton>
           </div>
         </header>
 
@@ -610,7 +961,11 @@ onBeforeUnmount(() => {
                   <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')"><span class="mode-dot" />首尾帧生视频</AppButton>
                 </nav>
               </div>
-              <div><AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton><AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton></div>
+              <div>
+                <AppButton variant="ghost" size="sm" icon-only :aria-label="`在分镜 ${scene.sequence} 下方添加分镜`" title="在下方添加分镜" @click="insertSceneAfter(scene)"><Plus :size="15" /></AppButton>
+                <AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" title="复制分镜" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton>
+                <AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" title="删除分镜" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton>
+              </div>
             </header>
 
             <div class="shot-editor-grid">
@@ -618,19 +973,53 @@ onBeforeUnmount(() => {
                 <h2>分镜信息</h2>
                 <label><span>分镜描述</span><textarea v-model="draftFor(scene).description" rows="5" placeholder="请输入分镜描述" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
-                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.length }}</small><AppButton variant="ghost" size="sm" icon-only :aria-label="`选择${group.label}`" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
-                  <div v-if="selectedAssetsFor(scene, group).length" class="selected-assets" :class="{ 'is-scene-assets': group.type === AssetTypeEnum.SCENE }">
+                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.length }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="`选择${group.label}及衍生状态`" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
+                  <div
+                    v-if="selectedAssetsFor(scene, group).length"
+                    class="selected-assets"
+                    :class="{
+                      'is-person-assets': group.type === AssetTypeEnum.PERSON,
+                      'is-scene-assets': group.type === AssetTypeEnum.SCENE,
+                      'is-prop-assets': group.type === AssetTypeEnum.ITEM,
+                    }"
+                  >
                     <article v-for="asset in selectedAssetsFor(scene, group)" :key="asset.id" class="selected-asset-row">
-                      <span class="asset-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="16" /></span>
-                      <AppButton variant="soft" size="sm" class="asset-name-button"><span>{{ asset.canonical_name }}</span></AppButton>
+                      <span class="asset-thumb"><img v-if="selectedAssetImage(scene, asset)" :src="selectedAssetImage(scene, asset)" :alt="selectedAssetLabel(scene, asset)" /><component v-else :is="group.icon" :size="16" /></span>
+                      <AppButton
+                        :id="assetRowPickerAnchorId(scene, asset)"
+                        variant="soft"
+                        size="sm"
+                        class="asset-name-button"
+                        :active="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id"
+                        :aria-expanded="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id"
+                        :aria-label="`替换${selectedAssetLabel(scene, asset)}`"
+                        :title="`替换${selectedAssetLabel(scene, asset)}`"
+                        @click="toggleAssetReplacementPicker(scene, group.type, asset)"
+                      ><span>{{ selectedAssetLabel(scene, asset) }}</span></AppButton>
                       <AppButton v-if="group.type === AssetTypeEnum.PERSON" variant="soft" size="sm" class="asset-voice-button"><Volume2 :size="13" /><span>未配置音色</span></AppButton>
-                      <AppButton variant="ghost" size="sm" icon-only aria-label="管理资产" @click="toggleAssetPicker(scene, group.type)"><Ellipsis :size="15" /></AppButton>
+                      <SceneAssetActionMenu
+                        :open="openAssetActionKey === assetActionKey(scene, asset)"
+                        :label="asset.canonical_name"
+                        @toggle="toggleAssetActionMenu(scene, asset)"
+                        @edit="editSceneAsset(asset)"
+                        @remove="removeAssetFromScene(scene, asset)"
+                      />
                     </article>
                   </div>
                   <p v-else>暂未选择{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
-                  <div v-if="openAssetPickers.has(assetPickerKey(scene, group.type))" class="asset-picker">
-                    <AppButton v-for="asset in group.items" :key="asset.id" variant="ghost" size="sm" :active="draftFor(scene).selectedAssetIds.includes(asset.id)" :aria-pressed="draftFor(scene).selectedAssetIds.includes(asset.id)" @click="toggleAsset(scene, asset.id)"><span class="asset-picker-thumb"><img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" /><component v-else :is="group.icon" :size="14" /></span><span>{{ asset.canonical_name }}</span><Check v-if="draftFor(scene).selectedAssetIds.includes(asset.id)" :size="13" /></AppButton>
-                  </div>
+                  <SceneAssetVariantPicker
+                    :open="openAssetPickerKey === assetPickerKey(scene, group.type)"
+                    :anchor-id="assetPickerAnchorId(scene, group.type)"
+                    :label="group.label"
+                    :assets="group.items"
+                    :selected-asset-ids="draftFor(scene).selectedAssetIds"
+                    :selected-variant-ids="draftFor(scene).selectedVariantIds"
+                    :initial-asset-id="assetPickerFocusIds[assetPickerKey(scene, group.type)] || 0"
+                    :selection-mode="assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] ? 'replace' : 'add'"
+                    :placement="assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] ? 'below' : 'auto'"
+                    @close="closeAssetPicker(assetPickerKey(scene, group.type))"
+                    @select="handleAssetPickerSelection(scene, group.type, $event)"
+                  />
                 </section>
               </aside>
 
@@ -644,7 +1033,7 @@ onBeforeUnmount(() => {
                 <div class="prompt-reference-bar"><AppButton variant="soft" size="sm" icon-only aria-label="添加参考素材"><Plus :size="14" /></AppButton><span>使用 @ 引用角色、场景、道具、音色及参考素材，编辑更灵活，分镜更精准</span></div>
                 <textarea v-model="draftFor(scene).prompt" placeholder="请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。" />
                 <footer>
-                  <div><AppSelect v-model="selectedVideoModel" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" /><span><Clock3 :size="14" /><input v-model.number="draftFor(scene).duration" type="number" min="1" max="30" />s</span><span>{{ project?.resolution || '720p' }}</span><span>1x</span></div>
+                  <div><AppSelect v-model="selectedVideoModel" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" /><span><Clock3 :size="14" /><input v-model.number="draftFor(scene).duration" type="number" :min="selectedVideoModelConfig?.capabilities.duration_min || 4" :max="selectedVideoModelConfig?.capabilities.duration_max || 30" />s</span><span>{{ modelResolution(selectedVideoModelConfig) }}</span><span>1x</span></div>
                   <AppButton variant="primary" size="md" :aria-label="`生成视频，预计消耗 ${draftFor(scene).duration * 150}`" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : draftFor(scene).duration * 150 }}</AppButton>
                 </footer>
               </section>
@@ -662,43 +1051,41 @@ onBeforeUnmount(() => {
           </article>
         </div>
       </section>
-    </div>
+      </div>
+    </ShortDramaWorkspaceShell>
+    <ShortDramaBatchVideoDialog
+      :open="batchVideoDialogOpen"
+      :scenes="batchVideoSceneOptions"
+      @close="batchVideoDialogOpen = false"
+      @generate="batchGenerateVideos"
+    />
+    <AssetCreateDialog
+      :open="Boolean(editingAsset)"
+      :kind="editingAssetKind(editingAsset)"
+      :novel-id="projectId"
+      :asset="editingAsset"
+      @close="closeAssetEditor"
+      @saved="saveEditedAsset"
+      @regenerate="regenerateEditedAsset"
+    />
   </main>
 </template>
 
 <style scoped>
-.storyboard-page { min-width: 0; min-height: 100%; overflow-x: hidden; color: #303442; background: #f7f8fb; }
+.storyboard-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f7f8fb; }
 .storyboard-page.is-workflow-view { height: 100vh; overflow: hidden; }
-.storyboard-topbar { position: sticky; top: 0; z-index: 30; display: grid; min-height: 64px; grid-template-columns: minmax(280px,1fr) auto minmax(280px,1fr); align-items: center; padding: 5px 18px; background: rgb(255 255 255 / 97%); box-shadow: 0 1px 0 #eceef3; backdrop-filter: blur(16px); }
-.storyboard-page.is-workflow-view .storyboard-topbar { position: fixed; right: 0; left: 0; min-height: 0; grid-template-columns: 1fr auto; padding: 14px 18px; pointer-events: none; background: transparent; box-shadow: none; backdrop-filter: none; }
-.project-heading { display: flex; min-width: 0; align-items: center; gap: 12px; }
-.storyboard-page.is-workflow-view .project-heading { pointer-events: none; }
-.storyboard-page.is-workflow-view .project-heading > button { pointer-events: auto; color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631, 0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
-.storyboard-page.is-workflow-view .project-heading > button:hover { color: #fff; background: #2a2622; }
-.storyboard-page.is-workflow-view .project-heading > :deep(.workbench-canvas-identity) { pointer-events: auto; }
-.project-heading > div { display: grid; min-width: 0; gap: 5px; }
-.project-heading strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.project-heading span { display: flex; align-items: center; gap: 7px; color: #9298a8; font-size: 10px; }
-.project-heading i { width: 1px; height: 10px; background: #dfe2e9; }
-.phase-nav { grid-column: 2; display: flex; align-items: center; }
-.phase-nav > span { width: 18px; height: 1px; background: #e2e4eb; }
-.phase-nav button { display: flex; width: 64px; min-height: 50px; flex-direction: column; gap: 3px; border-radius: 16px; color: #858b9a; background: #fff; font-size: 10px; }
-.phase-nav button.is-active { color: #5b5cf6; background: #f0f0ff; box-shadow: 0 8px 22px rgb(91 92 246 / 11%); }
-.storyboard-shell { min-height: calc(100vh - 64px); }
+.storyboard-shell { min-height: calc(100vh - 72px); }
 .storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
-.shot-rail { position: fixed; top: 64px; bottom: 0; left: 0; z-index: 24; display: grid; width: 48px; align-content: start; justify-items: center; gap: 10px; padding: 14px 5px; background: #fff; box-shadow: 1px 0 0 #eceef3; }
-.shot-rail > strong { color: #777d8d; font-size: 11px; }
-.scene-list { display: grid; width: 100%; max-height: calc(100vh - 112px); justify-items: center; gap: 8px; padding: 2px 2px 12px; }
-.shot-rail button { width: 34px; min-height: 34px; border-radius: 8px; }
-.storyboard-main { min-width: 0; margin-left: 48px; padding: 16px 16px 42px; }
-.storyboard-main.is-workflow-view { height: 100%; margin-left: 0; padding: 0; }
-.chapter-toolbar { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.storyboard-main { min-width: 0; padding: 16px 16px 42px; }
+.storyboard-main.is-workflow-view { height: 100%; padding: 0; }
+.chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: #f7f8fb; }
 .chapter-toolbar > div:first-child { min-width: 0; }
 .chapter-toolbar > div:first-child > span { color: #8c91a0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
 .chapter-toolbar > div:first-child > span.is-agent { color: #6163ef; }
 .chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; }
 .chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: #898f9e; font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
-.chapter-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.chapter-actions { display: flex; flex: 0 0 auto; align-self: center; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.chapter-model-select { width: 300px; min-width: 300px; }
 .video-model-select { width: 148px; min-width: 148px; }
 .workspace-view-switch { grid-column: 3; display: flex; justify-self: end; align-items: center; gap: 3px; padding: 3px; border-radius: 11px; background: #f1f2f7; box-shadow: inset 0 0 0 1px #e5e7ef; }
 .workspace-view-switch button { min-height: 32px; gap: 6px; padding-inline: 11px; border-radius: 8px; color: #777d8d; background: transparent; box-shadow: none; font-size: 11px; }
@@ -718,7 +1105,7 @@ onBeforeUnmount(() => {
 .storyboard-state.is-error svg { color: #bf6470; animation: none; }
 .storyboard-state button { margin-top: 8px; }
 .shot-editor-list { display: grid; gap: 12px; }
-.shot-editor { overflow: hidden; scroll-margin-top: 78px; border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px #e9ebf2; }
+.shot-editor { overflow: hidden; scroll-margin-top: calc(var(--short-drama-header-height,72px) + 116px); border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px #e9ebf2; }
 .shot-editor.is-active { box-shadow: inset 0 0 0 1px #dfe1f5; }
 .shot-editor-header { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 12px; background: #fbfbfd; }
 .shot-editor-header > div { display: flex; align-items: center; gap: 7px; }
@@ -745,13 +1132,15 @@ onBeforeUnmount(() => {
 .shot-assets > header small { color: #9a9fac; font-weight: 400; }
 .shot-assets > header button { width: 26px; min-height: 26px; padding: 0; }
 .selected-assets { display: grid; gap: 7px; }
-.selected-asset-row { display: grid; grid-template-columns: 38px minmax(0,1fr) 116px 30px; align-items: center; gap: 6px; }
+.selected-asset-row { display: grid; min-width: 0; grid-template-columns: 38px minmax(0,1fr) 30px; align-items: center; gap: 6px; }
+.selected-assets.is-person-assets .selected-asset-row { grid-template-columns: 38px minmax(0,1fr) 116px 30px; }
 .selected-asset-row > button { min-width: 0; justify-content: flex-start; }
 .selected-asset-row .asset-name-button { padding-inline: 9px; color: #4c5261; background: #fff; box-shadow: inset 0 0 0 1px #e0e3eb; }
 .selected-asset-row .asset-name-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-asset-row .asset-voice-button { color: #a0a5b2; background: #fafbfc; box-shadow: inset 0 0 0 1px #eceef3; font-size: 9px; }
-.selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: 1fr 30px; align-items: end; }
-.selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 180px; height: 108px; border-radius: 10px; }
+.selected-assets.is-scene-assets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: minmax(0,1fr) 30px; align-items: end; }
+.selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 10px; }
 .selected-assets.is-scene-assets .asset-name-button { grid-column: 1; }
 .asset-thumb { display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; }
 .asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -801,7 +1190,7 @@ onBeforeUnmount(() => {
 .preview-clip small { position: absolute; right: 1px; bottom: 1px; left: 1px; padding: 2px; border-radius: 0 0 5px 5px; color: #fff; background: #6264ef; font-size: 7px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@media (max-width: 820px) { .storyboard-topbar { position: static; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 14px; }.storyboard-page.is-workflow-view .storyboard-topbar { position: fixed; padding: 12px 14px; }.phase-nav { grid-column: 1 / -1; grid-row: 2; justify-content: center; }.workspace-view-switch { grid-column: 2; grid-row: 1; flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.shot-rail { top: 126px; bottom: auto; z-index: 20; display: flex; width: 100%; height: 56px; align-items: center; justify-items: initial; padding: 9px 14px; overflow: hidden; }.shot-rail > .scene-list { display: flex; max-height: none; justify-items: initial; overflow-x: auto; overflow-y: hidden; padding: 0; }.storyboard-main { margin-left: 0; padding: 74px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { flex-direction: column; }.chapter-actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }.workflow-canvas-shell { min-height: 520px; }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
-@media (max-width: 520px) { .phase-nav button { width: 54px; }.phase-nav > span { width: 7px; }.chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
+@media (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-actions { width: 100%; justify-content: flex-end; overflow-x: auto; padding-bottom: 4px; }.chapter-model-select { width: min(300px,70vw); min-width: min(300px,70vw); }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@media (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 </style>

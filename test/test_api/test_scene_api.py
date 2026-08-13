@@ -245,6 +245,26 @@ async def test_api_delete_scene(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_insert_scene_after_renumbers_following_scenes(client: AsyncClient):
+    novel = await Novel.create(name="Insert Scene Novel", author="Author")
+    chapter = await Chapter.create(
+        novel_id=novel.id, number=1, name="Ch1", content="Content"
+    )
+    first = await Scene.create(chapter_id=chapter.id, sequence=1, description="S1", prompt="p1")
+    second = await Scene.create(chapter_id=chapter.id, sequence=2, description="S2", prompt="p2")
+    third = await Scene.create(chapter_id=chapter.id, sequence=3, description="S3", prompt="p3")
+
+    response = await client.post(f"/api/scene/{first.id}/insert-after")
+
+    assert response.status_code == 200, response.text
+    created = response.json()["data"]
+    assert created["sequence"] == 2
+    ordered = await Scene.filter(chapter_id=chapter.id).order_by("sequence")
+    assert [scene.id for scene in ordered] == [first.id, created["id"], second.id, third.id]
+    assert [scene.sequence for scene in ordered] == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
 async def test_api_get_nonexistent_scene(client: AsyncClient):
     """查询不存在的分镜返回 404。"""
     response = await client.get("/api/scene/99999")

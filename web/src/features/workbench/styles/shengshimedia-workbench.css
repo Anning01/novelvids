@@ -531,7 +531,8 @@
   top: calc(100% + 5px);
   left: 0;
   display: grid;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   width: 100%;
   max-height: 220px;
   padding: 5px;
@@ -554,6 +555,7 @@
   justify-content: space-between;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   min-height: 34px;
   padding: 7px 9px;
   border: 0;

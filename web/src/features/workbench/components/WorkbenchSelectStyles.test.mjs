@@ -13,3 +13,13 @@ it.each([
   expect(hoverRule).not.toMatch(/\bbackground(?:-color)?\s*:/)
   expect(hoverRule).not.toMatch(/\bborder(?:-color)?\s*:/)
 })
+
+it.each([
+  ['workbench', workbenchStyles],
+  ['shengshimedia', shengshimediaStyles],
+])('prevents horizontal scrolling in the %s select menu', (_theme, styles) => {
+  const contentRule = styles.match(/\.workbench-select__content\s*\{([^}]*)\}/)?.[1] ?? ''
+
+  expect(contentRule).toMatch(/overflow-x:\s*hidden/)
+  expect(contentRule).toMatch(/overflow-y:\s*auto/)
+})

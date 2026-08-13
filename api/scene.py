@@ -24,6 +24,12 @@ async def create_scene(scene: SceneCreate):
     return ResponseSchema(data=task)
 
 
+@router.post("/{scene_id}/insert-after", summary="在指定分镜后添加分镜", response_model=ResponseSchema[SceneOut])
+async def insert_scene_after(scene_id: int):
+    scene = await scene_controller.insert_after(scene_id)
+    return ResponseSchema(data=scene)
+
+
 @router.put("/{scene_id}", summary="全量修改分镜", response_model=ResponseSchema[SceneOut])
 async def update_scene(scene_id: int, scene: SceneUpdate):
     scenes = await scene_controller.update(scene_id, scene)

@@ -7,6 +7,7 @@ from models.novel import Novel
 from models.chapter import Chapter
 from models.scene import Scene
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from models.video import Video
 from models.config import AiModelConfig
 from schemas.video import VideoGenerateRequest
@@ -24,7 +25,7 @@ from utils.enums import (
 
 async def _create_scene_with_config(
     prompt: str = "测试提示词",
-    model_name: str = "viduq2",
+    model_name: str = "seedance-2",
 ) -> tuple[Scene, AiModelConfig]:
     """创建完整的 Scene + AiModelConfig 测试数据。"""
     novel = await Novel.create(name="Video Test Novel", author="Author")
@@ -33,9 +34,11 @@ async def _create_scene_with_config(
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
         name=model_name,
-        base_url="https://mock.api.com/v2",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key="sk-test",
         model="mock-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
         is_active=True,
     )
     return scene, config
@@ -51,7 +54,7 @@ async def test_生成视频_提交成功():
     scene, config = await _create_scene_with_config()
     req = VideoGenerateRequest(
         scene_id=scene.id,
-        model_type=VideoModelTypeEnum.viduq2.value,
+        model_config_id=config.id,
     )
 
     with patch("controllers.video.get_generator") as mock_factory:
@@ -63,7 +66,9 @@ async def test_生成视频_提交成功():
 
     assert video.id is not None
     assert video.scene_id == scene.id
-    assert video.model_type == VideoModelTypeEnum.viduq2.value
+    assert video.model_type == VideoModelTypeEnum.seedance.value
+    assert video.metadata["model_config_id"] == config.id
+    assert video.metadata["video_model_type"] == "seedance_2"
     assert video.external_task_id == "ext-task-001"
     assert video.status == TaskStatusEnum.pending.value
     print(f"    生成视频成功: video_id={video.id}, task_id={video.external_task_id}")
@@ -74,7 +79,7 @@ async def test_生成视频_分镜不存在():
     """分镜ID不存在时报 404。"""
     req = VideoGenerateRequest(
         scene_id=99999,
-        model_type=VideoModelTypeEnum.viduq2.value,
+        model_config_id=1,
     )
     with pytest.raises(HTTPException) as exc_info:
         await video_controller.generate(req)
@@ -84,20 +89,20 @@ async def test_生成视频_分镜不存在():
 
 
 @pytest.mark.asyncio
-async def test_生成视频_无配置报404():
-    """未配置视频模型时报 404。"""
+async def test_生成视频_未选择可用配置报400():
+    """提交不存在或未启用的视频配置时报 400。"""
     novel = await Novel.create(name="No Config Novel", author="Author")
     chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
     scene = await Scene.create(chapter=chapter, sequence=1, prompt="test", duration=6.0)
 
     req = VideoGenerateRequest(
         scene_id=scene.id,
-        model_type=VideoModelTypeEnum.viduq2.value,
+        model_config_id=99999,
     )
     with pytest.raises(HTTPException) as exc_info:
         await video_controller.generate(req)
-    assert exc_info.value.status_code == 404
-    assert "启用一个模型" in exc_info.value.detail
+    assert exc_info.value.status_code == 400
+    assert "未启用或已被删除" in exc_info.value.detail
     print(f"    无配置: {exc_info.value.detail}")
 
 
@@ -117,17 +122,19 @@ async def test_生成视频_解析资产引用():
         prompt="@张三 在大殿中行走",
         duration=6.0,
     )
-    await AiModelConfig.create(
+    config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
-        name="viduq2",
-        base_url="https://mock.api.com/v2",
+        name="seedance-2",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key="sk-test",
         model="mock-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
         is_active=True,
     )
     req = VideoGenerateRequest(
         scene_id=scene.id,
-        model_type=VideoModelTypeEnum.viduq2.value,
+        model_config_id=config.id,
     )
 
     with patch("controllers.video.get_generator") as mock_factory:
@@ -149,12 +156,61 @@ async def test_生成视频_解析资产引用():
 
 
 @pytest.mark.asyncio
+async def test_生成视频_采用分镜选择的资产衍生状态():
+    """分镜 metadata 中的形态选择决定实际提交的参考图片。"""
+    novel = await Novel.create(name="Scene Variant Novel", author="Author")
+    chapter = await Chapter.create(novel=novel, number=3, name="第3章", content="内容")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="艾伦",
+        main_image="https://example.com/base.png",
+    )
+    variant = await AssetVariant.create(
+        asset=asset,
+        name="负伤形态",
+        images=["https://example.com/injured.png"],
+    )
+    scene = await Scene.create(
+        chapter=chapter,
+        sequence=1,
+        prompt="@艾伦 走入画面",
+        duration=6.0,
+        metadata={"asset_variant_ids": {str(asset.id): variant.id}},
+    )
+    await scene.assets.add(asset)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="seedance-2-variant",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="sk-test",
+        model="mock-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=True,
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "variant-task-001"
+        mock_factory.return_value = mock_gen
+        await video_controller.generate(VideoGenerateRequest(
+            scene_id=scene.id,
+            model_config_id=config.id,
+        ))
+
+    subjects = mock_gen.submit.call_args.kwargs["subjects"]
+    assert subjects[0]["variant_name"] == "负伤形态"
+    assert subjects[0]["images"] == ["https://example.com/injured.png"]
+
+
+@pytest.mark.asyncio
 async def test_首尾帧生成_必须同时提供两张图片():
     """首尾帧模式缺少任意一帧时，不提交外部生成任务。"""
-    scene, _ = await _create_scene_with_config()
+    scene, config = await _create_scene_with_config()
     req = VideoGenerateRequest(
         scene_id=scene.id,
-        model_type=VideoModelTypeEnum.seedance.value,
+        model_config_id=config.id,
         generation_mode="keyframes",
         first_frame_url="https://cdn.example.com/first.png",
     )
@@ -169,10 +225,10 @@ async def test_首尾帧生成_必须同时提供两张图片():
 @pytest.mark.asyncio
 async def test_首尾帧生成_传递关键帧并记录模式():
     """首尾帧地址传给视频生成器，并写入视频元数据。"""
-    scene, _ = await _create_scene_with_config()
+    scene, config = await _create_scene_with_config()
     req = VideoGenerateRequest(
         scene_id=scene.id,
-        model_type=VideoModelTypeEnum.seedance.value,
+        model_config_id=config.id,
         generation_mode="keyframes",
         first_frame_url="https://cdn.example.com/first.png",
         last_frame_url="https://cdn.example.com/last.png",
@@ -299,6 +355,35 @@ async def test_查询视频状态_失败():
 
     assert result.status == TaskStatusEnum.failed.value
     print(f"    查询失败: status={result.status}")
+
+
+@pytest.mark.asyncio
+async def test_查询视频状态_配置停用后仍使用任务原配置():
+    scene, config = await _create_scene_with_config()
+    video = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="disabled-config-task",
+        status=TaskStatusEnum.running.value,
+        metadata={"model_config_id": config.id, "video_model_type": "seedance_2"},
+    )
+    config.is_active = False
+    await config.save(update_fields=["is_active"])
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.query.return_value = {
+            "status": TaskStatusEnum.running,
+            "progress": 50,
+            "url": None,
+            "metadata": {},
+        }
+        mock_factory.return_value = mock_gen
+
+        result = await video_controller.query_status(video.id)
+
+    assert result.status == TaskStatusEnum.running.value
+    assert mock_factory.call_args.args[0].id == config.id
 
 
 # =====================================================================

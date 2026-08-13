@@ -33,10 +33,7 @@ def image_to_base64(image_path: str) -> str:
 
 
 class BaseVideoGenerator(ABC):
-    """视频生成器抽象基类。
-
-    所有平台 (Vidu, Veo, Sora, Seedance) 实现此接口。
-    """
+    """视频生成器抽象基类；当前开放的后台能力由 Seedance 实现。"""
 
     def __init__(self, config: AiModelConfig):
         self.config = config

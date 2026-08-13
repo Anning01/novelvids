@@ -22,7 +22,9 @@ from prompts.extraction import (
     ensure_ordered_trait_labels,
 )
 from services.ai_task_executor import BaseTaskHandler
+from services.chapter_titles import strip_chapter_ordinal
 from services.image_generation import generate_images
+from services.image_generation.capabilities import validate_selection
 from services.llm.json_output import create_json_completion
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum, ImageSourceEnum
 from utils.prompt_language import normalize_prompt_language, prompt_language_name
@@ -93,7 +95,11 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
         if len(chapter_text) > allowance:
             first = allowance * 2 // 3
             chapter_text = f"{chapter_text[:first]}\n……\n{chapter_text[-(allowance - first):]}"
-        block = f"【第 {chapter.number} 章：{chapter.name}】\n{chapter_text}"
+        chapter_title = strip_chapter_ordinal(chapter.name)
+        heading = f"第 {chapter.number} 章"
+        if chapter_title:
+            heading = f"{heading}：{chapter_title}"
+        block = f"【{heading}】\n{chapter_text}"
         blocks.append(block)
         used += len(block)
     return "\n\n".join(blocks)
@@ -109,7 +115,7 @@ Requirements: center the story's core conflict and atmosphere with cinematic com
     return f"""为小说《{novel.name}》创作一张竖版影视短剧封面主视觉。
 题材：{types}。
 故事大纲：{analysis.story_outline}
-要求：以故事核心冲突和氛围为主体，电影级构图与光影，视觉焦点明确，适合 2:3 竖版封面；画面中不要出现任何文字、标题、字幕、Logo、水印或边框；避免人物面部畸变和多余肢体。输出约 1K 分辨率。"""
+要求：以故事核心冲突和氛围为主体，电影级构图与光影，视觉焦点明确，适合 2:3 竖版封面；画面中不要出现任何文字、标题、字幕、Logo、水印或边框；避免人物面部畸变和多余肢体。按当前模型默认清晰度输出。"""
 
 
 async def _save_cover(image: Any, novel_id: int) -> str:
@@ -191,7 +197,10 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             await novel_controller.split(novel_id)
             chapters = await Chapter.filter(novel_id=novel_id).order_by("number")
 
-        llm_config = await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value)
+        llm_config = await ai_model_config_controller.get_active_with_legacy_fallback(
+            AiTaskTypeEnum.project_analysis.value,
+            AiTaskTypeEnum.extraction.value,
+        )
         image_config = await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
 
         material = _build_analysis_material(novel, chapters)
@@ -220,14 +229,24 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
 
         await _sync_character_assets(novel, analysis.key_characters, len(chapters))
 
+        cover_selection = validate_selection(
+            image_config.image_model_type,
+            clarity=None,
+            aspect_ratio="2:3",
+            output_format="png",
+            generation_count=1,
+        )
+
         images = await generate_images(
             base_url=image_config.base_url,
             api_key=image_config.api_key,
             model=image_config.model,
             prompt=_cover_prompt(novel, analysis, prompt_language),
             api_protocol=image_config.api_protocol,
-            resolution="2K",
-            aspect_ratio="2:3",
+            resolution=cover_selection.provider_size,
+            aspect_ratio=cover_selection.aspect_ratio,
+            output_format=cover_selection.output_format,
+            quality=cover_selection.provider_quality,
             count=1,
         )
         cover = await _save_cover(images[0], novel_id)

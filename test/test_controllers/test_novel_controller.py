@@ -72,9 +72,9 @@ async def test_split_novel_chapters(sql_profiler):
 
     chapters = await Chapter.filter(novel_id=novel.id).order_by("number").all()
     assert len(chapters) == 2
-    assert chapters[0].name == "第1章 开始"
+    assert chapters[0].name == "开始"
     assert "第一章" in chapters[0].content
-    assert chapters[1].name == "第2章 发展"
+    assert chapters[1].name == "发展"
     assert "第二章" in chapters[1].content
 
     print(f"\n[Split] SQL Count: {p.query_count}")
@@ -93,7 +93,7 @@ async def test_split_novel_no_chapters_recognized():
 
     chapters = await Chapter.filter(novel_id=novel.id).all()
     assert len(chapters) == 1
-    assert chapters[0].name == "第一章"
+    assert chapters[0].name == "No Chapter Novel"
     assert chapters[0].content == content
     print(f"    无法识别章节，默认整体作为一个章节: name='{chapters[0].name}'")
 
@@ -144,7 +144,8 @@ async def test_split_novel_already_has_chapters():
 async def test_analyze_novel_submits_one_safe_task():
     novel = await Novel.create(name="Analyze Novel", content="第1章 开始\n正文")
     await AiModelConfig.create(
-        task_type=AiTaskTypeEnum.extraction.value,
+        task_type=AiTaskTypeEnum.project_analysis.value,
+        task_types=[AiTaskTypeEnum.project_analysis.value],
         name="llm",
         base_url="https://llm.example.com",
         api_key="secret-llm",
@@ -157,6 +158,7 @@ async def test_analyze_novel_submits_one_safe_task():
         base_url="https://image.example.com",
         api_key="secret-image",
         model="image-model",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
 

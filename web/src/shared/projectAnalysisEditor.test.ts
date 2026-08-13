@@ -61,6 +61,7 @@ describe('project analysis editor', () => {
     }
     const draft = createChapterEditDraft(chapter)
 
+    expect(draft.name).toBe('未命名')
     expect(chapterDraftChanged(draft, chapter)).toBe(false)
     draft.content = '修改后的正文'
     expect(chapterDraftChanged(draft, chapter)).toBe(true)

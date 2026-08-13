@@ -24,7 +24,7 @@ function mediaUrl(node: WorkbenchNode) {
 }
 
 const payload = computed(() => {
-  const { ui: _ui, modelOptions: _modelOptions, ...data } = props.node.data
+  const { ui: _ui, modelOptions: _modelOptions, videoModelOptions: _videoModelOptions, ...data } = props.node.data
   return data
 })
 const prompt = computed(() => {

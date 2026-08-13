@@ -8,13 +8,16 @@ from schemas.config import (
     AiModelConfigUpdate,
     GeneralConfigOut,
     GeneralConfigUpdate,
+    ImageGenerationModelOut,
+    VideoGenerationModelOut,
 )
 from utils.enums import (
     AssetTypeEnum,
     AiTaskTypeEnum,
     ImageSourceEnum,
     TaskStatusEnum,
-    VideoModelTypeEnum,
+    VideoGenerationModelTypeEnum,
+    ImageModelTypeEnum,
     WorkflowStatus,
 )
 from utils.page import QueryParams, get_list_params
@@ -40,8 +43,27 @@ async def get_all_enums():
         "image_source": _serialize_enum(ImageSourceEnum),
         "workflow_status": _serialize_enum(WorkflowStatus),
         "ai_task_type": _serialize_enum(AiTaskTypeEnum),
-        "video_model_type": _serialize_enum(VideoModelTypeEnum),
+        "video_model_type": _serialize_enum(VideoGenerationModelTypeEnum),
+        "image_model_type": _serialize_enum(ImageModelTypeEnum),
     })
+
+
+@router.get(
+    "/image-generation/models",
+    summary="获取当前可用的生图模型及参数能力",
+    response_model=ResponseSchema[list[ImageGenerationModelOut]],
+)
+async def get_image_generation_models():
+    return ResponseSchema(data=await ai_model_config_controller.list_active_image_models())
+
+
+@router.get(
+    "/video-generation/models",
+    summary="获取当前可用的视频模型及参数能力",
+    response_model=ResponseSchema[list[VideoGenerationModelOut]],
+)
+async def get_video_generation_models():
+    return ResponseSchema(data=await ai_model_config_controller.list_active_video_models())
 
 
 @router.post("", summary="创建模型配置", response_model=ResponseSchema[AiModelConfigOut])
@@ -105,4 +127,10 @@ async def delete_config(config_id: int):
 @router.post("/{config_id}/activate", summary="启用模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def activate_config(config_id: int):
     instance = await ai_model_config_controller.activate(config_id)
+    return ResponseSchema(data=instance)
+
+
+@router.post("/{config_id}/deactivate", summary="停用模型配置", response_model=ResponseSchema[AiModelConfigOut])
+async def deactivate_config(config_id: int):
+    instance = await ai_model_config_controller.deactivate(config_id)
     return ResponseSchema(data=instance)

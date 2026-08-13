@@ -5,13 +5,14 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), updateAsset: vi.fn(), updateScene: vi.fn() },
+  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), queryVideo: vi.fn(), updateAsset: vi.fn(), updateScene: vi.fn() },
   sleep: vi.fn(),
 }))
 
 const createAssetMock = vi.mocked(api.createAsset)
 const createSceneMock = vi.mocked(api.createScene)
 const deleteAssetMock = vi.mocked(api.deleteAsset)
+const queryVideoMock = vi.mocked(api.queryVideo)
 const updateAssetMock = vi.mocked(api.updateAsset)
 const updateSceneMock = vi.mocked(api.updateScene)
 let store: ReturnType<typeof useWorkbenchStore>
@@ -199,6 +200,71 @@ it('persists the active video version without discarding scene metadata', async 
     },
   })
   expect(store.scenes[0]?.metadata?.workbench).toMatchObject({ activeVideoId: 91 })
+})
+
+it('renders the adopted video result instead of always using the latest video', () => {
+  const source = {
+    id: 10,
+    chapter_id: 2162,
+    sequence: 1,
+    metadata: { workbench: { activeVideoId: 91 } },
+    created_at: '2026-07-25T00:00:00.000Z',
+    updated_at: '2026-07-25T00:00:00.000Z',
+  }
+  store.chapter = {
+    id: 2162,
+    novel_id: 9,
+    number: 1,
+    name: '章节',
+    created_at: source.created_at,
+    updated_at: source.updated_at,
+  }
+  store.scenes = [source]
+  store.videos[10] = [
+    { id: 92, scene_id: 10, model_type: 3, status: TaskStatusEnum.PROCESSING, created_at: '', updated_at: '' },
+    { id: 91, scene_id: 10, model_type: 1, status: TaskStatusEnum.COMPLETED, created_at: '', updated_at: '' },
+  ]
+
+  store.rebuildGraph()
+
+  expect(store.nodeByKey('video-91')?.data.video).toMatchObject({ id: 91 })
+  expect(store.nodeByKey('video-92')).toBeUndefined()
+  expect(store.nodeByKey('shot-10')?.status).toBe('running')
+})
+
+it('resumes polling a non-terminal video and refreshes its canvas state', async () => {
+  store.chapter = {
+    id: 2162,
+    novel_id: 9,
+    number: 1,
+    name: '章节',
+    created_at: '',
+    updated_at: '',
+  }
+  store.scenes = [{ id: 10, chapter_id: 2162, sequence: 1, created_at: '', updated_at: '' }]
+  store.videos[10] = [
+    { id: 92, scene_id: 10, model_type: 3, status: TaskStatusEnum.PROCESSING, created_at: '', updated_at: '' },
+  ]
+  queryVideoMock.mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 92,
+      scene_id: 10,
+      model_type: 3,
+      status: TaskStatusEnum.COMPLETED,
+      url: '/media/videos/92.mp4',
+      created_at: '',
+      updated_at: '',
+    },
+  })
+
+  await store.resumeVideoPolling(10, 92)
+
+  expect(queryVideoMock).toHaveBeenCalledWith(92)
+  expect(store.videos[10]?.[0]).toMatchObject({ status: TaskStatusEnum.COMPLETED, url: '/media/videos/92.mp4' })
+  expect(store.busySceneIds).not.toContain(10)
+  expect(store.pollingVideoIds).not.toContain(92)
 })
 
 it('hides a generated video result through delete and restores it through history', async () => {

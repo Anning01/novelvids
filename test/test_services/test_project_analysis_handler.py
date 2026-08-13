@@ -67,7 +67,8 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
         content="第1章 启程\n林舟离开故乡。\n第2章 归途\n林舟揭开旧日真相。",
     )
     await AiModelConfig.create(
-        task_type=AiTaskTypeEnum.extraction.value,
+        task_type=AiTaskTypeEnum.project_analysis.value,
+        task_types=[AiTaskTypeEnum.project_analysis.value],
         name="llm",
         base_url="https://llm.example.com",
         api_key="secret-llm",
@@ -81,6 +82,7 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
         api_key="secret-image",
         model="test-image",
         api_protocol="volcengine_ark",
+        image_model_type="seedream_5_pro",
         is_active=True,
     )
 
@@ -119,7 +121,7 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
         result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id})
 
     chapters = await Chapter.filter(novel_id=novel.id).order_by("number")
-    assert [chapter.name for chapter in chapters] == ["第1章 启程", "第2章 归途"]
+    assert [chapter.name for chapter in chapters] == ["启程", "归途"]
     assert result["book_types"] == ["东方奇幻", "冒险"]
     assert result["chapter_count"] == 2
     assert result["cover"] == "/media/covers/test.png"
@@ -150,5 +152,6 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
     generate_images.assert_awaited_once()
     request = generate_images.await_args.kwargs
     assert request["api_protocol"] == "volcengine_ark"
-    assert request["resolution"] == "2K"
+    assert request["resolution"] == "1248x1872"
     assert request["aspect_ratio"] == "2:3"
+    assert request["output_format"] == "png"

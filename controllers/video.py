@@ -14,10 +14,15 @@ from models.scene import Scene
 from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.video import get_generator
-from services.video.asset_resolver import resolve_assets, resolve_image_source
+from services.video.asset_resolver import (
+    normalize_selected_variant_ids,
+    resolve_assets,
+    resolve_image_source,
+)
+from services.video.capabilities import validate_selection
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +56,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         """提交视频生成请求。
 
         1. 获取 Scene (含关联 chapter -> novel)
-        2. 根据 model_type 查找启用的 AiModelConfig
+        2. 根据 model_config_id 查找用户已启用的 AiModelConfig
         3. 解析 prompt 中的 @资产昵称 -> subjects
         4. 调用生成器 submit()
         5. 创建 Video 记录 (status=pending)
@@ -61,18 +66,28 @@ class VideoController(CRUDBase[Video, dict, dict]):
             raise HTTPException(404, detail=f"分镜 {req.scene_id} 不存在")
 
         # 获取 novel_id (通过 chapter)
+        # SQLite 测试和开发环境使用单连接；分开预取，避免并发 relation 查询争用连接。
         await scene.fetch_related("chapter")
+        await scene.fetch_related("assets")
         novel_id = scene.chapter.novel_id
 
         # 查找启用的视频配置
-        config = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value)
+        config = await ai_model_config_controller.get_active(
+            AiTaskTypeEnum.video.value,
+            req.model_config_id,
+        )
 
-        # 解析 @资产昵称
+        # 解析 @资产昵称，并采用分镜中显式选择的资产衍生状态。
         prompt = scene.prompt or ""
+        metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
         subjects = await resolve_assets(
             prompt,
             novel_id,
             chapter_number=scene.chapter.number,
+            selected_asset_ids=[asset.id for asset in scene.assets],
+            selected_variant_ids=normalize_selected_variant_ids(
+                metadata.get("asset_variant_ids")
+            ),
         )
         logger.info(
             "Video resolve_assets: scene_id=%s, novel_id=%s, prompt_len=%d, subjects=%s",
@@ -81,8 +96,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
         )
 
         # 获取生成器并提交
-        generator = get_generator(req.model_type, config)
-        duration = scene.duration or 6.0
+        generator = get_generator(config)
+        duration = req.duration if req.duration is not None else int(scene.duration or 6)
+        selection = validate_selection(
+            config.video_model_type,
+            generation_mode=req.generation_mode,
+            resolution=req.resolution,
+            aspect_ratio=req.aspect_ratio,
+            duration=duration,
+            output_format=req.output_format,
+            generate_audio=req.generate_audio,
+        )
         if req.generation_mode == "keyframes" and not (req.first_frame_url and req.last_frame_url):
             raise HTTPException(400, detail="首尾帧模式必须同时上传首帧和尾帧")
         first_frame = req.first_frame_url
@@ -96,7 +120,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
         external_task_id = await generator.submit(
             prompt=prompt,
             subjects=subjects if subjects and req.generation_mode == "reference" else None,
-            duration=duration,
+            duration=selection.duration,
+            aspect_ratio=selection.aspect_ratio,
+            resolution=selection.resolution,
+            output_format=selection.output_format,
+            generate_audio=selection.generate_audio,
             generation_mode=req.generation_mode,
             first_frame_url=first_frame,
             last_frame_url=last_frame,
@@ -105,13 +133,20 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # 创建 Video 记录
         video = await Video.create(
             scene_id=scene.id,
-            model_type=req.model_type,
+            model_type=VideoModelTypeEnum.seedance.value,
             external_task_id=external_task_id,
             status=TaskStatusEnum.pending.value,
             metadata={
                 "generation_mode": req.generation_mode,
                 "first_frame_url": req.first_frame_url,
                 "last_frame_url": req.last_frame_url,
+                "model_config_id": config.id,
+                "video_model_type": config.video_model_type,
+                "resolution": selection.resolution,
+                "aspect_ratio": selection.aspect_ratio,
+                "duration": selection.duration,
+                "output_format": selection.output_format,
+                "generate_audio": selection.generate_audio,
             },
         )
         logger.info(
@@ -134,10 +169,19 @@ class VideoController(CRUDBase[Video, dict, dict]):
         if not video.external_task_id:
             raise HTTPException(400, detail="该视频无外部任务ID，无法查询")
 
-        # 查找启用的视频配置
-        config = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value)
+        # 新记录保存了配置 ID：即使管理员之后停用它，也要用原配置完成状态查询。
+        # 历史记录没有配置 ID 时，继续回退到当前启用配置。
+        metadata = video.metadata or {}
+        config_id = metadata.get("model_config_id")
+        if config_id is not None:
+            config = await ai_model_config_controller.get_configured_for_task(
+                AiTaskTypeEnum.video.value,
+                int(config_id),
+            )
+        else:
+            config = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value)
 
-        generator = get_generator(video.model_type, config)
+        generator = get_generator(config)
         result = await generator.query(video.external_task_id)
         logger.info(
             "Video query result: video_id=%s, status=%s, url=%s, metadata=%s",

@@ -2,27 +2,28 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft,
   BookOpenText,
   Boxes,
   Check,
   Clapperboard,
-  Film,
   ImagePlus,
+  GitBranch,
   Layers3,
   LoaderCircle,
   Merge as MergeIcon,
   Pencil,
   Plus,
   RefreshCw,
-  Settings2,
+  Sparkles,
   Trash2,
+  Upload,
   UsersRound,
-  Video,
 } from 'lucide-vue-next'
 import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
+import AssetVariantFamilyPanel from '@/components/AssetVariantFamilyPanel.vue'
+import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
@@ -63,6 +64,7 @@ const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
 const selectedChapterId = computed(() => Number(route.query.chapter))
 const project = ref(readProjectMeta())
+const chapters = ref<Chapter[]>([])
 const selectedChapter = ref<Chapter | null>(null)
 const assets = ref<Asset[]>([])
 const activeTab = ref<AssetTab>('character')
@@ -72,6 +74,7 @@ const nameDraft = ref('')
 const loading = ref(true)
 const showAssetDialog = ref(false)
 const editingAsset = ref<Asset | null>(null)
+const assetDrawerMode = ref<'ai' | 'library' | 'upload'>('ai')
 const showBatchDialog = ref(false)
 const batchGenerating = ref(false)
 const submittingExtraction = ref(false)
@@ -84,6 +87,7 @@ const draggingAssetId = ref<number | null>(null)
 const mergeHoverTargetId = ref<number | null>(null)
 const mergeArmedTargetId = ref<number | null>(null)
 const mergeProgressKey = ref(0)
+const expandedVariantAssetId = ref<number | null>(null)
 let pageAlive = true
 let extractionPollVersion = 0
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
@@ -100,13 +104,6 @@ const tabs = [
   { value: 'scene' as const, label: '场景', icon: ImagePlus, type: AssetTypeEnum.SCENE },
   { value: 'prop' as const, label: '道具', icon: Boxes, type: AssetTypeEnum.ITEM },
 ]
-
-const phases = computed(() => [
-  ...(project.value.creationMode === 'agent' ? [{ label: '剧本', icon: BookOpenText }] : []),
-  { label: '设定', icon: Settings2, active: true },
-  { label: '分镜', icon: Clapperboard },
-  { label: '视频', icon: Video, disabled: true },
-])
 
 const activeTabConfig = computed(() => tabs.find(item => item.value === activeTab.value) ?? tabs[0])
 const visibleAssets = computed(() => assets.value.filter(item => item.asset_type === activeTabConfig.value.type))
@@ -180,20 +177,24 @@ const extractionStatusClass = computed(() => ({
     || extractionTask.value?.status === TaskStatusEnum.CANCELLED,
 }))
 
-async function loadProject() {
+async function loadProject(chapterId = selectedChapterId.value) {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return
+  loading.value = true
   try {
-    const chapterRequest = Number.isFinite(selectedChapterId.value) && selectedChapterId.value > 0
-      ? api.chapter(selectedChapterId.value)
-      : Promise.resolve(null)
-    const extractionRequest = Number.isFinite(selectedChapterId.value) && selectedChapterId.value > 0
-      ? api.latestExtraction(selectedChapterId.value)
-      : Promise.resolve(null)
-    const [projectResponse, assetResponse, chapterResponse, extractionResponse] = await Promise.all([
+    const [projectResponse, chapterListResponse] = await Promise.all([
       api.novel(projectId.value),
-      api.assets(projectId.value),
-      chapterRequest,
-      extractionRequest,
+      api.chapters(projectId.value),
+    ])
+    chapters.value = chapterListResponse.data.items
+    const targetChapter = chapters.value.find(item => item.id === chapterId) ?? chapters.value[0] ?? null
+    if (targetChapter && targetChapter.id !== selectedChapterId.value) {
+      await router.replace({ query: { ...route.query, chapter: String(targetChapter.id) } })
+    }
+    const scopedChapterId = assetScope.value === 'chapter' ? targetChapter?.id : undefined
+    const [assetResponse, chapterResponse, extractionResponse] = await Promise.all([
+      api.assets(projectId.value, 1, 100, scopedChapterId),
+      targetChapter ? api.chapter(targetChapter.id) : Promise.resolve(null),
+      targetChapter ? api.latestExtraction(targetChapter.id) : Promise.resolve(null),
     ])
     const settings = readShortDramaSettings(projectResponse.data)
     project.value = {
@@ -221,6 +222,15 @@ async function loadProject() {
   }
 }
 
+async function selectChapter(chapter: Chapter) {
+  if (chapter.id === selectedChapter.value?.id) return
+  extractionPollVersion++
+  extractionTask.value = null
+  extractionSubmissionError.value = ''
+  await router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
+  await loadProject(chapter.id)
+}
+
 function extractionErrorMessage(error: unknown) {
   const message = (error as Error).message || '本章资产提取失败'
   return /insufficient balance/i.test(message)
@@ -231,6 +241,9 @@ function extractionErrorMessage(error: unknown) {
 async function refreshAssets() {
   const chapterId = assetScope.value === 'chapter' ? selectedChapter.value?.id : undefined
   assets.value = (await api.assets(projectId.value, 1, 100, chapterId)).data.items
+  if (editingAsset.value) {
+    editingAsset.value = assets.value.find(item => item.id === editingAsset.value?.id) || null
+  }
 }
 
 async function setAssetScope(nextScope: AssetScope) {
@@ -322,8 +335,9 @@ async function saveName() {
   }
 }
 
-function openAssetDialog(asset?: Asset) {
+function openAssetDialog(asset?: Asset, initialMode: 'ai' | 'library' | 'upload' = 'ai') {
   editingAsset.value = asset || null
+  assetDrawerMode.value = initialMode
   showAssetDialog.value = true
 }
 
@@ -338,6 +352,14 @@ function addCreatedAsset(asset: Asset) {
 
 function saveEditedAsset(asset: Asset) {
   assets.value = assets.value.map(item => item.id === asset.id ? asset : item)
+  if (editingAsset.value?.id === asset.id) editingAsset.value = asset
+}
+
+function truncateText(value: string | undefined, maxLength: number) {
+  const normalized = value?.trim() || ''
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength).trimEnd()}...`
+    : normalized
 }
 
 async function removeAsset(asset: Asset) {
@@ -454,6 +476,10 @@ function handleAssetClick(asset: Asset) {
   openAssetDialog(asset)
 }
 
+function toggleVariantFamily(asset: Asset) {
+  expandedVariantAssetId.value = expandedVariantAssetId.value === asset.id ? null : asset.id
+}
+
 function setAssetGenerating(assetId: number, value: boolean) {
   const next = new Set(generatingAssetIds.value)
   value ? next.add(assetId) : next.delete(assetId)
@@ -487,7 +513,16 @@ async function generateAssetAndWait(asset: Asset) {
   }
 }
 
-async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; resolution: string; ratio: string }) {
+async function generateSingleAsset(asset: Asset) {
+  if (generatingAssetIds.value.has(asset.id)) return
+  const completed = await generateAssetAndWait(asset)
+  if (!pageAlive) return
+  await refreshAssets()
+  if (completed) notice.success(`${asset.canonical_name}参考图已生成`)
+  else notice.error(`${asset.canonical_name}生成失败，请在生成记录中查看原因`)
+}
+
+async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
   if (batchGenerating.value) return
   const selected = new Set(options.assetIds)
   const targets = visibleAssets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingAssetIds.value.has(asset.id))
@@ -500,8 +535,11 @@ async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId:
       const metadata = {
         ...(asset.metadata || {}),
         model_config_id: options.modelConfigId,
-        resolution: options.resolution,
+        clarity: options.clarity,
+        resolution: options.clarity,
         aspect_ratio: options.ratio,
+        output_format: options.outputFormat,
+        generation_count: 1,
       }
       const updated = (await api.updateAsset(asset.id, { metadata })).data
       assets.value = assets.value.map(item => item.id === updated.id ? updated : item)
@@ -538,23 +576,11 @@ function goToStoryboard() {
   })
 }
 
-function returnToProjects() {
-  void router.push('/projects')
-}
-
-function selectPhase(label: string) {
-  if (label === '剧本' && project.value.creationMode === 'agent') {
-    void router.push({
-      path: `/create/short-drama/agent/${projectId.value}`,
-      query: route.query.chapter ? { chapter: String(route.query.chapter) } : undefined,
-    })
-  } else if (label === '分镜') {
-    goToStoryboard()
-  }
-}
-
 onMounted(loadProject)
-watch(activeTab, () => clearMergeHover(true))
+watch(activeTab, () => {
+  clearMergeHover(true)
+  expandedVariantAssetId.value = null
+})
 onBeforeUnmount(() => {
   pageAlive = false
   extractionPollVersion++
@@ -564,11 +590,20 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="manual-page">
-    <header class="manual-topbar">
-      <div class="manual-project-nav">
-        <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="返回项目" title="返回项目" @click="returnToProjects"><ArrowLeft :size="18" /></AppButton>
-        <div>
-          <div class="project-name-line">
+    <ShortDramaWorkspaceShell
+      :project-id="projectId"
+      :project-name="project.name"
+      :aspect-ratio="project.aspectRatio"
+      :resolution="project.resolution"
+      :style-name="project.style"
+      active-phase="settings"
+      :creation-mode="project.creationMode"
+      :chapters="chapters"
+      :active-chapter-id="selectedChapter?.id || 0"
+      @select-chapter="selectChapter"
+    >
+      <template #project-name>
+        <div class="project-name-line">
             <template v-if="editingName">
               <input v-model="nameDraft" maxlength="80" autofocus @keyup.enter="saveName" @keyup.esc="editingName = false" @blur="saveName" />
             </template>
@@ -576,21 +611,8 @@ onBeforeUnmount(() => {
               <strong>{{ project.name }}</strong>
               <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="编辑项目名称" @click="startRename"><Pencil :size="13" /></AppButton>
             </template>
-          </div>
-          <span><Film :size="13" />{{ project.aspectRatio }}<i />{{ project.resolution }}<i />{{ project.style }}</span>
         </div>
-      </div>
-
-      <nav class="manual-phases" aria-label="人工短剧制作流程">
-        <template v-for="(phase, index) in phases" :key="phase.label">
-          <span v-if="index" class="phase-line" />
-          <AppButton type="button" variant="soft" size="sm" :active="phase.active" :disabled="phase.disabled" :aria-current="phase.active ? 'step' : undefined" @click="selectPhase(phase.label)">
-            <component :is="phase.icon" :size="16" />
-            {{ phase.label }}
-          </AppButton>
-        </template>
-      </nav>
-    </header>
+      </template>
 
     <section class="manual-workspace">
       <header class="asset-toolbar">
@@ -657,9 +679,8 @@ onBeforeUnmount(() => {
         <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
+        <template v-for="asset in visibleAssets" :key="asset.id">
         <article
-          v-for="asset in visibleAssets"
-          :key="asset.id"
           class="asset-card"
           :class="{
             'is-drag-source': draggingAssetId === asset.id,
@@ -667,14 +688,8 @@ onBeforeUnmount(() => {
             'is-merge-armed': mergeArmedTargetId === asset.id,
             'is-merging': mergingAssetIds.has(asset.id),
           }"
-          role="button"
-          tabindex="0"
           :draggable="!generatingAssetIds.has(asset.id) && !mergingAssetIds.has(asset.id)"
           :aria-grabbed="draggingAssetId === asset.id"
-          :aria-label="`编辑${activeTabConfig.label}：${asset.canonical_name}`"
-          @click="handleAssetClick(asset)"
-          @keydown.enter="handleAssetClick(asset)"
-          @keydown.space.prevent="handleAssetClick(asset)"
           @dragstart="startAssetDrag($event, asset)"
           @dragenter.prevent="enterMergeTarget(asset)"
           @dragover="allowAssetDrop($event, asset)"
@@ -682,21 +697,29 @@ onBeforeUnmount(() => {
           @drop="dropAsset($event, asset)"
           @dragend="finishAssetDrag"
         >
-          <div class="asset-visual" :class="{ 'is-generating': generatingAssetIds.has(asset.id) }">
-            <img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
-            <div v-else-if="generatingAssetIds.has(asset.id)" class="asset-generating-placeholder" role="status" aria-live="polite">
-              <span><LoaderCircle :size="24" /></span>
-              <strong>正在生成参考图</strong>
-              <small>完成后将在这里自动显示</small>
+          <button class="asset-card-open" type="button" :aria-label="`查看并编辑${activeTabConfig.label}：${asset.canonical_name}`" @click="handleAssetClick(asset)">
+            <div class="asset-visual" :class="{ 'is-generating': generatingAssetIds.has(asset.id), 'is-empty': !asset.main_image }">
+              <img v-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
+              <div v-else-if="generatingAssetIds.has(asset.id)" class="asset-generating-placeholder" role="status" aria-live="polite">
+                <span><LoaderCircle :size="24" /></span>
+                <strong>正在生成参考图</strong>
+                <small>完成后将在这里自动显示</small>
+              </div>
+              <component v-else :is="activeTabConfig.icon" :size="30" />
+              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
+              <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>
+              <div class="asset-card-info">
+                <strong>{{ truncateText(asset.canonical_name, 16) }}</strong>
+                <p>{{ truncateText(asset.description || `尚未填写${activeTabConfig.label}描述`, 32) }}</p>
+              </div>
             </div>
-            <component v-else :is="activeTabConfig.icon" :size="30" />
-            <AppBadge v-if="asset.main_image" class="asset-state-badge" tone="success" size="sm"><Check :size="12" />已完成</AppBadge>
-            <AppBadge v-else-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
-            <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>
-          </div>
-          <div class="asset-card-copy">
-            <div><strong>{{ asset.canonical_name }}</strong><span class="asset-card-actions"><AppButton type="button" variant="ghost" size="xs" icon-only :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click.stop="openAssetDialog(asset)"><Pencil :size="14" /></AppButton><AppButton type="button" variant="danger" size="xs" icon-only :disabled="mergingAssetIds.has(asset.id)" :aria-label="`删除${asset.canonical_name}`" @click.stop="removeAsset(asset)"><Trash2 :size="14" /></AppButton></span></div>
-            <p>{{ asset.description || `尚未填写${activeTabConfig.label}描述` }}</p>
+          </button>
+          <div class="asset-card-actions" aria-label="资产操作">
+            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="衍生管理" title="衍生管理" :active="expandedVariantAssetId === asset.id" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`管理${asset.canonical_name}的衍生形态`" @click="toggleVariantFamily(asset)"><GitBranch :size="14" /></AppButton>
+            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="编辑" title="编辑" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click="openAssetDialog(asset)"><Pencil :size="14" /></AppButton>
+            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="本地上传" title="本地上传" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`为${asset.canonical_name}本地上传图片`" @click="openAssetDialog(asset, 'upload')"><Upload :size="14" /></AppButton>
+            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only :data-tooltip="asset.main_image ? '重新生成' : '生成'" :title="asset.main_image ? '重新生成' : '生成'" :disabled="generatingAssetIds.has(asset.id) || mergingAssetIds.has(asset.id)" :aria-label="`${asset.main_image ? '重新生成' : '生成'}${asset.canonical_name}`" @click="generateSingleAsset(asset)"><RefreshCw v-if="asset.main_image" :size="14" /><Sparkles v-else :size="14" /></AppButton>
+            <AppButton class="asset-card-action is-danger" type="button" variant="ghost" size="xs" icon-only data-tooltip="删除" title="删除" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`删除${asset.canonical_name}`" @click="removeAsset(asset)"><Trash2 :size="14" /></AppButton>
           </div>
           <div
             v-if="mergeHoverTargetId === asset.id"
@@ -710,6 +733,13 @@ onBeforeUnmount(() => {
             <i />
           </div>
         </article>
+        <AssetVariantFamilyPanel
+          v-if="expandedVariantAssetId === asset.id"
+          :asset="asset"
+          :chapter-number="selectedChapter?.number"
+          @close="expandedVariantAssetId = null"
+        />
+        </template>
       </div>
     </section>
 
@@ -732,9 +762,11 @@ onBeforeUnmount(() => {
       :kind="activeTab"
       :novel-id="projectId"
       :asset="editingAsset"
+      :initial-mode="assetDrawerMode"
       @close="closeAssetDialog"
       @created="addCreatedAsset"
       @saved="saveEditedAsset"
+      @regenerate="generateSingleAsset"
     />
 
     <AssetBatchGenerateDialog
@@ -747,26 +779,16 @@ onBeforeUnmount(() => {
       @close="showBatchDialog = false"
       @generate="batchGenerateAssets"
     />
+    </ShortDramaWorkspaceShell>
   </main>
 </template>
 
 <style scoped>
 .manual-page { min-height: 100%; color: #303442; background: #f8f9fc; }
-.manual-topbar { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: minmax(270px,1fr) auto minmax(270px,1fr); align-items: center; min-height: 72px; padding: 8px 28px; border-bottom: 1px solid #e6e8f0; background: rgba(255,255,255,.96); backdrop-filter: blur(16px); }
-.manual-project-nav { display: flex; align-items: center; gap: 13px; min-width: 0; }
-.manual-project-nav > button { display: grid; place-items: center; width: 30px; height: 30px; color: #697080; border-radius: 9px; background: transparent; }
-.manual-project-nav > button:hover { color: #5d5ff5; background: #f0f0ff; }
 .project-name-line { display: flex; align-items: center; gap: 5px; min-height: 25px; }
 .project-name-line strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .project-name-line button { display: grid; place-items: center; color: #8a91a1; background: transparent; }
 .project-name-line input { width: min(320px,45vw); height: 30px; padding: 0 9px; border: 1px solid #6b6df6; border-radius: 7px; outline: none; font: inherit; }
-.manual-project-nav > div > span { display: flex; align-items: center; gap: 7px; margin-top: 2px; color: #9299a8; font-size: 11px; }
-.manual-project-nav i { width: 1px; height: 10px; background: #dcdfe8; }
-.manual-phases { grid-column: 2; display: flex; align-items: center; }
-.manual-phases button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 74px; height: 54px; color: #a5abb8; border: 0; border-radius: 17px; background: #fafbfe; font-size: 11px; }
-.manual-phases button.is-active { color: #5e60f5; background: #f0f0ff; box-shadow: 0 8px 22px rgba(92,94,246,.11); }
-.manual-phases button:disabled { opacity: .55; }
-.phase-line { width: 28px; height: 1px; background: #e1e3eb; }
 .manual-workspace { padding: 28px 44px 120px; }
 .asset-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 50px; }
 .asset-toolbar nav { display: flex; align-items: center; gap: 26px; }
@@ -803,29 +825,47 @@ onBeforeUnmount(() => {
 .empty-state strong { margin-top: 14px; color: #686f7f; font-size: 14px; }
 .empty-state p { margin: 6px 0 18px; font-size: 12px; }
 .empty-state > button { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; color: #fff; border-radius: 9px; background: #5e60f5; font-size: 12px; box-shadow: 0 8px 18px rgba(94,96,245,.2); }
-.asset-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 16px; padding-top: 24px; }
-.asset-card { position: relative; overflow: hidden; border: 1px solid #e4e6ed; border-radius: 14px; outline: 0; background: #fff; cursor: grab; transition: transform .18s ease,box-shadow .18s ease,border-color .18s ease,opacity .18s ease; }
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); gap: 16px; padding-top: 24px; }
+.asset-card { position: relative; overflow: hidden; border: 1px solid var(--app-border); border-radius: 16px; outline: 0; background: var(--app-surface-muted); cursor: grab; transition: transform .22s cubic-bezier(.2,.72,.2,1),box-shadow .22s ease,border-color .22s ease,opacity .18s ease; }
 .asset-card:active { cursor: grabbing; }
-.asset-card:hover,.asset-card:focus-visible { border-color: #cfd0fb; box-shadow: 0 14px 34px rgba(54,57,98,.1); transform: translateY(-2px); }
+.asset-card:hover,.asset-card:focus-within { border-color: var(--app-border-strong); box-shadow: var(--app-shadow); transform: translateY(-3px); }
 .asset-card.is-drag-source { opacity: .38; transform: scale(.985); }
 .asset-card.is-merge-target { border-color: var(--app-accent); box-shadow: 0 0 0 3px var(--app-accent-soft),var(--app-shadow); transform: translateY(-2px); }
 .asset-card.is-merging { pointer-events: none; opacity: .62; }
-.asset-visual { position: relative; display: grid; height: 190px; place-items: center; overflow: hidden; color: #aeb4c2; background: #f0f2f7; }
-.asset-visual.is-generating { color: #696bf3; background: linear-gradient(145deg,#f6f6ff,#eceefe); }
-.asset-visual.is-generating::before { position: absolute; inset: 0; background: linear-gradient(105deg,transparent 28%,rgb(255 255 255 / 72%) 48%,transparent 68%); content: ''; transform: translateX(-100%); animation: generation-shimmer 1.8s ease-in-out infinite; }
+.asset-card-open { display: block; width: 100%; padding: 0; border: 0; outline: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.asset-card-open:focus-visible { box-shadow: inset 0 0 0 3px color-mix(in srgb,var(--app-accent) 38%,transparent); }
+.asset-visual { position: relative; display: grid; width: 100%; aspect-ratio: 4/3; place-items: center; overflow: hidden; color: var(--app-text-secondary); background: var(--app-surface-muted); }
+.asset-visual.is-generating { color: var(--app-accent); background: color-mix(in srgb,var(--app-accent-soft) 55%,var(--app-surface-muted)); }
+.asset-visual.is-generating::before { position: absolute; inset: 0; background: linear-gradient(105deg,transparent 28%,color-mix(in srgb,var(--app-surface-raised) 74%,transparent) 48%,transparent 68%); content: ''; transform: translateX(-100%); animation: generation-shimmer 1.8s ease-in-out infinite; }
 .asset-visual img { width: 100%; height: 100%; object-fit: cover; }
+.asset-visual::after { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg,transparent 48%,rgb(24 27 34 / 18%) 64%,rgb(20 22 28 / 94%) 100%); content: ''; opacity: 0; transition: opacity .24s ease; }
+.asset-visual.is-empty::after { background: linear-gradient(180deg,transparent 42%,color-mix(in srgb,var(--app-surface) 76%,transparent) 66%,var(--app-surface) 100%); opacity: 1; }
 .asset-generating-placeholder { position: relative; z-index: 1; display: grid; place-items: center; gap: 7px; text-align: center; }
-.asset-generating-placeholder > span { display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid rgb(104 106 245 / 18%); border-radius: 15px; background: rgb(255 255 255 / 72%); box-shadow: 0 10px 24px rgb(74 77 150 / 10%); }
+.asset-generating-placeholder > span { display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid var(--app-border); border-radius: 15px; background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
 .asset-generating-placeholder svg { animation: spin 1s linear infinite; }
-.asset-generating-placeholder strong { color: #5b5de7; font-size: 12px; }
-.asset-generating-placeholder small { color: #9196b0; font-size: 10px; }
-.asset-state-badge { position: absolute; top: 10px; right: 10px; box-shadow: 0 5px 14px rgba(43,46,80,.08); }
+.asset-generating-placeholder strong { color: var(--app-accent); font-size: 12px; }
+.asset-generating-placeholder small { color: var(--app-text-secondary); font-size: 10px; }
+.asset-state-badge { position: absolute; top: 10px; left: 10px; z-index: 2; box-shadow: 0 5px 14px rgba(43,46,80,.08); }
 .asset-state-badge.is-running svg { animation: spin .8s linear infinite; }
-.asset-card-copy { padding: 13px 14px 14px; }
-.asset-card-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.asset-card-copy button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; }
-.asset-card-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
-.asset-card-copy p { min-height: 34px; margin: 7px 0 0; color: #8a91a1; font-size: 11px; line-height: 1.55; }
+.asset-card-info { position: absolute; right: 0; bottom: 0; left: 0; z-index: 2; display: grid; gap: 5px; padding: 36px 14px 13px; color: #f7f8fb; opacity: 0; transform: translateY(12px); transition: opacity .22s ease,transform .26s cubic-bezier(.2,.72,.2,1); text-shadow: 0 1px 2px rgb(0 0 0 / 48%); }
+.asset-card-info strong { overflow: hidden; color: #f7f8fb; font-size: 13px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.asset-card-info p { min-height: 30px; margin: 0; color: #e1e4eb; font-size: 10px; font-weight: 500; line-height: 1.5; }
+.asset-visual.is-empty .asset-card-info { color: var(--app-text); opacity: 1; text-shadow: none; transform: translateY(0); }
+.asset-visual.is-empty .asset-card-info :is(strong,p) { color: var(--app-text); }
+.asset-visual.is-empty .asset-card-info p { color: var(--app-text-secondary); }
+.asset-card-actions { position: absolute; top: 10px; right: 10px; z-index: 4; display: flex; flex-direction: row-reverse; gap: 5px; opacity: 0; pointer-events: none; transform: translateX(12px); transition: opacity .18s ease,transform .24s cubic-bezier(.2,.72,.2,1); }
+.asset-card .asset-card-actions :deep(.asset-card-action.app-button--ghost) { position: relative; width: 30px; height: 30px; color: var(--app-text); border: 1px solid var(--app-border-strong); border-radius: 9px; background: var(--app-surface-raised); box-shadow: 0 6px 16px rgb(36 39 54 / 18%); backdrop-filter: blur(9px); transform: translateX(7px); transition: color .16s ease,background .16s ease,transform .22s cubic-bezier(.2,.72,.2,1); }
+.asset-card .asset-card-actions :deep(.asset-card-action.app-button--ghost:hover),.asset-card .asset-card-actions :deep(.asset-card-action.app-button--ghost:focus-visible) { color: var(--app-accent); background: var(--app-surface); }
+.asset-card .asset-card-actions :deep(.asset-card-action.is-danger:hover),.asset-card .asset-card-actions :deep(.asset-card-action.is-danger:focus-visible) { color: #d65d6d; }
+.asset-card-action::after { position: absolute; top: 38px; left: 50%; width: max-content; max-width: 120px; padding: 5px 7px; border-radius: 6px; color: #fff; background: rgb(42 45 54 / 92%); content: attr(data-tooltip); font-size: 9px; line-height: 1; opacity: 0; pointer-events: none; transform: translate(-50%,-4px); transition: opacity .14s ease,transform .14s ease; white-space: nowrap; }
+.asset-card-action:hover::after,.asset-card-action:focus-visible::after { opacity: 1; transform: translate(-50%,0); }
+.asset-card-action:nth-child(2) { transition-delay: .025s; }
+.asset-card-action:nth-child(3) { transition-delay: .05s; }
+.asset-card-action:nth-child(4) { transition-delay: .075s; }
+.asset-card:hover .asset-visual::after,.asset-card:focus-within .asset-visual::after,.asset-card:hover .asset-card-info,.asset-card:focus-within .asset-card-info { opacity: 1; }
+.asset-card:hover .asset-card-info,.asset-card:focus-within .asset-card-info,.asset-card:hover .asset-card-actions,.asset-card:focus-within .asset-card-actions { transform: translate(0); }
+.asset-card:hover .asset-card-actions,.asset-card:focus-within .asset-card-actions { opacity: 1; pointer-events: auto; }
+.asset-card:hover .asset-card-action,.asset-card:focus-within .asset-card-action { transform: translateX(0); }
 .asset-merge-overlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 18px; color: var(--app-text); background: var(--app-surface-raised); text-align: center; }
 .asset-merge-overlay > span { display: grid; width: 44px; height: 44px; place-items: center; color: var(--app-accent); border: 1px solid var(--app-border-strong); border-radius: 14px; background: var(--app-accent-soft); }
 .asset-merge-overlay strong { font-size: 13px; }
@@ -857,9 +897,6 @@ onBeforeUnmount(() => {
 .manual-dialog footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
 .manual-dialog footer button { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 900px) {
-  .manual-topbar { grid-template-columns: 1fr; gap: 8px; padding: 10px 14px; }
-  .manual-phases { grid-column: 1; justify-content: center; }
-  .manual-phases button { width: 66px; height: 46px; }
   .manual-workspace { padding: 16px 16px 100px; }
   .asset-toolbar { align-items: flex-start; flex-direction: column; gap: 8px; }
   .asset-summary { width: 100%; overflow-x: auto; padding-bottom: 4px; }
@@ -870,5 +907,6 @@ onBeforeUnmount(() => {
   .asset-visual.is-generating::before,.asset-generating-placeholder svg,.generating-summary-dot { animation: none; }
   .asset-visual.is-generating::before { opacity: .3; transform: none; }
   .asset-merge-overlay > i { animation-timing-function: steps(4,end); }
+  .asset-card,.asset-card-info,.asset-card-actions,.asset-card-action,.asset-card-action::after,.asset-visual::after { transition-duration: .01ms; }
 }
 </style>

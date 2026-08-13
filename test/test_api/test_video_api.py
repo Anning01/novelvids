@@ -11,7 +11,7 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
 
 
 async def _setup_video_data(
-    model_name: str = "viduq2",
+    model_name: str = "seedance-2",
 ) -> tuple[Scene, AiModelConfig]:
     """创建测试用 Scene + Config。"""
     novel = await Novel.create(name="API Video Novel", author="Author")
@@ -20,9 +20,11 @@ async def _setup_video_data(
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
         name=model_name,
-        base_url="https://mock.api.com/v2",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key="sk-test",
         model="mock-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
         is_active=True,
     )
     return scene, config
@@ -40,7 +42,7 @@ async def test_api_生成视频(client: AsyncClient):
 
         resp = await client.post("/api/video/generate/", json={
             "scene_id": scene.id,
-            "model_type": VideoModelTypeEnum.viduq2.value,
+            "model_config_id": config.id,
         })
 
     assert resp.status_code == 200, resp.text
@@ -143,17 +145,32 @@ async def test_api_删除视频(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_api_生成视频_无配置(client: AsyncClient):
-    """无配置时返回 404。"""
+async def test_api_生成视频_未选择可用配置(client: AsyncClient):
+    """提交不存在或未启用的视频配置时返回 400。"""
     novel = await Novel.create(name="No Cfg Novel", author="Author")
     chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
     scene = await Scene.create(chapter=chapter, sequence=1, prompt="test", duration=6.0)
 
     resp = await client.post("/api/video/generate/", json={
         "scene_id": scene.id,
-        "model_type": VideoModelTypeEnum.viduq2.value,
+        "model_config_id": 99999,
     })
     body = resp.json()
-    assert body["code"] == 404
-    assert "启用一个模型" in body["message"]
+    assert body["code"] == 400
+    assert "未启用或已被删除" in body["message"]
     print(f"    API 无配置: code={body['code']}, message={body['message']}")
+
+
+@pytest.mark.asyncio
+async def test_api_拒绝旧供应商枚举选择(client: AsyncClient):
+    scene, config = await _setup_video_data()
+
+    resp = await client.post("/api/video/generate/", json={
+        "scene_id": scene.id,
+        "model_config_id": config.id,
+        "model_type": VideoModelTypeEnum.viduq2.value,
+    })
+
+    assert resp.status_code == 200
+    assert resp.json()["code"] == 422
+    assert "model_type" in resp.json()["message"]

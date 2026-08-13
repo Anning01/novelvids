@@ -74,6 +74,7 @@ async def test_api_accepts_configured_image_protocol(client: AsyncClient):
             "api_key": "ark-key",
             "model": "configured-seedream-model",
             "api_protocol": "volcengine_ark",
+            "image_model_type": "seedream_5_lite",
         },
     )
 
@@ -97,6 +98,113 @@ async def test_api_rejects_unknown_image_protocol(client: AsyncClient):
 
     assert response.status_code == 200
     assert response.json()["code"] == 422
+
+
+@pytest.mark.asyncio
+async def test_api_lists_only_active_supported_image_models_with_capabilities(client: AsyncClient):
+    active = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        task_types=[AiTaskTypeEnum.reference_image.value],
+        name="seedream-pro-active",
+        base_url="https://ark.example.com/api/v3",
+        api_key="secret",
+        model="configured-pro-endpoint",
+        api_protocol="volcengine_ark",
+        image_model_type="seedream_5_pro",
+        is_active=True,
+        concurrency=3,
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="legacy-unsupported",
+        base_url="https://legacy.example.com/v1",
+        api_key="legacy-secret",
+        model="legacy-model",
+        is_active=True,
+    )
+    response = await client.get("/api/config/image-generation/models")
+    assert response.status_code == 200
+    assert response.json()["data"] == [{
+        "config_id": active.id,
+        "name": "seedream-pro-active",
+        "model": "configured-pro-endpoint",
+        "model_type": "seedream_5_pro",
+        "concurrency": 3,
+        "capabilities": {
+            "clarities": ["1K", "1.5K", "2K"],
+            "aspect_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"],
+            "output_formats": ["png", "jpeg"],
+            "generation_counts": [1],
+            "default_clarity": "1.5K",
+            "default_aspect_ratio": "16:9",
+            "default_output_format": "png",
+            "default_generation_count": 1,
+        },
+    }]
+
+
+@pytest.mark.asyncio
+async def test_api_lists_only_active_configured_video_models_with_capabilities(client: AsyncClient):
+    active = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        task_types=[AiTaskTypeEnum.video.value],
+        name="seedance-2.5-active",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="secret",
+        model="configured-seedance-2.5-endpoint",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2_5",
+        is_active=True,
+        concurrency=2,
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="inactive-seedance",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="secret",
+        model="inactive-endpoint",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=False,
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="legacy-unsupported-video",
+        base_url="https://legacy.example.com/v1",
+        api_key="secret",
+        model="legacy-endpoint",
+        is_active=True,
+    )
+
+    response = await client.get("/api/config/video-generation/models")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == [{
+        "config_id": active.id,
+        "name": "seedance-2.5-active",
+        "model": "configured-seedance-2.5-endpoint",
+        "model_type": "seedance_2_5",
+        "concurrency": 2,
+        "capabilities": {
+            "resolutions": ["480p", "720p"],
+            "aspect_ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+            "aspect_ratios_by_mode": {
+                "reference": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+                "keyframes": ["adaptive"],
+            },
+            "output_formats": ["mp4", "mov"],
+            "generation_modes": ["reference", "keyframes"],
+            "duration_min": 4,
+            "duration_max": 30,
+            "supports_auto_duration": True,
+            "supports_audio": True,
+            "max_reference_images": 30,
+            "default_resolution": "720p",
+            "default_aspect_ratio": "adaptive",
+            "default_output_format": "mp4",
+            "default_generate_audio": True,
+        },
+    }]
 
 
 @pytest.mark.asyncio
@@ -207,7 +315,7 @@ async def test_api_delete_config(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_api_activate_config(client: AsyncClient):
-    """启用配置 - 同 task_type 只能有一个 active。"""
+    """启用配置后，同 task_type 的多个模型可以同时运行。"""
     c1 = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="config-1",
@@ -230,14 +338,14 @@ async def test_api_activate_config(client: AsyncClient):
     data = response.json()["data"]
     assert data["is_active"] is True
 
-    # 验证 c1 被自动禁用
+    # 验证 c1 继续运行
     await c1.refresh_from_db()
-    assert c1.is_active is False
+    assert c1.is_active is True
 
 
 @pytest.mark.asyncio
 async def test_api_create_config_with_active(client: AsyncClient):
-    """创建时传 is_active=True，同类型旧的自动禁用。"""
+    """创建时传 is_active=True，同类型旧配置继续运行。"""
     c1 = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="existing-active",
@@ -260,14 +368,14 @@ async def test_api_create_config_with_active(client: AsyncClient):
     data = response.json()["data"]
     assert data["is_active"] is True
 
-    # 旧配置应被禁用
+    # 旧配置继续运行
     await c1.refresh_from_db()
-    assert c1.is_active is False
+    assert c1.is_active is True
 
 
 @pytest.mark.asyncio
 async def test_api_update_config_with_active(client: AsyncClient):
-    """全量更新时传 is_active=True，同类型旧的自动禁用。"""
+    """全量更新时传 is_active=True，不影响同类型旧配置。"""
     c1 = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="active-before-update",
@@ -297,14 +405,14 @@ async def test_api_update_config_with_active(client: AsyncClient):
     data = response.json()["data"]
     assert data["is_active"] is True
 
-    # 旧配置应被禁用
+    # 旧配置继续运行
     await c1.refresh_from_db()
-    assert c1.is_active is False
+    assert c1.is_active is True
 
 
 @pytest.mark.asyncio
 async def test_api_patch_config_with_active(client: AsyncClient):
-    """局部更新时传 is_active=True，同类型旧的自动禁用。"""
+    """局部更新时传 is_active=True，不影响同类型旧配置。"""
     c1 = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="active-before-patch",
@@ -329,9 +437,9 @@ async def test_api_patch_config_with_active(client: AsyncClient):
     data = response.json()["data"]
     assert data["is_active"] is True
 
-    # 旧配置应被禁用
+    # 旧配置继续运行
     await c1.refresh_from_db()
-    assert c1.is_active is False
+    assert c1.is_active is True
 
 
 @pytest.mark.asyncio
@@ -368,9 +476,36 @@ async def test_api_activate_does_not_affect_other_task_types(client: AsyncClient
     await video.refresh_from_db()
     assert video.is_active is True
 
-    # 旧的 extraction 被禁用
+    # 旧的 extraction 继续运行
     await extraction.refresh_from_db()
-    assert extraction.is_active is False
+    assert extraction.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_api_deactivate_only_stops_target_config(client: AsyncClient):
+    first = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="image-running-first",
+        base_url="https://first.example.com",
+        api_key="key-first",
+        model="model-first",
+        is_active=True,
+    )
+    second = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="image-running-second",
+        base_url="https://second.example.com",
+        api_key="key-second",
+        model="model-second",
+        is_active=True,
+    )
+
+    response = await client.post(f"/api/config/{second.id}/deactivate")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["is_active"] is False
+    await first.refresh_from_db()
+    assert first.is_active is True
 
 
 @pytest.mark.asyncio
@@ -384,6 +519,7 @@ async def test_api_获取所有枚举(client: AsyncClient):
     expected_keys = {
         "task_status", "asset_type", "image_source",
         "workflow_status", "ai_task_type", "video_model_type",
+        "image_model_type",
     }
     assert set(data.keys()) == expected_keys
 
@@ -398,7 +534,12 @@ async def test_api_获取所有枚举(client: AsyncClient):
 
     # 抽查具体值
     video_types = {item["name"]: item for item in data["video_model_type"]}
-    assert "viduq2" in video_types
-    assert video_types["viduq2"]["value"] == 1
-    assert video_types["viduq2"]["label"] == "Viduq2"
+    assert set(video_types) == {
+        "seedance_2",
+        "seedance_2_fast",
+        "seedance_2_mini",
+        "seedance_2_5",
+    }
+    assert video_types["seedance_2"]["value"] == "seedance_2"
+    assert video_types["seedance_2"]["label"] == "Doubao Seedance 2.0"
     print(f"    枚举接口: keys={list(data.keys())}, video_model_type count={len(data['video_model_type'])}")

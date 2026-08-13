@@ -25,7 +25,7 @@ import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
 import { api } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import type { AiModelConfig, EnumItem, GeneralConfig, ImageApiProtocol } from '@/types'
+import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, ImageApiProtocol, ImageModelType, VideoGenerationModelType } from '@/types'
 
 type ModelCategoryId = 'llm' | 'image' | 'video'
 type SettingsSection = 'models' | 'general'
@@ -45,7 +45,7 @@ const categories: ModelCategory[] = [
     label: 'LLM 大模型',
     eyebrow: 'LANGUAGE',
     description: '负责剧本理解、人物提取、分集规划与分镜文本生成。',
-    taskTypes: [1, 3],
+    taskTypes: [1, 3, 5],
     icon: Bot,
   },
   {
@@ -73,6 +73,8 @@ const settingsTabs: AppTabItem[] = [
 const configs = ref<AiModelConfig[]>([])
 const generalConfig = ref<GeneralConfig | null>(null)
 const taskTypes = ref<EnumItem[]>([])
+const imageModelTypes = ref<ConfigEnumItem[]>([])
+const videoModelTypes = ref<ConfigEnumItem[]>([])
 const loading = ref(true)
 const savingGeneral = ref(false)
 const activeSection = ref<SettingsSection>('models')
@@ -82,7 +84,7 @@ const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' })
 
 function configTaskTypes(item: AiModelConfig) {
   return item.task_types?.length ? item.task_types : [item.task_type]
@@ -93,7 +95,7 @@ const isEditing = computed(() => editingConfigId.value !== null)
 const selectedConfigs = computed(() => configs.value.filter(item => configTaskTypes(item).some(value => selectedCategory.value.taskTypes.includes(value))))
 const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value => ({
   value: String(value),
-  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成' }[value] ?? `任务 ${value}`),
+  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析' }[value] ?? `任务 ${value}`),
 })))
 
 function iconTone(categoryId: ModelCategoryId) {
@@ -107,14 +109,11 @@ function configsFor(category: ModelCategory) {
 }
 
 function activeCount(category: ModelCategory) {
-  return new Set(configsFor(category)
-    .filter(item => item.is_active)
-    .flatMap(item => configTaskTypes(item).filter(value => category.taskTypes.includes(value))))
-    .size
+  return configsFor(category).filter(item => item.is_active).length
 }
 
 function taskLabel(value: number) {
-  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成' }[value] ?? `任务 ${value}`)
+  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成', 5: '项目分析' }[value] ?? `任务 ${value}`)
 }
 
 function protocolLabel(value: ImageApiProtocol) {
@@ -142,6 +141,8 @@ async function load() {
     ])
     configs.value = configResponse.data.items
     taskTypes.value = enumResponse.data.ai_task_type || []
+    imageModelTypes.value = enumResponse.data.image_model_type || []
+    videoModelTypes.value = enumResponse.data.video_model_type || []
     generalConfig.value = generalResponse.data
     promptLanguage.value = generalResponse.data.prompt_language
   } catch (error) {
@@ -172,7 +173,7 @@ function changeSettingsSection(value: string) {
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' }
+  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' }
   editingConfigId.value = null
   showApiKey.value = false
   showCreate.value = true
@@ -189,12 +190,21 @@ function openEdit(item: AiModelConfig) {
     base_url: item.base_url || '',
     api_key: item.api_key || '',
     model: item.model || '',
-    api_protocol: item.api_protocol || 'openai_compatible',
+    api_protocol: category.id === 'video' ? 'volcengine_ark' : item.api_protocol || 'openai_compatible',
+    image_model_type: item.image_model_type || '',
+    video_model_type: item.video_model_type || '',
     concurrency: item.concurrency,
     supports_json_output: item.supports_json_output ?? false,
     max_context_characters: item.max_context_characters ?? '',
   }
   showCreate.value = true
+}
+
+function changeImageModelType() {
+  if (form.value.api_protocol === 'openrouter_compatible') return
+  form.value.api_protocol = form.value.image_model_type === 'gpt_image_2'
+    ? 'openai_compatible'
+    : 'volcengine_ark'
 }
 
 async function saveConfig() {
@@ -207,9 +217,12 @@ async function saveConfig() {
     const taskTypes = form.value.task_types.map(Number)
     const payload = {
       ...form.value,
+      api_protocol: selectedCategoryId.value === 'video' ? 'volcengine_ark' : form.value.api_protocol,
       task_type: taskTypes[0],
       task_types: taskTypes,
       max_context_characters: form.value.max_context_characters || null,
+      image_model_type: selectedCategoryId.value === 'image' ? form.value.image_model_type || null : null,
+      video_model_type: selectedCategoryId.value === 'video' ? form.value.video_model_type || null : null,
     }
     if (editingConfigId.value !== null) {
       await api.updateConfig(editingConfigId.value, payload)
@@ -231,6 +244,16 @@ async function activate(item: AiModelConfig) {
     await api.activateConfig(item.id)
     await load()
     notice.success(`已启用 ${item.name}`)
+  } catch (error) {
+    notice.error((error as Error).message)
+  }
+}
+
+async function deactivate(item: AiModelConfig) {
+  try {
+    await api.deactivateConfig(item.id)
+    await load()
+    notice.success(`已停用 ${item.name}`)
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -283,7 +306,7 @@ onMounted(load)
       >
         <AppIconTile :tone="iconTone(category.id)" size="lg"><component :is="category.icon" :size="22" /></AppIconTile>
         <span class="category-copy"><small>{{ category.eyebrow }}</small><strong>{{ category.label }}</strong><p>{{ category.description }}</p></span>
-        <span class="category-status"><i :class="{ 'is-ready': activeCount(category) }" />{{ activeCount(category) ? `${activeCount(category)} 个用途已就绪` : '尚未启用' }}</span>
+        <span class="category-status"><i :class="{ 'is-ready': activeCount(category) }" />{{ activeCount(category) ? `${activeCount(category)} 个模型运行中` : '尚未启用' }}</span>
       </AppButton>
     </section>
 
@@ -302,19 +325,24 @@ onMounted(load)
         <article v-for="item in selectedConfigs" :key="item.id" class="model-config-card" :class="{ 'is-active': item.is_active }">
           <AppIconTile :tone="iconTone(selectedCategory.id)"><component :is="selectedCategory.icon" :size="19" /></AppIconTile>
           <div class="config-main">
-            <div class="config-title"><h3>{{ item.name }}</h3><span :class="{ 'is-active': item.is_active }">{{ item.is_active ? '当前启用' : '备用配置' }}</span></div>
+            <div class="config-title"><h3>{{ item.name }}</h3><span :class="{ 'is-active': item.is_active }">{{ item.is_active ? '已启动' : '未启动' }}</span></div>
             <p>{{ configTaskTypes(item).map(taskLabel).join(' · ') }}</p>
             <div class="config-metadata">
               <span><Settings2 :size="13" />{{ item.model || '未设置模型名称' }}</span>
               <span><Server :size="13" />{{ providerHost(item.base_url) }}</span>
               <span><Zap :size="13" />并发 {{ item.concurrency }}</span>
               <span v-if="selectedCategory.id === 'image'">{{ protocolLabel(item.api_protocol) }}</span>
+              <span v-if="selectedCategory.id === 'image'">{{ imageModelTypes.find(type => type.value === item.image_model_type)?.label || '未选择受支持类型' }}</span>
+              <span v-if="selectedCategory.id === 'video'">{{ videoModelTypes.find(type => type.value === item.video_model_type)?.label || '未选择受支持类型' }}</span>
               <span v-if="selectedCategory.id === 'llm'">{{ item.supports_json_output ? 'JSON 格式化' : '提示词 JSON' }}</span>
             </div>
           </div>
           <div class="config-actions">
             <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" title="启用配置" @click="activate(item)"><Power :size="15" /><span>启用</span></AppButton>
-            <span v-else class="active-check"><CheckCircle2 :size="16" />运行中</span>
+            <template v-else>
+              <span class="active-check"><CheckCircle2 :size="16" />运行中</span>
+              <AppButton variant="soft" size="sm" type="button" title="停用配置" @click="deactivate(item)"><Power :size="15" /><span>停用</span></AppButton>
+            </template>
             <span class="config-icon-actions">
               <AppButton variant="secondary" size="sm" icon-only type="button" aria-label="编辑配置" title="编辑配置" @click="openEdit(item)"><Pencil :size="15" /></AppButton>
               <AppButton variant="danger" size="sm" icon-only type="button" aria-label="删除配置" title="删除配置" @click="remove(item)"><Trash2 :size="15" /></AppButton>
@@ -417,6 +445,27 @@ onMounted(load)
           </label>
           <label><span>模型名称</span><input v-model="form.model" name="model-id" required autocomplete="off" spellcheck="false" placeholder="模型 ID" /></label>
           <label><span>并发数</span><input v-model.number="form.concurrency" name="model-concurrency" type="number" min="1" required /></label>
+          <label v-if="selectedCategory.id === 'image'" class="is-full">
+            <span>生图模型类型</span>
+            <select v-model="form.image_model_type" name="image-model-type" required @change="changeImageModelType">
+              <option disabled value="">请选择受支持的模型</option>
+              <option v-for="item in imageModelTypes" :key="String(item.value)" :value="item.value">{{ item.label }}</option>
+            </select>
+            <small>仅支持 Lite、Pro 和 GPT Image 2；清晰度、比例与格式由所选类型的后台能力定义。</small>
+          </label>
+          <label v-if="selectedCategory.id === 'video'" class="is-full">
+            <span>视频模型类型</span>
+            <select v-model="form.video_model_type" name="video-model-type" required>
+              <option disabled value="">请选择受支持的 Seedance 模型</option>
+              <option v-for="item in videoModelTypes" :key="String(item.value)" :value="item.value">{{ item.label }}</option>
+            </select>
+            <small>仅开放 Seedance 2.0、2.0 Fast、2.0 Mini 与 2.5；分辨率、比例、时长和格式由后台能力定义。</small>
+          </label>
+          <label v-if="selectedCategory.id === 'video'" class="is-full">
+            <span>接口协议</span>
+            <output class="model-readonly-value" aria-label="视频接口协议">官方协议（火山方舟）</output>
+            <small>提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。</small>
+          </label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">
             <span>接口协议</span>
             <select v-model="form.api_protocol" name="image-api-protocol">
@@ -538,6 +587,7 @@ onMounted(load)
 .model-form-grid label > span:first-child { font-weight: 600; }
 .model-form-grid label > small { color: var(--app-text-muted); font-size: 9px; }
 .model-form-grid input, .model-form-grid select { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid var(--app-border); border-radius: 9px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); caret-color: var(--app-text); font-size: 11px; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.model-readonly-value { display: flex; width: 100%; min-height: 39px; align-items: center; padding: 0 11px; border-radius: 9px; color: var(--app-text); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 11px; }
 .model-form-grid input::placeholder { color: var(--app-text-muted); opacity: 1; }
 .model-form-grid input:hover, .model-form-grid select:hover { border-color: var(--app-border-strong); }
 .model-form-grid input:focus { border-color: var(--app-accent); color: var(--app-text); background: var(--app-surface-hover); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }

@@ -1,7 +1,7 @@
-import type { Scene } from '@/types'
+import type { Scene, VideoGenerationCapabilities } from '@/types'
 
-export const SHOT_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const
-export const SHOT_RESOLUTIONS = ['480p', '720p', '1080p'] as const
+export const SHOT_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'] as const
+export const SHOT_RESOLUTIONS = ['480p', '720p', '1080p', '4k'] as const
 
 export type ShotAspectRatio = typeof SHOT_ASPECT_RATIOS[number]
 export type ShotResolution = typeof SHOT_RESOLUTIONS[number]
@@ -16,6 +16,8 @@ export interface ShotWorkbenchConfig {
   duration: number
   aspectRatio: ShotAspectRatio
   resolution: ShotResolution
+  outputFormat: string
+  generateAudio: boolean
   useLastFrame: boolean
   referenceMode: ShotReferenceMode
   referenceModes: Record<string, ShotReferenceMode>
@@ -59,6 +61,8 @@ export function normalizeShotConfig(scene: Scene, projectDefaults: ShotProjectDe
     duration,
     aspectRatio,
     resolution,
+    outputFormat: stringValue(workbench.outputFormat) || 'mp4',
+    generateAudio: workbench.generateAudio !== false,
     useLastFrame: workbench.useLastFrame === true,
     referenceMode: workbench.referenceMode === 'image' ? 'image' : 'prompt',
     referenceModes: referenceModes(workbench.referenceModes),
@@ -79,10 +83,39 @@ export function patchShotWorkbenchConfig(
   }
 }
 
-export function shotGenerationOptions(config: ShotWorkbenchConfig) {
+export function shotGenerationOptions(
+  config: ShotWorkbenchConfig,
+  capabilities?: VideoGenerationCapabilities,
+) {
+  const generationMode = config.useLastFrame ? 'keyframes' as const : 'reference' as const
+  const ratios = capabilities?.aspect_ratios_by_mode[generationMode]
+    || capabilities?.aspect_ratios
+    || [...SHOT_ASPECT_RATIOS]
+  const resolution = !capabilities || capabilities.resolutions.includes(config.resolution)
+    ? config.resolution
+    : capabilities.resolutions.includes(capabilities.default_resolution)
+      ? capabilities.default_resolution
+      : capabilities.resolutions[0]
+  const aspectRatio = ratios.includes(config.aspectRatio)
+    ? config.aspectRatio
+    : ratios.includes(capabilities?.default_aspect_ratio || '')
+      ? capabilities?.default_aspect_ratio
+      : ratios[0]
+  const outputFormat = !capabilities || capabilities.output_formats.includes(config.outputFormat)
+    ? config.outputFormat
+    : capabilities.default_output_format
+  const roundedDuration = Math.round(config.duration)
+  const duration = capabilities
+    ? Math.max(capabilities.duration_min, Math.min(capabilities.duration_max, roundedDuration))
+    : roundedDuration
   return {
-    generation_mode: config.useLastFrame ? 'keyframes' as const : 'reference' as const,
+    generation_mode: generationMode,
     first_frame_url: config.firstFrameUrl || undefined,
     last_frame_url: config.useLastFrame ? config.lastFrameUrl || undefined : undefined,
+    resolution,
+    aspect_ratio: aspectRatio,
+    duration,
+    output_format: outputFormat,
+    generate_audio: capabilities?.supports_audio === false ? false : config.generateAudio,
   }
 }

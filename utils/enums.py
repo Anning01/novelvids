@@ -126,8 +126,27 @@ class AiTaskTypeEnum(NicknameIntEnum):
 
 @enum_description
 class VideoModelTypeEnum(NicknameIntEnum):
-    """视频全局模型类型。"""
+    """历史视频供应商类型，仅用于兼容已有视频记录。"""
     viduq2 = 1, "Viduq2"
     sora2 = 2, "Sora2"
     seedance = 3, "Seedance/即梦"
     veo3 = 4, "Veo3"
+
+
+@enum_description
+class VideoGenerationModelTypeEnum(NicknameStrEnum):
+    """后台允许配置的视频生成模型类型。"""
+
+    seedance_2 = "seedance_2", "Doubao Seedance 2.0"
+    seedance_2_fast = "seedance_2_fast", "Doubao Seedance 2.0 Fast"
+    seedance_2_mini = "seedance_2_mini", "Doubao Seedance 2.0 Mini"
+    seedance_2_5 = "seedance_2_5", "Doubao Seedance 2.5"
+
+
+@enum_description
+class ImageModelTypeEnum(NicknameStrEnum):
+    """后台允许启用的生图模型类型。"""
+
+    seedream_5_lite = "seedream_5_lite", "Doubao Seedream 5.0 Lite"
+    seedream_5_pro = "seedream_5_pro", "Doubao Seedream 5.0 Pro"
+    gpt_image_2 = "gpt_image_2", "GPT Image 2"

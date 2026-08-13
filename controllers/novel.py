@@ -4,6 +4,7 @@ from models.ai_task import AiTask
 from models.chapter import Chapter
 from controllers.config import ai_model_config_controller, general_config_controller
 from services.ai_task_executor import ai_task_executor
+from services.chapter_titles import normalize_chapter_title
 from services.nlp import (
     ChapterSplitError,
     RegexChapterRecognitionStrategy,
@@ -71,7 +72,10 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             Chapter(
                 novel_id=novel.id,
                 number=idx + 1,
-                name=chapter_result.title,
+                name=normalize_chapter_title(
+                    chapter_result.title,
+                    fallback=novel.name,
+                ),
                 content=chapter_result.content,
             )
             for idx, chapter_result in enumerate(parsed_chapters)
@@ -92,7 +96,10 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         if not (novel.content or "").strip():
             raise HTTPException(status_code=400, detail="项目没有可分析的书稿内容")
 
-        await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value)
+        await ai_model_config_controller.get_active_with_legacy_fallback(
+            AiTaskTypeEnum.project_analysis.value,
+            AiTaskTypeEnum.extraction.value,
+        )
         await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)

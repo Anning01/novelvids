@@ -22,6 +22,10 @@ class AssetVariantPatch(AssetVariantProperties):
     pass
 
 
+class AssetVariantChapterAssignment(BaseModel):
+    chapter_number: int = Field(..., ge=1, description="设置为该集唯一使用的衍生形态")
+
+
 class AssetVariantOut(AssetVariantProperties, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 

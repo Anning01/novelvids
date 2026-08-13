@@ -30,6 +30,19 @@ async def test_create_chapter(sql_profiler):
     assert chapter.novel_id == novel.id
     assert p.query_count > 0
 
+
+@pytest.mark.asyncio
+async def test_create_chapter_strips_a_repeated_ordinal_prefix():
+    novel = await Novel.create(name="Chapter Title Novel", author="Author")
+    chapter = await chapter_controller.create(ChapterCreate(
+        novel_id=novel.id,
+        number=2,
+        name="第2章 凪光真人",
+        content="Chapter Content",
+    ))
+
+    assert chapter.name == "凪光真人"
+
 @pytest.mark.asyncio
 async def test_get_chapter():
     """Test retrieving a chapter."""

@@ -8,11 +8,18 @@ from utils.enums import VideoModelTypeEnum, TaskStatusEnum
 
 class VideoGenerateRequest(BaseModel):
     """提交视频生成请求"""
+    model_config = ConfigDict(extra="forbid")
+
     scene_id: int = Field(..., description="分镜ID")
-    model_type: VideoModelTypeEnum = Field(..., description=VideoModelTypeEnum.__doc__)
+    model_config_id: int = Field(..., description="后台已启用的视频模型配置ID", ge=1)
     generation_mode: Literal["reference", "keyframes"] = Field("reference", description="参考图或首尾帧生成模式")
     first_frame_url: Optional[str] = Field(None, description="首帧图片地址")
     last_frame_url: Optional[str] = Field(None, description="尾帧图片地址")
+    resolution: Optional[str] = Field(None, description="视频分辨率，由所选模型能力校验")
+    aspect_ratio: Optional[str] = Field(None, description="视频宽高比，由所选模型能力校验")
+    duration: Optional[int] = Field(None, description="视频时长（秒），留空使用分镜时长")
+    output_format: Optional[str] = Field(None, description="视频输出格式")
+    generate_audio: Optional[bool] = Field(None, description="是否生成同步音频")
 
 
 # --- 输出 Schema ---

@@ -44,10 +44,14 @@ async def test_创建配置_传入is_active为True():
 
 @pytest.mark.asyncio
 async def test_单个模型支持多个能力用途():
-    """同一配置可同时服务内容提取与分镜生成。"""
+    """同一配置可同时服务内容提取、分镜生成与项目分析。"""
     config = await ai_model_config_controller.create(AiModelConfigCreate(
         task_type=AiTaskTypeEnum.extraction.value,
-        task_types=[AiTaskTypeEnum.extraction.value, AiTaskTypeEnum.storyboard.value],
+        task_types=[
+            AiTaskTypeEnum.extraction.value,
+            AiTaskTypeEnum.storyboard.value,
+            AiTaskTypeEnum.project_analysis.value,
+        ],
         name="multi-purpose-llm",
         base_url="https://api.example.com",
         api_key="sk-test",
@@ -58,14 +62,66 @@ async def test_单个模型支持多个能力用途():
     assert config.task_types == [
         AiTaskTypeEnum.extraction.value,
         AiTaskTypeEnum.storyboard.value,
+        AiTaskTypeEnum.project_analysis.value,
     ]
     assert await ai_model_config_controller.get_active(AiTaskTypeEnum.extraction.value) == config
     assert await ai_model_config_controller.get_active(AiTaskTypeEnum.storyboard.value) == config
+    assert await ai_model_config_controller.get_active(AiTaskTypeEnum.project_analysis.value) == config
 
 
 @pytest.mark.asyncio
-async def test_多能力配置会停用任一能力冲突的旧配置():
-    """启用多用途模型时，它覆盖到的每个能力都只保留一个启用配置。"""
+async def test_项目分析优先使用独立能力配置():
+    legacy = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[AiTaskTypeEnum.extraction.value],
+        name="legacy-extraction",
+        base_url="https://legacy.example.com",
+        api_key="legacy-key",
+        model="legacy-model",
+        is_active=True,
+    )
+    dedicated = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.project_analysis.value,
+        task_types=[AiTaskTypeEnum.project_analysis.value],
+        name="project-analysis",
+        base_url="https://analysis.example.com",
+        api_key="analysis-key",
+        model="analysis-model",
+        is_active=True,
+    )
+
+    selected = await ai_model_config_controller.get_active_with_legacy_fallback(
+        AiTaskTypeEnum.project_analysis.value,
+        AiTaskTypeEnum.extraction.value,
+    )
+
+    assert selected == dedicated
+    assert selected != legacy
+
+
+@pytest.mark.asyncio
+async def test_项目分析兼容旧的提取模型配置():
+    legacy = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[AiTaskTypeEnum.extraction.value],
+        name="legacy-project-analysis",
+        base_url="https://legacy.example.com",
+        api_key="legacy-key",
+        model="legacy-model",
+        is_active=True,
+    )
+
+    selected = await ai_model_config_controller.get_active_with_legacy_fallback(
+        AiTaskTypeEnum.project_analysis.value,
+        AiTaskTypeEnum.extraction.value,
+    )
+
+    assert selected == legacy
+
+
+@pytest.mark.asyncio
+async def test_多能力配置不会停用能力重叠的旧配置():
+    """启用多用途模型时，能力重叠的配置可以继续运行。"""
     old_storyboard = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.storyboard.value,
         task_types=[AiTaskTypeEnum.storyboard.value],
@@ -87,12 +143,12 @@ async def test_多能力配置会停用任一能力冲突的旧配置():
     ))
 
     await old_storyboard.refresh_from_db()
-    assert old_storyboard.is_active is False
+    assert old_storyboard.is_active is True
 
 
 @pytest.mark.asyncio
-async def test_创建配置_启用时同类型旧的自动禁用():
-    """创建新配置并启用，同类型下原有的应被自动禁用。"""
+async def test_创建配置_启用时同类型旧的继续运行():
+    """创建新配置并启用，同类型下原有配置仍保持运行。"""
     old = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="old-active",
@@ -114,7 +170,7 @@ async def test_创建配置_启用时同类型旧的自动禁用():
     assert new.is_active is True
 
     await old.refresh_from_db()
-    assert old.is_active is False
+    assert old.is_active is True
 
 
 @pytest.mark.asyncio
@@ -170,8 +226,8 @@ async def test_全量更新配置():
 
 
 @pytest.mark.asyncio
-async def test_全量更新配置_传入is_active禁用同类型():
-    """全量更新时传 is_active=True，同类型下其他应被禁用。"""
+async def test_全量更新配置_传入is_active不影响同类型():
+    """全量更新时传 is_active=True，不影响同类型其他配置。"""
     active = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="currently-active",
@@ -200,7 +256,7 @@ async def test_全量更新配置_传入is_active禁用同类型():
     assert result.is_active is True
 
     await active.refresh_from_db()
-    assert active.is_active is False
+    assert active.is_active is True
 
 
 # =====================================================================
@@ -225,8 +281,8 @@ async def test_局部更新配置_只改一个字段():
 
 
 @pytest.mark.asyncio
-async def test_局部更新配置_传入is_active禁用同类型():
-    """局部更新传 is_active=True，同类型旧的应被禁用。"""
+async def test_局部更新配置_传入is_active不影响同类型():
+    """局部更新传 is_active=True，不影响同类型其他配置。"""
     active = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="active-before-patch",
@@ -248,7 +304,7 @@ async def test_局部更新配置_传入is_active禁用同类型():
     assert result.is_active is True
 
     await active.refresh_from_db()
-    assert active.is_active is False
+    assert active.is_active is True
 
 
 # =====================================================================
@@ -299,8 +355,8 @@ async def test_启用配置():
 
 
 @pytest.mark.asyncio
-async def test_启用配置_同类型旧的自动禁用():
-    """启用新配置时，同 task_type 下其他已启用的应被禁用。"""
+async def test_启用配置_同类型可同时运行():
+    """启用新配置时，同 task_type 下其他已启用配置继续运行。"""
     c1 = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="c1-active",
@@ -320,7 +376,7 @@ async def test_启用配置_同类型旧的自动禁用():
     await ai_model_config_controller.activate(c2.id)
 
     await c1.refresh_from_db()
-    assert c1.is_active is False
+    assert c1.is_active is True
 
     await c2.refresh_from_db()
     assert c2.is_active is True
@@ -359,7 +415,36 @@ async def test_启用配置_不同类型互不影响():
     assert video.is_active is True  # video 不受影响
 
     await ext1.refresh_from_db()
-    assert ext1.is_active is False  # 同类型 ext 被禁用
+    assert ext1.is_active is True  # 同类型 ext 继续运行
+
+
+@pytest.mark.asyncio
+async def test_停用配置_只停止目标模型():
+    """停用一个模型不会影响同用途下其他运行模型。"""
+    first = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        name="deactivate-first",
+        base_url="https://first.example.com",
+        api_key="key-first",
+        model="model-first",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+    second = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        name="deactivate-second",
+        base_url="https://second.example.com",
+        api_key="key-second",
+        model="model-second",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+
+    result = await ai_model_config_controller.deactivate(second.id)
+
+    await first.refresh_from_db()
+    assert result.is_active is False
+    assert first.is_active is True
 
 
 # =====================================================================
@@ -368,7 +453,7 @@ async def test_启用配置_不同类型互不影响():
 
 @pytest.mark.asyncio
 async def test_获取启用配置():
-    """get_active 返回指定类型下唯一启用的配置。"""
+    """get_active 返回指定类型下最近启用的配置。"""
     await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="the-active-one",
@@ -383,6 +468,38 @@ async def test_获取启用配置():
     )
     assert result.name == "the-active-one"
     assert result.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_获取指定的启用配置():
+    """显式选择时返回目标模型，而不是自动选择的模型。"""
+    first = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        task_types=[AiTaskTypeEnum.reference_image.value],
+        name="image-first",
+        base_url="https://first.example.com",
+        api_key="key-first",
+        model="model-first",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        task_types=[AiTaskTypeEnum.reference_image.value],
+        name="image-second",
+        base_url="https://second.example.com",
+        api_key="key-second",
+        model="model-second",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+
+    result = await ai_model_config_controller.get_active(
+        AiTaskTypeEnum.reference_image.value,
+        first.id,
+    )
+
+    assert result.id == first.id
 
 
 @pytest.mark.asyncio
@@ -418,9 +535,11 @@ async def test_多个类型各有启用配置_互不干扰():
     await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
         name="video-active",
-        base_url="https://v.com",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key="key-v",
         model="model-v",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
         is_active=True,
     )
 
@@ -429,3 +548,108 @@ async def test_多个类型各有启用配置_互不干扰():
 
     vid = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value)
     assert vid.name == "video-active"
+
+
+@pytest.mark.asyncio
+async def test_同一生图模型类型同时只能启用一个():
+    first = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="seedream-lite-first",
+        base_url="https://ark.example.com/api/v3",
+        api_key="first-key",
+        model="first-endpoint",
+        api_protocol="volcengine_ark",
+        image_model_type="seedream_5_lite",
+        is_active=True,
+    ))
+    second = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="seedream-lite-second",
+        base_url="https://ark.example.com/api/v3",
+        api_key="second-key",
+        model="second-endpoint",
+        api_protocol="volcengine_ark",
+        image_model_type="seedream_5_lite",
+        is_active=True,
+    ))
+    pro = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="seedream-pro",
+        base_url="https://ark.example.com/api/v3",
+        api_key="pro-key",
+        model="pro-endpoint",
+        api_protocol="volcengine_ark",
+        image_model_type="seedream_5_pro",
+        is_active=True,
+    ))
+    await first.refresh_from_db()
+    await second.refresh_from_db()
+    await pro.refresh_from_db()
+    assert first.is_active is False
+    assert second.is_active is True
+    assert pro.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_同一视频模型类型同时只能启用一个_不同类型可并行():
+    first = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.video.value,
+        name="seedance-2-first",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="first-key",
+        model="first-endpoint",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=True,
+    ))
+    second = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.video.value,
+        name="seedance-2-second",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="second-key",
+        model="second-endpoint",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=True,
+    ))
+    fast = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.video.value,
+        name="seedance-2-fast",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="fast-key",
+        model="fast-endpoint",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2_fast",
+        is_active=True,
+    ))
+
+    await first.refresh_from_db()
+    await second.refresh_from_db()
+    await fast.refresh_from_db()
+    assert first.is_active is False
+    assert second.is_active is True
+    assert fast.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_视频模型必须使用受支持类型和火山方舟协议():
+    with pytest.raises(HTTPException, match="未选择受支持"):
+        await ai_model_config_controller.create(AiModelConfigCreate(
+            task_type=AiTaskTypeEnum.video.value,
+            name="missing-video-type",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            api_key="key",
+            model="endpoint",
+            api_protocol="volcengine_ark",
+        ))
+
+    with pytest.raises(HTTPException, match="仅支持火山方舟"):
+        await ai_model_config_controller.create(AiModelConfigCreate(
+            task_type=AiTaskTypeEnum.video.value,
+            name="wrong-protocol",
+            base_url="https://example.com/v1",
+            api_key="key",
+            model="endpoint",
+            api_protocol="openai_compatible",
+            video_model_type="seedance_2_5",
+        ))

@@ -3,7 +3,11 @@ import pytest
 from models.novel import Novel
 from models.asset import Asset
 from models.asset_variant import AssetVariant
-from services.video.asset_resolver import resolve_assets, MENTION_PATTERN
+from services.video.asset_resolver import (
+    MENTION_PATTERN,
+    normalize_selected_variant_ids,
+    resolve_assets,
+)
 from services.video.seedance import SeedanceGenerator
 from utils.enums import AssetTypeEnum
 
@@ -151,6 +155,69 @@ async def test_按章节自动采用资产升级形态():
     assert subjects[0]["name"] == "白玉京"
     assert subjects[0]["variant_name"] == "战后废墟"
     assert subjects[0]["images"] == ["https://example.com/ruin.png"]
+
+
+@pytest.mark.asyncio
+async def test_分镜显式选择的资产形态优先于章节默认形态():
+    novel = await Novel.create(name="Explicit Variant Novel", author="Author")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="艾伦",
+        main_image="https://example.com/base.png",
+    )
+    chapter_variant = await AssetVariant.create(
+        asset=asset,
+        name="冬季披风",
+        chapter_numbers=[5],
+        images=["https://example.com/winter.png"],
+    )
+    selected_variant = await AssetVariant.create(
+        asset=asset,
+        name="负伤便装",
+        images=["https://example.com/injured.png"],
+    )
+
+    subjects = await resolve_assets(
+        "@艾伦 穿过街道",
+        novel.id,
+        chapter_number=5,
+        selected_asset_ids=[asset.id],
+        selected_variant_ids={asset.id: selected_variant.id},
+    )
+
+    assert chapter_variant.id != selected_variant.id
+    assert subjects[0]["variant_name"] == "负伤便装"
+    assert subjects[0]["images"] == ["https://example.com/injured.png"]
+
+
+@pytest.mark.asyncio
+async def test_分镜绑定但提示词未引用的资产仍作为参考素材():
+    novel = await Novel.create(name="Bound Asset Novel", author="Author")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.item.value,
+        canonical_name="长剑",
+        main_image="https://example.com/sword.png",
+    )
+
+    subjects = await resolve_assets(
+        "雨夜中的决斗",
+        novel.id,
+        selected_asset_ids=[asset.id],
+        selected_variant_ids={asset.id: None},
+    )
+
+    assert subjects[0]["name"] == "长剑"
+    assert subjects[0]["variant_name"] is None
+    assert subjects[0]["images"] == ["https://example.com/sword.png"]
+
+
+def test_标准化分镜资产形态映射():
+    assert normalize_selected_variant_ids({"1": 11, 2: None, "bad": 3, "4": -1}) == {
+        1: 11,
+        2: None,
+    }
 
 
 @pytest.mark.asyncio

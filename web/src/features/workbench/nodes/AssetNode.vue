@@ -4,25 +4,25 @@ import type { MaterialMention, MaterialMentionOption } from '../components/mater
 import type { ImageAnnotation, WorkbenchNode } from '../types/workbenchTypes'
 import { CheckCircle2, Download, ImageUp, LoaderCircle, Maximize2, Minimize2, Pencil, Plus, ScanFace, Trash2, X } from 'lucide-vue-next'
 import { computed, inject, ref, watch } from 'vue'
-import type { Asset, DigitalHuman } from '@/types'
+import type { Asset, DigitalHuman, ImageGenerationModel } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { downloadFile } from '@/shared/downloadFile'
 import { notice } from '@/shared/notice'
 import AssetDefaultImage from '../components/AssetDefaultImage.vue'
+import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import ImageAnnotationDialog from '../components/ImageAnnotationDialog.vue'
+import MediaGenerationModelSelector from '../components/MediaGenerationModelSelector.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import MediaLibraryPicker from '../components/MediaLibraryPicker.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import WorkbenchSelect from '../components/WorkbenchSelect.vue'
-import WorkbenchSuggestedInput from '../components/WorkbenchSuggestedInput.vue'
 import { assetTypeIconFor, assetTypePresentationOptions } from '../components/assetTypePresentation'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
+import { useWorkbenchNodeDimensionSync } from '../composables/useWorkbenchNodeDimensionSync'
 import {
-  ASSET_SIZE_PRESETS,
   assetImageMediaMetadata,
   assetImageCandidates,
   assetSelectedImageCandidates,
-  assetSizeResolution,
   normalizeAssetConfig,
   patchAssetImageMediaMetadata,
   patchAssetWorkbenchConfig,
@@ -31,6 +31,7 @@ import {
 import { registerWorkbenchPromptAction } from '../prompt/promptActionRegistry'
 import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
 import { promptEditorFromData, workbenchPromptEditorKey } from '../prompt/promptEditor'
+import { balanceMediaGalleryRows, containedAspectRatioSize, mediaAspectRatioCss, mediaGalleryItemWidth } from '../graph/mediaAspectRatio'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -42,6 +43,9 @@ const assetTypeExplicit = ref(true)
 const nickname = ref('')
 const description = ref('')
 const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value))
+const imageModels = computed(() => (props.data.imageModelOptions as ImageGenerationModel[] | undefined) || [])
+const imageModelOptions = computed(() => imageModels.value.map(model => ({ value: model.config_id, label: model.name || model.model })))
+const selectedImageModel = computed(() => imageModels.value.find(model => model.config_id === config.value.modelConfigId) || null)
 const saving = ref(false)
 const changingMainImage = ref(false)
 const uploadingImage = ref(false)
@@ -51,6 +55,7 @@ const annotationOpen = ref(false)
 const imageGalleryExpanded = ref(false)
 const loadedImageWidth = ref(0)
 const loadedImageHeight = ref(0)
+const loadedGalleryImageSizes = ref<Record<string, { width: number; height: number }>>({})
 const digitalHumanPickerOpen = ref(false)
 const selectedVariantValue = ref('base')
 const addingVariant = ref(false)
@@ -64,10 +69,19 @@ watch(asset, value => {
   nickname.value = value.canonical_name
   description.value = value.description || ''
   config.value = normalizeAssetConfig(value)
+  if (!imageModelOptions.value.some(option => option.value === config.value.modelConfigId)) {
+    config.value.modelConfigId = imageModelOptions.value[0]?.value ?? null
+  }
   if (
     selectedVariantValue.value !== 'base'
     && !value.variants?.some(variant => String(variant.id) === selectedVariantValue.value)
   ) selectedVariantValue.value = 'base'
+}, { immediate: true })
+
+watch(imageModelOptions, options => {
+  if (!options.some(option => option.value === config.value.modelConfigId)) {
+    config.value.modelConfigId = options[0]?.value ?? null
+  }
 }, { immediate: true })
 
 const busy = computed(() => store.busyAssetIds.includes(asset.value.id))
@@ -107,7 +121,8 @@ const primaryImage = computed(() => (
 ))
 const hasImagePreview = computed(() => Boolean(asset.value.main_image))
 const hasMultipleImages = computed(() => assetImages.value.length > 1)
-const assetImageStackDepth = computed(() => Math.max(0, assetImages.value.length - 1))
+const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
+const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
 const assetImageStageStyle = computed(() => {
   const stackOffset = assetImageStackDepth.value * 7
   return stackOffset
@@ -121,6 +136,34 @@ const imagePixelSize = computed(() => {
   const height = imageMetadata.value.height || loadedImageHeight.value
   return width > 0 && height > 0 ? `${Math.round(width)} × ${Math.round(height)}` : ''
 })
+function assetImageAspectRatio(image: { key: string; url: string } | null | undefined) {
+  if (!image) return config.value.aspectRatio
+  const loaded = loadedGalleryImageSizes.value[image.key]
+  if (loaded?.width && loaded.height) return `${loaded.width}:${loaded.height}`
+  if (image.key === primaryImage.value?.key) {
+    const width = imageMetadata.value.width || loadedImageWidth.value
+    const height = imageMetadata.value.height || loadedImageHeight.value
+    if (width > 0 && height > 0) return `${width}:${height}`
+  }
+  return config.value.aspectRatio
+}
+const primaryImageAspectRatio = computed(() => assetImageAspectRatio(primaryImage.value))
+function assetGalleryItemStyle(image: { key: string; url: string }) {
+  const ratio = assetImageAspectRatio(image)
+  return {
+    '--workbench-asset-image-aspect-ratio': mediaAspectRatioCss(ratio),
+    '--workbench-asset-gallery-item-width': `${mediaGalleryItemWidth(ratio)}px`,
+  }
+}
+const assetGalleryRows = computed(() => balanceMediaGalleryRows(
+  assetImages.value,
+  assetImageAspectRatio,
+  { targetRowWidth: 1280, maxItemsPerRow: 4 },
+))
+const assetGalleryLayoutSignature = computed(() => assetImages.value
+  .map(image => `${image.key}:${assetImageAspectRatio(image)}`)
+  .join('|'))
+useWorkbenchNodeDimensionSync(props.id, () => `${imageGalleryExpanded.value}:${assetGalleryLayoutSignature.value}`)
 const imageDownloadFilename = computed(() => {
   const extension = imageMetadata.value.mimeType?.includes('webp')
     ? 'webp'
@@ -191,11 +234,7 @@ const materialMentions = computed<MaterialMention[]>(() => {
 const personAsset = computed(() => assetType.value === AssetTypeEnum.PERSON)
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
 const generatorSupportsType = computed(() => ![AssetTypeEnum.PRODUCT, AssetTypeEnum.STYLE].includes(assetType.value))
-const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && !busy.value && !saving.value)
-const sizeSuggestions = ASSET_SIZE_PRESETS.map(item => ({
-  value: item.value,
-  label: `${item.resolution} · ${item.ratio} · ${item.dimensions}${item.default ? '（默认）' : item.resolution === '2K' ? '（成本约 2 倍）' : ''}`,
-}))
+const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && config.value.modelConfigId !== null && !busy.value && !saving.value)
 const assetTypeOptions = assetTypePresentationOptions
 const assetTypeValue = computed({
   get: () => imageMetadata.value.source === 'upload' && !assetTypeExplicit.value ? 'image' : String(assetType.value),
@@ -210,24 +249,49 @@ const assetTypeValue = computed({
     void save()
   },
 })
-function updateSize(value: string) {
-  config.value.size = value
-  config.value.resolution = assetSizeResolution(value)
-}
+const imageParameterValue = computed<ImageGenerationParameters>({
+  get: () => ({
+    clarity: config.value.clarity,
+    aspectRatio: config.value.aspectRatio,
+    outputFormat: config.value.outputFormat,
+    generationCount: config.value.generationCount,
+  }),
+  set: value => {
+    config.value = {
+      ...config.value,
+      clarity: value.clarity,
+      resolution: value.clarity,
+      aspectRatio: value.aspectRatio,
+      size: value.aspectRatio,
+      outputFormat: value.outputFormat,
+      format: value.outputFormat.toUpperCase(),
+      generationCount: value.generationCount as AssetWorkbenchConfig['generationCount'],
+    }
+  },
+})
 
 function normalizedDraftConfig(): AssetWorkbenchConfig {
-  const count = Math.max(1, Math.min(4, Number(config.value.generationCount) || 1)) as AssetWorkbenchConfig['generationCount']
-  const size = /^\d{2,5}x\d{2,5}$/.test(config.value.size.trim()) ? config.value.size.trim() : '1424x800'
   return {
     ...config.value,
-    generationCount: count,
-    resolution: assetSizeResolution(size),
-    size,
-    format: 'PNG',
+    resolution: config.value.clarity,
+    size: config.value.aspectRatio,
+    format: config.value.outputFormat.toUpperCase(),
     digitalHumanAssetId: personAsset.value ? config.value.digitalHumanAssetId : '',
     digitalHumanPreviewUrl: personAsset.value ? config.value.digitalHumanPreviewUrl : '',
   }
 }
+
+watch(selectedImageModel, model => {
+  if (!model) return
+  const current = imageParameterValue.value
+  const capabilities = model.capabilities
+  imageParameterValue.value = {
+    clarity: capabilities.clarities.includes(current.clarity) ? current.clarity : capabilities.default_clarity,
+    aspectRatio: capabilities.aspect_ratios.includes(current.aspectRatio) ? current.aspectRatio : capabilities.default_aspect_ratio,
+    outputFormat: capabilities.output_formats.includes(current.outputFormat) ? current.outputFormat : capabilities.default_output_format,
+    generationCount: capabilities.generation_counts.includes(current.generationCount) ? current.generationCount : capabilities.default_generation_count,
+  }
+}, { immediate: true })
 
 async function save() {
   saving.value = true
@@ -331,15 +395,24 @@ function imageRoleLabel(image: { key: string; url: string }) {
   return `参考图 ${Math.max(0, referenceIndex) + 1}`
 }
 
-function assetImageStackLayerStyle(layerIndex: number) {
+function assetImageStackLayerStyle(image: { key: string; url: string }, layerIndex: number) {
   const xOffset = layerIndex * 4
   const yOffset = layerIndex * 5
   const rotation = layerIndex * 0.35
   return {
-    inset: '0',
+    ...containedAspectRatioSize(assetImageAspectRatio(image), primaryImageAspectRatio.value),
     transform: `translate(${xOffset}px, ${yOffset}px) rotate(${rotation}deg)`,
     transformOrigin: 'top left',
     zIndex: -layerIndex,
+  }
+}
+
+function captureGalleryImageSize(image: { key: string }, event: Event) {
+  const element = event.currentTarget as HTMLImageElement
+  if (!element.naturalWidth || !element.naturalHeight) return
+  loadedGalleryImageSizes.value = {
+    ...loadedGalleryImageSizes.value,
+    [image.key]: { width: element.naturalWidth, height: element.naturalHeight },
   }
 }
 
@@ -484,12 +557,12 @@ async function clearDigitalHuman() {
           :style="assetImageStageStyle"
         >
           <span
-            v-for="layerIndex in assetImageStackDepth"
-            :key="layerIndex"
+            v-for="(image, layerIndex) in stackedAssetImages"
+            :key="image.key"
             class="workbench-asset-image-stack-layer"
-            :style="assetImageStackLayerStyle(layerIndex)"
+            :style="assetImageStackLayerStyle(image, layerIndex + 1)"
             aria-hidden="true"
-          />
+          ><img :src="image.url" alt="" draggable="false"></span>
           <img
             class="workbench-uploaded-image-preview"
             :src="asset.main_image"
@@ -523,41 +596,45 @@ async function clearDigitalHuman() {
             type="button"
             class="workbench-asset-gallery__collapse"
             :aria-label="`收起${assetName}的 ${assetImages.length} 张图片`"
-            @click="imageGalleryExpanded = false"
+            @pointerdown.stop
+            @click.stop="imageGalleryExpanded = false"
           >
             <Minimize2 :size="17" aria-hidden="true" />
             <span>收起</span>
           </button>
-          <article
-            v-for="image in assetImages"
-            :key="image.key"
-            class="workbench-asset-gallery__item"
-            :class="{ 'is-primary': imageIsPrimary(image) }"
-            role="button"
-            :tabindex="imageIsPrimary(image) ? -1 : 0"
-            :aria-label="imageIsPrimary(image) ? `${assetName}主图` : `设${assetName}${imageRoleLabel(image)}为主图`"
-            @click="setMainImage(image.url)"
-            @keydown.enter.prevent="setMainImage(image.url)"
-            @keydown.space.prevent="setMainImage(image.url)"
-          >
-            <img :src="image.url" :alt="`${assetName}${imageRoleLabel(image)}`" draggable="false" loading="lazy" decoding="async">
-            <span class="workbench-asset-gallery__label">
-              <CheckCircle2 v-if="imageIsPrimary(image)" :size="13" aria-hidden="true" />
-              {{ imageRoleLabel(image) }}
-            </span>
-            <div class="workbench-asset-gallery__actions">
-              <button
-                type="button"
-                :disabled="Boolean(downloadingGalleryImageKey)"
-                :aria-label="`下载${imageRoleLabel(image)}`"
-                @click.stop="downloadGalleryImage(image)"
-              >
-                <LoaderCircle v-if="downloadingGalleryImageKey === image.key" class="workbench-node-context__loading-icon" :size="15" aria-hidden="true" />
-                <Download v-else :size="15" aria-hidden="true" />
-                <span>下载</span>
-              </button>
-            </div>
-          </article>
+          <div v-for="row in assetGalleryRows" :key="row.map(image => image.key).join('|')" class="workbench-media-gallery__row">
+            <article
+              v-for="image in row"
+              :key="image.key"
+              class="workbench-asset-gallery__item"
+              :class="{ 'is-primary': imageIsPrimary(image) }"
+              :style="assetGalleryItemStyle(image)"
+              role="button"
+              :tabindex="imageIsPrimary(image) ? -1 : 0"
+              :aria-label="imageIsPrimary(image) ? `${assetName}主图` : `设${assetName}${imageRoleLabel(image)}为主图`"
+              @click="setMainImage(image.url)"
+              @keydown.enter.prevent="setMainImage(image.url)"
+              @keydown.space.prevent="setMainImage(image.url)"
+            >
+              <img :src="image.url" :alt="`${assetName}${imageRoleLabel(image)}`" draggable="false" loading="lazy" decoding="async" @load="captureGalleryImageSize(image, $event)">
+              <span class="workbench-asset-gallery__label">
+                <CheckCircle2 v-if="imageIsPrimary(image)" :size="13" aria-hidden="true" />
+                {{ imageRoleLabel(image) }}
+              </span>
+              <div class="workbench-asset-gallery__actions">
+                <button
+                  type="button"
+                  :disabled="Boolean(downloadingGalleryImageKey)"
+                  :aria-label="`下载${imageRoleLabel(image)}`"
+                  @click.stop="downloadGalleryImage(image)"
+                >
+                  <LoaderCircle v-if="downloadingGalleryImageKey === image.key" class="workbench-node-context__loading-icon" :size="15" aria-hidden="true" />
+                  <Download v-else :size="15" aria-hidden="true" />
+                  <span>下载</span>
+                </button>
+              </div>
+            </article>
+          </div>
         </section>
         <AssetDefaultImage
           v-if="showDefaultVisualImage"
@@ -612,21 +689,8 @@ async function clearDigitalHuman() {
 
           <fieldset class="workbench-form workbench-capability-form">
             <legend>生成参数</legend>
-            <label class="workbench-field"><span>数量</span><input v-model.number="config.generationCount" type="number" min="1" max="4" step="1" aria-label="数量"></label>
-            <label class="workbench-field">
-              <span>尺寸</span>
-              <WorkbenchSuggestedInput
-                :model-value="config.size"
-                :suggestions="sizeSuggestions"
-                label="尺寸"
-                inputmode="numeric"
-                placeholder="1424x800"
-                pattern="\d{2,5}x\d{2,5}"
-                @update:model-value="updateSize"
-              />
-              <small>推荐使用 1K；2K 生成成本约为 1K 的 2 倍。也可输入自定义宽高，如 1280x960。</small>
-            </label>
-            <label class="workbench-field"><span>格式</span><select v-model="config.format" aria-label="格式"><option value="PNG">PNG</option></select></label>
+            <MediaGenerationModelSelector v-model="config.modelConfigId" :options="imageModelOptions" label="图片模型" />
+            <ImageGenerationParameterPanel v-model="imageParameterValue" :capabilities="selectedImageModel?.capabilities" compact />
           </fieldset>
         </section>
 

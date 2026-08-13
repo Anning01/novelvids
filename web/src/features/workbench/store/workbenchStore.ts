@@ -2,10 +2,11 @@ import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
-import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, Scene, Video } from '@/types'
+import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
+import { activeVideoForScene, isTerminalVideo, sceneHasRunningVideo, sceneWithActiveVideo } from '../graph/videoVersions'
 import { assetImageMediaMetadata, assetTypeLabel, patchAssetImageMediaMetadata } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
@@ -47,6 +48,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     scenes: [] as Scene[],
     videos: {} as Record<number, Video[]>,
     modelOptions: [] as EnumItem[],
+    videoModelOptions: [] as VideoGenerationModel[],
+    imageModelOptions: [] as ImageGenerationModel[],
     nodes: [] as WorkbenchNode[],
     edges: [] as WorkbenchEdge[],
     selectedNodeKeys: [] as string[],
@@ -61,6 +64,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     viewport: { x: 0, y: 0, zoom: 1 } as WorkbenchViewport,
     loadEpoch: markRaw(new WorkbenchLoadEpoch()),
     pendingControllers: [] as AbortController[],
+    pollingVideoIds: [] as number[],
   }),
   getters: {
     canUndo: state => state.history.length > 0,
@@ -80,6 +84,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.loadEpoch.begin()
       this.pendingControllers.forEach(controller => controller.abort())
       this.pendingControllers = []
+      this.pollingVideoIds = []
       this.busyAssetIds = []
       this.busySceneIds = []
       this.loading = false
@@ -160,20 +165,26 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async load(novelId: number, chapterId: number) {
       const epoch = this.loadEpoch.begin()
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
-      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
+      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.pollingVideoIds = []; this.videoModelOptions = []; this.imageModelOptions = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
-        const [bootstrapResponse, enumsResponse] = await Promise.all([
+        const [bootstrapResponse, videoConfigResponse, imageConfigResponse] = await Promise.all([
           api.workbenchBootstrap(novelId, chapterId),
-          api.enums(),
+          api.videoGenerationModels(),
+          api.imageGenerationModels(),
         ])
         if (!this.loadEpoch.isCurrent(epoch)) return
         this.chapter = bootstrapResponse.data.chapter
         this.assets = bootstrapResponse.data.assets
         this.scenes = bootstrapResponse.data.scenes
-        this.modelOptions = enumsResponse.data.video_model_type || []
+        this.videoModelOptions = videoConfigResponse.data
+        this.modelOptions = this.videoModelOptions.map(item => ({ value: item.config_id, label: item.name }))
+        this.imageModelOptions = imageConfigResponse.data
         this.videos = bootstrapResponse.data.videos
         this.rebuildGraph()
         this.loadSavedLayout()
+        Object.entries(this.videos).forEach(([sceneId, videos]) => videos
+          .filter(video => !isTerminalVideo(video))
+          .forEach(video => { void this.resumeVideoPolling(Number(sceneId), video.id) }))
       } finally {
         if (this.loadEpoch.isCurrent(epoch)) this.loading = false
       }
@@ -183,17 +194,20 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', `第 ${this.chapter.number} 章 · ${this.chapter.name}`, { x: 80, y: 80 }, { chapter: this.chapter, layout_family: 'chapter', layout_lane: 'chapter' })]
       const edges: WorkbenchEdge[] = []
       const validAssetIds = new Set(this.assets.map(asset => asset.id))
-      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, asset_type: assetTypeLabel(asset.asset_type), layout_family: 'asset', ui: {}, index })))
+      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, imageModelOptions: this.imageModelOptions, asset_type: assetTypeLabel(asset.asset_type), layout_family: 'asset', ui: {}, index })))
       this.scenes.forEach((scene, index) => {
         const sceneKey = `shot-${scene.id}`
-        nodes.push(node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: this.videos[scene.id] || [], modelOptions: this.modelOptions, shot_index: scene.sequence, layout_family: 'shot', ui: {} }))
+        const sceneVideos = this.videos[scene.id] || []
+        const sceneNode = node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
+        sceneNode.status = sceneHasRunningVideo(sceneVideos) ? 'running' : 'ready'
+        nodes.push(sceneNode)
         edges.push(edge(100000 + scene.id, `chapter-${sceneKey}`, 'chapter', sceneKey, 'shot_sequence', index))
         sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
-        const latest = this.videos[scene.id]?.[0]
-        if (latest) {
-          const resultKey = `video-${latest.id}`
-          nodes.push(node(latest.id, resultKey, 'video_result', `视频结果 · #${latest.id}`, { x: 1400, y: index * 520 }, { video: latest, sceneId: scene.id, layout_family: 'result', ui: {} }))
-          edges.push(edge(300000 + latest.id, `${sceneKey}-${resultKey}`, sceneKey, resultKey, 'output_binding'))
+        const activeVideo = activeVideoForScene(scene, sceneVideos)
+        if (activeVideo) {
+          const resultKey = `video-${activeVideo.id}`
+          nodes.push(node(activeVideo.id, resultKey, 'video_result', `视频结果 · #${activeVideo.id}`, { x: 1400, y: index * 520 }, { video: activeVideo, sceneId: scene.id, layout_family: 'result', ui: {} }))
+          edges.push(edge(300000 + activeVideo.id, `${sceneKey}-${resultKey}`, sceneKey, resultKey, 'output_binding'))
         }
       })
       const old = new Map(this.nodes.map(item => [item.key, item]))
@@ -620,16 +634,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async setActiveVideo(sceneId: number, videoId: number) {
       const scene = this.scenes.find(item => item.id === sceneId)
       if (!scene || !this.videos[sceneId]?.some(video => video.id === videoId)) return null
-      const metadata = scene.metadata && typeof scene.metadata === 'object' && !Array.isArray(scene.metadata)
-        ? { ...scene.metadata }
-        : {}
-      const currentWorkbench = metadata.workbench && typeof metadata.workbench === 'object' && !Array.isArray(metadata.workbench)
-        ? metadata.workbench as Record<string, unknown>
-        : {}
-      const nextMetadata = {
-        ...metadata,
-        workbench: { ...currentWorkbench, activeVideoId: videoId },
-      }
+      const nextMetadata = sceneWithActiveVideo(scene, videoId).metadata
       const updated = (await api.updateScene(sceneId, { metadata: nextMetadata })).data
       this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item)
       this.rebuildGraph()
@@ -807,14 +812,29 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         this.finishPendingWork(controller)
       }
     },
-    async generateVideo(sceneId: number, modelType: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string } = {}) {
+    async generateVideo(sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean } = {}) {
       const controller = this.beginPendingWork()
+      let submittedVideoId: number | null = null
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
       try {
-        let video = (await api.generateVideo(sceneId, modelType, options)).data
+        let video = (await api.generateVideo(sceneId, modelConfigId, options)).data
+        submittedVideoId = video.id
         if (controller.signal.aborted) return
-        this.videos[sceneId] = [video, ...(this.videos[sceneId] || [])]; this.rebuildGraph()
+        this.videos[sceneId] = [video, ...(this.videos[sceneId] || []).filter(item => item.id !== video.id)]
+        const scene = this.scenes.find(item => item.id === sceneId)
+        if (scene) {
+          const adopted = sceneWithActiveVideo(scene, video.id)
+          this.scenes = this.scenes.map(item => item.id === sceneId ? adopted : item)
+          try {
+            const updated = (await api.updateScene(sceneId, { metadata: adopted.metadata })).data
+            this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item)
+          } catch {
+            notice.error('视频已提交，但采用状态保存失败；刷新后可重新选择该版本')
+          }
+        }
+        this.rebuildGraph()
         if (!terminal.has(video.status)) {
+          this.pollingVideoIds.push(video.id)
           video = await pollUntilTerminal(async () => {
             const current = (await api.queryVideo(video.id)).data
             if (!controller.signal.aborted) {
@@ -829,7 +849,42 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         if (!isAbortError(error)) throw error
       } finally {
         this.finishPendingWork(controller)
+        if (submittedVideoId !== null) this.pollingVideoIds = this.pollingVideoIds.filter(id => id !== submittedVideoId)
         this.busySceneIds = this.busySceneIds.filter(id => id !== sceneId)
+        this.rebuildGraph()
+      }
+    },
+    async resumeVideoPolling(sceneId: number, videoId: number) {
+      if (this.pollingVideoIds.includes(videoId)) return
+      const initial = this.videos[sceneId]?.find(video => video.id === videoId)
+      if (!initial || isTerminalVideo(initial)) return
+      const chapterId = this.chapterId
+      const controller = this.beginPendingWork()
+      this.pollingVideoIds.push(videoId)
+      if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
+      try {
+        const video = await pollUntilTerminal(async () => {
+          const current = (await api.queryVideo(videoId)).data
+          if (this.chapterId !== chapterId) controller.abort()
+          if (!controller.signal.aborted) {
+            this.videos[sceneId] = (this.videos[sceneId] || []).map(item => item.id === current.id ? current : item)
+            this.rebuildGraph()
+          }
+          return current
+        }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal })
+        if (!controller.signal.aborted) {
+          video.status === TaskStatusEnum.COMPLETED
+            ? notice.success('视频生成完成')
+            : notice.error(String(video.metadata?.error || '视频生成失败'))
+        }
+      } catch (error) {
+        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : '视频状态刷新失败')
+      } finally {
+        this.finishPendingWork(controller)
+        this.pollingVideoIds = this.pollingVideoIds.filter(id => id !== videoId)
+        if (!sceneHasRunningVideo(this.videos[sceneId] || [])) {
+          this.busySceneIds = this.busySceneIds.filter(id => id !== sceneId)
+        }
         this.rebuildGraph()
       }
     },

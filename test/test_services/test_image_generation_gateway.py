@@ -29,8 +29,8 @@ def test_openai_adapter_maps_resolution_alias_to_supported_vertical_size():
         "model": "gpt-image-2",
         "prompt": "cover",
         "n": 1,
-        "response_format": "url",
         "size": "1024x1536",
+        "output_format": "png",
     }
 
 
@@ -52,6 +52,7 @@ def test_volcengine_adapter_uses_seedream_protocol_fields_without_model_branchin
         "watermark": False,
         "sequential_image_generation": "disabled",
         "size": "2K",
+        "output_format": "png",
     }
 
 
@@ -74,6 +75,26 @@ def test_openrouter_adapter_uses_images_endpoint_and_native_dimensions():
         "output_format": "png",
         "resolution": "2K",
         "aspect_ratio": "2:3",
+    }
+
+
+def test_openrouter_adapter_sends_explicit_size_without_conflicting_aspect_ratio():
+    prepared = image_protocol_adapter("openrouter_compatible").prepare(
+        ImageGenerationInput(
+            model="configured-image-model",
+            prompt="cover",
+            resolution="2048x1152",
+            aspect_ratio="16:9",
+        )
+    )
+
+    assert prepared.path == "/images"
+    assert prepared.payload == {
+        "model": "configured-image-model",
+        "prompt": "cover",
+        "n": 1,
+        "output_format": "png",
+        "size": "2048x1152",
     }
 
 

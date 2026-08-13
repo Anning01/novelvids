@@ -41,6 +41,16 @@ async def ensure_ai_model_config_schema() -> None:
             "ALTER TABLE ai_model_configs "
             "ADD COLUMN max_context_characters INT;"
         )
+    if "image_model_type" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs "
+            "ADD COLUMN image_model_type VARCHAR(40);"
+        )
+    if "video_model_type" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs "
+            "ADD COLUMN video_model_type VARCHAR(40);"
+        )
     if statements:
         await connection.execute_script("".join(statements))
 

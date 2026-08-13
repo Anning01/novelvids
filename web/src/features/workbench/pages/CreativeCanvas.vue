@@ -667,7 +667,8 @@ async function runSelected() {
         const config = normalizeShotConfig(scene, projectDefaults.value)
         const modelType = Number(config.modelType ?? store.modelOptions[0]?.value)
         if (!Number.isFinite(modelType)) throw new Error('当前没有可用的视频模型')
-        await store.generateVideo(node.id, modelType, shotGenerationOptions(config))
+        const model = store.videoModelOptions.find(item => item.config_id === modelType)
+        await store.generateVideo(node.id, modelType, shotGenerationOptions(config, model?.capabilities))
       }
     }
   } catch (error) {

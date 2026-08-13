@@ -6,6 +6,7 @@ from models.chapter import Chapter
 from models.novel import Novel
 from schemas.chapter import ChapterCreate, ChapterPatch, ChapterUpdate
 from services.ai_task_executor import ai_task_executor
+from services.chapter_titles import normalize_chapter_title
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
@@ -23,8 +24,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             max_row = await Chapter.filter(novel_id=obj_in.novel_id).order_by("-number").first()
             obj_in.number = (max_row.number + 1) if max_row else 1
 
-        if not obj_in.name:
-            obj_in.name = f"第{obj_in.number}章"
+        obj_in.name = normalize_chapter_title(obj_in.name)
 
         chapter = await super().create(obj_in)
 
@@ -39,10 +39,14 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
 
     async def update(self, chapter_id: int, obj_in: ChapterUpdate) -> Chapter:
         instance = await self.get(chapter_id)
+        if obj_in.name is not None:
+            obj_in.name = normalize_chapter_title(obj_in.name)
         return await super().update(instance, obj_in)
 
     async def patch(self, chapter_id: int, obj_in: ChapterPatch) -> Chapter:
         instance = await self.get(chapter_id)
+        if obj_in.name is not None:
+            obj_in.name = normalize_chapter_title(obj_in.name)
         return await super().patch(instance, obj_in)
 
     async def remove(self, chapter_id: int) -> None:

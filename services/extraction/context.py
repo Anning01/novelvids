@@ -8,6 +8,7 @@ from types import MappingProxyType
 from models.asset import Asset
 from models.chapter import Chapter
 from models.novel import Novel
+from services.chapter_titles import normalize_chapter_title
 from utils.enums import AssetTypeEnum
 
 
@@ -115,7 +116,7 @@ class ExtractionContextLoader:
             chapter=ChapterExtractionInput(
                 id=chapter.id,
                 number=chapter.number,
-                name=chapter.name,
+                name=normalize_chapter_title(chapter.name),
                 content=chapter.content or "",
             ),
         )

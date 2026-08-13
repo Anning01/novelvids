@@ -1,0 +1,35 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from services.reference.generator import generate_for_sora_consistency
+
+
+@pytest.mark.asyncio
+async def test_generation_count_runs_supported_single_image_requests_and_collects_all_results():
+    generated = AsyncMock(side_effect=[
+        [SimpleNamespace(url="https://cdn.example.com/1.png")],
+        [SimpleNamespace(url="https://cdn.example.com/2.png")],
+        [SimpleNamespace(url="https://cdn.example.com/3.png")],
+        [SimpleNamespace(url="https://cdn.example.com/4.png")],
+    ])
+    with patch("services.reference.generator.generate_images", new=generated):
+        result = await generate_for_sora_consistency(
+            {"type": "scene", "description": "山间古寺"},
+            base_url="https://image.example.com/v1",
+            api_key="secret",
+            model="configured-model",
+            count=4,
+            output_format="jpeg",
+        )
+
+    assert [image.url for image in result] == [
+        "https://cdn.example.com/1.png",
+        "https://cdn.example.com/2.png",
+        "https://cdn.example.com/3.png",
+        "https://cdn.example.com/4.png",
+    ]
+    assert generated.await_count == 4
+    assert all(call.kwargs["count"] == 1 for call in generated.await_args_list)
+    assert all(call.kwargs["output_format"] == "jpeg" for call in generated.await_args_list)

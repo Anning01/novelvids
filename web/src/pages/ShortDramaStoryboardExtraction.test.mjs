@@ -12,7 +12,7 @@ it('keeps chapter asset extraction in settings instead of the storyboard', () =>
 })
 
 it('restores the extraction task in settings and hides completed status', () => {
-  expect(settingsSource).toContain('api.latestExtraction(selectedChapterId.value)')
+  expect(settingsSource).toContain('api.latestExtraction(targetChapter.id)')
   expect(settingsSource).toContain('void monitorExtractionTask(extractionTask.value.id)')
   expect(settingsSource).toContain("if (extractionTask.value?.status === TaskStatusEnum.COMPLETED) return false")
 })

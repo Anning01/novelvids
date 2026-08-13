@@ -3,20 +3,16 @@ import type { ImageAnnotation } from '../types/workbenchTypes'
 import { AssetTypeEnum } from '@/types'
 
 export interface AssetWorkbenchConfig {
-  generationCount: 1 | 2 | 3 | 4
-  resolution: '1K' | '2K'
+  modelConfigId: number | null
+  generationCount: 1 | 2 | 4
+  clarity: string
+  resolution: string
+  aspectRatio: string
   size: string
-  format: 'PNG'
+  outputFormat: string
+  format: string
   digitalHumanAssetId: string
   digitalHumanPreviewUrl: string
-}
-
-export interface AssetSizePreset {
-  value: string
-  resolution: AssetWorkbenchConfig['resolution']
-  ratio: string
-  dimensions: string
-  default?: boolean
 }
 
 export interface AssetImageCandidate {
@@ -39,25 +35,6 @@ export interface AssetImageMediaMetadata {
   annotations?: ImageAnnotation[]
 }
 
-export const ASSET_SIZE_PRESETS: readonly AssetSizePreset[] = [
-  { value: '1024x1024', resolution: '1K', ratio: '1:1', dimensions: '1024×1024' },
-  { value: '1152x864', resolution: '1K', ratio: '4:3', dimensions: '1152×864' },
-  { value: '864x1152', resolution: '1K', ratio: '3:4', dimensions: '864×1152' },
-  { value: '1424x800', resolution: '1K', ratio: '16:9', dimensions: '1424×800', default: true },
-  { value: '800x1424', resolution: '1K', ratio: '9:16', dimensions: '800×1424' },
-  { value: '1248x832', resolution: '1K', ratio: '3:2', dimensions: '1248×832' },
-  { value: '832x1248', resolution: '1K', ratio: '2:3', dimensions: '832×1248' },
-  { value: '1568x672', resolution: '1K', ratio: '21:9', dimensions: '1568×672' },
-  { value: '2048x2048', resolution: '2K', ratio: '1:1', dimensions: '2048×2048' },
-  { value: '2368x1776', resolution: '2K', ratio: '4:3', dimensions: '2368×1776' },
-  { value: '1776x2368', resolution: '2K', ratio: '3:4', dimensions: '1776×2368' },
-  { value: '2816x1584', resolution: '2K', ratio: '16:9', dimensions: '2816×1584' },
-  { value: '1584x2816', resolution: '2K', ratio: '9:16', dimensions: '1584×2816' },
-  { value: '2496x1664', resolution: '2K', ratio: '3:2', dimensions: '2496×1664' },
-  { value: '1664x2496', resolution: '2K', ratio: '2:3', dimensions: '1664×2496' },
-  { value: '3136x1344', resolution: '2K', ratio: '21:9', dimensions: '3136×1344' },
-]
-
 export const ASSET_TYPE_OPTIONS = [
   { value: AssetTypeEnum.PERSON, label: '人物' },
   { value: AssetTypeEnum.ITEM, label: '物品' },
@@ -71,9 +48,13 @@ export function assetTypeLabel(type: AssetTypeEnum) {
 }
 
 const DEFAULT_CONFIG: AssetWorkbenchConfig = {
+  modelConfigId: null,
   generationCount: 1,
   resolution: '1K',
+  clarity: '1K',
+  aspectRatio: '16:9',
   size: '1424x800',
+  outputFormat: 'png',
   format: 'PNG',
   digitalHumanAssetId: '',
   digitalHumanPreviewUrl: '',
@@ -119,18 +100,30 @@ function validSize(value: unknown): value is string {
 }
 
 export function normalizeAssetConfig(asset: Asset): AssetWorkbenchConfig {
+  const metadata = recordValue(asset.metadata)
   const workbench = recordValue(recordValue(asset.metadata).workbench)
-  const generationCount = [1, 2, 3, 4].includes(Number(workbench.generationCount))
-    ? Number(workbench.generationCount) as AssetWorkbenchConfig['generationCount']
-    : DEFAULT_CONFIG.generationCount
-  const resolution = workbench.resolution === '2K' || workbench.resolution === '1K'
-    ? workbench.resolution
-    : DEFAULT_CONFIG.resolution
+  const modelConfigId = Number(metadata.model_config_id ?? workbench.modelConfigId)
+  const resolution = typeof workbench.resolution === 'string' ? workbench.resolution : DEFAULT_CONFIG.resolution
+  const clarity = typeof workbench.clarity === 'string' ? workbench.clarity : resolution
+  const aspectRatio = typeof workbench.aspectRatio === 'string'
+    ? workbench.aspectRatio
+    : typeof metadata.aspect_ratio === 'string'
+      ? metadata.aspect_ratio
+      : DEFAULT_CONFIG.aspectRatio
+  const outputFormat = typeof workbench.outputFormat === 'string'
+    ? workbench.outputFormat.toLowerCase()
+    : typeof workbench.format === 'string'
+      ? workbench.format.toLowerCase()
+      : DEFAULT_CONFIG.outputFormat
   return {
-    generationCount,
+    modelConfigId: Number.isInteger(modelConfigId) && modelConfigId > 0 ? modelConfigId : null,
+    generationCount: 1,
     resolution,
+    clarity,
+    aspectRatio,
     size: validSize(workbench.size) ? workbench.size.trim() : DEFAULT_CONFIG.size,
-    format: workbench.format === 'PNG' ? 'PNG' : DEFAULT_CONFIG.format,
+    outputFormat,
+    format: outputFormat.toUpperCase(),
     digitalHumanAssetId: typeof workbench.digitalHumanAssetId === 'string' ? workbench.digitalHumanAssetId : '',
     digitalHumanPreviewUrl: typeof workbench.digitalHumanPreviewUrl === 'string' ? workbench.digitalHumanPreviewUrl : '',
   }
@@ -140,9 +133,16 @@ export function patchAssetWorkbenchConfig(
   metadata: Asset['metadata'],
   config: AssetWorkbenchConfig,
 ): Record<string, unknown> {
+  const normalizedConfig = { ...config, generationCount: 1 as const }
   return {
     ...recordValue(metadata),
-    workbench: { ...config },
+    model_config_id: config.modelConfigId,
+    clarity: config.clarity,
+    resolution: config.clarity,
+    aspect_ratio: config.aspectRatio,
+    output_format: config.outputFormat,
+    generation_count: 1,
+    workbench: normalizedConfig,
   }
 }
 
@@ -192,11 +192,4 @@ export function assetSelectedImageCandidates(asset: Asset): AssetImageCandidate[
   }
   const selected = new Set(selectedValue.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())))
   return candidates.filter(candidate => selected.has(candidate.url.trim()))
-}
-
-export function assetSizeResolution(size: string): AssetWorkbenchConfig['resolution'] {
-  const preset = ASSET_SIZE_PRESETS.find(item => item.value === size)
-  if (preset) return preset.resolution
-  const dimensions = size.match(/^(\d{2,5})x(\d{2,5})$/)
-  return dimensions && Math.max(Number(dimensions[1]), Number(dimensions[2])) >= 1800 ? '2K' : '1K'
 }

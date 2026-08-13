@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Optional, Type
+from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -15,9 +16,10 @@ from models.chapter import Chapter
 from schemas.asset import AssetCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
+from services.image_generation.capabilities import validate_selection
 from utils.crud import CRUDBase
 from utils.decorators import atomic
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum, ImageSourceEnum, TaskStatusEnum
 from utils.page import QueryParams
 
 
@@ -376,11 +378,117 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         await variant.save()
         return variant
 
+    async def assign_variant_to_chapter(
+        self,
+        asset_id: int,
+        variant_id: int,
+        chapter_number: int,
+    ) -> list[AssetVariant]:
+        """Make exactly one variant of an asset active for a chapter number."""
+        await self.get(asset_id)
+        variants = await AssetVariant.filter(asset_id=asset_id).order_by("id")
+        target = next((variant for variant in variants if variant.id == variant_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="资产形态不存在")
+
+        for variant in variants:
+            chapters = {
+                int(value)
+                for value in (variant.chapter_numbers or [])
+                if isinstance(value, int) and value > 0
+            }
+            if variant.id == variant_id:
+                chapters.add(chapter_number)
+            else:
+                chapters.discard(chapter_number)
+            normalized = sorted(chapters)
+            if normalized != list(variant.chapter_numbers or []):
+                variant.chapter_numbers = normalized
+                await variant.save(update_fields=["chapter_numbers", "updated_at"])
+        return variants
+
     async def remove_variant(self, asset_id: int, variant_id: int) -> None:
         variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
         if variant is None:
             raise HTTPException(status_code=404, detail="资产形态不存在")
         await variant.delete()
+
+    async def generation_history(self, asset_id: int) -> list[dict[str, Any]]:
+        """Return sanitized base-asset image-generation history."""
+        await self.get(asset_id)
+        tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.reference_image.value,
+        ).order_by("-created_at")
+        records: list[dict[str, Any]] = []
+        for task in tasks:
+            request_params = task.request_params or {}
+            if (
+                request_params.get("asset_id") != asset_id
+                or request_params.get("variant_id") is not None
+            ):
+                continue
+            response_data = task.response_data or {}
+            raw_images = response_data.get("images", [])
+            images = (
+                [image for image in raw_images if isinstance(image, str)]
+                if isinstance(raw_images, list)
+                else []
+            )
+            records.append({
+                "id": task.id,
+                "status": task.status,
+                "images": images,
+                "error_message": task.error_message,
+                "model": request_params.get("model"),
+                "clarity": request_params.get("clarity"),
+                "aspect_ratio": request_params.get("aspect_ratio"),
+                "output_format": request_params.get("output_format"),
+                "created_at": task.created_at,
+                "finished_at": task.finished_at,
+            })
+        return records
+
+    async def restore_generation(self, asset_id: int, task_id: UUID) -> Asset:
+        """Restore a completed image-generation result as the asset's current image."""
+        asset = await self.get(asset_id)
+        task = await AiTask.get_or_none(
+            id=task_id,
+            task_type=AiTaskTypeEnum.reference_image.value,
+        )
+        request_params = task.request_params if task else {}
+        if (
+            task is None
+            or request_params.get("asset_id") != asset_id
+            or request_params.get("variant_id") is not None
+        ):
+            raise HTTPException(status_code=404, detail="该生成记录不存在")
+        if task.status != TaskStatusEnum.completed.value:
+            raise HTTPException(status_code=400, detail="只有生成成功的记录可以设为当前图片")
+        response_data = task.response_data or {}
+        raw_images = response_data.get("images", [])
+        images = (
+            [image for image in raw_images if isinstance(image, str) and image]
+            if isinstance(raw_images, list)
+            else []
+        )
+        if not images:
+            raise HTTPException(status_code=400, detail="该生成记录没有可恢复的图片")
+
+        metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+        asset.main_image = images[0]
+        asset.image_source = ImageSourceEnum.ai.value
+        asset.metadata = {
+            **metadata,
+            "image_gallery": images,
+            "restored_generation_task_id": str(task.id),
+        }
+        await asset.save(update_fields=[
+            "main_image",
+            "image_source",
+            "metadata",
+            "updated_at",
+        ])
+        return asset
 
     async def reference(self, asset_id: int, variant_id: int | None = None) -> AiTask:
         """提交参考图生成任务。"""
@@ -394,14 +502,37 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         # 1. 获取任务配置
         metadata = asset.metadata or {}
         requested_config_id = metadata.get("model_config_id")
-        if requested_config_id:
-            config = await ai_model_config_controller.get(int(requested_config_id))
-            if config.task_type != AiTaskTypeEnum.reference_image.value:
-                raise HTTPException(status_code=400, detail="所选配置不是生图模型")
-        else:
-            config = await ai_model_config_controller.get_active(
-                AiTaskTypeEnum.reference_image.value
-            )
+        config = await ai_model_config_controller.get_active(
+            AiTaskTypeEnum.reference_image.value,
+            int(requested_config_id) if requested_config_id else None,
+        )
+        variant_metadata = variant.metadata if variant and isinstance(variant.metadata, dict) else {}
+        effective_metadata = {**metadata, **variant_metadata}
+        workbench = effective_metadata.get("workbench")
+        if not isinstance(workbench, dict):
+            workbench = {}
+        selection = validate_selection(
+            config.image_model_type,
+            clarity=(
+                effective_metadata.get("clarity")
+                or effective_metadata.get("resolution")
+                or workbench.get("clarity")
+                or workbench.get("resolution")
+            ),
+            aspect_ratio=(
+                effective_metadata.get("aspect_ratio")
+                or workbench.get("aspectRatio")
+            ),
+            output_format=(
+                effective_metadata.get("output_format")
+                or workbench.get("outputFormat")
+                or workbench.get("format")
+            ),
+            generation_count=(
+                effective_metadata.get("generation_count")
+                or workbench.get("generationCount")
+            ),
+        )
 
         prompt_language = await general_config_controller.get_prompt_language()
 
@@ -434,11 +565,22 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "api_protocol": config.api_protocol,
             "variant_id": variant.id if variant else None,
             "prompt_language": prompt_language,
+            "clarity": selection.clarity,
+            "resolution": selection.provider_size,
+            "aspect_ratio": selection.aspect_ratio,
+            "output_format": selection.output_format,
+            "quality": selection.provider_quality,
+            "generation_count": selection.generation_count,
         }
 
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.reference_image, request_params
         )
+        task.request_params = {
+            **(task.request_params or request_params),
+            "generation_run_id": str(task.id),
+        }
+        await task.save(update_fields=["request_params", "updated_at"])
         return task
 
 asset_controller = AssetController()

@@ -2,6 +2,14 @@ from fastapi import HTTPException
 
 from models.config import AiModelConfig, GeneralConfig
 from schemas.config import AiModelConfigCreate, AiModelConfigUpdate, GeneralConfigUpdate
+from services.image_generation.capabilities import (
+    capabilities_for as image_capabilities_for,
+    validate_protocol as validate_image_protocol,
+)
+from services.video.capabilities import (
+    capabilities_for as video_capabilities_for,
+    validate_protocol as validate_video_protocol,
+)
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum
 
@@ -27,58 +35,197 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             data["task_types"] = [int(data["task_type"])]
         return data
 
-    async def _ensure_single_active(self, task_types: set[int], exclude_id: int | None = None):
-        """确保每个能力用途下只有一个启用配置。"""
-        query = AiModelConfig.filter(is_active=True)
-        if exclude_id is not None:
-            query = query.exclude(id=exclude_id)
-        active_configs = await query
-        conflicting_ids = [
-            config.id for config in active_configs
-            if self._capabilities(config) & task_types
-        ]
-        if conflicting_ids:
-            await AiModelConfig.filter(id__in=conflicting_ids).update(is_active=False)
+    @staticmethod
+    def _validate_image_payload(data: dict, instance: AiModelConfig | None = None) -> None:
+        task_types = data.get("task_types")
+        if task_types is None and instance is not None:
+            task_types = instance.task_types or [instance.task_type]
+        if AiTaskTypeEnum.reference_image.value not in (task_types or []):
+            return
+        model_type = data.get("image_model_type")
+        if model_type is None and instance is not None:
+            model_type = instance.image_model_type
+        protocol = data.get("api_protocol")
+        if protocol is None and instance is not None:
+            protocol = instance.api_protocol
+        image_capabilities_for(model_type)
+        validate_image_protocol(model_type, str(protocol))
+
+    @staticmethod
+    def _validate_video_payload(data: dict, instance: AiModelConfig | None = None) -> None:
+        task_types = data.get("task_types")
+        if task_types is None and instance is not None:
+            task_types = instance.task_types or [instance.task_type]
+        if AiTaskTypeEnum.video.value not in (task_types or []):
+            return
+        model_type = data.get("video_model_type")
+        if model_type is None and instance is not None:
+            model_type = instance.video_model_type
+        protocol = data.get("api_protocol")
+        if protocol is None and instance is not None:
+            protocol = instance.api_protocol
+        video_capabilities_for(model_type)
+        validate_video_protocol(model_type, str(protocol))
+
+    @classmethod
+    def _validate_generation_payload(cls, data: dict, instance: AiModelConfig | None = None) -> None:
+        cls._validate_image_payload(data, instance)
+        cls._validate_video_payload(data, instance)
+
+    @staticmethod
+    async def _enforce_single_active_image_type(instance: AiModelConfig) -> None:
+        if not instance.is_active or not instance.image_model_type:
+            return
+        if AiTaskTypeEnum.reference_image.value not in AiModelConfigController._capabilities(instance):
+            return
+        await AiModelConfig.filter(
+            is_active=True,
+            image_model_type=instance.image_model_type,
+        ).exclude(id=instance.id).update(is_active=False)
+
+    @staticmethod
+    async def _enforce_single_active_video_type(instance: AiModelConfig) -> None:
+        if not instance.is_active or not instance.video_model_type:
+            return
+        if AiTaskTypeEnum.video.value not in AiModelConfigController._capabilities(instance):
+            return
+        await AiModelConfig.filter(
+            is_active=True,
+            video_model_type=instance.video_model_type,
+        ).exclude(id=instance.id).update(is_active=False)
+
+    @classmethod
+    async def _enforce_single_active_generation_type(cls, instance: AiModelConfig) -> None:
+        await cls._enforce_single_active_image_type(instance)
+        await cls._enforce_single_active_video_type(instance)
 
     async def create(self, obj_in: AiModelConfigCreate, **kwargs) -> AiModelConfig:
-        instance = await super().create(self._normalize_payload(obj_in), **kwargs)
-        if instance.is_active:
-            await self._ensure_single_active(self._capabilities(instance), exclude_id=instance.id)
+        data = self._normalize_payload(obj_in)
+        self._validate_generation_payload(data)
+        instance = await super().create(data, **kwargs)
+        await self._enforce_single_active_generation_type(instance)
         return instance
 
     async def update(self, config_id: int, obj_in: AiModelConfigUpdate) -> AiModelConfig:
         instance = await self.get(config_id)
-        instance = await super().update(instance, self._normalize_payload(obj_in))
-        if instance.is_active:
-            await self._ensure_single_active(self._capabilities(instance), exclude_id=instance.id)
-        return instance
+        data = self._normalize_payload(obj_in)
+        self._validate_generation_payload(data, instance)
+        updated = await super().update(instance, data)
+        await self._enforce_single_active_generation_type(updated)
+        return updated
 
     async def patch(self, config_id: int, obj_in) -> AiModelConfig:
         instance = await self.get(config_id)
-        instance = await super().patch(instance, self._normalize_payload(obj_in))
-        if instance.is_active:
-            await self._ensure_single_active(self._capabilities(instance), exclude_id=instance.id)
-        return instance
+        data = self._normalize_payload(obj_in)
+        self._validate_generation_payload(data, instance)
+        updated = await super().patch(instance, data)
+        await self._enforce_single_active_generation_type(updated)
+        return updated
 
     async def remove(self, config_id: int) -> None:
         instance = await self.get(config_id)
         await super().remove(instance)
 
     async def activate(self, config_id: int) -> AiModelConfig:
-        """启用指定配置，同类型下其他配置自动禁用。"""
+        """启用配置；同一生图或视频能力类型自动停用旧项。"""
         instance = await self.get(config_id)
-        await self._ensure_single_active(self._capabilities(instance), exclude_id=config_id)
+        self._validate_generation_payload({}, instance)
         instance.is_active = True
+        await instance.save(update_fields=["is_active", "updated_at"])
+        await self._enforce_single_active_generation_type(instance)
+        return instance
+
+    async def list_active_image_models(self) -> list[dict]:
+        configs = await AiModelConfig.filter(is_active=True).order_by("-updated_at", "-id")
+        result = []
+        for config in configs:
+            if AiTaskTypeEnum.reference_image.value not in self._capabilities(config):
+                continue
+            if not config.image_model_type:
+                continue
+            try:
+                self._validate_image_payload({}, config)
+                capabilities = image_capabilities_for(config.image_model_type)
+            except HTTPException:
+                continue
+            result.append({
+                "config_id": config.id,
+                "name": config.name,
+                "model": config.model,
+                "model_type": config.image_model_type,
+                "concurrency": config.concurrency,
+                "capabilities": capabilities.public_dict(),
+            })
+        return result
+
+    async def list_active_video_models(self) -> list[dict]:
+        configs = await AiModelConfig.filter(is_active=True).order_by("-updated_at", "-id")
+        result = []
+        for config in configs:
+            if AiTaskTypeEnum.video.value not in self._capabilities(config):
+                continue
+            if not config.video_model_type:
+                continue
+            try:
+                self._validate_video_payload({}, config)
+                capabilities = video_capabilities_for(config.video_model_type)
+            except HTTPException:
+                continue
+            result.append({
+                "config_id": config.id,
+                "name": config.name,
+                "model": config.model,
+                "model_type": config.video_model_type,
+                "concurrency": config.concurrency,
+                "capabilities": capabilities.public_dict(),
+            })
+        return result
+
+    async def deactivate(self, config_id: int) -> AiModelConfig:
+        """停用指定配置，不影响同用途下的其他运行配置。"""
+        instance = await self.get(config_id)
+        instance.is_active = False
         await instance.save(update_fields=["is_active", "updated_at"])
         return instance
 
-    async def get_active(self, task_type: int) -> AiModelConfig:
-        """获取某任务类型当前启用的配置。"""
-        active_configs = await AiModelConfig.filter(is_active=True)
-        config = next(
-            (item for item in active_configs if task_type in self._capabilities(item)),
-            None,
+    async def get_active(
+        self,
+        task_type: int,
+        config_id: int | None = None,
+    ) -> AiModelConfig:
+        """获取可用于任务的启用配置；未指定时使用最近启用的一项。"""
+        active_configs = await AiModelConfig.filter(is_active=True).order_by(
+            "-updated_at",
+            "-id",
         )
+        if config_id is not None:
+            selected = next((item for item in active_configs if item.id == config_id), None)
+            if selected is None:
+                raise HTTPException(status_code=400, detail="所选模型未启用或已被删除")
+            if task_type not in self._capabilities(selected):
+                raise HTTPException(status_code=400, detail="所选模型不支持当前生成任务")
+            if task_type == AiTaskTypeEnum.reference_image.value:
+                self._validate_image_payload({}, selected)
+            if task_type == AiTaskTypeEnum.video.value:
+                self._validate_video_payload({}, selected)
+            return selected
+        candidates = [
+            item for item in active_configs if task_type in self._capabilities(item)
+        ]
+        config = None
+        for candidate in candidates:
+            if task_type == AiTaskTypeEnum.reference_image.value:
+                try:
+                    self._validate_image_payload({}, candidate)
+                except HTTPException:
+                    continue
+            if task_type == AiTaskTypeEnum.video.value:
+                try:
+                    self._validate_video_payload({}, candidate)
+                except HTTPException:
+                    continue
+            config = candidate
+            break
         if config is None:
             try:
                 name = AiTaskTypeEnum(task_type).nickname
@@ -89,6 +236,37 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 detail=f"请先在「配置」中为「{name}」启用一个模型",
             )
         return config
+
+    async def get_active_with_legacy_fallback(
+        self,
+        task_type: int,
+        legacy_task_type: int,
+    ) -> AiModelConfig:
+        """优先读取目标能力；未配置时兼容升级前复用的历史能力。"""
+        try:
+            return await self.get_active(task_type)
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+        return await self.get_active(legacy_task_type)
+
+    async def get_configured_for_task(
+        self,
+        task_type: int,
+        config_id: int,
+    ) -> AiModelConfig:
+        """读取任务创建时使用的配置，不要求它仍处于启用状态。
+
+        新任务只能使用启用配置；已有异步任务即使随后被停用，仍需使用原配置查询结果。
+        """
+        selected = await self.get(config_id)
+        if task_type not in self._capabilities(selected):
+            raise HTTPException(status_code=400, detail="所选模型不支持当前生成任务")
+        if task_type == AiTaskTypeEnum.reference_image.value:
+            self._validate_image_payload({}, selected)
+        if task_type == AiTaskTypeEnum.video.value:
+            self._validate_video_payload({}, selected)
+        return selected
 
 
 ai_model_config_controller = AiModelConfigController()

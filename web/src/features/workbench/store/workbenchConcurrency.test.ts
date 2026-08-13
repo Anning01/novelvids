@@ -7,7 +7,8 @@ import { useWorkbenchStore } from './workbenchStore'
 vi.mock('@/api', () => ({
   api: {
     workbenchBootstrap: vi.fn(),
-    enums: vi.fn().mockResolvedValue({ data: { video_model_type: [] } }),
+    videoGenerationModels: vi.fn().mockResolvedValue({ data: [] }),
+    imageGenerationModels: vi.fn().mockResolvedValue({ data: [] }),
   },
   sleep: vi.fn(),
 }))

@@ -131,6 +131,13 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   expect(wrapper.findAll('.workbench-asset-image-stack-layer')).toHaveLength(2)
   await wrapper.get('[aria-label="展开三图角色的 3 张图片"]').trigger('click')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(true)
+  expect(wrapper.findAll('.workbench-media-gallery__row').length).toBeGreaterThan(0)
+
+  await wrapper.get('[aria-label="收起三图角色的 3 张图片"]').trigger('pointerdown')
+  await wrapper.get('[aria-label="收起三图角色的 3 张图片"]').trigger('click')
+  expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(false)
+
+  await wrapper.get('[aria-label="展开三图角色的 3 张图片"]').trigger('click')
 
   await wrapper.get('[aria-label="设三图角色参考图 1为主图"]').trigger('click')
   expect(setMainImage).toHaveBeenCalledWith(2, '/media/side.png')

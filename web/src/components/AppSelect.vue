@@ -245,7 +245,9 @@ onUnmounted(() => {
 .app-select__menu {
   position: fixed;
   z-index: 1000;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
   padding: 6px;
   border: 1px solid var(--app-border);
   border-radius: 11px;
@@ -253,6 +255,8 @@ onUnmounted(() => {
   background: var(--app-surface);
   box-shadow: var(--app-shadow);
 }
+
+.app-select__menu::-webkit-scrollbar { display: none; }
 
 .app-select__menu-label {
   margin: 4px 8px 6px;
@@ -263,6 +267,7 @@ onUnmounted(() => {
 .app-select__option {
   display: flex;
   width: 100%;
+  min-width: 0;
   min-height: 36px;
   align-items: center;
   justify-content: flex-start;
@@ -276,6 +281,8 @@ onUnmounted(() => {
   font-size: 12px;
   text-align: left;
 }
+
+.app-select__option > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .app-select__option:hover {
   color: var(--app-text);

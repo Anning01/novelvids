@@ -383,6 +383,7 @@ async def test_all_generation_tasks_snapshot_the_global_language():
         base_url="https://image.example.com",
         api_key="secret",
         model="test-image",
+        image_model_type="gpt_image_2",
         is_active=True,
     )
 

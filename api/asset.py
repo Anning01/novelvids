@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, BackgroundTasks, Query
+from uuid import UUID
 
 from controllers.asset import asset_controller
 from schemas.ai_task import AiTaskOut
 from schemas.asset import (
     AssetBriefOut,
     AssetCreate,
+    AssetGenerationRecordOut,
     AssetMergeOut,
     AssetMergeRequest,
     AssetOut,
@@ -14,7 +16,12 @@ from schemas.asset import (
     AssetUpdate,
     AssetWithVariantsOut,
 )
-from schemas.asset_variant import AssetVariantCreate, AssetVariantOut, AssetVariantPatch
+from schemas.asset_variant import (
+    AssetVariantChapterAssignment,
+    AssetVariantCreate,
+    AssetVariantOut,
+    AssetVariantPatch,
+)
 from controllers.config import general_config_controller
 from services.ai_task_executor import ai_task_executor
 from services.reference.generator import build_sora_compatible_prompt
@@ -90,6 +97,24 @@ async def get_asset(asset_id: int):
 
 
 @router.get(
+    "/{asset_id}/generation-history",
+    summary="获取资产生图记录",
+    response_model=ResponseSchema[list[AssetGenerationRecordOut]],
+)
+async def get_asset_generation_history(asset_id: int):
+    return ResponseSchema(data=await asset_controller.generation_history(asset_id))
+
+
+@router.post(
+    "/{asset_id}/generation-history/{task_id}/restore",
+    summary="将历史生图结果设为当前图片",
+    response_model=ResponseSchema[AssetOut],
+)
+async def restore_asset_generation(asset_id: int, task_id: UUID):
+    return ResponseSchema(data=await asset_controller.restore_generation(asset_id, task_id))
+
+
+@router.get(
     "/{asset_id}/variants",
     summary="获取资产的全部视觉形态",
     response_model=ResponseSchema[list[AssetVariantOut]],
@@ -120,6 +145,23 @@ async def patch_asset_variant(
     return ResponseSchema(
         data=await asset_controller.patch_variant(asset_id, variant_id, variant)
     )
+
+
+@router.post(
+    "/{asset_id}/variants/{variant_id}/chapter",
+    summary="将衍生形态设为指定集唯一使用状态",
+    response_model=ResponseSchema[list[AssetVariantOut]],
+)
+async def assign_asset_variant_to_chapter(
+    asset_id: int,
+    variant_id: int,
+    payload: AssetVariantChapterAssignment,
+):
+    return ResponseSchema(data=await asset_controller.assign_variant_to_chapter(
+        asset_id,
+        variant_id,
+        payload.chapter_number,
+    ))
 
 
 @router.delete(

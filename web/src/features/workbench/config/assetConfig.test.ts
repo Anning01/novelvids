@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { Asset } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import {
-  ASSET_SIZE_PRESETS,
   assetImageCandidates,
   assetSelectedImageCandidates,
   normalizeAssetConfig,
@@ -24,9 +23,13 @@ function makeAsset(patch: Partial<Asset> = {}): Asset {
 describe('asset workbench configuration', () => {
   it('normalizes missing settings to the reference defaults', () => {
     expect(normalizeAssetConfig(makeAsset({ metadata: undefined }))).toEqual({
+      modelConfigId: null,
       generationCount: 1,
+      clarity: '1K',
       resolution: '1K',
+      aspectRatio: '16:9',
       size: '1424x800',
+      outputFormat: 'png',
       format: 'PNG',
       digitalHumanAssetId: '',
       digitalHumanPreviewUrl: '',
@@ -36,6 +39,7 @@ describe('asset workbench configuration', () => {
   it('accepts persisted values and rejects malformed settings', () => {
     expect(normalizeAssetConfig(makeAsset({
       metadata: {
+        model_config_id: 27,
         workbench: {
           generationCount: 4,
           resolution: '2K',
@@ -46,7 +50,8 @@ describe('asset workbench configuration', () => {
         },
       },
     }))).toMatchObject({
-      generationCount: 4,
+      modelConfigId: 27,
+      generationCount: 1,
       resolution: '2K',
       size: '1584x2816',
       digitalHumanAssetId: 'human-9',
@@ -65,10 +70,14 @@ describe('asset workbench configuration', () => {
         },
       },
     }))).toEqual({
+      modelConfigId: null,
       generationCount: 1,
-      resolution: '1K',
+      clarity: '4K',
+      resolution: '4K',
+      aspectRatio: '16:9',
       size: '1424x800',
-      format: 'PNG',
+      outputFormat: 'jpeg',
+      format: 'JPEG',
       digitalHumanAssetId: '',
       digitalHumanPreviewUrl: '',
     })
@@ -122,28 +131,10 @@ describe('asset workbench configuration', () => {
     )
     expect(metadata).toMatchObject({
       source: 'chapter',
-      workbench: { generationCount: 2, resolution: '1K', size: '1024x1024' },
+      model_config_id: null,
+      generation_count: 1,
+      workbench: { generationCount: 1, resolution: '1K', size: '1024x1024' },
     })
   })
 
-  it('publishes the same 1K and 2K dimension presets as the reference page', () => {
-    expect(ASSET_SIZE_PRESETS.map(item => item.value)).toEqual([
-      '1024x1024',
-      '1152x864',
-      '864x1152',
-      '1424x800',
-      '800x1424',
-      '1248x832',
-      '832x1248',
-      '1568x672',
-      '2048x2048',
-      '2368x1776',
-      '1776x2368',
-      '2816x1584',
-      '1584x2816',
-      '2496x1664',
-      '1664x2496',
-      '3136x1344',
-    ])
-  })
 })

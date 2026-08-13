@@ -3,11 +3,12 @@ import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 import { computed, inject, ref, watch } from 'vue'
-import type { Asset, EnumItem, Scene, Video } from '@/types'
+import type { Asset, EnumItem, Scene, Video, VideoGenerationModel } from '@/types'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import WorkbenchSelect from '../components/WorkbenchSelect.vue'
+import MediaGenerationModelSelector from '../components/MediaGenerationModelSelector.vue'
 import { assetSelectedImageCandidates } from '../config/assetConfig'
 import {
   normalizeShotConfig,
@@ -22,6 +23,7 @@ import {
 import { registerWorkbenchPromptAction } from '../prompt/promptActionRegistry'
 import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
 import { promptEditorFromData, workbenchPromptEditorKey } from '../prompt/promptEditor'
+import { sceneHasRunningVideo } from '../graph/videoVersions'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -30,6 +32,8 @@ const promptEditor = inject(workbenchPromptEditorKey, null)
 const scene = computed(() => props.data.scene as Scene)
 const videos = computed(() => (props.data.videos || []) as Video[])
 const options = computed(() => (props.data.modelOptions || []) as EnumItem[])
+const videoModels = computed(() => (props.data.videoModelOptions || []) as VideoGenerationModel[])
+const selectedModel = computed(() => videoModels.value.find(item => item.config_id === config.value.modelType) || null)
 const projectDefaults = computed<ShotProjectDefaults>(() => (
   props.data.project_defaults as ShotProjectDefaults | undefined
 ) || { aspectRatio: '9:16', resolution: '720p' })
@@ -44,15 +48,23 @@ watch([scene, projectDefaults], ([value, defaults]) => {
   prompt.value = value.prompt || ''
   config.value = normalizeShotConfig(value, defaults)
 }, { immediate: true })
-watch(options, value => {
-  if (config.value.modelType === null && value.length) config.value.modelType = value[0].value
+watch(videoModels, value => {
+  if (!value.some(item => item.config_id === config.value.modelType)) {
+    config.value.modelType = value[0]?.config_id || null
+  }
 }, { immediate: true })
 
-const busy = computed(() => store.busySceneIds.includes(scene.value.id))
+const busy = computed(() => store.busySceneIds.includes(scene.value.id) || sceneHasRunningVideo(videos.value))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
 const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
-const canGenerate = computed(() => backendCanGenerate.value && config.value.modelType !== null && !busy.value && !saving.value)
+const keyframesReady = computed(() => !config.value.useLastFrame || Boolean(config.value.firstFrameUrl && config.value.lastFrameUrl))
+const generationMode = computed(() => config.value.useLastFrame ? 'keyframes' : 'reference')
+const canGenerate = computed(() => Boolean(backendCanGenerate.value
+  && selectedModel.value?.capabilities.generation_modes.includes(generationMode.value)
+  && keyframesReady.value
+  && !busy.value
+  && !saving.value))
 const activeVideoId = computed(() => {
   const configured = config.value.activeVideoId
   return configured && videos.value.some(video => video.id === configured) ? configured : videos.value[0]?.id || null
@@ -147,6 +159,24 @@ const materialMentions = computed<MaterialMention[]>(() => {
       }))
   }))
 })
+const frameImageOptions = computed(() => {
+  const values = materialOptions.value.filter(option => option.hasImage && option.previewUrl)
+  const configuredValues = [config.value.firstFrameUrl, config.value.lastFrameUrl].filter(Boolean)
+  const seen = new Set<string>()
+  return [
+    { value: '', label: '请选择参考图片' },
+    ...values.flatMap((option) => {
+      if (seen.has(option.previewUrl)) return []
+      seen.add(option.previewUrl)
+      return [{ value: option.previewUrl, label: option.name }]
+    }),
+    ...configuredValues.flatMap((url) => {
+      if (seen.has(url)) return []
+      seen.add(url)
+      return [{ value: url, label: '已保存的参考图片' }]
+    }),
+  ]
+})
 
 function normalizedDraftConfig(): ShotWorkbenchConfig {
   const duration = Math.max(1, Math.min(30, Number(config.value.duration) || 1))
@@ -180,7 +210,11 @@ async function save() {
 async function generate() {
   if (!canGenerate.value || config.value.modelType === null) return
   await save()
-  await store.generateVideo(scene.value.id, config.value.modelType, shotGenerationOptions(config.value))
+  await store.generateVideo(
+    scene.value.id,
+    config.value.modelType,
+    shotGenerationOptions(config.value, selectedModel.value?.capabilities),
+  )
 }
 
 registerWorkbenchPromptAction(props.id, {
@@ -239,8 +273,37 @@ const referenceImageCount = computed(() => materialMentions.value.filter(item =>
 const referenceVideoCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_video').length)
 const referenceAudioCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_audio').length)
 const promptInjectionCount = computed(() => materialMentions.value.filter(item => item.mode === 'prompt_injection').length)
-const aspectRatioOptions = SHOT_ASPECT_RATIOS.map(value => ({ value, label: value }))
-const resolutionOptions = SHOT_RESOLUTIONS.map(value => ({ value, label: value }))
+const supportedAspectRatios = computed(() => selectedModel.value?.capabilities.aspect_ratios_by_mode[generationMode.value]
+  || selectedModel.value?.capabilities.aspect_ratios
+  || [...SHOT_ASPECT_RATIOS])
+const supportedResolutions = computed(() => selectedModel.value?.capabilities.resolutions || [...SHOT_RESOLUTIONS])
+const aspectRatioOptions = computed(() => supportedAspectRatios.value.map(value => ({ value, label: value === 'adaptive' ? '自适应' : value })))
+const resolutionOptions = computed(() => supportedResolutions.value.map(value => ({ value, label: value })))
+const outputFormatOptions = computed(() => (selectedModel.value?.capabilities.output_formats || ['mp4']).map(value => ({ value, label: value.toUpperCase() })))
+const durationMin = computed(() => selectedModel.value?.capabilities.duration_min || 4)
+const durationMax = computed(() => selectedModel.value?.capabilities.duration_max || 30)
+const maxReferenceImages = computed(() => selectedModel.value?.capabilities.max_reference_images || 0)
+
+watch([selectedModel, generationMode], ([model]) => {
+  const capabilities = model?.capabilities
+  if (!capabilities) return
+  const ratios = capabilities.aspect_ratios_by_mode[generationMode.value] || capabilities.aspect_ratios
+  if (!capabilities.resolutions.includes(config.value.resolution)) {
+    config.value.resolution = (capabilities.resolutions.includes(capabilities.default_resolution)
+      ? capabilities.default_resolution
+      : capabilities.resolutions[0]) as ShotWorkbenchConfig['resolution']
+  }
+  if (!ratios.includes(config.value.aspectRatio)) {
+    config.value.aspectRatio = (ratios.includes(capabilities.default_aspect_ratio)
+      ? capabilities.default_aspect_ratio
+      : ratios[0]) as ShotWorkbenchConfig['aspectRatio']
+  }
+  config.value.duration = Math.max(capabilities.duration_min, Math.min(capabilities.duration_max, config.value.duration))
+  if (!capabilities.output_formats.includes(config.value.outputFormat)) {
+    config.value.outputFormat = capabilities.default_output_format
+  }
+  if (!capabilities.supports_audio) config.value.generateAudio = false
+}, { immediate: true })
 
 async function chooseVideo(videoId: number) {
   if (videoId === activeVideoId.value) return
@@ -263,9 +326,13 @@ async function chooseVideo(videoId: number) {
         <fieldset class="workbench-form workbench-capability-form">
           <legend>生成参数</legend>
           <label class="workbench-field">
+            <span>视频模型</span>
+            <MediaGenerationModelSelector v-model="config.modelType" :options="options" label="视频模型" />
+          </label>
+          <label class="workbench-field">
             <span>视频时长（秒）</span>
             <div class="workbench-duration-slider nodrag nowheel">
-              <input v-model.number="config.duration" type="range" min="1" max="30" step="1" aria-label="视频时长（秒）">
+              <input v-model.number="config.duration" type="range" :min="durationMin" :max="durationMax" step="1" aria-label="视频时长（秒）">
               <span :aria-label="`视频时长（秒）当前值`">{{ config.duration }} 秒</span>
             </div>
           </label>
@@ -277,17 +344,37 @@ async function chooseVideo(videoId: number) {
             <span>分辨率</span>
             <WorkbenchSelect v-model="config.resolution" :options="resolutionOptions" label="分辨率" />
           </label>
-          <label class="workbench-field workbench-field--switch">
-            <span>返回末帧图片</span>
-            <button class="workbench-inline-switch" type="button" role="switch" aria-label="返回末帧图片" :aria-checked="config.useLastFrame" @click="config.useLastFrame = !config.useLastFrame"><i /></button>
-            <small>开启后生成视频并将模型返回的末帧及时保存为独立图片。</small>
+          <label class="workbench-field">
+            <span>视频格式</span>
+            <WorkbenchSelect v-model="config.outputFormat" :options="outputFormatOptions" label="视频格式" />
           </label>
+          <label v-if="selectedModel?.capabilities.supports_audio" class="workbench-field workbench-field--switch">
+            <span>同步音频</span>
+            <button class="workbench-inline-switch" type="button" role="switch" aria-label="生成同步音频" :aria-checked="config.generateAudio" @click="config.generateAudio = !config.generateAudio"><i /></button>
+            <small>由所选 Seedance 模型随视频生成音频。</small>
+          </label>
+          <label class="workbench-field workbench-field--switch">
+            <span>首尾帧模式</span>
+            <button class="workbench-inline-switch" type="button" role="switch" aria-label="首尾帧模式" :aria-checked="config.useLastFrame" @click="config.useLastFrame = !config.useLastFrame"><i /></button>
+            <small>开启后从已连接的图片中指定首帧和尾帧。</small>
+          </label>
+          <template v-if="config.useLastFrame">
+            <label class="workbench-field">
+              <span>首帧图片</span>
+              <WorkbenchSelect v-model="config.firstFrameUrl" :options="frameImageOptions" label="首帧图片" />
+            </label>
+            <label class="workbench-field">
+              <span>尾帧图片</span>
+              <WorkbenchSelect v-model="config.lastFrameUrl" :options="frameImageOptions" label="尾帧图片" />
+            </label>
+            <small v-if="!keyframesReady" class="workbench-field-error" role="alert">请先连接图片资产，并同时选择首帧和尾帧。</small>
+          </template>
         </fieldset>
 
         <section v-if="materialMentions.length" class="workbench-reference-list workbench-reference-list--compact" aria-label="资产引用策略">
           <button type="button" class="workbench-reference-list__toggle" :aria-label="assetInputOpen ? '收起资产输入' : '展开资产输入'" :aria-expanded="assetInputOpen" aria-controls="shot-asset-inputs" @click="assetInputOpen = !assetInputOpen">
             <span><strong>资产输入</strong><small>{{ materialMentions.length }} 个</small></span>
-            <span>图片 {{ referenceImageCount }}/9 · 视频 {{ referenceVideoCount }}/3 · 音频 {{ referenceAudioCount }}/3 · 提示词 {{ promptInjectionCount }} <i aria-hidden="true">⌄</i></span>
+            <span>图片 {{ referenceImageCount }}/{{ maxReferenceImages }} · 视频 {{ referenceVideoCount }}/3 · 音频 {{ referenceAudioCount }}/3 · 提示词 {{ promptInjectionCount }} <i aria-hidden="true">⌄</i></span>
           </button>
           <div v-if="assetInputOpen" id="shot-asset-inputs" class="workbench-reference-list__body">
             <div v-for="material in materialMentions" :key="material.edgeKey" class="workbench-shot-asset-input">
@@ -364,5 +451,11 @@ async function chooseVideo(videoId: number) {
 
 .workbench-inline-switch[aria-checked='true'] > i {
   transform: translateX(14px);
+}
+
+.workbench-field-error {
+  color: #e4a39a;
+  font-size: 10px;
+  line-height: 1.5;
 }
 </style>
