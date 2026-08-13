@@ -252,6 +252,34 @@ async def test_api_asset_variants_support_multiple_images(client: AsyncClient):
     assert variant["asset_id"] == asset.id
     assert variant["images"] == ["/media/a.png", "/media/b.png", "/media/c.png"]
 
+    # The edit drawer reloads this collection after a browser refresh.  Keep the
+    # response at the API boundary as serializable schemas instead of raw ORM rows.
+    variants_response = await client.get(f"/api/asset/{asset.id}/variants")
+    assert variants_response.status_code == 200, variants_response.text
+    assert variants_response.json()["data"] == [variant]
+
+    assignment_response = await client.post(
+        f"/api/asset/{asset.id}/variants/{variant['id']}/chapter",
+        json={"chapter_number": 104},
+    )
+    assert assignment_response.status_code == 200, assignment_response.text
+    assert assignment_response.json()["data"][0]["chapter_numbers"] == [
+        101,
+        102,
+        103,
+        104,
+    ]
+
+    refreshed_response = await client.get(f"/api/asset/{asset.id}/variants")
+    assert refreshed_response.status_code == 200, refreshed_response.text
+    assert refreshed_response.json()["data"][0]["name"] == "红衣变装"
+    assert refreshed_response.json()["data"][0]["chapter_numbers"] == [
+        101,
+        102,
+        103,
+        104,
+    ]
+
     detail = await client.get(f"/api/asset/{asset.id}")
     assert detail.status_code == 200, detail.text
     assert detail.json()["data"]["variants"][0]["name"] == "红衣变装"

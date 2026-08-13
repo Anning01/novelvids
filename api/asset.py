@@ -120,7 +120,10 @@ async def restore_asset_generation(asset_id: int, task_id: UUID):
     response_model=ResponseSchema[list[AssetVariantOut]],
 )
 async def get_asset_variants(asset_id: int):
-    return ResponseSchema(data=await asset_controller.list_variants(asset_id))
+    variants = await asset_controller.list_variants(asset_id)
+    return ResponseSchema(
+        data=[AssetVariantOut.model_validate(variant) for variant in variants]
+    )
 
 
 @router.post(
@@ -157,11 +160,14 @@ async def assign_asset_variant_to_chapter(
     variant_id: int,
     payload: AssetVariantChapterAssignment,
 ):
-    return ResponseSchema(data=await asset_controller.assign_variant_to_chapter(
+    variants = await asset_controller.assign_variant_to_chapter(
         asset_id,
         variant_id,
         payload.chapter_number,
-    ))
+    )
+    return ResponseSchema(
+        data=[AssetVariantOut.model_validate(variant) for variant in variants]
+    )
 
 
 @router.delete(
