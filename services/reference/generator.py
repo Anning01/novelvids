@@ -6,6 +6,8 @@ from utils.prompt_language import normalize_prompt_language
 
 CHARACTER_TURNAROUND = "character_turnaround"
 GROUP_PORTRAIT = "group_portrait"
+REFERENCE_OUTPUT_GUARD_ZH = "禁止生成任何文字、标签、Logo 或水印。"
+REFERENCE_OUTPUT_GUARD_EN = "Do not output any text, labels, logos, or watermarks."
 
 SINGLE_CHARACTER_PROMPT_PREFIX_ZH = (
     "任务：完成角色的上半身正面平视特写和该角色的全身三视图，"
@@ -14,6 +16,7 @@ SINGLE_CHARACTER_PROMPT_PREFIX_ZH = (
     "三视图不可以有分割线，比例是16:9，左侧为角色胸部以上特写大图，占画面约 40% 宽度，"
     "用于展示面部、发型、表情、眼神、上半身服装和配饰细节，右侧为同一角色的三视图，"
     "占画面约 60% 宽度，依次展示正面全身、侧面全身、背面全身。"
+    f"{REFERENCE_OUTPUT_GUARD_ZH}"
 )
 
 SCENE_PROMPT_PREFIX_ZH = (
@@ -22,7 +25,7 @@ SCENE_PROMPT_PREFIX_ZH = (
     "从高空俯视整体空间布局，展示环境关系和场景结构；左下角为背视图，从主体后方观察，"
     "突出背部轮廓、空间纵深和环境延展；右下角为侧视图，从主体侧面观察，展示主体比例、"
     "层次和空间关系。四个画面保持同一场景、同一光照、同一色调、同一时间状态。"
-    "不输出文字信息。\n\n"
+    f"{REFERENCE_OUTPUT_GUARD_ZH}\n\n"
     "1. 只出现场景，不出现人物、道具等无关内容,\n"
     "2. 必须只展示静态事物，不能包含人，动物等可以自行运行的事物\n"
     "3. 无动态、特效、技能、光效及战斗相关描写。"
@@ -89,7 +92,8 @@ def _character_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
         "the face, hairstyle, expression, eyes, upper-body clothing, and accessories. The right side "
         "occupies about 60% and shows the same character in front, side, and back full-body views in that "
         "order. Identity, proportions, clothing, hairstyle, and accessories must remain exactly consistent "
-        "across every view. Do not output text, labels, watermarks, borders, or divider lines.\n\n"
+        "across every view. Do not output borders or divider lines. "
+        f"{REFERENCE_OUTPUT_GUARD_EN}\n\n"
         f"Character description:\n{details}"
     )
 
@@ -109,7 +113,7 @@ def _scene_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
         "architecture, set dressing, lighting, color palette, time of day, and weather state.\n\n"
         "Show only the environment. Do not include people, animals, hero props, or unrelated objects. "
         "Depict a static environment with no motion, effects, abilities, glowing effects, or combat. "
-        "Do not output text, labels, or watermarks.\n\n"
+        f"{REFERENCE_OUTPUT_GUARD_EN}\n\n"
         f"Scene description:\n{details}"
     )
 
@@ -117,8 +121,8 @@ def _scene_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
 def _item_prompt(data: dict[str, Any], language: str, ratio: str) -> str:
     details = _details(data)
     if language == "zh":
-        return f"【道具描述】{details}"
-    return f"[Prop description] {details}"
+        return f"【道具描述】{details}\n\n{REFERENCE_OUTPUT_GUARD_ZH}"
+    return f"[Prop description] {details}\n\n{REFERENCE_OUTPUT_GUARD_EN}"
 
 
 def build_sora_compatible_prompt(data: dict[str, Any], prompt_language: str = "en") -> str:

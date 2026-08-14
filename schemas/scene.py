@@ -1,6 +1,6 @@
 # 生成视频分镜
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
 from utils.enums import AssetTypeEnum, TaskStatusEnum
@@ -13,6 +13,10 @@ class SceneEntity(BaseModel):
     name: str = Field(..., description="场景词的标准名称，如 '张三'")
     aliases: list[str] = Field(..., description="该场景词在文中可能出现的别名，如 ['三哥', '张大侠']")
     description: str = Field(..., description="该实体的视觉描述字符串")
+    asset_type: Literal["人物", "场景", "物品"] = Field(
+        "人物",
+        description="实体类型，用于构建专业 Prompt 的资产引用章节",
+    )
 
 
 # --- Asset 侧模型 ---
@@ -30,10 +34,30 @@ class AssetSimple(BaseModel):
 
 
 class SoraScenePromptConfig(BaseModel):
-    """生成视频分镜的提示词配置 - Sora"""
+    """专业视频分镜提示词的结构化内容。"""
+
     sequence: int = Field(..., description="分镜序列号")
-    description: str = Field(..., description="分镜标题，简短有力，如 'The Revelation'")
-    duration: Literal["4s", "8s"] = Field(..., description="时长，推荐4s以获得最佳指令依从性")
+    description: str = Field(..., description="镜头标题，简短描述该镜头的核心事件")
+    duration: str = Field(..., description="镜头时长，格式如 3s、4s 或 8s，范围 1-30 秒")
+    shot_size_and_camera: str = Field(
+        ...,
+        description="景别与机位，如‘中景正面机位’或‘过肩镜头’",
+    )
+
+    visual_style: str = Field(
+        ...,
+        description="贯穿该镜头的视觉风格，不描述剧情动作",
+    )
+    effect_restrictions: list[str] = Field(
+        ...,
+        description="根据题材明确禁止的廉价或违和视觉特效",
+    )
+    time_setting: str = Field(..., description="时间、天气与总体光线条件")
+    environment: str = Field(..., description="环境状态、光线层次与氛围变化")
+    spatial_relationships: str = Field(
+        ...,
+        description="人物、场景入口、主要陈设和机位之间的空间关系",
+    )
     # --- 核心内容 ---
     visual_prose: str = Field(
         ...,
@@ -75,6 +99,32 @@ class SoraScenePromptConfig(BaseModel):
         ...,
         description="【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
     )
+
+    dialogue: list[str] = Field(
+        default_factory=list,
+        description="镜头内人物台词；每项包含人物、语气和原文，无台词时返回空数组",
+    )
+    transition: str = Field(
+        ...,
+        description="与相邻镜头衔接的转场方式及连续性依据",
+    )
+    allowed_effects: list[str] = Field(
+        default_factory=list,
+        description="允许使用的克制效果；无特殊效果时明确写自然光写实拍摄",
+    )
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, value: str) -> str:
+        raw = value.strip().lower().removesuffix("s")
+        try:
+            seconds = float(raw)
+        except ValueError as exc:
+            raise ValueError("duration 必须是 1-30 秒的数值，如 4s") from exc
+        if not 1 <= seconds <= 30:
+            raise ValueError("duration 必须在 1-30 秒之间")
+        normalized = str(int(seconds)) if seconds.is_integer() else str(seconds)
+        return f"{normalized}s"
 
 class Storyboard(BaseModel):
     """完整的故事板，包含多个分镜"""

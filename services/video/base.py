@@ -17,8 +17,17 @@ MIME_TYPES = {
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
     ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
 }
+
+
+class VideoProviderError(RuntimeError):
+    """视频供应商边界错误；调用方可安全持久化其脱敏后的消息。"""
 
 
 def image_to_base64(image_path: str) -> str:

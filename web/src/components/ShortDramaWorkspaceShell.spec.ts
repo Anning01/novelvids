@@ -2,9 +2,11 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import ShortDramaWorkspaceShell from './ShortDramaWorkspaceShell.vue'
 
+const routerPush = vi.fn()
+
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: { chapter: '12' } }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: routerPush }),
 }))
 
 const chapter = { id: 12, novel_id: 1, number: 2, name: '追踪', created_at: '', updated_at: '' }
@@ -20,6 +22,21 @@ const baseProps = {
 }
 
 describe('ShortDramaWorkspaceShell', () => {
+  it('keeps the video phase locked until the current episode has a playable result', async () => {
+    routerPush.mockClear()
+    const wrapper = mount(ShortDramaWorkspaceShell, { props: baseProps })
+    const videoButton = wrapper.findAll('.short-drama-phase-nav button').find(button => button.text().includes('视频'))
+    expect(videoButton?.attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({ videoEnabled: true })
+    const enabledVideoButton = wrapper.findAll('.short-drama-phase-nav button').find(button => button.text().includes('视频'))
+    await enabledVideoButton?.trigger('click')
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/create/short-drama/video/1',
+      query: { chapter: '12' },
+    })
+  })
+
   it('shares the fixed header and episode rail for production phases', () => {
     const wrapper = mount(ShortDramaWorkspaceShell, { props: baseProps })
     wrapper.get('.short-drama-workspace-header')

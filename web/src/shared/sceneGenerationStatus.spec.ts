@@ -9,5 +9,7 @@ describe('resolveSceneGenerationState', () => {
     expect(resolveSceneGenerationState({ status: TaskStatusEnum.CANCELLED })).toBe('error')
     expect(resolveSceneGenerationState({ status: TaskStatusEnum.PROCESSING })).toBe('pending')
     expect(resolveSceneGenerationState()).toBe('pending')
+    expect(resolveSceneGenerationState(undefined, true)).toBe('error')
+    expect(resolveSceneGenerationState({ status: TaskStatusEnum.COMPLETED }, true)).toBe('error')
   })
 })

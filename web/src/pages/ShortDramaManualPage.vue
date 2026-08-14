@@ -748,11 +748,11 @@ onBeforeUnmount(() => {
       :novel-id="projectId"
       :asset="editingAsset"
       :chapter-number="selectedChapter?.number"
+      :episode-numbers="chapters.map(item => item.number)"
       :initial-mode="assetDrawerMode"
       @close="closeAssetDialog"
       @created="addCreatedAsset"
       @saved="saveEditedAsset"
-      @regenerate="generateSingleAsset"
     />
 
     <AssetBatchGenerateDialog

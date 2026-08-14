@@ -12,7 +12,8 @@ function recordValue(value: unknown): Record<string, unknown> {
 }
 
 export function activeVideoIdForScene(scene: Scene) {
-  const value = recordValue(recordValue(scene.metadata).workbench).activeVideoId
+  const metadata = recordValue(scene.metadata)
+  const value = metadata.current_video_id ?? recordValue(metadata.workbench).activeVideoId
   const id = Number(value)
   return Number.isFinite(id) && id > 0 ? id : null
 }

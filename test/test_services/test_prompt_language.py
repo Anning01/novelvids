@@ -18,6 +18,7 @@ from prompts.extraction import (
     GROUP_PORTRAIT_TRAIT_LABELS,
     SINGLE_CHARACTER_TRAIT_LABELS,
 )
+from prompts.storyboard import format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig
 from services.extraction.context import (
     ChapterExtractionInput,
@@ -28,7 +29,6 @@ from services.extraction.extractor import AssetExtractionResult, AssetExtractor,
 from services.extraction.messages import ExtractionMessageBuilder
 from services.project_analysis.handler import BookAnalysis, _cover_prompt
 from services.reference.generator import build_sora_compatible_prompt
-from services.storyboard.handler import format_storyboard_prompt
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum
 
 
@@ -43,6 +43,12 @@ def _shot() -> SoraScenePromptConfig:
         sequence=1,
         description="晨雾中的会面",
         duration="4s",
+        shot_size_and_camera="中景正面机位",
+        visual_style="冷峻写实风，轻微柔焦",
+        effect_restrictions=["禁止廉价发光粒子"],
+        time_setting="清晨，阴天",
+        environment="石桥被晨雾包围，环境安静",
+        spatial_relationships="李舟位于桥中央，镜头在桥头正对人物",
         visual_prose="晨雾笼罩石桥。",
         actions=["0.0s-4.0s: @李舟缓步前行。"],
         format_and_look="180° 快门，细颗粒。",
@@ -51,6 +57,9 @@ def _shot() -> SoraScenePromptConfig:
         grade_and_palette="低饱和青灰色。",
         camera_movement="缓慢推进。",
         sound_design="环境水声，-20 LUFS。",
+        dialogue=[],
+        transition="以人物前进方向承接下一镜头。",
+        allowed_effects=["自然雾气"],
     )
 
 
@@ -116,6 +125,8 @@ def test_reference_prompt_supports_chinese_and_english():
     assert "沉着的旅人" not in english
     assert "Anime" not in english
     assert "二次元" not in chinese
+    assert "水印" in chinese
+    assert "watermarks" in english
 
 
 def test_reference_prompt_supports_group_scene_and_prop_layouts():
@@ -155,9 +166,13 @@ def test_reference_prompt_supports_group_scene_and_prop_layouts():
     assert "four-panel environment reference sheet" in english_scene
     assert "high-angle aerial view" in english_scene
     assert scene_data["description"] not in chinese_scene
+    assert "水印" in chinese_scene
+    assert "watermarks" in english_scene
 
-    assert chinese_prop == "【道具描述】氧化铜外壳，黑色刻度盘"
-    assert english_prop == "[Prop description] 氧化铜外壳，黑色刻度盘"
+    assert chinese_prop.startswith("【道具描述】氧化铜外壳，黑色刻度盘")
+    assert english_prop.startswith("[Prop description] 氧化铜外壳，黑色刻度盘")
+    assert "水印" in chinese_prop
+    assert "watermarks" in english_prop
     assert prop_data["description"] not in chinese_prop
 
 
@@ -191,14 +206,20 @@ def test_reference_prompt_uses_requested_aspect_ratio():
     assert "21:9" in prompt
 
 
-def test_storyboard_prompt_labels_follow_language():
+def test_storyboard_prompt_uses_professional_chinese_structure():
     chinese = format_storyboard_prompt(_shot(), "zh")
     english = format_storyboard_prompt(_shot(), "en")
 
-    assert chinese.startswith("视觉描述:")
-    assert "\n运镜:" in chinese
-    assert english.startswith("Visual Prose:")
-    assert "\nCamera Movement:" in english
+    assert chinese.startswith("【禁止项】")
+    assert "【风格定调】" in chinese
+    assert "【角色 / 道具 / 场景引用】" in chinese
+    assert "【全局前置条件】" in chinese
+    assert "【镜头描述】" in chinese
+    assert "【镜头1 · @{镜头时长:4s} · 中景正面机位" in chinese
+    assert "【转场方式】" in chinese
+    assert "【特效规范】" in chinese
+    assert "总时长：@{镜头时长:4s}" in chinese
+    assert english == chinese
     assert "['" not in chinese
 
 

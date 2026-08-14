@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from models.config import AiModelConfig
+from services.video.capabilities import capabilities_for
 from utils.enums import AiTaskTypeEnum
 
 
@@ -185,25 +186,7 @@ async def test_api_lists_only_active_configured_video_models_with_capabilities(c
         "model": "configured-seedance-2.5-endpoint",
         "model_type": "seedance_2_5",
         "concurrency": 2,
-        "capabilities": {
-            "resolutions": ["480p", "720p"],
-            "aspect_ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
-            "aspect_ratios_by_mode": {
-                "reference": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
-                "keyframes": ["adaptive"],
-            },
-            "output_formats": ["mp4", "mov"],
-            "generation_modes": ["reference", "keyframes"],
-            "duration_min": 4,
-            "duration_max": 30,
-            "supports_auto_duration": True,
-            "supports_audio": True,
-            "max_reference_images": 30,
-            "default_resolution": "720p",
-            "default_aspect_ratio": "adaptive",
-            "default_output_format": "mp4",
-            "default_generate_audio": True,
-        },
+        "capabilities": capabilities_for("seedance_2_5").public_dict(),
     }]
 
 

@@ -6,6 +6,22 @@ from utils.enums import VideoModelTypeEnum, TaskStatusEnum
 
 # --- 输入 Schema ---
 
+class VideoReferenceMedia(BaseModel):
+    """已上传并通过模型能力校验的参考素材。"""
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["image", "video"]
+    url: str = Field(..., min_length=1, max_length=2000)
+    name: Optional[str] = Field(None, max_length=255)
+    content_type: Optional[str] = Field(None, max_length=100)
+    size_bytes: Optional[int] = Field(None, ge=0)
+    width: Optional[int] = Field(None, ge=1)
+    height: Optional[int] = Field(None, ge=1)
+    duration: Optional[float] = Field(None, ge=0)
+    fps: Optional[float] = Field(None, ge=0)
+    codec: Optional[str] = Field(None, max_length=50)
+
+
 class VideoGenerateRequest(BaseModel):
     """提交视频生成请求"""
     model_config = ConfigDict(extra="forbid")
@@ -20,6 +36,8 @@ class VideoGenerateRequest(BaseModel):
     duration: Optional[int] = Field(None, description="视频时长（秒），留空使用分镜时长")
     output_format: Optional[str] = Field(None, description="视频输出格式")
     generate_audio: Optional[bool] = Field(None, description="是否生成同步音频")
+    return_last_frame: Optional[bool] = Field(False, description="是否返回尾帧并注入下一分镜参考图")
+    reference_media: list[VideoReferenceMedia] = Field(default_factory=list, description="用户上传的参考图片与视频")
 
 
 # --- 输出 Schema ---

@@ -161,6 +161,61 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
 
 
 @pytest.mark.asyncio
+async def test_api_records_annotated_asset_image_as_generation_history(
+    client: AsyncClient,
+):
+    novel = await Novel.create(name="Annotated Asset Novel")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="标注人物",
+        main_image="/media/assets/original.png",
+        metadata={"image_gallery": ["/media/assets/original.png"]},
+    )
+
+    response = await client.post(
+        f"/api/asset/{asset.id}/generation-history/edit",
+        json={
+            "image_url": "/media/assets/annotated.png",
+            "source_image_url": "/media/assets/original.png",
+            "output_format": "png",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["main_image"] == "/media/assets/annotated.png"
+    assert data["metadata"]["image_gallery"] == [
+        "/media/assets/annotated.png",
+        "/media/assets/original.png",
+    ]
+    task_id = data["metadata"]["edited_generation_task_id"]
+    task = await AiTask.get(id=task_id)
+    assert task.status == TaskStatusEnum.completed.value
+    assert task.request_params["operation"] == "image_annotation"
+    assert task.request_params["model"] == "图片标注编辑"
+    assert task.request_params["source_image_url"] == "/media/assets/original.png"
+    assert task.response_data == {"images": ["/media/assets/annotated.png"]}
+
+    history_response = await client.get(
+        f"/api/asset/{asset.id}/generation-history"
+    )
+    assert history_response.status_code == 200, history_response.text
+    history = history_response.json()["data"]
+    assert history[0]["id"] == task_id
+    assert history[0]["images"] == ["/media/assets/annotated.png"]
+    assert history[0]["model"] == "图片标注编辑"
+
+    invalid_response = await client.post(
+        f"/api/asset/{asset.id}/generation-history/edit",
+        json={"image_url": "https://example.com/annotated.png"},
+    )
+    assert invalid_response.status_code == 200
+    assert invalid_response.json()["code"] == 422
+    assert "标注图必须先上传到本地媒体目录" in invalid_response.json()["message"]
+
+
+@pytest.mark.asyncio
 async def test_api_previews_exact_reference_prompt_without_narrative_description(
     client: AsyncClient,
 ):
@@ -252,11 +307,48 @@ async def test_api_asset_variants_support_multiple_images(client: AsyncClient):
     assert variant["asset_id"] == asset.id
     assert variant["images"] == ["/media/a.png", "/media/b.png", "/media/c.png"]
 
+    editor_form = {
+        "version": 1,
+        "canonical_name": "李火旺",
+        "description": "后期形态说明",
+        "base_traits": "红色道袍，黑色长发",
+        "prompt_touched": True,
+        "creation_mode": "ai",
+        "gender": "男",
+        "age_group": "青年",
+        "voice": "",
+        "reference_layout": "character_turnaround",
+        "model_config_id": 12,
+        "image_parameters": {
+            "clarity": "1.5K",
+            "aspect_ratio": "16:9",
+            "output_format": "png",
+            "generation_count": 1,
+        },
+        "library_selection": {"key": "", "scope": "all"},
+    }
+    patch_response = await client.patch(
+        f"/api/asset/{asset.id}/variants/{variant['id']}",
+        json={
+            "base_traits": editor_form["base_traits"],
+            "metadata": {
+                "editor_form": editor_form,
+                "model_config_id": 12,
+                "clarity": "1.5K",
+                "aspect_ratio": "16:9",
+                "output_format": "png",
+            },
+        },
+    )
+    assert patch_response.status_code == 200, patch_response.text
+
     # The edit drawer reloads this collection after a browser refresh.  Keep the
     # response at the API boundary as serializable schemas instead of raw ORM rows.
     variants_response = await client.get(f"/api/asset/{asset.id}/variants")
     assert variants_response.status_code == 200, variants_response.text
-    assert variants_response.json()["data"] == [variant]
+    persisted_variant = variants_response.json()["data"][0]
+    assert persisted_variant["metadata"]["editor_form"] == editor_form
+    assert persisted_variant["base_traits"] == "红色道袍，黑色长发"
 
     assignment_response = await client.post(
         f"/api/asset/{asset.id}/variants/{variant['id']}/chapter",

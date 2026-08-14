@@ -13,7 +13,7 @@ from models.ai_task import AiTask
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.chapter import Chapter
-from schemas.asset import AssetCreate, AssetUpdate
+from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
 from services.image_generation.capabilities import validate_selection
@@ -448,6 +448,52 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             })
         return records
 
+    @atomic()
+    async def record_image_edit(
+        self,
+        asset_id: int,
+        payload: AssetImageEditCreate,
+    ) -> Asset:
+        """Store a raster annotation as the current asset image and a restorable history run."""
+        asset = await self.get(asset_id)
+        now = datetime.now(timezone.utc)
+        metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+        task = await AiTask.create(
+            task_type=AiTaskTypeEnum.reference_image.value,
+            status=TaskStatusEnum.completed.value,
+            request_params={
+                "asset_id": asset.id,
+                "variant_id": None,
+                "operation": "image_annotation",
+                "model": "图片标注编辑",
+                "aspect_ratio": metadata.get("aspect_ratio"),
+                "clarity": metadata.get("clarity") or metadata.get("resolution"),
+                "output_format": payload.output_format,
+                "source_image_url": payload.source_image_url,
+            },
+            response_data={"images": [payload.image_url]},
+            started_at=now,
+            finished_at=now,
+        )
+        existing_gallery = metadata.get("image_gallery")
+        gallery = existing_gallery if isinstance(existing_gallery, list) else []
+        image_gallery = [
+            payload.image_url,
+            *[
+                image
+                for image in gallery
+                if isinstance(image, str) and image != payload.image_url
+            ],
+        ]
+        asset.main_image = payload.image_url
+        asset.metadata = {
+            **metadata,
+            "image_gallery": image_gallery,
+            "edited_generation_task_id": str(task.id),
+        }
+        await asset.save(update_fields=["main_image", "metadata", "updated_at"])
+        return asset
+
     async def restore_generation(self, asset_id: int, task_id: UUID) -> Asset:
         """Restore a completed image-generation result as the asset's current image."""
         asset = await self.get(asset_id)
@@ -501,13 +547,17 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
 
         # 1. 获取任务配置
         metadata = asset.metadata or {}
-        requested_config_id = metadata.get("model_config_id")
+        variant_metadata = (
+            variant.metadata
+            if variant and isinstance(variant.metadata, dict)
+            else {}
+        )
+        effective_metadata = {**metadata, **variant_metadata}
+        requested_config_id = effective_metadata.get("model_config_id")
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.reference_image.value,
             int(requested_config_id) if requested_config_id else None,
         )
-        variant_metadata = variant.metadata if variant and isinstance(variant.metadata, dict) else {}
-        effective_metadata = {**metadata, **variant_metadata}
         workbench = effective_metadata.get("workbench")
         if not isinstance(workbench, dict):
             workbench = {}

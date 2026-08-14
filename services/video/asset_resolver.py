@@ -45,12 +45,12 @@ async def resolve_assets(
 ) -> list[dict[str, Any]]:
     """解析分镜使用的资产及形态，返回视频模型 subjects。
 
-    用户在分镜中显式选择的形态优先于 prompt 的 ``#形态`` 与章节默认形态；
-    已绑定但未写进 prompt 的资产也会作为参考素材提交。
+    只有同时满足“已绑定到分镜”和“在 prompt 中显式引用”的资产才会提交；
+    用户在分镜中显式选择的形态优先于 prompt 的 ``#形态`` 与章节默认形态。
     """
     mentions = [m1 or m2 for m1, m2 in MENTION_PATTERN.findall(prompt)]
     logger.info("resolve_assets: mentions=%s (prompt[:100]=%r)", mentions, prompt[:100])
-    if not mentions and not selected_asset_ids:
+    if not mentions:
         return []
 
     # 查找该小说下的所有资产（一次查询）
@@ -60,24 +60,24 @@ async def resolve_assets(
         novel_id, len(assets), [a.canonical_name for a in assets],
     )
 
-    assets_by_id = {asset.id: asset for asset in assets}
+    allowed_asset_ids = set(selected_asset_ids) if selected_asset_ids is not None else None
     requested_assets: list[tuple[Asset, str]] = []
     seen_ids: set[int] = set()
 
     for mention in mentions:
         name, _, variant_name = mention.partition("#")
         matched = _find_asset(name, assets)
+        if matched and allowed_asset_ids is not None and matched.id not in allowed_asset_ids:
+            logger.warning(
+                "resolve_assets: mentioned asset_id=%s is not bound to the scene; ignored",
+                matched.id,
+            )
+            continue
         if matched and matched.id not in seen_ids:
             seen_ids.add(matched.id)
             requested_assets.append((matched, variant_name))
         elif not matched:
             logger.warning("resolve_assets: mention %r not found in assets", mention)
-
-    for asset_id in selected_asset_ids or []:
-        matched = assets_by_id.get(asset_id)
-        if matched and matched.id not in seen_ids:
-            seen_ids.add(matched.id)
-            requested_assets.append((matched, ""))
 
     subjects: list[dict[str, Any]] = []
     explicit_variant_ids = selected_variant_ids or {}
@@ -202,7 +202,7 @@ def _collect_images(asset: Asset, variant: AssetVariant | None = None) -> list[s
         except FileNotFoundError:
             logger.warning("resolve_assets: image not found: %s", path)
             continue
-    return images[:9]
+    return images
 
 
 def resolve_image_source(path: str) -> str:

@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import ShortDramaBatchVideoDialog from './ShortDramaBatchVideoDialog.vue'
 
 const scenes = [
-  { id: 11, sequence: 1, cost: 600 },
-  { id: 12, sequence: 2, cost: 900, disabled: true, disabledReason: '已完成' },
-  { id: 13, sequence: 3, cost: 750 },
+  { id: 11, sequence: 1 },
+  { id: 12, sequence: 2, disabled: true, disabledReason: '已完成' },
+  { id: 13, sequence: 3 },
 ]
 
 afterEach(() => {
@@ -37,7 +37,7 @@ describe('ShortDramaBatchVideoDialog', () => {
 
     const submit = wrapper.find('.batch-video-dialog__submit')
     expect(submit.text()).toBe('开始')
-    expect(submit.attributes('aria-label')).toContain('预计消耗 1350 点')
+    expect(submit.attributes('aria-label')).toBe('生成所选 2 条分镜视频')
     await submit.trigger('click')
     expect(wrapper.emitted('generate')).toEqual([[[11, 13]]])
   })

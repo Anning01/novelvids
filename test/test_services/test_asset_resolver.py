@@ -192,7 +192,7 @@ async def test_分镜显式选择的资产形态优先于章节默认形态():
 
 
 @pytest.mark.asyncio
-async def test_分镜绑定但提示词未引用的资产仍作为参考素材():
+async def test_分镜绑定但提示词未引用的资产不会作为参考素材():
     novel = await Novel.create(name="Bound Asset Novel", author="Author")
     asset = await Asset.create(
         novel=novel,
@@ -208,9 +208,22 @@ async def test_分镜绑定但提示词未引用的资产仍作为参考素材()
         selected_variant_ids={asset.id: None},
     )
 
-    assert subjects[0]["name"] == "长剑"
-    assert subjects[0]["variant_name"] is None
-    assert subjects[0]["images"] == ["https://example.com/sword.png"]
+    assert subjects == []
+
+
+@pytest.mark.asyncio
+async def test_提示词引用未绑定到分镜的资产不会越权提交():
+    novel = await Novel.create(name="Unbound Asset Novel", author="Author")
+    await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="路人",
+        main_image="https://example.com/person.png",
+    )
+
+    subjects = await resolve_assets("@路人 走入画面", novel.id, selected_asset_ids=[])
+
+    assert subjects == []
 
 
 def test_标准化分镜资产形态映射():

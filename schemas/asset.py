@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from schemas._base import BaseResponse
 from schemas.asset_variant import AssetVariantOut
 from utils.enums import AssetTypeEnum, ImageSourceEnum
@@ -92,6 +92,21 @@ class AssetGenerationRecordOut(BaseModel):
     output_format: Optional[str] = None
     created_at: datetime
     finished_at: Optional[datetime] = None
+
+
+class AssetImageEditCreate(BaseModel):
+    """Persist a locally uploaded annotation result as a new image history entry."""
+
+    image_url: str
+    source_image_url: Optional[str] = None
+    output_format: str = "png"
+
+    @field_validator("image_url")
+    @classmethod
+    def validate_local_media_url(cls, value: str) -> str:
+        if not value.startswith("/media/"):
+            raise ValueError("标注图必须先上传到本地媒体目录")
+        return value
 
 
 # --- 输出 Schema (Out-bound) ---

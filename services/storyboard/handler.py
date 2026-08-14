@@ -5,46 +5,12 @@ from openai import AsyncOpenAI
 from models.chapter import Chapter
 from models.asset import Asset
 from models.scene import Scene
+from prompts.storyboard import format_storyboard_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from schemas.scene import SceneEntity
+from utils.enums import AssetTypeEnum
 from utils.prompt_language import normalize_prompt_language
-
-
-PROMPT_LABELS = {
-    "en": (
-        ("Visual Prose", "visual_prose"),
-        ("Actions", "actions"),
-        ("Format and Look", "format_and_look"),
-        ("Lenses and Filtration", "lenses_and_filtration"),
-        ("Lighting and Atmosphere", "lighting_and_atmosphere"),
-        ("Grade and Palette", "grade_and_palette"),
-        ("Camera Movement", "camera_movement"),
-        ("Sound Design", "sound_design"),
-    ),
-    "zh": (
-        ("视觉描述", "visual_prose"),
-        ("动作", "actions"),
-        ("画面格式与风格", "format_and_look"),
-        ("镜头与滤镜", "lenses_and_filtration"),
-        ("光线与氛围", "lighting_and_atmosphere"),
-        ("色调与调色", "grade_and_palette"),
-        ("运镜", "camera_movement"),
-        ("声音设计", "sound_design"),
-    ),
-}
-
-
-def format_storyboard_prompt(shot, prompt_language: str = "en") -> str:
-    """Render the stored prompt using labels matching the configured language."""
-    language = normalize_prompt_language(prompt_language)
-    lines = []
-    for label, field_name in PROMPT_LABELS[language]:
-        value = getattr(shot, field_name)
-        if isinstance(value, list):
-            value = " ".join(value)
-        lines.append(f"{label}: {value}")
-    return "\n".join(lines)
 
 
 class StoryboardTaskHandler(BaseTaskHandler):
@@ -64,6 +30,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         api_key = request_params["api_key"]
         model = request_params["model"]
         supports_json_output = request_params.get("supports_json_output", False)
+        max_context_characters = request_params.get("max_context_characters")
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
 
         # 1. 获取章节和相关资产
@@ -76,9 +43,12 @@ class StoryboardTaskHandler(BaseTaskHandler):
             SceneEntity(
                 name=asset.canonical_name,
                 aliases=asset.aliases or [],
-                description=asset.description or asset.base_traits or ""
+                description=asset.description or asset.base_traits or "",
+                asset_type=AssetTypeEnum(asset.asset_type).nickname,
             )
             for asset in assets
+            if AssetTypeEnum(asset.asset_type)
+            in (AssetTypeEnum.person, AssetTypeEnum.scene, AssetTypeEnum.item)
         ]
 
         # 3. 调用 OpenAI API 生成分镜
@@ -94,6 +64,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 model=model,
                 supports_json_output=supports_json_output,
                 prompt_language=prompt_language,
+                max_context_characters=max_context_characters,
             )
 
             end_time = time.time()
@@ -106,6 +77,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 api_metadata=api_metadata,
                 request_duration=request_duration,
                 prompt_language=prompt_language,
+                entities=entities,
             )
 
             # 5. 返回结果
@@ -129,7 +101,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
         storyboard,
         api_metadata: dict,
         request_duration: float,
-        prompt_language: str = "en",
+        prompt_language: str = "zh",
+        entities: list[SceneEntity] | None = None,
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
         scenes_created = []
@@ -137,6 +110,12 @@ class StoryboardTaskHandler(BaseTaskHandler):
         for shot in storyboard.shots:
             # 构建 prompt JSON 对象
             prompt_params = {
+                "shot_size_and_camera": shot.shot_size_and_camera,
+                "visual_style": shot.visual_style,
+                "effect_restrictions": shot.effect_restrictions,
+                "time_setting": shot.time_setting,
+                "environment": shot.environment,
+                "spatial_relationships": shot.spatial_relationships,
                 "visual_prose": shot.visual_prose,
                 "actions": shot.actions,
                 "format_and_look": shot.format_and_look,
@@ -144,7 +123,10 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "lighting_and_atmosphere": shot.lighting_and_atmosphere,
                 "grade_and_palette": shot.grade_and_palette,
                 "camera_movement": shot.camera_movement,
-                "sound_design": shot.sound_design
+                "sound_design": shot.sound_design,
+                "dialogue": shot.dialogue,
+                "transition": shot.transition,
+                "allowed_effects": shot.allowed_effects,
             }
 
             # 解析 duration 为浮点数
@@ -167,12 +149,17 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 # 请求参数
                 "request_duration": round(request_duration, 2),
                 "prompt_language": normalize_prompt_language(prompt_language),
+                "generation_batch_count": api_metadata.get("batch_count", 1),
             }
 
             # 如果有拒绝信息，添加到 metadata
             if "refusal" in api_metadata:
                 scene_metadata["refusal"] = api_metadata["refusal"]
-            prompt = format_storyboard_prompt(shot, prompt_language)
+            prompt = format_storyboard_prompt(
+                shot,
+                prompt_language,
+                entities=entities or [],
+            )
             # 创建 Scene 记录
             scene = await Scene.create(
                 chapter_id=chapter_id,

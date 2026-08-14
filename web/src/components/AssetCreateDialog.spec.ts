@@ -2,9 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
-import { AssetTypeEnum, type Asset, type AssetVariant, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetVariant, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
 import AppButton from './AppButton.vue'
 import AssetCreateDialog from './AssetCreateDialog.vue'
+import EpisodeSelectionPicker from './EpisodeSelectionPicker.vue'
+import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import assetDialogSource from './AssetCreateDialog.vue?raw'
 
 vi.mock('@/api', () => ({
@@ -17,11 +19,13 @@ vi.mock('@/api', () => ({
     assetVariants: vi.fn(),
     createAssetVariant: vi.fn(),
     updateAssetVariant: vi.fn(),
+    updateAsset: vi.fn(),
     assignAssetVariantToChapter: vi.fn(),
     deleteAssetVariant: vi.fn(),
     generateAsset: vi.fn(),
     task: vi.fn(),
     upload: vi.fn(),
+    recordAssetImageEdit: vi.fn(),
     restoreAssetGeneration: vi.fn(),
     referencePromptPreview: vi.fn(),
   },
@@ -128,6 +132,13 @@ it('lists every running image model and hides stopped models', async () => {
   expect(options).toContain('运行模型 A')
   expect(options).toContain('运行模型 B')
   expect(options).not.toContain('停用模型 C')
+})
+
+it('keeps the drawer header compact', () => {
+  const styles = parse(assetDialogSource).descriptor.styles.map(block => block.content).join('\n')
+  expect(styles).toContain('grid-template-columns: 36px 1fr 32px')
+  expect(styles).toContain('padding: 11px 18px')
+  expect(styles).toContain('width: 36px; height: 36px')
 })
 
 it('keeps the selected library card outline inside the scroll viewport', async () => {
@@ -278,6 +289,210 @@ it('switches the top preview with the selected variant and shows a blank state f
   expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/base.png')
 })
 
+it('shows a live animated generation state immediately after regeneration starts', async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  const assetWithBaseImage = { ...editedAsset, main_image: '/media/base.png' }
+  const pendingVariant: AssetVariant = {
+    id: 31,
+    asset_id: editedAsset.id,
+    name: '测试形态',
+    description: '尚未生成图片的衍生形态',
+    images: [],
+    created_at: editedAsset.created_at,
+    updated_at: editedAsset.updated_at,
+  }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: 'ok', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [imageModel(12, '生成模型')] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithBaseImage })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: [pendingVariant] })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' } })
+  vi.mocked(api.updateAssetVariant).mockResolvedValue({ code: 0, message: 'ok', data: pendingVariant })
+  vi.mocked(api.generateAsset).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 'generation-pending',
+      task_type: 4,
+      status: TaskStatusEnum.PENDING,
+      created_at: '2026-08-14T10:00:00.000Z',
+    },
+  })
+  vi.mocked(api.task).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 'generation-pending',
+      task_type: 4,
+      status: TaskStatusEnum.PROCESSING,
+      created_at: '2026-08-14T10:00:00.000Z',
+    },
+  })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithBaseImage },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  await wrapper.get('button[aria-label="切换到测试形态"]').trigger('click')
+  const regenerateButton = wrapper.findAll('button').find(button => button.text().includes('重新生成'))
+  expect(regenerateButton).toBeDefined()
+  await regenerateButton!.trigger('click')
+  await flushPromises()
+
+  expect(api.generateAsset).toHaveBeenCalledWith(assetWithBaseImage.id, pendingVariant.id)
+  expect(wrapper.get('.asset-generated-preview > header strong').text()).toContain('测试形态')
+  expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('生成中')
+  expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('自动显示最新结果')
+  expect(wrapper.find('.asset-generated-preview__loader').exists()).toBe(true)
+  expect(wrapper.get('.asset-generated-preview__status').text()).toContain('生成中')
+  expect(regenerateButton!.attributes('aria-busy')).toBe('true')
+  expect(regenerateButton!.text()).toContain('生成中')
+
+  wrapper.unmount()
+  vi.useRealTimers()
+})
+
+it('creates a derived state only from the drawer footer and persists the AI-assisted episode range', async () => {
+  vi.clearAllMocks()
+  const assetWithImage = { ...editedAsset, main_image: '/media/base.png' }
+  const createdVariant: AssetVariant = {
+    id: 45,
+    asset_id: 7,
+    name: '战损状态',
+    description: '左臂受伤，衣服沾血',
+    chapter_numbers: [2, 3, 4, 8],
+    images: [],
+    created_at: editedAsset.created_at,
+    updated_at: editedAsset.updated_at,
+  }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: 'ok', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithImage })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' } })
+  vi.mocked(api.createAssetVariant).mockResolvedValue({ code: 0, message: 'ok', data: createdVariant })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithImage, chapterNumber: 2, episodeNumbers: Array.from({ length: 10 }, (_, index) => index + 1) },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  await wrapper.get('.asset-variant-item.is-add').trigger('click')
+  await wrapper.get('.asset-variant-editor label:first-of-type input').setValue('战损状态')
+  wrapper.getComponent(EpisodeSelectionPicker).vm.$emit('update:modelValue', [2, 3, 4, 8])
+  await wrapper.get('.asset-variant-editor .is-description input').setValue('左臂受伤，衣服沾血')
+  expect(wrapper.find('.asset-generated-preview img').exists()).toBe(false)
+  expect(api.createAssetVariant).not.toHaveBeenCalled()
+
+  await wrapper.get('.asset-dialog').trigger('submit')
+  await flushPromises()
+
+  expect(api.createAssetVariant).toHaveBeenCalledWith(7, expect.objectContaining({
+    name: '战损状态',
+    description: '左臂受伤，衣服沾血',
+    chapter_numbers: [2, 3, 4, 8],
+    metadata: expect.objectContaining({ editor_form: expect.objectContaining({ version: 1 }) }),
+  }))
+  expect(api.updateAsset).not.toHaveBeenCalled()
+})
+
+it('switches and persists an independent JSON form version for each derived state', async () => {
+  vi.clearAllMocks()
+  const assetWithBaseVersion: Asset = {
+    ...editedAsset,
+    main_image: '/media/base.png',
+    metadata: {
+      gender: '男',
+      age_group: '中年',
+      model_config_id: 12,
+      clarity: 'medium',
+      aspect_ratio: '1:1',
+      output_format: 'png',
+    },
+  }
+  const editorForm = {
+    version: 1 as const,
+    canonical_name: '李火旺·练气期',
+    description: '练气期的独立角色描述',
+    base_traits: '练气期白衣形态提示词',
+    prompt_touched: true,
+    creation_mode: 'ai' as const,
+    gender: '男',
+    age_group: '青年',
+    voice: '青年音色',
+    reference_layout: 'character_turnaround',
+    model_config_id: 12,
+    image_parameters: {
+      clarity: 'high',
+      aspect_ratio: '3:2',
+      output_format: 'webp',
+      generation_count: 1,
+    },
+    library_selection: { key: '', scope: 'all' as const },
+  }
+  const variant: AssetVariant = {
+    id: 31,
+    asset_id: 7,
+    name: '练气期',
+    base_traits: editorForm.base_traits,
+    images: [],
+    metadata: { editor_form: editorForm },
+    created_at: editedAsset.created_at,
+    updated_at: editedAsset.updated_at,
+  }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: 'ok', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [imageModel(12, '版本模型')] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithBaseVersion })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: [variant] })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' } })
+  vi.mocked(api.updateAssetVariant).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: variant,
+  })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithBaseVersion },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
+  expect(wrapper.get<HTMLInputElement>('.asset-form-grid input').element.value).toBe('李火旺·练气期')
+  expect(wrapper.get<HTMLTextAreaElement>('textarea[rows="8"]').element.value).toBe('练气期白衣形态提示词')
+  expect(wrapper.findAll<HTMLTextAreaElement>('.asset-field textarea').at(-1)!.element.value).toBe('练气期的独立角色描述')
+
+  await wrapper.get('button[aria-label="切换到主形象"]').trigger('click')
+  expect(wrapper.get<HTMLInputElement>('.asset-form-grid input').element.value).toBe('李火旺')
+  await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
+  await wrapper.get<HTMLInputElement>('.asset-form-grid input').setValue('李火旺·练气后期')
+  await wrapper.get<HTMLTextAreaElement>('textarea[rows="8"]').setValue('练气后期的新提示词')
+  await wrapper.get('.asset-dialog').trigger('submit')
+  await flushPromises()
+
+  expect(api.updateAssetVariant).toHaveBeenCalledWith(7, 31, expect.objectContaining({
+    base_traits: '练气后期的新提示词',
+    metadata: expect.objectContaining({
+      model_config_id: 12,
+      clarity: 'high',
+      aspect_ratio: '3:2',
+      output_format: 'webp',
+      editor_form: expect.objectContaining({
+        version: 1,
+        canonical_name: '李火旺·练气后期',
+        base_traits: '练气后期的新提示词',
+      }),
+    }),
+  }))
+  expect(api.updateAsset).not.toHaveBeenCalled()
+})
+
 it('renders as a right drawer and lists previous generation images', async () => {
   vi.clearAllMocks()
   const assetWithImage = { ...editedAsset, main_image: '/media/current.png' }
@@ -376,4 +591,65 @@ it('renders as a right drawer and lists previous generation images', async () =>
   expect(wrapper.find('.image-lightbox').exists()).toBe(false)
   expect(wrapper.emitted('close')).toBeUndefined()
   wrapper.unmount()
+})
+
+it('opens the image annotation editor and stores its export as a new generation record', async () => {
+  vi.clearAllMocks()
+  const assetWithImage = { ...editedAsset, main_image: '/media/assets/current.png' }
+  const annotatedAsset: Asset = {
+    ...assetWithImage,
+    main_image: '/media/assets/annotated.png',
+    metadata: {
+      image_gallery: ['/media/assets/annotated.png', '/media/assets/current.png'],
+      edited_generation_task_id: 'annotation-run',
+    },
+  }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithImage })
+  vi.mocked(api.assetGenerationHistory).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' },
+  })
+  vi.mocked(api.upload).mockResolvedValue({
+    filename: 'assets/annotated.png',
+    original_filename: 'annotated.png',
+    content_type: 'image/png',
+    file_path: '/tmp/annotated.png',
+  })
+  vi.mocked(api.recordAssetImageEdit).mockResolvedValue({ code: 0, message: 'ok', data: annotatedAsset })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithImage },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  await wrapper.get('button[aria-label="编辑当前图片标注"]').trigger('click')
+  const editor = wrapper.getComponent(ImageAnnotationEditor)
+  expect(editor.props('open')).toBe(true)
+  expect(editor.props('imageUrl')).toBe('/media/assets/current.png')
+
+  editor.vm.$emit('save', new Blob(['annotated image'], { type: 'image/png' }))
+  await flushPromises()
+
+  expect(api.upload).toHaveBeenCalledTimes(1)
+  const uploadedFile = vi.mocked(api.upload).mock.calls[0]?.[0]
+  expect(uploadedFile).toBeInstanceOf(File)
+  expect(uploadedFile?.type).toBe('image/png')
+  expect(api.recordAssetImageEdit).toHaveBeenCalledWith(editedAsset.id, {
+    image_url: '/media/assets/annotated.png',
+    source_image_url: '/media/assets/current.png',
+    output_format: 'png',
+  })
+  expect(wrapper.emitted('saved')?.[0]?.[0]).toEqual(annotatedAsset)
+  expect(editor.props('open')).toBe(false)
+  expect(api.assetGenerationHistory).toHaveBeenCalledTimes(2)
 })

@@ -420,6 +420,56 @@ async def test_reference_使用资产指定的生图模型():
 
 
 @pytest.mark.asyncio
+async def test_reference_衍生形态使用自身JSON配置的生图模型():
+    """衍生形态覆盖主形象的模型与参数，保证每个版本独立生成。"""
+    from models.config import AiModelConfig
+    from utils.enums import AiTaskTypeEnum
+
+    novel = await Novel.create(name="Variant Ref Config Novel", author="Author")
+    base_config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="base-ref-config",
+        base_url="https://base.example.com/v1",
+        api_key="base-key",
+        model="base-model",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+    variant_config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="variant-ref-config",
+        base_url="https://variant.example.com/v1",
+        api_key="variant-key",
+        model="variant-model",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="独立版本测试",
+        metadata={"model_config_id": base_config.id, "clarity": "low"},
+    )
+    variant = await AssetVariant.create(
+        asset_id=asset.id,
+        name="受伤形态",
+        metadata={
+            "model_config_id": variant_config.id,
+            "clarity": "high",
+            "aspect_ratio": "3:2",
+            "output_format": "webp",
+        },
+    )
+
+    task = await asset_controller.reference(asset.id, variant.id)
+
+    assert task.request_params["model"] == "variant-model"
+    assert task.request_params["clarity"] == "high"
+    assert task.request_params["aspect_ratio"] == "3:2"
+    assert task.request_params["output_format"] == "webp"
+
+
+@pytest.mark.asyncio
 async def test_reference_拒绝资产指定的停用模型():
     """资产保存的模型被停用后，不允许继续提交新的生成任务。"""
     from models.config import AiModelConfig

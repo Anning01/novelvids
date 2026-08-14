@@ -11,6 +11,13 @@ it('keeps the current chapter toolbar below the shared fixed header while scenes
   expect(source).not.toContain('new IntersectionObserver')
 })
 
+it('opens the chapter summary in a shared editable details drawer', () => {
+  expect(source).toContain('class="chapter-summary"')
+  expect(source).toContain('@click="openChapterDetails"')
+  expect(source).toContain('<ChapterDetailDrawer')
+  expect(source).toContain('@save="saveChapterDetails"')
+})
+
 it('places scene status inside the storyboard main gutter instead of reserving another shell rail', () => {
   expect(source).toContain('<section class="storyboard-main"')
   expect(source).toContain('<ShortDramaSceneStatusRail')

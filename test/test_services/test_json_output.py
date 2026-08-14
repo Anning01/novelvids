@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from services.llm.json_output import create_json_completion
+from services.llm.json_output import (
+    JsonCompletionTruncatedError,
+    create_json_completion,
+)
 
 
 class ExamAnswer(BaseModel):
@@ -12,9 +15,12 @@ class ExamAnswer(BaseModel):
     answer: str
 
 
-def fake_client(content: str):
+def fake_client(content: str, finish_reason: str = "stop"):
     create = AsyncMock(return_value=SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content, refusal=None))]
+        choices=[SimpleNamespace(
+            message=SimpleNamespace(content=content, refusal=None),
+            finish_reason=finish_reason,
+        )]
     ))
     return SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
@@ -56,3 +62,16 @@ async def test_unsupported_model_uses_prompt_and_parses_fenced_json():
     assert "response_format" not in request
     assert request["messages"][0]["role"] == "system"
     assert "JSON Schema" in request["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_truncated_completion_raises_a_precise_retryable_error():
+    client, _create = fake_client('{"question":"Q"', finish_reason="length")
+
+    with pytest.raises(JsonCompletionTruncatedError):
+        await create_json_completion(
+            client,
+            model="prompt-only-model",
+            messages=[{"role": "user", "content": "Q A"}],
+            response_model=ExamAnswer,
+        )

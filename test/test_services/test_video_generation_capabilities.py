@@ -5,12 +5,18 @@ import pytest
 from fastapi import HTTPException
 
 from models.config import AiModelConfig
-from services.video.capabilities import validate_selection
+from services.video.capabilities import capabilities_for, validate_selection
 from services.video.seedance import SeedanceGenerationError, SeedanceGenerator
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 def test_video_capabilities_are_model_specific():
+    assert capabilities_for("seedance_2").max_reference_images == 9
+    assert capabilities_for("seedance_2").max_reference_videos == 3
+    assert capabilities_for("seedance_2").reference_video_total_duration_max == 15
+    assert capabilities_for("seedance_2_5").max_reference_images == 30
+    assert capabilities_for("seedance_2_5").max_reference_videos == 10
+    assert capabilities_for("seedance_2_5").reference_video_total_duration_max == 30
     standard = validate_selection(
         "seedance_2",
         generation_mode="reference",
@@ -94,6 +100,7 @@ async def test_seedance_2_5_outbound_request_uses_documented_task_protocol(monke
             "resolution": "720p",
             "ratio": "9:16",
             "generate_audio": True,
+            "return_last_frame": True,
             "watermark": False,
             "output_format": "mov",
         }
@@ -118,10 +125,55 @@ async def test_seedance_2_5_outbound_request_uses_documented_task_protocol(monke
         resolution="720p",
         output_format="mov",
         generate_audio=True,
+        return_last_frame=True,
         generation_mode="reference",
     )
 
     assert task_id == "video-task-1"
+
+
+@pytest.mark.asyncio
+async def test_seedance_reference_uploads_are_appended_with_official_roles(monkeypatch):
+    config = await _video_config("seedance_2_5")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        content = json.loads(request.content)["content"]
+        assert content == [
+            {"type": "text", "text": "镜头推进"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,asset"},
+                "role": "reference_image",
+            },
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,upload"},
+                "role": "reference_image",
+            },
+            {
+                "type": "video_url",
+                "video_url": {"url": "https://media.example.com/reference.mp4"},
+                "role": "reference_video",
+            },
+        ]
+        return httpx.Response(200, json={"id": "reference-task"})
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.video.seedance.httpx.AsyncClient", client_factory)
+    task_id = await SeedanceGenerator(config).submit(
+        prompt="镜头推进",
+        subjects=[{"name": "人物", "images": ["data:image/png;base64,asset"]}],
+        reference_images=["data:image/png;base64,upload"],
+        reference_videos=["https://media.example.com/reference.mp4"],
+        generation_mode="reference",
+    )
+
+    assert task_id == "reference-task"
 
 
 @pytest.mark.asyncio
@@ -142,6 +194,7 @@ async def test_seedance_keyframes_and_query_nested_video_url(monkeypatch):
             json={
                 "status": "succeeded",
                 "content": {"video_url": {"url": "https://cdn.example.com/result.mp4"}},
+                "last_frame_url": "https://cdn.example.com/result-last.png",
                 "duration": 6,
                 "frames": 144,
             },
@@ -169,7 +222,11 @@ async def test_seedance_keyframes_and_query_nested_video_url(monkeypatch):
     assert len(requests) == 2
     assert result["status"] == TaskStatusEnum.completed
     assert result["url"] == "https://cdn.example.com/result.mp4"
-    assert result["metadata"] == {"duration": 6, "frames": 144}
+    assert result["metadata"] == {
+        "duration": 6,
+        "frames": 144,
+        "last_frame_url": "https://cdn.example.com/result-last.png",
+    }
 
 
 @pytest.mark.asyncio
@@ -195,3 +252,36 @@ async def test_seedance_http_error_is_sanitized(monkeypatch):
 
     assert "private prompt" not in str(exc_info.value)
     assert "token" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_seedance_http_error_surfaces_structured_provider_detail(monkeypatch):
+    config = await _video_config("seedance_2_fast")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            headers={"x-request-id": "video-request-400"},
+            json={
+                "error": {
+                    "code": "InvalidParameter",
+                    "message": "参考图片数量超出当前模型限制",
+                },
+            },
+        )
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.video.seedance.httpx.AsyncClient", client_factory)
+    with pytest.raises(SeedanceGenerationError) as exc_info:
+        await SeedanceGenerator(config).submit(prompt="镜头缓慢推进")
+
+    message = str(exc_info.value)
+    assert "参考图片数量超出当前模型限制" in message
+    assert "InvalidParameter" in message
+    assert "HTTP 400" in message
+    assert "video-request-400" in message

@@ -1,30 +1,27 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Check, ImagePlus, LoaderCircle, RefreshCw, Sparkles, Upload, WandSparkles, X } from 'lucide-vue-next'
-import AppButton from '@/components/AppButton.vue'
-import { api, sleep } from '@/api'
+import { computed, ref, watch } from 'vue'
+import { Check, ImagePlus, LoaderCircle, Sparkles, WandSparkles, X } from 'lucide-vue-next'
+import { api } from '@/api'
+import EpisodeSelectionPicker from '@/components/EpisodeSelectionPicker.vue'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import { TaskStatusEnum, type Asset, type AssetVariant } from '@/types'
+import { type Asset, type AssetVariant, type AssetVariantDraft } from '@/types'
 
-const props = defineProps<{ asset: Asset; chapterNumber?: number }>()
-const emit = defineEmits<{ select: [variant: AssetVariant | null] }>()
+const props = withDefaults(defineProps<{ asset: Asset; chapterNumber?: number; episodeNumbers?: number[] }>(), {
+  episodeNumbers: () => [],
+})
+const emit = defineEmits<{ select: [variant: AssetVariant | null]; draft: [draft: AssetVariantDraft | null] }>()
 
 const variants = ref<AssetVariant[]>([])
 const loading = ref(false)
-const saving = ref(false)
-const generatingId = ref(0)
 const editingId = ref<number | null>(null)
 const formName = ref('')
 const formDescription = ref('')
-const formChapters = ref('')
-const uploadInput = ref<HTMLInputElement | null>(null)
+const formChapters = ref<number[]>([])
 const selectedVariantId = ref<number | null>(null)
-let alive = true
 
 const entityAction = computed(() => new Map<number, string>([[1, '变装'], [2, '场景状态'], [3, '道具状态']]).get(props.asset.asset_type) || '衍生')
 const currentVariantId = computed(() => variants.value.find(item => props.chapterNumber && item.chapter_numbers?.includes(props.chapterNumber))?.id || 0)
-const editingVariant = computed(() => variants.value.find(item => item.id === editingId.value) || null)
 
 function imageFor(variant: AssetVariant) {
   return variant.images?.[0] || ''
@@ -34,6 +31,7 @@ function selectBase() {
   selectedVariantId.value = null
   editingId.value = null
   emit('select', null)
+  emit('draft', null)
 }
 
 function selectVariant(variant: AssetVariant) {
@@ -42,8 +40,19 @@ function selectVariant(variant: AssetVariant) {
   beginEdit(variant)
 }
 
-function parseChapters(value: string) {
-  return [...new Set(value.split(/[，,、\s]+/).map(Number).filter(number => Number.isInteger(number) && number > 0))].sort((a, b) => a - b)
+function currentDraft(): AssetVariantDraft | null {
+  if (editingId.value === null) return null
+  return {
+    id: editingId.value || null,
+    name: formName.value.trim(),
+    description: formDescription.value.trim(),
+    chapter_numbers: formChapters.value,
+    is_new: editingId.value === 0,
+  }
+}
+
+function emitDraft() {
+  emit('draft', currentDraft())
 }
 
 async function loadVariants() {
@@ -58,121 +67,32 @@ async function loadVariants() {
 }
 
 function beginCreate() {
+  selectedVariantId.value = -1
   editingId.value = 0
   formName.value = ''
   formDescription.value = ''
-  formChapters.value = props.chapterNumber ? String(props.chapterNumber) : ''
+  formChapters.value = props.chapterNumber ? [props.chapterNumber] : []
+  emit('select', null)
+  emitDraft()
 }
 
 function beginEdit(variant: AssetVariant) {
   editingId.value = variant.id
   formName.value = variant.name
   formDescription.value = variant.description || ''
-  formChapters.value = (variant.chapter_numbers || []).join('，')
+  formChapters.value = [...(variant.chapter_numbers || [])]
+  emitDraft()
 }
 
-function closeEditor() {
-  editingId.value = null
+function upsertVariant(variant: AssetVariant) {
+  const existingIndex = variants.value.findIndex(item => item.id === variant.id)
+  if (existingIndex === -1) variants.value.push(variant)
+  else variants.value.splice(existingIndex, 1, variant)
+  selectedVariantId.value = variant.id
+  beginEdit(variant)
 }
 
-async function saveVariant() {
-  const variantName = formName.value.trim()
-  if (!variantName || saving.value) return
-  saving.value = true
-  const payload = {
-    name: variantName,
-    description: formDescription.value.trim() || undefined,
-    chapter_numbers: parseChapters(formChapters.value),
-  }
-  try {
-    if (editingId.value) {
-      const updated = (await api.updateAssetVariant(props.asset.id, editingId.value, payload)).data
-      variants.value = variants.value.map(item => item.id === updated.id ? updated : item)
-      if (selectedVariantId.value === updated.id) emit('select', updated)
-      notice.success('衍生形态已更新')
-    } else {
-      const created = (await api.createAssetVariant(props.asset.id, payload)).data
-      variants.value.push(created)
-      selectedVariantId.value = created.id
-      emit('select', created)
-      notice.success(`${entityAction.value}已添加`)
-    }
-    editingId.value = null
-  } catch (error) {
-    notice.error((error as Error).message)
-  } finally {
-    saving.value = false
-  }
-}
-
-async function useForChapter(variant: AssetVariant) {
-  if (!props.chapterNumber || currentVariantId.value === variant.id || saving.value) return
-  saving.value = true
-  try {
-    variants.value = (await api.assignAssetVariantToChapter(props.asset.id, variant.id, props.chapterNumber)).data
-    notice.success(`第 ${props.chapterNumber} 集已使用「${variant.name}」`)
-  } catch (error) {
-    notice.error((error as Error).message)
-  } finally {
-    saving.value = false
-  }
-}
-
-async function generateVariant(variant: AssetVariant) {
-  if (generatingId.value) return
-  generatingId.value = variant.id
-  try {
-    let task = (await api.generateAsset(props.asset.id, variant.id)).data
-    while (alive && ![TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED].includes(task.status)) {
-      await sleep(1800)
-      task = (await api.task(task.id)).data
-    }
-    if (!alive) return
-    if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '衍生参考图生成失败')
-    await loadVariants()
-    notice.success('衍生参考图已生成')
-  } catch (error) {
-    notice.error((error as Error).message)
-  } finally {
-    generatingId.value = 0
-  }
-}
-
-function generateEditingVariant() {
-  if (editingVariant.value) void generateVariant(editingVariant.value)
-}
-
-function useEditingVariant() {
-  if (editingVariant.value) void useForChapter(editingVariant.value)
-}
-
-async function chooseUpload() {
-  await nextTick()
-  uploadInput.value?.click()
-}
-
-async function uploadImage(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file || !editingId.value) return
-  saving.value = true
-  try {
-    const current = variants.value.find(item => item.id === editingId.value)
-    if (!current) return
-    const uploaded = await api.upload(file)
-    const updated = (await api.updateAssetVariant(props.asset.id, current.id, {
-      images: [`/media/${uploaded.filename}`, ...(current.images || []).filter(Boolean)],
-    })).data
-    variants.value = variants.value.map(item => item.id === updated.id ? updated : item)
-    if (selectedVariantId.value === updated.id) emit('select', updated)
-    notice.success('衍生图片已上传')
-  } catch (error) {
-    notice.error((error as Error).message)
-  } finally {
-    saving.value = false
-  }
-}
+defineExpose({ upsertVariant })
 
 async function removeVariant(variant: AssetVariant) {
   if (!await appConfirm({
@@ -198,7 +118,9 @@ watch(() => props.asset.id, () => {
   void loadVariants()
 }, { immediate: true })
 
-onBeforeUnmount(() => { alive = false })
+watch([formName, formDescription, formChapters], () => {
+  if (editingId.value !== null) emitDraft()
+})
 </script>
 
 <template>
@@ -223,7 +145,7 @@ onBeforeUnmount(() => { alive = false })
           </span>
           <strong>{{ variant.name }}</strong>
         </button>
-        <button type="button" class="asset-variant-item__remove" :aria-label="`删除${variant.name}`" title="删除" @click="removeVariant(variant)"><X :size="13" /></button>
+        <button type="button" class="asset-variant-item__remove" :aria-label="`删除${variant.name}`" title="删除该衍生" @click="removeVariant(variant)"><X :size="9" /><span>删除</span></button>
       </article>
       <button type="button" class="asset-variant-item is-add" @click="beginCreate">
         <span class="asset-variant-item__media"><WandSparkles :size="22" /></span>
@@ -231,27 +153,21 @@ onBeforeUnmount(() => { alive = false })
       </button>
     </div>
 
-    <form v-if="editingId !== null" class="asset-variant-editor" @submit.prevent="saveVariant">
+    <section v-if="editingId !== null" class="asset-variant-editor" aria-label="衍生形态字段">
       <header>
         <span><Sparkles :size="15" /></span>
-        <div><strong>{{ editingId ? '编辑衍生形态' : `添加${entityAction}` }}</strong><small>保留主体特征，只描述发生的变化。</small></div>
-        <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="关闭衍生编辑" @click="closeEditor"><X :size="14" /></AppButton>
+        <div><strong>{{ editingId ? '编辑衍生形态' : `添加${entityAction}` }}</strong><small>字段、上传与生成结果会由抽屉底部统一保存。</small></div>
       </header>
       <div class="asset-variant-editor__fields">
         <label><span>名称</span><input v-model="formName" maxlength="100" placeholder="例如：日常便装" /></label>
-        <label><span>适用集数</span><input v-model="formChapters" placeholder="例如：1，2，5" /></label>
+        <div class="is-chapters">
+          <span>适用集数 <small><Sparkles :size="9" />AI 建议 · 可修改</small></span>
+          <EpisodeSelectionPicker v-model="formChapters" :episode-numbers="episodeNumbers" :current-episode="chapterNumber" />
+          <em>支持区间、分段与逐集微调，保存为集数列表。</em>
+        </div>
         <label class="is-description"><span>变化描述</span><input v-model="formDescription" placeholder="例如：换成深色西装，左臂受伤" /></label>
       </div>
-      <footer>
-        <div>
-          <AppButton v-if="editingId" type="button" variant="secondary" size="sm" @click="chooseUpload"><Upload :size="14" />上传</AppButton>
-          <AppButton v-if="editingId" type="button" variant="secondary" size="sm" :loading="generatingId === editingId" @click="generateEditingVariant"><RefreshCw :size="14" />生成</AppButton>
-          <AppButton v-if="editingId && chapterNumber" type="button" variant="secondary" size="sm" :disabled="currentVariantId === editingId" @click="useEditingVariant"><Check :size="14" />本集使用</AppButton>
-        </div>
-        <div><AppButton type="button" variant="secondary" size="sm" @click="closeEditor">取消</AppButton><AppButton type="submit" variant="primary" size="sm" :loading="saving" :disabled="!formName.trim()">保存</AppButton></div>
-      </footer>
-    </form>
-    <input ref="uploadInput" class="asset-variant-strip__upload" type="file" accept="image/*" @change="uploadImage" />
+    </section>
   </section>
 </template>
 
@@ -271,27 +187,29 @@ onBeforeUnmount(() => { alive = false })
 .asset-variant-item:hover .asset-variant-item__media,.asset-variant-item:focus-within .asset-variant-item__media { border-color: var(--app-accent); transform: translateY(-1px); }
 .asset-variant-item.is-selected .asset-variant-item__media { border-color: var(--app-accent); box-shadow: 0 0 0 2px var(--app-accent-soft); }
 .asset-variant-item__media small { position: absolute; right: 5px; bottom: 5px; display: flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 5px; color: #fff; background: rgb(69 71 218 / 88%); font-size: 7px; }
-.asset-variant-item__remove { position: absolute; top: -7px; right: -7px; z-index: 2; display: grid; width: 22px; height: 22px; place-items: center; padding: 0; border: 2px solid var(--app-surface); border-radius: 50%; color: #fff; background: #4b4f5c; cursor: pointer; opacity: 0; transform: scale(.84); transition: opacity .14s ease,transform .14s ease; }
-.asset-variant-item:hover .asset-variant-item__remove,.asset-variant-item:focus-within .asset-variant-item__remove { opacity: 1; transform: scale(1); }
+.asset-variant-item__remove { position: absolute; top: 4px; right: 4px; z-index: 2; display: inline-flex; min-width: 31px; height: 16px; align-items: center; justify-content: center; gap: 2px; padding: 0 5px; border: 0; border-radius: 999px; color: #fff; background: rgb(42 45 55 / 78%); cursor: pointer; font: inherit; font-size: 7px; font-weight: 650; opacity: 0; transform: translateY(-2px); transition: opacity .14s ease,transform .14s ease,background .14s ease; backdrop-filter: blur(5px); }
+.asset-variant-item__remove span { line-height: 1; }
+.asset-variant-item.is-selected .asset-variant-item__remove { opacity: .78; transform: translateY(0); }
+.asset-variant-item:hover .asset-variant-item__remove,.asset-variant-item:focus-within .asset-variant-item__remove { background: #d4485b; opacity: 1; transform: translateY(0); }
 .asset-variant-item.is-add { color: var(--app-text-secondary); }
 .asset-variant-item.is-add .asset-variant-item__media { width: 58px; margin: 0 auto; color: var(--app-text); background: var(--app-surface); }
 .asset-variant-strip__loading { display: grid; width: 112px; height: 58px; flex: 0 0 112px; place-items: center; color: var(--app-accent); }
 .asset-variant-strip__loading svg { animation: variant-strip-spin .8s linear infinite; }
 .asset-variant-editor { display: grid; gap: 11px; padding: 12px; border-radius: 12px; background: var(--app-surface-muted); animation: variant-editor-in .18s ease; }
-.asset-variant-editor > header { display: grid; grid-template-columns: 32px minmax(0,1fr) 28px; align-items: center; gap: 8px; }
+.asset-variant-editor > header { display: grid; grid-template-columns: 32px minmax(0,1fr); align-items: center; gap: 8px; }
 .asset-variant-editor > header > span { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: var(--app-accent); background: var(--app-accent-soft); }
 .asset-variant-editor > header > div { display: grid; gap: 2px; }
 .asset-variant-editor > header strong { font-size: 11px; }
 .asset-variant-editor > header small { color: var(--app-text-muted); font-size: 8px; }
-.asset-variant-editor__fields { display: grid; grid-template-columns: .8fr .7fr 1.5fr; gap: 8px; }
-.asset-variant-editor label { display: grid; gap: 5px; color: var(--app-text-secondary); font-size: 9px; font-weight: 650; }
+.asset-variant-editor__fields { display: grid; grid-template-columns: .75fr 1.1fr 1.45fr; align-items: start; gap: 8px; }
+.asset-variant-editor label,.asset-variant-editor .is-chapters { display: grid; gap: 5px; color: var(--app-text-secondary); font-size: 9px; font-weight: 650; }
+.asset-variant-editor label > span,.asset-variant-editor .is-chapters > span { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.asset-variant-editor label > span > small,.asset-variant-editor .is-chapters > span > small { display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 7px; white-space: nowrap; }
 .asset-variant-editor input { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--app-border); border-radius: 8px; outline: 0; color: var(--app-text); background: var(--app-surface); font: inherit; font-weight: 450; }
 .asset-variant-editor input:focus { border-color: var(--app-accent); box-shadow: 0 0 0 3px var(--app-accent-soft); }
-.asset-variant-editor footer,.asset-variant-editor footer > div { display: flex; align-items: center; gap: 6px; }
-.asset-variant-editor footer { justify-content: space-between; }
-.asset-variant-strip__upload { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.asset-variant-editor label > em,.asset-variant-editor .is-chapters > em { color: var(--app-text-muted); font-size: 7px; font-style: normal; font-weight: 450; line-height: 1.4; }
 @keyframes variant-strip-spin { to { transform: rotate(360deg); } }
 @keyframes variant-editor-in { from { opacity: 0; transform: translateY(-4px); } }
-@media (max-width: 620px) { .asset-variant-editor__fields { grid-template-columns: 1fr; } .asset-variant-editor footer { align-items: stretch; flex-direction: column; } }
+@media (max-width: 620px) { .asset-variant-editor__fields { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .asset-variant-item__media,.asset-variant-item__remove,.asset-variant-editor { transition: none; animation: none; } }
 </style>

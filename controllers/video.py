@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
@@ -11,15 +12,23 @@ from fastapi import HTTPException
 from controllers.config import ai_model_config_controller
 from config import settings
 from models.scene import Scene
+from models.chapter import Chapter
 from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.video import get_generator
+from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
     normalize_selected_variant_ids,
     resolve_assets,
     resolve_image_source,
 )
 from services.video.capabilities import validate_selection
+from services.video.capabilities import capabilities_for
+from services.video.reference_media import (
+    render_reference_mentions,
+    select_referenced_media,
+    verify_local_reference,
+)
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
@@ -48,11 +57,108 @@ async def _download_video(remote_url: str, video_id: int) -> str:
     return media_url
 
 
+async def _download_last_frame(remote_url: str, video_id: int) -> str:
+    """持久化供应商尾帧，避免下一镜头生成时引用临时 URL。"""
+    directory = Path(settings.MEDIA_PATH) / "video-references"
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f"last-frame-{video_id}.png"
+    temporary = directory / f".last-frame-{video_id}.downloading"
+    size_bytes = 0
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream("GET", remote_url) as response:
+                response.raise_for_status()
+                with temporary.open("wb") as target:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        size_bytes += len(chunk)
+                        if size_bytes > 30 * 1024 * 1024:
+                            raise ValueError("尾帧图片超过 30MB")
+                        target.write(chunk)
+        os.replace(temporary, destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return f"/media/video-references/{destination.name}"
+
+
+async def _next_scene(scene: Scene) -> Scene | None:
+    """按小说章节与镜头顺序找到下一镜头，章节末尾自动跨到下一章。"""
+    next_in_chapter = await Scene.filter(
+        chapter_id=scene.chapter_id,
+        sequence__gt=scene.sequence,
+    ).order_by("sequence", "id").first()
+    if next_in_chapter is not None:
+        return next_in_chapter
+
+    chapter = await Chapter.get(id=scene.chapter_id)
+    next_chapter = await Chapter.filter(
+        novel_id=chapter.novel_id,
+        number__gt=chapter.number,
+    ).order_by("number", "id").first()
+    if next_chapter is None:
+        return None
+    return await Scene.filter(chapter_id=next_chapter.id).order_by("sequence", "id").first()
+
+
+async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dict | None:
+    """将尾帧写入下一镜头 metadata.video_reference_media，保持操作幂等。"""
+    source_scene = await Scene.get(id=video.scene_id)
+    target_scene = await _next_scene(source_scene)
+    if target_scene is None:
+        return None
+
+    reference = {
+        "type": "image",
+        "url": last_frame_url,
+        "name": f"分镜{source_scene.sequence}生成尾帧.png",
+        "content_type": "image/png",
+        "source": "previous_scene_last_frame",
+        "source_scene_id": source_scene.id,
+        "source_video_id": video.id,
+    }
+    target_metadata = target_scene.metadata if isinstance(target_scene.metadata, dict) else {}
+    raw_media = target_metadata.get("video_reference_media")
+    media = [item for item in raw_media if isinstance(item, dict)] if isinstance(raw_media, list) else []
+    media = [
+        item for item in media
+        if not (
+            item.get("source") == "previous_scene_last_frame"
+            and item.get("source_scene_id") == source_scene.id
+        )
+    ]
+    target_scene.metadata = {**target_metadata, "video_reference_media": [reference, *media]}
+    await target_scene.save(update_fields=["metadata", "updated_at"])
+    return {"scene_id": target_scene.id, "reference": reference}
+
+
 class VideoController(CRUDBase[Video, dict, dict]):
     def __init__(self):
         super().__init__(model=Video)
 
-    async def generate(self, req: VideoGenerateRequest) -> Video:
+    @staticmethod
+    async def _set_scene_current_video(scene: Scene, video_id: int) -> None:
+        """记录分镜当前展示的视频版本，不覆盖其他分镜元数据。"""
+        current_scene = await Scene.get(id=scene.id)
+        metadata = current_scene.metadata if isinstance(current_scene.metadata, dict) else {}
+        current_scene.metadata = {**metadata, "current_video_id": video_id}
+        await current_scene.save(update_fields=["metadata", "updated_at"])
+
+    async def generation_history(self, scene_id: int) -> list[Video]:
+        """返回分镜的全部视频生成版本，最新记录在前。"""
+        if not await Scene.exists(id=scene_id):
+            raise HTTPException(404, detail=f"分镜 {scene_id} 不存在")
+        return await Video.filter(scene_id=scene_id).order_by("-id")
+
+    async def select_current(self, video_id: int) -> Video:
+        """将已完成的视频历史版本恢复为分镜当前版本。"""
+        video = await self.get(video_id)
+        if video.status != TaskStatusEnum.completed.value or not video.url:
+            raise HTTPException(400, detail="只有已完成且包含视频文件的记录可以设为当前版本")
+        scene = await Scene.get(id=video.scene_id)
+        await self._set_scene_current_video(scene, video.id)
+        return video
+
+    async def generate(self, req: VideoGenerateRequest, media_base_url: str = "") -> Video:
         """提交视频生成请求。
 
         1. 获取 Scene (含关联 chapter -> novel)
@@ -106,9 +212,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
             duration=duration,
             output_format=req.output_format,
             generate_audio=req.generate_audio,
+            return_last_frame=req.return_last_frame,
         )
         if req.generation_mode == "keyframes" and not (req.first_frame_url and req.last_frame_url):
             raise HTTPException(400, detail="首尾帧模式必须同时上传首帧和尾帧")
+        if req.generation_mode == "keyframes" and req.reference_media:
+            raise HTTPException(400, detail="首尾帧模式不能同时使用全模态参考素材")
         first_frame = req.first_frame_url
         last_frame = req.last_frame_url
         if req.generation_mode == "keyframes":
@@ -117,18 +226,108 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 last_frame = resolve_image_source(req.last_frame_url or "")
             except FileNotFoundError as error:
                 raise HTTPException(400, detail=f"首尾帧图片不存在：{error}") from error
-        external_task_id = await generator.submit(
-            prompt=prompt,
-            subjects=subjects if subjects and req.generation_mode == "reference" else None,
-            duration=selection.duration,
-            aspect_ratio=selection.aspect_ratio,
-            resolution=selection.resolution,
-            output_format=selection.output_format,
-            generate_audio=selection.generate_audio,
-            generation_mode=req.generation_mode,
-            first_frame_url=first_frame,
-            last_frame_url=last_frame,
+        capabilities = capabilities_for(config.video_model_type)
+        reference_images: list[str] = []
+        reference_videos: list[str] = []
+        reference_video_duration = 0.0
+        seen_references: set[tuple[str, str]] = set()
+        referenced_media = select_referenced_media(prompt, req.reference_media)
+        provider_prompt = render_reference_mentions(prompt, referenced_media)
+        logger.info(
+            "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
+            scene.id,
+            len(req.reference_media),
+            len(referenced_media),
         )
+        for reference in referenced_media:
+            identity = (reference.type, reference.url)
+            if identity in seen_references:
+                continue
+            seen_references.add(identity)
+            verified = await verify_local_reference(reference.type, reference.url, capabilities)
+            if reference.type == "image":
+                try:
+                    reference_images.append(resolve_image_source(reference.url))
+                except FileNotFoundError as error:
+                    raise HTTPException(400, detail=f"参考图片不存在：{error}") from error
+                continue
+            duration_value = (verified or {}).get("duration") or reference.duration
+            if not duration_value:
+                raise HTTPException(400, detail="无法校验参考视频时长，请重新上传该视频")
+            reference_video_duration += float(duration_value)
+            if reference.url.startswith("/media/"):
+                if not media_base_url:
+                    raise HTTPException(400, detail="本地参考视频缺少可访问的媒体地址")
+                reference_videos.append(f"{media_base_url}{reference.url}")
+            else:
+                reference_videos.append(reference.url)
+
+        asset_reference_image_count = sum(len(subject.get("images", [])) for subject in subjects)
+        if asset_reference_image_count + len(reference_images) > capabilities.max_reference_images:
+            raise HTTPException(
+                400,
+                detail=(
+                    f"当前模型最多接收 {capabilities.max_reference_images} 张参考图片，"
+                    "已包含分镜所选资产图"
+                ),
+            )
+        if len(reference_videos) > capabilities.max_reference_videos:
+            raise HTTPException(400, detail=f"当前模型最多接收 {capabilities.max_reference_videos} 个参考视频")
+        if reference_video_duration > capabilities.reference_video_total_duration_max + 0.001:
+            raise HTTPException(
+                400,
+                detail=f"当前模型参考视频总时长不能超过 {capabilities.reference_video_total_duration_max} 秒",
+            )
+        video_metadata = {
+            "generation_mode": req.generation_mode,
+            "first_frame_url": req.first_frame_url,
+            "last_frame_url": req.last_frame_url,
+            "model_config_id": config.id,
+            "model_name": config.name,
+            "model": config.model,
+            "video_model_type": config.video_model_type,
+            "resolution": selection.resolution,
+            "aspect_ratio": selection.aspect_ratio,
+            "duration": selection.duration,
+            "output_format": selection.output_format,
+            "generate_audio": selection.generate_audio,
+            "return_last_frame": selection.return_last_frame,
+            "reference_media": [item.model_dump() for item in referenced_media],
+        }
+        try:
+            external_task_id = await generator.submit(
+                prompt=provider_prompt,
+                subjects=subjects if subjects and req.generation_mode == "reference" else None,
+                duration=selection.duration,
+                aspect_ratio=selection.aspect_ratio,
+                resolution=selection.resolution,
+                output_format=selection.output_format,
+                generate_audio=selection.generate_audio,
+                generation_mode=req.generation_mode,
+                first_frame_url=first_frame,
+                last_frame_url=last_frame,
+                reference_images=reference_images,
+                reference_videos=reference_videos,
+                return_last_frame=selection.return_last_frame,
+            )
+        except VideoProviderError as error:
+            # 供应商在提交阶段直接拒绝请求时也创建失败记录，让异常在预览区可见，
+            # 并使分镜状态在刷新页面后仍保持为红色。
+            video = await Video.create(
+                scene_id=scene.id,
+                model_type=VideoModelTypeEnum.seedance.value,
+                external_task_id=None,
+                status=TaskStatusEnum.failed.value,
+                metadata={**video_metadata, "error": str(error)},
+            )
+            await self._set_scene_current_video(scene, video.id)
+            logger.warning(
+                "Video submit rejected: video_id=%s, scene_id=%s, model_config_id=%s",
+                video.id,
+                scene.id,
+                config.id,
+            )
+            return video
 
         # 创建 Video 记录
         video = await Video.create(
@@ -136,19 +335,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             model_type=VideoModelTypeEnum.seedance.value,
             external_task_id=external_task_id,
             status=TaskStatusEnum.pending.value,
-            metadata={
-                "generation_mode": req.generation_mode,
-                "first_frame_url": req.first_frame_url,
-                "last_frame_url": req.last_frame_url,
-                "model_config_id": config.id,
-                "video_model_type": config.video_model_type,
-                "resolution": selection.resolution,
-                "aspect_ratio": selection.aspect_ratio,
-                "duration": selection.duration,
-                "output_format": selection.output_format,
-                "generate_audio": selection.generate_audio,
-            },
+            metadata=video_metadata,
         )
+        await self._set_scene_current_video(scene, video.id)
         logger.info(
             "Video generate: video_id=%s, scene_id=%s, task_id=%s",
             video.id, scene.id, external_task_id,
@@ -213,12 +402,61 @@ class VideoController(CRUDBase[Video, dict, dict]):
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
 
+        result_metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        provider_last_frame_url = result_metadata.get("last_frame_url")
+        if (
+            new_status == TaskStatusEnum.completed.value
+            and (video.metadata or {}).get("return_last_frame") is True
+            and isinstance(provider_last_frame_url, str)
+            and provider_last_frame_url
+        ):
+            persisted_last_frame_url = provider_last_frame_url
+            try:
+                persisted_last_frame_url = await _download_last_frame(provider_last_frame_url, video.id)
+            except Exception as error:
+                logger.warning(
+                    "Last frame download failed; preserving provider URL: video_id=%s, error=%s",
+                    video.id,
+                    error,
+                )
+            try:
+                propagation = await _inject_last_frame_reference(video, persisted_last_frame_url)
+                video.metadata = {
+                    **(video.metadata or {}),
+                    "last_frame_url": persisted_last_frame_url,
+                    "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
+                    "last_frame_reference": propagation["reference"] if propagation else None,
+                }
+            except Exception as error:
+                logger.exception("Last frame propagation failed: video_id=%s", video.id)
+                video.metadata = {
+                    **(video.metadata or {}),
+                    "last_frame_url": persisted_last_frame_url,
+                    "last_frame_propagation_error": str(error)[:300],
+                }
+            if "metadata" not in update_fields:
+                update_fields.append("metadata")
+
         await video.save(update_fields=update_fields)
         return video
 
     async def remove(self, video_id: int) -> None:
         instance = await self.get(video_id)
+        scene = await Scene.get_or_none(id=instance.scene_id)
         await super().remove(instance)
+        if scene is None:
+            return
+        metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
+        if metadata.get("current_video_id") != video_id:
+            return
+        fallback = await Video.filter(scene_id=scene.id).order_by("-id").first()
+        next_metadata = {**metadata}
+        if fallback:
+            next_metadata["current_video_id"] = fallback.id
+        else:
+            next_metadata.pop("current_video_id", None)
+        scene.metadata = next_metadata
+        await scene.save(update_fields=["metadata", "updated_at"])
 
     async def get_chapter_videos(self, chapter_id: int) -> list[dict]:
         """获取章节下所有分镜的视频，按 scene.sequence 排序。
@@ -245,11 +483,21 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         result = []
         for scene in scenes:
-            # 获取该分镜最新的已完成视频
-            video = await Video.filter(
-                scene_id=scene.id,
-                status=TaskStatusEnum.completed.value
-            ).order_by("-id").first()
+            # 优先使用用户从生成记录中选定的版本，再回退到最新完成版本。
+            metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
+            current_video_id = metadata.get("current_video_id")
+            video = None
+            if isinstance(current_video_id, int):
+                video = await Video.filter(
+                    id=current_video_id,
+                    scene_id=scene.id,
+                    status=TaskStatusEnum.completed.value,
+                ).first()
+            if video is None:
+                video = await Video.filter(
+                    scene_id=scene.id,
+                    status=TaskStatusEnum.completed.value,
+                ).order_by("-id").first()
 
             item = {
                 "scene_id": scene.id,
@@ -324,10 +572,20 @@ class VideoController(CRUDBase[Video, dict, dict]):
         missing_scenes: list[int] = []
 
         for scene in scenes:
-            video = await Video.filter(
-                scene_id=scene.id,
-                status=TaskStatusEnum.completed.value
-            ).order_by("-id").first()
+            metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
+            current_video_id = metadata.get("current_video_id")
+            video = None
+            if isinstance(current_video_id, int):
+                video = await Video.filter(
+                    id=current_video_id,
+                    scene_id=scene.id,
+                    status=TaskStatusEnum.completed.value,
+                ).first()
+            if video is None:
+                video = await Video.filter(
+                    scene_id=scene.id,
+                    status=TaskStatusEnum.completed.value,
+                ).order_by("-id").first()
 
             if video:
                 videos_to_merge.append(video)

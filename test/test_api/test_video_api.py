@@ -53,6 +53,34 @@ async def test_api_生成视频(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_上传参考素材使用所选模型能力(client: AsyncClient):
+    _, config = await _setup_video_data()
+    uploaded = {
+        "type": "video",
+        "url": "/media/video-references/reference.mp4",
+        "name": "reference.mp4",
+        "content_type": "video/mp4",
+        "size_bytes": 1024,
+        "width": 1280,
+        "height": 720,
+        "duration": 8,
+        "fps": 30,
+        "codec": "h264",
+    }
+
+    with patch("api.video.save_reference_upload", new_callable=AsyncMock, return_value=uploaded) as save:
+        resp = await client.post(
+            "/api/video/reference/upload",
+            data={"model_config_id": str(config.id)},
+            files={"file": ("reference.mp4", b"video", "video/mp4")},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] == uploaded
+    assert save.await_args.args[1].max_reference_videos == 3
+
+
+@pytest.mark.asyncio
 async def test_api_查询视频状态(client: AsyncClient):
     """GET /api/video/query/{id} 返回进度。"""
     scene, config = await _setup_video_data()
@@ -125,6 +153,33 @@ async def test_api_获取视频详情(client: AsyncClient):
     assert data["id"] == video.id
     assert data["url"] == "https://cdn.example.com/detail.mp4"
     print(f"    API 视频详情: id={data['id']}, url={data['url']}")
+
+
+@pytest.mark.asyncio
+async def test_api_获取生成记录并恢复当前视频版本(client: AsyncClient):
+    scene, _ = await _setup_video_data()
+    completed = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/history.mp4",
+    )
+    failed = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.failed.value,
+        metadata={"error": "provider rejected"},
+    )
+
+    history_resp = await client.get(f"/api/video/scene/{scene.id}/generation-history")
+    select_resp = await client.post(f"/api/video/{completed.id}/select-current")
+
+    assert history_resp.status_code == 200, history_resp.text
+    assert [record["id"] for record in history_resp.json()["data"]] == [failed.id, completed.id]
+    assert select_resp.status_code == 200, select_resp.text
+    assert select_resp.json()["data"]["id"] == completed.id
+    await scene.refresh_from_db()
+    assert scene.metadata["current_video_id"] == completed.id
 
 
 @pytest.mark.asyncio

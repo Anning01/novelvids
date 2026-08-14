@@ -26,6 +26,29 @@ class VideoModelCapabilities:
     supports_auto_duration: bool
     supports_audio: bool
     max_reference_images: int
+    max_reference_videos: int
+    max_reference_audios: int
+    reference_video_duration_max: int
+    reference_video_total_duration_max: int
+    reference_audio_duration_max: int
+    reference_audio_total_duration_max: int
+    supports_return_last_frame: bool = True
+    reference_image_formats: tuple[str, ...] = ("jpg", "jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif")
+    reference_video_formats: tuple[str, ...] = ("mp4", "mov")
+    reference_video_codecs: tuple[str, ...] = ("h264", "hevc")
+    reference_video_audio_codecs: tuple[str, ...] = ("aac", "mp3")
+    reference_video_resolutions: tuple[str, ...] = ("480p", "720p", "1080p", "4k")
+    reference_image_max_size_mb: int = 30
+    reference_video_max_size_mb: int = 200
+    reference_media_duration_min: int = 2
+    reference_media_ratio_min: float = 0.4
+    reference_media_ratio_max: float = 2.5
+    reference_media_side_min: int = 300
+    reference_media_side_max: int = 6000
+    reference_video_pixels_min: int = 409600
+    reference_video_pixels_max: int = 8295044
+    reference_video_fps_min: int = 24
+    reference_video_fps_max: int = 60
     default_resolution: str = "720p"
     default_aspect_ratio: str = "adaptive"
     default_output_format: str = "mp4"
@@ -46,6 +69,29 @@ class VideoModelCapabilities:
             "supports_auto_duration": self.supports_auto_duration,
             "supports_audio": self.supports_audio,
             "max_reference_images": self.max_reference_images,
+            "max_reference_videos": self.max_reference_videos,
+            "max_reference_audios": self.max_reference_audios,
+            "reference_video_duration_max": self.reference_video_duration_max,
+            "reference_video_total_duration_max": self.reference_video_total_duration_max,
+            "reference_audio_duration_max": self.reference_audio_duration_max,
+            "reference_audio_total_duration_max": self.reference_audio_total_duration_max,
+            "supports_return_last_frame": self.supports_return_last_frame,
+            "reference_image_formats": list(self.reference_image_formats),
+            "reference_video_formats": list(self.reference_video_formats),
+            "reference_video_codecs": list(self.reference_video_codecs),
+            "reference_video_audio_codecs": list(self.reference_video_audio_codecs),
+            "reference_video_resolutions": list(self.reference_video_resolutions),
+            "reference_image_max_size_mb": self.reference_image_max_size_mb,
+            "reference_video_max_size_mb": self.reference_video_max_size_mb,
+            "reference_media_duration_min": self.reference_media_duration_min,
+            "reference_media_ratio_min": self.reference_media_ratio_min,
+            "reference_media_ratio_max": self.reference_media_ratio_max,
+            "reference_media_side_min": self.reference_media_side_min,
+            "reference_media_side_max": self.reference_media_side_max,
+            "reference_video_pixels_min": self.reference_video_pixels_min,
+            "reference_video_pixels_max": self.reference_video_pixels_max,
+            "reference_video_fps_min": self.reference_video_fps_min,
+            "reference_video_fps_max": self.reference_video_fps_max,
             "default_resolution": self.default_resolution,
             "default_aspect_ratio": self.default_aspect_ratio,
             "default_output_format": self.default_output_format,
@@ -60,6 +106,7 @@ class VideoGenerationSelection:
     duration: int
     output_format: str
     generate_audio: bool
+    return_last_frame: bool
 
 
 CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
@@ -74,6 +121,12 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         supports_auto_duration=True,
         supports_audio=True,
         max_reference_images=9,
+        max_reference_videos=3,
+        max_reference_audios=3,
+        reference_video_duration_max=15,
+        reference_video_total_duration_max=15,
+        reference_audio_duration_max=15,
+        reference_audio_total_duration_max=15,
     ),
     VideoGenerationModelTypeEnum.seedance_2_fast: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -86,6 +139,12 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         supports_auto_duration=True,
         supports_audio=True,
         max_reference_images=9,
+        max_reference_videos=3,
+        max_reference_audios=3,
+        reference_video_duration_max=15,
+        reference_video_total_duration_max=15,
+        reference_audio_duration_max=15,
+        reference_audio_total_duration_max=15,
     ),
     VideoGenerationModelTypeEnum.seedance_2_mini: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -98,6 +157,12 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         supports_auto_duration=True,
         supports_audio=True,
         max_reference_images=9,
+        max_reference_videos=3,
+        max_reference_audios=3,
+        reference_video_duration_max=15,
+        reference_video_total_duration_max=15,
+        reference_audio_duration_max=15,
+        reference_audio_total_duration_max=15,
     ),
     VideoGenerationModelTypeEnum.seedance_2_5: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -113,6 +178,12 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         supports_auto_duration=True,
         supports_audio=True,
         max_reference_images=30,
+        max_reference_videos=10,
+        max_reference_audios=10,
+        reference_video_duration_max=30,
+        reference_video_total_duration_max=30,
+        reference_audio_duration_max=30,
+        reference_audio_total_duration_max=30,
     ),
 }
 
@@ -139,6 +210,7 @@ def validate_selection(
     duration: object,
     output_format: object,
     generate_audio: object,
+    return_last_frame: object = None,
 ) -> VideoGenerationSelection:
     normalized = VideoGenerationModelTypeEnum(model_type)
     capabilities = CAPABILITIES[normalized]
@@ -146,6 +218,7 @@ def validate_selection(
     selected_ratio = str(aspect_ratio or capabilities.default_aspect_ratio)
     selected_format = str(output_format or capabilities.default_output_format).lower()
     selected_audio = capabilities.default_generate_audio if generate_audio is None else bool(generate_audio)
+    selected_return_last_frame = bool(return_last_frame) if return_last_frame is not None else False
     try:
         selected_duration = int(duration)
     except (TypeError, ValueError) as exc:
@@ -172,10 +245,13 @@ def validate_selection(
         raise HTTPException(status_code=400, detail="当前视频模型不支持自动时长")
     if selected_audio and not capabilities.supports_audio:
         raise HTTPException(status_code=400, detail="当前视频模型不支持生成同步音频")
+    if selected_return_last_frame and not capabilities.supports_return_last_frame:
+        raise HTTPException(status_code=400, detail="当前视频模型不支持返回尾帧")
     return VideoGenerationSelection(
         resolution=selected_resolution,
         aspect_ratio=selected_ratio,
         duration=selected_duration,
         output_format=selected_format,
         generate_audio=selected_audio,
+        return_last_frame=selected_return_last_frame,
     )

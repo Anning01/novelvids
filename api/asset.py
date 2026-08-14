@@ -7,6 +7,7 @@ from schemas.asset import (
     AssetBriefOut,
     AssetCreate,
     AssetGenerationRecordOut,
+    AssetImageEditCreate,
     AssetMergeOut,
     AssetMergeRequest,
     AssetOut,
@@ -103,6 +104,15 @@ async def get_asset(asset_id: int):
 )
 async def get_asset_generation_history(asset_id: int):
     return ResponseSchema(data=await asset_controller.generation_history(asset_id))
+
+
+@router.post(
+    "/{asset_id}/generation-history/edit",
+    summary="保存资产图片标注并创建生成记录",
+    response_model=ResponseSchema[AssetOut],
+)
+async def record_asset_image_edit(asset_id: int, payload: AssetImageEditCreate):
+    return ResponseSchema(data=await asset_controller.record_image_edit(asset_id, payload))
 
 
 @router.post(

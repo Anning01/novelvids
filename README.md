@@ -169,6 +169,8 @@ novelvids/
 │   └── nlp/                # NLP 工具
 │
 ├── prompts/                # Prompt 模板 —— AI 提示词管理
+│   ├── extraction.py       # 资产提取 Prompt 与固定语言规则
+│   └── storyboard.py       # 分镜生成 Prompt 与纯渲染函数
 │
 ├── test/                   # 测试套件 —— 四层全覆盖
 │   ├── conftest.py         # 测试夹具（内存数据库、模拟客户端）
@@ -298,4 +300,3 @@ npm run build
 <p align="center">
   <sub>联系方式：864399407 Built with passion by <a href="https://github.com/Anning01">Anning</a></sub>
 </p>
-

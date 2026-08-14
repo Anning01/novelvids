@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AssetVariantStrip from './AssetVariantStrip.vue'
+import EpisodeSelectionPicker from './EpisodeSelectionPicker.vue'
 import assetVariantStripSource from './AssetVariantStrip.vue?raw'
 import { api } from '@/api'
 import { AssetTypeEnum, type Asset, type AssetVariant } from '@/types'
@@ -61,28 +62,38 @@ describe('AssetVariantStrip', () => {
     expect(wrapper.get('.asset-variant-item.is-current').text()).toContain('本集')
   })
 
-  it('reserves enough rail space for the floating delete icon', () => {
+  it('keeps the delete action as a small tag inside each derived thumbnail', async () => {
     const styles = parse(assetVariantStripSource).descriptor.styles.map(block => block.content).join('\n')
-    expect(styles).toContain('padding: 10px 9px 8px')
-    expect(styles).toContain('top: -7px')
+    expect(styles).toContain('top: 4px; right: 4px')
+    expect(styles).toContain('min-width: 31px; height: 16px')
+    const wrapper = mount(AssetVariantStrip, { props: { asset, chapterNumber: 1 } })
+    await flushPromises()
+    expect(wrapper.get('.asset-variant-item__remove').text()).toBe('删除')
   })
 
-  it('creates a new derived state from the inline editor', async () => {
-    vi.mocked(api.createAssetVariant).mockResolvedValue({ code: 0, message: 'ok', data: { ...variant, id: 32, name: '受伤状态', chapter_numbers: [2], images: [] } })
+  it('emits a new derived-state draft and leaves persistence to the drawer footer', async () => {
     const wrapper = mount(AssetVariantStrip, { props: { asset, chapterNumber: 2 } })
     await flushPromises()
 
     await wrapper.get('.asset-variant-item.is-add').trigger('click')
     const inputs = wrapper.findAll('.asset-variant-editor input')
     await inputs[0].setValue('受伤状态')
-    await inputs[1].setValue('2')
-    await wrapper.get('.asset-variant-editor').trigger('submit')
+    wrapper.getComponent(EpisodeSelectionPicker).vm.$emit('update:modelValue', [2, 3, 4, 8])
+    await inputs[1].setValue('左臂受伤并换上战损服装')
     await flushPromises()
 
-    expect(api.createAssetVariant).toHaveBeenCalledWith(7, expect.objectContaining({ name: '受伤状态', chapter_numbers: [2] }))
-    expect(wrapper.text()).toContain('受伤状态')
-    expect(wrapper.emitted('select')?.at(-1)?.[0]).toMatchObject({ id: 32, images: [] })
-    expect(wrapper.get('.asset-variant-item.is-selected').text()).toContain('受伤状态')
+    expect(api.createAssetVariant).not.toHaveBeenCalled()
+    expect(wrapper.emitted('draft')?.at(-1)?.[0]).toEqual({
+      id: null,
+      name: '受伤状态',
+      description: '左臂受伤并换上战损服装',
+      chapter_numbers: [2, 3, 4, 8],
+      is_new: true,
+    })
+    expect(wrapper.text()).toContain('AI 建议 · 可修改')
+    expect(wrapper.text()).toContain('第 2–4 集、第 8 集')
+    expect(wrapper.find('.asset-variant-editor footer').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('本集使用')
   })
 
   it('switches between the base image and a derived image without falling back for empty variants', async () => {

@@ -812,7 +812,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         this.finishPendingWork(controller)
       }
     },
-    async generateVideo(sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean } = {}) {
+    async generateVideo(sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean; return_last_frame?: boolean } = {}) {
       const controller = this.beginPendingWork()
       let submittedVideoId: number | null = null
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)

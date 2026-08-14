@@ -1,124 +1,123 @@
-from typing import List
+"""Storyboard model orchestration with bounded continuation batches."""
+
+import json
+from typing import Any
+
 from openai import AsyncOpenAI
 
+from prompts.storyboard import build_storyboard_messages
 from schemas.scene import SceneEntity, Storyboard
-from services.llm.json_output import create_json_completion
-from utils.prompt_language import normalize_prompt_language
+from services.llm.json_output import (
+    JsonCompletionTruncatedError,
+    create_json_completion,
+)
+from services.storyboard.chunking import NarrativeChunker
+
+
+def _message_characters(messages: list[dict[str, str]]) -> int:
+    schema_characters = len(
+        json.dumps(Storyboard.model_json_schema(), ensure_ascii=False)
+    )
+    return sum(len(message["content"]) for message in messages) + schema_characters
+
+
+def _usage_values(completion: Any) -> dict[str, int]:
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return {}
+    return {
+        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+    }
+
+
+def _aggregate_metadata(completions: list[Any]) -> dict[str, Any]:
+    last_completion = completions[-1]
+    usage_totals: dict[str, int] = {}
+    response_ids: list[str] = []
+    refusal: str | None = None
+    for completion in completions:
+        response_id = getattr(completion, "id", None)
+        if response_id:
+            response_ids.append(response_id)
+        for key, value in _usage_values(completion).items():
+            usage_totals[key] = usage_totals.get(key, 0) + value
+        choices = getattr(completion, "choices", [])
+        if choices:
+            refusal = getattr(choices[0].message, "refusal", None) or refusal
+
+    metadata: dict[str, Any] = {
+        "model": getattr(last_completion, "model", None),
+        "response_id": getattr(last_completion, "id", None),
+        "response_ids": response_ids,
+        "created": getattr(last_completion, "created", None),
+        "system_fingerprint": getattr(last_completion, "system_fingerprint", None),
+        "batch_count": len(completions),
+    }
+    if usage_totals:
+        metadata["usage"] = usage_totals
+    if refusal:
+        metadata["refusal"] = refusal
+    return metadata
 
 
 async def generate_storyboard(
     client: AsyncOpenAI,
     long_text: str,
-    entities: List[SceneEntity],
+    entities: list[SceneEntity],
     model: str,
     supports_json_output: bool = False,
-    prompt_language: str = "en",
-) -> tuple[Storyboard, dict]:
-    """
-    调用 OpenAI API 生成分镜板
-
-    Returns:
-        tuple[Storyboard, dict]: (生成的分镜板, 元数据字典)
-    """
-    # 构建实体上下文
-    entities_context = ""
-    for e in entities:
-        entities_context += f"- Entity Name: {e.name}\n  Aliases: {', '.join(e.aliases)}\n  Visual Description: {e.description} (RULE: DO NOT re-describe this look, simply use @{{{e.name}}})\n\n"
-
-    language = normalize_prompt_language(prompt_language)
-    language_instruction = (
-        "Write every descriptive output field, shot title, visual description, action, "
-        "camera note, and sound note in Simplified Chinese. Keep entity references in "
-        "the exact @{实体名} syntax and retain standard equipment names where necessary."
-        if language == "zh"
-        else
-        "Write every descriptive output field, shot title, visual description, action, "
-        "camera note, and sound note in English. Keep entity references in the exact "
-        "@{Entity Name} syntax."
+    prompt_language: str = "zh",
+    max_context_characters: int | None = None,
+) -> tuple[Storyboard, dict[str, Any]]:
+    """Generate fresh bounded calls and carry only a continuity summary."""
+    fixed_messages = build_storyboard_messages(
+        "",
+        entities,
+        prompt_language,
     )
-
-    # 系统提示词 (System Prompt) - 融入了摄影指导思维
-    system_prompt = f"""
-You are an elite Cinematographer (DP) and Sora 2 Prompt Engineering Expert.
-Your goal is to break down a narrative text into a "Sora 2 Ultra-Detailed Storyboard".
-
-### 0. OUTPUT LANGUAGE
-{language_instruction}
-
-### 1. INPUT CONTEXT
-- **Narrative**: A segment of a story.
-- **Entities**: Pre-defined characters/places.
-
-### 2. CRITICAL RULE: ENTITY BINDING
-- When the narrative mentions a defined entity (or its alias), you MUST refer to it using the EXACT syntax `@{{EXACT Entity Name}}` with curly braces in `visual_prose` and `actions`.
-- Entity names MUST be copied EXACTLY as listed below — do NOT abbreviate, truncate, or paraphrase them.
-- Example: if entity is "Rabbit Cloth Doll", write `@{{Rabbit Cloth Doll}}`, NOT `@{{Rabbit Cloth}}` or `@{{Rabbit}}`.
-- **NEVER** generate visual descriptions for `@{{Entity Name}}` (the rendering engine handles this).
-- **ALWAYS** generate lavish, microscopic visual details for *anything else* (props, background textures, nameless extras).
-
-### 3. SORA 2 "ULTRA-DETAILED" STYLE GUIDE
-You must act like a film director using professional equipment. Fill the specific fields with technical jargon:
-- **Format**: 180° shutter, Kodak Vision3, 65mm, coarse grain, halation, gate weave.
-- **Lens**: 24mm/35mm/50mm/85mm primes, Anamorphic 2.0x, T1.5 aperture, Pro-Mist filters, Chromatic Aberration.
-- **Lighting**: Chiaroscuro, Rembrandt, Sodium vapor practicals, Negative fill, Volumetric fog, God rays, 4x4 Bounce.
-- **Grade**: Teal & Orange, Bleach bypass, Crushed blacks, Lifted shadows, Technicolor.
-- **Sound**: Diegetic only. Mention LUFS levels, specific textures (leather creaking, snow crunching).
-
-### 4. SHOT STRUCTURE
-- Duration: Strictly 4s or 8s.
-- Pacing: Break long scenes into multiple cuts.
-- Actions: precise timestamps (0.0s-2.0s).
-
-### DEFINED ENTITIES LIST
-{entities_context}
-"""
-
-    user_prompt = f"""
-### NARRATIVE TEXT TO PROCESS
-\"\"\"
-{long_text}
-\"\"\"
-
-Generate the storyboard now and strictly follow the output language requirement.
-"""
-
-    storyboard, completion = await create_json_completion(
-        client,
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_model=Storyboard,
-        supports_json_output=supports_json_output,
-        timeout=600,
+    chunker = NarrativeChunker.for_context_limit(
+        max_context_characters,
+        _message_characters(fixed_messages),
     )
+    chunks = chunker.split(long_text)
+    shots = []
+    completions: list[Any] = []
+    batch_index = 0
 
-    # 收集元数据
-    metadata = {
-        "model": completion.model,
-        "response_id": completion.id,
-        "created": completion.created,
-        "system_fingerprint": getattr(completion, 'system_fingerprint', None),
-    }
+    while batch_index < len(chunks):
+        previous_shot = shots[-1] if shots else None
+        messages = build_storyboard_messages(
+            chunks[batch_index],
+            entities,
+            prompt_language,
+            batch_index=batch_index,
+            batch_count=len(chunks),
+            next_sequence=len(shots) + 1,
+            previous_shot=previous_shot,
+        )
+        try:
+            batch_storyboard, completion = await create_json_completion(
+                client,
+                model=model,
+                messages=messages,
+                response_model=Storyboard,
+                supports_json_output=supports_json_output,
+                timeout=600,
+            )
+        except JsonCompletionTruncatedError:
+            retry_chunks = chunker.split_for_retry(chunks[batch_index])
+            if len(retry_chunks) <= 1:
+                raise
+            chunks[batch_index : batch_index + 1] = retry_chunks
+            continue
 
-    # 添加 token 使用情况
-    if hasattr(completion, 'usage') and completion.usage:
-        usage = completion.usage
-        metadata["usage"] = {
-            "prompt_tokens": usage.prompt_tokens,
-            "completion_tokens": usage.completion_tokens,
-            "total_tokens": usage.total_tokens,
-        }
+        for shot in batch_storyboard.shots:
+            shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
+        completions.append(completion)
+        batch_index += 1
 
-        # 详细的 token 使用信息（如果有）
-        if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
-            metadata["usage"]["prompt_tokens_details"] = usage.prompt_tokens_details.model_dump()
-        if hasattr(usage, 'completion_tokens_details') and usage.completion_tokens_details:
-            metadata["usage"]["completion_tokens_details"] = usage.completion_tokens_details.model_dump()
-
-    # 检查是否有拒绝信息
-    if hasattr(completion.choices[0].message, 'refusal') and completion.choices[0].message.refusal:
-        metadata["refusal"] = completion.choices[0].message.refusal
-
-    return storyboard, metadata
+    if not completions:
+        raise ValueError("分镜模型未返回任何批次结果")
+    return Storyboard(shots=shots), _aggregate_metadata(completions)
