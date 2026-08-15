@@ -4,6 +4,7 @@ import pytest
 
 from services.billing.pricing import (
     compute_image_cost,
+    compute_input_image_cost,
     compute_text_cost,
     compute_video_cost,
     normalize_token_usage,
@@ -62,3 +63,37 @@ def test_compute_video_cost_multiplies_seconds_by_resolution():
 def test_compute_video_cost_missing_resolution_is_zero():
     assert compute_video_cost(6.0, "4k", VIDEO_PRICING) == Decimal("0")
     assert compute_video_cost(6.0, "720p", None) == Decimal("0")
+
+
+def test_compute_input_image_cost_first_free_then_per_image():
+    pricing = {
+        "type": "image",
+        "currency": "CNY",
+        "prices": {"1K": 0.3},
+        "input_image": {"first_free": 1, "price_per_image": 0.02},
+    }
+    assert compute_input_image_cost(0, pricing) == Decimal("0")
+    assert compute_input_image_cost(1, pricing) == Decimal("0")
+    assert compute_input_image_cost(2, pricing) == Decimal("0.020000")
+    assert compute_input_image_cost(5, pricing) == Decimal("0.080000")
+
+
+def test_compute_input_image_cost_missing_fee_is_zero():
+    assert compute_input_image_cost(5, {"type": "image", "prices": {"1K": 0.3}}) == Decimal("0")
+    assert compute_input_image_cost(5, None) == Decimal("0")
+
+
+def test_compute_video_cost_uses_video_reference_prices():
+    pricing = {
+        "type": "video",
+        "currency": "CNY",
+        "prices": {"720p": 1.0},
+        "video_reference_prices": {"720p": 1.5},
+    }
+    assert compute_video_cost(6.0, "720p", pricing, has_video_reference=False) == Decimal("6.000000")
+    assert compute_video_cost(6.0, "720p", pricing, has_video_reference=True) == Decimal("9.000000")
+
+
+def test_compute_video_cost_video_reference_falls_back_to_prices():
+    pricing = {"type": "video", "currency": "CNY", "prices": {"720p": 1.0}}
+    assert compute_video_cost(6.0, "720p", pricing, has_video_reference=True) == Decimal("6.000000")

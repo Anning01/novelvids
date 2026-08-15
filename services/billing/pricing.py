@@ -17,6 +17,13 @@ def _as_decimal(value: object) -> Decimal:
         return Decimal("0")
 
 
+def _as_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def normalize_token_usage(usage: dict | None) -> dict[str, int]:
     """归一化 token 用量键：兼容 prompt_tokens/completion_tokens 命名。"""
     if not isinstance(usage, dict):
@@ -55,10 +62,31 @@ def compute_image_cost(image_count: int, clarity: str | None, pricing: dict | No
     return _money(_as_decimal(prices[clarity]) * Decimal(int(image_count or 0)))
 
 
-def compute_video_cost(seconds: float, resolution: str | None, pricing: dict | None) -> Decimal:
+def compute_input_image_cost(input_image_count: int, pricing: dict | None) -> Decimal:
+    """图生图输入参考图费用：前 first_free 张免费，超出按 price_per_image 计。"""
+    if not isinstance(pricing, dict):
+        return Decimal("0")
+    input_fee = pricing.get("input_image")
+    if not isinstance(input_fee, dict):
+        return Decimal("0")
+    first_free = _as_int(input_fee.get("first_free"))
+    price_per_image = _as_decimal(input_fee.get("price_per_image"))
+    billable = max(0, int(input_image_count or 0) - first_free)
+    return _money(Decimal(billable) * price_per_image)
+
+
+def compute_video_cost(
+    seconds: float,
+    resolution: str | None,
+    pricing: dict | None,
+    has_video_reference: bool = False,
+) -> Decimal:
     if not isinstance(pricing, dict) or pricing.get("type") != "video":
         return Decimal("0")
-    prices = pricing.get("prices") or {}
+    if has_video_reference:
+        prices = pricing.get("video_reference_prices") or pricing.get("prices")
+    else:
+        prices = pricing.get("prices")
     if not isinstance(prices, dict) or resolution not in prices:
         return Decimal("0")
     return _money(_as_decimal(prices[resolution]) * _as_decimal(seconds))
