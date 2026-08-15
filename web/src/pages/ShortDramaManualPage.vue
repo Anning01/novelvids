@@ -13,7 +13,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Sparkles,
   Trash2,
   Upload,
   UsersRound,
@@ -506,15 +505,6 @@ async function generateAssetAndWait(asset: Asset) {
   }
 }
 
-async function generateSingleAsset(asset: Asset) {
-  if (generatingAssetIds.value.has(asset.id)) return
-  const completed = await generateAssetAndWait(asset)
-  if (!pageAlive) return
-  await refreshAssets()
-  if (completed) notice.success(`${asset.canonical_name}参考图已生成`)
-  else notice.error(`${asset.canonical_name}生成失败，请在生成记录中查看原因`)
-}
-
 async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
   if (batchGenerating.value) return
   const selected = new Set(options.assetIds)
@@ -710,7 +700,6 @@ onBeforeUnmount(() => {
           <div class="asset-card-actions" aria-label="资产操作">
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="编辑" title="编辑" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click="openAssetDialog(asset)"><Pencil :size="14" /></AppButton>
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="本地上传" title="本地上传" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`为${asset.canonical_name}本地上传图片`" @click="openAssetDialog(asset, 'upload')"><Upload :size="14" /></AppButton>
-            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only :data-tooltip="asset.main_image ? '重新生成' : '生成'" :title="asset.main_image ? '重新生成' : '生成'" :disabled="generatingAssetIds.has(asset.id) || mergingAssetIds.has(asset.id)" :aria-label="`${asset.main_image ? '重新生成' : '生成'}${asset.canonical_name}`" @click="generateSingleAsset(asset)"><RefreshCw v-if="asset.main_image" :size="14" /><Sparkles v-else :size="14" /></AppButton>
             <AppButton class="asset-card-action is-danger" type="button" variant="ghost" size="xs" icon-only data-tooltip="删除" title="删除" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`删除${asset.canonical_name}`" @click="removeAsset(asset)"><Trash2 :size="14" /></AppButton>
           </div>
           <div
