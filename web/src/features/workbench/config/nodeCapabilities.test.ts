@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
 import type { WorkbenchNodeKind } from '../types/workbenchTypes'
+import { workbenchNodeHandles } from '../graph/handleCapabilities'
 import { NODE_CAPABILITIES } from './nodeCapabilities'
 
 it('defines one exhaustive capability entry for every workbench node kind', () => {
@@ -24,6 +25,8 @@ it('defines one exhaustive capability entry for every workbench node kind', () =
 })
 
 it('keeps editing and port behavior consistent for manual operation nodes', () => {
+  expect(NODE_CAPABILITIES.chapter).toMatchObject({ deletable: false, target: false, source: false })
+  expect(workbenchNodeHandles('chapter')).toEqual({ target: [], source: [] })
   expect(NODE_CAPABILITIES.note).toMatchObject({ deletable: true, copyable: true, target: false, source: false })
   expect(NODE_CAPABILITIES.section).toMatchObject({ deletable: true, copyable: false, target: false, source: false })
   expect(NODE_CAPABILITIES.watermark).toMatchObject({ deletable: true, runnable: true, target: true, source: true })

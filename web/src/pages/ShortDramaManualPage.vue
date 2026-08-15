@@ -7,7 +7,6 @@ import {
   Check,
   Clapperboard,
   ImagePlus,
-  GitBranch,
   Layers3,
   LoaderCircle,
   Merge as MergeIcon,
@@ -22,7 +21,6 @@ import {
 import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
-import AssetVariantFamilyPanel from '@/components/AssetVariantFamilyPanel.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
@@ -87,7 +85,6 @@ const draggingAssetId = ref<number | null>(null)
 const mergeHoverTargetId = ref<number | null>(null)
 const mergeArmedTargetId = ref<number | null>(null)
 const mergeProgressKey = ref(0)
-const expandedVariantAssetId = ref<number | null>(null)
 let pageAlive = true
 let extractionPollVersion = 0
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
@@ -476,10 +473,6 @@ function handleAssetClick(asset: Asset) {
   openAssetDialog(asset)
 }
 
-function toggleVariantFamily(asset: Asset) {
-  expandedVariantAssetId.value = expandedVariantAssetId.value === asset.id ? null : asset.id
-}
-
 function setAssetGenerating(assetId: number, value: boolean) {
   const next = new Set(generatingAssetIds.value)
   value ? next.add(assetId) : next.delete(assetId)
@@ -579,7 +572,6 @@ function goToStoryboard() {
 onMounted(loadProject)
 watch(activeTab, () => {
   clearMergeHover(true)
-  expandedVariantAssetId.value = null
 })
 onBeforeUnmount(() => {
   pageAlive = false
@@ -679,8 +671,9 @@ onBeforeUnmount(() => {
         <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
-        <template v-for="asset in visibleAssets" :key="asset.id">
         <article
+          v-for="asset in visibleAssets"
+          :key="asset.id"
           class="asset-card"
           :class="{
             'is-drag-source': draggingAssetId === asset.id,
@@ -715,7 +708,6 @@ onBeforeUnmount(() => {
             </div>
           </button>
           <div class="asset-card-actions" aria-label="资产操作">
-            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="衍生管理" title="衍生管理" :active="expandedVariantAssetId === asset.id" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`管理${asset.canonical_name}的衍生形态`" @click="toggleVariantFamily(asset)"><GitBranch :size="14" /></AppButton>
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="编辑" title="编辑" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click="openAssetDialog(asset)"><Pencil :size="14" /></AppButton>
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="本地上传" title="本地上传" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`为${asset.canonical_name}本地上传图片`" @click="openAssetDialog(asset, 'upload')"><Upload :size="14" /></AppButton>
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only :data-tooltip="asset.main_image ? '重新生成' : '生成'" :title="asset.main_image ? '重新生成' : '生成'" :disabled="generatingAssetIds.has(asset.id) || mergingAssetIds.has(asset.id)" :aria-label="`${asset.main_image ? '重新生成' : '生成'}${asset.canonical_name}`" @click="generateSingleAsset(asset)"><RefreshCw v-if="asset.main_image" :size="14" /><Sparkles v-else :size="14" /></AppButton>
@@ -733,13 +725,6 @@ onBeforeUnmount(() => {
             <i />
           </div>
         </article>
-        <AssetVariantFamilyPanel
-          v-if="expandedVariantAssetId === asset.id"
-          :asset="asset"
-          :chapter-number="selectedChapter?.number"
-          @close="expandedVariantAssetId = null"
-        />
-        </template>
       </div>
     </section>
 
@@ -762,11 +747,12 @@ onBeforeUnmount(() => {
       :kind="activeTab"
       :novel-id="projectId"
       :asset="editingAsset"
+      :chapter-number="selectedChapter?.number"
+      :episode-numbers="chapters.map(item => item.number)"
       :initial-mode="assetDrawerMode"
       @close="closeAssetDialog"
       @created="addCreatedAsset"
       @saved="saveEditedAsset"
-      @regenerate="generateSingleAsset"
     />
 
     <AssetBatchGenerateDialog

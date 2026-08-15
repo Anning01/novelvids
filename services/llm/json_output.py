@@ -8,6 +8,10 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 
+class JsonCompletionTruncatedError(ValueError):
+    """The provider stopped before returning a complete structured response."""
+
+
 def _extract_json(content: str) -> Any:
     """从纯 JSON、Markdown 代码块或带说明的文本中提取首个 JSON 值。"""
     text = (content or "").strip()
@@ -80,6 +84,11 @@ async def create_json_completion(
 
     completion = await client.chat.completions.create(**request)
     message = completion.choices[0].message
+    finish_reason = getattr(completion.choices[0], "finish_reason", None)
+    if finish_reason == "length":
+        raise JsonCompletionTruncatedError(
+            "模型输出达到 token 上限，结构化 JSON 未完成"
+        )
     refusal = getattr(message, "refusal", None)
     if refusal:
         raise ValueError(f"模型拒绝生成 JSON：{refusal}")

@@ -8,7 +8,7 @@ import type { Video } from '@/types'
 import { TaskStatusEnum } from '@/types'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchVideoMedia from '../components/WorkbenchVideoMedia.vue'
-import { videoAspectRatio, videoCoverUrl, videoDownloadFilename, videoDurationSeconds } from '../graph/videoMedia'
+import { videoAspectRatio, videoCoverUrl, videoDownloadFilename, videoPixelSize, videoResolution } from '../graph/videoMedia'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -27,6 +27,15 @@ const title = computed(() => `视频结果 · #${video.value.id}`)
 const filename = computed(() => videoDownloadFilename(video.value, title.value))
 const downloading = ref(false)
 const downloadError = ref('')
+const measuredVideoSize = ref<{ width: number; height: number } | null>(null)
+const displayedRatio = computed(() => measuredVideoSize.value
+  ? `${measuredVideoSize.value.width}:${measuredVideoSize.value.height}`
+  : videoAspectRatio(video.value))
+const mediaSizeLabel = computed(() => {
+  const size = measuredVideoSize.value || videoPixelSize(video.value)
+  const pixelSize = size ? `${Math.round(size.width)} × ${Math.round(size.height)}` : ''
+  return [videoResolution(video.value), videoAspectRatio(video.value), pixelSize].filter(Boolean).join(' · ')
+})
 
 async function downloadVideo() {
   if (!video.value.url || downloading.value) return
@@ -43,7 +52,13 @@ async function downloadVideo() {
 </script>
 
 <template>
-  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'video_result', title, status: statusLabel(video.status) }">
+  <WorkbenchNodeFrame
+    v-bind="props"
+    :data="{ ...data, kind: 'video_result', title, status: statusLabel(video.status), body_flush: true, floating_header: true, borderless_media: true }"
+  >
+    <template v-if="mediaSizeLabel" #meta>
+      <span class="workbench-node-frame__media-size">{{ mediaSizeLabel }}</span>
+    </template>
     <template #toolbar-actions>
       <button
         type="button"
@@ -61,12 +76,12 @@ async function downloadVideo() {
         :src="video.url"
         :poster="videoCoverUrl(video)"
         :title="title"
-        :duration-seconds="videoDurationSeconds(video)"
-        :ratio="videoAspectRatio(video)"
+        :ratio="displayedRatio"
         :running="processing"
         :failed="failed"
         :error="failureMessage"
         :progress="video.progress || 0"
+        @metadata="measuredVideoSize = $event"
       />
       <AppButton v-if="processing" class="workbench-inline-action" type="button" @click="store.refreshVideo(video.id)">
         <RefreshCw :size="14" aria-hidden="true" />刷新状态

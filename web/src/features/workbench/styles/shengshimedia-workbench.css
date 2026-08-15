@@ -122,9 +122,19 @@
   width: 520px;
 }
 .viral-workbench-canvas .vue-flow__node-shot,
-.viral-workbench-canvas .vue-flow__node-asset,
 .viral-workbench-canvas .vue-flow__node-composition {
   width: 350px;
+}
+.viral-workbench-canvas .vue-flow__node-asset {
+  --workbench-asset-collapsed-width: 520px;
+
+  width: var(--workbench-asset-collapsed-width);
+}
+.viral-workbench-canvas .vue-flow__node-shot { width: 560px; }
+.viral-workbench-canvas .vue-flow__node-shot:has(.workbench-video-result.is-portrait) { width: 480px; }
+.viral-workbench-canvas .vue-flow__node-shot:has(.workbench-video-result.is-landscape) { width: 680px; }
+.viral-workbench-canvas .vue-flow__node-shot > .workbench-node-component > .workbench-node-frame.is-borderless-media {
+  border: 0;
 }
 .viral-workbench-canvas .vue-flow__node:focus-visible,
 .viral-workbench-canvas .vue-flow__edge:focus-visible,
@@ -356,6 +366,9 @@
   width: 100%;
   gap: 10px;
   color: #c6bdb4;
+}
+.viral-workbench-canvas .vue-flow__node-shot .workbench-node-frame__body--flush .workbench-video-production > .workbench-video-result {
+  margin: 0;
 }
 .workbench-node-summary {
   display: grid;
@@ -723,8 +736,26 @@
   outline: 2px solid var(--vf-accent);
   outline-offset: 2px;
 }
+.workbench-prompt-reference-strip {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.workbench-prompt-references-viewport {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-color: #5a544e transparent;
+  scrollbar-width: thin;
+}
 .workbench-prompt-references {
   display: flex;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
   min-height: 80px;
   align-items: flex-start;
   gap: 8px;
@@ -741,6 +772,7 @@
   width: 72px;
   height: 72px;
   flex: 0 0 72px;
+  scroll-snap-align: start;
 }
 .workbench-prompt-reference::before {
   position: absolute;
@@ -770,7 +802,7 @@
   border: 1px solid var(--vf-border-regular);
   border-radius: 14px;
   background: var(--vf-bg-muted);
-  cursor: default;
+  cursor: zoom-in;
 }
 .workbench-prompt-reference__thumbnail:hover {
   border-color: var(--vf-border-strong);
@@ -853,7 +885,10 @@
   z-index: 92;
   top: calc(100% + 8px);
   left: 50%;
+  display: inline-flex;
   width: max-content;
+  align-items: center;
+  gap: 7px;
   padding: 4px 9px;
   border: 1px solid var(--vf-border-regular);
   border-radius: 6px;
@@ -864,11 +899,20 @@
   transform: translateX(-50%);
   white-space: nowrap;
 }
-.workbench-prompt-reference:first-child .workbench-prompt-reference__tip {
-  left: 0;
-  transform: none;
+.workbench-prompt-reference__tip strong {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--vf-text-primary);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+.workbench-prompt-reference__tip span {
+  color: var(--vf-text-secondary);
 }
 .workbench-prompt-panel .workbench-mention-editor {
+  min-height: 0;
+  flex: 1 1 auto;
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -878,8 +922,9 @@
   box-shadow: none;
 }
 .workbench-prompt-panel .workbench-mention-editor__input {
-  min-height: 320px;
-  max-height: min(560px, calc(100vh - 150px));
+  height: 100%;
+  min-height: 0;
+  max-height: none;
   padding: 10px 14px 10px 10px;
   font-size: 14px;
   line-height: 1.8;
@@ -913,6 +958,22 @@
 }
 .workbench-prompt-panel__count {
   flex: 0 0 auto;
+}
+.workbench-prompt-panel__footer-start {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+.workbench-prompt-panel__footer-start > .media-generation-model-selector {
+  width: min(220px, 42%);
+  flex: 0 1 220px;
+}
+.workbench-prompt-panel__footer-start > .image-parameters,
+.workbench-prompt-panel__footer-start > .video-parameter-trigger {
+  width: min(220px, 42%);
+  flex: 0 1 220px;
 }
 .workbench-prompt-panel__footer-actions {
   display: flex;
@@ -998,6 +1059,23 @@
   .workbench-prompt-reference {
     flex-basis: 64px;
   }
+  .workbench-prompt-panel__footer {
+    flex-wrap: wrap;
+  }
+  .workbench-prompt-panel__footer-start {
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .workbench-prompt-panel__footer-start > .media-generation-model-selector,
+  .workbench-prompt-panel__footer-start > .image-parameters,
+  .workbench-prompt-panel__footer-start > .video-parameter-trigger {
+    width: 100%;
+    max-width: none;
+    flex: 1 1 100%;
+  }
+  .workbench-prompt-panel__footer-actions {
+    width: 100%;
+  }
 }
 .workbench-inline-mention {
   display: inline-flex;
@@ -1028,6 +1106,20 @@
   color: #9bc6b2;
   background: #21332d;
 }
+.workbench-inline-mention.is-asset-person,
+.workbench-inline-mention.is-asset-scene,
+.workbench-inline-mention.is-asset-item,
+.workbench-inline-mention.is-asset-product,
+.workbench-inline-mention.is-asset-style {
+  border-color: color-mix(in srgb, var(--workbench-mention-type-color) 34%, transparent);
+  color: color-mix(in srgb, var(--workbench-mention-type-color) 78%, var(--vf-text-primary, #eee9e2));
+  background: color-mix(in srgb, var(--workbench-mention-type-color) 22%, var(--vf-bg-elevated, #211e1b));
+}
+.workbench-inline-mention.is-asset-person { --workbench-mention-type-color: #a995ff; }
+.workbench-inline-mention.is-asset-scene { --workbench-mention-type-color: #63c6ad; }
+.workbench-inline-mention.is-asset-item { --workbench-mention-type-color: #e0ad58; }
+.workbench-inline-mention.is-asset-product { --workbench-mention-type-color: #e987a0; }
+.workbench-inline-mention.is-asset-style { --workbench-mention-type-color: #71aee8; }
 .workbench-inline-mention.is-selected {
   border-color: #b6a4ef;
   box-shadow: 0 0 0 2px rgb(142 124 200 / 20%);
@@ -1692,6 +1784,10 @@
 }
 .viral-workbench-canvas .vue-flow__node-image_result .workbench-media-node img {
   max-height: 680px;
+  object-fit: contain;
+}
+.viral-workbench-canvas .vue-flow__node-shot .workbench-media-node video {
+  max-height: none;
   object-fit: contain;
 }
 .viral-workbench-canvas .vue-flow__node-video_result .workbench-media-node video {
@@ -3150,6 +3246,25 @@
   padding: 0 12px 8px;
   color: var(--vf-danger);
   font-size: 12px;
+}
+.viral-workbench-canvas .vue-flow__node-chapter {
+  width: 360px;
+}
+.workbench-chapter-note {
+  --workbench-note-color: #6d99c7;
+
+  height: auto;
+  min-height: 0;
+}
+.workbench-chapter-note > header > span {
+  margin-left: auto;
+  opacity: 0.65;
+  font-size: 11px;
+}
+.workbench-chapter-note > textarea {
+  width: 100%;
+  min-height: 176px;
+  box-sizing: border-box;
 }
 
 .workbench-connection-picker {

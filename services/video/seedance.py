@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from services.video.base import BaseVideoGenerator
+from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for
 from utils.enums import TaskStatusEnum
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _ENTITY_RE = re.compile(r"@\{([^}]+)\}|@([\w\u4e00-\u9fff·]+)")
 
 
-class SeedanceGenerationError(RuntimeError):
+class SeedanceGenerationError(VideoProviderError):
     """脱敏后可安全返回给调用方的 Seedance 接口错误。"""
 
 
@@ -48,7 +48,22 @@ def _provider_error(data: Any) -> str | None:
         return f"{message}（{code}）"
     if isinstance(error, str) and error.strip():
         return error.strip()[:500]
+    message = data.get("message") or data.get("detail")
+    if isinstance(message, str) and message.strip():
+        code = data.get("code") or data.get("type")
+        normalized_message = message.strip()[:500]
+        if code is not None and str(code).strip():
+            return f"{normalized_message}（{str(code).strip()[:80]}）"
+        return normalized_message
     return None
+
+
+def _http_provider_error(response: httpx.Response) -> str | None:
+    """只提取结构化供应商错误，避免把 HTML 或请求内容原样暴露给调用方。"""
+    try:
+        return _provider_error(response.json())
+    except ValueError:
+        return None
 
 
 def _video_url(data: Any) -> str | None:
@@ -69,6 +84,28 @@ def _video_url(data: Any) -> str | None:
     if isinstance(content, list):
         for item in content:
             if url := _video_url(item):
+                return url
+    return None
+
+
+def _last_frame_url(data: Any) -> str | None:
+    """兼容查询接口中顶层、content 及对象形式的尾帧地址。"""
+    if not isinstance(data, dict):
+        return None
+    for key in ("last_frame_url", "last_frame"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("url")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    content = data.get("content")
+    if isinstance(content, dict):
+        return _last_frame_url(content)
+    if isinstance(content, list):
+        for item in content:
+            if url := _last_frame_url(item):
                 return url
     return None
 
@@ -153,6 +190,9 @@ class SeedanceGenerator(BaseVideoGenerator):
         resolution = str(kwargs.get("resolution") or "720p")
         output_format = str(kwargs.get("output_format") or "mp4")
         generate_audio = bool(kwargs.get("generate_audio", True))
+        return_last_frame = bool(kwargs.get("return_last_frame", False))
+        extra_reference_images = list(dict.fromkeys(kwargs.get("reference_images") or []))
+        reference_videos = list(dict.fromkeys(kwargs.get("reference_videos") or []))
         capabilities = capabilities_for(self.config.video_model_type)
 
         # 首尾帧模式只使用两张关键帧；参考图模式继续解析 @资产。
@@ -182,6 +222,18 @@ class SeedanceGenerator(BaseVideoGenerator):
                     "image_url": {"url": img},
                     "role": "reference_image",
                 })
+            for img in extra_reference_images:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": img},
+                    "role": "reference_image",
+                })
+            for video in reference_videos:
+                content.append({
+                    "type": "video_url",
+                    "video_url": {"url": video},
+                    "role": "reference_video",
+                })
 
         payload: dict[str, Any] = {
             "model": self.config.model,
@@ -190,6 +242,7 @@ class SeedanceGenerator(BaseVideoGenerator):
             "resolution": resolution,
             "ratio": aspect_ratio,
             "generate_audio": generate_audio,
+            "return_last_frame": return_last_frame,
             "watermark": False,
         }
         if "mov" in capabilities.output_formats:
@@ -198,17 +251,19 @@ class SeedanceGenerator(BaseVideoGenerator):
         url = f"{self.config.base_url.rstrip('/')}/contents/generations/tasks"
         safe_url = _safe_endpoint(url)
         logger.info(
-            "seedance_outbound endpoint=%s model=%s mode=%s images=%d duration=%s "
-            "resolution=%s ratio=%s format=%s audio=%s",
+            "seedance_outbound endpoint=%s model=%s mode=%s images=%d videos=%d duration=%s "
+            "resolution=%s ratio=%s format=%s audio=%s return_last_frame=%s",
             safe_url,
             self.config.model,
             generation_mode,
-            len(content) - 1,
+            len(ref_images) + len(extra_reference_images),
+            len(reference_videos),
             payload["duration"],
             resolution,
             aspect_ratio,
             output_format,
             generate_audio,
+            return_last_frame,
         )
         async with httpx.AsyncClient(timeout=30) as client:
             try:
@@ -223,13 +278,19 @@ class SeedanceGenerator(BaseVideoGenerator):
 
         request_id = _request_id(resp)
         if resp.status_code >= 400:
+            provider_error = _http_provider_error(resp)
             logger.warning(
-                "seedance_http_error endpoint=%s status=%s request_id=%s",
+                "seedance_http_error endpoint=%s status=%s request_id=%s has_provider_detail=%s",
                 safe_url,
                 resp.status_code,
                 request_id or "-",
+                bool(provider_error),
             )
             suffix = f"，request_id={request_id}" if request_id else ""
+            if provider_error:
+                raise SeedanceGenerationError(
+                    f"视频供应商请求失败：{provider_error}（HTTP {resp.status_code}{suffix}）"
+                )
             raise SeedanceGenerationError(f"视频供应商请求失败（HTTP {resp.status_code}{suffix}）")
         try:
             data = resp.json()
@@ -265,7 +326,12 @@ class SeedanceGenerator(BaseVideoGenerator):
                 raise SeedanceGenerationError("查询视频任务时网络请求失败") from exc
         request_id = _request_id(resp)
         if resp.status_code >= 400:
+            provider_error = _http_provider_error(resp)
             suffix = f"，request_id={request_id}" if request_id else ""
+            if provider_error:
+                raise SeedanceGenerationError(
+                    f"查询视频任务失败：{provider_error}（HTTP {resp.status_code}{suffix}）"
+                )
             raise SeedanceGenerationError(f"查询视频任务失败（HTTP {resp.status_code}{suffix}）")
         try:
             data = resp.json()
@@ -277,6 +343,12 @@ class SeedanceGenerator(BaseVideoGenerator):
 
         if status in ("succeeded", "completed", "success"):
             video_url = _video_url(data)
+            metadata = {
+                "duration": data.get("duration"),
+                "frames": data.get("frames"),
+            }
+            if last_frame_url := _last_frame_url(data):
+                metadata["last_frame_url"] = last_frame_url
             logger.info(
                 "seedance_query_completed task=%s has_video_url=%s request_id=%s",
                 external_task_id,
@@ -287,8 +359,7 @@ class SeedanceGenerator(BaseVideoGenerator):
                 TaskStatusEnum.completed,
                 progress=100,
                 url=video_url,
-                duration=data.get("duration"),
-                frames=data.get("frames"),
+                **metadata,
             )
 
         if status in ("failed", "expired", "cancelled", "canceled"):

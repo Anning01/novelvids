@@ -10,7 +10,9 @@ from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.video import Video
 from models.config import AiModelConfig
-from schemas.video import VideoGenerateRequest
+from schemas.video import VideoGenerateRequest, VideoReferenceMedia
+from services.video.base import VideoProviderError
+from services.video.reference_media import reference_mention_syntax
 from utils.enums import (
     AiTaskTypeEnum,
     AssetTypeEnum,
@@ -68,10 +70,103 @@ async def test_生成视频_提交成功():
     assert video.scene_id == scene.id
     assert video.model_type == VideoModelTypeEnum.seedance.value
     assert video.metadata["model_config_id"] == config.id
+    assert video.metadata["model_name"] == config.name
+    assert video.metadata["model"] == config.model
     assert video.metadata["video_model_type"] == "seedance_2"
     assert video.external_task_id == "ext-task-001"
     assert video.status == TaskStatusEnum.pending.value
+    await scene.refresh_from_db()
+    assert scene.metadata["current_video_id"] == video.id
     print(f"    生成视频成功: video_id={video.id}, task_id={video.external_task_id}")
+
+
+@pytest.mark.asyncio
+async def test_生成视频_供应商提交失败时持久化异常记录():
+    """供应商同步拒绝请求时，失败详情仍能在预览区与状态轨道中恢复。"""
+    scene, config = await _create_scene_with_config()
+    req = VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id)
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.side_effect = VideoProviderError(
+            "视频供应商请求失败：参考图片格式不受支持（HTTP 400，request_id=req-test）"
+        )
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(req)
+
+    assert video.status == TaskStatusEnum.failed.value
+    assert video.external_task_id is None
+    assert video.metadata["error"] == (
+        "视频供应商请求失败：参考图片格式不受支持（HTTP 400，request_id=req-test）"
+    )
+    persisted = await Video.get(id=video.id)
+    assert persisted.status == TaskStatusEnum.failed.value
+    assert persisted.metadata["error"] == video.metadata["error"]
+
+
+@pytest.mark.asyncio
+async def test_生成视频_传递并记录参考图片和视频():
+    image = VideoReferenceMedia(type="image", url="https://cdn.example.com/look.png", width=1024, height=1024)
+    motion = VideoReferenceMedia(type="video", url="https://cdn.example.com/motion.mp4", duration=8, width=1280, height=720)
+    scene, config = await _create_scene_with_config(
+        prompt=f"使用 {reference_mention_syntax('image', image.url)} 和 {reference_mention_syntax('video', motion.url)}"
+    )
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        reference_media=[image, motion],
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "reference-task"
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(req)
+
+    kwargs = mock_gen.submit.call_args.kwargs
+    assert kwargs["reference_images"] == ["https://cdn.example.com/look.png"]
+    assert kwargs["reference_videos"] == ["https://cdn.example.com/motion.mp4"]
+    assert video.metadata["reference_media"][1]["duration"] == 8.0
+
+
+@pytest.mark.asyncio
+async def test_生成视频_未在提示词引用的上传素材不会提交供应商():
+    scene, config = await _create_scene_with_config(prompt="只生成空镜头")
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        reference_media=[
+            VideoReferenceMedia(type="image", url="https://cdn.example.com/person.png"),
+            VideoReferenceMedia(type="video", url="https://cdn.example.com/motion.mp4", duration=8),
+        ],
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "no-reference-task"
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(req)
+
+    kwargs = mock_gen.submit.call_args.kwargs
+    assert kwargs["reference_images"] == []
+    assert kwargs["reference_videos"] == []
+    assert video.metadata["reference_media"] == []
+
+
+@pytest.mark.asyncio
+async def test_首尾帧模式_拒绝全模态参考素材():
+    scene, config = await _create_scene_with_config()
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        generation_mode="keyframes",
+        first_frame_url="https://cdn.example.com/first.png",
+        last_frame_url="https://cdn.example.com/last.png",
+        reference_media=[VideoReferenceMedia(type="image", url="https://cdn.example.com/reference.png")],
+    )
+
+    with pytest.raises(HTTPException, match="不能同时"):
+        await video_controller.generate(req)
 
 
 @pytest.mark.asyncio
@@ -111,7 +206,7 @@ async def test_生成视频_解析资产引用():
     """prompt 含 @资产昵称 时解析并传递 subjects。"""
     novel = await Novel.create(name="Asset Resolve Novel", author="Author")
     chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
-    await Asset.create(
+    asset = await Asset.create(
         novel=novel,
         asset_type=AssetTypeEnum.person.value,
         canonical_name="张三",
@@ -122,6 +217,7 @@ async def test_生成视频_解析资产引用():
         prompt="@张三 在大殿中行走",
         duration=6.0,
     )
+    await scene.assets.add(asset)
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
         name="seedance-2",
@@ -312,6 +408,98 @@ async def test_查询视频状态_已完成():
 
 
 @pytest.mark.asyncio
+async def test_返回尾帧_注入同章下一分镜参考图():
+    scene, config = await _create_scene_with_config()
+    next_scene = await Scene.create(
+        chapter_id=scene.chapter_id,
+        sequence=2,
+        prompt="下一镜头",
+        duration=6.0,
+        metadata={"video_reference_media": [{"type": "image", "url": "https://cdn.example.com/manual.png"}]},
+    )
+    video = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="return-last-frame-task",
+        status=TaskStatusEnum.running.value,
+        metadata={
+            "model_config_id": config.id,
+            "video_model_type": "seedance_2",
+            "return_last_frame": True,
+        },
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory, \
+         patch("controllers.video._download_video", new_callable=AsyncMock) as mock_video_download, \
+         patch("controllers.video._download_last_frame", new_callable=AsyncMock) as mock_frame_download:
+        mock_gen = AsyncMock()
+        mock_gen.query.return_value = {
+            "status": TaskStatusEnum.completed,
+            "progress": 100,
+            "url": "https://cdn.example.com/video.mp4",
+            "metadata": {"last_frame_url": "https://cdn.example.com/last.png"},
+        }
+        mock_factory.return_value = mock_gen
+        mock_video_download.return_value = f"/media/videos/{video.id}.mp4"
+        mock_frame_download.return_value = f"/media/video-references/last-frame-{video.id}.png"
+        result = await video_controller.query_status(video.id)
+
+    await next_scene.refresh_from_db()
+    references = next_scene.metadata["video_reference_media"]
+    assert references[0]["url"] == f"/media/video-references/last-frame-{video.id}.png"
+    assert references[0]["source_scene_id"] == scene.id
+    assert references[1]["url"] == "https://cdn.example.com/manual.png"
+    assert result.metadata["last_frame_injected_scene_id"] == next_scene.id
+
+
+@pytest.mark.asyncio
+async def test_返回尾帧_章节末镜头注入下一章首镜头():
+    scene, config = await _create_scene_with_config()
+    chapter = await Chapter.get(id=scene.chapter_id)
+    next_chapter = await Chapter.create(
+        novel_id=chapter.novel_id,
+        number=chapter.number + 1,
+        name="下一章",
+        content="内容",
+    )
+    next_scene = await Scene.create(
+        chapter=next_chapter,
+        sequence=1,
+        prompt="跨章镜头",
+        duration=6.0,
+    )
+    video = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="cross-chapter-last-frame-task",
+        status=TaskStatusEnum.running.value,
+        metadata={
+            "model_config_id": config.id,
+            "video_model_type": "seedance_2",
+            "return_last_frame": True,
+        },
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory, \
+         patch("controllers.video._download_video", new_callable=AsyncMock) as mock_video_download, \
+         patch("controllers.video._download_last_frame", new_callable=AsyncMock) as mock_frame_download:
+        mock_gen = AsyncMock()
+        mock_gen.query.return_value = {
+            "status": TaskStatusEnum.completed,
+            "progress": 100,
+            "url": "https://cdn.example.com/video.mp4",
+            "metadata": {"last_frame_url": "https://cdn.example.com/cross-last.png"},
+        }
+        mock_factory.return_value = mock_gen
+        mock_video_download.return_value = f"/media/videos/{video.id}.mp4"
+        mock_frame_download.return_value = f"/media/video-references/last-frame-{video.id}.png"
+        await video_controller.query_status(video.id)
+
+    await next_scene.refresh_from_db()
+    assert next_scene.metadata["video_reference_media"][0]["source_scene_id"] == scene.id
+
+
+@pytest.mark.asyncio
 async def test_查询视频状态_已完成不再查询():
     """已完成的视频不再调用外部 API。"""
     scene, config = await _create_scene_with_config()
@@ -432,6 +620,48 @@ async def test_查询视频_配置不存在():
 # =====================================================================
 # CRUD
 # =====================================================================
+
+@pytest.mark.asyncio
+async def test_视频生成记录按时间倒序并可恢复成功版本():
+    scene, _ = await _create_scene_with_config()
+    completed = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/completed.mp4",
+    )
+    failed = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.failed.value,
+        metadata={"error": "provider rejected"},
+    )
+    scene.metadata = {"current_video_id": failed.id, "preserved": True}
+    await scene.save(update_fields=["metadata", "updated_at"])
+
+    history = await video_controller.generation_history(scene.id)
+    selected = await video_controller.select_current(completed.id)
+
+    assert [record.id for record in history] == [failed.id, completed.id]
+    assert selected.id == completed.id
+    await scene.refresh_from_db()
+    assert scene.metadata == {"current_video_id": completed.id, "preserved": True}
+
+
+@pytest.mark.asyncio
+async def test_未完成视频不能设为当前版本():
+    scene, _ = await _create_scene_with_config()
+    pending = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.pending.value,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await video_controller.select_current(pending.id)
+
+    assert exc_info.value.status_code == 400
+    assert "已完成" in exc_info.value.detail
 
 @pytest.mark.asyncio
 async def test_删除视频():

@@ -127,7 +127,7 @@ function selectScene(sceneId: number) {
 }
 
 .scene-status-rail__item.is-completed .scene-status-rail__bar { background: #68d99c; }
-.scene-status-rail__item.is-error .scene-status-rail__bar { background: #f08a9a; }
+.scene-status-rail__item.is-error .scene-status-rail__bar { background: #ef5c70; }
 .scene-status-rail__item.is-pending .scene-status-rail__bar { background: color-mix(in srgb, var(--app-text-muted) 20%, var(--app-surface)); }
 
 .scene-status-rail__item:hover .scene-status-rail__bar,

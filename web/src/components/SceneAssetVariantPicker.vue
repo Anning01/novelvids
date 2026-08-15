@@ -30,7 +30,7 @@ const emit = defineEmits<{
   select: [selection: SceneAssetVariantSelection]
 }>()
 
-const PANEL_MAX_WIDTH = 620
+const PANEL_MAX_WIDTH = 520
 const panel = ref<HTMLElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
 const query = ref('')
@@ -93,7 +93,12 @@ function assetThumbnail(asset: Asset) {
 }
 
 function variantThumbnail(asset: Asset, variant?: AssetVariant) {
-  return variant?.images[0] || asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
+  if (variant) return variant.images[0] || ''
+  return asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
+}
+
+function variantIsAvailable(variant: AssetVariant) {
+  return Boolean(variant.images[0])
 }
 
 function selectAsset(assetId: number) {
@@ -101,6 +106,12 @@ function selectAsset(assetId: number) {
 }
 
 function selectVariant(assetId: number, variantId: number | null) {
+  if (variantId !== null) {
+    const variant = props.assets
+      .find(asset => asset.id === assetId)
+      ?.variants?.find(item => item.id === variantId)
+    if (!variant || !variantIsAvailable(variant)) return
+  }
   emit('select', {
     assetId,
     variantId,
@@ -226,12 +237,14 @@ onBeforeUnmount(() => {
               v-for="variant in visibleVariants"
               :key="variant.id"
               type="button"
-              :class="{ 'is-selected': isSelected(activeAsset.id, variant.id) }"
+              :disabled="!variantIsAvailable(variant)"
+              :aria-disabled="!variantIsAvailable(variant)"
+              :class="{ 'is-selected': isSelected(activeAsset.id, variant.id), 'is-unavailable': !variantIsAvailable(variant) }"
               @click="selectVariant(activeAsset.id, variant.id)"
             >
-              <span class="scene-asset-variant-picker__thumb"><img v-if="variantThumbnail(activeAsset, variant)" :src="variantThumbnail(activeAsset, variant)" alt=""><ImageIcon v-else :size="16" /></span>
-              <span><strong>{{ activeAsset.canonical_name }} · {{ variant.name }}</strong><small>{{ variant.description || '衍生形态' }}</small></span>
-              <span class="scene-asset-variant-picker__check"><Check v-if="isSelected(activeAsset.id, variant.id)" :size="14" /></span>
+              <span class="scene-asset-variant-picker__thumb" :class="{ 'is-empty': !variantIsAvailable(variant) }"><img v-if="variantThumbnail(activeAsset, variant)" :src="variantThumbnail(activeAsset, variant)" alt=""></span>
+              <span><strong>{{ activeAsset.canonical_name }} · {{ variant.name }}</strong><small>{{ variantIsAvailable(variant) ? (variant.description || '衍生形态') : '尚未生成' }}</small></span>
+              <span class="scene-asset-variant-picker__check"><Check v-if="variantIsAvailable(variant) && isSelected(activeAsset.id, variant.id)" :size="14" /></span>
             </button>
             <p v-if="normalizedQuery && !visibleVariants.length">该主体没有匹配的衍生状态，可选择基础形态。</p>
           </div>
@@ -248,7 +261,7 @@ onBeforeUnmount(() => {
 .scene-asset-variant-picker__header label { display: flex; min-width: 0; min-height: 42px; flex: 1; align-items: center; gap: 9px; padding: 0 12px; border-radius: 10px; color: var(--app-text-muted); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
 .scene-asset-variant-picker__header label:focus-within { color: var(--app-accent); box-shadow: inset 0 0 0 2px color-mix(in srgb,var(--app-accent) 36%,transparent); }
 .scene-asset-variant-picker__header input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--app-text); background: transparent; font: inherit; font-size: 12px; }
-.scene-asset-variant-picker__body { display: grid; min-height: 230px; overflow: hidden; grid-template-columns: minmax(220px,42%) minmax(0,1fr); }
+.scene-asset-variant-picker__body { display: grid; min-height: 230px; overflow: hidden; grid-template-columns: minmax(190px,40%) minmax(0,1fr); }
 .scene-asset-variant-picker nav,.scene-asset-variant-picker__variants { min-height: 0; overflow-y: auto; padding: 8px; }
 .scene-asset-variant-picker nav,.scene-asset-variant-picker__variants { scrollbar-width: none; }
 .scene-asset-variant-picker nav::-webkit-scrollbar,.scene-asset-variant-picker__variants::-webkit-scrollbar { display: none; }
@@ -258,11 +271,15 @@ onBeforeUnmount(() => {
 .scene-asset-variant-picker nav button:hover,.scene-asset-variant-picker__variants button:hover { color: var(--app-text); background: var(--app-surface-hover); }
 .scene-asset-variant-picker nav button:active,.scene-asset-variant-picker__variants button:active { transform: scale(.992); }
 .scene-asset-variant-picker nav button.is-active,.scene-asset-variant-picker__variants button.is-selected { color: var(--app-accent); background: var(--app-accent-soft); }
+.scene-asset-variant-picker__variants button.is-unavailable { color: var(--app-text-muted); background: transparent; cursor: not-allowed; opacity: .58; }
+.scene-asset-variant-picker__variants button.is-unavailable:hover { color: var(--app-text-muted); background: transparent; }
+.scene-asset-variant-picker__variants button.is-unavailable:active { transform: none; }
 .scene-asset-variant-picker button > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
 .scene-asset-variant-picker button strong,.scene-asset-variant-picker button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scene-asset-variant-picker button strong { font-size: 12px; font-weight: 650; }
 .scene-asset-variant-picker button small { color: var(--app-text-muted); font-size: 9px; font-weight: 450; }
 .scene-asset-variant-picker__thumb { display: grid; width: 38px; height: 38px; overflow: hidden; place-items: center; border-radius: 8px; color: var(--app-text-muted); background: var(--app-surface-muted); }
+.scene-asset-variant-picker__thumb.is-empty { box-shadow: inset 0 0 0 1px var(--app-border); }
 .scene-asset-variant-picker__thumb img { width: 100%; height: 100%; object-fit: cover; }
 .scene-asset-variant-picker__selected-mark { color: var(--app-accent); }
 .scene-asset-variant-picker__check { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 6px; color: #fff; background: transparent; box-shadow: inset 0 0 0 1px var(--app-border-strong); }

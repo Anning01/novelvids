@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Check, ChevronDown } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { claimExclusivePopover } from '@/shared/exclusivePopover'
 
 const props = defineProps<{
   modelValue: string
@@ -16,34 +17,48 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const container = ref<HTMLElement | null>(null)
 const open = ref(false)
 const openAbove = ref(false)
+const exclusiveSource = Symbol('workbench-select')
+let releaseExclusive: (() => void) | null = null
 const selectedOption = computed(() => props.options.find(option => option.value === props.modelValue))
 
 function updatePlacement() {
   const trigger = container.value?.querySelector<HTMLElement>('.workbench-select__trigger')
-  const frame = container.value?.closest<HTMLElement>('.workbench-node-frame')
+  const boundary = container.value?.closest<HTMLElement>('.workbench-prompt-panel, .workbench-node-frame')
   if (!trigger) return
   const triggerRect = trigger.getBoundingClientRect()
-  const frameRect = frame?.getBoundingClientRect()
+  const boundaryRect = boundary?.getBoundingClientRect()
   const menuHeight = Math.min(props.options.length * 34 + 12, 220)
-  const lowerBoundary = Math.min(window.innerHeight, frameRect?.bottom ?? window.innerHeight)
-  const upperBoundary = Math.max(0, frameRect?.top ?? 0)
+  const lowerBoundary = Math.min(window.innerHeight, boundaryRect?.bottom ?? window.innerHeight)
+  const upperBoundary = Math.max(0, boundaryRect?.top ?? 0)
   const spaceBelow = lowerBoundary - triggerRect.bottom
   const spaceAbove = triggerRect.top - upperBoundary
   openAbove.value = spaceBelow < menuHeight && spaceAbove > spaceBelow
 }
 
+function beginExclusiveSession() {
+  releaseExclusive?.()
+  releaseExclusive = claimExclusivePopover(exclusiveSource, close)
+}
+
 function toggle() {
-  if (!open.value) updatePlacement()
-  open.value = !open.value
+  if (open.value) {
+    close()
+    return
+  }
+  updatePlacement()
+  beginExclusiveSession()
+  open.value = true
 }
 
 function select(value: string) {
   emit('update:modelValue', value)
-  open.value = false
+  close()
 }
 
 function close() {
   open.value = false
+  releaseExclusive?.()
+  releaseExclusive = null
 }
 
 function handleFocusOut(event: FocusEvent) {
@@ -53,6 +68,7 @@ function handleFocusOut(event: FocusEvent) {
 
 async function openAndFocus(last = false) {
   updatePlacement()
+  beginExclusiveSession()
   open.value = true
   await nextTick()
   const options = [...(container.value?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [])]
@@ -71,6 +87,8 @@ function closeAndFocus() {
   close()
   container.value?.querySelector<HTMLButtonElement>('.workbench-select__trigger')?.focus()
 }
+
+onBeforeUnmount(close)
 </script>
 
 <template>

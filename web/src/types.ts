@@ -28,6 +28,7 @@ export interface WorkbenchCapabilities {
 export interface Novel { id: number; name: string; author?: string; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
+export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; angle_image_1?: string; angle_image_2?: string; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
 export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; images: string[]; error_message?: string; model?: string; clarity?: string; aspect_ratio?: string; output_format?: string; created_at: string; finished_at?: string }
 export interface AssetReferencePromptPreview { prompt: string; prompt_language: 'zh' | 'en' }
@@ -52,7 +53,55 @@ export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'gpt_image_2
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5'
-export interface VideoGenerationCapabilities { resolutions: string[]; aspect_ratios: string[]; aspect_ratios_by_mode: Record<string, string[]>; output_formats: string[]; generation_modes: string[]; duration_min: number; duration_max: number; supports_auto_duration: boolean; supports_audio: boolean; max_reference_images: number; default_resolution: string; default_aspect_ratio: string; default_output_format: string; default_generate_audio: boolean }
+export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
+export interface VideoInputImageReference {
+  number: number
+  url: string
+  label: string
+  source: 'asset' | 'upload'
+  assetId?: number
+  mediaIndex?: number
+  assetImageIndex?: number
+}
+export interface VideoGenerationCapabilities {
+  resolutions: string[]
+  aspect_ratios: string[]
+  aspect_ratios_by_mode: Record<string, string[]>
+  output_formats: string[]
+  generation_modes: string[]
+  duration_min: number
+  duration_max: number
+  supports_auto_duration: boolean
+  supports_audio: boolean
+  supports_return_last_frame: boolean
+  max_reference_images: number
+  max_reference_videos: number
+  max_reference_audios: number
+  reference_video_duration_max: number
+  reference_video_total_duration_max: number
+  reference_audio_duration_max: number
+  reference_audio_total_duration_max: number
+  reference_image_formats: string[]
+  reference_video_formats: string[]
+  reference_video_codecs: string[]
+  reference_video_audio_codecs: string[]
+  reference_video_resolutions: string[]
+  reference_image_max_size_mb: number
+  reference_video_max_size_mb: number
+  reference_media_duration_min: number
+  reference_media_ratio_min: number
+  reference_media_ratio_max: number
+  reference_media_side_min: number
+  reference_media_side_max: number
+  reference_video_pixels_min: number
+  reference_video_pixels_max: number
+  reference_video_fps_min: number
+  reference_video_fps_max: number
+  default_resolution: string
+  default_aspect_ratio: string
+  default_output_format: string
+  default_generate_audio: boolean
+}
 export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; capabilities: VideoGenerationCapabilities }
 export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; max_context_characters?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }

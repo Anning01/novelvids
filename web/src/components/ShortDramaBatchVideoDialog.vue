@@ -7,7 +7,6 @@ import AppScrollArea from '@/components/AppScrollArea.vue'
 export interface BatchVideoSceneOption {
   id: number
   sequence: number
-  cost: number
   disabled?: boolean
   disabledReason?: string
 }
@@ -29,10 +28,6 @@ const allSelected = computed(() => (
   Boolean(eligibleScenes.value.length)
   && eligibleScenes.value.every(scene => selectedIds.value.includes(scene.id))
 ))
-const selectedCost = computed(() => props.scenes.reduce((total, scene) => (
-  selectedIds.value.includes(scene.id) ? total + scene.cost : total
-), 0))
-
 function close() {
   emit('close')
 }
@@ -132,7 +127,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
                 class="batch-video-dialog__submit"
                 variant="primary"
                 :disabled="!selectedIds.length"
-                :aria-label="`生成所选 ${selectedIds.length} 条分镜视频，预计消耗 ${selectedCost} 点`"
+                :aria-label="`生成所选 ${selectedIds.length} 条分镜视频`"
                 @click="submit"
               >
                 <Sparkles :size="15" />开始

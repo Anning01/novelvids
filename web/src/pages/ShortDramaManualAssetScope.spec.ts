@@ -165,11 +165,12 @@ it('switches the settings cards and counts between all project assets and curren
   expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
 })
 
-it('uses image-first cards with five hover actions and opens upload in the drawer', async () => {
+it('uses image-first cards with four hover actions and opens upload in the drawer', async () => {
   const wrapper = await mountInCurrentChapterScope()
   const card = wrapper.get('.asset-card')
 
-  expect(card.findAll('.asset-card-action')).toHaveLength(5)
+  expect(card.findAll('.asset-card-action')).toHaveLength(4)
+  expect(card.find('[aria-label*="衍生形态"]').exists()).toBe(false)
   expect(card.get('.asset-visual').classes()).toContain('is-empty')
   expect(card.get('.asset-card-info p').text()).toMatch(/\.\.\.$/)
   const styles = parse(manualPageSource).descriptor.styles.map(block => block.content).join('\n')

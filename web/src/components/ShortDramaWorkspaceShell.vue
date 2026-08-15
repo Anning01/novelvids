@@ -165,7 +165,9 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
 
 .is-immersive { height: 100vh; overflow: hidden; }
 .is-immersive .short-drama-workspace-header { right: 0; min-height: 0; padding: 14px 18px; border: 0; pointer-events: none; background: transparent; box-shadow: none; backdrop-filter: none; }
-.is-immersive .short-drama-project-identity,.is-immersive .short-drama-header-end { pointer-events: auto; }
+.is-immersive .short-drama-project-identity { pointer-events: none; }
+.is-immersive .short-drama-project-identity > *,.is-immersive .short-drama-header-end { pointer-events: auto; }
+.is-immersive :deep(.workbench-toolbar) { z-index: 40; }
 .is-immersive .short-drama-workspace-body { height: 100vh; min-height: 0; padding-top: 0; }
 .is-immersive .short-drama-back { color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631,0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
 

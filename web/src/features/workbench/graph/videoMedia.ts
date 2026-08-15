@@ -39,6 +39,16 @@ export function videoDurationSeconds(video: Video) {
   return numberValue(video, 'duration_seconds', 'durationSeconds', 'duration')
 }
 
+export function videoResolution(video: Video) {
+  return stringValue(video, 'resolution', 'video_resolution', 'videoResolution')
+}
+
+export function videoPixelSize(video: Video) {
+  const width = numberValue(video, 'width', 'video_width', 'videoWidth')
+  const height = numberValue(video, 'height', 'video_height', 'videoHeight')
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
 export function videoDownloadFilename(video: Video, title: string) {
   const mimeType = stringValue(video, 'mime_type', 'mimeType')
   const extension = mimeType.includes('webm')

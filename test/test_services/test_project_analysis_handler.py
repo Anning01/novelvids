@@ -134,8 +134,12 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
     assert character.is_global is False
     assert character.source_chapters == [1, 2]
     assert character.last_updated_chapter == 0
-    assert character.base_traits == STRUCTURED_PERSON_TRAITS
+    assert character.base_traits.startswith(
+        "Task: Create an upper-body, front-facing, eye-level close-up"
+    )
+    assert STRUCTURED_PERSON_TRAITS in character.base_traits
     assert character.metadata["role"] == "主角"
+    assert character.metadata["reference_layout"] == "character_turnaround"
 
     messages = llm_client.create.await_args.kwargs["messages"]
     system_prompt = messages[0]["content"]

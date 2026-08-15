@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { ImageGenerationCapabilities } from '@/types'
+import { claimExclusivePopover } from '@/shared/exclusivePopover'
 
 export interface ImageGenerationParameters {
   clarity: string
@@ -27,7 +28,11 @@ const panel = ref<HTMLElement | null>(null)
 const open = ref(false)
 const opensUp = ref(true)
 const placement = ref({ top: 0, left: 0, width: 520 })
+const panelThemeStyle = ref<Record<string, string>>({})
+const exclusiveSource = Symbol('image-parameter-picker')
+let releaseExclusive: (() => void) | null = null
 const panelStyle = computed(() => ({
+  ...panelThemeStyle.value,
   top: `${placement.value.top}px`,
   left: `${placement.value.left}px`,
   width: `${placement.value.width}px`,
@@ -70,18 +75,53 @@ function updatePlacement() {
   }
 }
 
+function captureTriggerTheme() {
+  const element = root.value
+  if (!element) return
+  const style = getComputedStyle(element)
+  const themeValue = (workflowVariable: string, appVariable: string, fallback: string) => (
+    style.getPropertyValue(workflowVariable).trim()
+    || style.getPropertyValue(appVariable).trim()
+    || fallback
+  )
+  panelThemeStyle.value = {
+    '--app-surface': themeValue('--vf-bg-elevated', '--app-surface', '#fff'),
+    '--app-surface-raised': themeValue('--vf-bg-elevated', '--app-surface-raised', '#fff'),
+    '--app-surface-muted': themeValue('--vf-bg-muted', '--app-surface-muted', '#f2f3f7'),
+    '--app-border': themeValue('--vf-border-subtle', '--app-border', '#e3e5ec'),
+    '--app-border-strong': themeValue('--vf-border-strong', '--app-border-strong', '#d3d6e0'),
+    '--app-text': themeValue('--vf-text-primary', '--app-text', '#303442'),
+    '--app-text-secondary': themeValue('--vf-text-secondary', '--app-text-secondary', '#656b7b'),
+    '--app-text-muted': themeValue('--vf-text-tertiary', '--app-text-muted', '#9398a8'),
+    '--app-accent': themeValue('--vf-accent', '--app-accent', '#5b5cf6'),
+    '--app-accent-soft': themeValue('--vf-bg-tint', '--app-accent-soft', '#eeefff'),
+    'color-scheme': style.colorScheme.trim().startsWith('dark') ? 'dark' : 'light',
+  }
+}
+
+function close() {
+  open.value = false
+  releaseExclusive?.()
+  releaseExclusive = null
+}
+
 async function toggle() {
   if (props.disabled || !props.capabilities) return
-  open.value = !open.value
   if (open.value) {
-    await nextTick()
-    updatePlacement()
+    close()
+    return
   }
+  captureTriggerTheme()
+  releaseExclusive?.()
+  releaseExclusive = claimExclusivePopover(exclusiveSource, close)
+  open.value = true
+  await nextTick()
+  updatePlacement()
 }
 
 function closeFromOutside(event: PointerEvent) {
   const target = event.target as Node
-  if (!root.value?.contains(target) && !panel.value?.contains(target)) open.value = false
+  if (!root.value?.contains(target) && !panel.value?.contains(target)) close()
 }
 
 onMounted(() => {
@@ -90,6 +130,7 @@ onMounted(() => {
   window.addEventListener('scroll', updatePlacement, true)
 })
 onUnmounted(() => {
+  close()
   window.removeEventListener('pointerdown', closeFromOutside)
   window.removeEventListener('resize', updatePlacement)
   window.removeEventListener('scroll', updatePlacement, true)
@@ -98,7 +139,7 @@ onUnmounted(() => {
 
 <template>
   <div ref="root" class="image-parameters" :class="{ 'is-open': open, 'is-compact': compact }">
-    <button type="button" class="image-parameters__trigger" :disabled="disabled || !capabilities" aria-haspopup="dialog" :aria-expanded="open" @click="toggle">
+    <button type="button" class="image-parameters__trigger" :disabled="disabled || !capabilities" aria-label="设置图片生成参数" aria-haspopup="dialog" :aria-expanded="open" @click="toggle">
       <i class="image-parameters__trigger-ratio" :style="ratioStyle(modelValue.aspectRatio, 20, 15, 6)" data-ratio-icon aria-hidden="true" />
       <span>{{ summary }}</span>
       <ChevronDown :size="15" aria-hidden="true" />
@@ -133,10 +174,10 @@ onUnmounted(() => {
 
 <style scoped>
 .image-parameters { position: relative; min-width: 220px; }
-.image-parameters__trigger { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--app-border); border-radius: 10px; color: var(--app-text-secondary); background: var(--app-surface); box-shadow: 0 1px 2px rgb(32 36 49 / 3%); cursor: pointer; font: inherit; font-size: 11px; }
-.image-parameters__trigger:hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
-.image-parameters.is-open .image-parameters__trigger { border-color: var(--app-accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
-.image-parameters__trigger:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.image-parameters__trigger { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--vf-border-subtle,var(--app-border,#e3e5ec)); border-radius: 10px; color: var(--vf-text-secondary,var(--app-text-secondary,#656b7b)); background: var(--vf-bg-elevated,var(--app-surface,#fff)); box-shadow: 0 1px 2px rgb(32 36 49 / 3%); cursor: pointer; font: inherit; font-size: 11px; }
+.image-parameters__trigger:hover { border-color: var(--vf-border-strong,var(--app-border-strong,#d3d6e0)); color: var(--vf-text-primary,var(--app-text,#303442)); background: var(--vf-bg-muted,var(--app-surface-hover,#f7f7f9)); }
+.image-parameters.is-open .image-parameters__trigger { border-color: var(--vf-accent,var(--app-accent,#5b5cf6)); box-shadow: 0 0 0 3px color-mix(in srgb,var(--vf-accent,var(--app-accent,#5b5cf6)) 10%,transparent); }
+.image-parameters__trigger:focus-visible { outline: 2px solid var(--vf-accent,var(--app-accent,#5b5cf6)); outline-offset: 2px; }
 .image-parameters__trigger:disabled { cursor: not-allowed; opacity: .5; }
 .image-parameters__trigger-ratio { display: block; flex: 0 0 auto; box-sizing: border-box; border: 2px solid currentColor; border-radius: 2px; }
 .image-parameters__trigger > span { min-width: 0; flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }

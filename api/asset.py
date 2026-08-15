@@ -7,6 +7,7 @@ from schemas.asset import (
     AssetBriefOut,
     AssetCreate,
     AssetGenerationRecordOut,
+    AssetImageEditCreate,
     AssetMergeOut,
     AssetMergeRequest,
     AssetOut,
@@ -106,6 +107,15 @@ async def get_asset_generation_history(asset_id: int):
 
 
 @router.post(
+    "/{asset_id}/generation-history/edit",
+    summary="保存资产图片标注并创建生成记录",
+    response_model=ResponseSchema[AssetOut],
+)
+async def record_asset_image_edit(asset_id: int, payload: AssetImageEditCreate):
+    return ResponseSchema(data=await asset_controller.record_image_edit(asset_id, payload))
+
+
+@router.post(
     "/{asset_id}/generation-history/{task_id}/restore",
     summary="将历史生图结果设为当前图片",
     response_model=ResponseSchema[AssetOut],
@@ -120,7 +130,10 @@ async def restore_asset_generation(asset_id: int, task_id: UUID):
     response_model=ResponseSchema[list[AssetVariantOut]],
 )
 async def get_asset_variants(asset_id: int):
-    return ResponseSchema(data=await asset_controller.list_variants(asset_id))
+    variants = await asset_controller.list_variants(asset_id)
+    return ResponseSchema(
+        data=[AssetVariantOut.model_validate(variant) for variant in variants]
+    )
 
 
 @router.post(
@@ -157,11 +170,14 @@ async def assign_asset_variant_to_chapter(
     variant_id: int,
     payload: AssetVariantChapterAssignment,
 ):
-    return ResponseSchema(data=await asset_controller.assign_variant_to_chapter(
+    variants = await asset_controller.assign_variant_to_chapter(
         asset_id,
         variant_id,
         payload.chapter_number,
-    ))
+    )
+    return ResponseSchema(
+        data=[AssetVariantOut.model_validate(variant) for variant in variants]
+    )
 
 
 @router.delete(

@@ -120,7 +120,7 @@ onUnmounted(() => {
           <img v-if="selectedOption?.image" :src="selectedOption.image" alt="" />
         </slot>
       </span>
-      <span class="app-select__value">{{ selectedOption?.label }}</span>
+      <span class="app-select__value" :title="selectedOption?.label">{{ selectedOption?.label }}</span>
       <ChevronDown class="app-select__chevron" :size="14" />
     </AppButton>
 
@@ -150,7 +150,7 @@ onUnmounted(() => {
               <img v-if="option.image" :src="option.image" alt="" />
             </slot>
           </span>
-          <span>{{ option.label }}</span>
+          <span :title="option.label">{{ option.label }}</span>
           <Check v-if="option.value === modelValue" class="app-select__check" :size="15" />
         </AppButton>
       </div>

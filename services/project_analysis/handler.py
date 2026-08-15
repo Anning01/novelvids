@@ -21,6 +21,7 @@ from prompts.extraction import (
     SINGLE_CHARACTER_VISUAL_RULES,
     ensure_ordered_trait_labels,
 )
+from prompts.reference import render_default_asset_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
 from services.image_generation import generate_images
@@ -146,7 +147,12 @@ async def _save_cover(image: Any, novel_id: int) -> str:
     return f"/media/covers/{filename}"
 
 
-async def _sync_character_assets(novel: Novel, characters: list[KeyCharacter], chapter_count: int) -> None:
+async def _sync_character_assets(
+    novel: Novel,
+    characters: list[KeyCharacter],
+    chapter_count: int,
+    prompt_language: str,
+) -> None:
     for character in characters:
         name = character.name.strip()
         if not name:
@@ -162,12 +168,20 @@ async def _sync_character_assets(novel: Novel, characters: list[KeyCharacter], c
         values = {
             "aliases": character.aliases,
             "description": character.description,
-            "base_traits": character.base_traits,
+            "base_traits": render_default_asset_prompt(
+                asset_type="person",
+                visual_traits=character.base_traits,
+                prompt_language=prompt_language,
+            ),
             "is_global": False,
             "source_chapters": chapter_numbers,
             # 项目分析只建立全书人物档案，不代表某一章的增量提取版本。
             "last_updated_chapter": 0,
-            "metadata": {"role": character.role, "analysis_source": "project_analysis"},
+            "metadata": {
+                "role": character.role,
+                "analysis_source": "project_analysis",
+                "reference_layout": "character_turnaround",
+            },
         }
         if asset is None:
             await Asset.create(
@@ -227,7 +241,12 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             supports_json_output=llm_config.supports_json_output,
         )
 
-        await _sync_character_assets(novel, analysis.key_characters, len(chapters))
+        await _sync_character_assets(
+            novel,
+            analysis.key_characters,
+            len(chapters),
+            prompt_language,
+        )
 
         cover_selection = validate_selection(
             image_config.image_model_type,

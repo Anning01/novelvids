@@ -8,5 +8,5 @@ const path = computed(() => getBezierPath(props)[0]);
 </script>
 
 <template>
-  <BaseEdge :id="id" :path="path" class="workbench-edge workbench-edge--sequence" :aria-label="label || '镜头顺序连线'" />
+  <BaseEdge :id="id" :path="path" class="workbench-edge workbench-edge--sequence" :aria-label="label || '视频顺序连线'" />
 </template>

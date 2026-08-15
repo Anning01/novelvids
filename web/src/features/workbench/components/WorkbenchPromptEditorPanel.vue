@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue';
-import type { WorkbenchPromptAction } from '../prompt/promptActionRegistry';
+import type { WorkbenchPromptAction, WorkbenchPromptActionControl } from '../prompt/promptActionRegistry';
 import type { WorkbenchPromptEditor } from '../types/workbenchTypes';
 import type { MaterialMention, MaterialMentionOption } from './materialMentionTypes';
 import { LoaderCircle, Maximize2, Minimize2, Play, X } from 'lucide-vue-next';
@@ -34,6 +34,10 @@ let animationFrame = 0;
 
 const promptLength = computed(() => Array.from(props.modelValue.trim()).length);
 const promptActions = computed(() => actionRegistry?.actions.get(props.nodeKey) ?? []);
+const promptControls = computed(() => promptActions.value.flatMap((action) => {
+  const controls = [...(action.control ? [action.control] : []), ...(action.controls ?? [])];
+  return controls.filter(control => !control.visible || unref(control.visible));
+}));
 
 function actionBusy(action: WorkbenchPromptAction) {
   return unref(action.busy);
@@ -45,6 +49,14 @@ function actionEnabled(action: WorkbenchPromptAction) {
 
 function actionProgress(action: WorkbenchPromptAction) {
   return action.progress ? unref(action.progress) : null;
+}
+
+function controlProps(control: WorkbenchPromptActionControl) {
+  return control.props ? unref(control.props) : {};
+}
+
+function controlModelValue(control: WorkbenchPromptActionControl) {
+  return unref(control.modelValue);
 }
 
 function addMaterial(material: MaterialMentionOption, prompt: string) {
@@ -87,7 +99,7 @@ function updatePosition() {
     return;
   }
   const anchorRect = anchor.getBoundingClientRect();
-  const gap = 12;
+  const gap = 6;
   const width = Math.min(960, Math.max(360, window.innerWidth * 0.4), window.innerWidth - viewportPadding * 2);
   const left = anchorRect.left + anchorRect.width / 2 - width / 2;
   const top = anchorRect.bottom + gap;
@@ -204,7 +216,18 @@ onBeforeUnmount(() => {
       />
 
       <footer class="workbench-prompt-panel__footer">
-        <span class="workbench-prompt-panel__count">{{ promptLength }} 字</span>
+        <div class="workbench-prompt-panel__footer-start">
+          <span class="workbench-prompt-panel__count">{{ promptLength }} 字</span>
+          <component
+            :is="control.component"
+            v-for="control in promptControls"
+            :key="control.id"
+            v-bind="controlProps(control)"
+            :model-value="controlModelValue(control)"
+            v-on="control.events ?? {}"
+            @update:model-value="control.updateModelValue"
+          />
+        </div>
         <div v-if="promptActions.length" class="workbench-prompt-panel__footer-actions" aria-label="Prompt 操作">
           <button
             v-for="action in promptActions"

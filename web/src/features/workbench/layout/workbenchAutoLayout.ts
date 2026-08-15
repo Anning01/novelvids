@@ -28,7 +28,6 @@ function sectionMemberKeys(node: WorkbenchNode) {
 
 /** Higher affinity means the target column should follow its source sooner. */
 export const WORKBENCH_LAYOUT_RELATIONSHIP_RULES: WorkbenchLayoutRelationshipRule[] = [
-  { sourceFamily: 'chapter', targetFamily: 'shot', affinity: 400 },
   { sourceFamily: 'asset', targetFamily: 'shot', affinity: 220 },
   { sourceFamily: 'shot', targetFamily: 'result', affinity: 360 },
 ];
@@ -113,7 +112,7 @@ export function buildWorkbenchGroupedAutoLayout(
   const groupedMemberKeys = new Set(sections.flatMap(sectionMemberKeys));
   const layoutUnits = nodes.filter(node =>
     node.kind === 'section'
-    || (node.kind !== 'note' && !groupedMemberKeys.has(node.key)),
+    || (!['chapter', 'note'].includes(node.kind) && !groupedMemberKeys.has(node.key)),
   );
   const unitLayout = buildWorkbenchAutoLayout(layoutUnits, edges, options);
   const result: Record<string, Point> = {};
@@ -367,8 +366,8 @@ function orderedLanes(
   const unresolvedIncoming = new Map(lanes.map(lane => [lane, new Set(incoming.get(lane))]));
   const result: string[] = [];
 
-  // Keep the chapter entry point first, then order reusable visual assets by
-  // stable category lanes before topology affinity is applied.
+  // Order reusable visual assets by stable category lanes before topology
+  // affinity is applied. Chapter and note nodes are excluded by grouped layout.
   const preludeLanes = lanes
     .flatMap((lane) => {
       const order = lanePreludeOrder(laneNodes.get(lane)!);

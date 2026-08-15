@@ -17,6 +17,15 @@ export const assetTypePresentationOptions: AssetTypePresentationOption[] = [
   { value: String(AssetTypeEnum.STYLE), label: '风格', icon: Palette },
 ]
 
+// PRODUCT and STYLE remain in the presentation map so legacy records keep
+// their original label and icon. The current workflow only creates these
+// three supported asset categories.
+export const editableAssetTypeOptions = assetTypePresentationOptions.filter(option => [
+  String(AssetTypeEnum.PERSON),
+  String(AssetTypeEnum.ITEM),
+  String(AssetTypeEnum.SCENE),
+].includes(option.value))
+
 export function assetTypeIconFor(value: string | number) {
   return assetTypePresentationOptions.find(option => option.value === String(value))?.icon ?? Box
 }

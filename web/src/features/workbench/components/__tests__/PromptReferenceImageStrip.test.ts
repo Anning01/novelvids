@@ -7,7 +7,8 @@ const imageMention: MaterialMention = {
   nodeKey: 'asset-character',
   connectionKey: 'edge-character',
   edgeKey: 'edge-character:image:0',
-  name: '将军',
+  name: '将军-图1',
+  sourceName: '将军',
   prompt: '古代将军',
   previewUrl: 'https://cdn.example.com/general.jpg',
   hasImage: true,
@@ -21,18 +22,24 @@ describe('promptReferenceImageStrip', () => {
       props: { mentions: [imageMention] },
     });
 
-    const thumbnail = screen.getByRole('button', { name: '参考图片 1：将军，双击聚焦来源节点' });
+    const thumbnail = screen.getByRole('button', { name: '参考图片 1：将军-图1，双击聚焦来源节点' });
     expect(thumbnail).toHaveTextContent('1');
     expect(screen.queryByLabelText('将军大图预览')).not.toBeInTheDocument();
 
     await fireEvent.mouseEnter(thumbnail.closest('li')!);
-    expect(screen.getByLabelText('将军大图预览')).toBeInTheDocument();
+    const preview = screen.getByLabelText('将军大图预览');
+    expect(preview).toBeInTheDocument();
+    expect(preview.closest('.workbench-prompt-references-viewport')).toBeNull();
+    expect(screen.getByText('将军')).toBeInTheDocument();
     expect(screen.getByText('双击可聚焦至节点')).toBeInTheDocument();
 
     await fireEvent.dblClick(thumbnail);
     expect(view.emitted().focus?.[0]).toEqual(['asset-character']);
 
-    await fireEvent.click(screen.getByRole('button', { name: '移除参考图片 1：将军' }));
+    await fireEvent.keyDown(thumbnail, { key: 'Enter' });
+    expect(view.emitted().focus?.[1]).toEqual(['asset-character']);
+
+    await fireEvent.click(screen.getByRole('button', { name: '移除参考图片 1：将军-图1' }));
     expect(view.emitted().remove?.[0]).toEqual(['edge-character']);
   });
 

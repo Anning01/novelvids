@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, Chapter, DigitalHuman, GeneralConfig, ImageGenerationModel, Novel, PaginationResponse, Scene, SingleResponse, Video, VideoGenerationModel, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, Chapter, DigitalHuman, GeneralConfig, ImageGenerationModel, Novel, PaginationResponse, Scene, SingleResponse, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 const BASE = '/api'
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -61,9 +61,11 @@ export const api = {
   latestExtraction: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/chapter/extract/${chapterId}/latest`),
   assets: (novelId: number, page = 1, pageSize = 100, chapterId?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, chapter_id: chapterId })}`),
   referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),
-  projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
+  projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24, assetType?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, asset_type: assetType, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
+  publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, is_global: true, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
   assetGenerationHistory: (id: number) => request<SingleResponse<AssetGenerationRecord[]>>(`/asset/${id}/generation-history`),
+  recordAssetImageEdit: (id: number, data: { image_url: string; source_image_url?: string; output_format?: string }) => request<SingleResponse<Asset>>(`/asset/${id}/generation-history/edit`, { method: 'POST', body: JSON.stringify(data) }),
   restoreAssetGeneration: (assetId: number, taskId: string) => request<SingleResponse<Asset>>(`/asset/${assetId}/generation-history/${taskId}/restore`, { method: 'POST' }),
   assetLibrary: (assetType: number, page = 1, pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, page, page_size: pageSize, sort: '-id' })}`),
   createAsset: (data: Partial<Asset> & { novel_id: number; chapter_id?: number; asset_type: number; canonical_name: string }) => request<SingleResponse<Asset>>('/asset', { method: 'POST', body: JSON.stringify(data) }),
@@ -85,7 +87,18 @@ export const api = {
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
   generateScenes: (chapterId: number) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
-  generateVideo: (sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean } = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
+  videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
+  selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
+  generateVideo: (sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean; return_last_frame?: boolean; reference_media?: VideoReferenceMedia[] } = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
+  async uploadVideoReference(file: File, modelConfigId: number) {
+    const data = new FormData()
+    data.append('model_config_id', String(modelConfigId))
+    data.append('file', file)
+    const response = await fetch(`${BASE}/video/reference/upload`, { method: 'POST', body: data })
+    const payload = await response.json()
+    if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || '参考素材上传失败')
+    return payload.data as VideoReferenceMedia
+  },
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),

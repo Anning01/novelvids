@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from controllers.video import video_controller
 from schemas.video import (
@@ -8,7 +8,12 @@ from schemas.video import (
     VideoQueryOut,
     VideoMergeRequest,
     VideoMergeOut,
+    VideoReferenceMedia,
 )
+from controllers.config import ai_model_config_controller
+from services.video.capabilities import capabilities_for
+from services.video.reference_media import save_reference_upload
+from utils.enums import AiTaskTypeEnum
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
@@ -16,10 +21,23 @@ router = APIRouter()
 
 
 @router.post("/generate/", summary="提交视频生成", response_model=ResponseSchema[VideoOut])
-async def generate_video(req: VideoGenerateRequest):
+async def generate_video(req: VideoGenerateRequest, request: Request):
     """提交视频生成请求，返回 Video 记录"""
-    video = await video_controller.generate(req)
+    video = await video_controller.generate(req, media_base_url=str(request.base_url).rstrip("/"))
     return ResponseSchema(data=video)
+
+
+@router.post("/reference/upload", summary="上传视频生成参考素材", response_model=ResponseSchema[VideoReferenceMedia])
+async def upload_video_reference(
+    model_config_id: int = Form(..., ge=1),
+    file: UploadFile = File(...),
+):
+    config = await ai_model_config_controller.get_active(
+        AiTaskTypeEnum.video.value,
+        model_config_id,
+    )
+    capabilities = capabilities_for(config.video_model_type)
+    return ResponseSchema(data=await save_reference_upload(file, capabilities))
 
 
 @router.get("/query/{video_id}", summary="查询视频生成状态", response_model=ResponseSchema[VideoQueryOut])
@@ -27,6 +45,26 @@ async def query_video(video_id: int):
     """轮询查询视频生成进度"""
     video = await video_controller.query_status(video_id)
     return ResponseSchema(data=video)
+
+
+@router.get(
+    "/scene/{scene_id}/generation-history",
+    summary="获取分镜视频生成记录",
+    response_model=ResponseSchema[list[VideoOut]],
+)
+async def get_video_generation_history(scene_id: int):
+    videos = await video_controller.generation_history(scene_id)
+    return ResponseSchema(data=[VideoOut.model_validate(video) for video in videos])
+
+
+@router.post(
+    "/{video_id}/select-current",
+    summary="将视频生成记录设为当前版本",
+    response_model=ResponseSchema[VideoOut],
+)
+async def select_current_video(video_id: int):
+    video = await video_controller.select_current(video_id)
+    return ResponseSchema(data=VideoOut.model_validate(video))
 
 
 @router.get("", summary="获取视频列表", response_model=ResponseSchema[PaginationResponse[VideoBriefOut]])

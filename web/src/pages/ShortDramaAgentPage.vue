@@ -10,14 +10,12 @@ import {
   Clapperboard,
   FileText,
   Film,
-  Image,
   MonitorPlay,
   Pencil,
   RefreshCw,
   Save,
   Sparkles,
   UsersRound,
-  Video,
   X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
@@ -38,7 +36,7 @@ import type {
   ChapterEditDraft,
   ProjectAnalysisDraft,
 } from '@/shared/projectAnalysisEditor'
-import type { AiModelConfig, AiTask, Asset, Chapter, Novel } from '@/types'
+import type { AiTask, Asset, Chapter, Novel } from '@/types'
 
 interface AgentProjectMeta {
   projectId?: number
@@ -91,7 +89,6 @@ const novel = ref<Novel | null>(null)
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
-const configs = ref<AiModelConfig[]>([])
 const activeEpisode = ref(1)
 const showingAllCharacters = ref(false)
 const analysisTask = ref<AiTask | null>(null)
@@ -153,20 +150,6 @@ const analysisStatus = computed(() => {
   return '准备分析'
 })
 const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', '#8d73db']
-const activeModels = computed(() => ({
-  llm: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).some(value => [1, 3, 5].includes(value))),
-  image: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).includes(2)),
-  video: configs.value.find(item => item.is_active && (item.task_types?.length ? item.task_types : [item.task_type]).includes(4)),
-}))
-
-async function loadModels() {
-  try {
-    configs.value = (await api.configs()).data.items
-  } catch {
-    // The analysis page remains usable when the local API is unavailable.
-  }
-}
-
 async function loadProject(): Promise<boolean> {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
   try {
@@ -385,7 +368,7 @@ async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
 }
 
 onMounted(async () => {
-  const [, projectReady] = await Promise.all([loadModels(), loadProject()])
+  const projectReady = await loadProject()
   if (projectReady) await loadAnalysis()
 })
 onBeforeUnmount(stopPolling)
@@ -485,15 +468,6 @@ onBeforeUnmount(stopPolling)
               <template v-else><strong>{{ projectView.storyboardStrategy }}</strong><p>{{ projectView.storyboardSetting }}</p></template>
             </div>
           </article>
-        </div>
-      </section>
-
-      <section class="analysis-section">
-        <header><div><span class="section-kicker">MODEL READINESS</span><h2>模型能力</h2></div><RouterLink to="/settings">管理模型<ArrowRight :size="14" /></RouterLink></header>
-        <div class="model-readiness-grid">
-          <article><span class="model-kind is-llm"><Bot :size="17" /></span><div><small>LLM 大模型</small><strong>{{ activeModels.llm?.model || '待配置' }}</strong></div><i :class="{ 'is-ready': activeModels.llm }" /></article>
-          <article><span class="model-kind is-image"><Image :size="17" /></span><div><small>生图模型</small><strong>{{ activeModels.image?.model || '待配置' }}</strong></div><i :class="{ 'is-ready': activeModels.image }" /></article>
-          <article><span class="model-kind is-video"><Video :size="17" /></span><div><small>视频模型</small><strong>{{ activeModels.video?.model || '待配置' }}</strong></div><i :class="{ 'is-ready': activeModels.video }" /></article>
         </div>
       </section>
 
@@ -601,23 +575,13 @@ onBeforeUnmount(stopPolling)
 .profile-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .profile-card > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .profile-card > div { display: grid; gap: 4px; }
-.profile-card small, .model-readiness-grid small { color: #969baa; font-size: 9px; }
+.profile-card small { color: #969baa; font-size: 9px; }
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
 .analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid #dfe1ea; border-radius: 9px; outline: 0; background: #fbfbfe; box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
 .analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: #7779ef; background: #fff; box-shadow: 0 0 0 3px rgb(91 92 246 / 10%); }
 .tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: #454a59; font-size: 11px; }
 .profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: #656b7b; font: inherit; font-size: 10px; line-height: 1.6; }
-.model-readiness-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.model-readiness-grid article { position: relative; display: grid; min-width: 0; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 11px; padding: 12px; border-radius: 13px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
-.model-kind { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; }
-.model-kind.is-llm { color: #5e60ed; background: #eff0ff; }
-.model-kind.is-image { color: #a16588; background: #f9edf4; }
-.model-kind.is-video { color: #397f85; background: #eaf5f5; }
-.model-readiness-grid article > div { display: grid; min-width: 0; gap: 3px; }
-.model-readiness-grid strong { overflow: hidden; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.model-readiness-grid article > i { position: absolute; top: 10px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: #d4d7df; }
-.model-readiness-grid article > i.is-ready { background: #46af83; box-shadow: 0 0 0 3px #e6f5ef; }
 .outline-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 20px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .outline-card > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .outline-card p { margin: 0; color: #5e6474; font-size: 12px; line-height: 1.9; }
@@ -672,7 +636,6 @@ onBeforeUnmount(stopPolling)
   .analysis-hero h1 { font-size: 19px; }
   .genre-tags { margin-top: 11px; }
   .profile-grid, .character-grid { grid-template-columns: 1fr; }
-  .model-readiness-grid { grid-template-columns: 1fr; }
   .analysis-section { padding-top: 30px; }
   .analysis-progress-card { grid-template-columns: 44px minmax(0, 1fr); }
   .analysis-progress-card > span { width: 44px; height: 44px; }

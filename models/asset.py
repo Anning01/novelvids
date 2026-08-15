@@ -32,7 +32,10 @@ class Asset(AbstractBaseModel):
 
     # 描述信息
     description = fields.TextField(null=True, description="详细描述")  # 详细描述 (中文)
-    base_traits = fields.TextField(null=True, description="英文prompt")  # 固有特征 (英文, 用于 prompt)
+    base_traits = fields.TextField(
+        null=True,
+        description="用户可编辑并最终发送的完整生图提示词",
+    )
 
     # 图片资产
     main_image = fields.CharField(max_length=500, null=True, description="三视主图")  # 主图路径/URL
@@ -53,5 +56,4 @@ class Asset(AbstractBaseModel):
     class Meta:
         table = "assets"
         unique_together = (("novel", "asset_type", "canonical_name"),)
-
 

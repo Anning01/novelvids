@@ -52,3 +52,30 @@ it('supports keyboard opening and Escape', async () => {
   await wrapper.get('[role="listbox"]').trigger('keydown', { key: 'Escape' })
   expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
 })
+
+it('opens above when the prompt panel has no room below the trigger', async () => {
+  const promptPanel = document.createElement('section')
+  promptPanel.className = 'workbench-prompt-panel'
+  document.body.append(promptPanel)
+  const wrapper = mount(WorkbenchSelect, {
+    attachTo: promptPanel,
+    props: {
+      modelValue: 'seedance',
+      label: '视频模型',
+      options: [
+        { value: 'seedance', label: 'Seedance' },
+        { value: 'fast', label: 'Seedance Fast' },
+      ],
+    },
+  })
+  const trigger = wrapper.get<HTMLElement>('[aria-label="视频模型"]')
+  promptPanel.getBoundingClientRect = () => ({ top: 40, bottom: 240 } as DOMRect)
+  trigger.element.getBoundingClientRect = () => ({ top: 200, bottom: 230 } as DOMRect)
+
+  await trigger.trigger('click')
+
+  expect(wrapper.get('.workbench-select').classes()).toContain('is-above')
+  expect(wrapper.get('[role="listbox"]').classes()).toContain('is-above')
+  wrapper.unmount()
+  promptPanel.remove()
+})

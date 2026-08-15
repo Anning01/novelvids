@@ -162,11 +162,16 @@ def _orchestration_case(*, assets=("known-asset",)):
     budget_policy_factory = Mock(return_value=budget_policy)
     extractor = SimpleNamespace(extract=AsyncMock(return_value=extraction_result))
     extractor_factory = Mock(return_value=extractor)
+    prepared_result = extraction_result.model_copy()
+    prompt_preparer = SimpleNamespace(
+        prepare=Mock(return_value=prepared_result),
+    )
     upsert_service = SimpleNamespace(save_result=AsyncMock(return_value=summary))
     handler = ExtractionTaskHandler(
         context_loader=context_loader,
         message_builder=message_builder,
         upsert_service=upsert_service,
+        prompt_preparer=prompt_preparer,
         budget_policy_factory=budget_policy_factory,
         extractor_factory=extractor_factory,
     )
@@ -193,6 +198,8 @@ def _orchestration_case(*, assets=("known-asset",)):
         budget_policy_factory=budget_policy_factory,
         extractor=extractor,
         extractor_factory=extractor_factory,
+        prepared_result=prepared_result,
+        prompt_preparer=prompt_preparer,
         upsert_service=upsert_service,
     )
 
@@ -229,10 +236,14 @@ async def test_handler_orchestrates_injected_collaborators_once(caplog):
         supports_json_output=True,
     )
     case.extractor.extract.assert_awaited_once_with(case.messages)
+    case.prompt_preparer.prepare.assert_called_once_with(
+        case.extraction_result,
+        prompt_language="zh",
+    )
     case.upsert_service.save_result.assert_awaited_once_with(
         novel_id=case.request_params["novel_id"],
         chapter_number=case.context.chapter.number,
-        result=case.extraction_result,
+        result=case.prepared_result,
     )
     assert "assets=1" in caplog.text
     assert "message_chars=(12, 12, 13, 22)" in caplog.text
@@ -489,6 +500,7 @@ async def test_Handler只委托资产保存阶段():
         "scenes": [],
         "items": [],
     }
+    prepared_result = extraction_result.model_copy()
 
     with (
         patch(
@@ -496,7 +508,11 @@ async def test_Handler只委托资产保存阶段():
             new=AsyncMock(return_value=extraction_result),
         ),
         patch("services.extraction.handler.AssetUpsertService") as service_type,
+        patch(
+            "services.extraction.handler.AssetPromptPreparationService"
+        ) as preparer_type,
     ):
+        preparer_type.return_value.prepare.return_value = prepared_result
         service_type.return_value.save_result = AsyncMock(
             return_value=expected_summary
         )
@@ -512,7 +528,11 @@ async def test_Handler只委托资产保存阶段():
     service_type.return_value.save_result.assert_awaited_once_with(
         novel_id=novel.id,
         chapter_number=chapter.number,
-        result=extraction_result,
+        result=prepared_result,
+    )
+    preparer_type.return_value.prepare.assert_called_once_with(
+        extraction_result,
+        prompt_language="en",
     )
 
 
@@ -542,6 +562,10 @@ async def test_正常提取_source_chapters记录章节号():
     )
     assert 1 in person.source_chapters
     assert person.last_updated_chapter == 1
+    assert person.base_traits.startswith(
+        "Task: Create an upper-body, front-facing, eye-level close-up"
+    )
+    assert ZHANG_SAN_TRAITS in person.base_traits
 
 
 # =====================================================================

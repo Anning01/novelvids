@@ -2,8 +2,8 @@
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { ImageAnnotation, WorkbenchNode } from '../types/workbenchTypes'
-import { CheckCircle2, Download, ImageUp, LoaderCircle, Maximize2, Minimize2, Pencil, Plus, ScanFace, Trash2, X } from 'lucide-vue-next'
-import { computed, inject, ref, watch } from 'vue'
+import { CheckCircle2, Download, ImageUp, Layers3, Library, LoaderCircle, Maximize2, Minimize2, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import { computed, inject, markRaw, ref, watch } from 'vue'
 import type { Asset, DigitalHuman, ImageGenerationModel } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { downloadFile } from '@/shared/downloadFile'
@@ -11,18 +11,22 @@ import { notice } from '@/shared/notice'
 import AssetDefaultImage from '../components/AssetDefaultImage.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import ImageAnnotationDialog from '../components/ImageAnnotationDialog.vue'
+import DigitalHumanGenerationControl from '../components/DigitalHumanGenerationControl.vue'
 import MediaGenerationModelSelector from '../components/MediaGenerationModelSelector.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import MediaLibraryPicker from '../components/MediaLibraryPicker.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import WorkbenchSelect from '../components/WorkbenchSelect.vue'
-import { assetTypeIconFor, assetTypePresentationOptions } from '../components/assetTypePresentation'
-import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
+import ProjectAssetPicker from '../components/ProjectAssetPicker.vue'
+import type { ReusableAssetChoice } from '../components/reusableAsset'
+import { assetTypeIconFor, assetTypePresentationOptions, editableAssetTypeOptions } from '../components/assetTypePresentation'
+import { disambiguateMaterialMentionNames, materialMentionAssetCategory } from '../components/materialMentionTypes'
 import { useWorkbenchNodeDimensionSync } from '../composables/useWorkbenchNodeDimensionSync'
 import {
   assetImageMediaMetadata,
   assetImageCandidates,
   assetSelectedImageCandidates,
+  isReusableAssetPlaceholder,
   normalizeAssetConfig,
   patchAssetImageMediaMetadata,
   patchAssetWorkbenchConfig,
@@ -42,6 +46,7 @@ const assetType = ref<AssetTypeEnum>(AssetTypeEnum.PERSON)
 const assetTypeExplicit = ref(true)
 const nickname = ref('')
 const description = ref('')
+const prompt = ref('')
 const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value))
 const imageModels = computed(() => (props.data.imageModelOptions as ImageGenerationModel[] | undefined) || [])
 const imageModelOptions = computed(() => imageModels.value.map(model => ({ value: model.config_id, label: model.name || model.model })))
@@ -57,10 +62,14 @@ const loadedImageWidth = ref(0)
 const loadedImageHeight = ref(0)
 const loadedGalleryImageSizes = ref<Record<string, { width: number; height: number }>>({})
 const digitalHumanPickerOpen = ref(false)
+const imageFileInput = ref<HTMLInputElement | null>(null)
+const variantToolbarOpen = ref(false)
+const reusableAssetPickerOpen = ref(false)
 const selectedVariantValue = ref('base')
 const addingVariant = ref(false)
 const variantName = ref('')
 const creatingVariant = ref(false)
+const reusablePlaceholder = computed(() => isReusableAssetPlaceholder(asset.value))
 
 watch(asset, value => {
   assetType.value = value.asset_type
@@ -68,6 +77,7 @@ watch(asset, value => {
   assetTypeExplicit.value = media.source !== 'upload' || media.assetTypeExplicit === true
   nickname.value = value.canonical_name
   description.value = value.description || ''
+  prompt.value = value.base_traits || ''
   config.value = normalizeAssetConfig(value)
   if (!imageModelOptions.value.some(option => option.value === config.value.modelConfigId)) {
     config.value.modelConfigId = imageModelOptions.value[0]?.value ?? null
@@ -124,12 +134,15 @@ const hasMultipleImages = computed(() => assetImages.value.length > 1)
 const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
 const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
 const assetImageStageStyle = computed(() => {
-  const stackOffset = assetImageStackDepth.value * 7
+  const stackOffset = assetImageStackDepth.value * 4
   return stackOffset
-    ? { marginRight: `${stackOffset}px`, marginBottom: `${stackOffset}px` }
+    ? { marginRight: `${stackOffset}px` }
     : undefined
 })
 const showDefaultVisualImage = computed(() => !hasImagePreview.value)
+const defaultVisualImageStyle = computed(() => ({
+  aspectRatio: mediaAspectRatioCss(config.value.aspectRatio),
+}))
 const annotations = computed(() => imageMetadata.value.annotations || [])
 const imagePixelSize = computed(() => {
   const width = imageMetadata.value.width || loadedImageWidth.value
@@ -202,10 +215,14 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
     const base = {
       nodeKey: source.key,
       name: source.title.trim() || source.key,
+      sourceName: source.title.trim() || source.key,
       prompt: '',
       previewUrl,
       hasImage: Boolean(previewUrl),
       mediaKind: 'image' as const,
+      assetCategory: source.kind === 'asset'
+        ? materialMentionAssetCategory((source.data.asset as Asset | undefined)?.asset_type)
+        : source.kind === 'digital_human' ? 'person' as const : undefined,
     }
     if (source.kind !== 'asset') return [base]
     const selectedImages = assetSelectedImageCandidates(source.data.asset as Asset)
@@ -235,7 +252,7 @@ const personAsset = computed(() => assetType.value === AssetTypeEnum.PERSON)
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
 const generatorSupportsType = computed(() => ![AssetTypeEnum.PRODUCT, AssetTypeEnum.STYLE].includes(assetType.value))
 const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && config.value.modelConfigId !== null && !busy.value && !saving.value)
-const assetTypeOptions = assetTypePresentationOptions
+const assetTypeOptions = editableAssetTypeOptions
 const assetTypeValue = computed({
   get: () => imageMetadata.value.source === 'upload' && !assetTypeExplicit.value ? 'image' : String(assetType.value),
   set: (value) => {
@@ -302,6 +319,7 @@ async function save() {
       asset_type: assetType.value,
       canonical_name: nickname.value.trim() || asset.value.canonical_name,
       description: description.value,
+      base_traits: prompt.value,
       metadata: patchAssetImageMediaMetadata(
         patchAssetWorkbenchConfig(asset.value.metadata, nextConfig),
         { assetTypeExplicit: assetTypeExplicit.value },
@@ -326,7 +344,7 @@ async function createVariant() {
     const created = await store.createAssetVariant(asset.value.id, {
       name: nextName,
       description: description.value,
-      base_traits: asset.value.base_traits,
+      base_traits: prompt.value,
       chapter_numbers: store.chapter?.number ? [store.chapter.number] : [],
       metadata: { workbench: { ...config.value } },
     })
@@ -351,6 +369,54 @@ registerWorkbenchPromptAction(props.id, {
   busyLabel: '生成中',
   enabled: canGenerate,
   busy,
+  controls: [
+    {
+      id: 'asset-image-generation-model',
+      component: markRaw(MediaGenerationModelSelector),
+      props: computed(() => ({
+        options: imageModelOptions.value,
+        label: '图片模型',
+      })),
+      modelValue: computed(() => config.value.modelConfigId),
+      updateModelValue(value) {
+        const modelConfigId = Number(value)
+        if (Number.isFinite(modelConfigId)) config.value.modelConfigId = modelConfigId
+      },
+    },
+    {
+      id: 'asset-image-generation-parameters',
+      component: markRaw(ImageGenerationParameterPanel),
+      props: computed(() => ({
+        capabilities: selectedImageModel.value?.capabilities,
+        compact: true,
+      })),
+      modelValue: imageParameterValue,
+      updateModelValue(value) {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          imageParameterValue.value = value as ImageGenerationParameters
+        }
+      },
+    },
+    {
+      id: 'asset-image-generation-digital-human',
+      component: markRaw(DigitalHumanGenerationControl),
+      visible: personAsset,
+      props: computed(() => ({
+        title: config.value.digitalHumanAssetId || '选择数字人',
+        previewUrl: config.value.digitalHumanPreviewUrl,
+        selected: Boolean(config.value.digitalHumanAssetId),
+      })),
+      modelValue: computed(() => ({
+        assetId: config.value.digitalHumanAssetId,
+        previewUrl: config.value.digitalHumanPreviewUrl,
+      })),
+      updateModelValue() {},
+      events: {
+        open: () => { digitalHumanPickerOpen.value = true },
+        clear: () => { void clearDigitalHuman() },
+      },
+    },
+  ],
   run: generate,
 })
 registerWorkbenchNodeRun(props.id, { enabled: canGenerate, run: generate })
@@ -369,7 +435,7 @@ function handleNodeFocusOut(event: FocusEvent) {
 
 function addMaterialReference(material: MaterialMentionOption, nextPrompt: string) {
   if (!referenceEdges.value.some(edge => edge.source === material.nodeKey)) return
-  description.value = nextPrompt
+  prompt.value = nextPrompt
 }
 
 async function setMainImage(url: string) {
@@ -397,11 +463,9 @@ function imageRoleLabel(image: { key: string; url: string }) {
 
 function assetImageStackLayerStyle(image: { key: string; url: string }, layerIndex: number) {
   const xOffset = layerIndex * 4
-  const yOffset = layerIndex * 5
-  const rotation = layerIndex * 0.35
   return {
     ...containedAspectRatioSize(assetImageAspectRatio(image), primaryImageAspectRatio.value),
-    transform: `translate(${xOffset}px, ${yOffset}px) rotate(${rotation}deg)`,
+    transform: `translateX(${xOffset}px)`,
     transformOrigin: 'top left',
     zIndex: -layerIndex,
   }
@@ -495,6 +559,20 @@ async function clearDigitalHuman() {
     else await store.setAssetMainImage(asset.value.id, null)
   }
 }
+
+async function chooseReusableAsset(choice: ReusableAssetChoice) {
+  try {
+    if (choice.scope === 'project') {
+      await store.reuseProjectAssetInPlaceholder(asset.value.id, choice.asset)
+    } else if ('digitalHuman' in choice) {
+      await store.applyPublicDigitalHumanToPlaceholder(asset.value.id, choice.digitalHuman)
+    } else {
+      await store.applyPublicAssetToPlaceholder(asset.value.id, choice.asset)
+    }
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : '资产复用失败')
+  }
+}
 </script>
 
 <template>
@@ -507,15 +585,20 @@ async function clearDigitalHuman() {
         title: nickname || asset.canonical_name,
         status: busy ? 'running' : 'ready',
         body_flush: hasImagePreview || showDefaultVisualImage,
+        body_draggable: true,
         floating_header: hasImagePreview || showDefaultVisualImage,
+        borderless_media: hasImagePreview || showDefaultVisualImage,
       }"
     >
       <template #icon>
         <WorkbenchSelect
           class="workbench-node-frame__icon-select"
+          :class="{ 'is-placeholder-asset-type': reusablePlaceholder }"
           v-model="assetTypeValue"
           :options="assetTypeOptions"
           label="资产类型"
+          placeholder="选择资产类型"
+          title="选择资产类型"
           :fallback-icon="assetTypeIconFor(assetTypeValue)"
           icon-only
         />
@@ -534,11 +617,41 @@ async function clearDigitalHuman() {
       <template v-if="imagePixelSize" #meta>
         <span class="workbench-node-frame__media-size">{{ imagePixelSize }}</span>
       </template>
-      <template v-if="asset.main_image" #toolbar-actions>
-        <button type="button" aria-label="标注资产图片" title="标注图片" @click="annotationOpen = true">
+      <template #toolbar-actions>
+        <button
+          v-if="reusablePlaceholder"
+          type="button"
+          aria-label="选择可复用资产"
+          title="从公共资产或项目资产选择"
+          @click="reusableAssetPickerOpen = true"
+        >
+          <Library :size="16" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          :disabled="uploadingImage"
+          :aria-label="asset.main_image ? '替换资产图片' : '上传资产图片'"
+          :title="asset.main_image ? '替换图片' : '上传图片'"
+          @click="imageFileInput?.click()"
+        >
+          <LoaderCircle v-if="uploadingImage" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
+          <ImageUp v-else :size="16" aria-hidden="true" />
+        </button>
+        <input ref="imageFileInput" class="workbench-visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="uploadingImage" aria-label="上传资产图片" @change="replaceImage">
+        <button
+          type="button"
+          aria-label="管理衍生形态"
+          title="衍生形态"
+          :class="{ 'is-active': variantToolbarOpen }"
+          @click="variantToolbarOpen = !variantToolbarOpen"
+        >
+          <Layers3 :size="16" aria-hidden="true" />
+        </button>
+        <button v-if="asset.main_image" type="button" aria-label="标注资产图片" title="标注图片" @click="annotationOpen = true">
           <Pencil :size="16" aria-hidden="true" />
         </button>
         <button
+          v-if="asset.main_image"
           type="button"
           :disabled="downloadingImage"
           :aria-label="`下载图片，保存为 ${imageDownloadFilename}`"
@@ -548,6 +661,22 @@ async function clearDigitalHuman() {
           <LoaderCircle v-if="downloadingImage" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
           <Download v-else :size="16" aria-hidden="true" />
         </button>
+        <section v-if="variantToolbarOpen" class="workbench-node-context__popover workbench-asset-variant-popover" role="dialog" aria-label="衍生形态管理">
+          <header>
+            <strong>衍生形态</strong>
+            <button type="button" aria-label="关闭衍生形态管理" @click="variantToolbarOpen = false"><X :size="14" aria-hidden="true" /></button>
+          </header>
+          <div class="workbench-asset-variant-popover__row">
+            <WorkbenchSelect v-model="selectedVariantValue" :options="variantOptions" label="视觉形态" />
+            <button type="button" aria-label="新增视觉形态" title="新增形态" @click="addingVariant = !addingVariant"><Plus :size="14" aria-hidden="true" /></button>
+            <button v-if="selectedVariantId" type="button" class="is-danger" aria-label="删除当前视觉形态" title="删除当前形态" @click="deleteSelectedVariant"><Trash2 :size="14" aria-hidden="true" /></button>
+          </div>
+          <form v-if="addingVariant" class="workbench-asset-variant-popover__create" @submit.prevent="createVariant">
+            <input v-model="variantName" maxlength="100" :placeholder="personAsset ? '例如：红衣变装' : assetType === AssetTypeEnum.SCENE ? '例如：战后废墟' : '例如：展开形态'" aria-label="新形态名称">
+            <button type="submit" :disabled="creatingVariant || !variantName.trim()">{{ creatingVariant ? '保存中…' : '保存' }}</button>
+          </form>
+          <small>选择当前生成形态，或新增人物变装、场景升级和道具形态。</small>
+        </section>
       </template>
       <div class="workbench-node-content" @focusout="handleNodeFocusOut">
         <div
@@ -643,69 +772,29 @@ async function clearDigitalHuman() {
           :preview-label="config.digitalHumanPreviewUrl ? '数字人参考' : undefined"
           :title="assetName"
           :type-label="assetTypeLabel"
+          :style="defaultVisualImageStyle"
         />
-        <label class="workbench-asset-image-upload nodrag" :class="{ 'is-disabled': uploadingImage }">
-          <ImageUp :size="14" aria-hidden="true" />
-          {{ uploadingImage ? '上传中…' : asset.main_image ? '替换图片' : '上传图片' }}
-          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="uploadingImage" aria-label="上传资产图片" @change="replaceImage">
-        </label>
-
-        <section class="workbench-asset-generation nodrag" aria-label="资产图片生成">
-          <div class="workbench-asset-generation__heading"><strong>图片生成</strong><small>已合并历史生成配置</small></div>
-          <section class="workbench-asset-variants" aria-label="资产视觉形态">
-            <div class="workbench-asset-variants__row">
-              <WorkbenchSelect v-model="selectedVariantValue" :options="variantOptions" label="视觉形态" />
-              <AppButton type="button" variant="secondary" size="sm" icon-only aria-label="新增视觉形态" @click="addingVariant = !addingVariant"><Plus :size="14" /></AppButton>
-              <AppButton v-if="selectedVariantId" type="button" variant="danger" size="sm" icon-only aria-label="删除当前视觉形态" @click="deleteSelectedVariant"><Trash2 :size="14" /></AppButton>
-            </div>
-            <form v-if="addingVariant" class="workbench-asset-variants__create" @submit.prevent="createVariant">
-              <input v-model="variantName" maxlength="100" :placeholder="personAsset ? '例如：红衣变装' : assetType === AssetTypeEnum.SCENE ? '例如：战后废墟' : '例如：展开形态'" aria-label="新形态名称">
-              <AppButton type="submit" variant="primary" size="sm" :loading="creatingVariant" :disabled="!variantName.trim()">保存形态</AppButton>
-            </form>
-            <small>同一资产可保存人物变装、场景升级或道具形态，并为每种形态生成多张图。本章新建的形态会自动用于本章；也可在分镜中用 @{资产名#形态名} 精确指定。</small>
-          </section>
-          <section v-if="personAsset" class="workbench-library-reference">
-            <div class="workbench-library-reference__heading">
-              <div><strong>数字人人物</strong><small>可选 · 仅用于人物资产展示，不作为参考图</small></div>
-              <button v-if="config.digitalHumanAssetId" type="button" class="workbench-library-reference__clear" aria-label="移除数字人人物" @click="clearDigitalHuman">
-                <X :size="14" aria-hidden="true" />
-              </button>
-            </div>
-            <button class="workbench-library-reference__selector" type="button" aria-label="从数字人库选择人物资产展示形象" @click="digitalHumanPickerOpen = true">
-              <span class="workbench-library-reference__placeholder" :class="{ 'has-preview': config.digitalHumanPreviewUrl }">
-                <img
-                  v-if="config.digitalHumanPreviewUrl"
-                  class="workbench-library-reference__preview"
-                  :src="config.digitalHumanPreviewUrl"
-                  :alt="`${config.digitalHumanAssetId} 数字人预览`"
-                  loading="lazy"
-                  decoding="async"
-                >
-                <ScanFace v-else :size="22" aria-hidden="true" />
-              </span>
-              <span><strong>{{ config.digitalHumanAssetId || '从数字人库选择' }}</strong><small>{{ config.digitalHumanAssetId ? '人物资产展示（非参考图）' : '参考图请从左侧输入连线引入' }}</small></span>
-            </button>
-          </section>
-
-          <fieldset class="workbench-form workbench-capability-form">
-            <legend>生成参数</legend>
-            <MediaGenerationModelSelector v-model="config.modelConfigId" :options="imageModelOptions" label="图片模型" />
-            <ImageGenerationParameterPanel v-model="imageParameterValue" :capabilities="selectedImageModel?.capabilities" compact />
-          </fieldset>
-        </section>
-
       </div>
     </WorkbenchNodeFrame>
+
+    <ProjectAssetPicker
+      :open="reusableAssetPickerOpen"
+      :novel-id="asset.novel_id"
+      :asset-type="assetType"
+      :excluded-ids="store.assets.map(item => item.id)"
+      @close="reusableAssetPickerOpen = false"
+      @choose="chooseReusableAsset"
+    />
 
     <WorkbenchPromptEditorPanel
       v-if="promptEditorConfig"
       :open="promptEditorOpen"
       :node-key="props.id"
       :config="promptEditorConfig"
-      :model-value="description"
+      :model-value="prompt"
       :materials="materialOptions"
       :mentions="materialMentions"
-      @update:model-value="description = $event"
+      @update:model-value="prompt = $event"
       @add="addMaterialReference"
       @close="promptEditor?.close(props.id)"
       @focus-reference="promptEditor?.focusReference($event)"
@@ -731,147 +820,71 @@ async function clearDigitalHuman() {
 </template>
 
 <style scoped>
-.workbench-asset-generation {
+.workbench-asset-variant-popover {
   display: grid;
-  gap: 9px;
-  padding-top: 10px;
-  border-top: 1px solid #37322e;
+  width: 330px;
+  gap: 10px;
+  padding: 11px;
 }
-
-.workbench-asset-generation__heading,
-.workbench-library-reference__heading,
-.workbench-library-reference__selector {
+.workbench-asset-variant-popover > header,
+.workbench-asset-variant-popover__row,
+.workbench-asset-variant-popover__create {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
 }
-
-.workbench-asset-generation__heading,
-.workbench-library-reference__heading {
+.workbench-asset-variant-popover > header {
   justify-content: space-between;
+  color: #eee8e1;
+  font-size: 12px;
 }
-
-.workbench-library-reference__clear {
+.workbench-asset-variant-popover button {
   display: grid;
-  width: 28px;
-  height: 28px;
-  flex: none;
+  min-width: 32px;
+  height: 32px;
   place-items: center;
   border: 1px solid #4a433d;
   border-radius: 8px;
-  color: #a99f96;
+  color: #aaa39c;
   background: #292522;
   cursor: pointer;
 }
-
-.workbench-library-reference__clear:hover,
-.workbench-library-reference__clear:focus-visible {
+.workbench-asset-variant-popover button:hover,
+.workbench-asset-variant-popover button:focus-visible {
   border-color: #8f76d8;
   color: #eee8e1;
   outline: none;
 }
-
-.workbench-asset-generation__heading > small {
-  color: #817870;
+.workbench-asset-variant-popover button.is-danger:hover,
+.workbench-asset-variant-popover button.is-danger:focus-visible {
+  border-color: #b96666;
+  color: #ef9a9a;
 }
-
-.workbench-asset-variants {
-  display: grid;
-  gap: 7px;
-  padding: 9px;
-  border: 1px solid #39342f;
-  border-radius: 10px;
-  background: #191715;
+.workbench-asset-variant-popover button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
-
-.workbench-asset-variants__row,
-.workbench-asset-variants__create {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.workbench-asset-variants__row > :first-child {
+.workbench-asset-variant-popover__row > :first-child,
+.workbench-asset-variant-popover__create input {
   min-width: 0;
   flex: 1;
 }
-
-.workbench-asset-variants__create input {
-  min-width: 0;
+.workbench-asset-variant-popover__create input {
   height: 34px;
-  flex: 1;
-  padding: 0 10px;
+  padding: 0 9px;
   border: 1px solid #48413b;
   border-radius: 8px;
   color: #eee9e4;
   outline: none;
   background: #131210;
 }
-
-.workbench-asset-variants > small {
+.workbench-asset-variant-popover__create button {
+  min-width: 58px;
+  padding: 0 10px;
+}
+.workbench-asset-variant-popover > small {
   color: #817870;
-  line-height: 1.5;
-}
-
-.workbench-library-reference {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid #3f3934;
-  border-radius: 12px;
-  background: #191715;
-}
-
-.workbench-library-reference__heading > div,
-.workbench-library-reference__selector > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.workbench-library-reference strong {
-  color: #eee7df;
-  font-size: 12px;
-}
-
-.workbench-library-reference small {
-  color: #948b83;
   font-size: 10px;
-}
-
-.workbench-library-reference__selector {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #49413b;
-  border-radius: 10px;
-  background: #24211e;
-  text-align: left;
-}
-
-.workbench-library-reference__selector:hover {
-  border-color: #8e75d8;
-}
-
-.workbench-library-reference__placeholder {
-  display: grid;
-  overflow: hidden;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  place-items: center;
-  border-radius: 8px;
-  background: #332e2a;
-  color: #a88cf4;
-}
-
-.workbench-library-reference__placeholder.has-preview {
-  background: #191715;
-}
-
-.workbench-library-reference__preview {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center top;
+  line-height: 1.45;
 }
 </style>

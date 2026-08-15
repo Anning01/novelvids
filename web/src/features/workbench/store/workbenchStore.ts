@@ -7,7 +7,7 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { activeVideoForScene, isTerminalVideo, sceneHasRunningVideo, sceneWithActiveVideo } from '../graph/videoVersions'
-import { assetImageMediaMetadata, assetTypeLabel, patchAssetImageMediaMetadata } from '../config/assetConfig'
+import { assetImageMediaMetadata, assetTypeLabel, DEFAULT_ASSET_ASPECT_RATIO, isReusableAssetPlaceholder, patchAssetImageMediaMetadata, REUSABLE_ASSET_PLACEHOLDER_KEY } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
 import { nodeCapabilities } from '../config/nodeCapabilities'
@@ -191,7 +191,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     rebuildGraph() {
       if (!this.chapter) return
-      const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', `第 ${this.chapter.number} 章 · ${this.chapter.name}`, { x: 80, y: 80 }, { chapter: this.chapter, layout_family: 'chapter', layout_lane: 'chapter' })]
+      const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', `第 ${this.chapter.number} 章 · ${this.chapter.name}`, { x: 80, y: 80 }, { chapter: this.chapter, presentation: 'note', layout_family: 'note', layout_lane: 'note' })]
       const edges: WorkbenchEdge[] = []
       const validAssetIds = new Set(this.assets.map(asset => asset.id))
       this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, imageModelOptions: this.imageModelOptions, asset_type: assetTypeLabel(asset.asset_type), layout_family: 'asset', ui: {}, index })))
@@ -201,7 +201,6 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const sceneNode = node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
         sceneNode.status = sceneHasRunningVideo(sceneVideos) ? 'running' : 'ready'
         nodes.push(sceneNode)
-        edges.push(edge(100000 + scene.id, `chapter-${sceneKey}`, 'chapter', sceneKey, 'shot_sequence', index))
         sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
         const activeVideo = activeVideoForScene(scene, sceneVideos)
         if (activeVideo) {
@@ -246,6 +245,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async flushNodeDraft(key: string) {
       if (!this.nodeByKey(key)) return
       this.persistLayout()
+    },
+    async saveChapter(patch: Pick<Partial<Chapter>, 'name' | 'content'>) {
+      if (!this.chapter) return null
+      const updated = (await api.updateChapter(this.chapter.id, patch)).data
+      this.chapter = updated
+      this.rebuildGraph()
+      notice.success('章节已保存')
+      return updated
     },
     async flushLayout() { this.persistLayout() },
     copySelection() { const key = this.selectedNodeKeys[0]; const item = key ? this.nodeByKey(key) : null; this.clipboardNode = item && nodeCapabilities(item.kind).copyable ? cloneValue(item) : null },
@@ -583,14 +590,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success(isAssetReference
         ? '参考图片已连接到资产'
         : isShotSequence
-          ? '镜头顺序已连接'
+          ? '视频顺序已连接'
           : isWatermarkVideo
             ? '视频已连接到水印'
             : isComposerWatermark
               ? '水印已连接到视频合成器'
               : isComposerShot || isComposerVideo
                 ? '视频已加入成片输入'
-                : '参考资源已连接到镜头')
+                : '参考资源已连接到视频')
       return true
     },
     deleteMediaEdge(edgeKey: string) {
@@ -656,6 +663,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         chapter_id: this.chapterId,
         asset_type: AssetTypeEnum.PERSON,
         canonical_name: `资产 ${suffix}`,
+        metadata: {
+          [REUSABLE_ASSET_PLACEHOLDER_KEY]: true,
+          aspect_ratio: DEFAULT_ASSET_ASPECT_RATIO,
+          workbench: { aspectRatio: DEFAULT_ASSET_ASPECT_RATIO },
+        },
       })).data
       this.assets.push(created)
       this.rebuildGraph()
@@ -664,6 +676,100 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (item) this.selectNode(item.key)
       this.persistLayout()
       notice.success('已添加空资产')
+      return item
+    },
+    reusableAssetName(name: string, targetAssetId: number) {
+      const base = name.trim() || '复用资产'
+      const usedNames = new Set(this.assets.filter(asset => asset.id !== targetAssetId).map(asset => `${asset.asset_type}:${asset.canonical_name}`))
+      const target = this.assets.find(asset => asset.id === targetAssetId)
+      if (!target || !usedNames.has(`${target.asset_type}:${base}`)) return base
+      let suffix = 2
+      while (usedNames.has(`${target.asset_type}:${base} ${suffix}`)) suffix += 1
+      return `${base} ${suffix}`
+    },
+    async applyPublicAssetToPlaceholder(placeholderId: number, source: Asset) {
+      const placeholder = this.assets.find(asset => asset.id === placeholderId)
+      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error('请从新建的空资产选择公共资产')
+      if (placeholder.asset_type !== source.asset_type) throw new Error('只能选择与当前节点类型一致的公共资产')
+      const sourceMetadata = source.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata)
+        ? source.metadata as Record<string, unknown>
+        : {}
+      const updated = (await api.updateAsset(placeholderId, {
+        canonical_name: this.reusableAssetName(source.canonical_name, placeholderId),
+        aliases: source.aliases,
+        description: source.description,
+        base_traits: source.base_traits,
+        main_image: source.main_image,
+        angle_image_1: source.angle_image_1,
+        angle_image_2: source.angle_image_2,
+        image_source: source.image_source,
+        is_global: false,
+        metadata: {
+          ...sourceMetadata,
+          library_source: 'public',
+          source_asset_id: source.id,
+          [REUSABLE_ASSET_PLACEHOLDER_KEY]: false,
+        },
+      })).data
+      this.assets = this.assets.map(asset => asset.id === placeholderId ? updated : asset)
+      this.rebuildGraph()
+      notice.success(`已应用公共资产「${updated.canonical_name}」`)
+      return this.nodeByKey(`asset-${updated.id}`) || null
+    },
+    async applyPublicDigitalHumanToPlaceholder(placeholderId: number, human: DigitalHuman) {
+      const placeholder = this.assets.find(asset => asset.id === placeholderId)
+      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error('请从新建的空资产选择公共人物')
+      if (placeholder.asset_type !== AssetTypeEnum.PERSON) throw new Error('公共人物只能用于人物资产')
+      const currentMetadata = placeholder.metadata && typeof placeholder.metadata === 'object' && !Array.isArray(placeholder.metadata)
+        ? placeholder.metadata as Record<string, unknown>
+        : {}
+      const currentWorkbench = currentMetadata.workbench && typeof currentMetadata.workbench === 'object' && !Array.isArray(currentMetadata.workbench)
+        ? currentMetadata.workbench as Record<string, unknown>
+        : {}
+      const updated = (await api.updateAsset(placeholderId, {
+        canonical_name: this.reusableAssetName(human.occupation || '公共人物', placeholderId),
+        description: `${human.country} · ${human.gender} · ${human.age} 岁${human.occupation ? ` · ${human.occupation}` : ''}`,
+        main_image: human.image_url,
+        is_global: false,
+        metadata: {
+          ...currentMetadata,
+          library_source: 'public',
+          source_asset_id: human.asset_id,
+          gender: human.gender,
+          age: human.age,
+          country: human.country,
+          occupation: human.occupation,
+          [REUSABLE_ASSET_PLACEHOLDER_KEY]: false,
+          workbench: {
+            ...currentWorkbench,
+            digitalHumanAssetId: human.asset_id,
+            digitalHumanPreviewUrl: human.image_url,
+          },
+        },
+      })).data
+      this.assets = this.assets.map(asset => asset.id === placeholderId ? updated : asset)
+      this.rebuildGraph()
+      notice.success(`已应用公共人物「${updated.canonical_name}」`)
+      return this.nodeByKey(`asset-${updated.id}`) || null
+    },
+    async reuseProjectAssetInPlaceholder(placeholderId: number, source: Asset) {
+      const placeholder = this.assets.find(asset => asset.id === placeholderId)
+      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error('请从新建的空资产选择项目资产')
+      if (placeholder.asset_type !== source.asset_type) throw new Error('只能选择与当前节点类型一致的项目资产')
+      if (placeholder.novel_id !== source.novel_id || source.novel_id !== this.novelId) throw new Error('只能复用当前项目的资产')
+      const placeholderNode = this.nodeByKey(`asset-${placeholderId}`)
+      const position = placeholderNode ? { ...placeholderNode.position } : null
+      const zIndex = placeholderNode?.zIndex
+      const reused = (await api.reuseAsset(source.id, this.chapterId)).data
+      const merged = (await api.mergeAssets(placeholderId, reused.id)).data.asset
+      this.assets = [...this.assets.filter(asset => asset.id !== placeholderId && asset.id !== reused.id), merged]
+      this.rebuildGraph()
+      const item = this.nodeByKey(`asset-${merged.id}`) || null
+      if (item && position) item.position = position
+      if (item && zIndex !== undefined) item.zIndex = zIndex
+      if (item) this.selectNode(item.key)
+      this.persistLayout()
+      notice.success(`已复用项目资产「${merged.canonical_name}」`)
       return item
     },
     async reuseAsset(assetId: number, position?: Point) {
@@ -812,7 +918,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         this.finishPendingWork(controller)
       }
     },
-    async generateVideo(sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean } = {}) {
+    async generateVideo(sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean; return_last_frame?: boolean } = {}) {
       const controller = this.beginPendingWork()
       let submittedVideoId: number | null = null
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)

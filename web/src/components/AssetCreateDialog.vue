@@ -4,11 +4,13 @@ import {
   Boxes,
   Check,
   ChevronDown,
+  CircleAlert,
   Clock3,
   ImagePlus,
   Library,
   LoaderCircle,
   Maximize2,
+  Pencil,
   Search,
   Sparkles,
   RefreshCw,
@@ -19,21 +21,51 @@ import {
   X,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import AssetVariantStrip from '@/components/AssetVariantStrip.vue'
+import ImageAnnotationEditor from '@/components/ImageAnnotationEditor.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api } from '@/api'
+import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { notice } from '@/shared/notice'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
-import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetGenerationRecord, type DigitalHuman, type ImageGenerationModel } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetGenerationRecord, type AssetVariant, type AssetVariantDraft, type DigitalHuman, type ImageGenerationModel } from '@/types'
 
 type AssetKind = 'character' | 'scene' | 'prop'
 type CreateMode = 'ai' | 'library' | 'upload'
 type LibraryItem = { key: string; name: string; detail: string; image: string; source: 'public' | 'project'; asset?: Asset; human?: DigitalHuman }
+type LibraryScope = 'all' | 'public' | 'project'
+type AssetEditorFormSnapshot = {
+  version: 1
+  canonical_name: string
+  description: string
+  base_traits: string
+  prompt_touched: boolean
+  creation_mode: CreateMode
+  gender: string
+  age_group: string
+  voice: string
+  reference_layout: string
+  model_config_id: number | null
+  image_parameters: {
+    clarity: string
+    aspect_ratio: string
+    output_format: string
+    generation_count: number
+  }
+  library_selection: {
+    key: string
+    scope: LibraryScope
+  }
+}
 
-const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; initialMode?: CreateMode }>(), {
+const VARIANT_EDITOR_FORM_KEY = 'editor_form'
+
+const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode }>(), {
+  episodeNumbers: () => [],
   initialMode: 'ai',
 })
-const emit = defineEmits<{ close: []; created: [asset: Asset]; saved: [asset: Asset]; regenerate: [asset: Asset] }>()
+const emit = defineEmits<{ close: []; created: [asset: Asset]; saved: [asset: Asset] }>()
 
 const config = computed(() => ({
   character: { label: '角色', icon: UserRound, type: AssetTypeEnum.PERSON, library: '角色库' },
@@ -73,7 +105,7 @@ const modelId = ref('')
 const models = ref<ImageGenerationModel[]>([])
 const libraryItems = ref<LibraryItem[]>([])
 const selectedLibraryKey = ref('')
-const libraryScope = ref<'all' | 'public' | 'project'>('all')
+const libraryScope = ref<LibraryScope>('all')
 const search = ref('')
 const uploadFile = ref<File | null>(null)
 const uploadPreview = ref('')
@@ -86,27 +118,72 @@ const loadingLibrary = ref(false)
 const loadingMoreLibrary = ref(false)
 const loadingHistory = ref(false)
 const generationHistory = ref<AssetGenerationRecord[]>([])
+const generationTask = ref<AiTask | null>(null)
+const generationRequested = ref(false)
+const generationError = ref('')
 const selectedErrorRecordId = ref('')
 const restoringRecordId = ref('')
+const selectedVariant = ref<AssetVariant | null>(null)
+const variantDraft = ref<AssetVariantDraft | null>(null)
+const variantStripRef = ref<{ upsertVariant: (variant: AssetVariant) => void } | null>(null)
 const imageInfo = ref<Record<string, { dimensions: string; format: string }>>({})
 const lightboxImage = ref('')
 const lightboxAlt = ref('')
 const lightboxFormat = ref('')
+const annotationOpen = ref(false)
+const annotationSaving = ref(false)
 const publicPage = ref(0)
 const publicPages = ref(0)
 const projectPage = ref(0)
 const projectPages = ref(0)
 let previousBodyOverflow = ''
+let generationController: AbortController | null = null
+const formDrafts = new Map<string, AssetEditorFormSnapshot>()
 const isEditing = computed(() => Boolean(props.asset))
-const generatedImage = computed(() => promptSourceAsset.value?.main_image || props.asset?.main_image || '')
+const variantContextActive = computed(() => Boolean(variantDraft.value))
+const generatedImage = computed(() => variantDraft.value?.is_new
+  ? ''
+  : selectedVariant.value
+    ? selectedVariant.value.images?.[0] || ''
+    : promptSourceAsset.value?.main_image || props.asset?.main_image || '')
+const currentImageName = computed(() => variantDraft.value?.name || selectedVariant.value?.name || name.value || props.asset?.canonical_name || config.value.label)
 const currentImageFormat = computed(() => {
   const historyFormat = generationHistory.value.find(record => record.images.includes(generatedImage.value))?.output_format
-  const metadata = props.asset?.metadata && typeof props.asset.metadata === 'object'
-    ? props.asset.metadata as Record<string, unknown>
+  const sourceMetadata = selectedVariant.value?.metadata || props.asset?.metadata
+  const metadata = sourceMetadata && typeof sourceMetadata === 'object'
+    ? sourceMetadata as Record<string, unknown>
     : {}
   return historyFormat || (typeof metadata.output_format === 'string' ? metadata.output_format : '')
 })
 const selectedErrorRecord = computed(() => generationHistory.value.find(record => record.id === selectedErrorRecordId.value && record.error_message) || null)
+const terminalGenerationStatuses = new Set<number>([
+  TaskStatusEnum.COMPLETED,
+  TaskStatusEnum.FAILED,
+  TaskStatusEnum.CANCELLED,
+])
+const generationRunning = computed(() => Boolean(
+  generationTask.value && !terminalGenerationStatuses.has(generationTask.value.status),
+))
+const generationBusy = computed(() => generationRequested.value && (saving.value || generationRunning.value))
+const canAnnotateCurrentImage = computed(() => Boolean(
+  props.asset
+  && generatedImage.value
+  && !variantDraft.value?.is_new
+  && !generationBusy.value,
+))
+const generationStatusText = computed(() => {
+  if (generationError.value) return '生成失败'
+  if (!generationTask.value) return '正在提交'
+  return historyStatus(generationTask.value.status)
+})
+const generationStatusMessage = computed(() => {
+  if (generationError.value) return generationError.value
+  if (!generationTask.value) return '正在保存当前配置并创建生成任务…'
+  if (generationTask.value.status === TaskStatusEnum.PENDING) return '任务已提交，正在等待模型执行。'
+  if (generationTask.value.status === TaskStatusEnum.QUEUED) return '当前任务正在队列中，轮到后会自动开始。'
+  if (generationTask.value.status === TaskStatusEnum.PROCESSING) return '正在生成图像，完成后这里会自动显示最新结果。'
+  return ''
+})
 const historyStatus = (status: TaskStatusEnum) => ({
   [TaskStatusEnum.PENDING]: '等待中',
   [TaskStatusEnum.PROCESSING]: '生成中',
@@ -136,7 +213,7 @@ const libraryHasMore = computed(() => {
   return publicHasMore.value || projectHasMore.value
 })
 const canSubmit = computed(() => {
-  if (isEditing.value) return Boolean(name.value.trim())
+  if (isEditing.value) return variantDraft.value ? Boolean(variantDraft.value.name.trim()) : Boolean(name.value.trim())
   if (mode.value === 'library') return Boolean(selectedLibrary.value)
   const characterReady = props.kind !== 'character' || isGroupPortrait.value || Boolean(gender.value && age.value)
   if (mode.value === 'upload') return Boolean(name.value.trim() && uploadFile.value && characterReady)
@@ -144,6 +221,9 @@ const canSubmit = computed(() => {
 })
 
 function reset() {
+  generationController?.abort()
+  generationController = null
+  formDrafts.clear()
   mode.value = props.initialMode
   name.value = ''
   description.value = ''
@@ -168,10 +248,17 @@ function reset() {
   uploadPreview.value = ''
   modelId.value = ''
   generationHistory.value = []
+  generationTask.value = null
+  generationRequested.value = false
+  generationError.value = ''
   selectedErrorRecordId.value = ''
   restoringRecordId.value = ''
+  selectedVariant.value = null
+  variantDraft.value = null
   imageInfo.value = {}
   lightboxImage.value = ''
+  annotationOpen.value = false
+  annotationSaving.value = false
 
   if (props.asset) {
     const metadata = props.asset.metadata && typeof props.asset.metadata === 'object'
@@ -195,6 +282,110 @@ function reset() {
     }
     if (Number.isFinite(Number(metadata.model_config_id))) modelId.value = String(metadata.model_config_id)
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function stringField(source: Record<string, unknown>, key: string, fallback: string) {
+  return typeof source[key] === 'string' ? source[key] : fallback
+}
+
+function modeField(value: unknown, fallback: CreateMode): CreateMode {
+  return value === 'ai' || value === 'library' || value === 'upload' ? value : fallback
+}
+
+function scopeField(value: unknown, fallback: LibraryScope): LibraryScope {
+  return value === 'all' || value === 'public' || value === 'project' ? value : fallback
+}
+
+function captureFormSnapshot(): AssetEditorFormSnapshot {
+  return {
+    version: 1,
+    canonical_name: name.value,
+    description: description.value,
+    base_traits: prompt.value,
+    prompt_touched: promptTouched.value,
+    creation_mode: mode.value,
+    gender: gender.value,
+    age_group: age.value,
+    voice: voice.value,
+    reference_layout: referenceLayout.value,
+    model_config_id: Number(modelId.value) || null,
+    image_parameters: {
+      clarity: imageParameters.value.clarity,
+      aspect_ratio: imageParameters.value.aspectRatio,
+      output_format: imageParameters.value.outputFormat,
+      generation_count: imageParameters.value.generationCount,
+    },
+    library_selection: {
+      key: selectedLibraryKey.value,
+      scope: libraryScope.value,
+    },
+  }
+}
+
+function snapshotForVariant(variant: AssetVariant, fallback: AssetEditorFormSnapshot): AssetEditorFormSnapshot {
+  const metadata = asRecord(variant.metadata)
+  const stored = asRecord(metadata[VARIANT_EDITOR_FORM_KEY])
+  const storedImageParameters = asRecord(stored.image_parameters)
+  const storedLibrarySelection = asRecord(stored.library_selection)
+  const modelConfigId = stored.model_config_id ?? metadata.model_config_id
+  return {
+    version: 1,
+    canonical_name: stringField(stored, 'canonical_name', fallback.canonical_name),
+    description: stringField(stored, 'description', fallback.description),
+    base_traits: stringField(stored, 'base_traits', variant.base_traits || fallback.base_traits),
+    prompt_touched: typeof stored.prompt_touched === 'boolean' ? stored.prompt_touched : true,
+    creation_mode: modeField(stored.creation_mode ?? metadata.creation_mode, fallback.creation_mode),
+    gender: stringField(stored, 'gender', stringField(metadata, 'gender', fallback.gender)),
+    age_group: stringField(stored, 'age_group', stringField(metadata, 'age_group', fallback.age_group)),
+    voice: stringField(stored, 'voice', stringField(metadata, 'voice', fallback.voice)),
+    reference_layout: stringField(stored, 'reference_layout', stringField(metadata, 'reference_layout', fallback.reference_layout)),
+    model_config_id: Number.isFinite(Number(modelConfigId)) ? Number(modelConfigId) : fallback.model_config_id,
+    image_parameters: {
+      clarity: stringField(storedImageParameters, 'clarity', stringField(metadata, 'clarity', fallback.image_parameters.clarity)),
+      aspect_ratio: stringField(storedImageParameters, 'aspect_ratio', stringField(metadata, 'aspect_ratio', fallback.image_parameters.aspect_ratio)),
+      output_format: stringField(storedImageParameters, 'output_format', stringField(metadata, 'output_format', fallback.image_parameters.output_format)),
+      generation_count: Number(storedImageParameters.generation_count ?? metadata.generation_count) || fallback.image_parameters.generation_count,
+    },
+    library_selection: {
+      key: stringField(storedLibrarySelection, 'key', fallback.library_selection.key),
+      scope: scopeField(storedLibrarySelection.scope, fallback.library_selection.scope),
+    },
+  }
+}
+
+function applyFormSnapshot(snapshot: AssetEditorFormSnapshot, isVariant: boolean) {
+  name.value = snapshot.canonical_name
+  description.value = snapshot.description
+  prompt.value = snapshot.base_traits
+  mode.value = snapshot.creation_mode
+  gender.value = snapshot.gender
+  age.value = snapshot.age_group
+  voice.value = snapshot.voice
+  referenceLayout.value = snapshot.reference_layout
+  modelId.value = snapshot.model_config_id ? String(snapshot.model_config_id) : ''
+  imageParameters.value = {
+    clarity: snapshot.image_parameters.clarity,
+    aspectRatio: snapshot.image_parameters.aspect_ratio,
+    outputFormat: snapshot.image_parameters.output_format,
+    generationCount: snapshot.image_parameters.generation_count,
+  }
+  selectedLibraryKey.value = snapshot.library_selection.key
+  libraryScope.value = snapshot.library_selection.scope
+  promptTouched.value = isVariant || snapshot.prompt_touched
+  uploadFile.value = null
+  if (uploadPreview.value) URL.revokeObjectURL(uploadPreview.value)
+  uploadPreview.value = ''
+}
+
+function activeFormKey() {
+  if (variantDraft.value?.is_new) return 'variant:new'
+  return selectedVariant.value ? `variant:${selectedVariant.value.id}` : 'base'
 }
 
 function resolveImageFormat(url: string, hint?: string) {
@@ -232,6 +423,53 @@ function closeImageLightbox() {
   lightboxImage.value = ''
 }
 
+function openAnnotationEditor() {
+  if (!canAnnotateCurrentImage.value) return
+  annotationOpen.value = true
+}
+
+async function saveAnnotatedImage(blob: Blob) {
+  if (!props.asset || annotationSaving.value) return
+  annotationSaving.value = true
+  try {
+    const safeBaseName = (currentImageName.value || 'asset')
+      .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+      .replace(/^-+|-+$/g, '') || 'asset'
+    const file = new File(
+      [blob],
+      `${safeBaseName}-annotation-${Date.now()}.png`,
+      { type: 'image/png' },
+    )
+    const uploaded = await api.upload(file)
+    const imageUrl = `/media/${uploaded.filename}`
+    if (selectedVariant.value) {
+      const variant = selectedVariant.value
+      const updated = (await api.updateAssetVariant(props.asset.id, variant.id, {
+        images: [imageUrl, ...variant.images.filter(image => image && image !== imageUrl)],
+      })).data
+      selectedVariant.value = updated
+      variantStripRef.value?.upsertVariant(updated)
+      annotationOpen.value = false
+      notice.success('衍生形象标注图已保存，原图已保留')
+      return
+    }
+    const updated = (await api.recordAssetImageEdit(props.asset.id, {
+      image_url: imageUrl,
+      source_image_url: generatedImage.value,
+      output_format: 'png',
+    })).data
+    promptSourceAsset.value = updated
+    annotationOpen.value = false
+    emit('saved', updated)
+    await loadGenerationHistory()
+    notice.success('标注图已保存，并加入生成记录')
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    annotationSaving.value = false
+  }
+}
+
 function toggleHistoryError(recordId: string) {
   selectedErrorRecordId.value = selectedErrorRecordId.value === recordId ? '' : recordId
 }
@@ -245,7 +483,27 @@ function isLongError(message: string) {
 }
 
 function isCurrentGeneration(record: AssetGenerationRecord) {
+  if (selectedVariant.value) return false
   return Boolean(record.images[0] && record.images[0] === generatedImage.value)
+}
+
+function selectVariantPreview(variant: AssetVariant | null) {
+  formDrafts.set(activeFormKey(), captureFormSnapshot())
+  selectedVariant.value = variant
+  variantDraft.value = null
+  const targetKey = activeFormKey()
+  let snapshot = formDrafts.get(targetKey)
+  if (!snapshot) {
+    const baseSnapshot = formDrafts.get('base') || captureFormSnapshot()
+    snapshot = variant ? snapshotForVariant(variant, baseSnapshot) : baseSnapshot
+    formDrafts.set(targetKey, snapshot)
+  }
+  applyFormSnapshot(snapshot, Boolean(variant))
+  closeImageLightbox()
+}
+
+function updateVariantDraft(draft: AssetVariantDraft | null) {
+  variantDraft.value = draft
 }
 
 async function restoreGeneration(record: AssetGenerationRecord) {
@@ -287,8 +545,80 @@ async function loadGenerationHistory() {
   }
 }
 
+async function refreshGeneratedResult(assetId: number, variantId?: number) {
+  const refreshedAsset = (await api.asset(assetId)).data
+  promptSourceAsset.value = refreshedAsset
+  emit('saved', refreshedAsset)
+
+  if (variantId) {
+    const variants = (await api.assetVariants(assetId)).data
+    const refreshedVariant = variants.find(item => item.id === variantId)
+    if (refreshedVariant) {
+      selectedVariant.value = refreshedVariant
+      variantDraft.value = {
+        id: refreshedVariant.id,
+        name: refreshedVariant.name,
+        description: refreshedVariant.description || '',
+        chapter_numbers: refreshedVariant.chapter_numbers || [],
+        is_new: false,
+      }
+      variantStripRef.value?.upsertVariant(refreshedVariant)
+    }
+  }
+  await loadGenerationHistory()
+}
+
+async function generateAndTrack(assetId: number, variantId?: number) {
+  generationController?.abort()
+  const controller = new AbortController()
+  generationController = controller
+  generationRequested.value = true
+  generationError.value = ''
+  generationTask.value = null
+
+  try {
+    const submitted = (await api.generateAsset(assetId, variantId)).data
+    if (controller.signal.aborted) return
+    generationTask.value = submitted
+    saving.value = false
+    await loadGenerationHistory()
+
+    const completed = terminalGenerationStatuses.has(submitted.status)
+      ? submitted
+      : await pollUntilTerminal(async () => {
+          const task = (await api.task(submitted.id)).data
+          generationTask.value = task
+          return task
+        }, {
+          signal: controller.signal,
+          intervalMs: 1500,
+          terminalStatuses: terminalGenerationStatuses,
+        })
+
+    if (controller.signal.aborted) return
+    generationTask.value = completed
+    if (completed.status !== TaskStatusEnum.COMPLETED) {
+      generationError.value = completed.error_message || (completed.status === TaskStatusEnum.CANCELLED ? '生成任务已取消' : '图片生成失败，请查看生成记录')
+      await loadGenerationHistory()
+      notice.error(generationError.value)
+      return
+    }
+
+    await refreshGeneratedResult(assetId, variantId)
+    generationRequested.value = false
+    notice.success(variantId ? `「${currentImageName.value}」已生成` : `${config.value.label}参考图已生成`)
+  } catch (error) {
+    if (isAbortError(error)) return
+    generationError.value = (error as Error).message || '生成任务提交失败'
+    generationTask.value = null
+    notice.error(generationError.value)
+  } finally {
+    if (generationController === controller) generationController = null
+  }
+}
+
 async function loadReferencePrompt() {
-  if (!props.asset || promptTouched.value) return
+  if (!props.asset || selectedVariant.value || promptTouched.value) return
   try {
     const source = (await api.asset(props.asset.id)).data
     promptSourceAsset.value = source
@@ -419,6 +749,7 @@ function onDrop(event: DragEvent) {
 
 function onWindowKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || event.repeat || !props.open) return
+  if (annotationOpen.value) return
   event.preventDefault()
   if (lightboxImage.value) {
     closeImageLightbox()
@@ -428,9 +759,75 @@ function onWindowKeydown(event: KeyboardEvent) {
 }
 
 async function submit(regenerate = false) {
-  if (!canSubmit.value || saving.value) return
+  if (!canSubmit.value || saving.value || generationRunning.value) return
+  if (regenerate) {
+    generationRequested.value = true
+    generationError.value = ''
+  } else {
+    generationRequested.value = false
+    generationError.value = ''
+  }
   saving.value = true
   try {
+    if (props.asset && variantDraft.value) {
+      const draft = variantDraft.value
+      const variant = selectedVariant.value
+      const snapshot = captureFormSnapshot()
+      const existingMetadata = asRecord(variant?.metadata)
+      const metadata: Record<string, unknown> = {
+        ...existingMetadata,
+        creation_mode: snapshot.creation_mode,
+        clarity: snapshot.image_parameters.clarity,
+        aspect_ratio: snapshot.image_parameters.aspect_ratio,
+        resolution: snapshot.image_parameters.clarity,
+        output_format: snapshot.image_parameters.output_format,
+        generation_count: snapshot.image_parameters.generation_count,
+        model_config_id: snapshot.model_config_id || undefined,
+        gender: snapshot.gender,
+        age_group: snapshot.age_group,
+        voice: snapshot.voice,
+        reference_layout: snapshot.reference_layout,
+        [VARIANT_EDITOR_FORM_KEY]: snapshot,
+      }
+      let images = variant?.images || []
+      if (snapshot.creation_mode === 'upload' && uploadFile.value) {
+        const uploaded = await api.upload(uploadFile.value)
+        images = [`/media/${uploaded.filename}`, ...images.filter(Boolean)]
+      } else if (snapshot.creation_mode === 'library' && selectedLibrary.value?.image) {
+        images = [selectedLibrary.value.image, ...images.filter(image => image !== selectedLibrary.value?.image)]
+        metadata.library_source = selectedLibrary.value.source
+        metadata.source_asset_id = selectedLibrary.value.asset?.id || selectedLibrary.value.human?.asset_id
+      }
+      const variantPayload: Partial<AssetVariant> & { name: string } = {
+        name: draft.name.trim(),
+        description: draft.description || undefined,
+        chapter_numbers: draft.chapter_numbers,
+        base_traits: snapshot.base_traits,
+        images,
+        metadata,
+      }
+      const updated = variant
+        ? (await api.updateAssetVariant(props.asset.id, variant.id, variantPayload)).data
+        : (await api.createAssetVariant(props.asset.id, variantPayload)).data
+      selectedVariant.value = updated
+      variantDraft.value = {
+        id: updated.id,
+        name: updated.name,
+        description: updated.description || '',
+        chapter_numbers: updated.chapter_numbers || [],
+        is_new: false,
+      }
+      variantStripRef.value?.upsertVariant(updated)
+      formDrafts.set(`variant:${updated.id}`, snapshot)
+      if (regenerate) {
+        await generateAndTrack(props.asset.id, updated.id)
+        return
+      }
+      notice.success(`「${updated.name}」版本已保存`)
+      emit('close')
+      return
+    }
+
     let assetName = name.value.trim()
     let assetDescription = description.value.trim()
     let mainImage: string | undefined
@@ -495,9 +892,7 @@ async function submit(regenerate = false) {
       promptSourceAsset.value = response.data
       emit('saved', response.data)
       if (regenerate) {
-        notice.success('修改已保存，正在重新生成')
-        emit('regenerate', response.data)
-        await loadGenerationHistory()
+        await generateAndTrack(response.data.id)
         return
       }
       notice.success(`${config.value.label}已更新`)
@@ -519,7 +914,10 @@ async function submit(regenerate = false) {
 
 watch(() => props.open, value => {
   if (!value) {
+    generationController?.abort()
+    generationController = null
     closeImageLightbox()
+    annotationOpen.value = false
     document.body.style.overflow = previousBodyOverflow
     return
   }
@@ -559,6 +957,7 @@ onMounted(() => {
   }
 })
 onUnmounted(() => {
+  generationController?.abort()
   window.removeEventListener('keydown', onWindowKeydown)
   document.body.style.overflow = previousBodyOverflow
 })
@@ -572,18 +971,52 @@ onUnmounted(() => {
     <Transition name="asset-drawer">
       <form v-if="open" class="asset-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-dialog-title" @submit.prevent="submit(false)">
         <header class="asset-dialog__header">
-          <span class="asset-dialog__icon"><component :is="config.icon" :size="20" /></span>
+          <span class="asset-dialog__icon"><component :is="config.icon" :size="18" /></span>
           <div><span>PROJECT ASSET</span><h2 id="asset-dialog-title">{{ isEditing ? '编辑' : '新增' }}{{ config.label }}</h2></div>
           <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭" @click="emit('close')"><X :size="18" /></AppButton>
         </header>
 
         <div class="asset-dialog__body">
-          <section v-if="generatedImage" class="asset-generated-preview" aria-label="当前图片">
-            <header><strong>当前图片</strong><span>{{ imageInfoLabel(generatedImage, currentImageFormat) }}</span></header>
-            <button type="button" class="asset-generated-preview__viewer" aria-label="放大查看当前图片" @click="openImageLightbox(generatedImage, `${name || asset?.canonical_name || config.label}的生成图片`, currentImageFormat)">
-              <img :src="generatedImage" :alt="`${name || asset?.canonical_name || config.label}的生成图片`" @load="recordImageInfo(generatedImage, $event, currentImageFormat)" />
-              <span><Maximize2 :size="15" />放大查看</span>
-            </button>
+          <section v-if="isEditing || generatedImage" class="asset-generated-preview" aria-label="当前图片">
+            <header>
+              <strong>当前图片 · {{ currentImageName }}</strong>
+              <span v-if="generationBusy || generationError" class="asset-generated-preview__status" :class="{ 'is-error': generationError }">
+                <i aria-hidden="true" />{{ generationStatusText }}
+              </span>
+              <span v-else>{{ generatedImage ? imageInfoLabel(generatedImage, currentImageFormat) : '尚未生成' }}</span>
+            </header>
+            <div v-if="generatedImage" class="asset-generated-preview__canvas">
+              <button type="button" class="asset-generated-preview__viewer" :class="{ 'is-generating': generationBusy }" aria-label="放大查看当前图片" @click="openImageLightbox(generatedImage, `${currentImageName}的生成图片`, currentImageFormat)">
+                <img :src="generatedImage" :alt="`${currentImageName}的生成图片`" @load="recordImageInfo(generatedImage, $event, currentImageFormat)" />
+                <span class="asset-generated-preview__zoom"><Maximize2 :size="15" />放大查看</span>
+                <span v-if="generationBusy" class="asset-generated-preview__overlay" aria-hidden="true">
+                  <i><LoaderCircle :size="25" /></i>
+                </span>
+              </button>
+              <AppButton
+                v-if="canAnnotateCurrentImage"
+                type="button"
+                variant="secondary"
+                size="sm"
+                icon-only
+                class="asset-generated-preview__edit"
+                aria-label="编辑当前图片标注"
+                title="编辑图片"
+                @click="openAnnotationEditor"
+              ><Pencil :size="15" /></AppButton>
+            </div>
+            <div v-else-if="generationBusy" class="asset-generated-preview__generating" role="status" aria-live="polite">
+              <span class="asset-generated-preview__loader"><LoaderCircle :size="30" /></span>
+              <strong>{{ generationStatusText }}</strong>
+              <span>{{ generationStatusMessage }}</span>
+            </div>
+            <div v-else class="asset-generated-preview__empty" role="status"><ImagePlus :size="30" /><strong>暂无图片</strong><span>可以上传或生成该衍生形象</span></div>
+            <Transition name="asset-generation-status">
+              <div v-if="(generationBusy && generatedImage) || generationError" class="asset-generation-status" :class="{ 'is-error': generationError }" role="status" aria-live="polite">
+                <span><LoaderCircle v-if="!generationError" :size="17" /><CircleAlert v-else :size="17" /></span>
+                <div><strong>{{ generationStatusText }}</strong><small>{{ generationStatusMessage }}</small></div>
+              </div>
+            </Transition>
           </section>
 
           <section v-if="isEditing" class="asset-generation-history" aria-labelledby="asset-history-title">
@@ -647,6 +1080,17 @@ onUnmounted(() => {
               </section>
             </Transition>
           </section>
+
+          <AssetVariantStrip
+            v-if="isEditing && asset"
+            ref="variantStripRef"
+            :asset="asset"
+            :draft="variantDraft"
+            :chapter-number="chapterNumber"
+            :episode-numbers="episodeNumbers"
+            @select="selectVariantPreview"
+            @draft="updateVariantDraft"
+          />
 
           <div class="asset-form-grid" :class="{ 'is-character': kind === 'character' && !isGroupPortrait }">
             <label class="asset-field"><span><i>*</i>名称</span><input v-model="name" maxlength="100" placeholder="请输入" /></label>
@@ -712,14 +1156,22 @@ onUnmounted(() => {
           <span v-else />
           <div>
             <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="secondary" :disabled="!canSubmit || saving" @click="submit(true)"><RefreshCw :size="15" />重新生成</AppButton>
-            <AppButton type="submit" variant="primary" :disabled="!canSubmit" :loading="saving"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton>
+            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="secondary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : variantDraft?.is_new ? '生成' : '重新生成' }}</AppButton>
+            <AppButton type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton>
           </div>
         </footer>
       </form>
     </Transition>
   </Teleport>
   <ImageLightbox :open="Boolean(lightboxImage)" :src="lightboxImage" :alt="lightboxAlt" :format="lightboxFormat" @close="closeImageLightbox" />
+  <ImageAnnotationEditor
+    :open="annotationOpen"
+    :image-url="generatedImage"
+    :title="currentImageName"
+    :saving="annotationSaving"
+    @close="annotationOpen = false"
+    @save="saveAnnotatedImage"
+  />
 </template>
 
 <style scoped>
@@ -729,21 +1181,55 @@ onUnmounted(() => {
 .asset-backdrop-enter-from,.asset-backdrop-leave-to { opacity: 0; }
 .asset-drawer-enter-active,.asset-drawer-leave-active { transition: transform .28s cubic-bezier(.2,.72,.2,1),box-shadow .28s ease; }
 .asset-drawer-enter-from,.asset-drawer-leave-to { box-shadow: none; transform: translateX(100%); }
-.asset-dialog__header { display: grid; grid-template-columns: 44px 1fr 36px; align-items: center; gap: 12px; padding: 20px 22px 16px; background: linear-gradient(135deg,#fbfbff,#f4f5ff); }
-.asset-dialog__icon { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 14px; color: #5b5df0; background: #fff; box-shadow: 0 8px 22px rgb(73 75 159 / 10%); }
-.asset-dialog__header > div > span { color: #7779ef; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
-.asset-dialog__header h2 { margin: 2px 0 0; color: #292d3a; font-size: 19px; }
+.asset-dialog__header { display: grid; grid-template-columns: 36px 1fr 32px; align-items: center; gap: 10px; padding: 11px 18px; background: linear-gradient(135deg,#fbfbff,#f4f5ff); }
+.asset-dialog__icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; color: #5b5df0; background: #fff; box-shadow: 0 6px 16px rgb(73 75 159 / 9%); }
+.asset-dialog__header > div > span { color: #7779ef; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
+.asset-dialog__header h2 { margin: 0; color: #292d3a; font-size: 17px; line-height: 1.2; }
 .asset-dialog__body { display: grid; min-width: 0; gap: 17px; overflow-x: hidden; overflow-y: auto; padding: 18px 22px 20px; }
 .asset-generated-preview { display: grid; gap: 8px; }
 .asset-generated-preview > header { display: flex; align-items: center; justify-content: space-between; color: #535968; font-size: 12px; }
 .asset-generated-preview > header strong { font-weight: 650; }
 .asset-generated-preview > header span { color: #858c9b; font-size: 10px; font-variant-numeric: tabular-nums; }
+.asset-generated-preview > header .asset-generated-preview__status { display: inline-flex; align-items: center; gap: 6px; color: #5d5ff0; font-weight: 700; }
+.asset-generated-preview__status i { width: 6px; height: 6px; border-radius: 999px; background: currentColor; box-shadow: 0 0 0 0 rgb(93 95 240 / 28%); animation: asset-generation-pulse 1.45s ease-out infinite; }
+.asset-generated-preview > header .asset-generated-preview__status.is-error { color: #ca4052; }
+.asset-generated-preview__status.is-error i { box-shadow: none; animation: none; }
+.asset-generated-preview__canvas { position: relative; min-width: 0; }
 .asset-generated-preview__viewer { position: relative; display: grid; width: 100%; min-height: 220px; max-height: min(520px,52vh); place-items: center; overflow: hidden; padding: 0; border: 0; border-radius: 16px; outline: 0; background: #f7f8fa; cursor: zoom-in; }
 .asset-generated-preview__viewer img { display: block; width: auto; max-width: 100%; height: auto; max-height: min(520px,52vh); object-fit: contain; transition: transform .24s cubic-bezier(.2,.72,.2,1); }
-.asset-generated-preview__viewer > span { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 9px; color: #fff; background: rgb(43 46 55 / 74%); font-size: 10px; opacity: 0; transform: translateY(5px); transition: opacity .18s ease,transform .2s ease; backdrop-filter: blur(8px); }
+.asset-generated-preview__viewer > .asset-generated-preview__zoom { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 9px; color: #fff; background: rgb(43 46 55 / 74%); font-size: 10px; opacity: 0; transform: translateY(5px); transition: opacity .18s ease,transform .2s ease; backdrop-filter: blur(8px); }
+.asset-generated-preview__viewer.is-generating { cursor: progress; }
+.asset-generated-preview__viewer.is-generating::after { position: absolute; inset: 0; background: linear-gradient(105deg,transparent 30%,rgb(255 255 255 / 38%) 48%,transparent 66%); content: ''; transform: translateX(-100%); animation: asset-generation-shimmer 1.8s ease-in-out infinite; pointer-events: none; }
+.asset-generated-preview__overlay { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: rgb(246 247 252 / 24%); pointer-events: none; }
+.asset-generated-preview__overlay > i { display: grid; width: 50px; height: 50px; place-items: center; border: 1px solid rgb(255 255 255 / 72%); border-radius: 16px; color: #5d5ff0; background: rgb(255 255 255 / 82%); box-shadow: 0 10px 30px rgb(49 51 96 / 14%); font-style: normal; backdrop-filter: blur(10px); }
+.asset-generated-preview__overlay svg { animation: asset-library-spin .8s linear infinite; }
 .asset-generated-preview__viewer:hover img { transform: scale(1.012); }
-.asset-generated-preview__viewer:hover > span,.asset-generated-preview__viewer:focus-visible > span { opacity: 1; transform: translateY(0); }
+.asset-generated-preview__viewer:hover > .asset-generated-preview__zoom,.asset-generated-preview__viewer:focus-visible > .asset-generated-preview__zoom { opacity: 1; transform: translateY(0); }
 .asset-generated-preview__viewer:focus-visible { box-shadow: 0 0 0 3px rgb(91 93 240 / 18%); }
+.asset-generated-preview__edit { position: absolute; z-index: 3; top: 12px; right: 12px; color: var(--app-text-secondary); background: var(--app-surface-raised); box-shadow: inset 0 0 0 1px var(--app-border),var(--app-shadow); opacity: 0; transform: translateY(-4px); transition: color .16s ease,background-color .16s ease,box-shadow .16s ease,opacity .18s ease,transform .2s cubic-bezier(.2,.72,.2,1); backdrop-filter: blur(9px); }
+.asset-generated-preview__edit:hover:not(:disabled),.asset-generated-preview__edit:focus-visible { color: var(--app-accent); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong),var(--app-shadow); }
+.asset-generated-preview__canvas:hover .asset-generated-preview__edit,.asset-generated-preview__edit:focus-visible { opacity: 1; transform: translateY(0); }
+.asset-generated-preview__empty { display: grid; min-height: 220px; place-items: center; align-content: center; gap: 6px; border-radius: 16px; color: var(--app-text-muted); background: var(--app-surface-muted); }
+.asset-generated-preview__empty strong { color: var(--app-text-secondary); font-size: 12px; }
+.asset-generated-preview__empty span { font-size: 9px; }
+.asset-generated-preview__generating { position: relative; display: grid; min-height: 220px; place-items: center; align-content: center; gap: 8px; overflow: hidden; border-radius: 16px; color: var(--app-text-muted); background: color-mix(in srgb,var(--app-accent-soft) 45%,var(--app-surface-muted)); }
+.asset-generated-preview__generating::before { position: absolute; inset: 0; background: linear-gradient(105deg,transparent 28%,rgb(255 255 255 / 60%) 48%,transparent 68%); content: ''; transform: translateX(-100%); animation: asset-generation-shimmer 1.8s ease-in-out infinite; }
+.asset-generated-preview__generating > * { position: relative; z-index: 1; }
+.asset-generated-preview__generating strong { color: var(--app-accent); font-size: 12px; }
+.asset-generated-preview__generating > span:last-child { font-size: 9px; }
+.asset-generated-preview__loader { display: grid; width: 52px; height: 52px; place-items: center; border: 1px solid color-mix(in srgb,var(--app-accent) 14%,var(--app-border)); border-radius: 16px; color: var(--app-accent); background: var(--app-surface-raised); box-shadow: var(--app-shadow); }
+.asset-generated-preview__loader svg { animation: asset-library-spin .8s linear infinite; }
+.asset-generation-status { display: grid; min-width: 0; grid-template-columns: 32px minmax(0,1fr); align-items: center; gap: 9px; padding: 9px 10px; border-radius: 11px; color: #5557e7; background: #f2f2ff; }
+.asset-generation-status > span { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; background: #fff; }
+.asset-generation-status svg { animation: asset-library-spin .8s linear infinite; }
+.asset-generation-status div { display: grid; min-width: 0; gap: 2px; }
+.asset-generation-status strong { font-size: 10px; }
+.asset-generation-status small { overflow: hidden; color: #777d8d; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.asset-generation-status.is-error { color: #c5384c; background: #fff1f2; }
+.asset-generation-status.is-error > span { background: #fff; }
+.asset-generation-status.is-error svg { animation: none; }
+.asset-generation-status-enter-active,.asset-generation-status-leave-active { transition: opacity .18s ease,transform .2s cubic-bezier(.2,.72,.2,1); }
+.asset-generation-status-enter-from,.asset-generation-status-leave-to { opacity: 0; transform: translateY(-5px); }
 .asset-generation-history { display: grid; gap: 10px; padding-top: 4px; }
 .asset-generation-history > header,.asset-generation-history > header > div { display: flex; align-items: center; gap: 7px; }
 .asset-generation-history > header { justify-content: space-between; color: #656b7a; }
@@ -820,6 +1306,8 @@ onUnmounted(() => {
 .asset-library__paging { display: flex; min-height: 34px; grid-column: 1/-1; align-items: center; justify-content: center; gap: 7px; color: #989dab; font-size: 10px; }
 .asset-library__paging svg { animation: asset-library-spin .8s linear infinite; }
 @keyframes asset-library-spin { to { transform: rotate(360deg); } }
+@keyframes asset-generation-shimmer { 55%,100% { transform: translateX(100%); } }
+@keyframes asset-generation-pulse { 70%,100% { box-shadow: 0 0 0 7px rgb(93 95 240 / 0%); } }
 .asset-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 22px 18px; background: #fbfbfd; box-shadow: 0 -10px 30px rgb(36 40 57 / 4%); }
 .asset-dialog__footer > div,.asset-generation-options { display: flex; align-items: center; gap: 8px; }
 .asset-generation-options :deep(.app-select:first-child) { width: 190px; }
@@ -833,10 +1321,14 @@ onUnmounted(() => {
   .asset-generation-options :deep(.image-parameters) { width: 100%; }
   .asset-generation-history__list { grid-template-columns: 1fr; }
 }
+@media (hover: none) {
+  .asset-generated-preview__edit { opacity: 1; transform: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .asset-backdrop-enter-active,.asset-backdrop-leave-active,.asset-drawer-enter-active,.asset-drawer-leave-active { transition-duration: .01ms; }
-  .asset-generation-history__placeholder svg,.asset-library__paging svg { animation: none !important; }
-  .asset-generated-preview__viewer img,.asset-generated-preview__viewer > span,.asset-generation-history__image img { transition-duration: .01ms; }
+  .asset-generation-history__placeholder svg,.asset-library__paging svg,.asset-generated-preview__overlay svg,.asset-generated-preview__loader svg,.asset-generation-status svg,.asset-generated-preview__status i { animation: none !important; }
+  .asset-generated-preview__viewer.is-generating::after,.asset-generated-preview__generating::before { animation: none; opacity: .35; transform: none; }
+  .asset-generated-preview__viewer img,.asset-generated-preview__viewer > .asset-generated-preview__zoom,.asset-generated-preview__edit,.asset-generation-history__image img { transition-duration: .01ms; }
   .asset-generation-history__error svg,.asset-error-detail-enter-active,.asset-error-detail-leave-active { transition-duration: .01ms; }
 }
 </style>

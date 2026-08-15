@@ -8,7 +8,8 @@ export interface SceneStatusRailItem {
   state: SceneGenerationState
 }
 
-export function resolveSceneGenerationState(video?: Pick<Video, 'status'>): SceneGenerationState {
+export function resolveSceneGenerationState(video?: Pick<Video, 'status'>, hasSubmissionError = false): SceneGenerationState {
+  if (hasSubmissionError) return 'error'
   if (video?.status === TaskStatusEnum.COMPLETED) return 'completed'
   if (video?.status === TaskStatusEnum.FAILED || video?.status === TaskStatusEnum.CANCELLED) return 'error'
   return 'pending'

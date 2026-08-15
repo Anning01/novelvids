@@ -5,15 +5,18 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), queryVideo: vi.fn(), updateAsset: vi.fn(), updateScene: vi.fn() },
+  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn() },
   sleep: vi.fn(),
 }))
 
 const createAssetMock = vi.mocked(api.createAsset)
 const createSceneMock = vi.mocked(api.createScene)
 const deleteAssetMock = vi.mocked(api.deleteAsset)
+const mergeAssetsMock = vi.mocked(api.mergeAssets)
 const queryVideoMock = vi.mocked(api.queryVideo)
+const reuseAssetMock = vi.mocked(api.reuseAsset)
 const updateAssetMock = vi.mocked(api.updateAsset)
+const updateChapterMock = vi.mocked(api.updateChapter)
 const updateSceneMock = vi.mocked(api.updateScene)
 let store: ReturnType<typeof useWorkbenchStore>
 
@@ -22,6 +25,32 @@ beforeEach(() => {
   store = useWorkbenchStore()
   store.chapterId = 2162
   store.novelId = 9
+})
+
+it('persists chapter content and refreshes the chapter note data', async () => {
+  const original = {
+    id: 2162,
+    novel_id: 9,
+    number: 1,
+    name: '开端',
+    content: '原章节正文',
+    created_at: '2026-07-25T00:00:00.000Z',
+    updated_at: '2026-07-25T00:00:00.000Z',
+  }
+  const updated = {
+    ...original,
+    content: '双击编辑后的完整章节正文',
+    updated_at: '2026-08-15T00:00:00.000Z',
+  }
+  store.chapter = original
+  store.rebuildGraph()
+  updateChapterMock.mockResolvedValueOnce({ code: 0, message: 'ok', data: updated })
+
+  await expect(store.saveChapter({ content: updated.content })).resolves.toEqual(updated)
+
+  expect(updateChapterMock).toHaveBeenCalledWith(2162, { content: updated.content })
+  expect(store.chapter).toEqual(updated)
+  expect(store.nodeByKey('chapter')?.data.chapter).toEqual(updated)
 })
 
 it('does not leave a shot when createScene rejects', async () => {
@@ -97,10 +126,62 @@ it('creates, positions, selects, and persists an empty asset', async () => {
     chapter_id: 2162,
     asset_type: AssetTypeEnum.PERSON,
     canonical_name: '资产 1',
+    metadata: {
+      workbench_reusable_placeholder: true,
+      aspect_ratio: '16:9',
+      workbench: { aspectRatio: '16:9' },
+    },
   })
   expect(created?.position).toEqual({ x: 120, y: 240 })
   expect(store.selectedNodeKeys).toEqual(['asset-81'])
   expect(persist).toHaveBeenCalled()
+})
+
+it('replaces a typed placeholder with a same-type project asset at the same position', async () => {
+  const placeholder = {
+    id: 81,
+    novel_id: 9,
+    asset_type: AssetTypeEnum.SCENE,
+    canonical_name: '资产 1',
+    metadata: { workbench_reusable_placeholder: true },
+    source_chapters: [1],
+    created_at: '2026-07-25T00:00:00.000Z',
+    updated_at: '2026-07-25T00:00:00.000Z',
+  }
+  const source = {
+    ...placeholder,
+    id: 63,
+    canonical_name: '郊区小楼',
+    metadata: {},
+    source_chapters: [2],
+  }
+  const merged = { ...source, source_chapters: [1, 2] }
+  store.chapter = {
+    id: 2162,
+    novel_id: 9,
+    number: 1,
+    name: '章节',
+    created_at: placeholder.created_at,
+    updated_at: placeholder.updated_at,
+  }
+  store.assets = [placeholder]
+  store.rebuildGraph()
+  const placeholderNode = store.nodeByKey('asset-81')!
+  placeholderNode.position = { x: 420, y: 260 }
+  reuseAssetMock.mockResolvedValueOnce({ code: 0, message: 'ok', data: source })
+  mergeAssetsMock.mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: { asset: merged, removed_asset_id: 81, data_source_asset_id: 63, summary: [] },
+  })
+
+  const result = await store.reuseProjectAssetInPlaceholder(81, source)
+
+  expect(reuseAssetMock).toHaveBeenCalledWith(63, 2162)
+  expect(mergeAssetsMock).toHaveBeenCalledWith(81, 63)
+  expect(store.assets).toEqual([merged])
+  expect(result?.key).toBe('asset-63')
+  expect(result?.position).toEqual({ x: 420, y: 260 })
 })
 
 it('promotes a real candidate to the asset main image', async () => {
@@ -230,6 +311,7 @@ it('renders the adopted video result instead of always using the latest video', 
   expect(store.nodeByKey('video-91')?.data.video).toMatchObject({ id: 91 })
   expect(store.nodeByKey('video-92')).toBeUndefined()
   expect(store.nodeByKey('shot-10')?.status).toBe('running')
+  expect(store.edges.some(edge => edge.source === 'chapter' || edge.target === 'chapter')).toBe(false)
 })
 
 it('resumes polling a non-terminal video and refreshes its canvas state', async () => {

@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Python 运行时与缓存
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# 前端（由独立镜像构建）
+web
+node_modules
+
+# 数据与媒体（运行时挂载卷，不入镜像）
+data
+media
+*.db
+*.sqlite
+*.sqlite3
+
+# 密钥与本地配置
+.env
+.env.*
+test/.test.env
+
+# 日志与临时文件
+*.log
+logs
+tmp
+temp
+
+# IDE / OS
+.idea
+.vscode
+.DS_Store
