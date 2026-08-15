@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from prompts.storyboard import build_storyboard_messages, format_storyboard_prompt
+from prompts.storyboard import (
+    build_storyboard_messages,
+    entity_reference_names,
+    format_storyboard_prompt,
+    referenced_entities,
+)
 from schemas.scene import SceneEntity, SoraScenePromptConfig, Storyboard
 from services.llm.json_output import JsonCompletionTruncatedError
 from services.storyboard.chunking import NarrativeChunker
@@ -123,6 +128,23 @@ def test_professional_prompt_renders_only_assets_referenced_by_the_shot():
     assert "场景参考：郊区小楼" in prompt
     assert "场景概念图：郊区小楼。红砖外墙，窗框斑驳" in prompt
     assert "旧钥匙" not in prompt
+
+
+def test_entity_reference_names_matches_braced_syntax_and_aliases():
+    entity = _entity()
+    assert referenced_entities(_shot(1), [entity]) == [entity]
+    # 未引用实体不会被匹配
+    unused = SceneEntity(
+        name="旧钥匙",
+        aliases=[],
+        description="黄铜材质，齿槽磨损",
+        asset_type="物品",
+    )
+    assert referenced_entities(_shot(1), [entity, unused]) == [entity]
+    # 纯文本出现名字但非 @{} 绑定语法时不匹配
+    assert entity_reference_names("小楼居中，人物接近入口", [entity]) == []
+    # 别名以 @{} 形式出现时匹配
+    assert entity_reference_names("他走向 @{小楼}", [entity]) == [entity]
 
 
 @pytest.mark.asyncio

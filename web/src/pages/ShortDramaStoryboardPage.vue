@@ -155,19 +155,13 @@ const assetGroups = computed(() => [
 
 function makeSceneDraft(scene: Scene): SceneDraft {
   const metadata = scene?.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}
+  // 资产引用统一以持久化的 scene.assets / asset_ids 为准，与画布工作流共用同一份数据。
   const linkedAssetIds = scene.assets?.map(item => item.id) ?? scene.asset_ids ?? []
-  const sceneText = `${scene.description || ''}\n${scene.prompt || ''}`.toLocaleLowerCase()
-  const inferredAssetIds = assets.value.filter(item => {
-    const names = [item.canonical_name, ...(item.aliases || [])]
-      .map(name => name.trim().toLocaleLowerCase())
-      .filter(name => name.length > 1)
-    return names.some(name => sceneText.includes(name))
-  }).map(item => item.id)
   return {
     description: scene.description || '',
     prompt: scene.prompt || '',
     duration: scene.duration || 6,
-    selectedAssetIds: [...new Set([...linkedAssetIds, ...inferredAssetIds])],
+    selectedAssetIds: [...new Set(linkedAssetIds)],
     selectedVariantIds: readSelectedVariantIds(metadata.asset_variant_ids),
     videoGenerationMode: metadata.video_generation_mode === 'keyframes' ? 'keyframes' : 'reference',
     firstFrameUrl: typeof metadata.first_frame_url === 'string' ? metadata.first_frame_url : '',

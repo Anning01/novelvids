@@ -5,7 +5,7 @@ from openai import AsyncOpenAI
 from models.chapter import Chapter
 from models.asset import Asset
 from models.scene import Scene
-from prompts.storyboard import format_storyboard_prompt
+from prompts.storyboard import format_storyboard_prompt, referenced_entities
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from schemas.scene import SceneEntity
@@ -45,6 +45,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 aliases=asset.aliases or [],
                 description=asset.description or asset.base_traits or "",
                 asset_type=AssetTypeEnum(asset.asset_type).nickname,
+                asset_id=asset.id,
             )
             for asset in assets
             if AssetTypeEnum(asset.asset_type)
@@ -160,6 +161,13 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 prompt_language,
                 entities=entities or [],
             )
+            # 镜头实际引用的资产 ID，持久化到 scene.assets（与画布工作流共用同一份引用数据）
+            referenced_asset_ids = [
+                entity.asset_id
+                for entity in referenced_entities(shot, entities or [])
+                if entity.asset_id is not None
+            ]
+
             # 创建 Scene 记录
             scene = await Scene.create(
                 chapter_id=chapter_id,
@@ -170,6 +178,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 duration=duration_value,
                 metadata=scene_metadata
             )
+
+            if referenced_asset_ids:
+                await scene.assets.add(*await Asset.filter(id__in=referenced_asset_ids))
 
             scenes_created.append(scene)
 

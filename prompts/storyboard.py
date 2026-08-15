@@ -223,24 +223,37 @@ def _shot_search_text(shot: StoryboardShot) -> str:
     return "\n".join(str(value) for value in values)
 
 
-def _referenced_entities(
-    shot: StoryboardShot,
+def entity_reference_names(
+    text: str,
     entities: Sequence[StoryboardEntity],
 ) -> list[StoryboardEntity]:
-    search_text = _shot_search_text(shot)
+    """返回在文本中以 `@{实体名}` / `@实体名` 形式被引用的实体。
+
+    实体名或别名只要命中一次即视为被引用，这是分镜资产引用的唯一判定逻辑。
+    """
     return [
         entity
         for entity in entities
-        if f"@{{{entity.name}}}" in search_text
-        or f"@{entity.name}" in search_text
+        if any(
+            f"@{{{name}}}" in text or f"@{name}" in text
+            for name in (entity.name, *entity.aliases)
+        )
     ]
+
+
+def referenced_entities(
+    shot: StoryboardShot,
+    entities: Sequence[StoryboardEntity],
+) -> list[StoryboardEntity]:
+    """返回镜头实际引用的实体。"""
+    return entity_reference_names(_shot_search_text(shot), entities)
 
 
 def _format_asset_references(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
 ) -> str:
-    referenced = _referenced_entities(shot, entities)
+    referenced = referenced_entities(shot, entities)
     if not referenced:
         return "本镜头未引用已登记资产。"
 
