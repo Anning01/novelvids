@@ -11,7 +11,7 @@ from prompts.extraction import (
     SINGLE_CHARACTER_TRAIT_LABELS,
     ensure_ordered_trait_labels,
 )
-from services.llm.json_output import create_json_completion
+from services.llm.json_output import create_json_completion, completion_usage
 
 
 ASSET_EXTRACTION_GATEWAY_ERROR_CODE = "asset_extraction_gateway_error"
@@ -26,8 +26,9 @@ class AssetExtractionGatewayError(RuntimeError):
 
     error_code = ASSET_EXTRACTION_GATEWAY_ERROR_CODE
 
-    def __init__(self) -> None:
+    def __init__(self, usage: dict | None = None) -> None:
         super().__init__(ASSET_EXTRACTION_GATEWAY_ERROR_MESSAGE)
+        self.usage = usage or {}
 
 
 class Person(BaseModel):
@@ -110,21 +111,25 @@ class AssetExtractor:
         self.client = client
         self.model = model
         self.supports_json_output = supports_json_output
+        self.last_usage: dict = {}
 
     async def extract(
         self,
         messages: list[dict[str, str]],
     ) -> AssetExtractionResult:
         try:
-            parsed, _ = await create_json_completion(
+            parsed, completion = await create_json_completion(
                 self.client,
                 model=self.model,
                 messages=messages,
                 response_model=self.response_model,
                 supports_json_output=self.supports_json_output,
             )
+            self.last_usage = completion_usage(completion)
             return AssetExtractionResult.model_validate(parsed)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            raise AssetExtractionGatewayError() from None
+        except Exception as error:
+            raise AssetExtractionGatewayError(
+                usage=getattr(error, "usage", None) or {}
+            ) from None

@@ -26,7 +26,7 @@ from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
 from services.image_generation import generate_images
 from services.image_generation.capabilities import validate_selection
-from services.llm.json_output import create_json_completion
+from services.llm.json_output import create_json_completion, completion_usage
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum, ImageSourceEnum
 from utils.prompt_language import normalize_prompt_language, prompt_language_name
 
@@ -219,7 +219,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
 
         material = _build_analysis_material(novel, chapters)
         llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
-        analysis, _ = await create_json_completion(
+        analysis, completion = await create_json_completion(
             llm_client,
             model=llm_config.model,
             messages=[
@@ -240,6 +240,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             response_model=BookAnalysis,
             supports_json_output=llm_config.supports_json_output,
         )
+        token_usage = completion_usage(completion)
 
         await _sync_character_assets(
             novel,
@@ -288,4 +289,10 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             **analysis.model_dump(),
             "chapter_count": len(chapters),
             "cover": cover,
+            "token_usage": token_usage,
+            "llm_config_id": llm_config.id,
+            "llm_model": llm_config.model,
+            "image_usage": {"image_count": 1, "clarity": cover_selection.clarity},
+            "image_config_id": image_config.id,
+            "image_model": image_config.model,
         }

@@ -11,6 +11,29 @@ from pydantic import BaseModel
 class JsonCompletionTruncatedError(ValueError):
     """The provider stopped before returning a complete structured response."""
 
+    def __init__(self, message: str, usage: dict | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage or {}
+
+
+class JsonCompletionError(ValueError):
+    """Structured JSON completion failed; carries token usage for billing."""
+
+    def __init__(self, message: str, usage: dict | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage or {}
+
+
+def completion_usage(completion: Any) -> dict[str, int]:
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return {}
+    return {
+        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+    }
+
 
 def _extract_json(content: str) -> Any:
     """从纯 JSON、Markdown 代码块或带说明的文本中提取首个 JSON 值。"""
@@ -83,15 +106,19 @@ async def create_json_completion(
         request["timeout"] = timeout
 
     completion = await client.chat.completions.create(**request)
+    usage = completion_usage(completion)
     message = completion.choices[0].message
     finish_reason = getattr(completion.choices[0], "finish_reason", None)
     if finish_reason == "length":
         raise JsonCompletionTruncatedError(
-            "模型输出达到 token 上限，结构化 JSON 未完成"
+            "模型输出达到 token 上限，结构化 JSON 未完成", usage=usage
         )
     refusal = getattr(message, "refusal", None)
     if refusal:
-        raise ValueError(f"模型拒绝生成 JSON：{refusal}")
+        raise JsonCompletionError(f"模型拒绝生成 JSON：{refusal}", usage=usage)
 
-    payload = _extract_json(message.content or "")
+    try:
+        payload = _extract_json(message.content or "")
+    except ValueError as exc:
+        raise JsonCompletionError(str(exc), usage=usage) from None
     return response_model.model_validate(payload), completion
