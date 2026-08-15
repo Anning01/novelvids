@@ -35,6 +35,14 @@ def _validate_image_pricing(pricing: dict, model_type) -> None:
             raise HTTPException(status_code=400, detail=f"生图费用包含不支持的清晰度档位：{tier}")
         if not isinstance(value, (int, float)) or value < 0:
             raise HTTPException(status_code=400, detail=f"清晰度档位 {tier} 的费用必须为非负数字")
+    input_fee = pricing.get("input_image")
+    if input_fee is not None:
+        if not isinstance(input_fee, dict):
+            raise HTTPException(status_code=400, detail="生图输入图费用必须是对象")
+        if not isinstance(input_fee.get("first_free"), (int, float)) or input_fee["first_free"] < 0:
+            raise HTTPException(status_code=400, detail="输入图免费张数 first_free 必须为非负数字")
+        if not isinstance(input_fee.get("price_per_image"), (int, float)) or input_fee["price_per_image"] < 0:
+            raise HTTPException(status_code=400, detail="输入图超出单价 price_per_image 必须为非负数字")
 
 
 def _validate_video_pricing(pricing: dict, model_type) -> None:
@@ -49,6 +57,15 @@ def _validate_video_pricing(pricing: dict, model_type) -> None:
             raise HTTPException(status_code=400, detail=f"视频费用包含不支持的分辨率档位：{tier}")
         if not isinstance(value, (int, float)) or value < 0:
             raise HTTPException(status_code=400, detail=f"分辨率档位 {tier} 的费用必须为非负数字")
+    ref_prices = pricing.get("video_reference_prices")
+    if ref_prices is not None:
+        if not isinstance(ref_prices, dict):
+            raise HTTPException(status_code=400, detail="视频参考价格必须是档位对象")
+        for tier, value in ref_prices.items():
+            if tier not in allowed:
+                raise HTTPException(status_code=400, detail=f"视频参考价格包含不支持的分辨率档位：{tier}")
+            if not isinstance(value, (int, float)) or value < 0:
+                raise HTTPException(status_code=400, detail=f"视频参考分辨率档位 {tier} 的费用必须为非负数字")
 
 
 class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiModelConfigUpdate]):
