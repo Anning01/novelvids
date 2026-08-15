@@ -102,6 +102,8 @@ const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value =>
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
 const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
 const tierPrices = ref<Record<string, number>>({})
+const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
+const videoRefPrices = ref<Record<string, number>>({})
 const pricingTierOptions = computed<string[]>(() => {
   if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
   if (selectedCategoryId.value === 'video') return generationCapabilities.value.video[form.value.video_model_type] || []
@@ -190,6 +192,8 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   tierPrices.value = category.id === 'llm'
     ? {}
     : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
+  inputImagePricing.value = { first_free: 1, price_per_image: 0 }
+  videoRefPrices.value = {}
   editingConfigId.value = null
   showApiKey.value = false
   showCreate.value = true
@@ -217,6 +221,10 @@ function openEdit(item: AiModelConfig) {
     ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
     : { input_price_per_1m: 0, output_price_per_1m: 0 }
   tierPrices.value = item.pricing?.prices ? { ...item.pricing.prices } : {}
+  inputImagePricing.value = item.pricing?.input_image
+    ? { first_free: item.pricing.input_image.first_free, price_per_image: item.pricing.input_image.price_per_image }
+    : { first_free: 1, price_per_image: 0 }
+  videoRefPrices.value = item.pricing?.video_reference_prices ? { ...item.pricing.video_reference_prices } : {}
   showCreate.value = true
 }
 
@@ -235,23 +243,38 @@ async function saveConfig() {
   creating.value = true
   try {
     const taskTypes = form.value.task_types.map(Number)
-    const pricing: ModelPricing = selectedCategoryId.value === 'llm'
-      ? {
-          type: 'text',
-          currency: 'CNY',
-          input_price_per_1m: Number(textPricing.value.input_price_per_1m) || 0,
-          output_price_per_1m: Number(textPricing.value.output_price_per_1m) || 0,
-        }
-      : {
-          type: selectedCategoryId.value === 'image' ? 'image' : 'video',
-          currency: 'CNY',
-          prices: Object.fromEntries(
-            pricingTierOptions.value.map(tier => {
-              const value = tierPrices.value[tier]
-              return [tier, typeof value === 'number' && !Number.isNaN(value) ? value : 0]
-            })
-          ),
-        }
+    const tierPriceEntries = (source: Record<string, number>) => Object.fromEntries(
+      pricingTierOptions.value.map(tier => {
+        const value = source[tier]
+        return [tier, typeof value === 'number' && !Number.isNaN(value) ? value : 0]
+      })
+    )
+    let pricing: ModelPricing
+    if (selectedCategoryId.value === 'llm') {
+      pricing = {
+        type: 'text',
+        currency: 'CNY',
+        input_price_per_1m: Number(textPricing.value.input_price_per_1m) || 0,
+        output_price_per_1m: Number(textPricing.value.output_price_per_1m) || 0,
+      }
+    } else if (selectedCategoryId.value === 'image') {
+      pricing = {
+        type: 'image',
+        currency: 'CNY',
+        prices: tierPriceEntries(tierPrices.value),
+        input_image: {
+          first_free: Number(inputImagePricing.value.first_free) || 0,
+          price_per_image: Number(inputImagePricing.value.price_per_image) || 0,
+        },
+      }
+    } else {
+      pricing = {
+        type: 'video',
+        currency: 'CNY',
+        prices: tierPriceEntries(tierPrices.value),
+        video_reference_prices: tierPriceEntries(videoRefPrices.value),
+      }
+    }
     const payload = {
       ...form.value,
       api_protocol: selectedCategoryId.value === 'video' ? 'volcengine_ark' : form.value.api_protocol,
@@ -539,13 +562,38 @@ onMounted(load)
             <label><span>输出单价</span><input v-model.number="textPricing.output_price_per_1m" type="number" min="0" step="0.01" /></label>
           </div>
         </section>
-        <section v-else-if="pricingTierOptions.length" class="pricing-editor">
-          <span class="pricing-title">费用设置（{{ selectedCategoryId === 'image' ? '元 / 张' : '元 / 秒' }}）</span>
+        <section v-else-if="selectedCategoryId === 'image' && pricingTierOptions.length" class="pricing-editor">
+          <span class="pricing-title">输出图费用（元 / 张）</span>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
-              <span>{{ selectedCategoryId === 'image' ? '清晰度' : '分辨率' }} {{ tier }}</span>
+              <span>清晰度 {{ tier }}</span>
               <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
             </label>
+          </div>
+          <div class="pricing-sub">
+            <span class="pricing-title">输入图费用（图生图）</span>
+            <div class="pricing-grid">
+              <label><span>免费张数</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
+              <label><span>超出单价（元 / 张）</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
+            </div>
+          </div>
+        </section>
+        <section v-else-if="selectedCategoryId === 'video' && pricingTierOptions.length" class="pricing-editor">
+          <span class="pricing-title">无视频参考（元 / 秒）</span>
+          <div class="pricing-grid">
+            <label v-for="tier in pricingTierOptions" :key="tier">
+              <span>分辨率 {{ tier }}</span>
+              <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
+            </label>
+          </div>
+          <div class="pricing-sub">
+            <span class="pricing-title">有视频参考（元 / 秒）</span>
+            <div class="pricing-grid">
+              <label v-for="tier in pricingTierOptions" :key="tier">
+                <span>分辨率 {{ tier }}</span>
+                <input v-model.number="videoRefPrices[tier]" type="number" min="0" step="0.01" />
+              </label>
+            </div>
           </div>
         </section>
 
@@ -669,6 +717,7 @@ onMounted(load)
 .model-modal > footer .app-button { min-height: 38px; padding: 0 14px; border-radius: 9px; cursor: pointer; font-size: 11px; }
 .model-modal > footer button:disabled { cursor: not-allowed; opacity: .55; }
 .pricing-editor { display: grid; gap: 10px; margin-top: 2px; padding: 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
+.pricing-sub { display: grid; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--app-border); }
 .pricing-title { color: var(--app-text-secondary); font-size: 10px; font-weight: 600; }
 .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .pricing-grid label { display: grid; gap: 6px; color: var(--app-text-muted); font-size: 10px; }
