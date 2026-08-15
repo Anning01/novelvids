@@ -69,12 +69,12 @@ async def test_record_video_uses_video_task_type_and_cost():
         model="vid",
         api_protocol="volcengine_ark",
         video_model_type="seedance_2",
-        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}},
+        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 46.0}},
     )
     record = await billing_recorder.record_video(
         novel_id=7,
         model_config_id=config.id,
-        seconds=6.0,
+        seconds=5.0,
         resolution="720p",
         status=TaskStatusEnum.completed.value,
         video_id=11,
@@ -82,7 +82,7 @@ async def test_record_video_uses_video_task_type_and_cost():
     assert record.billing_type == "video"
     assert record.task_type == AiTaskTypeEnum.video.value
     assert record.video_id == 11
-    assert record.cost == Decimal("6.000000")
+    assert record.cost == Decimal("4.968000")
 
 
 @pytest.mark.asyncio
@@ -136,16 +136,18 @@ async def test_record_video_with_video_reference_uses_ref_price():
         model="vid",
         api_protocol="volcengine_ark",
         video_model_type="seedance_2",
-        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}, "video_reference_prices": {"720p": 1.5}},
+        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 46.0}, "video_reference_prices": {"720p": 28.0}},
     )
     record = await billing_recorder.record_video(
         novel_id=7,
         model_config_id=config.id,
-        seconds=6.0,
+        seconds=5.0,
         resolution="720p",
+        input_video_seconds=3.0,
         has_video_reference=True,
         status=TaskStatusEnum.completed.value,
         video_id=12,
     )
     assert record.usage["has_video_reference"] is True
-    assert record.cost == Decimal("9.000000")  # 6 × 1.5
+    assert record.usage["input_video_seconds"] == 3.0
+    assert record.cost == Decimal("4.838400")  # 6 × 1.5

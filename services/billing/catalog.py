@@ -29,29 +29,32 @@ IMAGE_PRICING: dict[str, dict] = {
     },
 }
 
-# 视频模型：输出视频按分辨率（元/秒），「输入不含视频」刊例价。
-# 注：文档中「输入包含视频」为 token 计费（含输入视频时长），无固定元/秒，
-# 故此处不填 video_reference_prices，含视频时回退到 prices。
+# 视频模型：按 token 计费。prices / video_reference_prices 为 token 单价
+# （元/百万token），分别对应「输入不含视频」与「输入包含视频」。均为刊例价。
 VIDEO_PRICING: dict[str, dict] = {
     "seedance_2": {
         "type": "video",
         "currency": "CNY",
-        "prices": {"480p": 0.46, "720p": 0.99, "1080p": 2.48, "4k": 5.05},
+        "prices": {"480p": 46.00, "720p": 46.00, "1080p": 51.00, "4k": 26.00},
+        "video_reference_prices": {"480p": 28.00, "720p": 28.00, "1080p": 31.00, "4k": 16.00},
     },
     "seedance_2_fast": {
         "type": "video",
         "currency": "CNY",
-        "prices": {"480p": 0.37, "720p": 0.80},
+        "prices": {"480p": 37.00, "720p": 37.00},
+        "video_reference_prices": {"480p": 22.00, "720p": 22.00},
     },
     "seedance_2_mini": {
         "type": "video",
         "currency": "CNY",
-        "prices": {"480p": 0.23, "720p": 0.50},
+        "prices": {"480p": 23.00, "720p": 23.00},
+        "video_reference_prices": {"480p": 14.00, "720p": 14.00},
     },
     "seedance_2_5": {
         "type": "video",
         "currency": "CNY",
-        "prices": {"480p": 0.67, "720p": 1.51, "1080p": 3.74},
+        "prices": {"480p": 70.00, "720p": 70.00, "1080p": 77.00},
+        "video_reference_prices": {"480p": 42.00, "720p": 42.00, "1080p": 46.00},
     },
 }
 

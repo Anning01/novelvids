@@ -579,7 +579,7 @@ onMounted(load)
           </div>
         </section>
         <section v-else-if="selectedCategoryId === 'video' && pricingTierOptions.length" class="pricing-editor">
-          <span class="pricing-title">无视频参考（元 / 秒）</span>
+          <span class="pricing-title">无视频参考（元 / 百万 token）</span>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
               <span>分辨率 {{ tier }}</span>
@@ -587,7 +587,7 @@ onMounted(load)
             </label>
           </div>
           <div class="pricing-sub">
-            <span class="pricing-title">有视频参考（元 / 秒）</span>
+            <span class="pricing-title">有视频参考（元 / 百万 token）</span>
             <div class="pricing-grid">
               <label v-for="tier in pricingTierOptions" :key="tier">
                 <span>分辨率 {{ tier }}</span>

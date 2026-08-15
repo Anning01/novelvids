@@ -35,8 +35,9 @@ def test_pricing_for_video_model():
     )
     pricing = pricing_for(config)
     assert pricing["type"] == "video"
-    assert pricing["prices"]["720p"] == 0.99
-    assert pricing["prices"]["4k"] == 5.05
+    assert pricing["prices"]["720p"] == 46.00
+    assert pricing["prices"]["4k"] == 26.00
+    assert pricing["video_reference_prices"]["720p"] == 28.00
 
 
 def test_pricing_for_llm_model():

@@ -17,7 +17,11 @@ TEXT_PRICING = {
     "output_price_per_1m": 2.0,
 }
 IMAGE_PRICING = {"type": "image", "currency": "CNY", "prices": {"1K": 0.10, "2K": 0.20}}
-VIDEO_PRICING = {"type": "video", "currency": "CNY", "prices": {"480p": 0.50, "720p": 1.00}}
+VIDEO_PRICING = {
+    "type": "video",
+    "currency": "CNY",
+    "prices": {"480p": 46.0, "720p": 46.0, "1080p": 51.0, "4k": 26.0},
+}
 
 
 def test_normalize_token_usage_prompt_completion_keys():
@@ -55,14 +59,16 @@ def test_compute_image_cost_missing_tier_is_zero():
     assert compute_image_cost(3, "1K", None) == Decimal("0")
 
 
-def test_compute_video_cost_multiplies_seconds_by_resolution():
-    assert compute_video_cost(6.0, "720p", VIDEO_PRICING) == Decimal("6.000000")
-    assert compute_video_cost(10.5, "480p", VIDEO_PRICING) == Decimal("5.250000")
+def test_compute_video_cost_token_based():
+    # 720p: 21600 token/s × 5s = 108000 tokens；46 × 108000 / 1e6 = 4.968
+    assert compute_video_cost(5.0, "720p", VIDEO_PRICING) == Decimal("4.968000")
+    # 4k: 194400 token/s × 5s = 972000；26 × 972000 / 1e6 = 25.272
+    assert compute_video_cost(5.0, "4k", VIDEO_PRICING) == Decimal("25.272000")
 
 
 def test_compute_video_cost_missing_resolution_is_zero():
-    assert compute_video_cost(6.0, "4k", VIDEO_PRICING) == Decimal("0")
-    assert compute_video_cost(6.0, "720p", None) == Decimal("0")
+    assert compute_video_cost(5.0, "8k", VIDEO_PRICING) == Decimal("0")
+    assert compute_video_cost(5.0, "720p", None) == Decimal("0")
 
 
 def test_compute_input_image_cost_first_free_then_per_image():
@@ -87,13 +93,16 @@ def test_compute_video_cost_uses_video_reference_prices():
     pricing = {
         "type": "video",
         "currency": "CNY",
-        "prices": {"720p": 1.0},
-        "video_reference_prices": {"720p": 1.5},
+        "prices": {"720p": 46.0},
+        "video_reference_prices": {"720p": 28.0},
     }
-    assert compute_video_cost(6.0, "720p", pricing, has_video_reference=False) == Decimal("6.000000")
-    assert compute_video_cost(6.0, "720p", pricing, has_video_reference=True) == Decimal("9.000000")
+    assert compute_video_cost(5.0, "720p", pricing, has_video_reference=False) == Decimal("4.968000")
+    # 含视频 3 秒：28 × 21600 × (5+3) / 1e6 = 4.8384
+    assert compute_video_cost(
+        5.0, "720p", pricing, input_video_seconds=3.0, has_video_reference=True
+    ) == Decimal("4.838400")
 
 
 def test_compute_video_cost_video_reference_falls_back_to_prices():
-    pricing = {"type": "video", "currency": "CNY", "prices": {"720p": 1.0}}
-    assert compute_video_cost(6.0, "720p", pricing, has_video_reference=True) == Decimal("6.000000")
+    pricing = {"type": "video", "currency": "CNY", "prices": {"720p": 46.0}}
+    assert compute_video_cost(5.0, "720p", pricing, has_video_reference=True) == Decimal("4.968000")

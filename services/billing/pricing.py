@@ -75,12 +75,28 @@ def compute_input_image_cost(input_image_count: int, pricing: dict | None) -> De
     return _money(Decimal(billable) * price_per_image)
 
 
+# 每个分辨率档位每秒的 token 数（帧率固定 24fps）：
+# 宽 × 高 × 24 / 1024。480p 为 864×496，720p 为 1280×720，1080p 为 1920×1080，
+# 4k 为 3840×2160。用这些系数反算文档「价格示例」的元/个 完全吻合。
+TOKENS_PER_SECOND: dict[str, int] = {
+    "480p": 10044,
+    "720p": 21600,
+    "1080p": 48600,
+    "4k": 194400,
+}
+
+
 def compute_video_cost(
     seconds: float,
     resolution: str | None,
     pricing: dict | None,
+    input_video_seconds: float = 0.0,
     has_video_reference: bool = False,
 ) -> Decimal:
+    """视频按 token 计费：token单价(元/百万token) × (输入+输出时长) × 每秒token数。
+
+    prices / video_reference_prices 的值为「元 / 百万 token」，非元/秒。
+    """
     if not isinstance(pricing, dict) or pricing.get("type") != "video":
         return Decimal("0")
     if has_video_reference:
@@ -89,4 +105,7 @@ def compute_video_cost(
         prices = pricing.get("prices")
     if not isinstance(prices, dict) or resolution not in prices:
         return Decimal("0")
-    return _money(_as_decimal(prices[resolution]) * _as_decimal(seconds))
+    tokens_per_second = TOKENS_PER_SECOND.get(resolution, 0)
+    total_seconds = _as_decimal(seconds) + _as_decimal(input_video_seconds)
+    tokens = Decimal(tokens_per_second) * total_seconds
+    return _money(_as_decimal(prices[resolution]) * tokens / Decimal("1_000_000"))

@@ -131,6 +131,7 @@ class BillingRecorder:
         fallback_model=None,
         seconds: float = 0.0,
         resolution: str | None = None,
+        input_video_seconds: float = 0.0,
         has_video_reference: bool = False,
         status: int = TaskStatusEnum.completed.value,
         video_id=None,
@@ -139,10 +140,15 @@ class BillingRecorder:
         usage = {
             "seconds": seconds,
             "resolution": resolution,
+            "input_video_seconds": input_video_seconds,
             "has_video_reference": bool(has_video_reference),
         }
         cost = compute_video_cost(
-            seconds, resolution, config.pricing if config else None, has_video_reference
+            seconds,
+            resolution,
+            config.pricing if config else None,
+            input_video_seconds=input_video_seconds,
+            has_video_reference=has_video_reference,
         )
         return await self._create(
             novel_id=novel_id,

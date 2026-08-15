@@ -687,7 +687,7 @@ class FakeCompletedGenerator:
             "status": TaskStatusEnum.completed,
             "progress": 100,
             "url": "https://example.com/v.mp4",
-            "metadata": {"duration": 6},
+            "metadata": {"duration": 5},
         }
 
 
@@ -700,7 +700,7 @@ async def test_query_status_completed_落视频流水():
         task_type=AiTaskTypeEnum.video.value,
         name="video", base_url="https://ark.cn-beijing.volces.com/api/v3", api_key="k", model="v",
         api_protocol="volcengine_ark", video_model_type="seedance_2",
-        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}},
+        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 46.0}},
         is_active=True,
     )
     video = await Video.create(
@@ -708,7 +708,7 @@ async def test_query_status_completed_落视频流水():
         model_type=VideoModelTypeEnum.seedance.value,
         external_task_id="ext-1",
         status=TaskStatusEnum.pending.value,
-        metadata={"model_config_id": config.id, "novel_id": novel.id, "resolution": "720p", "duration": 6},
+        metadata={"model_config_id": config.id, "novel_id": novel.id, "resolution": "720p", "duration": 5},
     )
     with (
         patch("controllers.video.get_generator", return_value=FakeCompletedGenerator()),
@@ -720,7 +720,7 @@ async def test_query_status_completed_落视频流水():
     assert record is not None
     assert record.billing_type == "video"
     assert record.status == TaskStatusEnum.completed.value
-    assert record.cost == Decimal("6.000000")
+    assert record.cost == Decimal("4.968000")  # 46 × 21600 token/s × 5s / 1e6
 
 
 @pytest.mark.asyncio
@@ -732,7 +732,7 @@ async def test_query_status_completed_video_reference_uses_ref_price():
         task_type=AiTaskTypeEnum.video.value,
         name="video", base_url="https://ark.cn-beijing.volces.com/api/v3", api_key="k", model="v",
         api_protocol="volcengine_ark", video_model_type="seedance_2",
-        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}, "video_reference_prices": {"720p": 1.5}},
+        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 46.0}, "video_reference_prices": {"720p": 28.0}},
         is_active=True,
     )
     video = await Video.create(
@@ -740,7 +740,7 @@ async def test_query_status_completed_video_reference_uses_ref_price():
         model_type=VideoModelTypeEnum.seedance.value,
         external_task_id="ext-2",
         status=TaskStatusEnum.pending.value,
-        metadata={"model_config_id": config.id, "novel_id": novel.id, "resolution": "720p", "duration": 6, "has_video_reference": True},
+        metadata={"model_config_id": config.id, "novel_id": novel.id, "resolution": "720p", "duration": 5, "has_video_reference": True, "input_video_seconds": 3},
     )
     with (
         patch("controllers.video.get_generator", return_value=FakeCompletedGenerator()),
@@ -751,4 +751,5 @@ async def test_query_status_completed_video_reference_uses_ref_price():
     record = await ModelUsageRecord.filter(video_id=video.id).first()
     assert record is not None
     assert record.usage["has_video_reference"] is True
-    assert record.cost == Decimal("9.000000")
+    assert record.usage["input_video_seconds"] == 3
+    assert record.cost == Decimal("4.838400")  # 28 × 21600 token/s × (5+3)s / 1e6
