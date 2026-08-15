@@ -11,7 +11,7 @@ from services.video.capabilities import (
     validate_protocol as validate_video_protocol,
 )
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum
+from utils.enums import AiTaskTypeEnum, ImageModelTypeEnum, VideoGenerationModelTypeEnum
 
 
 def _validate_text_pricing(pricing: dict) -> None:
@@ -243,6 +243,18 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 "capabilities": capabilities.public_dict(),
             })
         return result
+
+    async def list_generation_capabilities(self) -> dict:
+        return {
+            "image": {
+                model_type.value: list(image_capabilities_for(model_type.value).clarities)
+                for model_type in ImageModelTypeEnum
+            },
+            "video": {
+                model_type.value: list(video_capabilities_for(model_type.value).resolutions)
+                for model_type in VideoGenerationModelTypeEnum
+            },
+        }
 
     async def deactivate(self, config_id: int) -> AiModelConfig:
         """停用指定配置，不影响同用途下的其他运行配置。"""
