@@ -142,3 +142,63 @@ class BillingRecorder:
 
 
 billing_recorder = BillingRecorder()
+
+
+async def record_ai_task_usage(task, result: dict | None, error: Exception | None = None) -> None:
+    """AiTaskExecutor 完成/失败后的统一计费落点。"""
+    try:
+        request_params = task.request_params or {}
+        novel_id = request_params.get("novel_id")
+        if novel_id is None:
+            return
+        task_type = task.task_type
+        status = task.status
+        if task_type == AiTaskTypeEnum.reference_image.value:
+            await billing_recorder.record_image(
+                novel_id=novel_id,
+                task_type=task_type,
+                model_config_id=request_params.get("model_config_id"),
+                fallback_model=request_params.get("model"),
+                image_count=len((result or {}).get("images") or []),
+                clarity=request_params.get("clarity"),
+                status=status,
+                ai_task_id=task.id,
+            )
+            return
+        if task_type == AiTaskTypeEnum.project_analysis.value:
+            res = result or {}
+            token_usage = res.get("token_usage") or getattr(error, "usage", None) or {}
+            await billing_recorder.record_text(
+                novel_id=novel_id,
+                task_type=task_type,
+                model_config_id=res.get("llm_config_id"),
+                fallback_model=res.get("llm_model"),
+                token_usage=token_usage,
+                status=status,
+                ai_task_id=task.id,
+            )
+            image_usage = res.get("image_usage") or {}
+            if image_usage:
+                await billing_recorder.record_image(
+                    novel_id=novel_id,
+                    task_type=task_type,
+                    model_config_id=res.get("image_config_id"),
+                    fallback_model=res.get("image_model"),
+                    image_count=image_usage.get("image_count", 0),
+                    clarity=image_usage.get("clarity"),
+                    status=status,
+                    ai_task_id=task.id,
+                )
+            return
+        token_usage = (result or {}).get("token_usage") or getattr(error, "usage", None) or {}
+        await billing_recorder.record_text(
+            novel_id=novel_id,
+            task_type=task_type,
+            model_config_id=request_params.get("model_config_id"),
+            fallback_model=request_params.get("model"),
+            token_usage=token_usage,
+            status=status,
+            ai_task_id=task.id,
+        )
+    except Exception:
+        logger.exception("billing record failed for task %s", getattr(task, "id", None))

@@ -122,6 +122,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         # 3. 提交任务（BackgroundTask 中执行）
         request_params = {
             "chapter_id": chapter.id,
+            "novel_id": chapter.novel_id,
+            "model_config_id": config.id,
             "base_url": config.base_url,
             "api_key": config.api_key,
             "model": config.model,

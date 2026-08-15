@@ -6,6 +6,7 @@ import pytest
 
 from models.ai_task import AiTask
 from models.config import AiModelConfig
+from models.usage_record import ModelUsageRecord
 from services.ai_task_executor import (
     AiTaskExecutor,
     BaseTaskHandler,
@@ -371,3 +372,49 @@ async def test_部分任务失败_不影响其他():
 
     await success_task.refresh_from_db()
     assert success_task.status == TaskStatusEnum.completed.value
+
+
+class TextBillingHandler(BaseTaskHandler):
+    async def execute(self, request_params: dict) -> dict:
+        return {"token_usage": {"prompt_tokens": 1000, "completion_tokens": 500}}
+
+
+class FailWithUsageHandler(BaseTaskHandler):
+    async def execute(self, request_params: dict) -> dict:
+        error = RuntimeError("解析失败")
+        error.usage = {"prompt_tokens": 200, "completion_tokens": 100}
+        raise error
+
+
+@pytest.mark.asyncio
+async def test_run_完成落文本流水():
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        name="llm", base_url="https://api.example.com", api_key="k", model="m",
+        pricing={"type": "text", "currency": "CNY", "input_price_per_1m": 1.0, "output_price_per_1m": 2.0},
+    )
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.extraction, TextBillingHandler())
+    task = await executor.submit(AiTaskTypeEnum.extraction, {
+        "novel_id": 5, "model_config_id": config.id, "model": "m",
+    })
+    await executor.run(task)
+
+    record = await ModelUsageRecord.filter(novel_id=5).first()
+    assert record is not None
+    assert record.billing_type == "text"
+    assert record.status == TaskStatusEnum.completed.value
+    assert record.cost > 0
+
+
+@pytest.mark.asyncio
+async def test_run_文本失败透出usage仍计费():
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.extraction, FailWithUsageHandler())
+    task = await executor.submit(AiTaskTypeEnum.extraction, {"novel_id": 6})
+    await executor.run(task)
+
+    record = await ModelUsageRecord.filter(novel_id=6).first()
+    assert record is not None
+    assert record.status == TaskStatusEnum.failed.value
+    assert record.usage["input_tokens"] == 200
