@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Clapperboard, FolderKanban, Images, Settings, Sparkles } from 'lucide-vue-next'
+import { BarChart3, Clapperboard, FolderKanban, Images, Settings, Sparkles } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { notice } from '@/shared/notice'
@@ -23,6 +23,7 @@ const creationItems = [
 const personalItems = [
   { path: '/projects', label: '项目', icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
   { path: '/assets', label: '资产', icon: Images, active: () => route.path.startsWith('/assets') },
+  { path: '/billing', label: '成本', icon: BarChart3, active: () => route.path.startsWith('/billing') },
   { path: '/settings', label: '设置', icon: Settings, active: () => route.path.startsWith('/settings') },
 ]
 </script>

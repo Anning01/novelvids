@@ -15,6 +15,7 @@ export default createRouter({
     { path: '/novel/:novelId/chapter/:chapterId/step/:stepId', component: () => import('./pages/WorkflowPage.vue') },
     { path: '/assets', component: () => import('./pages/VideosPage.vue') },
     { path: '/settings', component: () => import('./pages/ConfigPage.vue') },
+    { path: '/billing', component: () => import('./pages/BillingPage.vue') },
     { path: '/videos', redirect: '/assets' },
     { path: '/config', redirect: '/settings' },
   ],
