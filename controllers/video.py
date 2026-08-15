@@ -15,6 +15,7 @@ from models.scene import Scene
 from models.chapter import Chapter
 from models.video import Video
 from schemas.video import VideoGenerateRequest
+from services.billing.recorder import billing_recorder
 from services.video import get_generator
 from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
@@ -283,6 +284,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "first_frame_url": req.first_frame_url,
             "last_frame_url": req.last_frame_url,
             "model_config_id": config.id,
+            "novel_id": novel_id,
             "model_name": config.name,
             "model": config.model,
             "video_model_type": config.video_model_type,
@@ -436,6 +438,30 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 }
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
+
+        try:
+            if metadata.get("novel_id") is not None:
+                if new_status == TaskStatusEnum.completed.value:
+                    seconds = result_metadata.get("duration") or metadata.get("duration")
+                    await billing_recorder.record_video(
+                        novel_id=metadata.get("novel_id"),
+                        model_config_id=metadata.get("model_config_id"),
+                        seconds=seconds,
+                        resolution=metadata.get("resolution"),
+                        status=TaskStatusEnum.completed.value,
+                        video_id=video.id,
+                    )
+                elif new_status in (TaskStatusEnum.failed.value, TaskStatusEnum.cancelled.value):
+                    await billing_recorder.record_video(
+                        novel_id=metadata.get("novel_id"),
+                        model_config_id=metadata.get("model_config_id"),
+                        seconds=0.0,
+                        resolution=metadata.get("resolution"),
+                        status=TaskStatusEnum.failed.value,
+                        video_id=video.id,
+                    )
+        except Exception:
+            logger.exception("billing record failed for video %s", video.id)
 
         await video.save(update_fields=update_fields)
         return video

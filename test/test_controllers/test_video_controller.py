@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, patch
+from decimal import Decimal
 from fastapi import HTTPException
 
 from controllers.video import video_controller
@@ -8,6 +9,7 @@ from models.chapter import Chapter
 from models.scene import Scene
 from models.asset import Asset
 from models.asset_variant import AssetVariant
+from models.usage_record import ModelUsageRecord
 from models.video import Video
 from models.config import AiModelConfig
 from schemas.video import VideoGenerateRequest, VideoReferenceMedia
@@ -677,3 +679,45 @@ async def test_删除视频():
     exists = await Video.filter(id=video.id).exists()
     assert not exists
     print(f"    删除视频: video_id={video.id}")
+
+
+class FakeCompletedGenerator:
+    async def query(self, external_task_id: str) -> dict:
+        return {
+            "status": TaskStatusEnum.completed,
+            "progress": 100,
+            "url": "https://example.com/v.mp4",
+            "metadata": {"duration": 6},
+        }
+
+
+@pytest.mark.asyncio
+async def test_query_status_completed_落视频流水():
+    novel = await Novel.create(name="视频计费小说", author="a")
+    chapter = await Chapter.create(novel_id=novel.id, number=1, name="第1章", content="c")
+    scene = await Scene.create(chapter_id=chapter.id, sequence=1, description="d", prompt="p", duration=6)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="video", base_url="https://ark.cn-beijing.volces.com/api/v3", api_key="k", model="v",
+        api_protocol="volcengine_ark", video_model_type="seedance_2",
+        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}},
+        is_active=True,
+    )
+    video = await Video.create(
+        scene_id=scene.id,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="ext-1",
+        status=TaskStatusEnum.pending.value,
+        metadata={"model_config_id": config.id, "novel_id": novel.id, "resolution": "720p", "duration": 6},
+    )
+    with (
+        patch("controllers.video.get_generator", return_value=FakeCompletedGenerator()),
+        patch("controllers.video._download_video", new=AsyncMock(return_value="/media/videos/1.mp4")),
+    ):
+        await video_controller.query_status(video.id)
+
+    record = await ModelUsageRecord.filter(video_id=video.id).first()
+    assert record is not None
+    assert record.billing_type == "video"
+    assert record.status == TaskStatusEnum.completed.value
+    assert record.cost == Decimal("6.000000")
