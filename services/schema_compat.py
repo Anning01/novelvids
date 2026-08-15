@@ -51,6 +51,10 @@ async def ensure_ai_model_config_schema() -> None:
             "ALTER TABLE ai_model_configs "
             "ADD COLUMN video_model_type VARCHAR(40);"
         )
+    if "pricing" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs ADD COLUMN pricing JSON;"
+        )
     if statements:
         await connection.execute_script("".join(statements))
 
