@@ -20,6 +20,7 @@ export interface WorkbenchPromptAction {
   enabled: ReactiveValue<boolean>;
   busy: ReactiveValue<boolean>;
   progress?: ReactiveValue<number | null>;
+  cost?: ReactiveValue<number>;
   control?: WorkbenchPromptActionControl;
   controls?: WorkbenchPromptActionControl[];
   run: () => Promise<void> | void;

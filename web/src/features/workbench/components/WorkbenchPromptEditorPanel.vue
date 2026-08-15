@@ -51,6 +51,10 @@ function actionProgress(action: WorkbenchPromptAction) {
   return action.progress ? unref(action.progress) : null;
 }
 
+function actionCost(action: WorkbenchPromptAction) {
+  return action.cost ? unref(action.cost) : 0;
+}
+
 function controlProps(control: WorkbenchPromptActionControl) {
   return control.props ? unref(control.props) : {};
 }
@@ -244,6 +248,7 @@ onBeforeUnmount(() => {
             <LoaderCircle v-if="actionBusy(action)" class="workbench-prompt-panel__action-spinner" :size="15" aria-hidden="true" />
             <Play v-else :size="14" aria-hidden="true" />
             <span>{{ actionBusy(action) ? (action.busyLabel || '处理中') : action.label }}</span>
+            <span v-if="!actionBusy(action) && actionCost(action) > 0" class="workbench-prompt-panel__action-cost">约 ¥{{ actionCost(action).toFixed(2) }}</span>
             <i v-if="actionProgress(action) !== null" aria-hidden="true">
               <b :style="{ width: `${actionProgress(action)}%` }" />
             </i>

@@ -24,6 +24,7 @@ import { promptEditorFromData, workbenchPromptEditorKey } from '../prompt/prompt
 import { sceneHasRunningVideo } from '../graph/videoVersions'
 import { videoAspectRatio, videoCoverUrl, videoPixelSize, videoResolution } from '../graph/videoMedia'
 import { useWorkbenchStore } from '../store/workbenchStore'
+import { estimateVideoCost } from '@/shared/modelPricing'
 import { TaskStatusEnum } from '@/types'
 
 const props = defineProps<NodeProps>()
@@ -236,6 +237,13 @@ registerWorkbenchPromptAction(props.id, {
   busyLabel: '提交生成中',
   enabled: canGenerate,
   busy,
+  cost: computed(() => estimateVideoCost(
+    selectedModel.value?.pricing,
+    config.value.resolution,
+    config.value.duration,
+    referenceVideoCount.value > 0,
+    0,
+  )),
   controls: [
     {
       id: 'shot-video-generation-model',
