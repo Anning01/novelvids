@@ -27,6 +27,7 @@ from services.project_analysis.handler import ProjectAnalysisTaskHandler
 from services.storyboard.handler import StoryboardTaskHandler
 from utils.enums import AiTaskTypeEnum
 from services.media_library_seed import ensure_media_library_seed_data
+from services.model_config_seed import ensure_model_config_seed_data
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
@@ -55,6 +56,7 @@ async def lifespan(_: FastAPI):
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
     await ensure_media_library_seed_data()
+    await ensure_model_config_seed_data()
     try:
         yield
     finally:

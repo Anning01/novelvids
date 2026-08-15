@@ -23,7 +23,7 @@ const description = computed(() => pricingDiscountDescription(props.pricing))
     {{ prefix }}
     <s v-if="isDiscounted" class="billing-price-tag__original">¥{{ cost.toFixed(2) }}</s>
     <span class="billing-price-tag__final">¥{{ final.toFixed(2) }}</span>
-    <span v-if="isDiscounted" class="billing-price-tag__badge" :title="description || undefined" aria-label="优惠"><BadgePercent :size="12" /></span>
+    <span v-if="isDiscounted" class="billing-price-tag__badge" :title="description || undefined" aria-label="优惠"><BadgePercent :size="14" /></span>
   </span>
 </template>
 
@@ -45,6 +45,8 @@ const description = computed(() => pricingDiscountDescription(props.pricing))
 .billing-price-tag__badge {
   display: inline-flex;
   align-items: center;
-  color: #e6533c;
+  align-self: center;
+  flex: 0 0 auto;
+  color: #ef4444;
 }
 </style>
