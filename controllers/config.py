@@ -14,6 +14,43 @@ from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum
 
 
+def _validate_text_pricing(pricing: dict) -> None:
+    if pricing.get("type") != "text":
+        raise HTTPException(status_code=400, detail="文本模型的费用配置 type 必须为 text")
+    for key in ("input_price_per_1m", "output_price_per_1m"):
+        value = pricing.get(key)
+        if value is None or not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(status_code=400, detail=f"文本费用缺少合法的 {key}")
+
+
+def _validate_image_pricing(pricing: dict, model_type) -> None:
+    if pricing.get("type") != "image":
+        raise HTTPException(status_code=400, detail="生图模型的费用配置 type 必须为 image")
+    prices = pricing.get("prices")
+    if not isinstance(prices, dict):
+        raise HTTPException(status_code=400, detail="生图费用需要 prices 档位对象")
+    allowed = set(image_capabilities_for(model_type).clarities)
+    for tier, value in prices.items():
+        if tier not in allowed:
+            raise HTTPException(status_code=400, detail=f"生图费用包含不支持的清晰度档位：{tier}")
+        if not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(status_code=400, detail=f"清晰度档位 {tier} 的费用必须为非负数字")
+
+
+def _validate_video_pricing(pricing: dict, model_type) -> None:
+    if pricing.get("type") != "video":
+        raise HTTPException(status_code=400, detail="视频模型的费用配置 type 必须为 video")
+    prices = pricing.get("prices")
+    if not isinstance(prices, dict):
+        raise HTTPException(status_code=400, detail="视频费用需要 prices 档位对象")
+    allowed = set(video_capabilities_for(model_type).resolutions)
+    for tier, value in prices.items():
+        if tier not in allowed:
+            raise HTTPException(status_code=400, detail=f"视频费用包含不支持的分辨率档位：{tier}")
+        if not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(status_code=400, detail=f"分辨率档位 {tier} 的费用必须为非负数字")
+
+
 class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiModelConfigUpdate]):
     def __init__(self):
         super().__init__(model=AiModelConfig)
@@ -67,10 +104,36 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         video_capabilities_for(model_type)
         validate_video_protocol(model_type, str(protocol))
 
+    @staticmethod
+    def _validate_pricing(data: dict, instance: AiModelConfig | None = None) -> None:
+        pricing = data.get("pricing")
+        if pricing is None:
+            return
+        if not isinstance(pricing, dict):
+            raise HTTPException(status_code=400, detail="费用配置必须是对象")
+        task_types = data.get("task_types")
+        if task_types is None and instance is not None:
+            task_types = instance.task_types or [instance.task_type]
+        task_types = [int(value) for value in (task_types or [])]
+        if AiTaskTypeEnum.reference_image.value in task_types:
+            model_type = data.get("image_model_type") or (
+                instance.image_model_type if instance else None
+            )
+            _validate_image_pricing(pricing, model_type)
+            return
+        if AiTaskTypeEnum.video.value in task_types:
+            model_type = data.get("video_model_type") or (
+                instance.video_model_type if instance else None
+            )
+            _validate_video_pricing(pricing, model_type)
+            return
+        _validate_text_pricing(pricing)
+
     @classmethod
     def _validate_generation_payload(cls, data: dict, instance: AiModelConfig | None = None) -> None:
         cls._validate_image_payload(data, instance)
         cls._validate_video_payload(data, instance)
+        cls._validate_pricing(data, instance)
 
     @staticmethod
     async def _enforce_single_active_image_type(instance: AiModelConfig) -> None:
