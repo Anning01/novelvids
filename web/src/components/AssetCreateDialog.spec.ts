@@ -373,7 +373,7 @@ it('shows a live animated generation state immediately after regeneration starts
   await flushPromises()
 
   await wrapper.get('button[aria-label="切换到测试形态"]').trigger('click')
-  const regenerateButton = wrapper.findAll('button').find(button => button.text().includes('重新生成'))
+  const regenerateButton = wrapper.findAll('button').find(button => button.text().includes('生成图片'))
   expect(regenerateButton).toBeDefined()
   await regenerateButton!.trigger('click')
   await flushPromises()

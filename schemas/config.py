@@ -112,6 +112,7 @@ class ImageGenerationModelOut(BaseModel):
     model: str
     model_type: ImageModelTypeEnum
     concurrency: int
+    pricing: Optional[dict] = None
     capabilities: ImageGenerationCapabilitiesOut
 
 

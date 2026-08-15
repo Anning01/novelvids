@@ -131,6 +131,7 @@ async def test_api_lists_only_active_supported_image_models_with_capabilities(cl
         "model": "configured-pro-endpoint",
         "model_type": "seedream_5_pro",
         "concurrency": 3,
+        "pricing": None,
         "capabilities": {
             "clarities": ["1K", "1.5K", "2K"],
             "aspect_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"],

@@ -234,6 +234,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 "model": config.model,
                 "model_type": config.image_model_type,
                 "concurrency": config.concurrency,
+                "pricing": config.pricing,
                 "capabilities": capabilities.public_dict(),
             })
         return result

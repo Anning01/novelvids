@@ -28,6 +28,7 @@ import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@
 import { api } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { notice } from '@/shared/notice'
+import { estimateImageCost } from '@/shared/modelPricing'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
 import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetGenerationRecord, type AssetVariant, type AssetVariantDraft, type DigitalHuman, type ImageGenerationModel } from '@/types'
 
@@ -111,6 +112,9 @@ const uploadFile = ref<File | null>(null)
 const uploadPreview = ref('')
 const dragging = ref(false)
 const saving = ref(false)
+const autoSaving = ref(false)
+const formHydrated = ref(false)
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 const promptTouched = ref(false)
 const promptLanguage = ref<'zh' | 'en'>('en')
 const promptSourceAsset = ref<Asset | null>(null)
@@ -195,6 +199,11 @@ const historyStatus = (status: TaskStatusEnum) => ({
 
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || `生图模型 ${item.config_id}` })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
+const estimatedCost = computed(() => estimateImageCost(
+  selectedModel.value?.pricing,
+  imageParameters.value.clarity,
+  imageParameters.value.generationCount,
+))
 const filteredLibraryItems = computed(() => libraryItems.value.filter(item => {
   if (libraryScope.value !== 'all' && item.source !== libraryScope.value) return false
   const query = search.value.trim().toLowerCase()
@@ -221,6 +230,7 @@ const canSubmit = computed(() => {
 })
 
 function reset() {
+  formHydrated.value = false
   generationController?.abort()
   generationController = null
   formDrafts.clear()
@@ -699,6 +709,7 @@ async function loadSources() {
       modelId.value = String(models.value[0]?.config_id || '')
     }
     await loadReferencePrompt()
+    formHydrated.value = true
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -756,6 +767,62 @@ function onWindowKeydown(event: KeyboardEvent) {
     return
   }
   emit('close')
+}
+
+function buildBaseAssetMetadata(existingMetadata: Record<string, unknown>): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {
+    ...existingMetadata,
+    creation_mode: mode.value,
+    clarity: imageParameters.value.clarity,
+    aspect_ratio: imageParameters.value.aspectRatio,
+    resolution: imageParameters.value.clarity,
+    output_format: imageParameters.value.outputFormat,
+    generation_count: 1,
+    model_config_id: Number(modelId.value) || undefined,
+  }
+  if (props.kind === 'character') {
+    Object.assign(metadata, {
+      gender: isGroupPortrait.value ? '' : gender.value,
+      age_group: isGroupPortrait.value ? '' : age.value,
+      voice: isGroupPortrait.value ? '' : voice.value,
+      reference_layout: referenceLayout.value,
+    })
+  }
+  return metadata
+}
+
+async function persistEdits() {
+  if (!props.asset || !formHydrated.value) return
+  if (autoSaving.value || saving.value || generationRunning.value) return
+  if (mode.value !== 'ai') return
+  if (!name.value.trim()) return
+  const existingMetadata = props.asset.metadata && typeof props.asset.metadata === 'object'
+    ? props.asset.metadata as Record<string, unknown>
+    : {}
+  const payload: Partial<Asset> = {
+    asset_type: config.value.type,
+    canonical_name: name.value.trim(),
+    description: description.value.trim(),
+    base_traits: promptTouched.value
+      ? prompt.value.trim()
+      : promptSourceAsset.value?.base_traits || prompt.value.trim(),
+    metadata: buildBaseAssetMetadata(existingMetadata),
+    is_global: false,
+  }
+  autoSaving.value = true
+  try {
+    const response = await api.updateAsset(props.asset.id, payload)
+    promptSourceAsset.value = response.data
+  } catch {
+    // 自动保存静默失败，不打断用户
+  } finally {
+    autoSaving.value = false
+  }
+}
+
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => { void persistEdits() }, 600)
 }
 
 async function submit(regenerate = false) {
@@ -914,6 +981,11 @@ async function submit(regenerate = false) {
 
 watch(() => props.open, value => {
   if (!value) {
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer)
+      autoSaveTimer = null
+      void persistEdits()
+    }
     generationController?.abort()
     generationController = null
     closeImageLightbox()
@@ -947,6 +1019,10 @@ watch(selectedModel, model => {
     generationCount: capabilities.generation_counts.includes(current.generationCount) ? current.generationCount : capabilities.default_generation_count,
   }
 }, { immediate: true })
+watch(
+  [name, description, prompt, gender, age, voice, referenceLayout, modelId, () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
+  () => { if (props.open && props.asset && formHydrated.value) scheduleAutoSave() },
+)
 onMounted(() => {
   window.addEventListener('keydown', onWindowKeydown)
   if (props.open) {
@@ -957,6 +1033,7 @@ onMounted(() => {
   }
 })
 onUnmounted(() => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
   generationController?.abort()
   window.removeEventListener('keydown', onWindowKeydown)
   document.body.style.overflow = previousBodyOverflow
@@ -1156,8 +1233,8 @@ onUnmounted(() => {
           <span v-else />
           <div>
             <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="secondary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : variantDraft?.is_new ? '生成' : '重新生成' }}</AppButton>
-            <AppButton type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton>
+            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : '生成图片' }}<span v-if="estimatedCost > 0 && !generationBusy" class="asset-cost">约 ¥{{ estimatedCost.toFixed(2) }}</span></AppButton>
+            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton>
           </div>
         </footer>
       </form>
@@ -1310,6 +1387,7 @@ onUnmounted(() => {
 @keyframes asset-generation-pulse { 70%,100% { box-shadow: 0 0 0 7px rgb(93 95 240 / 0%); } }
 .asset-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 22px 18px; background: #fbfbfd; box-shadow: 0 -10px 30px rgb(36 40 57 / 4%); }
 .asset-dialog__footer > div,.asset-generation-options { display: flex; align-items: center; gap: 8px; }
+.asset-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 .asset-generation-options :deep(.app-select:first-child) { width: 190px; }
 @media (max-width: 720px) {
   .asset-dialog { width: 100%; border-radius: 0; }

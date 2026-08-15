@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { defaultPricing, pricingTiers } from './modelPricing'
+import type { ModelPricing } from '@/types'
+import { defaultPricing, estimateImageCost, pricingTiers } from './modelPricing'
 
 describe('modelPricing', () => {
   it('文本模型默认定价结构', () => {
@@ -13,5 +14,12 @@ describe('modelPricing', () => {
   it('pricingTiers 提取档位列表', () => {
     expect(pricingTiers({ type: 'image', currency: 'CNY', prices: { '1K': 0.1 } })).toEqual(['1K'])
     expect(pricingTiers(null)).toEqual([])
+  })
+  it('estimateImageCost 按清晰度与张数估算', () => {
+    const pricing: ModelPricing = { type: 'image', currency: 'CNY', prices: { '1K': 0.3, '2K': 0.6 } }
+    expect(estimateImageCost(pricing, '1K', 1)).toBe(0.3)
+    expect(estimateImageCost(pricing, '2K', 2)).toBe(1.2)
+    expect(estimateImageCost(pricing, '3K', 1)).toBe(0)
+    expect(estimateImageCost(null, '1K', 1)).toBe(0)
   })
 })

@@ -12,3 +12,13 @@ export function defaultPricing(category: 'llm' | 'image' | 'video', tiers: strin
 export function pricingTiers(pricing: ModelPricing | null | undefined): string[] {
   return pricing?.prices ? Object.keys(pricing.prices) : []
 }
+
+export function estimateImageCost(
+  pricing: ModelPricing | null | undefined,
+  clarity: string | null | undefined,
+  count = 1,
+): number {
+  if (!pricing || pricing.type !== 'image') return 0
+  const unit = pricing.prices?.[clarity ?? ''] ?? 0
+  return Number(unit || 0) * Math.max(1, Number(count) || 1)
+}
