@@ -3,6 +3,8 @@ import type { CSSProperties } from 'vue';
 import type { WorkbenchPromptAction, WorkbenchPromptActionControl } from '../prompt/promptActionRegistry';
 import type { WorkbenchPromptEditor } from '../types/workbenchTypes';
 import type { MaterialMention, MaterialMentionOption } from './materialMentionTypes';
+import type { ModelPricing } from '@/types';
+import BillingPriceTag from '@/components/BillingPriceTag.vue';
 import { LoaderCircle, Maximize2, Minimize2, Play, X } from 'lucide-vue-next';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from 'vue';
 import { workbenchPromptActionRegistryKey } from '../prompt/promptActionRegistry';
@@ -53,6 +55,10 @@ function actionProgress(action: WorkbenchPromptAction) {
 
 function actionCost(action: WorkbenchPromptAction) {
   return action.cost ? unref(action.cost) : 0;
+}
+
+function actionCostPricing(action: WorkbenchPromptAction): ModelPricing | null | undefined {
+  return action.costPricing ? unref(action.costPricing) : undefined;
 }
 
 function controlProps(control: WorkbenchPromptActionControl) {
@@ -248,7 +254,7 @@ onBeforeUnmount(() => {
             <LoaderCircle v-if="actionBusy(action)" class="workbench-prompt-panel__action-spinner" :size="15" aria-hidden="true" />
             <Play v-else :size="14" aria-hidden="true" />
             <span>{{ actionBusy(action) ? (action.busyLabel || '处理中') : action.label }}</span>
-            <span v-if="!actionBusy(action) && actionCost(action) > 0" class="workbench-prompt-panel__action-cost">约 ¥{{ actionCost(action).toFixed(2) }}</span>
+            <BillingPriceTag v-if="!actionBusy(action)" :cost="actionCost(action)" :pricing="actionCostPricing(action)" />
             <i v-if="actionProgress(action) !== null" aria-hidden="true">
               <b :style="{ width: `${actionProgress(action)}%` }" />
             </i>

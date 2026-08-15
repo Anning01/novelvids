@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelPricing } from '@/types'
-import { defaultPricing, estimateImageCost, pricingTiers } from './modelPricing'
+import { defaultPricing, estimateImageCost, pricingDiscount, pricingDiscountDescription, pricingTiers } from './modelPricing'
 
 describe('modelPricing', () => {
   it('文本模型默认定价结构', () => {
@@ -21,5 +21,16 @@ describe('modelPricing', () => {
     expect(estimateImageCost(pricing, '2K', 2)).toBe(1.2)
     expect(estimateImageCost(pricing, '3K', 1)).toBe(0)
     expect(estimateImageCost(null, '1K', 1)).toBe(0)
+  })
+  it('pricingDiscount 默认 1，读取折扣倍数', () => {
+    expect(pricingDiscount(null)).toBe(1)
+    expect(pricingDiscount({ type: 'image', currency: 'CNY', prices: {} })).toBe(1)
+    expect(pricingDiscount({ type: 'image', currency: 'CNY', prices: {}, discount: 0.9 })).toBe(0.9)
+    expect(pricingDiscount({ type: 'image', currency: 'CNY', prices: {}, discount: 1.5 })).toBe(1.5)
+    expect(pricingDiscount({ type: 'image', currency: 'CNY', prices: {}, discount: 0 })).toBe(1)
+  })
+  it('pricingDiscountDescription 读取描述', () => {
+    expect(pricingDiscountDescription(null)).toBe('')
+    expect(pricingDiscountDescription({ type: 'image', currency: 'CNY', prices: {}, discount_description: '限时9折' })).toBe('限时9折')
   })
 })

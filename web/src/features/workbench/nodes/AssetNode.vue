@@ -375,6 +375,7 @@ registerWorkbenchPromptAction(props.id, {
     imageParameterValue.value.clarity,
     imageParameterValue.value.generationCount,
   )),
+  costPricing: computed(() => selectedImageModel.value?.pricing),
   controls: [
     {
       id: 'asset-image-generation-model',

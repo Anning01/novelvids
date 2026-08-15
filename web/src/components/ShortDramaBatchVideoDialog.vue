@@ -2,7 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, ListChecks, Sparkles, X } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
+import type { ModelPricing } from '@/types'
 
 export interface BatchVideoSceneOption {
   id: number
@@ -15,6 +17,7 @@ const props = defineProps<{
   open: boolean
   scenes: BatchVideoSceneOption[]
   costByScene?: Record<number, number>
+  pricing?: ModelPricing | null
 }>()
 
 const emit = defineEmits<{
@@ -132,7 +135,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
                 :aria-label="`生成所选 ${selectedIds.length} 条分镜视频`"
                 @click="submit"
               >
-                <Sparkles :size="15" />开始<span v-if="estimatedTotal > 0" class="batch-video-cost">约 ¥{{ estimatedTotal.toFixed(2) }}</span>
+                <Sparkles :size="15" />开始<BillingPriceTag :cost="estimatedTotal" :pricing="pricing" />
               </AppButton>
             </div>
           </footer>

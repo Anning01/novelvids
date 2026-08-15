@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Check, ImageIcon, ListChecks, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api } from '@/api'
@@ -151,7 +152,7 @@ watch(selectedModel, model => {
           <div class="batch-actions">
             <AppButton type="button" variant="soft" :disabled="!eligibleAssets.length" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</AppButton>
             <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton type="button" variant="primary" :disabled="!canGenerate" :loading="submitting" @click="submit"><Sparkles v-if="!submitting" :size="15" />生成 {{ selectedIds.length }} 个<span v-if="estimatedCost > 0 && !submitting" class="batch-cost">约 ¥{{ estimatedCost.toFixed(2) }}</span></AppButton>
+            <AppButton type="button" variant="primary" :disabled="!canGenerate" :loading="submitting" @click="submit"><Sparkles v-if="!submitting" :size="15" />生成 {{ selectedIds.length }} 个<BillingPriceTag v-if="!submitting" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
           </div>
         </footer>
       </section>

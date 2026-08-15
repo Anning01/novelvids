@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AssetVariantStrip from '@/components/AssetVariantStrip.vue'
 import ImageAnnotationEditor from '@/components/ImageAnnotationEditor.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
@@ -1233,7 +1234,7 @@ onUnmounted(() => {
           <span v-else />
           <div>
             <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : '生成图片' }}<span v-if="estimatedCost > 0 && !generationBusy" class="asset-cost">约 ¥{{ estimatedCost.toFixed(2) }}</span></AppButton>
+            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : '生成图片' }}<BillingPriceTag v-if="!generationBusy" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
             <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton>
           </div>
         </footer>

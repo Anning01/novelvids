@@ -111,6 +111,8 @@ export interface ModelPricing {
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
+  discount?: number
+  discount_description?: string
 }
 export interface GenerationCapabilities { image: Record<string, string[]>; video: Record<string, string[]> }
 export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; max_context_characters?: number | null; pricing?: ModelPricing | null; created_at: string; updated_at: string }

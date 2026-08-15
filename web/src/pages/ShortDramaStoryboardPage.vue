@@ -21,6 +21,7 @@ import {
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
@@ -1560,7 +1561,7 @@ onBeforeUnmount(() => {
                       @update:return-last-frame="updateSceneDraft(scene, 'returnLastFrame', $event)"
                     />
                   </div>
-                  <AppButton variant="primary" size="md" aria-label="生成视频" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成' }}<span v-if="!generatingVideoSceneIds.has(scene.id) && sceneVideoEstimate(scene) > 0" class="scene-video-cost">约 ¥{{ sceneVideoEstimate(scene).toFixed(2) }}</span></AppButton>
+                  <AppButton variant="primary" size="md" aria-label="生成视频" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成' }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
                 </footer>
               </section>
 
@@ -1607,6 +1608,7 @@ onBeforeUnmount(() => {
       :open="batchVideoDialogOpen"
       :scenes="batchVideoSceneOptions"
       :cost-by-scene="batchVideoCostByScene"
+      :pricing="selectedVideoModelConfig?.pricing"
       @close="batchVideoDialogOpen = false"
       @generate="batchGenerateVideos"
     />

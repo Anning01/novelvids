@@ -104,6 +104,7 @@ const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
 const tierPrices = ref<Record<string, number>>({})
 const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
 const videoRefPrices = ref<Record<string, number>>({})
+const discountPricing = ref({ discount: 1, description: '' })
 const pricingTierOptions = computed<string[]>(() => {
   if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
   if (selectedCategoryId.value === 'video') return generationCapabilities.value.video[form.value.video_model_type] || []
@@ -194,6 +195,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
     : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
   inputImagePricing.value = { first_free: 1, price_per_image: 0 }
   videoRefPrices.value = {}
+  discountPricing.value = { discount: 1, description: '' }
   editingConfigId.value = null
   showApiKey.value = false
   showCreate.value = true
@@ -225,6 +227,10 @@ function openEdit(item: AiModelConfig) {
     ? { first_free: item.pricing.input_image.first_free, price_per_image: item.pricing.input_image.price_per_image }
     : { first_free: 1, price_per_image: 0 }
   videoRefPrices.value = item.pricing?.video_reference_prices ? { ...item.pricing.video_reference_prices } : {}
+  discountPricing.value = {
+    discount: item.pricing?.discount ?? 1,
+    description: item.pricing?.discount_description ?? '',
+  }
   showCreate.value = true
 }
 
@@ -275,6 +281,9 @@ async function saveConfig() {
         video_reference_prices: tierPriceEntries(videoRefPrices.value),
       }
     }
+    pricing.discount = Number(discountPricing.value.discount) || 1
+    const discountDescription = discountPricing.value.description.trim()
+    if (discountDescription) pricing.discount_description = discountDescription
     const payload = {
       ...form.value,
       api_protocol: selectedCategoryId.value === 'video' ? 'volcengine_ark' : form.value.api_protocol,
@@ -594,6 +603,14 @@ onMounted(load)
                 <input v-model.number="videoRefPrices[tier]" type="number" min="0" step="0.01" />
               </label>
             </div>
+          </div>
+        </section>
+
+        <section class="pricing-editor">
+          <span class="pricing-title">折扣设置（1=无折扣，0.9=9折，大于 1=加价倍数）</span>
+          <div class="pricing-grid">
+            <label><span>折扣倍数</span><input v-model.number="discountPricing.discount" type="number" min="0.01" step="0.01" /></label>
+            <label><span>折扣描述（可选）</span><input v-model="discountPricing.description" type="text" placeholder="例如：限时9折" /></label>
           </div>
         </section>
 

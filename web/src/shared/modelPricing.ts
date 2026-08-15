@@ -23,6 +23,15 @@ export function estimateImageCost(
   return Number(unit || 0) * Math.max(1, Number(count) || 1)
 }
 
+export function pricingDiscount(pricing: ModelPricing | null | undefined): number {
+  const value = Number(pricing?.discount)
+  return value > 0 ? value : 1
+}
+
+export function pricingDiscountDescription(pricing: ModelPricing | null | undefined): string {
+  return pricing?.discount_description || ''
+}
+
 const VIDEO_TOKENS_PER_SECOND: Record<string, number> = {
   '480p': 10044,
   '720p': 21600,

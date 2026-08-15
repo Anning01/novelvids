@@ -244,6 +244,7 @@ registerWorkbenchPromptAction(props.id, {
     referenceVideoCount.value > 0,
     0,
   )),
+  costPricing: computed(() => selectedModel.value?.pricing),
   controls: [
     {
       id: 'shot-video-generation-model',
