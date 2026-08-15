@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite">
   <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey?style=for-the-badge" alt="License: CC BY-NC 4.0">
 </p>
 
 <p align="center">
@@ -25,7 +26,8 @@
   <a href="#模型配置">模型配置</a> &bull;
   <a href="#项目结构">项目结构</a> &bull;
   <a href="#技术栈">技术栈</a> &bull;
-  <a href="#测试">测试</a>
+  <a href="#测试">测试</a> &bull;
+  <a href="#许可协议">许可协议</a>
 </p>
 
 ---
@@ -123,21 +125,6 @@
     <td><img src="docs/images/screenshots/settings.png" alt="模型配置" width="480"></td>
   </tr>
 </table>
-
-### 截图清单（待补充）
-
-将以下页面截图保存到对应路径，即可自动替换上面的占位图：
-
-| 截图文件 | 对应页面 / 路由 |
-|------|------|
-| `docs/images/screenshots/home.png` | 首页 `/` |
-| `docs/images/screenshots/projects.png` | 项目列表 `/projects` |
-| `docs/images/screenshots/novel.png` | 小说详情 `/novel/:id` |
-| `docs/images/screenshots/agent.png` | 短剧智能流程 `/create/short-drama/agent/:projectId` |
-| `docs/images/screenshots/storyboard.png` | 分镜编辑 `/create/short-drama/storyboard/:projectId` |
-| `docs/images/screenshots/workbench.png` | 无限画布工作流 `/novel/:novelId/chapter/:chapterId/step/:stepId` |
-| `docs/images/screenshots/video.png` | 视频生成 `/create/short-drama/video/:projectId` |
-| `docs/images/screenshots/settings.png` | 模型配置 `/settings` |
 
 ## 快速开始
 
@@ -313,6 +300,17 @@ cd web && npm run test
 # 前端类型检查与构建
 cd web && npm run typecheck && npm run build
 ```
+
+## 许可协议
+
+本项目采用 [知识共享 署名-非商业性使用 4.0 国际许可协议（CC BY-NC 4.0）](LICENSE) 授权。
+
+- ✅ **学习、研究、个人使用**：免费，无需授权。
+- ✅ **转载、引用、二次开发（非商用）**：允许，但必须署名（保留原作者与项目链接）。
+- ❌ **商业使用**：禁止。任何将本项目或其衍生作品用于直接或间接商业目的（包括但不限于售卖、SaaS 化对外提供服务、付费定制、广告盈利等），均需事先取得作者的**书面授权**。
+- ⚠️ **未经授权商用，将依法追究法律责任。**
+
+> 需要商用授权？请联系作者（见页脚）洽谈。
 
 ---
 
