@@ -418,3 +418,30 @@ async def test_run_文本失败透出usage仍计费():
     assert record is not None
     assert record.status == TaskStatusEnum.failed.value
     assert record.usage["input_tokens"] == 200
+
+
+class ImageBillingHandler(BaseTaskHandler):
+    async def execute(self, request_params: dict) -> dict:
+        return {"images": ["/media/a.png"], "input_image_count": 3}
+
+
+@pytest.mark.asyncio
+async def test_run_参考图落图片流水含输入图费():
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="image", base_url="https://ark.example.com/api/v3", api_key="k", model="m",
+        api_protocol="volcengine_ark", image_model_type="seedream_5_pro",
+        pricing={"type": "image", "currency": "CNY", "prices": {"1K": 0.30}, "input_image": {"first_free": 1, "price_per_image": 0.02}},
+    )
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.reference_image, ImageBillingHandler())
+    task = await executor.submit(AiTaskTypeEnum.reference_image, {
+        "novel_id": 8, "model_config_id": config.id, "model": "m", "clarity": "1K",
+    })
+    await executor.run(task)
+
+    record = await ModelUsageRecord.filter(novel_id=8).first()
+    assert record is not None
+    assert record.billing_type == "image"
+    assert record.usage["input_image_count"] == 3
+    assert float(record.cost) == 0.34  # 1×0.30 + (3-1)×0.02
