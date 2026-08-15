@@ -1,7 +1,17 @@
-import type { ComputedRef, InjectionKey, Ref } from 'vue';
+import type { Component, ComputedRef, InjectionKey, Ref } from 'vue';
 import { inject, onScopeDispose, shallowReactive } from 'vue';
 
 type ReactiveValue<T> = Readonly<Ref<T> | ComputedRef<T>>;
+
+export interface WorkbenchPromptActionControl {
+  id: string;
+  component: Component;
+  visible?: ReactiveValue<boolean>;
+  props?: ReactiveValue<Record<string, unknown>>;
+  modelValue: ReactiveValue<unknown>;
+  updateModelValue: (value: unknown) => void;
+  events?: Record<string, (payload?: unknown) => void>;
+}
 
 export interface WorkbenchPromptAction {
   id: string;
@@ -10,6 +20,8 @@ export interface WorkbenchPromptAction {
   enabled: ReactiveValue<boolean>;
   busy: ReactiveValue<boolean>;
   progress?: ReactiveValue<number | null>;
+  control?: WorkbenchPromptActionControl;
+  controls?: WorkbenchPromptActionControl[];
   run: () => Promise<void> | void;
 }
 

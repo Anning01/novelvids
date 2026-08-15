@@ -1,7 +1,9 @@
 import { mount } from '@vue/test-utils'
+import { defineComponent } from 'vue'
 import { describe, expect, it } from 'vitest'
 import SceneVideoParameterPicker from './SceneVideoParameterPicker.vue'
 import type { VideoGenerationModel } from '@/types'
+import MediaGenerationModelSelector from '@/features/workbench/components/MediaGenerationModelSelector.vue'
 
 const model = {
   config_id: 9,
@@ -51,6 +53,9 @@ describe('SceneVideoParameterPicker', () => {
     expect(wrapper.text()).toContain('画面比例')
     expect(wrapper.text()).toContain('480p')
     expect(wrapper.text()).toContain('返回尾帧')
+    const lightPanelStyle = wrapper.get('[role="dialog"][aria-label="视频生成参数"]').attributes('style')
+    expect(lightPanelStyle).toContain('--app-surface-raised: #fff')
+    expect(lightPanelStyle).toContain('color-scheme: light')
 
     await wrapper.get('input[type="range"]').setValue('12')
     const ratioButton = wrapper.findAll('button').find(button => button.text() === '9:16')
@@ -104,5 +109,72 @@ describe('SceneVideoParameterPicker', () => {
     await wrapper.setProps({ aspectRatio: '1:1' })
     expect(wrapper.get('.summary-icon').attributes('style')).toContain('width: 12px')
     expect(wrapper.get('.summary-icon').attributes('style')).toContain('height: 12px')
+  })
+
+  it('keeps the model list and parameter panel mutually exclusive', async () => {
+    const harness = defineComponent({
+      components: { MediaGenerationModelSelector, SceneVideoParameterPicker },
+      setup: () => ({
+        model,
+        modelOptions: [{ value: 9, label: 'Seedance 2.5' }],
+      }),
+      template: `
+        <div>
+          <MediaGenerationModelSelector :model-value="9" :options="modelOptions" />
+          <SceneVideoParameterPicker
+            :model="model"
+            mode="reference"
+            :duration="6"
+            aspect-ratio="16:9"
+            resolution="720p"
+            :return-last-frame="false"
+          />
+        </div>
+      `,
+    })
+    const wrapper = mount(harness, { global: { stubs: { Teleport: true } } })
+
+    await wrapper.get('[aria-label="视频模型"]').trigger('click')
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(true)
+
+    await wrapper.get('[aria-label="设置视频时长、比例、分辨率和尾帧衔接"]').trigger('click')
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+    expect(wrapper.find('[role="dialog"][aria-label="视频生成参数"]').exists()).toBe(true)
+
+    await wrapper.get('[aria-label="视频模型"]').trigger('click')
+    expect(wrapper.find('[role="dialog"][aria-label="视频生成参数"]').exists()).toBe(false)
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('carries the workflow surface theme into the teleported parameter panel', async () => {
+    const surface = document.createElement('div')
+    surface.className = 'viral-workbench-surface-theme'
+    surface.style.setProperty('--vf-bg-elevated', '#211e1b')
+    surface.style.setProperty('--vf-text-primary', '#eee9e2')
+    surface.style.setProperty('--vf-border-strong', '#645a51')
+    surface.style.colorScheme = 'dark'
+    document.body.append(surface)
+    const wrapper = mount(SceneVideoParameterPicker, {
+      attachTo: surface,
+      props: {
+        model,
+        mode: 'reference',
+        duration: 6,
+        aspectRatio: '16:9',
+        resolution: '720p',
+        returnLastFrame: false,
+      },
+      global: { stubs: { Teleport: true } },
+    })
+
+    await wrapper.get('[aria-label="设置视频时长、比例、分辨率和尾帧衔接"]').trigger('click')
+    const panelStyle = wrapper.get('[role="dialog"][aria-label="视频生成参数"]').attributes('style')
+    expect(panelStyle).toContain('--app-surface-raised: #211e1b')
+    expect(panelStyle).toContain('--app-text: #eee9e2')
+    expect(panelStyle).toContain('--app-border-strong: #645a51')
+    expect(panelStyle).toContain('color-scheme: dark')
+    wrapper.unmount()
+    surface.remove()
   })
 })

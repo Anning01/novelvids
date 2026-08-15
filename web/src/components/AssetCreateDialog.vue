@@ -165,6 +165,12 @@ const generationRunning = computed(() => Boolean(
   generationTask.value && !terminalGenerationStatuses.has(generationTask.value.status),
 ))
 const generationBusy = computed(() => generationRequested.value && (saving.value || generationRunning.value))
+const canAnnotateCurrentImage = computed(() => Boolean(
+  props.asset
+  && generatedImage.value
+  && !variantDraft.value?.is_new
+  && !generationBusy.value,
+))
 const generationStatusText = computed(() => {
   if (generationError.value) return '生成失败'
   if (!generationTask.value) return '正在提交'
@@ -418,7 +424,7 @@ function closeImageLightbox() {
 }
 
 function openAnnotationEditor() {
-  if (!props.asset || !generatedImage.value || variantContextActive.value || generationBusy.value) return
+  if (!canAnnotateCurrentImage.value) return
   annotationOpen.value = true
 }
 
@@ -436,6 +442,17 @@ async function saveAnnotatedImage(blob: Blob) {
     )
     const uploaded = await api.upload(file)
     const imageUrl = `/media/${uploaded.filename}`
+    if (selectedVariant.value) {
+      const variant = selectedVariant.value
+      const updated = (await api.updateAssetVariant(props.asset.id, variant.id, {
+        images: [imageUrl, ...variant.images.filter(image => image && image !== imageUrl)],
+      })).data
+      selectedVariant.value = updated
+      variantStripRef.value?.upsertVariant(updated)
+      annotationOpen.value = false
+      notice.success('衍生形象标注图已保存，原图已保留')
+      return
+    }
     const updated = (await api.recordAssetImageEdit(props.asset.id, {
       image_url: imageUrl,
       source_image_url: generatedImage.value,
@@ -977,7 +994,7 @@ onUnmounted(() => {
                 </span>
               </button>
               <AppButton
-                v-if="props.asset && !variantContextActive && !generationBusy"
+                v-if="canAnnotateCurrentImage"
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -1068,6 +1085,7 @@ onUnmounted(() => {
             v-if="isEditing && asset"
             ref="variantStripRef"
             :asset="asset"
+            :draft="variantDraft"
             :chapter-number="chapterNumber"
             :episode-numbers="episodeNumbers"
             @select="selectVariantPreview"
@@ -1188,7 +1206,8 @@ onUnmounted(() => {
 .asset-generated-preview__viewer:hover img { transform: scale(1.012); }
 .asset-generated-preview__viewer:hover > .asset-generated-preview__zoom,.asset-generated-preview__viewer:focus-visible > .asset-generated-preview__zoom { opacity: 1; transform: translateY(0); }
 .asset-generated-preview__viewer:focus-visible { box-shadow: 0 0 0 3px rgb(91 93 240 / 18%); }
-.asset-generated-preview__edit { position: absolute; z-index: 3; top: 12px; right: 12px; opacity: 0; transform: translateY(-4px); transition: opacity .18s ease,transform .2s cubic-bezier(.2,.72,.2,1); }
+.asset-generated-preview__edit { position: absolute; z-index: 3; top: 12px; right: 12px; color: var(--app-text-secondary); background: var(--app-surface-raised); box-shadow: inset 0 0 0 1px var(--app-border),var(--app-shadow); opacity: 0; transform: translateY(-4px); transition: color .16s ease,background-color .16s ease,box-shadow .16s ease,opacity .18s ease,transform .2s cubic-bezier(.2,.72,.2,1); backdrop-filter: blur(9px); }
+.asset-generated-preview__edit:hover:not(:disabled),.asset-generated-preview__edit:focus-visible { color: var(--app-accent); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong),var(--app-shadow); }
 .asset-generated-preview__canvas:hover .asset-generated-preview__edit,.asset-generated-preview__edit:focus-visible { opacity: 1; transform: translateY(0); }
 .asset-generated-preview__empty { display: grid; min-height: 220px; place-items: center; align-content: center; gap: 6px; border-radius: 16px; color: var(--app-text-muted); background: var(--app-surface-muted); }
 .asset-generated-preview__empty strong { color: var(--app-text-secondary); font-size: 12px; }

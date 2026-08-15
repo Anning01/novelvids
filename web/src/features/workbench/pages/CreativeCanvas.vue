@@ -11,7 +11,6 @@ import { notice } from '@/shared/notice'
 import type { WorkbenchCapabilities } from '@/types'
 import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
 import ConnectionNodePicker from '../components/ConnectionNodePicker.vue'
-import ProjectAssetPicker from '../components/ProjectAssetPicker.vue'
 import WorkbenchRunStatus from '../components/WorkbenchRunStatus.vue'
 import WorkbenchToolbar from '../components/WorkbenchToolbar.vue'
 import AssetReferenceEdge from '../edges/AssetReferenceEdge.vue'
@@ -27,6 +26,7 @@ import { normalizeShotConfig, SHOT_ASPECT_RATIOS, SHOT_RESOLUTIONS, shotGenerati
 import { nodeCapabilities } from '../config/nodeCapabilities'
 import { nodeExposesHandle, workbenchNodeHandles } from '../graph/handleCapabilities'
 import { compatibleNodeCreations } from '../graph/nodeCreationRules'
+import { projectVideoResultEdge, videoResultOwners } from '../graph/videoProductionNodes'
 import { createWorkbenchPromptActionRegistry, workbenchPromptActionRegistryKey } from '../prompt/promptActionRegistry'
 import { promptEditorForNode, workbenchPromptEditorKey } from '../prompt/promptEditor'
 import { createWorkbenchNodeRunRegistry, workbenchNodeRunRegistryKey } from '../run/nodeRunRegistry'
@@ -75,7 +75,6 @@ const capabilities = ref<WorkbenchCapabilities>({
 const sectionDropTargetKey = ref<string | null>(null)
 const promptEditorNodeKey = ref<string | null>(null)
 const keyboardStatus = ref('尚未选择连线起点')
-const projectAssetPickerOpen = ref(false)
 const promptActionRegistry = createWorkbenchPromptActionRegistry()
 provide(workbenchPromptActionRegistryKey, promptActionRegistry)
 const nodeRunRegistry = createWorkbenchNodeRunRegistry()
@@ -99,7 +98,7 @@ const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markR
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
   { id: 'asset', label: '资产', description: '创建可编辑的昵称、Prompt 与图片资产', kind: 'asset', data: {} },
-  { id: 'shot', label: '镜头', description: '创建一个可编辑的镜头生产节点', kind: 'shot', data: {} },
+  { id: 'shot', label: '视频', description: '创建一个可编辑的视频生产节点', kind: 'shot', data: {} },
   { id: 'watermark', label: '创建水印', description: '创建水印配置节点', kind: 'watermark', data: {} },
   { id: 'operation:video_composer', label: '视频合成器', description: '创建成片合成节点', kind: 'video_composer', data: {} },
 ]
@@ -115,12 +114,20 @@ const projectDefaults = computed(() => ({
   aspectRatio: SHOT_ASPECT_RATIOS.includes(props.aspectRatio as ShotAspectRatio) ? props.aspectRatio as ShotAspectRatio : '9:16',
   resolution: SHOT_RESOLUTIONS.includes(props.resolution as ShotResolution) ? props.resolution as ShotResolution : '720p',
 }))
-const visibleStoreNodes = computed(() => store.nodes.filter(item => (item.data.ui as Record<string, unknown> | undefined)?.hidden !== true))
+const ownedVideoResults = computed(() => videoResultOwners(store.nodes, store.edges))
+const visibleStoreNodes = computed(() => store.nodes.filter(item => (
+  (item.data.ui as Record<string, unknown> | undefined)?.hidden !== true
+  && !ownedVideoResults.value.has(item.key)
+)))
 const visibleNodeKeys = computed(() => new Set(visibleStoreNodes.value.map(item => item.key)))
-const visibleStoreEdges = computed(() => store.edges.filter(item => visibleNodeKeys.value.has(item.source) && visibleNodeKeys.value.has(item.target)))
+const visibleStoreEdges = computed(() => store.edges
+  .map(item => projectVideoResultEdge(item, ownedVideoResults.value))
+  .filter(item => item.source !== item.target
+    && visibleNodeKeys.value.has(item.source)
+    && visibleNodeKeys.value.has(item.target)))
 const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
   id: item.key, type: item.kind, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
-  ...(item.size ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px` } } : {}),
+  ...(item.size && item.kind !== 'shot' && item.kind !== 'chapter' ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px` } } : {}),
   data: {
     ...item.data,
     kind: item.kind,
@@ -196,6 +203,7 @@ provide(workbenchPromptEditorKey, {
   },
   async focusReference(nodeKey) {
     if (!getNodes.value.some(node => node.id === nodeKey)) return
+    store.selectNode(nodeKey)
     await fitView({
       nodes: [nodeKey],
       padding: 0.4,
@@ -272,11 +280,12 @@ provide(workbenchKeyboardConnectorKey, {
 function canvasNodeSize(item: WorkbenchNode) {
   const rendered = getNodes.value.find(candidate => candidate.id === item.key)?.dimensions
   if (rendered && rendered.width > 0 && rendered.height > 0) return { width: rendered.width, height: rendered.height }
+  if (item.kind === 'shot') return { width: 560, height: 760 }
   if (item.size) return item.size
-  if (item.kind === 'shot') return { width: 360, height: 520 }
   if (item.kind === 'video_result') return { width: 360, height: 300 }
   if (item.kind === 'watermark') return { width: 360, height: 300 }
   if (item.kind === 'video_composer') return { width: 390, height: 420 }
+  if (item.kind === 'chapter') return { width: 360, height: 240 }
   if (item.kind === 'note') return { width: 320, height: 220 }
   return { width: 360, height: 280 }
 }
@@ -462,7 +471,7 @@ async function createCompatibleNode(option: CompatibleNodeCreation) {
   if (!picker) return
   connectionPicker.value = null
   const position = {
-    x: Math.round(picker.position.x + (picker.origin.handleType === 'source' ? 18 : -370)),
+    x: Math.round(picker.position.x + (picker.origin.handleType === 'source' ? 18 : -570)),
     y: Math.round(picker.position.y - 100),
   }
   const created = option.candidate.id === 'asset'
@@ -504,7 +513,7 @@ async function ensureNodeVisible(key: string) {
   saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
 }
 async function addShot() {
-  const created = await store.addShot(visibleNodePosition({ width: 360, height: 520 }))
+  const created = await store.addShot(visibleNodePosition({ width: 560, height: 760 }))
   if (created) await ensureNodeVisible(created.key)
 }
 function addNote() {
@@ -522,11 +531,7 @@ function addVideoComposer(position = visibleNodePosition({ width: 390, height: 4
   return created
 }
 async function addAsset() {
-  const created = await store.addEmptyAsset(visibleNodePosition({ width: 520, height: 680 }))
-  if (created) await ensureNodeVisible(created.key)
-}
-async function reuseAsset(assetId: number) {
-  const created = await store.reuseAsset(assetId, visibleNodePosition({ width: 520, height: 680 }))
+  const created = await store.addEmptyAsset(visibleNodePosition({ width: 520, height: 293 }))
   if (created) await ensureNodeVisible(created.key)
 }
 async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'video_media' | 'audio_media'>, file: File) {
@@ -617,12 +622,17 @@ async function autoArrange() {
     maxColumnHeight: Math.max(1100, height * 2.2),
     fixedNodeKeys,
   })
-  store.nodes.forEach(item => { if (positions[item.key]) item.position = positions[item.key] })
+  for (const [nodeKey, position] of Object.entries(positions)) {
+    const item = store.nodeByKey(nodeKey)
+    if (!item) continue
+    store.updateNodeLayout(nodeKey, position, item.size, item.zIndex)
+  }
   await nextTick()
   await fitView({ padding: 0.08, minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 240 })
   store.viewport = getViewport()
   saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
   store.persistLayout()
+  notice.success('画布布局已自动整理')
 }
 async function undoCanvasAction() {
   if (!store.undo()) return
@@ -731,12 +741,11 @@ onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); windo
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
       <Controls position="bottom-right" />
       <CanvasToolSwitcher v-model="canvasTool" />
-      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @reuse-asset="projectAssetPickerOpen = true" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div class="workbench-status-stack"><WorkbenchRunStatus :status="generating ? 'RUNNING' : 'IDLE'" :progress="generating ? 0 : undefined" /></div>
       <ConnectionNodePicker v-if="connectionPicker" :options="connectionPicker.options" :x="connectionPicker.x" :y="connectionPicker.y" :accent-class="connectionPicker.accentClass" @select="createCompatibleNode" @close="connectionPicker = null" />
       <p class="workbench-keyboard-status" role="status" aria-label="键盘连线状态" aria-live="polite">{{ keyboardStatus }}</p>
-      <ProjectAssetPicker :open="projectAssetPickerOpen" :novel-id="props.novelId" :excluded-ids="store.assets.map(asset => asset.id)" @close="projectAssetPickerOpen = false" @choose="reuseAsset($event.id)" />
-      <div v-if="store.nodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个镜头</AppButton></div>
+      <div v-if="visibleStoreNodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个视频</AppButton></div>
     </VueFlow>
   </main>
 </template>

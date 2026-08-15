@@ -185,6 +185,7 @@ function togglePalette() {
       'is-ignored': ignored,
       'has-marker': markerColor,
       'has-floating-header': data.floating_header === true,
+      'is-borderless-media': data.borderless_media === true,
     }"
     :style="markerColor ? { '--workbench-node-marker': markerColor } : undefined"
     :aria-label="`${data.title || '未命名'}节点`"
@@ -251,7 +252,7 @@ function togglePalette() {
       {{ handle.label }}<small v-if="!handle.required">可选</small>
     </span>
 
-    <header class="workbench-node-frame__header">
+    <header class="workbench-node-frame__header workbench-node-drag-handle">
       <span class="workbench-node-frame__header-icon">
         <slot name="icon">
           <component :is="icon" :size="17" aria-hidden="true" />

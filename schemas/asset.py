@@ -20,7 +20,10 @@ class AssetProperties(BaseModel):
     aliases: Optional[list[str]] = Field(None, description="别名列表", examples=["张三", "小张"])
     # 描述信息
     description: Optional[str] = Field(None, description="详细描述")
-    base_traits: Optional[str] = Field(None, description="固有特征（语言由通用配置决定，用于 prompt）")
+    base_traits: Optional[str] = Field(
+        None,
+        description="用户可编辑并最终发送的完整生图提示词",
+    )
     # 图片资产
     main_image: Optional[str] = Field(None, description="三视主图")
     angle_image_1: Optional[str] = Field(None, description="可选参考图1")

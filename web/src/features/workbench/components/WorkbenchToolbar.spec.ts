@@ -31,8 +31,7 @@ it('shows every verified add menu item in order', async () => {
   await wrapper.get('[aria-label="添加节点"]').trigger('click')
   expect(wrapper.findAll('[role="menuitem"]').map(item => item.text())).toEqual([
     '资产',
-    '复用项目资产',
-    '镜头',
+    '视频',
     '便签',
     '水印',
     '视频合成器',
@@ -41,8 +40,7 @@ it('shows every verified add menu item in order', async () => {
     '上传音频',
   ])
 
-  await wrapper.get('[aria-label="复用项目资产"]').trigger('click')
-  expect(wrapper.emitted('reuseAsset')).toHaveLength(1)
+  expect(wrapper.find('[aria-label="复用项目资产"]').exists()).toBe(false)
 })
 
 it('keeps the three upload inputs visually hidden and emits every chosen file', async () => {
@@ -71,4 +69,17 @@ it('keeps the three upload inputs visually hidden and emits every chosen file', 
   await imageInput.trigger('change')
 
   expect(wrapper.emitted('uploadImage')).toEqual([[firstFile], [secondFile]])
+})
+
+it('emits the automatic layout action from the grid button', async () => {
+  const wrapper = mount(WorkbenchToolbar, {
+    props: {
+      running: false,
+      runState: selectedRunState([], capabilities),
+    },
+  })
+
+  await wrapper.get('[aria-label="自动整理布局"]').trigger('click')
+
+  expect(wrapper.emitted('auto-arrange')).toHaveLength(1)
 })

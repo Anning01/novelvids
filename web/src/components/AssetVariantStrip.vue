@@ -7,7 +7,8 @@ import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { type Asset, type AssetVariant, type AssetVariantDraft } from '@/types'
 
-const props = withDefaults(defineProps<{ asset: Asset; chapterNumber?: number; episodeNumbers?: number[] }>(), {
+const props = withDefaults(defineProps<{ asset: Asset; draft?: AssetVariantDraft | null; chapterNumber?: number; episodeNumbers?: number[] }>(), {
+  draft: null,
   episodeNumbers: () => [],
 })
 const emit = defineEmits<{ select: [variant: AssetVariant | null]; draft: [draft: AssetVariantDraft | null] }>()
@@ -53,6 +54,16 @@ function currentDraft(): AssetVariantDraft | null {
 
 function emitDraft() {
   emit('draft', currentDraft())
+}
+
+function matchesDraft(left: AssetVariantDraft | null, right: AssetVariantDraft | null) {
+  if (!left || !right) return left === right
+  return left.id === right.id
+    && left.is_new === right.is_new
+    && left.name === right.name
+    && left.description === right.description
+    && left.chapter_numbers.length === right.chapter_numbers.length
+    && left.chapter_numbers.every((chapter, index) => chapter === right.chapter_numbers[index])
 }
 
 async function loadVariants() {
@@ -118,8 +129,21 @@ watch(() => props.asset.id, () => {
   void loadVariants()
 }, { immediate: true })
 
+watch(() => props.draft, draft => {
+  if (!draft) {
+    editingId.value = null
+    selectedVariantId.value = null
+    return
+  }
+  editingId.value = draft.is_new ? 0 : draft.id
+  selectedVariantId.value = draft.is_new ? -1 : draft.id
+  formName.value = draft.name
+  formDescription.value = draft.description
+  formChapters.value = [...draft.chapter_numbers]
+}, { immediate: true })
+
 watch([formName, formDescription, formChapters], () => {
-  if (editingId.value !== null) emitDraft()
+  if (editingId.value !== null && !matchesDraft(currentDraft(), props.draft)) emitDraft()
 })
 </script>
 

@@ -19,7 +19,10 @@ class AssetVariant(AbstractBaseModel):
     )
     name = fields.CharField(max_length=100, description="形态名称")
     description = fields.TextField(null=True, description="该形态的中文描述")
-    base_traits = fields.TextField(null=True, description="该形态的英文视觉描述")
+    base_traits = fields.TextField(
+        null=True,
+        description="该形态用户可编辑并最终发送的完整生图提示词",
+    )
     chapter_numbers = fields.JSONField(default=list, description="适用章节序号")
     images = fields.JSONField(default=list, description="该形态的多张参考图")
     metadata = fields.JSONField(default=dict, description="扩展生成参数")

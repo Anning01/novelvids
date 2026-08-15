@@ -47,12 +47,14 @@ export function assetTypeLabel(type: AssetTypeEnum) {
   return ASSET_TYPE_OPTIONS.find(item => item.value === type)?.label || '资产'
 }
 
+export const DEFAULT_ASSET_ASPECT_RATIO = '16:9'
+
 const DEFAULT_CONFIG: AssetWorkbenchConfig = {
   modelConfigId: null,
   generationCount: 1,
   resolution: '1K',
   clarity: '1K',
-  aspectRatio: '16:9',
+  aspectRatio: DEFAULT_ASSET_ASPECT_RATIO,
   size: '1424x800',
   outputFormat: 'png',
   format: 'PNG',
@@ -62,6 +64,17 @@ const DEFAULT_CONFIG: AssetWorkbenchConfig = {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+export const REUSABLE_ASSET_PLACEHOLDER_KEY = 'workbench_reusable_placeholder'
+
+export function isReusableAssetPlaceholder(asset: Asset) {
+  const metadata = recordValue(asset.metadata)
+  if (metadata[REUSABLE_ASSET_PLACEHOLDER_KEY] === true) return true
+  return !asset.main_image
+    && !asset.description
+    && !asset.base_traits
+    && /^资产\s+\d+$/.test(asset.canonical_name)
 }
 
 export function assetImageMediaMetadata(asset: Asset): AssetImageMediaMetadata {

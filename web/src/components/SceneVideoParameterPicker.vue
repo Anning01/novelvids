@@ -2,15 +2,19 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { Check, ChevronDown, ChevronUp, Monitor, TimerReset } from 'lucide-vue-next'
 import type { VideoGenerationModel } from '@/types'
+import { claimExclusivePopover } from '@/shared/exclusivePopover'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   model: VideoGenerationModel | null
   mode: 'reference' | 'keyframes'
   duration: number
   aspectRatio: string
   resolution: string
   returnLastFrame: boolean
-}>()
+  showReturnLastFrame?: boolean
+}>(), {
+  showReturnLastFrame: true,
+})
 
 const emit = defineEmits<{
   'update:duration': [value: number]
@@ -23,6 +27,9 @@ const trigger = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 const open = ref(false)
 const panelStyle = ref<Record<string, string>>({})
+const panelThemeStyle = ref<Record<string, string>>({})
+const exclusiveSource = Symbol('video-parameter-picker')
+let releaseExclusive: (() => void) | null = null
 
 const capabilities = computed(() => props.model?.capabilities)
 const ratios = computed(() => capabilities.value?.aspect_ratios_by_mode[props.mode]
@@ -77,9 +84,34 @@ function positionPanel() {
     ? above
     : Math.min(window.innerHeight - height - margin, anchor.bottom + gap)
   panelStyle.value = {
+    ...panelThemeStyle.value,
     top: `${Math.max(margin, top)}px`,
     left: `${left}px`,
     width: `${width}px`,
+  }
+}
+
+function captureTriggerTheme() {
+  const element = trigger.value
+  if (!element) return
+  const style = getComputedStyle(element)
+  const themeValue = (workflowVariable: string, appVariable: string, fallback: string) => (
+    style.getPropertyValue(workflowVariable).trim()
+    || style.getPropertyValue(appVariable).trim()
+    || fallback
+  )
+  panelThemeStyle.value = {
+    '--app-surface': themeValue('--vf-bg-elevated', '--app-surface', '#fff'),
+    '--app-surface-raised': themeValue('--vf-bg-elevated', '--app-surface-raised', '#fff'),
+    '--app-surface-muted': themeValue('--vf-bg-muted', '--app-surface-muted', '#f2f3f7'),
+    '--app-border': themeValue('--vf-border-subtle', '--app-border', '#e3e5ec'),
+    '--app-border-strong': themeValue('--vf-border-strong', '--app-border-strong', '#d3d6e0'),
+    '--app-text': themeValue('--vf-text-primary', '--app-text', '#303442'),
+    '--app-text-secondary': themeValue('--vf-text-secondary', '--app-text-secondary', '#656b7b'),
+    '--app-text-muted': themeValue('--vf-text-tertiary', '--app-text-muted', '#9398a8'),
+    '--app-accent': themeValue('--vf-accent', '--app-accent', '#5b5cf6'),
+    '--app-accent-soft': themeValue('--vf-bg-tint', '--app-accent-soft', '#eeefff'),
+    'color-scheme': style.colorScheme.trim().startsWith('dark') ? 'dark' : 'light',
   }
 }
 
@@ -89,6 +121,9 @@ async function toggle() {
     close()
     return
   }
+  captureTriggerTheme()
+  releaseExclusive?.()
+  releaseExclusive = claimExclusivePopover(exclusiveSource, close)
   open.value = true
   await nextTick()
   positionPanel()
@@ -100,6 +135,8 @@ async function toggle() {
 
 function close() {
   open.value = false
+  releaseExclusive?.()
+  releaseExclusive = null
   window.removeEventListener('resize', positionPanel)
   window.removeEventListener('scroll', positionPanel, true)
   window.removeEventListener('pointerdown', closeFromOutside)
@@ -132,7 +169,7 @@ onBeforeUnmount(close)
     :disabled="!model"
     :aria-expanded="open"
     aria-haspopup="dialog"
-    aria-label="设置视频时长、比例、分辨率和尾帧衔接"
+    :aria-label="showReturnLastFrame ? '设置视频时长、比例、分辨率和尾帧衔接' : '设置视频时长、比例和分辨率'"
     @click="toggle"
   >
     <span
@@ -208,7 +245,7 @@ onBeforeUnmount(close)
         </div>
 
         <button
-          v-if="capabilities?.supports_return_last_frame"
+          v-if="showReturnLastFrame && capabilities?.supports_return_last_frame"
           type="button"
           class="last-frame-toggle"
           :class="{ 'is-selected': returnLastFrame }"
@@ -225,9 +262,9 @@ onBeforeUnmount(close)
 </template>
 
 <style scoped>
-.video-parameter-trigger { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 9px; color: var(--app-text-secondary,#656b7b); background: var(--app-surface,#fff); box-shadow: 0 1px 3px rgb(35 39 55 / 8%); font-family: inherit; font-size: 10px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; }
-.video-parameter-trigger:hover:not(:disabled), .video-parameter-trigger[aria-expanded='true'] { color: var(--app-accent,#5b5cf6); box-shadow: inset 0 0 0 1px var(--app-accent,#5b5cf6),0 3px 12px rgb(55 57 112 / 10%); }
-.video-parameter-trigger:disabled { color: var(--app-text-muted,#9398a8); cursor: not-allowed; }
+.video-parameter-trigger { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 9px; color: var(--vf-text-secondary,var(--app-text-secondary,#656b7b)); background: var(--vf-bg-elevated,var(--app-surface,#fff)); box-shadow: inset 0 0 0 1px var(--vf-border-subtle,var(--app-border,#e3e5ec)); font-family: inherit; font-size: 10px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; }
+.video-parameter-trigger:hover:not(:disabled), .video-parameter-trigger[aria-expanded='true'] { color: var(--vf-accent,var(--app-accent,#5b5cf6)); box-shadow: inset 0 0 0 1px var(--vf-accent,var(--app-accent,#5b5cf6)),0 3px 12px rgb(55 57 112 / 10%); }
+.video-parameter-trigger:disabled { color: var(--vf-text-tertiary,var(--app-text-muted,#9398a8)); cursor: not-allowed; }
 .summary-icon { display: inline-block; box-sizing: border-box; flex: 0 0 auto; border: 1.5px solid currentColor; border-radius: 2px; transition: width .16s ease,height .16s ease; }
 .summary-icon.is-adaptive { border-style: dashed; }
 .video-parameter-panel { position: fixed; z-index: 1400; box-sizing: border-box; max-height: calc(100vh - 20px); overflow-y: auto; padding: 15px 16px; border: 1px solid var(--app-border-strong,#d3d6e0); border-radius: 15px; color: var(--app-text,#303442); background: var(--app-surface-raised,#fff); box-shadow: 0 14px 40px rgb(28 31 46 / 18%); scrollbar-width: none; transform-origin: bottom left; }

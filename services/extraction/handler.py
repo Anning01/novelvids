@@ -10,6 +10,8 @@ from services.extraction.context import ExtractionContextLoader
 from services.extraction.extractor import AssetExtractionGatewayError, AssetExtractor
 from services.extraction.messages import ExtractionMessageBuilder
 from services.extraction.persistence import AssetUpsertService
+from services.extraction.prompt_preparation import AssetPromptPreparationService
+from utils.prompt_language import normalize_prompt_language
 
 logger = logging.getLogger(__name__)
 EXPECTED_EXTRACTION_MESSAGE_ROLES = ("system", "user", "user", "user")
@@ -47,6 +49,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
         context_loader: ExtractionContextLoader | None = None,
         message_builder: ExtractionMessageBuilder | None = None,
         upsert_service: AssetUpsertService | None = None,
+        prompt_preparer: AssetPromptPreparationService | None = None,
         budget_policy_factory: Callable[
             [int | None], ContextBudgetPolicy
         ] = ContextBudgetPolicy,
@@ -55,6 +58,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
         self.context_loader = context_loader or ExtractionContextLoader()
         self.message_builder = message_builder or ExtractionMessageBuilder()
         self.upsert_service = upsert_service or AssetUpsertService()
+        self.prompt_preparer = prompt_preparer or AssetPromptPreparationService()
         self.budget_policy_factory = budget_policy_factory
         self.extractor_factory = extractor_factory
 
@@ -71,13 +75,16 @@ class ExtractionTaskHandler(BaseTaskHandler):
         """
         chapter_id = request_params["chapter_id"]
         novel_id = request_params["novel_id"]
+        prompt_language = normalize_prompt_language(
+            request_params.get("prompt_language")
+        )
         context = await self.context_loader.load(
             novel_id=novel_id,
             chapter_id=chapter_id,
         )
         messages = self.message_builder.build(
             context,
-            prompt_language=request_params.get("prompt_language", "en"),
+            prompt_language=prompt_language,
         )
         message_roles = _derive_message_roles(messages)
         formatted_message_roles = _format_message_roles(message_roles)
@@ -165,8 +172,12 @@ class ExtractionTaskHandler(BaseTaskHandler):
             formatted_message_roles,
         )
 
+        prepared_result = self.prompt_preparer.prepare(
+            result,
+            prompt_language=prompt_language,
+        )
         return await self.upsert_service.save_result(
             novel_id=novel_id,
             chapter_number=context.chapter.number,
-            result=result,
+            result=prepared_result,
         )

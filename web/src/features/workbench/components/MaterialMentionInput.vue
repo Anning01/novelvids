@@ -88,6 +88,7 @@ function rewriteMentionMarkers(value: string, changes: MentionNameChange[]) {
     const patterns = [
       { kind: 'wrapped-at', pattern: new RegExp(`【@${escapedName}】`, 'g'), next: nextName ? `【@${nextName}】` : '' },
       { kind: 'wrapped', pattern: new RegExp(`【${escapedName}】`, 'g'), next: nextName ? `【${nextName}】` : '' },
+      { kind: 'braced-at', pattern: new RegExp(`@\\{${escapedName}\\}`, 'g'), next: nextName ? `@{${nextName}}` : '' },
       {
         kind: 'at',
         pattern: new RegExp(`@${escapedName}(?=$|[\\s，。！？、,.;；:：)）\\]】}])`, 'g'),
@@ -136,7 +137,7 @@ watch(() => filteredMaterials.value.length, (length) => {
   void nextTick(updateMentionMenuPosition);
 });
 watch(
-  () => [props.modelValue, props.mentions.map(item => `${item.edgeKey}:${item.mode}:${item.name}:${item.previewUrl}`).join('|')],
+  () => [props.modelValue, props.mentions.map(item => `${item.edgeKey}:${item.mode}:${item.name}:${item.previewUrl}:${item.assetCategory ?? ''}`).join('|')],
   () => void nextTick(() => {
     const currentMentionNames = new Map(props.mentions.map(item => [item.edgeKey, item.name]));
     const connectedNames = new Set(props.mentions.map(item => item.name.toLocaleLowerCase()));
@@ -179,10 +180,15 @@ function mentionPattern() {
   if (!names.length)
     return null;
   const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return new RegExp(`(@(?:${escaped.join('|')})|【(?:${escaped.join('|')})】)`, 'g');
+  const options = escaped.join('|');
+  return new RegExp(`(@\\{(?:${options})\\}|@(?:${options})|【@?(?:${options})】)`, 'g');
 }
 
 function markerName(marker: string) {
+  if (marker.startsWith('@{'))
+    return marker.slice(2, -1);
+  if (marker.startsWith('【@'))
+    return marker.slice(2, -1);
   return marker.startsWith('【') ? marker.slice(1, -1) : marker.slice(1);
 }
 
@@ -215,12 +221,18 @@ function markPreviewFailed(url: string) {
   failedPreviewUrls.value = new Set([...failedPreviewUrls.value, url]);
 }
 
-function createMentionElement(mention: MaterialMention) {
+function createMentionElement(mention: MaterialMention, marker = `@{${mention.name}}`) {
   const token = document.createElement('span');
-  token.className = `workbench-inline-mention is-${mention.mode}`;
+  token.className = [
+    'workbench-inline-mention',
+    `is-${mention.mode}`,
+    mention.assetCategory ? `is-asset-${mention.assetCategory}` : '',
+  ].filter(Boolean).join(' ');
   token.contentEditable = 'false';
   token.dataset.edgeKey = mention.edgeKey;
-  token.dataset.marker = `@${mention.name}`;
+  token.dataset.marker = marker;
+  if (mention.assetCategory)
+    token.dataset.assetCategory = mention.assetCategory;
   token.setAttribute('role', 'button');
   token.setAttribute('tabindex', '-1');
   token.setAttribute('aria-label', `素材引用 ${mention.name}`);
@@ -285,7 +297,7 @@ function syncEditor() {
       appendText(root, props.modelValue.slice(cursor, index));
       const mention = props.mentions.find(item => item.name === markerName(match[0]));
       if (mention) {
-        root.append(createMentionElement(mention));
+        root.append(createMentionElement(mention, match[0]));
       }
       else {
         appendText(root, match[0]);
@@ -723,8 +735,9 @@ function chooseMaterial(material: MaterialMentionOption) {
     return;
   const currentPrompt = serializeEditor();
   const currentTrigger = trigger.value;
-  const nextPrompt = `${currentPrompt.slice(0, currentTrigger.start)}@${material.name} ${currentPrompt.slice(currentTrigger.end)}`;
-  pendingCaretOffset = currentTrigger.start + material.name.length + 2;
+  const marker = `@{${material.name}}`;
+  const nextPrompt = `${currentPrompt.slice(0, currentTrigger.start)}${marker} ${currentPrompt.slice(currentTrigger.end)}`;
+  pendingCaretOffset = currentTrigger.start + marker.length + 1;
   recordMentionHistory({
     before: currentPrompt,
     after: nextPrompt,

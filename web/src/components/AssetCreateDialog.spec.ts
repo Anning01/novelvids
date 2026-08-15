@@ -8,6 +8,7 @@ import AssetCreateDialog from './AssetCreateDialog.vue'
 import EpisodeSelectionPicker from './EpisodeSelectionPicker.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import assetDialogSource from './AssetCreateDialog.vue?raw'
+import annotationEditorSource from './ImageAnnotationEditor.vue?raw'
 
 vi.mock('@/api', () => ({
   api: {
@@ -255,7 +256,7 @@ it('shows an existing generated image and closes quickly with Escape', async () 
   wrapper.unmount()
 })
 
-it('switches the top preview with the selected variant and shows a blank state for variants without images', async () => {
+it('keeps image annotation available for a selected variant and stores the result on that variant', async () => {
   vi.clearAllMocks()
   const assetWithImage = { ...editedAsset, main_image: '/media/base.png' }
   const variants: AssetVariant[] = [
@@ -268,6 +269,17 @@ it('switches the top preview with the selected variant and shows a blank state f
   vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithImage })
   vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: variants })
   vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' } })
+  vi.mocked(api.upload).mockResolvedValue({
+    filename: 'assets/variant-annotated.png',
+    original_filename: 'variant-annotated.png',
+    content_type: 'image/png',
+    file_path: '/tmp/variant-annotated.png',
+  })
+  const annotatedVariant: AssetVariant = {
+    ...variants[0]!,
+    images: ['/media/assets/variant-annotated.png', '/media/variant.png'],
+  }
+  vi.mocked(api.updateAssetVariant).mockResolvedValue({ code: 0, message: 'ok', data: annotatedVariant })
 
   const wrapper = mount(AssetCreateDialog, {
     props: { open: true, kind: 'character', novelId: 9, asset: assetWithImage },
@@ -279,6 +291,21 @@ it('switches the top preview with the selected variant and shows a blank state f
   await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
   expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/variant.png')
   expect(wrapper.get('.asset-generated-preview > header strong').text()).toContain('练气期')
+  const editButton = wrapper.get('button[aria-label="编辑当前图片标注"]')
+  await editButton.trigger('click')
+  const editor = wrapper.getComponent(ImageAnnotationEditor)
+  expect(editor.props('open')).toBe(true)
+  expect(editor.props('imageUrl')).toBe('/media/variant.png')
+
+  editor.vm.$emit('save', new Blob(['annotated variant'], { type: 'image/png' }))
+  await flushPromises()
+
+  expect(api.updateAssetVariant).toHaveBeenCalledWith(editedAsset.id, variants[0]!.id, {
+    images: ['/media/assets/variant-annotated.png', '/media/variant.png'],
+  })
+  expect(api.recordAssetImageEdit).not.toHaveBeenCalled()
+  expect(editor.props('open')).toBe(false)
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/assets/variant-annotated.png')
 
   await wrapper.get('button[aria-label="切换到受伤状态"]').trigger('click')
   expect(wrapper.find('.asset-generated-preview img').exists()).toBe(false)
@@ -287,6 +314,15 @@ it('switches the top preview with the selected variant and shows a blank state f
 
   await wrapper.get('button[aria-label="切换到主形象"]').trigger('click')
   expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/base.png')
+})
+
+it('uses application theme tokens for the preview edit action and annotation editor', () => {
+  expect(assetDialogSource).toContain('color: var(--app-text-secondary)')
+  expect(assetDialogSource).toContain('background: var(--app-surface-raised)')
+  expect(annotationEditorSource).toContain('color:var(--app-text)')
+  expect(annotationEditorSource).toContain('background:var(--app-surface)')
+  expect(annotationEditorSource).toContain('border:1px solid var(--app-border-strong)')
+  expect(annotationEditorSource).toContain('background:var(--app-accent-soft)')
 })
 
 it('shows a live animated generation state immediately after regeneration starts', async () => {

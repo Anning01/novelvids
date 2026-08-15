@@ -3,6 +3,8 @@ import { fireEvent, render, waitFor } from '@testing-library/vue';
 import { describe, expect, it, vi } from 'vitest';
 import { ref } from 'vue';
 import { createWorkbenchPromptActionRegistry, workbenchPromptActionRegistryKey } from '../../prompt/promptActionRegistry';
+import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue';
+import MediaGenerationModelSelector from '../MediaGenerationModelSelector.vue';
 import WorkbenchPromptEditorPanel from '../WorkbenchPromptEditorPanel.vue';
 
 const config: WorkbenchPromptEditor = {
@@ -40,10 +42,10 @@ describe('workbenchPromptEditorPanel positioning', () => {
       },
     });
     const panel = await waitFor(() => view.getByRole('dialog', { name: '图片 Prompt编辑器' }));
-    await waitFor(() => expect(panel).toHaveStyle({ top: '412px', left: '619px', width: '512px', height: '320px' }));
+    await waitFor(() => expect(panel).toHaveStyle({ top: '406px', left: '619px', width: '512px', height: '320px' }));
 
     anchorRect = DOMRect.fromRect({ x: 200, y: 150, width: 350, height: 300 });
-    await waitFor(() => expect(panel).toHaveStyle({ top: '462px', left: '119px' }));
+    await waitFor(() => expect(panel).toHaveStyle({ top: '456px', left: '119px' }));
 
     view.unmount();
     anchor.remove();
@@ -52,12 +54,54 @@ describe('workbenchPromptEditorPanel positioning', () => {
   it('renders registered node actions in the extensible bottom action bar', async () => {
     const registry = createWorkbenchPromptActionRegistry();
     const run = vi.fn();
+    const modelConfigId = ref<number | null>(7);
+    const imageParameters = ref<ImageGenerationParameters>({
+      clarity: 'high',
+      aspectRatio: '16:9',
+      outputFormat: 'png',
+      generationCount: 1,
+    });
     registry.register('asset-1', {
       id: 'asset-image-generation',
       label: '生成资产图片',
       enabled: ref(true),
       busy: ref(false),
       progress: ref(null),
+      controls: [
+        {
+          id: 'asset-image-generation-model',
+          component: MediaGenerationModelSelector,
+          props: ref({
+            options: [{ value: 7, label: 'Seedream 5.0 Pro' }],
+            label: '图片模型',
+          }),
+          modelValue: modelConfigId,
+          updateModelValue(value) {
+            modelConfigId.value = Number(value);
+          },
+        },
+        {
+          id: 'asset-image-generation-parameters',
+          component: ImageGenerationParameterPanel,
+          props: ref({
+            capabilities: {
+              clarities: ['high'],
+              aspect_ratios: ['16:9'],
+              output_formats: ['png'],
+              generation_counts: [1],
+              default_clarity: 'high',
+              default_aspect_ratio: '16:9',
+              default_output_format: 'png',
+              default_generation_count: 1,
+            },
+            compact: true,
+          }),
+          modelValue: imageParameters,
+          updateModelValue(value) {
+            imageParameters.value = value as ImageGenerationParameters;
+          },
+        },
+      ],
       run,
     });
     const view = render(WorkbenchPromptEditorPanel, {
@@ -76,6 +120,11 @@ describe('workbenchPromptEditorPanel positioning', () => {
       },
     });
 
+    const modelSelector = await view.findByRole('button', { name: '图片模型' });
+    const parameterTrigger = view.getByRole('button', { name: '设置图片生成参数' });
+    expect(modelSelector.closest('.workbench-prompt-panel__footer-start')).toBeInTheDocument();
+    expect(parameterTrigger.closest('.workbench-prompt-panel__footer-start')).toBeInTheDocument();
+    expect(parameterTrigger).toHaveTextContent('16:9 · 高 · 1张 · PNG');
     await fireEvent.click(await view.findByRole('button', { name: '生成资产图片' }));
 
     expect(run).toHaveBeenCalledOnce();

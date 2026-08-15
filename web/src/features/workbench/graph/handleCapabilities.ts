@@ -18,15 +18,15 @@ export interface WorkbenchHandleCapability {
 }
 
 const assetInput: WorkbenchHandleCapability = { id: 'asset-input', label: '资产输入端口', className: 'workbench-handle--asset', type: 'target' }
-const sequenceInput: WorkbenchHandleCapability = { id: 'sequence-input', label: '镜头顺序输入端口', className: 'workbench-handle--sequence', type: 'target' }
+const sequenceInput: WorkbenchHandleCapability = { id: 'sequence-input', label: '视频顺序输入端口', className: 'workbench-handle--sequence', type: 'target' }
 const outputInput: WorkbenchHandleCapability = { id: 'output-input', label: '结果输入端口', className: 'workbench-handle--output', type: 'target' }
 const assetOutput: WorkbenchHandleCapability = { id: 'asset-output', label: '资产输出端口', className: 'workbench-handle--asset', type: 'source' }
-const sequenceOutput: WorkbenchHandleCapability = { id: 'sequence-output', label: '镜头顺序输出端口', className: 'workbench-handle--sequence', type: 'source' }
+const sequenceOutput: WorkbenchHandleCapability = { id: 'sequence-output', label: '视频顺序输出端口', className: 'workbench-handle--sequence', type: 'source' }
 const outputOutput: WorkbenchHandleCapability = { id: 'output-output', label: '结果输出端口', className: 'workbench-handle--output', type: 'source' }
 const watermarkInput: WorkbenchHandleCapability = { id: 'watermark-input', label: '水印配置', className: 'workbench-handle--watermark', type: 'target' }
 const watermarkVideoInput: WorkbenchHandleCapability = { id: 'watermark-video-input', label: '视频输入', className: 'workbench-handle--output', type: 'target', required: true }
 const watermarkOutput: WorkbenchHandleCapability = { id: 'watermark-output', label: '水印配置', className: 'workbench-handle--watermark', type: 'source' }
-const composerShotInput: WorkbenchHandleCapability = { id: 'shot-input', label: '镜头输入', className: 'workbench-handle--sequence', type: 'target' }
+const composerShotInput: WorkbenchHandleCapability = { id: 'shot-input', label: '生成视频输入', className: 'workbench-handle--sequence', type: 'target' }
 const composerVideoInput: WorkbenchHandleCapability = { id: 'video-input', label: '视频输入', className: 'workbench-handle--output', type: 'target' }
 
 function configuredHandleClass(edgeType: SupportedWorkbenchEdgeType) {
@@ -79,8 +79,6 @@ export function workbenchNodeHandles(kind: WorkbenchNodeKind, data?: Partial<Wor
   if (kind === 'shot') source.push(sequenceOutput, outputOutput)
   if (kind === 'video_result' || kind === 'video_composer') source.push(outputOutput)
   if (kind === 'watermark') source.push(watermarkOutput, outputOutput)
-  if (kind === 'chapter') source.push(outputOutput)
-
   return { source: uniqueHandles(source), target: uniqueHandles(target) }
 }
 

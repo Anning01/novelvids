@@ -2,14 +2,12 @@
 import {
   AudioLines,
   Box,
-  Clapperboard,
   ClipboardPaste,
   Copy,
   Film,
   Image,
   ImageUp,
   LayoutGrid,
-  Library,
   Palette,
   Play,
   Plus,
@@ -38,7 +36,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   addAsset: []
-  reuseAsset: []
   addShot: []
   addNote: []
   addWatermark: []
@@ -53,7 +50,7 @@ const emit = defineEmits<{
   paste: []
   undo: []
   redo: []
-  autoArrange: []
+  'auto-arrange': []
 }>()
 
 const imageInput = ref<HTMLInputElement | null>(null)
@@ -96,10 +93,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleDocumentKeydown)
 })
 
-function addNode(event: 'addAsset' | 'reuseAsset' | 'addShot' | 'addNote' | 'addWatermark' | 'addComposer') {
+function addNode(event: 'addAsset' | 'addShot' | 'addNote' | 'addWatermark' | 'addComposer') {
   closeAddMenu()
   if (event === 'addAsset') emit('addAsset')
-  if (event === 'reuseAsset') emit('reuseAsset')
   if (event === 'addShot') emit('addShot')
   if (event === 'addNote') emit('addNote')
   if (event === 'addWatermark') emit('addWatermark')
@@ -149,13 +145,9 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
             <Box :size="18" aria-hidden="true" />
             <span>资产</span>
           </button>
-          <button type="button" role="menuitem" aria-label="复用项目资产" @click="addNode('reuseAsset')">
-            <Library :size="18" aria-hidden="true" />
-            <span>复用项目资产</span>
-          </button>
-          <button type="button" role="menuitem" aria-label="新增镜头" @click="addNode('addShot')">
-            <Clapperboard :size="18" aria-hidden="true" />
-            <span>镜头</span>
+          <button type="button" role="menuitem" aria-label="新增视频" @click="addNode('addShot')">
+            <Video :size="18" aria-hidden="true" />
+            <span>视频</span>
           </button>
           <button type="button" role="menuitem" aria-label="新增便签" @click="addNode('addNote')">
             <StickyNote :size="18" aria-hidden="true" />
@@ -195,7 +187,7 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
       <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="为所选节点添加背景分区" title="多选节点后添加背景分区" :disabled="running || !canCreateSection" @click="$emit('createSection')">
         <Palette :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="自动整理布局" title="按连接关系分列并自动避让" :disabled="running" @click="$emit('autoArrange')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="自动整理布局" title="按连接关系分列并自动避让" :disabled="running" @click="$emit('auto-arrange')">
         <LayoutGrid :size="16" aria-hidden="true" />
       </button>
       <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="删除所选" title="删除所选（Delete）" :disabled="running || !hasSelection" @click="$emit('deleteSelection')">

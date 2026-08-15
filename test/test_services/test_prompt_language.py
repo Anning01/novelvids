@@ -18,6 +18,7 @@ from prompts.extraction import (
     GROUP_PORTRAIT_TRAIT_LABELS,
     SINGLE_CHARACTER_TRAIT_LABELS,
 )
+from prompts.reference import render_default_asset_prompt
 from prompts.storyboard import format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig
 from services.extraction.context import (
@@ -104,16 +105,17 @@ def test_extraction_system_rules_keep_fixed_labels_in_both_languages(
     assert "为空也必须返回空数组" not in system_prompt
 
 
-def test_reference_prompt_supports_chinese_and_english():
-    data = {
-        "type": "person",
-        "canonical_name": "李舟",
-        "base_traits": "青年，黑发，深色斗篷",
-        "description": "沉着的旅人",
-    }
-
-    chinese = build_sora_compatible_prompt(data, "zh")
-    english = build_sora_compatible_prompt(data, "en")
+def test_default_reference_prompt_supports_chinese_and_english():
+    chinese = render_default_asset_prompt(
+        asset_type="person",
+        visual_traits="青年，黑发，深色斗篷",
+        prompt_language="zh",
+    )
+    english = render_default_asset_prompt(
+        asset_type="person",
+        visual_traits="young man, black hair, dark cloak",
+        prompt_language="en",
+    )
 
     assert "上半身正面平视特写" in chinese
     assert "全身三视图" in chinese
@@ -121,15 +123,13 @@ def test_reference_prompt_supports_chinese_and_english():
     assert "upper-body, front-facing, eye-level close-up" in english
     assert "full-body three-view turnaround" in english
     assert "front, side, and back full-body views" in english
-    assert "沉着的旅人" not in chinese
-    assert "沉着的旅人" not in english
     assert "Anime" not in english
     assert "二次元" not in chinese
     assert "水印" in chinese
     assert "watermarks" in english
 
 
-def test_reference_prompt_supports_group_scene_and_prop_layouts():
+def test_default_reference_prompt_supports_group_scene_and_prop_layouts():
     group_data = {
         "type": "person",
         "canonical_name": "调查小队",
@@ -150,12 +150,38 @@ def test_reference_prompt_supports_group_scene_and_prop_layouts():
         "description": "边缘有一道细小裂纹",
     }
 
-    chinese_group = build_sora_compatible_prompt(group_data, "zh")
-    english_group = build_sora_compatible_prompt(group_data, "en")
-    chinese_scene = build_sora_compatible_prompt(scene_data, "zh")
-    english_scene = build_sora_compatible_prompt(scene_data, "en")
-    chinese_prop = build_sora_compatible_prompt(prop_data, "zh")
-    english_prop = build_sora_compatible_prompt(prop_data, "en")
+    chinese_group = render_default_asset_prompt(
+        asset_type="person",
+        visual_traits=group_data["base_traits"],
+        prompt_language="zh",
+        reference_layout="group_portrait",
+    )
+    english_group = render_default_asset_prompt(
+        asset_type="person",
+        visual_traits=group_data["base_traits"],
+        prompt_language="en",
+        reference_layout="group_portrait",
+    )
+    chinese_scene = render_default_asset_prompt(
+        asset_type="scene",
+        visual_traits=scene_data["base_traits"],
+        prompt_language="zh",
+    )
+    english_scene = render_default_asset_prompt(
+        asset_type="scene",
+        visual_traits=scene_data["base_traits"],
+        prompt_language="en",
+    )
+    chinese_prop = render_default_asset_prompt(
+        asset_type="item",
+        visual_traits=prop_data["base_traits"],
+        prompt_language="zh",
+    )
+    english_prop = render_default_asset_prompt(
+        asset_type="item",
+        visual_traits=prop_data["base_traits"],
+        prompt_language="en",
+    )
 
     assert chinese_group == group_data["base_traits"]
     assert english_group == group_data["base_traits"]
@@ -193,14 +219,21 @@ def test_reference_prompt_keeps_a_complete_manual_override_verbatim():
     assert prompt == complete_prompt
 
 
-def test_reference_prompt_uses_requested_aspect_ratio():
-    prompt = build_sora_compatible_prompt(
-        {
-            "type": "scene",
-            "canonical_name": "山谷",
-            "aspect_ratio": "21:9",
-        },
+def test_reference_generation_uses_custom_database_prompt_verbatim():
+    custom_prompt = "单人半身肖像，正面看向镜头，不要三视图，暖灰背景。"
+
+    assert build_sora_compatible_prompt(
+        {"type": "person", "base_traits": custom_prompt},
         "zh",
+    ) == custom_prompt
+
+
+def test_default_reference_prompt_uses_requested_aspect_ratio():
+    prompt = render_default_asset_prompt(
+        asset_type="scene",
+        visual_traits="山谷与河流",
+        aspect_ratio="21:9",
+        prompt_language="zh",
     )
 
     assert "21:9" in prompt

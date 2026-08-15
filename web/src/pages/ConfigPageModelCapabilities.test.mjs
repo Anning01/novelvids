@@ -7,5 +7,10 @@ const agentPageSource = readFileSync('src/pages/ShortDramaAgentPage.vue', 'utf8'
 it('exposes project analysis as a configurable LLM capability', () => {
   expect(configPageSource).toContain('taskTypes: [1, 3, 5]')
   expect(configPageSource).toContain("5: '项目分析'")
-  expect(agentPageSource).toContain('[1, 3, 5].includes(value)')
+})
+
+it('keeps model configuration out of the project analysis result', () => {
+  expect(agentPageSource).not.toContain('MODEL READINESS')
+  expect(agentPageSource).not.toContain('模型能力')
+  expect(agentPageSource).not.toContain('loadModels')
 })

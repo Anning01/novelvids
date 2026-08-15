@@ -50,4 +50,15 @@ describe('ShortDramaWorkspaceShell', () => {
     })
     expect(wrapper.find('[aria-label="集数导航"]').exists()).toBe(false)
   })
+
+  it('marks immersive workspaces so canvas controls can layer above the transparent shell header', () => {
+    const wrapper = mount(ShortDramaWorkspaceShell, {
+      props: { ...baseProps, immersive: true },
+      slots: { default: '<div class="workbench-toolbar">画布工具栏</div>' },
+    })
+
+    expect(wrapper.classes()).toContain('is-immersive')
+    expect(wrapper.find('.short-drama-project-identity').exists()).toBe(true)
+    expect(wrapper.get('.workbench-toolbar').text()).toBe('画布工具栏')
+  })
 })

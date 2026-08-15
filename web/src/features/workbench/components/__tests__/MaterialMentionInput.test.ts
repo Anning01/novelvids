@@ -80,4 +80,47 @@ describe('material mention input', () => {
       '【@新资产2】与@女主',
     ]));
   });
+
+  it('renders storyboard-style braced asset references as the same inline mention token', async () => {
+    const reference = {
+      ...mention('edge-building', '郊区小楼'),
+      previewUrl: '/media/building.png',
+      hasImage: true,
+      mediaKind: 'image' as const,
+      mode: 'reference_image' as const,
+      assetCategory: 'scene' as const,
+    };
+    const { container } = render(MaterialMentionInput, {
+      props: {
+        modelValue: '镜头缓慢向 @{郊区小楼} 推近',
+        materials: [reference],
+        mentions: [reference],
+        label: '镜头画面 Prompt',
+      },
+    });
+
+    await waitFor(() => expect(container.querySelector('.workbench-inline-mention')).not.toBeNull());
+    const token = container.querySelector<HTMLElement>('.workbench-inline-mention');
+    expect(token?.dataset.marker).toBe('@{郊区小楼}');
+    expect(token?.dataset.assetCategory).toBe('scene');
+    expect(token).toHaveClass('is-asset-scene');
+    expect(token?.textContent).toContain('@郊区小楼');
+  });
+
+  it('assigns distinct asset category classes independent of reference mode', async () => {
+    const person = { ...mention('edge-person', '女主'), assetCategory: 'person' as const };
+    const item = { ...mention('edge-item', '柠檬水'), assetCategory: 'item' as const };
+    const { container } = render(MaterialMentionInput, {
+      props: {
+        modelValue: '@{女主}拿起@{柠檬水}',
+        materials: [person, item],
+        mentions: [person, item],
+        label: '镜头画面 Prompt',
+      },
+    });
+
+    await waitFor(() => expect(container.querySelectorAll('.workbench-inline-mention')).toHaveLength(2));
+    expect(container.querySelector('[data-asset-category="person"]')).toHaveClass('is-asset-person');
+    expect(container.querySelector('[data-asset-category="item"]')).toHaveClass('is-asset-item');
+  });
 });
