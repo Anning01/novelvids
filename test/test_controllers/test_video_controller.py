@@ -721,3 +721,34 @@ async def test_query_status_completed_落视频流水():
     assert record.billing_type == "video"
     assert record.status == TaskStatusEnum.completed.value
     assert record.cost == Decimal("6.000000")
+
+
+@pytest.mark.asyncio
+async def test_query_status_completed_video_reference_uses_ref_price():
+    novel = await Novel.create(name="视频参考计费小说", author="a")
+    chapter = await Chapter.create(novel_id=novel.id, number=1, name="第1章", content="c")
+    scene = await Scene.create(chapter_id=chapter.id, sequence=1, description="d", prompt="p", duration=6)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="video", base_url="https://ark.cn-beijing.volces.com/api/v3", api_key="k", model="v",
+        api_protocol="volcengine_ark", video_model_type="seedance_2",
+        pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}, "video_reference_prices": {"720p": 1.5}},
+        is_active=True,
+    )
+    video = await Video.create(
+        scene_id=scene.id,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="ext-2",
+        status=TaskStatusEnum.pending.value,
+        metadata={"model_config_id": config.id, "novel_id": novel.id, "resolution": "720p", "duration": 6, "has_video_reference": True},
+    )
+    with (
+        patch("controllers.video.get_generator", return_value=FakeCompletedGenerator()),
+        patch("controllers.video._download_video", new=AsyncMock(return_value="/media/videos/2.mp4")),
+    ):
+        await video_controller.query_status(video.id)
+
+    record = await ModelUsageRecord.filter(video_id=video.id).first()
+    assert record is not None
+    assert record.usage["has_video_reference"] is True
+    assert record.cost == Decimal("9.000000")

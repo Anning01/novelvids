@@ -285,6 +285,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "last_frame_url": req.last_frame_url,
             "model_config_id": config.id,
             "novel_id": novel_id,
+            "has_video_reference": len(reference_videos) > 0,
             "model_name": config.name,
             "model": config.model,
             "video_model_type": config.video_model_type,
@@ -448,6 +449,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         model_config_id=metadata.get("model_config_id"),
                         seconds=seconds,
                         resolution=metadata.get("resolution"),
+                        has_video_reference=metadata.get("has_video_reference", False),
                         status=TaskStatusEnum.completed.value,
                         video_id=video.id,
                     )
@@ -457,6 +459,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         model_config_id=metadata.get("model_config_id"),
                         seconds=0.0,
                         resolution=metadata.get("resolution"),
+                        has_video_reference=metadata.get("has_video_reference", False),
                         status=TaskStatusEnum.failed.value,
                         video_id=video.id,
                     )
