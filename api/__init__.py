@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from api.ai_task import router as ai_task_router
 from api.asset import router as asset_router
+from api.billing import router as billing_router
 from api.config import router as config_router
 from api.novel import router as novel_router
 from api.chapter import router as chapter_router
@@ -24,3 +25,4 @@ api_router.include_router(file_router, prefix="/file", tags=["文件管理"])
 api_router.include_router(video_router, prefix="/video", tags=["视频生成"])
 api_router.include_router(media_library_router, prefix="/media-library", tags=["媒体资源库"])
 api_router.include_router(workbench_router, prefix="/workbench", tags=["创作画布"])
+api_router.include_router(billing_router, prefix="/billing", tags=["账单计费"])
