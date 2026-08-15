@@ -6,6 +6,7 @@ from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
 from services.billing.pricing import (
     compute_image_cost,
+    compute_input_image_cost,
     compute_text_cost,
     compute_video_cost,
     normalize_token_usage,
@@ -96,12 +97,20 @@ class BillingRecorder:
         fallback_model=None,
         image_count: int = 0,
         clarity: str | None = None,
+        input_image_count: int = 0,
         status: int = TaskStatusEnum.completed.value,
         ai_task_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
-        usage = {"image_count": int(image_count or 0), "clarity": clarity}
-        cost = compute_image_cost(image_count, clarity, config.pricing if config else None)
+        pricing = config.pricing if config else None
+        usage = {
+            "image_count": int(image_count or 0),
+            "clarity": clarity,
+            "input_image_count": int(input_image_count or 0),
+        }
+        cost = compute_image_cost(image_count, clarity, pricing) + compute_input_image_cost(
+            input_image_count, pricing
+        )
         return await self._create(
             novel_id=novel_id,
             task_type=task_type,
@@ -122,12 +131,19 @@ class BillingRecorder:
         fallback_model=None,
         seconds: float = 0.0,
         resolution: str | None = None,
+        has_video_reference: bool = False,
         status: int = TaskStatusEnum.completed.value,
         video_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
-        usage = {"seconds": seconds, "resolution": resolution}
-        cost = compute_video_cost(seconds, resolution, config.pricing if config else None)
+        usage = {
+            "seconds": seconds,
+            "resolution": resolution,
+            "has_video_reference": bool(has_video_reference),
+        }
+        cost = compute_video_cost(
+            seconds, resolution, config.pricing if config else None, has_video_reference
+        )
         return await self._create(
             novel_id=novel_id,
             task_type=AiTaskTypeEnum.video.value,
@@ -154,13 +170,15 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
         task_type = task.task_type
         status = task.status
         if task_type == AiTaskTypeEnum.reference_image.value:
+            res = result or {}
             await billing_recorder.record_image(
                 novel_id=novel_id,
                 task_type=task_type,
                 model_config_id=request_params.get("model_config_id"),
                 fallback_model=request_params.get("model"),
-                image_count=len((result or {}).get("images") or []),
+                image_count=len(res.get("images") or []),
                 clarity=request_params.get("clarity"),
+                input_image_count=res.get("input_image_count", 0),
                 status=status,
                 ai_task_id=task.id,
             )
