@@ -128,6 +128,12 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             return
         if not isinstance(pricing, dict):
             raise HTTPException(status_code=400, detail="费用配置必须是对象")
+        discount = pricing.get("discount")
+        if discount is not None and (not isinstance(discount, (int, float)) or discount <= 0):
+            raise HTTPException(status_code=400, detail="折扣倍数 discount 必须为正数")
+        description = pricing.get("discount_description")
+        if description is not None and not isinstance(description, str):
+            raise HTTPException(status_code=400, detail="折扣描述 discount_description 必须是字符串")
         task_types = data.get("task_types")
         if task_types is None and instance is not None:
             task_types = instance.task_types or [instance.task_type]

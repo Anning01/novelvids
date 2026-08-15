@@ -106,3 +106,30 @@ def test_compute_video_cost_uses_video_reference_prices():
 def test_compute_video_cost_video_reference_falls_back_to_prices():
     pricing = {"type": "video", "currency": "CNY", "prices": {"720p": 46.0}}
     assert compute_video_cost(5.0, "720p", pricing, has_video_reference=True) == Decimal("4.968000")
+
+
+def test_compute_cost_applies_discount():
+    text_pricing = {
+        "type": "text", "currency": "CNY",
+        "input_price_per_1m": 1.0, "output_price_per_1m": 2.0, "discount": 0.9,
+    }
+    usage = {"prompt_tokens": 1500, "completion_tokens": 500}
+    # 无折扣 0.0025；0.9 折 = 0.00225
+    assert compute_text_cost(usage, text_pricing) == Decimal("0.002250")
+
+    image_pricing = {"type": "image", "currency": "CNY", "prices": {"1K": 0.30}, "discount": 0.9}
+    assert compute_image_cost(2, "1K", image_pricing) == Decimal("0.540000")
+
+    video_pricing = {"type": "video", "currency": "CNY", "prices": {"720p": 46.0}, "discount": 0.9}
+    # 46 × 21600 × 5 / 1e6 = 4.968；× 0.9 = 4.4712
+    assert compute_video_cost(5.0, "720p", video_pricing) == Decimal("4.471200")
+
+
+def test_compute_cost_multiplier_over_one():
+    image_pricing = {"type": "image", "currency": "CNY", "prices": {"1K": 0.30}, "discount": 1.5}
+    assert compute_image_cost(1, "1K", image_pricing) == Decimal("0.450000")
+
+
+def test_compute_cost_no_discount_is_unchanged():
+    image_pricing = {"type": "image", "currency": "CNY", "prices": {"1K": 0.30}}
+    assert compute_image_cost(1, "1K", image_pricing) == Decimal("0.300000")

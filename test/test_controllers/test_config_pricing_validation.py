@@ -135,3 +135,30 @@ async def test_视频模型非法参考价表被拒绝():
             video_model_type="seedance_2",
             pricing={"type": "video", "currency": "CNY", "prices": {"720p": 1.0}, "video_reference_prices": {"8k": 1.5}},
         ))
+
+
+@pytest.mark.asyncio
+async def test_接受折扣配置():
+    config = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.extraction.value,
+        name="discounted",
+        base_url="https://api.example.com",
+        api_key="sk",
+        model="m",
+        pricing={"type": "text", "currency": "CNY", "input_price_per_1m": 1.0, "output_price_per_1m": 2.0, "discount": 0.9, "discount_description": "限时9折"},
+    ))
+    assert config.pricing["discount"] == 0.9
+    assert config.pricing["discount_description"] == "限时9折"
+
+
+@pytest.mark.asyncio
+async def test_非法折扣被拒绝():
+    with pytest.raises(HTTPException, match="折扣倍数"):
+        await ai_model_config_controller.create(AiModelConfigCreate(
+            task_type=AiTaskTypeEnum.extraction.value,
+            name="bad-discount",
+            base_url="https://api.example.com",
+            api_key="sk",
+            model="m",
+            pricing={"type": "text", "currency": "CNY", "input_price_per_1m": 1.0, "output_price_per_1m": 2.0, "discount": 0},
+        ))

@@ -24,6 +24,14 @@ def _as_int(value: object) -> int:
         return 0
 
 
+def _discount(pricing: dict | None) -> Decimal:
+    """读取模型级折扣倍数（默认 1 无折扣；<=0 视为无效回退到 1）。"""
+    if not isinstance(pricing, dict):
+        return Decimal("1")
+    discount = _as_decimal(pricing.get("discount"))
+    return discount if discount > 0 else Decimal("1")
+
+
 def normalize_token_usage(usage: dict | None) -> dict[str, int]:
     """归一化 token 用量键：兼容 prompt_tokens/completion_tokens 命名。"""
     if not isinstance(usage, dict):
@@ -50,7 +58,7 @@ def compute_text_cost(usage: dict | None, pricing: dict | None) -> Decimal:
         (Decimal(tokens["input_tokens"]) / _TOKEN_DIVISOR) * input_price
         + (Decimal(tokens["output_tokens"]) / _TOKEN_DIVISOR) * output_price
     )
-    return _money(cost)
+    return _money(cost * _discount(pricing))
 
 
 def compute_image_cost(image_count: int, clarity: str | None, pricing: dict | None) -> Decimal:
@@ -59,7 +67,7 @@ def compute_image_cost(image_count: int, clarity: str | None, pricing: dict | No
     prices = pricing.get("prices") or {}
     if not isinstance(prices, dict) or clarity not in prices:
         return Decimal("0")
-    return _money(_as_decimal(prices[clarity]) * Decimal(int(image_count or 0)))
+    return _money(_as_decimal(prices[clarity]) * Decimal(int(image_count or 0)) * _discount(pricing))
 
 
 def compute_input_image_cost(input_image_count: int, pricing: dict | None) -> Decimal:
@@ -72,7 +80,7 @@ def compute_input_image_cost(input_image_count: int, pricing: dict | None) -> De
     first_free = _as_int(input_fee.get("first_free"))
     price_per_image = _as_decimal(input_fee.get("price_per_image"))
     billable = max(0, int(input_image_count or 0) - first_free)
-    return _money(Decimal(billable) * price_per_image)
+    return _money(Decimal(billable) * price_per_image * _discount(pricing))
 
 
 # 每个分辨率档位每秒的 token 数（帧率固定 24fps）：
@@ -108,4 +116,4 @@ def compute_video_cost(
     tokens_per_second = TOKENS_PER_SECOND.get(resolution, 0)
     total_seconds = _as_decimal(seconds) + _as_decimal(input_video_seconds)
     tokens = Decimal(tokens_per_second) * total_seconds
-    return _money(_as_decimal(prices[resolution]) * tokens / Decimal("1_000_000"))
+    return _money(_as_decimal(prices[resolution]) * tokens / Decimal("1_000_000") * _discount(pricing))
