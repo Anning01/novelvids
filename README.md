@@ -42,14 +42,14 @@
 一段由猫影短剧从小说自动生成的短剧成品片段：
 
 <!--
-  TODO(成品视频)：请替换为真实的成品视频。可任选其一：
-  1) 上传 GIF/MP4 到 docs/videos/ 目录，并在下方引用（README 建议用 GIF 或外链，GitHub 不渲染 <video>）；
-  2) 使用外链平台（B 站 / YouTube / 优酷），放一张封面缩略图并点击跳转。
+  TODO(成品视频)：把完整视频上传到 B 站 / YouTube / 优酷后，把下方链接替换为真实地址。
 -->
 
-[![成品视频示例封面](docs/videos/demo-cover.png)](https://your-video-link.example.com)
+[![成品视频示例封面](docs/videos/demo-cover.jpg)](https://youtu.be/fdiw__J19uk)
 
-> 点击上方封面观看完整片段。生成链路：上传小说 → 章节拆分 → 实体提取 → 参考图生成 → 分镜生成 → 逐镜头视频合成。
+![成品视频高光预览](docs/videos/demo-preview.gif)
+
+> 点击封面观看完整片段。生成链路：上传小说 → 章节拆分 → 实体提取 → 参考图生成 → 分镜生成 → 逐镜头视频合成。
 
 ## 核心功能
 
@@ -100,11 +100,11 @@
   </tr>
   <tr>
     <td align="center"><b>小说详情</b></td>
-    <td align="center"><b>短剧智能流程</b></td>
+    <td align="center"><b>资产管理</b></td>
   </tr>
   <tr>
     <td><img src="docs/images/screenshots/novel.png" alt="小说详情" width="480"></td>
-    <td><img src="docs/images/screenshots/agent.png" alt="短剧智能流程" width="480"></td>
+    <td><img src="docs/images/screenshots/asset.png" alt="资产管理" width="480"></td>
   </tr>
   <tr>
     <td align="center"><b>分镜编辑（故事版）</b></td>
