@@ -102,7 +102,7 @@ export interface VideoGenerationCapabilities {
   default_output_format: string
   default_generate_audio: boolean
 }
-export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; capabilities: VideoGenerationCapabilities }
+export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
 export interface ModelPricing {
   type: 'text' | 'image' | 'video'
   currency: string

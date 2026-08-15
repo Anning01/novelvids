@@ -22,3 +22,25 @@ export function estimateImageCost(
   const unit = pricing.prices?.[clarity ?? ''] ?? 0
   return Number(unit || 0) * Math.max(1, Number(count) || 1)
 }
+
+const VIDEO_TOKENS_PER_SECOND: Record<string, number> = {
+  '480p': 10044,
+  '720p': 21600,
+  '1080p': 48600,
+  '4k': 194400,
+}
+
+export function estimateVideoCost(
+  pricing: ModelPricing | null | undefined,
+  resolution: string | null | undefined,
+  durationSeconds = 0,
+  hasVideoReference = false,
+  inputVideoSeconds = 0,
+): number {
+  if (!pricing || pricing.type !== 'video') return 0
+  const table = hasVideoReference ? (pricing.video_reference_prices || pricing.prices) : pricing.prices
+  const tokenPrice = table?.[resolution ?? ''] ?? 0
+  const tokensPerSecond = VIDEO_TOKENS_PER_SECOND[resolution ?? ''] ?? 0
+  const tokens = tokensPerSecond * (Number(durationSeconds || 0) + Number(inputVideoSeconds || 0))
+  return Number(tokenPrice || 0) * tokens / 1_000_000
+}

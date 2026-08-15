@@ -14,6 +14,7 @@ export interface BatchVideoSceneOption {
 const props = defineProps<{
   open: boolean
   scenes: BatchVideoSceneOption[]
+  costByScene?: Record<number, number>
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +29,7 @@ const allSelected = computed(() => (
   Boolean(eligibleScenes.value.length)
   && eligibleScenes.value.every(scene => selectedIds.value.includes(scene.id))
 ))
+const estimatedTotal = computed(() => selectedIds.value.reduce((sum, id) => sum + (props.costByScene?.[id] || 0), 0))
 function close() {
   emit('close')
 }
@@ -130,7 +132,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
                 :aria-label="`生成所选 ${selectedIds.length} 条分镜视频`"
                 @click="submit"
               >
-                <Sparkles :size="15" />开始
+                <Sparkles :size="15" />开始<span v-if="estimatedTotal > 0" class="batch-video-cost">约 ¥{{ estimatedTotal.toFixed(2) }}</span>
               </AppButton>
             </div>
           </footer>
@@ -237,6 +239,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 .batch-video-dialog__footer :deep(.app-button--soft:hover:not(:disabled)) { color: var(--app-text); background: var(--app-surface-hover); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
 .batch-video-dialog__select-all { justify-self: start; }
 .batch-video-dialog__submit { min-width: 90px; }
+.batch-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .batch-video-dialog-enter-active,.batch-video-dialog-leave-active { transition: opacity .18s ease; }
 .batch-video-dialog-enter-active .batch-video-dialog,.batch-video-dialog-leave-active .batch-video-dialog { transition: transform .18s ease,opacity .18s ease; }

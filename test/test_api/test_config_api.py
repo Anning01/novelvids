@@ -187,6 +187,7 @@ async def test_api_lists_only_active_configured_video_models_with_capabilities(c
         "model": "configured-seedance-2.5-endpoint",
         "model_type": "seedance_2_5",
         "concurrency": 2,
+        "pricing": None,
         "capabilities": capabilities_for("seedance_2_5").public_dict(),
     }]
 

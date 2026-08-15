@@ -162,6 +162,7 @@ class VideoGenerationModelOut(BaseModel):
     model: str = Field(..., description="供应商模型ID")
     model_type: VideoGenerationModelTypeEnum = Field(..., description="视频生成模型类型")
     concurrency: int = Field(..., description="并发数")
+    pricing: Optional[dict] = None
     capabilities: VideoGenerationCapabilitiesOut = Field(..., description="视频生成参数能力")
 
 
