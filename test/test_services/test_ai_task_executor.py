@@ -405,6 +405,8 @@ async def test_run_完成落文本流水():
     assert record.billing_type == "text"
     assert record.status == TaskStatusEnum.completed.value
     assert record.cost > 0
+    assert record.duration_seconds is not None
+    assert record.duration_seconds >= 0
 
 
 @pytest.mark.asyncio

@@ -149,6 +149,7 @@ export interface BillingRecord {
   cost: number
   currency: string
   status: number
+  duration_seconds?: number | null
   created_at: string
   updated_at: string
 }

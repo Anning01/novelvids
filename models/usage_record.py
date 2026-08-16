@@ -23,6 +23,7 @@ class ModelUsageRecord(AbstractBaseModel):
     cost = fields.DecimalField(max_digits=18, decimal_places=6, default=0, description="成本（元）")
     currency = fields.CharField(max_length=8, default="CNY", description="币种")
     status = fields.IntField(default=TaskStatusEnum.completed.value, description="任务状态")
+    duration_seconds = fields.FloatField(null=True, description="请求总时长（秒）")
 
     class Meta:
         table = "model_usage_records"

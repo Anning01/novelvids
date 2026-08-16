@@ -26,6 +26,7 @@ class ModelUsageRecordOut(BaseResponse):
     cost: float
     currency: str
     status: int
+    duration_seconds: Optional[float] = None
 
 
 class BillingSummaryOut(BaseModel):

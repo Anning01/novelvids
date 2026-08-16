@@ -34,6 +34,7 @@ class BillingRecorder:
         usage: dict,
         cost,
         status: int,
+        duration_seconds=None,
         ai_task_id=None,
         video_id=None,
     ) -> ModelUsageRecord | None:
@@ -53,6 +54,7 @@ class BillingRecorder:
                 cost=cost,
                 currency="CNY",
                 status=status,
+                duration_seconds=duration_seconds,
             )
         except Exception:
             logger.exception(
@@ -71,6 +73,7 @@ class BillingRecorder:
         fallback_model=None,
         token_usage=None,
         status: int = TaskStatusEnum.completed.value,
+        duration_seconds=None,
         ai_task_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
@@ -85,6 +88,7 @@ class BillingRecorder:
             usage=usage,
             cost=cost,
             status=status,
+            duration_seconds=duration_seconds,
             ai_task_id=ai_task_id,
         )
 
@@ -99,6 +103,7 @@ class BillingRecorder:
         clarity: str | None = None,
         input_image_count: int = 0,
         status: int = TaskStatusEnum.completed.value,
+        duration_seconds=None,
         ai_task_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
@@ -120,6 +125,7 @@ class BillingRecorder:
             usage=usage,
             cost=cost,
             status=status,
+            duration_seconds=duration_seconds,
             ai_task_id=ai_task_id,
         )
 
@@ -134,6 +140,7 @@ class BillingRecorder:
         input_video_seconds: float = 0.0,
         has_video_reference: bool = False,
         status: int = TaskStatusEnum.completed.value,
+        duration_seconds=None,
         video_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
@@ -159,11 +166,18 @@ class BillingRecorder:
             usage=usage,
             cost=cost,
             status=status,
+            duration_seconds=duration_seconds,
             video_id=video_id,
         )
 
 
 billing_recorder = BillingRecorder()
+
+
+def _task_duration_seconds(task) -> float | None:
+    if task.started_at and task.finished_at:
+        return (task.finished_at - task.started_at).total_seconds()
+    return None
 
 
 async def record_ai_task_usage(task, result: dict | None, error: Exception | None = None) -> None:
@@ -175,6 +189,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             return
         task_type = task.task_type
         status = task.status
+        duration = _task_duration_seconds(task)
         if task_type == AiTaskTypeEnum.reference_image.value:
             res = result or {}
             await billing_recorder.record_image(
@@ -186,6 +201,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 clarity=request_params.get("clarity"),
                 input_image_count=res.get("input_image_count", 0),
                 status=status,
+                duration_seconds=duration,
                 ai_task_id=task.id,
             )
             return
@@ -199,6 +215,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 fallback_model=res.get("llm_model"),
                 token_usage=token_usage,
                 status=status,
+                duration_seconds=duration,
                 ai_task_id=task.id,
             )
             image_usage = res.get("image_usage") or {}
@@ -211,6 +228,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                     image_count=image_usage.get("image_count", 0),
                     clarity=image_usage.get("clarity"),
                     status=status,
+                    duration_seconds=duration,
                     ai_task_id=task.id,
                 )
             return
@@ -222,6 +240,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             fallback_model=request_params.get("model"),
             token_usage=token_usage,
             status=status,
+            duration_seconds=duration,
             ai_task_id=task.id,
         )
     except Exception:

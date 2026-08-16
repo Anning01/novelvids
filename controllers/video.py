@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -443,6 +444,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         try:
             if metadata.get("novel_id") is not None:
+                duration_seconds = None
+                if video.created_at:
+                    duration_seconds = max(0.0, (datetime.now(timezone.utc) - video.created_at).total_seconds())
                 if new_status == TaskStatusEnum.completed.value:
                     seconds = result_metadata.get("duration") or metadata.get("duration")
                     await billing_recorder.record_video(
@@ -453,6 +457,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         input_video_seconds=metadata.get("input_video_seconds", 0),
                         has_video_reference=metadata.get("has_video_reference", False),
                         status=TaskStatusEnum.completed.value,
+                        duration_seconds=duration_seconds,
                         video_id=video.id,
                     )
                 elif new_status in (TaskStatusEnum.failed.value, TaskStatusEnum.cancelled.value):
@@ -464,6 +469,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         input_video_seconds=metadata.get("input_video_seconds", 0),
                         has_video_reference=metadata.get("has_video_reference", False),
                         status=TaskStatusEnum.failed.value,
+                        duration_seconds=duration_seconds,
                         video_id=video.id,
                     )
         except Exception:

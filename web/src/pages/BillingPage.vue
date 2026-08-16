@@ -43,6 +43,38 @@ const projectName = (novelId: number) => (
 )
 const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize.value)))
 
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+  return String(value)
+}
+
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return '—'
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.round(seconds % 60)}s`
+}
+
+function usageLabel(item: BillingRecord): string {
+  const usage = item.usage || {}
+  const num = (value: unknown) => Number(value) || 0
+  if (item.billing_type === 'text') {
+    return `输入 ${formatTokens(num(usage.input_tokens))} · 输出 ${formatTokens(num(usage.output_tokens))} token`
+  }
+  if (item.billing_type === 'image') {
+    const count = num(usage.image_count)
+    const clarity = usage.clarity ? ` @${usage.clarity}` : ''
+    const input = num(usage.input_image_count)
+    return `${count} 张${clarity}${input ? ` · 输入 ${input} 张` : ''}`
+  }
+  const seconds = num(usage.seconds)
+  const resolution = usage.resolution ? ` @${usage.resolution}` : ''
+  const input = num(usage.input_video_seconds)
+  return `${seconds}s${resolution}${input ? ` · 参考 ${input}s` : ''}`
+}
+
 function currentNovelId(): number | undefined {
   return selectedProjectId.value === 'all' ? undefined : Number(selectedProjectId.value)
 }
@@ -157,6 +189,8 @@ onMounted(load)
               <th>维度</th>
               <th>任务</th>
               <th>模型</th>
+              <th>用量</th>
+              <th>时长</th>
               <th>状态</th>
               <th class="is-num">成本</th>
             </tr>
@@ -168,10 +202,12 @@ onMounted(load)
               <td>{{ billingTypeLabel(item.billing_type) }}</td>
               <td>{{ taskTypeLabel(item.task_type) }}</td>
               <td>{{ item.model_name || item.model }}</td>
+              <td class="cell-muted">{{ usageLabel(item) }}</td>
+              <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
               <td>{{ statusLabel(item.status) }}</td>
               <td class="is-num cell-mono">{{ money(item.cost) }}</td>
             </tr>
-            <tr v-if="!records.length"><td colspan="7" class="empty">暂无调用记录</td></tr>
+            <tr v-if="!records.length"><td colspan="9" class="empty">暂无调用记录</td></tr>
           </tbody>
         </table>
         <footer v-if="totalRecords > 0" class="pager">
