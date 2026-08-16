@@ -138,26 +138,6 @@ onMounted(load)
         </article>
       </section>
 
-      <section v-if="selectedProjectId === 'all'" class="table-card">
-        <header class="table-card__header">
-          <h2>项目成本</h2>
-          <small>点击项目可查看明细</small>
-        </header>
-        <table class="data-table">
-          <thead>
-            <tr><th>项目</th><th class="is-num">调用次数</th><th class="is-num">成本</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in projects" :key="item.novel_id" class="is-clickable" @click="selectProject(String(item.novel_id))">
-              <td class="cell-strong">{{ item.novel_name }}</td>
-              <td class="is-num">{{ item.record_count }}</td>
-              <td class="is-num cell-mono">{{ money(item.total_cost) }}</td>
-            </tr>
-            <tr v-if="!projects.length"><td colspan="3" class="empty">暂无计费数据</td></tr>
-          </tbody>
-        </table>
-      </section>
-
       <section class="table-card">
         <header class="table-card__header">
           <h2>调用流水</h2>
@@ -229,10 +209,7 @@ onMounted(load)
 .data-table tbody tr:hover { background: var(--app-surface-hover, #f7f8fb); }
 .data-table tbody td { border-bottom: 1px solid var(--app-border); }
 .data-table tbody tr:last-child td { border-bottom: 0; }
-.data-table .is-clickable { cursor: pointer; }
-.data-table .is-clickable:hover td:first-child { color: var(--app-accent); }
 .data-table .is-num { text-align: right; }
-.data-table .cell-strong { font-weight: 620; }
 .data-table .cell-muted { color: var(--app-text-muted); }
 .data-table .cell-mono { font-variant-numeric: tabular-nums; }
 .data-table .empty { color: var(--app-text-muted); text-align: center; padding: 28px; }

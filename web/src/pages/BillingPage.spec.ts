@@ -33,7 +33,6 @@ describe('BillingPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('总成本')
-    expect(wrapper.text()).toContain('项目A')
     expect(wrapper.text()).toContain('¥3.00')
   })
 })
