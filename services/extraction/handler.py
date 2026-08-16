@@ -176,8 +176,9 @@ class ExtractionTaskHandler(BaseTaskHandler):
             result,
             prompt_language=prompt_language,
         )
-        return await self.upsert_service.save_result(
+        summary = await self.upsert_service.save_result(
             novel_id=novel_id,
             chapter_number=context.chapter.number,
             result=prepared_result,
         )
+        return {**summary, "token_usage": getattr(extractor, "last_usage", {})}

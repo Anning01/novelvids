@@ -172,7 +172,7 @@ async def test_extract_creates_task_and_assets(client: AsyncClient):
     # 验证任务完成
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.completed.value
-    assert set(task.response_data) == {"persons", "scenes", "items"}
+    assert set(task.response_data) == {"persons", "scenes", "items", "token_usage"}
     assert [entry["name"] for entry in task.response_data["persons"]] == [
         "张三",
         "李四",

@@ -3,10 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { Check, ImageIcon, ListChecks, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
+import { estimateImageCost } from '@/shared/modelPricing'
 import type { Asset, ImageGenerationModel } from '@/types'
 
 interface BatchGenerateOptions {
@@ -38,6 +40,11 @@ const loadingModels = ref(false)
 const eligibleAssets = computed(() => props.assets.filter(asset => !asset.main_image && !props.generatingIds.has(asset.id)))
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || `生图模型 ${item.config_id}` })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
+const estimatedCost = computed(() => estimateImageCost(
+  selectedModel.value?.pricing,
+  imageParameters.value.clarity,
+  selectedIds.value.length,
+))
 const allSelected = computed(() => Boolean(eligibleAssets.value.length) && eligibleAssets.value.every(asset => selectedIds.value.includes(asset.id)))
 const canGenerate = computed(() => selectedIds.value.length > 0 && Boolean(modelId.value) && !props.submitting)
 
@@ -145,7 +152,7 @@ watch(selectedModel, model => {
           <div class="batch-actions">
             <AppButton type="button" variant="soft" :disabled="!eligibleAssets.length" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</AppButton>
             <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton type="button" variant="primary" :disabled="!canGenerate" :loading="submitting" @click="submit"><Sparkles v-if="!submitting" :size="15" />生成 {{ selectedIds.length }} 个</AppButton>
+            <AppButton type="button" variant="primary" :disabled="!canGenerate" :loading="submitting" @click="submit"><Sparkles v-if="!submitting" :size="15" />生成 {{ selectedIds.length }} 个<BillingPriceTag v-if="!submitting" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
           </div>
         </footer>
       </section>
@@ -178,6 +185,7 @@ watch(selectedModel, model => {
 .batch-status.is-running svg { animation: batch-spin .8s linear infinite; }
 .batch-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 22px 18px; background: #fbfbfd; box-shadow: 0 -10px 30px rgb(36 40 57 / 4%); }
 .batch-options,.batch-actions { display: flex; align-items: center; gap: 8px; }
+.batch-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 .batch-options :deep(.app-select:first-child) { width: 220px; }
 @keyframes batch-spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) {

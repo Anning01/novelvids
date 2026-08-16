@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from datetime import datetime
 import asyncio
 import os
@@ -8,6 +8,7 @@ from pathlib import Path
 from docx import Document
 from pypdf import PdfReader
 
+from auth.deps import AuthContext, require_roles
 from utils.response_format import ResponseSchema
 from config import settings
 from services.nlp import (
@@ -18,6 +19,8 @@ from services.nlp import (
 )
 
 router = APIRouter()
+
+_EDITOR = Depends(require_roles("admin", "creator"))
 
 
 def _read_plain_text(file_path: str) -> str:
@@ -51,7 +54,8 @@ def _extract_document_text(file_path: str, extension: str) -> str:
 
 @router.post("/upload", summary="多文件上传", response_model=ResponseSchema[dict])
 async def upload_files(
-    files: list[UploadFile] = File(...)
+    files: list[UploadFile] = File(...),
+    _: AuthContext = _EDITOR,
 ):
     """处理多文件上传"""
     try:

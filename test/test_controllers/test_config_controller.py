@@ -653,3 +653,10 @@ async def test_视频模型必须使用受支持类型和火山方舟协议():
             api_protocol="openai_compatible",
             video_model_type="seedance_2_5",
         ))
+
+
+@pytest.mark.asyncio
+async def test_list_generation_capabilities_returns_all_types():
+    capabilities = await ai_model_config_controller.list_generation_capabilities()
+    assert "1K" in capabilities["image"]["seedream_5_pro"]
+    assert "720p" in capabilities["video"]["seedance_2"]

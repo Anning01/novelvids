@@ -64,6 +64,20 @@ class AiModelConfig(AbstractBaseModel):
         null=True,
         description="四层业务消息允许的最大总字符数；留空表示不预检",
     )
+    pricing = fields.JSONField(
+        null=True,
+        description="计费费用模块，按任务类型分 text/image/video 三种结构",
+    )
+    scope = fields.CharField(
+        max_length=16,
+        default="official",
+        description="配置归属：official 官方配置（超管）/ team 团队自定义",
+    )
+    team_id = fields.IntField(
+        null=True,
+        db_index=True,
+        description="所属团队；官方配置恒为 NULL（AUTH_ENABLED=true 时启用）",
+    )
 
     class Meta:
         table = "ai_model_configs"

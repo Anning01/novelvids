@@ -1023,6 +1023,14 @@
   z-index: 1;
   flex: 0 0 auto;
 }
+.workbench-prompt-panel__primary-action .workbench-prompt-panel__action-cost {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
+  opacity: .8;
+}
 .workbench-prompt-panel__primary-action > i {
   position: absolute;
   right: 0;

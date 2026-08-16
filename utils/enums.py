@@ -150,3 +150,20 @@ class ImageModelTypeEnum(NicknameStrEnum):
     seedream_5_lite = "seedream_5_lite", "Doubao Seedream 5.0 Lite"
     seedream_5_pro = "seedream_5_pro", "Doubao Seedream 5.0 Pro"
     gpt_image_2 = "gpt_image_2", "GPT Image 2"
+
+
+@enum_description
+class TeamRoleEnum(NicknameStrEnum):
+    """团队成员角色。仅 AUTH_ENABLED=true 时生效。"""
+
+    admin = "admin", "团队管理员"
+    creator = "creator", "创作者"
+    viewer = "viewer", "查看者"
+
+
+@enum_description
+class UserStatusEnum(NicknameIntEnum):
+    """用户账号状态。仅 AUTH_ENABLED=true 时生效。"""
+
+    disabled = 0, "已停用"
+    active = 1, "正常"

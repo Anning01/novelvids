@@ -87,6 +87,9 @@ async def initialize_db():
     # Let's try to load dynamically as the app does.
     import models
     model_modules = [f"models.{module}" for module in models.__all__]
+    # AUTH_ENABLED=true 时额外注册鉴权模型（与 main.py 的条件注册保持一致）
+    if os.getenv("AUTH_ENABLED", "").lower() == "true":
+        model_modules.append("auth.models")
 
     await Tortoise.init(
         db_url=db_url,
@@ -110,6 +113,7 @@ async def clear_db():
     from models.scene import Scene
     from models.ai_task import AiTask
     from models.config import AiModelConfig, GeneralConfig
+    from models.usage_record import ModelUsageRecord
     from models.video import Video
     from models.audio_reference import AudioReference
     from models.digital_human import DigitalHuman
@@ -124,7 +128,25 @@ async def clear_db():
     await Asset.all().delete()
     await Novel.all().delete()
     await AiModelConfig.all().delete()
+    await ModelUsageRecord.all().delete()
     await GeneralConfig.all().delete()
+
+    if os.getenv("AUTH_ENABLED", "").lower() == "true":
+        from auth.models import (
+            BalanceTransaction,
+            Team,
+            TeamInvite,
+            TeamMember,
+            User,
+            UserSession,
+        )
+
+        await TeamInvite.all().delete()
+        await BalanceTransaction.all().delete()
+        await UserSession.all().delete()
+        await TeamMember.all().delete()
+        await User.all().delete()
+        await Team.all().delete()
 
 
 @pytest.fixture(scope="module")

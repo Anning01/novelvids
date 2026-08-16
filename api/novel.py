@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends
 
+from auth.deps import AuthContext, get_auth_context, require_roles, require_team_access
 from controllers.novel import novel_controller
 from schemas.ai_task import AiTaskOut
 from schemas.novel import NovelBriefOut, NovelCreate, NovelUpdate, NovelPatch, NovelOut
@@ -9,21 +10,41 @@ from utils.response_format import PaginationResponse, ResponseSchema
 
 router = APIRouter()
 
+_EDITOR = Depends(require_roles("admin", "creator"))
+
 
 @router.post("", summary="创建小说/剧本", response_model=ResponseSchema[NovelOut])
-async def create_novel(novel: NovelCreate):
-    novels = await novel_controller.create(novel)
+async def create_novel(
+    novel: NovelCreate,
+    ctx: AuthContext = Depends(get_auth_context),
+    _: AuthContext = _EDITOR,
+):
+    novels = await novel_controller.create(
+        novel,
+        team_id=ctx.team_id,
+        created_by=ctx.user.id if ctx.user else None,
+    )
     return ResponseSchema(data=novels)
 
 
 @router.put("/{novel_id}", summary="全量修改小说/剧本", response_model=ResponseSchema[NovelOut])
-async def update_novel(novel_id: int, novel: NovelUpdate):
+async def update_novel(
+    novel_id: int,
+    novel: NovelUpdate,
+    _: AuthContext = Depends(require_team_access),
+    __: AuthContext = _EDITOR,
+):
     novels = await novel_controller.update(novel_id, novel)
     return ResponseSchema(data=novels)
 
 
 @router.patch("/{novel_id}", summary="局部更新小说/剧本", response_model=ResponseSchema[NovelOut])
-async def patch_novel(novel_id: int, novel: NovelPatch):
+async def patch_novel(
+    novel_id: int,
+    novel: NovelPatch,
+    _: AuthContext = Depends(require_team_access),
+    __: AuthContext = _EDITOR,
+):
     novels = await novel_controller.patch(novel_id, novel)
     return ResponseSchema(data=novels)
 
@@ -31,15 +52,23 @@ async def patch_novel(novel_id: int, novel: NovelPatch):
 @router.get(
     "", summary="获取小说/剧本列表", response_model=ResponseSchema[PaginationResponse[NovelBriefOut]]
 )
-async def get_novel_list(params: QueryParams = Depends(get_list_params)):
-    novels = await novel_controller.list(params, NovelBriefOut, search_fields=['name', 'author'])
+async def get_novel_list(
+    params: QueryParams = Depends(get_list_params),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    novels = await novel_controller.list(
+        params, NovelBriefOut, search_fields=['name', 'author'], team_id=ctx.team_id
+    )
     return ResponseSchema(data=novels)
 
 
 @router.get(
     "/{novel_id}", summary="获取小说/剧本详情", response_model=ResponseSchema[NovelOut]
 )
-async def get_novel(novel_id: int):
+async def get_novel(
+    novel_id: int,
+    _: AuthContext = Depends(require_team_access),
+):
     novel = await novel_controller.get(novel_id)
     return ResponseSchema(data=novel)
 
@@ -47,21 +76,38 @@ async def get_novel(novel_id: int):
 @router.delete(
     "/{novel_id}", summary="删除一个小说/剧本", response_model=ResponseSchema
 )
-async def delete_novel(novel_id: int):
+async def delete_novel(
+    novel_id: int,
+    _: AuthContext = Depends(require_team_access),
+    __: AuthContext = _EDITOR,
+):
     await novel_controller.remove(novel_id)
     return ResponseSchema()
 
 
 @router.post("/{novel_id}/split", summary="使用nlp智能拆分章节", response_model=ResponseSchema[NovelOut])
 @router.get("/{novel_id}/split", summary="使用nlp智能拆分章节（兼容）", response_model=ResponseSchema[NovelOut])
-async def split_novel(novel_id: int):
+async def split_novel(
+    novel_id: int,
+    _: AuthContext = Depends(require_team_access),
+    __: AuthContext = _EDITOR,
+):
     novel = await novel_controller.split(novel_id)
     return ResponseSchema(data=novel)
 
 
 @router.post("/{novel_id}/analyze", summary="分析 Agent 项目", response_model=ResponseSchema[AiTaskOut])
-async def analyze_novel(novel_id: int, bg: BackgroundTasks):
-    task = await novel_controller.analyze(novel_id)
+async def analyze_novel(
+    novel_id: int,
+    bg: BackgroundTasks,
+    ctx: AuthContext = Depends(require_team_access),
+    _: AuthContext = _EDITOR,
+):
+    task = await novel_controller.analyze(
+        novel_id,
+        team_id=ctx.team_id,
+        user_id=ctx.user.id if ctx.user else None,
+    )
     bg.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)
 
@@ -71,6 +117,9 @@ async def analyze_novel(novel_id: int, bg: BackgroundTasks):
     summary="获取最近一次 Agent 项目分析任务",
     response_model=ResponseSchema[AiTaskOut | None],
 )
-async def get_novel_analysis(novel_id: int):
+async def get_novel_analysis(
+    novel_id: int,
+    _: AuthContext = Depends(require_team_access),
+):
     task = await novel_controller.latest_analysis(novel_id)
     return ResponseSchema(data=task)

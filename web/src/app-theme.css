@@ -467,7 +467,30 @@
 :root[data-app-theme='dark'] .app-select__option:hover { color: var(--app-text); background: var(--app-surface-hover); }
 :root[data-app-theme='dark'] .app-select__option.is-selected { color: var(--app-accent); background: var(--app-accent-soft); }
 
-:root[data-app-theme='dark'] .notice { border-color: var(--app-border); color: var(--app-text); background: var(--app-surface); box-shadow: var(--app-shadow); }
+/* Team & auth pages */
+:root[data-app-theme='dark'] :is(.login-page,.invite-page,.members-page,.teams-page,.profile-page) { color: var(--app-text); background: var(--app-canvas); }
+:root[data-app-theme='dark'] :is(.login-card,.invite-card,.members-page .panel,.teams-page .panel,.teams-page .dialog-card,.profile-card) { border-color: var(--app-border); background: var(--app-surface); box-shadow: var(--app-shadow); }
+:root[data-app-theme='dark'] :is(.login-page,.invite-page,.members-page,.teams-page,.profile-page) :is(input,select,textarea) { border-color: var(--app-border); color: var(--app-text); background: #191715; }
+:root[data-app-theme='dark'] :is(.login-page,.invite-page,.profile-page) input:focus { border-color: #796b9b; box-shadow: 0 0 0 3px rgb(169 149 255 / 10%); }
+:root[data-app-theme='dark'] :is(.login-page,.invite-page,.members-page,.teams-page,.profile-page) :is(h1,h2,strong) { color: var(--app-text); }
+:root[data-app-theme='dark'] :is(.login-subtitle,.invite-subtitle,.invite-hint,.members-page .dim,.teams-page .dim,.profile-page .dim,.profile-stats dt,.team-info span,.team-meta,.password-form label) { color: var(--app-text-muted); }
+:root[data-app-theme='dark'] :is(.members-page .member-table,.teams-page .team-table) :is(th,td) { border-bottom-color: var(--app-border); }
+:root[data-app-theme='dark'] :is(.members-page .member-table,.teams-page .team-table) th { color: var(--app-text-muted); }
+:root[data-app-theme='dark'] :is(.login-error,.members-page .danger-button,.teams-page .danger-button,.profile-page .logout-button) { color: #e08a92; }
+:root[data-app-theme='dark'] :is(.members-page,.teams-page) .is-overdraft { color: #e08a92; }
+:root[data-app-theme='dark'] .members-page .status-badge.is-active { color: #82d5ad; background: rgb(66 151 109 / 14%); }
+:root[data-app-theme='dark'] .members-page .status-badge.is-stopped { color: #e08a92; background: rgb(190 73 85 / 12%); }
+:root[data-app-theme='dark'] :is(.members-page .ghost-button,.teams-page .ghost-button) { border-color: var(--app-border); color: var(--app-text-secondary); }
+:root[data-app-theme='dark'] :is(.members-page .ghost-button,.teams-page .ghost-button):hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
+:root[data-app-theme='dark'] .teams-page .dialog-mask { background: rgb(8 9 12 / 72%); }
+:root[data-app-theme='dark'] .profile-page .team-list li { border-color: var(--app-border); background: var(--app-surface-muted); }
+:root[data-app-theme='dark'] .profile-page .logout-button { border-color: rgb(213 112 100 / 16%); background: rgb(174 67 58 / 10%); }
+:root[data-app-theme='dark'] .app-team-selector select { border-color: var(--app-border); color: var(--app-text-secondary); background: #191715; }
+:root[data-app-theme='dark'] .app-team-selector select:hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
+:root[data-app-theme='dark'] .app-team-selector--super { color: var(--app-text-muted); }
+:root[data-app-theme='dark'] .app-user-block { border-color: var(--app-border); color: var(--app-text-secondary); background: var(--app-surface); }
+:root[data-app-theme='dark'] .app-user-block:hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
+:root[data-app-theme='dark'] .app-user-block.is-active { color: var(--app-accent); background: var(--app-accent-soft); }
 
 @media (prefers-reduced-motion: no-preference) {
   .app-shell,

@@ -62,13 +62,15 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             await novel.update_from_dict({"total_chapters": count})
             await novel.save()
 
-    async def extract(self, chapter_id: int) -> AiTask:
+    async def extract(
+        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None
+    ) -> AiTask:
         """提交提取任务，返回任务记录供前端轮询。"""
         chapter = await self.get(chapter_id)
 
-        # 1. 获取提取任务的启用配置
+        # 1. 获取提取任务的启用配置（团队自定义优先，官方兜底）
         config = await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.extraction.value
+            AiTaskTypeEnum.extraction.value, team_id=team_id
         )
         prompt_language = await general_config_controller.get_prompt_language()
 
@@ -90,6 +92,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         request_params = {
             "chapter_id": chapter.id,
             "novel_id": chapter.novel_id,
+            "model_config_id": config.id,
             "base_url": config.base_url,
             "api_key": config.api_key,
             "model": config.model,
@@ -98,6 +101,10 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             "max_context_characters": config.max_context_characters,
             "prompt_language": prompt_language,
         }
+        if team_id is not None:
+            request_params["team_id"] = team_id
+        if user_id is not None:
+            request_params["user_id"] = user_id
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.extraction, request_params
         )

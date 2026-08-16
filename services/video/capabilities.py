@@ -165,7 +165,7 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_audio_total_duration_max=15,
     ),
     VideoGenerationModelTypeEnum.seedance_2_5: VideoModelCapabilities(
-        resolutions=("480p", "720p"),
+        resolutions=("480p", "720p", "1080p"),
         aspect_ratios=COMMON_RATIOS,
         aspect_ratios_by_mode={
             "reference": COMMON_RATIOS,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,7 @@ from models.scene import Scene
 from models.chapter import Chapter
 from models.video import Video
 from schemas.video import VideoGenerateRequest
+from services.billing.recorder import billing_recorder
 from services.video import get_generator
 from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
@@ -158,7 +160,13 @@ class VideoController(CRUDBase[Video, dict, dict]):
         await self._set_scene_current_video(scene, video.id)
         return video
 
-    async def generate(self, req: VideoGenerateRequest, media_base_url: str = "") -> Video:
+    async def generate(
+        self,
+        req: VideoGenerateRequest,
+        media_base_url: str = "",
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> Video:
         """提交视频生成请求。
 
         1. 获取 Scene (含关联 chapter -> novel)
@@ -177,10 +185,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
         await scene.fetch_related("assets")
         novel_id = scene.chapter.novel_id
 
-        # 查找启用的视频配置
+        # 查找启用的视频配置（团队自定义优先，官方兜底）
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.video.value,
             req.model_config_id,
+            team_id=team_id,
         )
 
         # 解析 @资产昵称，并采用分镜中显式选择的资产衍生状态。
@@ -283,6 +292,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "first_frame_url": req.first_frame_url,
             "last_frame_url": req.last_frame_url,
             "model_config_id": config.id,
+            "novel_id": novel_id,
+            "has_video_reference": len(reference_videos) > 0,
+            "input_video_seconds": reference_video_duration,
             "model_name": config.name,
             "model": config.model,
             "video_model_type": config.video_model_type,
@@ -294,6 +306,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "return_last_frame": selection.return_last_frame,
             "reference_media": [item.model_dump() for item in referenced_media],
         }
+        if team_id is not None:
+            video_metadata["team_id"] = team_id
+        if user_id is not None:
+            video_metadata["user_id"] = user_id
         try:
             external_task_id = await generator.submit(
                 prompt=provider_prompt,
@@ -360,15 +376,20 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         # 新记录保存了配置 ID：即使管理员之后停用它，也要用原配置完成状态查询。
         # 历史记录没有配置 ID 时，继续回退到当前启用配置。
+        # 团队作用域从视频元数据读取（生成时固化）。
         metadata = video.metadata or {}
+        team_id = metadata.get("team_id")
         config_id = metadata.get("model_config_id")
         if config_id is not None:
             config = await ai_model_config_controller.get_configured_for_task(
                 AiTaskTypeEnum.video.value,
                 int(config_id),
+                team_id=team_id,
             )
         else:
-            config = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value)
+            config = await ai_model_config_controller.get_active(
+                AiTaskTypeEnum.video.value, team_id=team_id
+            )
 
         generator = get_generator(config)
         result = await generator.query(video.external_task_id)
@@ -437,8 +458,55 @@ class VideoController(CRUDBase[Video, dict, dict]):
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
 
+        try:
+            if metadata.get("novel_id") is not None:
+                duration_seconds = None
+                if video.created_at:
+                    duration_seconds = max(0.0, (datetime.now(timezone.utc) - video.created_at).total_seconds())
+                if new_status == TaskStatusEnum.completed.value:
+                    seconds = result_metadata.get("duration") or metadata.get("duration")
+                    record = await billing_recorder.record_video(
+                        novel_id=metadata.get("novel_id"),
+                        model_config_id=metadata.get("model_config_id"),
+                        seconds=seconds,
+                        resolution=metadata.get("resolution"),
+                        input_video_seconds=metadata.get("input_video_seconds", 0),
+                        has_video_reference=metadata.get("has_video_reference", False),
+                        status=TaskStatusEnum.completed.value,
+                        duration_seconds=duration_seconds,
+                        video_id=video.id,
+                        team_id=metadata.get("team_id"),
+                        user_id=metadata.get("user_id"),
+                    )
+                    await self._consume_balance(record, metadata.get("team_id"))
+                elif new_status in (TaskStatusEnum.failed.value, TaskStatusEnum.cancelled.value):
+                    record = await billing_recorder.record_video(
+                        novel_id=metadata.get("novel_id"),
+                        model_config_id=metadata.get("model_config_id"),
+                        seconds=0.0,
+                        resolution=metadata.get("resolution"),
+                        input_video_seconds=metadata.get("input_video_seconds", 0),
+                        has_video_reference=metadata.get("has_video_reference", False),
+                        status=TaskStatusEnum.failed.value,
+                        duration_seconds=duration_seconds,
+                        video_id=video.id,
+                        team_id=metadata.get("team_id"),
+                        user_id=metadata.get("user_id"),
+                    )
+                    await self._consume_balance(record, metadata.get("team_id"))
+        except Exception:
+            logger.exception("billing record failed for video %s", video.id)
+
         await video.save(update_fields=update_fields)
         return video
+
+    @staticmethod
+    async def _consume_balance(record, team_id) -> None:
+        if record is None or team_id is None:
+            return
+        from services.balance import consume
+
+        await consume(team_id, record.cost, usage_record_id=record.id)
 
     async def remove(self, video_id: int) -> None:
         instance = await self.get(video_id)

@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from auth.deps import AuthContext, ensure_novel_access, get_auth_context
 from models.asset import Asset
 from models.chapter import Chapter
 from models.scene import Scene
@@ -15,7 +16,9 @@ router = APIRouter()
     summary="获取创作画布能力",
     response_model=ResponseSchema[WorkbenchCapabilitiesOut],
 )
-async def get_workbench_capabilities():
+async def get_workbench_capabilities(
+    _: AuthContext = Depends(get_auth_context),
+):
     return ResponseSchema(data=WorkbenchCapabilitiesOut())
 
 
@@ -27,7 +30,9 @@ async def get_workbench_capabilities():
 async def get_workbench_bootstrap(
     novel_id: int = Query(..., ge=1),
     chapter_id: int = Query(..., ge=1),
+    ctx: AuthContext = Depends(get_auth_context),
 ):
+    await ensure_novel_access(novel_id, ctx)
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")

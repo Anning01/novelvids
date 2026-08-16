@@ -41,6 +41,18 @@ class AiModelConfigProperties(BaseModel):
         description="四层业务消息允许的最大总字符数",
         ge=1,
     )
+    pricing: Optional[dict] = Field(
+        None,
+        description="计费费用模块：文本={input_price_per_1m,output_price_per_1m}，图片/视频={prices}",
+    )
+    scope: Optional[str] = Field(
+        None,
+        description="配置归属：official 官方配置 / team 团队自定义",
+    )
+    team_id: Optional[int] = Field(
+        None,
+        description="所属团队；官方配置为 null",
+    )
 
 
 # --- 输入 Schema ---
@@ -108,6 +120,7 @@ class ImageGenerationModelOut(BaseModel):
     model: str
     model_type: ImageModelTypeEnum
     concurrency: int
+    pricing: Optional[dict] = None
     capabilities: ImageGenerationCapabilitiesOut
 
 
@@ -157,6 +170,7 @@ class VideoGenerationModelOut(BaseModel):
     model: str = Field(..., description="供应商模型ID")
     model_type: VideoGenerationModelTypeEnum = Field(..., description="视频生成模型类型")
     concurrency: int = Field(..., description="并发数")
+    pricing: Optional[dict] = None
     capabilities: VideoGenerationCapabilitiesOut = Field(..., description="视频生成参数能力")
 
 
@@ -175,3 +189,15 @@ class GeneralConfigOut(GeneralConfigUpdate, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="配置ID")
+
+
+class ModelConfigSourceOut(BaseModel):
+    """团队模型配置来源模式。"""
+
+    source: str = Field(..., description="official 官方配置 / custom 团队自定义")
+
+
+class ModelConfigSourceUpdate(BaseModel):
+    """切换团队模型配置来源。"""
+
+    source: Literal["official", "custom"] = Field(..., description="配置来源模式")

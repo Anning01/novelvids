@@ -116,6 +116,7 @@ async def test_extract_snapshots_context_limit(monkeypatch):
         content="Content",
     )
     config = SimpleNamespace(
+        id=1,
         base_url="https://api.example.com/v1",
         api_key="key",
         model="model",

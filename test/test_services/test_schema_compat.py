@@ -25,6 +25,7 @@ async def test_ai_model_config_schema_adds_protocol_once_across_repeated_startup
             {"name": "max_context_characters"},
             {"name": "image_model_type"},
             {"name": "video_model_type"},
+            {"name": "pricing"},
         ],
     ]
     monkeypatch.setattr(
@@ -46,6 +47,7 @@ async def test_ai_model_config_schema_adds_protocol_once_across_repeated_startup
     assert "ADD COLUMN max_context_characters INT" in script
     assert "ADD COLUMN image_model_type VARCHAR(40)" in script
     assert "ADD COLUMN video_model_type VARCHAR(40)" in script
+    assert "ADD COLUMN pricing JSON" in script
 
 
 @pytest.mark.asyncio

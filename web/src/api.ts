@@ -1,10 +1,47 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, Chapter, DigitalHuman, GeneralConfig, ImageGenerationModel, Novel, PaginationResponse, Scene, SingleResponse, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 const BASE = '/api'
+export const AUTH_TOKEN_KEY = 'novelvids_token'
+export const ACTIVE_TEAM_KEY = 'novelvids_active_team'
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(AUTH_TOKEN_KEY)
+}
+export function setAuthToken(token: string): void {
+  localStorage.setItem(AUTH_TOKEN_KEY, token)
+}
+export function clearAuthToken(): void {
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+}
+export function redirectToLogin(): void {
+  if (window.location.hash !== '#/login') window.location.hash = '#/login'
+}
+export function getActiveTeamId(): number | null {
+  const raw = localStorage.getItem(ACTIVE_TEAM_KEY)
+  const value = raw ? Number(raw) : NaN
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+export function setActiveTeamId(teamId: number | null): void {
+  if (teamId === null) localStorage.removeItem(ACTIVE_TEAM_KEY)
+  else localStorage.setItem(ACTIVE_TEAM_KEY, String(teamId))
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(BASE + url, { headers: { 'Content-Type': 'application/json' }, ...options })
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getAuthToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const teamId = getActiveTeamId()
+  if (teamId !== null) headers['X-Team-Id'] = String(teamId)
+  const response = await fetch(BASE + url, { headers, ...options })
   const payload = await response.json()
-  if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || '请求失败')
+  if (!response.ok || payload.code !== 0) {
+    // 登录失效：清除令牌并跳转登录页（登录接口本身的 401 不跳转）
+    if (payload.code === 401 && !url.startsWith('/auth/login')) {
+      clearAuthToken()
+      redirectToLogin()
+    }
+    throw new Error(payload.message || payload.detail || '请求失败')
+  }
   return payload
 }
 function qs(params: Record<string, unknown>) {
@@ -42,6 +79,30 @@ async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) =
 
 export const api = {
   enums: () => request<SingleResponse<AllEnums>>('/config/enums/all'),
+  authStatus: () => request<SingleResponse<AuthStatus>>('/auth/status'),
+  login: (username: string, password: string) => request<SingleResponse<LoginResult>>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  register: (data: { username: string; password: string; nickname?: string; invite_token: string }) => request<SingleResponse<LoginResult>>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  me: () => request<SingleResponse<AuthMe>>('/auth/me'),
+  logout: () => request<SingleResponse<null>>('/auth/logout', { method: 'POST' }),
+  changePassword: (oldPassword: string, newPassword: string) => request<SingleResponse<null>>('/auth/change-password', { method: 'POST', body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) }),
+  teamBalance: (teamId?: number) => request<SingleResponse<{ team_id: number; balance: number }>>(`/team/balance${qs({ team_id: teamId })}`),
+  teamTopUp: (data: { team_id: number; amount: number; note?: string }) => request<SingleResponse<{ team_id: number; balance: number }>>('/team/balance/topup', { method: 'POST', body: JSON.stringify(data) }),
+  teamMembers: (page = 1, pageSize = 20, teamId?: number) => request<PaginationResponse<MemberItem>>(`/team/members${qs({ page, page_size: pageSize, team_id: teamId })}`),
+  createTeamInvite: (role: TeamRole = 'creator', teamId?: number) => request<SingleResponse<InviteItem>>(`/team/invites${qs({ role, team_id: teamId })}`, { method: 'POST' }),
+  teamInviteInfo: (token: string) => request<SingleResponse<InviteItem>>(`/team/invites/${token}`),
+  joinTeamInvite: (token: string) => request<SingleResponse<InviteItem>>(`/team/invites/${token}/join`, { method: 'POST' }),
+  updateTeamMember: (userId: number, data: { role?: TeamRole; status?: number }, teamId?: number) => request<SingleResponse<MemberItem>>(`/team/members/${userId}${qs({ team_id: teamId })}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  setTeamMemberLimit: (userId: number, costLimit: number | null, teamId?: number) => request<SingleResponse<MemberItem>>(`/team/members/${userId}/limit${qs({ team_id: teamId })}`, { method: 'PUT', body: JSON.stringify({ cost_limit: costLimit }) }),
+  removeTeamMember: (userId: number, teamId?: number) => request<SingleResponse<null>>(`/team/members/${userId}${qs({ team_id: teamId })}`, { method: 'DELETE' }),
+  resetTeamMemberPassword: (userId: number, data: { new_password: string }, teamId?: number) => request<SingleResponse<null>>(`/team/members/${userId}/reset-password${qs({ team_id: teamId })}`, { method: 'POST', body: JSON.stringify(data) }),
+  teams: (page = 1, pageSize = 100) => request<PaginationResponse<TeamItem>>(`/team/teams${qs({ page, page_size: pageSize })}`),
+  createTeam: (data: { name: string; owner_user_id: number; member_limit?: number | null }) => request<SingleResponse<TeamItem>>('/team/teams', { method: 'POST', body: JSON.stringify(data) }),
+  updateTeam: (id: number, data: { name?: string; status?: number; member_limit?: number | null }) => request<SingleResponse<TeamItem>>(`/team/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  userStats: () => request<SingleResponse<UserStats>>('/users/stats'),
+  users: (page = 1, pageSize = 100, search?: string) => request<PaginationResponse<UserItem>>(`/users${qs({ page, page_size: pageSize, search })}`),
+  createUser: (data: { username: string; password: string; nickname?: string }) => request<SingleResponse<UserItem>>('/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: number, data: { status: number }) => request<SingleResponse<UserItem>>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteUser: (id: number) => request<SingleResponse<null>>(`/users/${id}`, { method: 'DELETE' }),
   novels: () => request<PaginationResponse<Novel>>('/novel?page=1&page_size=100'),
   novel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}`),
   createNovel: (data: Partial<Novel>) => request<SingleResponse<Novel>>('/novel', { method: 'POST', body: JSON.stringify(data) }),
@@ -108,6 +169,7 @@ export const api = {
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
   imageGenerationModels: () => request<SingleResponse<ImageGenerationModel[]>>('/config/image-generation/models'),
   videoGenerationModels: () => request<SingleResponse<VideoGenerationModel[]>>('/config/video-generation/models'),
+  generationCapabilities: () => request<SingleResponse<GenerationCapabilities>>('/config/generation/capabilities'),
   generalConfig: () => request<SingleResponse<GeneralConfig>>('/config/general'),
   updateGeneralConfig: (data: Pick<GeneralConfig, 'prompt_language'>) => request<SingleResponse<GeneralConfig>>('/config/general', { method: 'PUT', body: JSON.stringify(data) }),
   createConfig: (data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>('/config', { method: 'POST', body: JSON.stringify(data) }),
@@ -116,6 +178,10 @@ export const api = {
   deactivateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/deactivate`, { method: 'POST' }),
   deleteConfig: (id: number) => request<SingleResponse<null>>(`/config/${id}`, { method: 'DELETE' }),
   task: (id: string) => request<SingleResponse<AiTask>>(`/task/${id}`),
+  billingSummary: (novelId?: number) => request<SingleResponse<BillingSummary>>(`/billing/summary${qs({ novel_id: novelId })}`),
+  billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
+  billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
+  billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
   async upload(file: File) {
     const data = new FormData(); data.append('files', file)
     const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data })

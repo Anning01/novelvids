@@ -21,6 +21,7 @@ import {
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
@@ -37,6 +38,7 @@ import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCa
 import { api, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
+import { estimateVideoCost } from '@/shared/modelPricing'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { chapterHasCompletedVideo } from '@/shared/chapterVideoTimeline'
 import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
@@ -147,6 +149,9 @@ const batchVideoSceneOptions = computed<BatchVideoSceneOption[]>(() => scenes.va
     disabledReason,
   }
 }))
+const batchVideoCostByScene = computed<Record<number, number>>(() => Object.fromEntries(
+  scenes.value.map(scene => [scene.id, sceneVideoEstimate(scene)]),
+))
 const assetGroups = computed(() => [
   { type: AssetTypeEnum.PERSON, label: '出镜角色', icon: UsersRound, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.PERSON) },
   { type: AssetTypeEnum.SCENE, label: '分镜场景', icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
@@ -304,6 +309,24 @@ function sceneDuration(scene: Scene, model: VideoGenerationModel | null = select
   return Math.max(
     model.capabilities.duration_min,
     Math.min(model.capabilities.duration_max, draftDuration),
+  )
+}
+
+function sceneVideoEstimate(scene: Scene) {
+  const model = selectedVideoModelConfig.value
+  if (!model) return 0
+  const draft = draftFor(scene)
+  const hasVideoReference = draft.referenceMedia.some(item => item.type === 'video')
+  const inputVideoSeconds = draft.referenceMedia.reduce(
+    (sum, item) => item.type === 'video' ? sum + (Number(item.duration) || 0) : sum,
+    0,
+  )
+  return estimateVideoCost(
+    model.pricing,
+    sceneResolution(scene, model),
+    sceneDuration(scene, model),
+    hasVideoReference,
+    inputVideoSeconds,
   )
 }
 
@@ -1538,7 +1561,7 @@ onBeforeUnmount(() => {
                       @update:return-last-frame="updateSceneDraft(scene, 'returnLastFrame', $event)"
                     />
                   </div>
-                  <AppButton variant="primary" size="md" aria-label="生成视频" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成' }}</AppButton>
+                  <AppButton variant="primary" size="md" aria-label="生成视频" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成' }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
                 </footer>
               </section>
 
@@ -1584,6 +1607,8 @@ onBeforeUnmount(() => {
     <ShortDramaBatchVideoDialog
       :open="batchVideoDialogOpen"
       :scenes="batchVideoSceneOptions"
+      :cost-by-scene="batchVideoCostByScene"
+      :pricing="selectedVideoModelConfig?.pricing"
       @close="batchVideoDialogOpen = false"
       @generate="batchGenerateVideos"
     />
@@ -1725,4 +1750,5 @@ onBeforeUnmount(() => {
 @media (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; overflow-x: auto; padding-bottom: 4px; }.chapter-model-select { width: min(300px,70vw); min-width: min(300px,70vw); }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
 @media (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
+.scene-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 </style>

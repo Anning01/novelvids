@@ -57,8 +57,12 @@ stop:
 
 # --- 代码质量 ---
 test:
-	@echo "运行测试..."
-	uv run pytest
+	@echo "运行测试（强制 AUTH_ENABLED=false，与本地 .env 解耦）..."
+	AUTH_ENABLED=false uv run pytest
+
+test-auth:
+	@echo "运行鉴权测试（AUTH_ENABLED=true）..."
+	AUTH_ENABLED=true uv run pytest test/test_auth -q --no-cov
 
 format:
 	@echo "格式化代码..."
