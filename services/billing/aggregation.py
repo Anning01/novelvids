@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from models.novel import Novel
 from models.usage_record import ModelUsageRecord
+from schemas.billing import ModelUsageRecordOut
 from utils.page import QueryBuilder
 
 
@@ -117,9 +118,10 @@ async def list_records(params) -> dict:
     total = await query.count()
     query = await QueryBuilder.apply_pagination(query, params.page, params.page_size)
     items = await query
+    items_out = [ModelUsageRecordOut.model_validate(item) for item in items]
     pages = (total + params.page_size - 1) // params.page_size if total else 0
     return {
-        "items": items,
+        "items": items_out,
         "pagination": {
             "total": total,
             "page": params.page,

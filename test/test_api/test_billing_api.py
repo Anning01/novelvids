@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 from httpx import AsyncClient
 
+from models.ai_task import AiTask
 from models.config import AiModelConfig
 from models.novel import Novel
 from models.usage_record import ModelUsageRecord
@@ -50,3 +51,29 @@ async def test_billing_projects_and_records(client: AsyncClient):
     assert records.status_code == 200
     assert records.json()["data"]["pagination"]["total"] == 1
     assert records.json()["data"]["items"][0]["billing_type"] == "video"
+
+
+@pytest.mark.asyncio
+async def test_billing_records_serializes_uuid_and_cost(client: AsyncClient):
+    novel = await Novel.create(name="序列化测试", author="a")
+    task = await AiTask.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={"novel_id": novel.id},
+    )
+    await ModelUsageRecord.create(
+        novel_id=novel.id,
+        task_type=AiTaskTypeEnum.extraction.value,
+        billing_type="text",
+        ai_task_id=task.id,
+        model="m",
+        usage={"input_tokens": 100},
+        cost=Decimal("0.001000"),
+        status=TaskStatusEnum.completed.value,
+    )
+
+    response = await client.get(f"/api/billing/records?novel_id={novel.id}")
+    assert response.status_code == 200, response.text
+    item = response.json()["data"]["items"][0]
+    assert item["ai_task_id"] == str(task.id)
+    assert item["cost"] == 0.001

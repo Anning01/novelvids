@@ -1,6 +1,7 @@
 """账单计费相关 schema。"""
 
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,7 +15,7 @@ class ModelUsageRecordOut(BaseResponse):
     novel_id: int
     task_type: int
     billing_type: str
-    ai_task_id: Optional[str] = None
+    ai_task_id: Optional[UUID] = None
     video_id: Optional[int] = None
     model_config_id: Optional[int] = None
     model_name: Optional[str] = None
