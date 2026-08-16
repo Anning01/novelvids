@@ -84,6 +84,12 @@
 - 实时状态追踪（排队中/处理中/已完成/失败）
 - 支持预览与批量管理
 
+### 成本计费
+- 每次模型调用自动记录计费流水（token 用量、张数/秒数、定价快照、金额与请求时长）
+- 模型可配置费用模块：文本按 token、生图按清晰度、视频按 token（区分输入含视频/不含视频）
+- 支持模型级折扣（如 0.9 = 9 折），展示优惠前后金额与优惠说明
+- 成本看板：按项目过滤的维度汇总与调用流水（带分页）
+
 ## 界面预览
 
 <!--
@@ -123,6 +129,12 @@
   <tr>
     <td><img src="docs/images/screenshots/video.png" alt="视频生成" width="480"></td>
     <td><img src="docs/images/screenshots/settings.png" alt="模型配置" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><b>成本看板</b></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/screenshots/billing.png" alt="成本看板" width="960"></td>
   </tr>
 </table>
 
