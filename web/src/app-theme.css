@@ -467,8 +467,6 @@
 :root[data-app-theme='dark'] .app-select__option:hover { color: var(--app-text); background: var(--app-surface-hover); }
 :root[data-app-theme='dark'] .app-select__option.is-selected { color: var(--app-accent); background: var(--app-accent-soft); }
 
-:root[data-app-theme='dark'] .notice { border-color: var(--app-border); color: var(--app-text); background: var(--app-surface); box-shadow: var(--app-shadow); }
-
 @media (prefers-reduced-motion: no-preference) {
   .app-shell,
   .app-sidebar,
