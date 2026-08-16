@@ -129,15 +129,15 @@ onMounted(load)
           <strong class="stat-value">{{ summary?.total_records ?? 0 }}</strong>
           <small class="stat-sub">次模型调用</small>
         </article>
-        <article class="stat-card">
+        <article class="stat-card is-text">
           <span class="stat-label"><Type :size="15" />文本</span>
           <strong class="stat-value">{{ money(billingBreakdown.text) }}</strong>
         </article>
-        <article class="stat-card">
+        <article class="stat-card is-image">
           <span class="stat-label"><Image :size="15" />生图</span>
           <strong class="stat-value">{{ money(billingBreakdown.image) }}</strong>
         </article>
-        <article class="stat-card">
+        <article class="stat-card is-video">
           <span class="stat-label"><Clapperboard :size="15" />视频</span>
           <strong class="stat-value">{{ money(billingBreakdown.video) }}</strong>
         </article>
@@ -202,14 +202,24 @@ onMounted(load)
 .billing-state { padding: 60px 0; color: var(--app-text-muted); text-align: center; }
 
 .summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 26px; }
-.stat-card { display: grid; align-content: start; gap: 9px; padding: 18px 18px 16px; border-radius: 16px; background: var(--app-surface-raised, #fff); box-shadow: 0 1px 2px rgb(20 22 28 / 3%), 0 10px 28px rgb(20 22 28 / 5%); }
-.stat-card.is-primary { background: linear-gradient(135deg, #6869f7, #5556ed); color: #fff; box-shadow: 0 12px 30px rgb(83 84 230 / 22%); }
+.stat-card { display: grid; align-content: start; gap: 9px; padding: 18px 18px 16px; border-radius: 16px; background: linear-gradient(180deg, var(--app-surface-raised, #fff), var(--app-surface-muted, #f2f3f7)); box-shadow: inset 0 0 0 1px var(--app-border, #eceef3), 0 1px 2px rgb(20 22 28 / 3%), 0 10px 28px rgb(20 22 28 / 5%); }
+.stat-card.is-primary { background: linear-gradient(135deg, #6869f7, #4b4be0); color: #fff; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%), 0 14px 34px rgb(83 84 230 / 26%); }
+.stat-card.is-text { background: linear-gradient(180deg, color-mix(in srgb, #5b5cf6 9%, var(--app-surface-raised, #fff)), var(--app-surface-muted, #f2f3f7)); }
+.stat-card.is-image { background: linear-gradient(180deg, color-mix(in srgb, #22a06b 9%, var(--app-surface-raised, #fff)), var(--app-surface-muted, #f2f3f7)); }
+.stat-card.is-video { background: linear-gradient(180deg, color-mix(in srgb, #e08a3c 11%, var(--app-surface-raised, #fff)), var(--app-surface-muted, #f2f3f7)); }
 .stat-label { display: inline-flex; align-items: center; gap: 6px; color: var(--app-text-muted); font-size: 11px; font-weight: 600; }
 .is-primary .stat-label { color: rgb(255 255 255 / 82%); }
+.stat-card.is-text .stat-label { color: #5b5cf6; }
+.stat-card.is-image .stat-label { color: #22a06b; }
+.stat-card.is-video .stat-label { color: #e08a3c; }
 .stat-value { font-size: 26px; font-weight: 720; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
 .is-primary .stat-value { font-size: 30px; }
 .stat-sub { color: var(--app-text-muted); font-size: 10px; }
 .is-primary .stat-sub { color: rgb(255 255 255 / 72%); }
+
+:global([data-app-theme='dark']) .stat-card.is-text .stat-label { color: #9ba9ff; }
+:global([data-app-theme='dark']) .stat-card.is-image .stat-label { color: #4ed8a0; }
+:global([data-app-theme='dark']) .stat-card.is-video .stat-label { color: #f2b26b; }
 
 .table-card { margin-bottom: 22px; border-radius: 16px; background: var(--app-surface-raised, #fff); box-shadow: 0 1px 2px rgb(20 22 28 / 3%), 0 10px 28px rgb(20 22 28 / 5%); overflow: hidden; }
 .table-card__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 16px 20px 12px; }
