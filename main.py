@@ -31,6 +31,7 @@ from services.model_config_seed import ensure_model_config_seed_data
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
+    ensure_shared_team_columns,
     ensure_usage_record_schema,
 )
 
@@ -61,6 +62,8 @@ async def lifespan(_: FastAPI):
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
     await ensure_usage_record_schema()
+    # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
+    await ensure_shared_team_columns()
     await ensure_media_library_seed_data()
     await ensure_model_config_seed_data()
     if settings.AUTH_ENABLED:

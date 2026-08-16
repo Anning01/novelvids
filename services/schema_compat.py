@@ -104,12 +104,12 @@ async def ensure_novel_analysis_schema() -> None:
         await connection.execute_script("".join(statements))
 
 
-async def ensure_team_schema() -> None:
-    """AUTH_ENABLED=true 时补齐团队字段并回填存量数据。
+async def ensure_shared_team_columns() -> None:
+    """无条件补齐共享表（novels / model_usage_records / ai_model_configs）的
+    团队相关增量列。
 
-    - novels 增加 team_id / created_by
-    - model_usage_records 增加 team_id / user_id
-    - 尚无团队时创建「默认团队」，把存量小说与计费流水挂入
+    这些列在模型上始终存在（vanilla 下恒为 NULL），因此无论开关状态如何，
+    旧库都必须补列，否则 ORM 插入会因缺列失败。纯增量、幂等、vanilla 无副作用。
     """
     if not settings.DATABASE_URL.startswith("sqlite"):
         return
@@ -140,9 +140,24 @@ async def ensure_team_schema() -> None:
         if statements:
             await connection.execute_script("".join(statements))
 
-    await _backfill_default_team(connection)
     await _ensure_model_config_scope_schema(connection)
+
+
+async def ensure_team_schema() -> None:
+    """AUTH_ENABLED=true 时补齐团队专属表字段并回填存量数据。
+
+    - 共享表增量列（无条件，见 ensure_shared_team_columns）
+    - teams / team_members 表增量列
+    - 尚无团队时创建「默认团队」，把存量小说与计费流水挂入
+    """
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        return
+
+    connection = Tortoise.get_connection("default")
+    await ensure_shared_team_columns()
+
     await _ensure_team_member_schema(connection)
+    await _backfill_default_team(connection)
 
 
 async def _ensure_team_member_schema(connection) -> None:
