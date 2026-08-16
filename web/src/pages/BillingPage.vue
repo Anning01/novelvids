@@ -12,7 +12,7 @@ const records = ref<BillingRecord[]>([])
 const totalRecords = ref(0)
 const loading = ref(true)
 const page = ref(1)
-const pageSize = 20
+const pageSize = ref(20)
 const selectedProjectId = ref('all')
 
 const billingTypeLabel = (value: string) => ({ text: '文本', image: '生图', video: '视频' }[value] || value)
@@ -41,7 +41,7 @@ const billingBreakdown = computed(() => {
 const projectName = (novelId: number) => (
   projects.value.find(item => item.novel_id === novelId)?.novel_name || `项目 ${novelId}`
 )
-const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize)))
+const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize.value)))
 
 function currentNovelId(): number | undefined {
   return selectedProjectId.value === 'all' ? undefined : Number(selectedProjectId.value)
@@ -54,7 +54,7 @@ async function load() {
     const [summaryResponse, projectsResponse, recordsResponse] = await Promise.all([
       api.billingSummary(novelId),
       api.billingProjects(1, 100),
-      api.billingRecords({ novel_id: novelId, page: page.value, page_size: pageSize }),
+      api.billingRecords({ novel_id: novelId, page: page.value, page_size: pageSize.value }),
     ])
     summary.value = summaryResponse.data
     projects.value = projectsResponse.data.items
@@ -70,7 +70,7 @@ async function load() {
 async function loadRecords() {
   loading.value = true
   try {
-    const response = await api.billingRecords({ novel_id: currentNovelId(), page: page.value, page_size: pageSize })
+    const response = await api.billingRecords({ novel_id: currentNovelId(), page: page.value, page_size: pageSize.value })
     records.value = response.data.items
     totalRecords.value = response.data.pagination.total
   } catch (error) {
@@ -88,6 +88,11 @@ function selectProject(novelId: string) {
 
 function changePage(next: number) {
   page.value = next
+  void loadRecords()
+}
+
+function changePageSize() {
+  page.value = 1
   void loadRecords()
 }
 
@@ -169,10 +174,18 @@ onMounted(load)
             <tr v-if="!records.length"><td colspan="7" class="empty">暂无调用记录</td></tr>
           </tbody>
         </table>
-        <footer v-if="totalRecords > pageSize" class="pager">
-          <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
-          <span>{{ page }} / {{ pages }}</span>
-          <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">下一页</button>
+        <footer v-if="totalRecords > 0" class="pager">
+          <span class="pager-total">共 {{ totalRecords }} 条</span>
+          <div class="pager-controls">
+            <select v-model.number="pageSize" class="pager-size" aria-label="每页条数" @change="changePageSize">
+              <option :value="20">20 条/页</option>
+              <option :value="50">50 条/页</option>
+              <option :value="100">100 条/页</option>
+            </select>
+            <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
+            <span>{{ page }} / {{ pages }}</span>
+            <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">下一页</button>
+          </div>
         </footer>
       </section>
     </template>
@@ -214,11 +227,14 @@ onMounted(load)
 .data-table .cell-mono { font-variant-numeric: tabular-nums; }
 .data-table .empty { color: var(--app-text-muted); text-align: center; padding: 28px; }
 
-.pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 20px 16px; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 16px; }
+.pager-total { color: var(--app-text-muted); font-size: 11px; }
+.pager-controls { display: flex; align-items: center; gap: 10px; }
 .pager span { color: var(--app-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .pager button { padding: 6px 12px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text-secondary); background: var(--app-surface); cursor: pointer; font-size: 11px; }
 .pager button:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
 .pager button:disabled { opacity: .45; cursor: not-allowed; }
+.pager-size { height: 30px; padding: 0 8px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text-secondary); background: var(--app-surface); font-size: 11px; cursor: pointer; }
 
 @media (max-width: 960px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
