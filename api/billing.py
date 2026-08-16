@@ -14,8 +14,8 @@ router = APIRouter()
 
 
 @router.get("/summary", summary="账单汇总", response_model=ResponseSchema[BillingSummaryOut])
-async def get_billing_summary():
-    return ResponseSchema(data=await billing_controller.summary())
+async def get_billing_summary(novel_id: int | None = None):
+    return ResponseSchema(data=await billing_controller.summary(novel_id))
 
 
 @router.get(

@@ -117,7 +117,7 @@ export const api = {
   deactivateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/deactivate`, { method: 'POST' }),
   deleteConfig: (id: number) => request<SingleResponse<null>>(`/config/${id}`, { method: 'DELETE' }),
   task: (id: string) => request<SingleResponse<AiTask>>(`/task/${id}`),
-  billingSummary: () => request<SingleResponse<BillingSummary>>('/billing/summary'),
+  billingSummary: (novelId?: number) => request<SingleResponse<BillingSummary>>(`/billing/summary${qs({ novel_id: novelId })}`),
   billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
   billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),

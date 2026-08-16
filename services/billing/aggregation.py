@@ -20,8 +20,11 @@ def _money(value: Decimal) -> float:
     return round(float(value), 6)
 
 
-async def summary() -> dict:
-    rows = await ModelUsageRecord.all().values(
+async def summary(novel_id: int | None = None) -> dict:
+    query = ModelUsageRecord.all()
+    if novel_id is not None:
+        query = query.filter(novel_id=novel_id)
+    rows = await query.values(
         "task_type", "billing_type", "model", "model_name", "cost", "created_at"
     )
     total = sum((_dec(row["cost"]) for row in rows), Decimal("0"))

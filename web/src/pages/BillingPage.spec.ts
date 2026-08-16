@@ -27,11 +27,13 @@ describe('BillingPage', () => {
       data: { items: [], pagination: { total: 0, page: 1, page_size: 20, pages: 0 } },
     })
 
-    const wrapper = mount(BillingPage, { global: { stubs: { RouterLink: true } } })
+    const wrapper = mount(BillingPage, {
+      global: { stubs: { RouterLink: true, AppSelect: { template: '<div class="app-select-stub"><slot /></div>' } } },
+    })
     await flushPromises()
 
     expect(wrapper.text()).toContain('总成本')
     expect(wrapper.text()).toContain('项目A')
-    expect(wrapper.text()).toContain('3.0035')
+    expect(wrapper.text()).toContain('¥3.00')
   })
 })

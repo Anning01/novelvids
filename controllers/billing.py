@@ -4,8 +4,8 @@ from services.billing import aggregation
 
 
 class BillingController:
-    async def summary(self) -> dict:
-        return await aggregation.summary()
+    async def summary(self, novel_id: int | None = None) -> dict:
+        return await aggregation.summary(novel_id)
 
     async def projects(self, page: int, page_size: int) -> dict:
         return await aggregation.project_costs(page, page_size)
