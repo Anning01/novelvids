@@ -5,7 +5,9 @@ import pytest
 from pydantic import BaseModel
 
 from services.llm.json_output import (
+    JsonCompletionError,
     JsonCompletionTruncatedError,
+    completion_usage,
     create_json_completion,
 )
 
@@ -75,3 +77,34 @@ async def test_truncated_completion_raises_a_precise_retryable_error():
             messages=[{"role": "user", "content": "Q A"}],
             response_model=ExamAnswer,
         )
+
+
+def test_completion_usage_reads_openai_usage():
+    completion = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=12, completion_tokens=34, total_tokens=46)
+    )
+    assert completion_usage(completion) == {
+        "prompt_tokens": 12,
+        "completion_tokens": 34,
+        "total_tokens": 46,
+    }
+
+
+def test_completion_usage_missing_usage_is_empty():
+    assert completion_usage(SimpleNamespace()) == {}
+
+
+@pytest.mark.asyncio
+async def test_parse_failure_carries_usage():
+    client, _ = fake_client("not json at all", finish_reason="stop")
+    original = client.chat.completions.create.return_value
+    original.usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+
+    with pytest.raises(JsonCompletionError) as captured:
+        await create_json_completion(
+            client,
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            response_model=ExamAnswer,
+        )
+    assert captured.value.usage["prompt_tokens"] == 10

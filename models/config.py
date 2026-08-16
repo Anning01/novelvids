@@ -64,6 +64,10 @@ class AiModelConfig(AbstractBaseModel):
         null=True,
         description="四层业务消息允许的最大总字符数；留空表示不预检",
     )
+    pricing = fields.JSONField(
+        null=True,
+        description="计费费用模块，按任务类型分 text/image/video 三种结构",
+    )
 
     class Meta:
         table = "ai_model_configs"

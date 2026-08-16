@@ -51,7 +51,7 @@ export interface AiTask {
 export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'gpt_image_2'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
-export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; capabilities: ImageGenerationCapabilities }
+export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5'
 export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
 export interface VideoInputImageReference {
@@ -102,8 +102,20 @@ export interface VideoGenerationCapabilities {
   default_output_format: string
   default_generate_audio: boolean
 }
-export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; capabilities: VideoGenerationCapabilities }
-export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; max_context_characters?: number | null; created_at: string; updated_at: string }
+export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
+export interface ModelPricing {
+  type: 'text' | 'image' | 'video'
+  currency: string
+  input_price_per_1m?: number
+  output_price_per_1m?: number
+  prices?: Record<string, number>
+  input_image?: { first_free: number; price_per_image: number }
+  video_reference_prices?: Record<string, number>
+  discount?: number
+  discount_description?: string
+}
+export interface GenerationCapabilities { image: Record<string, string[]>; video: Record<string, string[]> }
+export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; max_context_characters?: number | null; pricing?: ModelPricing | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; is_active: boolean; created_at: string; updated_at: string }
 export interface DigitalHuman { id: number; country: string; age: number; gender: string; occupation: string; asset_id: string; image_url: string; is_active: boolean; created_at: string; updated_at: string }
@@ -121,3 +133,39 @@ export interface AllEnums {
 }
 export interface PaginationResponse<T> { code: number; message: string; data: { items: T[]; pagination: { total: number; page: number; page_size: number; pages: number } } }
 export interface SingleResponse<T> { code: number; message: string; data: T }
+export interface BillingRecord {
+  id: number
+  novel_id: number
+  task_type: number
+  billing_type: 'text' | 'image' | 'video'
+  ai_task_id?: string | null
+  video_id?: number | null
+  model_config_id?: number | null
+  model_name?: string | null
+  model: string
+  model_type?: string | null
+  pricing_snapshot?: Record<string, unknown> | null
+  usage: Record<string, unknown>
+  cost: number
+  currency: string
+  status: number
+  duration_seconds?: number | null
+  created_at: string
+  updated_at: string
+}
+export interface BillingSummary {
+  total_cost: number
+  total_records: number
+  by_billing_type: Array<{ billing_type: string; cost: number }>
+  by_task_type: Array<{ task_type: number; cost: number }>
+  by_model: Array<{ model: string; cost: number }>
+  daily_trend: Array<{ date: string; cost: number }>
+}
+export interface BillingProject { novel_id: number; novel_name: string; total_cost: number; record_count: number }
+export interface BillingProjectDetail {
+  novel_id: number
+  novel_name: string
+  total_cost: number
+  record_count: number
+  by_task_type: Array<{ task_type: number; cost: number }>
+}

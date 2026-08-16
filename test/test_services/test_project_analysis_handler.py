@@ -159,3 +159,52 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
     assert request["resolution"] == "1248x1872"
     assert request["aspect_ratio"] == "2:3"
     assert request["output_format"] == "png"
+
+
+class FakeLlmClientWithUsage(FakeLlmClient):
+    def __init__(self, analysis: BookAnalysis):
+        super().__init__(analysis)
+        self.create.return_value.usage = SimpleNamespace(
+            prompt_tokens=200, completion_tokens=80, total_tokens=280
+        )
+
+
+@pytest.mark.asyncio
+async def test_project_analysis_result_carries_billing_keys():
+    novel = await Novel.create(name="计费分析", content="第1章 起\n林舟出发。")
+    llm = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.project_analysis.value,
+        task_types=[AiTaskTypeEnum.project_analysis.value],
+        name="llm", base_url="https://llm.example.com", api_key="k", model="llm-model",
+        pricing={"type": "text", "currency": "CNY", "input_price_per_1m": 1.0, "output_price_per_1m": 2.0},
+        is_active=True,
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="image", base_url="https://image.example.com", api_key="k", model="img-model",
+        api_protocol="volcengine_ark", image_model_type="seedream_5_pro",
+        pricing={"type": "image", "currency": "CNY", "prices": {"1K": 0.10}},
+        is_active=True,
+    )
+    analysis = BookAnalysis(
+        book_types=["冒险"], story_outline="林舟出发。",
+        key_characters=[KeyCharacter(
+            name="林舟", aliases=[], role="主角", description="青年。",
+            base_traits=STRUCTURED_PERSON_TRAITS, chapter_numbers=[1],
+        )],
+    )
+    llm_client = FakeLlmClientWithUsage(analysis)
+    generated_image = SimpleNamespace(url="https://example.com/cover.png", b64_json=None)
+
+    with (
+        patch("services.project_analysis.handler.AsyncOpenAI", return_value=llm_client),
+        patch("services.project_analysis.handler.generate_images", new=AsyncMock(return_value=[generated_image])),
+        patch("services.project_analysis.handler._save_cover", new=AsyncMock(return_value="/media/covers/c.png")),
+    ):
+        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id})
+
+    assert result["token_usage"]["prompt_tokens"] == 200
+    assert result["llm_config_id"] == llm.id
+    assert result["llm_model"] == "llm-model"
+    assert result["image_usage"] == {"image_count": 1, "clarity": "1.5K"}
+    assert result["image_config_id"] is not None

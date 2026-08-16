@@ -11,7 +11,61 @@ from services.video.capabilities import (
     validate_protocol as validate_video_protocol,
 )
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum
+from utils.enums import AiTaskTypeEnum, ImageModelTypeEnum, VideoGenerationModelTypeEnum
+
+
+def _validate_text_pricing(pricing: dict) -> None:
+    if pricing.get("type") != "text":
+        raise HTTPException(status_code=400, detail="文本模型的费用配置 type 必须为 text")
+    for key in ("input_price_per_1m", "output_price_per_1m"):
+        value = pricing.get(key)
+        if value is None or not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(status_code=400, detail=f"文本费用缺少合法的 {key}")
+
+
+def _validate_image_pricing(pricing: dict, model_type) -> None:
+    if pricing.get("type") != "image":
+        raise HTTPException(status_code=400, detail="生图模型的费用配置 type 必须为 image")
+    prices = pricing.get("prices")
+    if not isinstance(prices, dict):
+        raise HTTPException(status_code=400, detail="生图费用需要 prices 档位对象")
+    allowed = set(image_capabilities_for(model_type).clarities)
+    for tier, value in prices.items():
+        if tier not in allowed:
+            raise HTTPException(status_code=400, detail=f"生图费用包含不支持的清晰度档位：{tier}")
+        if not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(status_code=400, detail=f"清晰度档位 {tier} 的费用必须为非负数字")
+    input_fee = pricing.get("input_image")
+    if input_fee is not None:
+        if not isinstance(input_fee, dict):
+            raise HTTPException(status_code=400, detail="生图输入图费用必须是对象")
+        if not isinstance(input_fee.get("first_free"), (int, float)) or input_fee["first_free"] < 0:
+            raise HTTPException(status_code=400, detail="输入图免费张数 first_free 必须为非负数字")
+        if not isinstance(input_fee.get("price_per_image"), (int, float)) or input_fee["price_per_image"] < 0:
+            raise HTTPException(status_code=400, detail="输入图超出单价 price_per_image 必须为非负数字")
+
+
+def _validate_video_pricing(pricing: dict, model_type) -> None:
+    if pricing.get("type") != "video":
+        raise HTTPException(status_code=400, detail="视频模型的费用配置 type 必须为 video")
+    prices = pricing.get("prices")
+    if not isinstance(prices, dict):
+        raise HTTPException(status_code=400, detail="视频费用需要 prices 档位对象")
+    allowed = set(video_capabilities_for(model_type).resolutions)
+    for tier, value in prices.items():
+        if tier not in allowed:
+            raise HTTPException(status_code=400, detail=f"视频费用包含不支持的分辨率档位：{tier}")
+        if not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(status_code=400, detail=f"分辨率档位 {tier} 的费用必须为非负数字")
+    ref_prices = pricing.get("video_reference_prices")
+    if ref_prices is not None:
+        if not isinstance(ref_prices, dict):
+            raise HTTPException(status_code=400, detail="视频参考价格必须是档位对象")
+        for tier, value in ref_prices.items():
+            if tier not in allowed:
+                raise HTTPException(status_code=400, detail=f"视频参考价格包含不支持的分辨率档位：{tier}")
+            if not isinstance(value, (int, float)) or value < 0:
+                raise HTTPException(status_code=400, detail=f"视频参考分辨率档位 {tier} 的费用必须为非负数字")
 
 
 class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiModelConfigUpdate]):
@@ -67,10 +121,42 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         video_capabilities_for(model_type)
         validate_video_protocol(model_type, str(protocol))
 
+    @staticmethod
+    def _validate_pricing(data: dict, instance: AiModelConfig | None = None) -> None:
+        pricing = data.get("pricing")
+        if pricing is None:
+            return
+        if not isinstance(pricing, dict):
+            raise HTTPException(status_code=400, detail="费用配置必须是对象")
+        discount = pricing.get("discount")
+        if discount is not None and (not isinstance(discount, (int, float)) or discount <= 0):
+            raise HTTPException(status_code=400, detail="折扣倍数 discount 必须为正数")
+        description = pricing.get("discount_description")
+        if description is not None and not isinstance(description, str):
+            raise HTTPException(status_code=400, detail="折扣描述 discount_description 必须是字符串")
+        task_types = data.get("task_types")
+        if task_types is None and instance is not None:
+            task_types = instance.task_types or [instance.task_type]
+        task_types = [int(value) for value in (task_types or [])]
+        if AiTaskTypeEnum.reference_image.value in task_types:
+            model_type = data.get("image_model_type") or (
+                instance.image_model_type if instance else None
+            )
+            _validate_image_pricing(pricing, model_type)
+            return
+        if AiTaskTypeEnum.video.value in task_types:
+            model_type = data.get("video_model_type") or (
+                instance.video_model_type if instance else None
+            )
+            _validate_video_pricing(pricing, model_type)
+            return
+        _validate_text_pricing(pricing)
+
     @classmethod
     def _validate_generation_payload(cls, data: dict, instance: AiModelConfig | None = None) -> None:
         cls._validate_image_payload(data, instance)
         cls._validate_video_payload(data, instance)
+        cls._validate_pricing(data, instance)
 
     @staticmethod
     async def _enforce_single_active_image_type(instance: AiModelConfig) -> None:
@@ -154,6 +240,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 "model": config.model,
                 "model_type": config.image_model_type,
                 "concurrency": config.concurrency,
+                "pricing": config.pricing,
                 "capabilities": capabilities.public_dict(),
             })
         return result
@@ -177,9 +264,22 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 "model": config.model,
                 "model_type": config.video_model_type,
                 "concurrency": config.concurrency,
+                "pricing": config.pricing,
                 "capabilities": capabilities.public_dict(),
             })
         return result
+
+    async def list_generation_capabilities(self) -> dict:
+        return {
+            "image": {
+                model_type.value: list(image_capabilities_for(model_type.value).clarities)
+                for model_type in ImageModelTypeEnum
+            },
+            "video": {
+                model_type.value: list(video_capabilities_for(model_type.value).resolutions)
+                for model_type in VideoGenerationModelTypeEnum
+            },
+        }
 
     async def deactivate(self, config_id: int) -> AiModelConfig:
         """停用指定配置，不影响同用途下的其他运行配置。"""

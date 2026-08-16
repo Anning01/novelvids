@@ -1,5 +1,6 @@
 import type { Component, ComputedRef, InjectionKey, Ref } from 'vue';
 import { inject, onScopeDispose, shallowReactive } from 'vue';
+import type { ModelPricing } from '@/types';
 
 type ReactiveValue<T> = Readonly<Ref<T> | ComputedRef<T>>;
 
@@ -20,6 +21,8 @@ export interface WorkbenchPromptAction {
   enabled: ReactiveValue<boolean>;
   busy: ReactiveValue<boolean>;
   progress?: ReactiveValue<number | null>;
+  cost?: ReactiveValue<number>;
+  costPricing?: ReactiveValue<ModelPricing | null | undefined>;
   control?: WorkbenchPromptActionControl;
   controls?: WorkbenchPromptActionControl[];
   run: () => Promise<void> | void;

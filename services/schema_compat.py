@@ -51,8 +51,29 @@ async def ensure_ai_model_config_schema() -> None:
             "ALTER TABLE ai_model_configs "
             "ADD COLUMN video_model_type VARCHAR(40);"
         )
+    if "pricing" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs ADD COLUMN pricing JSON;"
+        )
     if statements:
         await connection.execute_script("".join(statements))
+
+
+async def ensure_usage_record_schema() -> None:
+    """为已有 SQLite 数据库补齐计费流水的时长字段。"""
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        return
+
+    connection = Tortoise.get_connection("default")
+    columns = await connection.execute_query_dict("PRAGMA table_info(model_usage_records)")
+    if not columns:
+        return
+
+    existing = {str(column["name"]) for column in columns}
+    if "duration_seconds" not in existing:
+        await connection.execute_script(
+            "ALTER TABLE model_usage_records ADD COLUMN duration_seconds REAL;"
+        )
 
 
 async def ensure_novel_analysis_schema() -> None:

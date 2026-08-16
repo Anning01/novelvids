@@ -90,6 +90,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         request_params = {
             "chapter_id": chapter.id,
             "novel_id": chapter.novel_id,
+            "model_config_id": config.id,
             "base_url": config.base_url,
             "api_key": config.api_key,
             "model": config.model,

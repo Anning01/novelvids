@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, Chapter, DigitalHuman, GeneralConfig, ImageGenerationModel, Novel, PaginationResponse, Scene, SingleResponse, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, Novel, PaginationResponse, Scene, SingleResponse, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 const BASE = '/api'
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -108,6 +108,7 @@ export const api = {
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
   imageGenerationModels: () => request<SingleResponse<ImageGenerationModel[]>>('/config/image-generation/models'),
   videoGenerationModels: () => request<SingleResponse<VideoGenerationModel[]>>('/config/video-generation/models'),
+  generationCapabilities: () => request<SingleResponse<GenerationCapabilities>>('/config/generation/capabilities'),
   generalConfig: () => request<SingleResponse<GeneralConfig>>('/config/general'),
   updateGeneralConfig: (data: Pick<GeneralConfig, 'prompt_language'>) => request<SingleResponse<GeneralConfig>>('/config/general', { method: 'PUT', body: JSON.stringify(data) }),
   createConfig: (data: Partial<AiModelConfig>) => request<SingleResponse<AiModelConfig>>('/config', { method: 'POST', body: JSON.stringify(data) }),
@@ -116,6 +117,10 @@ export const api = {
   deactivateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/deactivate`, { method: 'POST' }),
   deleteConfig: (id: number) => request<SingleResponse<null>>(`/config/${id}`, { method: 'DELETE' }),
   task: (id: string) => request<SingleResponse<AiTask>>(`/task/${id}`),
+  billingSummary: (novelId?: number) => request<SingleResponse<BillingSummary>>(`/billing/summary${qs({ novel_id: novelId })}`),
+  billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
+  billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
+  billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
   async upload(file: File) {
     const data = new FormData(); data.append('files', file)
     const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data })

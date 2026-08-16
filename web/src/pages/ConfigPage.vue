@@ -23,9 +23,10 @@ import AppMultiSelect from '@/components/AppMultiSelect.vue'
 import AppIconTile from '@/components/AppIconTile.vue'
 import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
 import { api } from '@/api'
+import { defaultPricing } from '@/shared/modelPricing'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, ImageApiProtocol, ImageModelType, VideoGenerationModelType } from '@/types'
+import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
 
 type ModelCategoryId = 'llm' | 'image' | 'video'
 type SettingsSection = 'models' | 'general'
@@ -98,6 +99,18 @@ const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value =>
   label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析' }[value] ?? `任务 ${value}`),
 })))
 
+const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
+const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
+const tierPrices = ref<Record<string, number>>({})
+const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
+const videoRefPrices = ref<Record<string, number>>({})
+const discountPricing = ref({ discount: 1, description: '' })
+const pricingTierOptions = computed<string[]>(() => {
+  if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
+  if (selectedCategoryId.value === 'video') return generationCapabilities.value.video[form.value.video_model_type] || []
+  return []
+})
+
 function iconTone(categoryId: ModelCategoryId) {
   if (categoryId === 'image') return 'image' as const
   if (categoryId === 'video') return 'video' as const
@@ -134,10 +147,11 @@ function providerHost(baseUrl?: string) {
 async function load() {
   loading.value = true
   try {
-    const [configResponse, enumResponse, generalResponse] = await Promise.all([
+    const [configResponse, enumResponse, generalResponse, capabilitiesResponse] = await Promise.all([
       api.configs(),
       api.enums(),
       api.generalConfig(),
+      api.generationCapabilities(),
     ])
     configs.value = configResponse.data.items
     taskTypes.value = enumResponse.data.ai_task_type || []
@@ -145,6 +159,7 @@ async function load() {
     videoModelTypes.value = enumResponse.data.video_model_type || []
     generalConfig.value = generalResponse.data
     promptLanguage.value = generalResponse.data.prompt_language
+    generationCapabilities.value = capabilitiesResponse.data
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -174,6 +189,13 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
   form.value = { task_types: category.taskTypes.map(String), name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' }
+  textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
+  tierPrices.value = category.id === 'llm'
+    ? {}
+    : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
+  inputImagePricing.value = { first_free: 1, price_per_image: 0 }
+  videoRefPrices.value = {}
+  discountPricing.value = { discount: 1, description: '' }
   editingConfigId.value = null
   showApiKey.value = false
   showCreate.value = true
@@ -197,6 +219,18 @@ function openEdit(item: AiModelConfig) {
     supports_json_output: item.supports_json_output ?? false,
     max_context_characters: item.max_context_characters ?? '',
   }
+  textPricing.value = item.pricing?.type === 'text'
+    ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
+    : { input_price_per_1m: 0, output_price_per_1m: 0 }
+  tierPrices.value = item.pricing?.prices ? { ...item.pricing.prices } : {}
+  inputImagePricing.value = item.pricing?.input_image
+    ? { first_free: item.pricing.input_image.first_free, price_per_image: item.pricing.input_image.price_per_image }
+    : { first_free: 1, price_per_image: 0 }
+  videoRefPrices.value = item.pricing?.video_reference_prices ? { ...item.pricing.video_reference_prices } : {}
+  discountPricing.value = {
+    discount: item.pricing?.discount ?? 1,
+    description: item.pricing?.discount_description ?? '',
+  }
   showCreate.value = true
 }
 
@@ -215,6 +249,41 @@ async function saveConfig() {
   creating.value = true
   try {
     const taskTypes = form.value.task_types.map(Number)
+    const tierPriceEntries = (source: Record<string, number>) => Object.fromEntries(
+      pricingTierOptions.value.map(tier => {
+        const value = source[tier]
+        return [tier, typeof value === 'number' && !Number.isNaN(value) ? value : 0]
+      })
+    )
+    let pricing: ModelPricing
+    if (selectedCategoryId.value === 'llm') {
+      pricing = {
+        type: 'text',
+        currency: 'CNY',
+        input_price_per_1m: Number(textPricing.value.input_price_per_1m) || 0,
+        output_price_per_1m: Number(textPricing.value.output_price_per_1m) || 0,
+      }
+    } else if (selectedCategoryId.value === 'image') {
+      pricing = {
+        type: 'image',
+        currency: 'CNY',
+        prices: tierPriceEntries(tierPrices.value),
+        input_image: {
+          first_free: Number(inputImagePricing.value.first_free) || 0,
+          price_per_image: Number(inputImagePricing.value.price_per_image) || 0,
+        },
+      }
+    } else {
+      pricing = {
+        type: 'video',
+        currency: 'CNY',
+        prices: tierPriceEntries(tierPrices.value),
+        video_reference_prices: tierPriceEntries(videoRefPrices.value),
+      }
+    }
+    pricing.discount = Number(discountPricing.value.discount) || 1
+    const discountDescription = discountPricing.value.description.trim()
+    if (discountDescription) pricing.discount_description = discountDescription
     const payload = {
       ...form.value,
       api_protocol: selectedCategoryId.value === 'video' ? 'volcengine_ark' : form.value.api_protocol,
@@ -223,6 +292,7 @@ async function saveConfig() {
       max_context_characters: form.value.max_context_characters || null,
       image_model_type: selectedCategoryId.value === 'image' ? form.value.image_model_type || null : null,
       video_model_type: selectedCategoryId.value === 'video' ? form.value.video_model_type || null : null,
+      pricing,
     }
     if (editingConfigId.value !== null) {
       await api.updateConfig(editingConfigId.value, payload)
@@ -494,6 +564,56 @@ onMounted(load)
           </label>
         </div>
 
+        <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
+          <span class="pricing-title">费用设置（元 / 百万 token）</span>
+          <div class="pricing-grid">
+            <label><span>输入单价</span><input v-model.number="textPricing.input_price_per_1m" type="number" min="0" step="0.01" /></label>
+            <label><span>输出单价</span><input v-model.number="textPricing.output_price_per_1m" type="number" min="0" step="0.01" /></label>
+          </div>
+        </section>
+        <section v-else-if="selectedCategoryId === 'image' && pricingTierOptions.length" class="pricing-editor">
+          <span class="pricing-title">输出图费用（元 / 张）</span>
+          <div class="pricing-grid">
+            <label v-for="tier in pricingTierOptions" :key="tier">
+              <span>清晰度 {{ tier }}</span>
+              <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
+            </label>
+          </div>
+          <div class="pricing-sub">
+            <span class="pricing-title">输入图费用（图生图）</span>
+            <div class="pricing-grid">
+              <label><span>免费张数</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
+              <label><span>超出单价（元 / 张）</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
+            </div>
+          </div>
+        </section>
+        <section v-else-if="selectedCategoryId === 'video' && pricingTierOptions.length" class="pricing-editor">
+          <span class="pricing-title">无视频参考（元 / 百万 token）</span>
+          <div class="pricing-grid">
+            <label v-for="tier in pricingTierOptions" :key="tier">
+              <span>分辨率 {{ tier }}</span>
+              <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
+            </label>
+          </div>
+          <div class="pricing-sub">
+            <span class="pricing-title">有视频参考（元 / 百万 token）</span>
+            <div class="pricing-grid">
+              <label v-for="tier in pricingTierOptions" :key="tier">
+                <span>分辨率 {{ tier }}</span>
+                <input v-model.number="videoRefPrices[tier]" type="number" min="0" step="0.01" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="pricing-editor">
+          <span class="pricing-title">折扣设置（1=无折扣，0.9=9折，大于 1=加价倍数）</span>
+          <div class="pricing-grid">
+            <label><span>折扣倍数</span><input v-model.number="discountPricing.discount" type="number" min="0.01" step="0.01" /></label>
+            <label><span>折扣描述（可选）</span><input v-model="discountPricing.description" type="text" placeholder="例如：限时9折" /></label>
+          </div>
+        </section>
+
         <footer><AppButton variant="secondary" size="sm" type="button" @click="showCreate = false">取消</AppButton><AppButton variant="primary" size="sm" type="submit" :loading="creating">{{ creating ? '保存中…' : (isEditing ? '保存修改' : '创建配置') }}</AppButton></footer>
       </form>
     </div>
@@ -613,6 +733,13 @@ onMounted(load)
 .model-modal > footer { justify-content: flex-end; padding-top: 3px; }
 .model-modal > footer .app-button { min-height: 38px; padding: 0 14px; border-radius: 9px; cursor: pointer; font-size: 11px; }
 .model-modal > footer button:disabled { cursor: not-allowed; opacity: .55; }
+.pricing-editor { display: grid; gap: 10px; margin-top: 2px; padding: 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
+.pricing-sub { display: grid; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--app-border); }
+.pricing-title { color: var(--app-text-secondary); font-size: 10px; font-weight: 600; }
+.pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pricing-grid label { display: grid; gap: 6px; color: var(--app-text-muted); font-size: 10px; }
+.pricing-grid input { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--app-border); border-radius: 8px; outline: 0; color: var(--app-text); background: var(--app-surface); font-size: 11px; }
+.pricing-grid input:focus { border-color: var(--app-accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
 @media (max-width: 860px) {
   .model-category-grid { grid-template-columns: 1fr; }
   .model-category-card { min-height: 130px; }

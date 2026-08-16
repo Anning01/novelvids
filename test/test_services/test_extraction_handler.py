@@ -215,7 +215,7 @@ async def test_handler_orchestrates_injected_collaborators_once(caplog):
     ):
         summary = await case.handler.execute(case.request_params)
 
-    assert summary == case.summary
+    assert summary == {**case.summary, "token_usage": {}}
     case.context_loader.load.assert_awaited_once_with(
         novel_id=case.request_params["novel_id"],
         chapter_id=case.request_params["chapter_id"],
@@ -379,7 +379,7 @@ async def test_handler_empty_asset_registry_still_calls_model_once():
 
     summary = await case.handler.execute(case.request_params)
 
-    assert summary == case.summary
+    assert summary == {**case.summary, "token_usage": {}}
     case.budget_policy.validate.assert_called_once_with(
         case.messages,
         asset_count=0,
@@ -524,7 +524,7 @@ async def test_Handler只委托资产保存阶段():
             "model": "mock-model",
         })
 
-    assert summary == expected_summary
+    assert summary == {**expected_summary, "token_usage": {}}
     service_type.return_value.save_result.assert_awaited_once_with(
         novel_id=novel.id,
         chapter_number=chapter.number,
@@ -866,3 +866,15 @@ async def test_不同小说的资产互相隔离():
     assert len(p1) == 1
     assert len(p2) == 1
     assert p1[0].id != p2[0].id
+
+
+@pytest.mark.asyncio
+async def test_handler_surfaces_token_usage_from_extractor():
+    case = _orchestration_case()
+    case.extractor.last_usage = {"prompt_tokens": 120, "completion_tokens": 40}
+
+    with patch("services.extraction.handler.AsyncOpenAI", return_value=SimpleNamespace()):
+        summary = await case.handler.execute(case.request_params)
+
+    assert summary["token_usage"] == {"prompt_tokens": 120, "completion_tokens": 40}
+    assert summary["persons"] == case.summary["persons"]

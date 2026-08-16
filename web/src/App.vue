@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Clapperboard, FolderKanban, Images, Settings, Sparkles } from 'lucide-vue-next'
+import { BarChart3, Clapperboard, FolderKanban, Images, Settings, Sparkles } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { notice } from '@/shared/notice'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
+import AppNotice from '@/components/AppNotice.vue'
 import AppThemeToggle from '@/components/AppThemeToggle.vue'
 import { useAppThemeController } from '@/shared/appTheme'
 import { isWorkflowThemeSurface } from '@/shared/themeScope'
@@ -23,6 +24,7 @@ const creationItems = [
 const personalItems = [
   { path: '/projects', label: '项目', icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
   { path: '/assets', label: '资产', icon: Images, active: () => route.path.startsWith('/assets') },
+  { path: '/billing', label: '成本', icon: BarChart3, active: () => route.path.startsWith('/billing') },
   { path: '/settings', label: '设置', icon: Settings, active: () => route.path.startsWith('/settings') },
 ]
 </script>
@@ -63,6 +65,6 @@ const personalItems = [
     <section class="app-content" :class="{ 'is-fullscreen': isFullscreen }"><RouterView /></section>
     <AppThemeToggle v-if="isFullscreen && !isWorkflowSurface" />
     <AppConfirmDialog :dark="confirmDialogDark" />
-    <div class="notice-stack" aria-live="polite"><div v-for="item in notice.state.notices" :key="item.id" class="notice" :class="`is-${item.tone}`">{{ item.message }}</div></div>
+    <TransitionGroup name="notice" tag="div" class="notice-stack" aria-live="polite"><AppNotice v-for="item in notice.state.notices" :key="item.id" :item="item" /></TransitionGroup>
   </div>
 </template>

@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from models.ai_task import AiTask
+from services.billing.recorder import record_ai_task_usage
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ class AiTaskExecutor:
             await self._fail(task, f"任务超时（{timeout}s）")
         except Exception as e:
             logger.exception("AI task #%s failed", task.id)
-            await self._fail(task, str(e))
+            await self._fail(task, str(e), error=e)
 
     async def submit_and_run(
         self, task_type: AiTaskTypeEnum, request_params: dict
@@ -150,14 +151,16 @@ class AiTaskExecutor:
         await task.save(
             update_fields=["status", "response_data", "finished_at", "updated_at"]
         )
+        await record_ai_task_usage(task, result=result, error=None)
 
-    async def _fail(self, task: AiTask, error_message: str):
+    async def _fail(self, task: AiTask, error_message: str, error: Exception | None = None):
         task.status = TaskStatusEnum.failed.value
         task.error_message = error_message
         task.finished_at = datetime.now(timezone.utc)
         await task.save(
             update_fields=["status", "error_message", "finished_at", "updated_at"]
         )
+        await record_ai_task_usage(task, result=None, error=error)
 
 
 # 全局单例，在应用启动时注册各 handler

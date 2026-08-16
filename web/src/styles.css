@@ -173,10 +173,10 @@ a { color: inherit; text-decoration: none; }
 .page .modal label { color: #626879; }
 .page .modal input, .page .modal textarea, .page .modal select { border-color: #dfe2e9; color: #303442; background: #fafbfc; }
 .page .modal input:focus, .page .modal textarea:focus, .page .modal select:focus { border-color: #7a7bf8; background: #fff; }
-.notice-stack { position: fixed; top: 16px; right: 16px; z-index: 2000; display: grid; gap: 7px; }
-.notice { min-width: 250px; padding: 11px 13px; border: 1px solid #4a433c; border-radius: 10px; color: #ddd6cf; background: #211e1b; box-shadow: 0 14px 34px rgb(0 0 0 / 36%); font-size: 11px; }
-.notice.is-success { border-color: rgb(112 199 162 / 50%); }
-.notice.is-error { border-color: rgb(240 141 126 / 55%); }
+.notice-stack { position: fixed; top: 16px; right: 16px; z-index: 2000; display: grid; gap: 8px; }
+.notice-enter-active { transition: opacity .22s ease, transform .22s cubic-bezier(.2,.72,.2,1); }
+.notice-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.notice-enter-from, .notice-leave-to { opacity: 0; transform: translateX(18px); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

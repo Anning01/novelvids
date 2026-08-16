@@ -66,6 +66,15 @@ async def get_video_generation_models():
     return ResponseSchema(data=await ai_model_config_controller.list_active_video_models())
 
 
+@router.get(
+    "/generation/capabilities",
+    summary="获取各模型类型的清晰度/分辨率档位",
+    response_model=ResponseSchema,
+)
+async def get_generation_capabilities():
+    return ResponseSchema(data=await ai_model_config_controller.list_generation_capabilities())
+
+
 @router.post("", summary="创建模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def create_config(config: AiModelConfigCreate):
     instance = await ai_model_config_controller.create(config)
