@@ -37,6 +37,8 @@ class BillingRecorder:
         duration_seconds=None,
         ai_task_id=None,
         video_id=None,
+        team_id=None,
+        user_id=None,
     ) -> ModelUsageRecord | None:
         try:
             return await ModelUsageRecord.create(
@@ -55,6 +57,8 @@ class BillingRecorder:
                 currency="CNY",
                 status=status,
                 duration_seconds=duration_seconds,
+                team_id=team_id,
+                user_id=user_id,
             )
         except Exception:
             logger.exception(
@@ -75,6 +79,8 @@ class BillingRecorder:
         status: int = TaskStatusEnum.completed.value,
         duration_seconds=None,
         ai_task_id=None,
+        team_id=None,
+        user_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
         usage = normalize_token_usage(token_usage)
@@ -90,6 +96,8 @@ class BillingRecorder:
             status=status,
             duration_seconds=duration_seconds,
             ai_task_id=ai_task_id,
+            team_id=team_id,
+            user_id=user_id,
         )
 
     async def record_image(
@@ -105,6 +113,8 @@ class BillingRecorder:
         status: int = TaskStatusEnum.completed.value,
         duration_seconds=None,
         ai_task_id=None,
+        team_id=None,
+        user_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
         pricing = config.pricing if config else None
@@ -127,6 +137,8 @@ class BillingRecorder:
             status=status,
             duration_seconds=duration_seconds,
             ai_task_id=ai_task_id,
+            team_id=team_id,
+            user_id=user_id,
         )
 
     async def record_video(
@@ -142,6 +154,8 @@ class BillingRecorder:
         status: int = TaskStatusEnum.completed.value,
         duration_seconds=None,
         video_id=None,
+        team_id=None,
+        user_id=None,
     ) -> ModelUsageRecord | None:
         config = await self._config(model_config_id)
         usage = {
@@ -168,6 +182,8 @@ class BillingRecorder:
             status=status,
             duration_seconds=duration_seconds,
             video_id=video_id,
+            team_id=team_id,
+            user_id=user_id,
         )
 
 
@@ -181,7 +197,7 @@ def _task_duration_seconds(task) -> float | None:
 
 
 async def record_ai_task_usage(task, result: dict | None, error: Exception | None = None) -> None:
-    """AiTaskExecutor 完成/失败后的统一计费落点。"""
+    """AiTaskExecutor 完成/失败后的统一计费落点（含归属与余额扣减）。"""
     try:
         request_params = task.request_params or {}
         novel_id = request_params.get("novel_id")
@@ -190,9 +206,11 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
         task_type = task.task_type
         status = task.status
         duration = _task_duration_seconds(task)
+        team_id = request_params.get("team_id")
+        user_id = request_params.get("user_id")
         if task_type == AiTaskTypeEnum.reference_image.value:
             res = result or {}
-            await billing_recorder.record_image(
+            record = await billing_recorder.record_image(
                 novel_id=novel_id,
                 task_type=task_type,
                 model_config_id=request_params.get("model_config_id"),
@@ -203,12 +221,15 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 status=status,
                 duration_seconds=duration,
                 ai_task_id=task.id,
+                team_id=team_id,
+                user_id=user_id,
             )
+            await _consume_team_balance(record, team_id, user_id=user_id)
             return
         if task_type == AiTaskTypeEnum.project_analysis.value:
             res = result or {}
             token_usage = res.get("token_usage") or getattr(error, "usage", None) or {}
-            await billing_recorder.record_text(
+            record = await billing_recorder.record_text(
                 novel_id=novel_id,
                 task_type=task_type,
                 model_config_id=res.get("llm_config_id"),
@@ -217,10 +238,13 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 status=status,
                 duration_seconds=duration,
                 ai_task_id=task.id,
+                team_id=team_id,
+                user_id=user_id,
             )
+            await _consume_team_balance(record, team_id, user_id=user_id)
             image_usage = res.get("image_usage") or {}
             if image_usage:
-                await billing_recorder.record_image(
+                record = await billing_recorder.record_image(
                     novel_id=novel_id,
                     task_type=task_type,
                     model_config_id=res.get("image_config_id"),
@@ -230,10 +254,13 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                     status=status,
                     duration_seconds=duration,
                     ai_task_id=task.id,
+                    team_id=team_id,
+                    user_id=user_id,
                 )
+                await _consume_team_balance(record, team_id, user_id=user_id)
             return
         token_usage = (result or {}).get("token_usage") or getattr(error, "usage", None) or {}
-        await billing_recorder.record_text(
+        record = await billing_recorder.record_text(
             novel_id=novel_id,
             task_type=task_type,
             model_config_id=request_params.get("model_config_id"),
@@ -242,6 +269,19 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             status=status,
             duration_seconds=duration,
             ai_task_id=task.id,
+            team_id=team_id,
+            user_id=user_id,
         )
+        await _consume_team_balance(record, team_id, user_id=user_id)
     except Exception:
         logger.exception("billing record failed for task %s", getattr(task, "id", None))
+
+
+async def _consume_team_balance(record, team_id, user_id=None) -> None:
+    """按计费流水金额扣减团队余额并累计成员消耗；失败只记日志（旁路副作用）。"""
+    if record is None or team_id is None:
+        return
+    from services.balance import accumulate_member_cost, consume
+
+    await consume(team_id, record.cost, usage_record_id=record.id)
+    await accumulate_member_cost(team_id, user_id, record.cost)

@@ -20,10 +20,18 @@ def _money(value: Decimal) -> float:
     return round(float(value), 6)
 
 
-async def summary(novel_id: int | None = None) -> dict:
+async def summary(
+    novel_id: int | None = None,
+    team_id: int | None = None,
+    user_id: int | None = None,
+) -> dict:
     query = ModelUsageRecord.all()
     if novel_id is not None:
         query = query.filter(novel_id=novel_id)
+    if team_id is not None:
+        query = query.filter(team_id=team_id)
+    if user_id is not None:
+        query = query.filter(user_id=user_id)
     rows = await query.values(
         "task_type", "billing_type", "model", "model_name", "cost", "created_at"
     )
@@ -60,8 +68,18 @@ async def summary(novel_id: int | None = None) -> dict:
     }
 
 
-async def project_costs(page: int, page_size: int) -> dict:
-    rows = await ModelUsageRecord.all().values("novel_id", "cost")
+async def project_costs(
+    page: int,
+    page_size: int,
+    team_id: int | None = None,
+    user_id: int | None = None,
+) -> dict:
+    query = ModelUsageRecord.all()
+    if team_id is not None:
+        query = query.filter(team_id=team_id)
+    if user_id is not None:
+        query = query.filter(user_id=user_id)
+    rows = await query.values("novel_id", "cost")
     agg: dict[int, dict] = defaultdict(
         lambda: {"total_cost": Decimal("0"), "record_count": 0}
     )
@@ -95,9 +113,18 @@ async def project_costs(page: int, page_size: int) -> dict:
     }
 
 
-async def project_detail(novel_id: int) -> dict:
+async def project_detail(
+    novel_id: int,
+    team_id: int | None = None,
+    user_id: int | None = None,
+) -> dict:
     novel = await Novel.get_or_none(id=novel_id)
-    rows = await ModelUsageRecord.filter(novel_id=novel_id).values("task_type", "cost")
+    query = ModelUsageRecord.filter(novel_id=novel_id)
+    if team_id is not None:
+        query = query.filter(team_id=team_id)
+    if user_id is not None:
+        query = query.filter(user_id=user_id)
+    rows = await query.values("task_type", "cost")
     total = sum((_dec(row["cost"]) for row in rows), Decimal("0"))
     by_task: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
     for row in rows:
@@ -114,8 +141,16 @@ async def project_detail(novel_id: int) -> dict:
     }
 
 
-async def list_records(params) -> dict:
+async def list_records(
+    params,
+    team_id: int | None = None,
+    user_id: int | None = None,
+) -> dict:
     query = ModelUsageRecord.all()
+    if team_id is not None:
+        query = query.filter(team_id=team_id)
+    if user_id is not None:
+        query = query.filter(user_id=user_id)
     query = await QueryBuilder.apply_filters(query, ModelUsageRecord, params.filters or {})
     query = query.order_by("-id")
     total = await query.count()

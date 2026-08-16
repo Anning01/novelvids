@@ -84,7 +84,13 @@ class AiTaskExecutor:
         提交任务，写入数据库，返回任务记录。
 
         前端可凭 task.id 轮询查询任务状态。
+        AUTH_ENABLED 且携带 team_id 时预检团队余额（欠费禁新任务）。
         """
+        from services.balance import ensure_solvent
+
+        await ensure_solvent(
+            request_params.get("team_id"), request_params.get("user_id")
+        )
         task = await AiTask.create(
             task_type=task_type.value,
             request_params=request_params,

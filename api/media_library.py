@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 
+from auth.deps import AuthContext, get_auth_context
 from controllers.media_library import (
     AUDIO_SEARCH_FIELDS,
     DIGITAL_HUMAN_SEARCH_FIELDS,
@@ -20,7 +21,10 @@ router = APIRouter()
     summary="获取启用的参考音频",
     response_model=ResponseSchema[PaginationResponse[AudioReferenceOut]],
 )
-async def list_audio_references(params: QueryParams = Depends(get_list_params)):
+async def list_audio_references(
+    params: QueryParams = Depends(get_list_params),
+    _: AuthContext = Depends(get_auth_context),
+):
     data = await audio_reference_controller.list(
         params,
         AudioReferenceOut,
@@ -35,7 +39,10 @@ async def list_audio_references(params: QueryParams = Depends(get_list_params)):
     summary="获取启用的纯数字人",
     response_model=ResponseSchema[PaginationResponse[DigitalHumanOut]],
 )
-async def list_digital_humans(params: QueryParams = Depends(get_list_params)):
+async def list_digital_humans(
+    params: QueryParams = Depends(get_list_params),
+    _: AuthContext = Depends(get_auth_context),
+):
     data = await digital_human_controller.list(
         params,
         DigitalHumanOut,

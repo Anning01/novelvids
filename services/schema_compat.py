@@ -102,3 +102,142 @@ async def ensure_novel_analysis_schema() -> None:
     ]
     if statements:
         await connection.execute_script("".join(statements))
+
+
+async def ensure_team_schema() -> None:
+    """AUTH_ENABLED=true 时补齐团队字段并回填存量数据。
+
+    - novels 增加 team_id / created_by
+    - model_usage_records 增加 team_id / user_id
+    - 尚无团队时创建「默认团队」，把存量小说与计费流水挂入
+    """
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        return
+
+    connection = Tortoise.get_connection("default")
+
+    novel_columns = await connection.execute_query_dict("PRAGMA table_info(novels)")
+    if novel_columns:
+        existing = {str(column["name"]) for column in novel_columns}
+        statements = []
+        if "team_id" not in existing:
+            statements.append("ALTER TABLE novels ADD COLUMN team_id INT;")
+        if "created_by" not in existing:
+            statements.append("ALTER TABLE novels ADD COLUMN created_by INT;")
+        if statements:
+            await connection.execute_script("".join(statements))
+
+    usage_columns = await connection.execute_query_dict(
+        "PRAGMA table_info(model_usage_records)"
+    )
+    if usage_columns:
+        existing = {str(column["name"]) for column in usage_columns}
+        statements = []
+        if "team_id" not in existing:
+            statements.append("ALTER TABLE model_usage_records ADD COLUMN team_id INT;")
+        if "user_id" not in existing:
+            statements.append("ALTER TABLE model_usage_records ADD COLUMN user_id INT;")
+        if statements:
+            await connection.execute_script("".join(statements))
+
+    await _backfill_default_team(connection)
+    await _ensure_model_config_scope_schema(connection)
+    await _ensure_team_member_schema(connection)
+
+
+async def _ensure_team_member_schema(connection) -> None:
+    """团队/成员表补充第二阶段字段并回填成员累计消耗。"""
+    team_columns = await connection.execute_query_dict("PRAGMA table_info(teams)")
+    if team_columns:
+        existing = {str(column["name"]) for column in team_columns}
+        if "member_limit" not in existing:
+            await connection.execute_script(
+                "ALTER TABLE teams ADD COLUMN member_limit INT;"
+            )
+        if "owner_user_id" not in existing:
+            await connection.execute_script(
+                "ALTER TABLE teams ADD COLUMN owner_user_id INT;"
+            )
+
+    # 回填团队所有人：取该团队最早的一位管理员
+    await connection.execute_script(
+        "UPDATE teams SET owner_user_id = COALESCE(owner_user_id, ("
+        "  SELECT user_id FROM team_members "
+        "  WHERE team_members.team_id = teams.id AND team_members.role = 'admin' "
+        "  ORDER BY team_members.id LIMIT 1"
+        ")) WHERE owner_user_id IS NULL AND EXISTS ("
+        "  SELECT 1 FROM team_members WHERE team_members.team_id = teams.id"
+        ");"
+    )
+
+    member_columns = await connection.execute_query_dict(
+        "PRAGMA table_info(team_members)"
+    )
+    if member_columns:
+        existing = {str(column["name"]) for column in member_columns}
+        statements = []
+        if "status" not in existing:
+            statements.append(
+                "ALTER TABLE team_members ADD COLUMN status INT NOT NULL DEFAULT 1;"
+            )
+        if "total_cost" not in existing:
+            statements.append(
+                "ALTER TABLE team_members ADD COLUMN total_cost DECIMAL(18,6) "
+                "NOT NULL DEFAULT 0;"
+            )
+        if "cost_limit" not in existing:
+            statements.append(
+                "ALTER TABLE team_members ADD COLUMN cost_limit DECIMAL(18,6);"
+            )
+        if statements:
+            await connection.execute_script("".join(statements))
+
+    # 回填成员累计消耗：仅对可追溯到成员的历史计费流水生效
+    await connection.execute_script(
+        "UPDATE team_members SET total_cost = COALESCE(("
+        "  SELECT SUM(cost) FROM model_usage_records "
+        "  WHERE model_usage_records.team_id = team_members.team_id "
+        "    AND model_usage_records.user_id = team_members.user_id"
+        "), 0) WHERE total_cost = 0;"
+    )
+
+
+async def _ensure_model_config_scope_schema(connection) -> None:
+    """为已有 SQLite 数据库的模型配置表补齐官方/团队归属字段。"""
+    columns = await connection.execute_query_dict(
+        "PRAGMA table_info(ai_model_configs)"
+    )
+    if not columns:
+        return
+    existing = {str(column["name"]) for column in columns}
+    statements = []
+    if "scope" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs ADD COLUMN scope VARCHAR(16) "
+            "NOT NULL DEFAULT 'official';"
+        )
+    if "team_id" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs ADD COLUMN team_id INT;"
+        )
+    if statements:
+        await connection.execute_script("".join(statements))
+
+
+async def _backfill_default_team(connection) -> None:
+    """尚无团队且存在无归属小说时，创建默认团队并回填 team_id。"""
+    from auth.models import Team
+    from models.novel import Novel
+
+    orphan_novels = await Novel.filter(team_id=None).count()
+    if orphan_novels == 0:
+        return
+    if not await Team.exists():
+        await Team.create(name="默认团队")
+    default_team = await Team.first()
+    await Novel.filter(team_id=None).update(team_id=default_team.id)
+    await connection.execute_script(
+        "UPDATE model_usage_records SET team_id = "
+        "(SELECT team_id FROM novels WHERE novels.id = model_usage_records.novel_id) "
+        "WHERE team_id IS NULL AND novel_id IN (SELECT id FROM novels);"
+    )

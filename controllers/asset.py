@@ -536,7 +536,13 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         ])
         return asset
 
-    async def reference(self, asset_id: int, variant_id: int | None = None) -> AiTask:
+    async def reference(
+        self,
+        asset_id: int,
+        variant_id: int | None = None,
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> AiTask:
         """提交参考图生成任务。"""
         asset = await self.get(asset_id)
         variant = None
@@ -557,6 +563,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.reference_image.value,
             int(requested_config_id) if requested_config_id else None,
+            team_id=team_id,
         )
         workbench = effective_metadata.get("workbench")
         if not isinstance(workbench, dict):
@@ -623,6 +630,10 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "quality": selection.provider_quality,
             "generation_count": selection.generation_count,
         }
+        if team_id is not None:
+            request_params["team_id"] = team_id
+        if user_id is not None:
+            request_params["user_id"] = user_id
 
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.reference_image, request_params

@@ -21,6 +21,28 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
     def __init__(self):
         super().__init__(model=Novel)
 
+    async def create(
+        self,
+        obj_in: NovelCreate,
+        team_id: int | None = None,
+        created_by: int | None = None,
+    ) -> Novel:
+        """创建项目；AUTH_ENABLED 时由 API 层传入 team_id / created_by。"""
+        return await super().create(obj_in, team_id=team_id, created_by=created_by)
+
+    async def list(
+        self,
+        params,
+        response_model,
+        search_fields=None,
+        team_id: int | None = None,
+    ) -> dict:
+        """项目列表；team_id 非空时仅返回本团队项目（超管传 None 看全部）。"""
+        base_query = None
+        if team_id is not None:
+            base_query = Novel.filter(team_id=team_id)
+        return await super().list(params, response_model, search_fields, base_query)
+
     async def update(self, novel_id: int, obj_in: NovelUpdate) -> Novel:
         instance = await self.get(novel_id)
         return await super().update(instance, obj_in)
@@ -90,7 +112,12 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         await novel.save()
         return novel
 
-    async def analyze(self, novel_id: int) -> AiTask:
+    async def analyze(
+        self,
+        novel_id: int,
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> AiTask:
         """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
         novel = await self.get(novel_id)
         if not (novel.content or "").strip():
@@ -99,8 +126,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         await ai_model_config_controller.get_active_with_legacy_fallback(
             AiTaskTypeEnum.project_analysis.value,
             AiTaskTypeEnum.extraction.value,
+            team_id=team_id,
         )
-        await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
+        await ai_model_config_controller.get_active(
+            AiTaskTypeEnum.reference_image.value, team_id=team_id
+        )
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 
@@ -112,13 +142,18 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if task.request_params.get("novel_id") == novel_id:
                 return task
 
+        params = {
+            "novel_id": novel_id,
+            "resolution": "1K",
+            "prompt_language": prompt_language,
+        }
+        if team_id is not None:
+            params["team_id"] = team_id
+        if user_id is not None:
+            params["user_id"] = user_id
         return await ai_task_executor.submit(
             AiTaskTypeEnum.project_analysis,
-            {
-                "novel_id": novel_id,
-                "resolution": "1K",
-                "prompt_language": prompt_language,
-            },
+            params,
         )
 
     async def latest_analysis(self, novel_id: int) -> AiTask | None:

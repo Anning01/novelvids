@@ -214,8 +214,12 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         llm_config = await ai_model_config_controller.get_active_with_legacy_fallback(
             AiTaskTypeEnum.project_analysis.value,
             AiTaskTypeEnum.extraction.value,
+            team_id=request_params.get("team_id"),
         )
-        image_config = await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image.value)
+        image_config = await ai_model_config_controller.get_active(
+            AiTaskTypeEnum.reference_image.value,
+            team_id=request_params.get("team_id"),
+        )
 
         material = _build_analysis_material(novel, chapters)
         llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)

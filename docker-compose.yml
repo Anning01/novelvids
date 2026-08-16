@@ -8,6 +8,11 @@ services:
       MEDIA_PATH: /app/media
       DEBUG: "false"
       GENERATE_SCHEMAS: "true"
+      # 登录与团队功能开关：默认关闭（docker 部署即用，与无鉴权版本一致）。
+      # 线上部署改为 "true"，并配置 SUPER_ADMIN_USERNAME / SUPER_ADMIN_PASSWORD。
+      AUTH_ENABLED: "false"
+      # SUPER_ADMIN_USERNAME: "admin"
+      # SUPER_ADMIN_PASSWORD: "change-me-strong-password"
     volumes:
       - ./data:/app/data
       - ./media:/app/media
