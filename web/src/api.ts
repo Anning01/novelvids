@@ -1,6 +1,18 @@
 import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
-const BASE = '/api'
+// API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
+// 例：VITE_API_BASE=https://api.example.com npm run build
+const API_BASE = ((import.meta.env.VITE_API_BASE ?? '') as string).replace(/\/+$/, '') + '/api'
+const BASE = API_BASE
+
+/** 媒体地址解析：设置了 VITE_API_BASE 时，把后端返回的相对 /media 路径前缀为后端域名。 */
+export function mediaUrl(path: string | null | undefined): string {
+  if (!path) return ''
+  if (!path.startsWith('/media')) return path
+  const base = ((import.meta.env.VITE_API_BASE ?? '') as string).replace(/\/+$/, '')
+  if (!base) return path
+  return `${base}${path}`
+}
 export const AUTH_TOKEN_KEY = 'novelvids_token'
 export const ACTIVE_TEAM_KEY = 'novelvids_active_team'
 
