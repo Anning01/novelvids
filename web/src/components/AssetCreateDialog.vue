@@ -1235,7 +1235,7 @@ onUnmounted(() => {
           <div>
             <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
             <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : '生成图片' }}<BillingPriceTag v-if="!generationBusy" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
-            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}</AppButton>
+            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}<BillingPriceTag v-if="!isEditing && mode === 'ai' && !saving" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
           </div>
         </footer>
       </form>
