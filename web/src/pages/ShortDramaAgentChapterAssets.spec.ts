@@ -17,8 +17,10 @@ vi.mock('@/api', () => ({
   api: {
     configs: vi.fn(),
     novel: vi.fn(),
+    novelMeta: vi.fn(),
     novelAnalysis: vi.fn(),
     chapters: vi.fn(),
+    chaptersPage: vi.fn(),
     chapter: vi.fn(),
     assets: vi.fn(),
   },
@@ -40,7 +42,7 @@ beforeEach(() => {
     message: 'ok',
     data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
   })
-  vi.mocked(api.novel).mockResolvedValue({
+  vi.mocked(api.novelMeta).mockResolvedValue({
     code: 0,
     message: 'ok',
     data: {
@@ -49,7 +51,7 @@ beforeEach(() => {
       author: 'Agent 创建',
       description: 'Agent 模式 · 9:16 · 720p · 写实通用',
       total_chapters: 1,
-      content: chapter.content,
+      content_length: 0,
       created_at: '2026-08-06T00:00:00.000Z',
       updated_at: '2026-08-06T00:00:00.000Z',
     },
@@ -78,10 +80,10 @@ beforeEach(() => {
       created_at: '2026-08-06T00:00:00.000Z',
     },
   })
-  vi.mocked(api.chapters).mockResolvedValue({
+  vi.mocked(api.chaptersPage).mockResolvedValue({
     code: 0,
     message: 'ok',
-    data: { items: [chapter], pagination: { total: 1, page: 1, page_size: 100, pages: 1 } },
+    data: { items: [chapter], pagination: { total: 1, page: 1, page_size: 30, pages: 1 } },
   })
   vi.mocked(api.chapter).mockResolvedValue({ code: 0, message: 'ok', data: chapter })
   vi.mocked(api.assets).mockResolvedValue({

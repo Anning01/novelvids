@@ -890,7 +890,7 @@ async function load() {
   loading.value = true
   try {
     const [novelResponse, chapterResponse, videoModelResponse] = await Promise.all([
-      api.novel(projectId.value),
+      api.novelMeta(projectId.value),
       api.chapters(projectId.value),
       api.videoGenerationModels(),
     ])
@@ -1632,7 +1632,7 @@ onBeforeUnmount(() => {
 .storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
 .storyboard-main { min-width: 0; padding: 16px 16px 42px; }
 .storyboard-main.is-workflow-view { height: 100%; padding: 0; }
-.chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: #f7f8fb; }
+.chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
 .chapter-summary { position: relative; display: block; min-width: 0; max-width: min(840px,calc(100% - 540px)); padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
 .chapter-summary:hover { background: rgb(255 255 255 / 72%); box-shadow: inset 0 0 0 1px #eceef5; }
 .chapter-summary:focus-visible { outline: 3px solid rgb(91 92 246 / 18%); outline-offset: 1px; }
@@ -1641,8 +1641,8 @@ onBeforeUnmount(() => {
 .chapter-summary > span.is-agent { color: #6163ef; }
 .chapter-summary > small { position: absolute; top: 9px; right: 8px; color: #7379ef; font-size: 8px; font-weight: 650; opacity: 0; transform: translateX(4px); transition: opacity .16s ease,transform .16s ease; }
 .chapter-summary:hover > small,.chapter-summary:focus-visible > small { opacity: 1; transform: translateX(0); }
-.chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; }
-.chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: #898f9e; font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; color: var(--app-text, #303442); }
+.chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: var(--app-text-muted, #898f9e); font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-actions { display: flex; flex: 0 0 auto; align-self: center; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
 .chapter-model-select { width: 300px; min-width: 300px; }
 .video-model-select { max-width: min(420px, 48vw); }

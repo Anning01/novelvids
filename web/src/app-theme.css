@@ -305,6 +305,7 @@
 }
 
 /* Storyboard editor; workflow mode deliberately excluded */
+:root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) .chapter-toolbar { color: var(--app-text); background: var(--app-surface-muted); box-shadow: 0 1px 0 var(--app-border); }
 :root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) :is(.phase-nav button,.shot-rail,.shot-editor,.shot-info-panel,.prompt-panel,.preview-panel) { color: var(--app-text-secondary); background: var(--app-surface); }
 :root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) :is(.shot-editor,.shot-info-panel,.prompt-panel,.preview-panel) { box-shadow: inset 0 0 0 1px var(--app-border); }
 :root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) .shot-editor.is-active { box-shadow: inset 0 0 0 1px var(--app-border-strong); }

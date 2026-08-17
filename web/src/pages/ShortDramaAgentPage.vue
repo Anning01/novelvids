@@ -31,6 +31,7 @@ import {
   projectPatchFromDraft,
 } from '@/shared/projectAnalysisEditor'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
+import { usePagedChapters } from '@/shared/pagedChapters'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type {
   ChapterEditDraft,
@@ -92,7 +93,14 @@ const projectId = computed(() => Number(route.params.projectId))
 const activeEpisode = ref(1)
 const showingAllCharacters = ref(false)
 const analysisTask = ref<AiTask | null>(null)
-const chapters = ref<Chapter[]>([])
+const {
+  chapters,
+  total: chaptersTotal,
+  loading: chaptersLoading,
+  hasMore: chaptersHasMore,
+  loadMore: loadMoreChapters,
+  reset: resetChapters,
+} = usePagedChapters(() => projectId.value)
 const chapterDetails = ref<Record<number, Chapter>>({})
 const chapterAssets = ref<Record<number, Asset[]>>({})
 const loadingChapterId = ref<number | null>(null)
@@ -153,9 +161,9 @@ const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', 
 async function loadProject(): Promise<boolean> {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
   try {
-    const response = await api.novel(projectId.value)
-    novel.value = response.data
-    const contentLength = (response.data.content || '').trim().length
+    const response = await api.novelMeta(projectId.value)
+    novel.value = response.data as unknown as Novel
+    const contentLength = response.data.content_length || 0
     if (contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
       notice.error(`书稿约 ${contentLength.toLocaleString()} 字但只拆分出 ${response.data.total_chapters || 0} 章，已阻止进入。请重新上传并检查文件编码或章节标题。`)
       await router.replace('/create/short-drama')
@@ -181,7 +189,8 @@ async function loadProject(): Promise<boolean> {
 
 async function loadChapters() {
   try {
-    chapters.value = (await api.chapters(projectId.value)).data.items
+    resetChapters()
+    await loadMoreChapters()
     const requestedChapterId = Number(route.query.chapter)
     const requestedChapter = chapters.value.find(item => item.id === requestedChapterId)
     if (requestedChapter) {
@@ -367,11 +376,27 @@ async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
   episodeTabs.value.scrollTo({ left: Math.max(0, left), behavior: 'smooth' })
 }
 
+const episodeSentinel = ref<HTMLElement | null>(null)
+let episodeObserver: IntersectionObserver | null = null
+function observeEpisodeSentinel() {
+  episodeObserver?.disconnect()
+  if (episodeSentinel.value) {
+    episodeObserver = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) void loadMoreChapters()
+    }, { rootMargin: '300px' })
+    episodeObserver.observe(episodeSentinel.value)
+  }
+}
 onMounted(async () => {
+  observeEpisodeSentinel()
   const projectReady = await loadProject()
   if (projectReady) await loadAnalysis()
+  observeEpisodeSentinel()
 })
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  episodeObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -410,7 +435,7 @@ onBeforeUnmount(stopPolling)
           </AppBadge>
           <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" aria-label="小说昵称" maxlength="255" />
           <h1 v-else>{{ project.name }}</h1>
-          <p><FileText :size="14" />{{ analysisResult?.chapter_count || chapters.length || 0 }} 章 <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
+          <p><FileText :size="14" />{{ analysisResult?.chapter_count || chaptersTotal || 0 }} 章 <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
           <label v-if="editing && projectDraft" class="tag-editor">
             <span>项目标签</span>
             <input v-model="projectDraft.tagsText" placeholder="使用逗号分隔，例如：都市，热血，成长" />
@@ -497,11 +522,13 @@ onBeforeUnmount(stopPolling)
       <section class="analysis-section episode-section">
         <header>
           <div><span class="section-kicker">EPISODE CHAPTERS</span><h2>分集剧情</h2><p>复用项目的分章节结构，每一集对应一个章节。</p></div>
-          <span>{{ chapters.length }} 章</span>
+          <span>{{ chaptersTotal }} 章</span>
         </header>
         <div ref="episodeTabs" class="episode-tabs" role="tablist" aria-label="分集剧情" tabindex="0">
           <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only type="button" role="tab" :active="activeEpisode === chapter.number" :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</AppButton>
+          <span v-if="chaptersHasMore" class="episode-load-more">{{ chaptersLoading ? '加载中…' : '继续滚动加载' }}</span>
         </div>
+        <div ref="episodeSentinel" class="episode-sentinel" aria-hidden="true"></div>
         <article v-if="selectedEpisode" class="episode-content">
           <header>
             <span>{{ String(selectedEpisode.number).padStart(2, '0') }}</span>
@@ -620,6 +647,8 @@ onBeforeUnmount(stopPolling)
 .chapter-content-editor { display: block; width: calc(100% - 36px); min-height: 520px; margin: 0 18px 18px; padding: 18px 20px; resize: vertical; color: #515767; font: inherit; font-size: 12px; line-height: 2; white-space: pre-wrap; }
 .episode-content > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 18px; color: #8b909f; background: #f5f6f9; font-size: 9px; }
 .episode-content > footer span { display: inline-flex; align-items: center; gap: 5px; }
+.episode-sentinel { height: 2px; margin-top: 8px; }
+.episode-load-more { align-self: center; padding: 0 8px; color: var(--app-text-muted); font-size: 11px; white-space: nowrap; }
 .continue-button { position: relative; display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; margin-top: 28px; padding: 0 52px; border: 0; border-radius: 13px; color: #fff; background: #5b5cf6; box-shadow: 0 14px 30px rgb(91 92 246 / 22%); cursor: pointer; font-size: 13px; font-weight: 700; }
 .continue-button > span { display: inline-flex; align-items: center; gap: 8px; }
 .continue-button > svg { position: absolute; right: 20px; }

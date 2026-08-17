@@ -125,3 +125,21 @@ async def test_api_split_novel(client: AsyncClient):
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["total_chapters"] == 2
+
+
+@pytest.mark.asyncio
+async def test_api_novel_meta_excludes_content(client: AsyncClient):
+    """元信息接口不返回书稿正文，但给出正文字符数用于拆分校验。"""
+    created = await client.post(
+        "/api/novel",
+        json={"name": "元信息项目", "author": "x", "content": "第一章 开端" * 100},
+    )
+    novel_id = created.json()["data"]["id"]
+
+    response = await client.get(f"/api/novel/{novel_id}/meta")
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert "content" not in data
+    assert data["content_length"] == len("第一章 开端" * 100)
+    assert data["name"] == "元信息项目"
+    assert data["total_chapters"] == 0

@@ -17,7 +17,9 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api', () => ({
   api: {
     novel: vi.fn(),
+    novelMeta: vi.fn(),
     chapters: vi.fn(),
+    chaptersPage: vi.fn(),
     assets: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
@@ -41,7 +43,7 @@ const chapter = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(api.novel).mockResolvedValue({
+  vi.mocked(api.novelMeta).mockResolvedValue({
     code: 0,
     message: 'ok',
     data: {
@@ -49,6 +51,7 @@ beforeEach(() => {
       name: '厄运之手',
       author: 'Agent 创建',
       description: 'Agent 模式 · 9:16 · 720p · 写实通用',
+      content_length: 0,
       created_at: '2026-08-06T00:00:00.000Z',
       updated_at: '2026-08-06T00:00:00.000Z',
     },
@@ -57,7 +60,7 @@ beforeEach(() => {
   vi.mocked(api.chapters).mockResolvedValue({
     code: 0,
     message: 'ok',
-    data: { items: [chapter], pagination: { total: 1, page: 1, page_size: 100, pages: 1 } },
+    data: { items: [chapter], pagination: { total: 1, page: 1, page_size: 30, pages: 1 } },
   })
   vi.mocked(api.latestExtraction).mockResolvedValue({ code: 0, message: 'ok', data: null })
   vi.mocked(api.assets).mockImplementation(async (_novelId, _page, _pageSize, chapterId) => {

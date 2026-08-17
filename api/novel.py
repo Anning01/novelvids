@@ -3,7 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from auth.deps import AuthContext, get_auth_context, require_roles, require_team_access
 from controllers.novel import novel_controller
 from schemas.ai_task import AiTaskOut
-from schemas.novel import NovelBriefOut, NovelCreate, NovelUpdate, NovelPatch, NovelOut
+from schemas.novel import NovelBriefOut, NovelCreate, NovelUpdate, NovelPatch, NovelMetaOut, NovelOut
 from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
@@ -60,6 +60,16 @@ async def get_novel_list(
         params, NovelBriefOut, search_fields=['name', 'author'], team_id=ctx.team_id
     )
     return ResponseSchema(data=novels)
+
+
+@router.get(
+    "/{novel_id}/meta", summary="获取小说/剧本元信息（不含正文）", response_model=ResponseSchema[NovelMetaOut]
+)
+async def get_novel_meta(
+    novel_id: int,
+    _: AuthContext = Depends(require_team_access),
+):
+    return ResponseSchema(data=await novel_controller.meta(novel_id))
 
 
 @router.get(

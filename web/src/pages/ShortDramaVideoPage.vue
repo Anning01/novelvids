@@ -165,7 +165,7 @@ async function load() {
   loadError.value = ''
   try {
     const [projectResponse, chaptersResponse] = await Promise.all([
-      api.novel(projectId.value),
+      api.novelMeta(projectId.value),
       api.chapters(projectId.value),
     ])
     const settings = readShortDramaSettings(projectResponse.data)
