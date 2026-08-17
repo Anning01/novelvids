@@ -281,3 +281,22 @@ async def test_members_list_is_paginated(client, member_world):
         headers=_auth(member_world["tokens"]["admin"]),
     )
     assert len(page2.json()["data"]["items"]) == 8
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_set_own_limit_or_reset_own_password(client, member_world):
+    """团队管理员不可对自己执行限额与重置密码操作。"""
+    admin_id = member_world["admin"].id
+    limit = await client.put(
+        f"/api/team/members/{admin_id}/limit",
+        json={"cost_limit": "10"},
+        headers=_auth(member_world["tokens"]["admin"]),
+    )
+    assert limit.json()["code"] == 400
+
+    reset = await client.post(
+        f"/api/team/members/{admin_id}/reset-password",
+        json={"new_password": "whatever-123"},
+        headers=_auth(member_world["tokens"]["admin"]),
+    )
+    assert reset.json()["code"] == 400

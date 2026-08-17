@@ -199,7 +199,7 @@ async def set_member_limit(
 ):
     return ResponseSchema(
         data=await team_controller.set_member_limit(
-            _team_id_or_own(ctx, team_id), user_id, payload.cost_limit
+            _team_id_or_own(ctx, team_id), user_id, payload.cost_limit, _operator_id(ctx)
         )
     )
 
@@ -216,7 +216,7 @@ async def reset_member_password(
     team_id: int | None = Query(default=None, ge=1),
 ):
     await team_controller.reset_member_password(
-        _team_id_or_own(ctx, team_id), user_id, payload.new_password
+        _team_id_or_own(ctx, team_id), user_id, payload.new_password, _operator_id(ctx)
     )
     return ResponseSchema(data=None, message="密码已重置")
 

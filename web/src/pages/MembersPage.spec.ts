@@ -135,3 +135,29 @@ describe('MembersPage 翻页', () => {
     expect(wrapper.findAll('tbody tr')).toHaveLength(5)
   })
 })
+
+
+describe('MembersPage 本人行不可操作', () => {
+  it('管理员本人行禁用操作按钮并显示本人标识', async () => {
+    vi.spyOn(api, 'teamMembers').mockResolvedValue({
+      data: {
+        items: [
+          { user_id: 1, username: 'admin', nickname: '管理员', role: 'admin', status: 1, total_cost: '0.000000', cost_limit: null },
+          { user_id: 2, username: 'bob', nickname: '鲍勃', role: 'creator', status: 1, total_cost: '0.000000', cost_limit: null },
+        ],
+        pagination: { total: 2, page: 1, page_size: 20, pages: 1 },
+      },
+    } as never)
+
+    // setupStore 里 admin 用户 id=1
+    const wrapper = mountPage(setupStore())
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('本人')
+    expect(rows[0].text()).toContain('不可操作本人')
+    expect(rows[0].findAll('button')).toHaveLength(0)
+    expect(rows[1].findAll('button').length).toBeGreaterThan(0)
+  })
+})

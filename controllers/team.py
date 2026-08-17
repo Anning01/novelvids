@@ -115,8 +115,14 @@ class TeamController:
         return _member_out(membership, user.username, user.nickname)
 
     async def set_member_limit(
-        self, team_id: int, user_id: int, cost_limit: Decimal | None
+        self,
+        team_id: int,
+        user_id: int,
+        cost_limit: Decimal | None,
+        operator_user_id: int,
     ) -> dict:
+        if user_id == operator_user_id:
+            raise HTTPException(status_code=400, detail="不能设置自己的限额")
         membership = await self._get_membership(team_id, user_id)
         if cost_limit is not None and cost_limit < 0:
             raise HTTPException(status_code=422, detail="限额不能为负数")
@@ -134,8 +140,12 @@ class TeamController:
         await membership.delete()
 
     async def reset_member_password(
-        self, team_id: int, user_id: int, new_password: str
+        self, team_id: int, user_id: int, new_password: str, operator_user_id: int
     ) -> None:
+        if user_id == operator_user_id:
+            raise HTTPException(
+                status_code=400, detail="请到用户中心修改自己的密码"
+            )
         from auth.models import User
         from auth.security import hash_password
 
