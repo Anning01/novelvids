@@ -70,6 +70,12 @@ class AuthService:
                     role=item.role,
                     status=item.status,
                     total_cost=float(item.total_cost),
+                    cost_limit=(
+                        float(item.cost_limit)
+                        if item.cost_limit is not None
+                        else None
+                    ),
+                    team_balance=float(item.team.balance),
                     joined_at=item.created_at,
                 )
                 for item in memberships

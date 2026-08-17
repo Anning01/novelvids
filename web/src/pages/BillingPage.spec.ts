@@ -1,16 +1,22 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import { api } from '@/api'
 import BillingPage from './BillingPage.vue'
 
-vi.mock('@/api', () => ({
-  api: {
-    billingSummary: vi.fn(),
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>()
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      billingSummary: vi.fn(),
     billingProjects: vi.fn(),
     billingRecords: vi.fn(),
   },
-  statusLabel: vi.fn((status?: number) => (status ? String(status) : '未知')),
-}))
+    statusLabel: vi.fn((status?: number) => (status ? String(status) : '未知')),
+  }
+})
 
 describe('BillingPage', () => {
   it('渲染汇总卡片与项目成本表', async () => {
@@ -28,7 +34,10 @@ describe('BillingPage', () => {
     })
 
     const wrapper = mount(BillingPage, {
-      global: { stubs: { RouterLink: true, AppSelect: { template: '<div class="app-select-stub"><slot /></div>' } } },
+      global: {
+        plugins: [createPinia()],
+        stubs: { RouterLink: true, AppSelect: { template: '<div class="app-select-stub"><slot /></div>' } },
+      },
     })
     await flushPromises()
 

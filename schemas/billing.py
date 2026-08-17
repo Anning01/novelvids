@@ -27,6 +27,9 @@ class ModelUsageRecordOut(BaseResponse):
     currency: str
     status: int
     duration_seconds: Optional[float] = None
+    cost_source: str = "balance"
+    team_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class BillingSummaryOut(BaseModel):

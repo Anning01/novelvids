@@ -45,15 +45,15 @@ def _check_config_ownership(instance: AiModelConfig, ctx: AuthContext) -> None:
 
 
 def _check_config_read_access(instance: AiModelConfig, ctx: AuthContext) -> None:
-    """团队管理员可读官方配置与本团队配置；他团队配置 404。"""
+    """平台级配置仅超管可见；团队管理员只可读本团队自定义配置。"""
     if ctx.user is None or ctx.is_super_admin:
         return
-    if instance.team_id is not None and instance.team_id != ctx.team_id:
+    if instance.team_id != ctx.team_id:
         raise HTTPException(status_code=404, detail="配置不存在或无权操作")
 
 
 def _mask_official_key(item: AiModelConfigOut, ctx: AuthContext) -> AiModelConfigOut:
-    """官方配置的 api_key 对超管以外任何角色一律不外泄。"""
+    """平台级配置不向团队暴露（列表/详情均已隔离）；超管可看全量。保留掩码以防他处复用。"""
     if ctx.user is not None and not ctx.is_super_admin and item.scope == "official":
         item.api_key = None
     return item
@@ -132,8 +132,8 @@ async def get_config_list(
 ):
     base_query = None
     if ctx.user is not None and not ctx.is_super_admin:
-        # 团队管理员可见：本团队自定义配置 + 官方配置（Key 掩码）
-        base_query = AiModelConfig.filter(Q(team_id=ctx.team_id) | Q(team_id=None))
+        # 团队管理员仅可见本团队自定义配置；平台级配置只有超管可见
+        base_query = AiModelConfig.filter(team_id=ctx.team_id)
     result = await ai_model_config_controller.list(
         params, AiModelConfigOut, base_query=base_query
     )

@@ -24,6 +24,11 @@ class ModelUsageRecord(AbstractBaseModel):
     currency = fields.CharField(max_length=8, default="CNY", description="币种")
     status = fields.IntField(default=TaskStatusEnum.completed.value, description="任务状态")
     duration_seconds = fields.FloatField(null=True, description="请求总时长（秒）")
+    cost_source = fields.CharField(
+        max_length=16,
+        default="balance",
+        description="消耗来源：balance 平台模型扣团队余额 / team_key 团队自己的 Key",
+    )
     team_id = fields.IntField(
         null=True,
         db_index=True,

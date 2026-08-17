@@ -94,8 +94,9 @@ async def test_team_admin_creates_team_config(client, config_world):
 
 
 @pytest.mark.asyncio
-async def test_team_admin_list_sees_own_and_official_with_key_masked(client, config_world):
-    # 官方配置（超管创建，含真实 Key）
+async def test_team_admin_sees_only_own_team_configs(client, config_world):
+    """平台级配置对团队不可见：团队管理员只看到本团队自定义配置。"""
+    # 官方配置（超管创建）
     await client.post(
         "/api/config", json={**TEXT_CONFIG, "name": "official-secret"}, headers=_auth(config_world["tokens"]["boss"])
     )
@@ -106,14 +107,15 @@ async def test_team_admin_list_sees_own_and_official_with_key_masked(client, con
 
     response = await client.get("/api/config", headers=_auth(config_world["tokens"]["admin_a"]))
     items = {item["name"]: item for item in response.json()["data"]["items"]}
-    assert set(items) == {"official-secret", "team-a-secret"}
-    # 官方配置 Key 必须剥离
-    assert items["official-secret"]["api_key"] is None
-    assert items["official-secret"]["scope"] == "official"
+    assert set(items) == {"team-a-secret"}
     # 本团队 Key 可见
     assert items["team-a-secret"]["api_key"] == "sk-secret-key"
     assert items["team-a-secret"]["scope"] == "team"
-    assert items["team-a-secret"]["team_id"] == config_world["team_a"].id
+
+    # 超管可见全量（官方 + 各团队）
+    boss_list = await client.get("/api/config", headers=_auth(config_world["tokens"]["boss"]))
+    boss_names = {item["name"] for item in boss_list.json()["data"]["items"]}
+    assert boss_names == {"official-secret", "team-a-secret"}
 
 
 @pytest.mark.asyncio
@@ -135,10 +137,9 @@ async def test_team_admin_cannot_mutate_official_config(client, config_world):
         )
         assert response.json()["code"] == 404, f"{method} {path}: {response.text}"
 
-    # 官方配置详情：Key 掩码可见，但内容未被篡改
+    # 官方配置详情：团队管理员不可见（平台级配置只有超管可查看）
     detail = await client.get(f"/api/config/{config_id}", headers=_auth(config_world["tokens"]["admin_a"]))
-    assert detail.json()["code"] == 0
-    assert detail.json()["data"]["api_key"] is None
+    assert detail.json()["code"] == 404
     assert (await AiModelConfig.get(id=config_id)).name == "official-frozen"
 
 

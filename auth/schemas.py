@@ -65,6 +65,8 @@ class MembershipOut(BaseModel):
     role: str
     status: int = 1
     total_cost: float = 0.0
+    cost_limit: Decimal | float | str | None = None
+    team_balance: Decimal | float | str | None = None
     joined_at: datetime | str | None = ""
 
     @field_serializer("joined_at", when_used="json")

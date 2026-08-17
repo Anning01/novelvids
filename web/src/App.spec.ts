@@ -91,3 +91,45 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     expect(wrapper.find('.app-theme-toggle.is-sidebar').exists()).toBe(true)
   })
 })
+
+  it('左下角用户入口按角色显示限额或余额', async () => {
+    // 团队管理员 → 团队余额
+    let wrapper = mountApp(setupStore({
+      enabled: true,
+      token: 't',
+      user: { id: 1, username: 'boss', nickname: '', avatar_url: '', is_super_admin: false },
+      memberships: [{ team_id: 1, team_name: '甲队', role: 'admin', team_balance: '123.45' }],
+      activeTeamId: 1,
+    }))
+    expect(wrapper.find('.app-user-wallet').text()).toBe('余额 ¥123.45')
+
+    // 创作者有限额 → 显示限额
+    wrapper = mountApp(setupStore({
+      enabled: true,
+      token: 't',
+      user: { id: 2, username: 'c', nickname: '', avatar_url: '', is_super_admin: false },
+      memberships: [{ team_id: 1, team_name: '甲队', role: 'creator', cost_limit: '50', team_balance: '999' }],
+      activeTeamId: 1,
+    }))
+    expect(wrapper.find('.app-user-wallet').text()).toBe('限额 ¥50.00')
+
+    // 创作者不限 → 显示团队余额
+    wrapper = mountApp(setupStore({
+      enabled: true,
+      token: 't',
+      user: { id: 3, username: 'c2', nickname: '', avatar_url: '', is_super_admin: false },
+      memberships: [{ team_id: 1, team_name: '甲队', role: 'viewer', cost_limit: null, team_balance: '88' }],
+      activeTeamId: 1,
+    }))
+    expect(wrapper.find('.app-user-wallet').text()).toBe('余额 ¥88.00')
+
+    // 超管不显示
+    wrapper = mountApp(setupStore({
+      enabled: true,
+      token: 't',
+      user: { id: 9, username: 'boss', nickname: '', avatar_url: '', is_super_admin: true },
+      memberships: [],
+      activeTeamId: null,
+    }))
+    expect(wrapper.find('.app-user-wallet').exists()).toBe(false)
+  })

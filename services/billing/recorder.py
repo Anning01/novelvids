@@ -41,6 +41,13 @@ class BillingRecorder:
         user_id=None,
     ) -> ModelUsageRecord | None:
         try:
+            # 消耗来源：团队自己的 Key 直连供应商不计入团队余额；
+            # 平台模型（官方配置/未配置回退）按团队余额扣费
+            cost_source = (
+                "team_key"
+                if config is not None and config.scope == "team"
+                else "balance"
+            )
             return await ModelUsageRecord.create(
                 novel_id=novel_id,
                 task_type=task_type,
@@ -59,6 +66,7 @@ class BillingRecorder:
                 duration_seconds=duration_seconds,
                 team_id=team_id,
                 user_id=user_id,
+                cost_source=cost_source,
             )
         except Exception:
             logger.exception(
@@ -278,10 +286,11 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
 
 
 async def _consume_team_balance(record, team_id, user_id=None) -> None:
-    """按计费流水金额扣减团队余额并累计成员消耗；失败只记日志（旁路副作用）。"""
+    """计费后处理：仅平台模型（balance 来源）扣团队余额；成员累计消耗两种来源都记。"""
     if record is None or team_id is None:
         return
     from services.balance import accumulate_member_cost, consume
 
-    await consume(team_id, record.cost, usage_record_id=record.id)
+    if record.cost_source != "team_key":
+        await consume(team_id, record.cost, usage_record_id=record.id)
     await accumulate_member_cost(team_id, user_id, record.cost)

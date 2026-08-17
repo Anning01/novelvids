@@ -217,3 +217,60 @@ async def test_creator_cannot_read_balance(client: AsyncClient):
 
     response = await client.get("/api/team/balance", headers=_auth(token))
     assert response.json()["code"] == 403
+
+
+@pytest.mark.asyncio
+async def test_team_key_usage_does_not_deduct_team_balance(client):
+    """团队自己的 Key：计费来源 team_key，不扣团队余额；成员累计消耗照记。"""
+    from models.config import AiModelConfig
+
+    team = await Team.create(name="自有Key队")
+    await balance.top_up(team.id, Decimal("100"))
+    novel = await Novel.create(name="自有Key项目", author="x", team_id=team.id)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[AiTaskTypeEnum.extraction.value],
+        name="团队自有模型",
+        base_url="https://team",
+        api_key="team-key",
+        model="m",
+        is_active=True,
+        scope="team",
+        team_id=team.id,
+        pricing={
+            "type": "text",
+            "currency": "CNY",
+            "input_price_per_1m": 10_000,
+            "output_price_per_1m": 20_000,
+        },
+    )
+    from auth.models import TeamMember as MemberRow
+
+    member_user = await _create_user("team_key_member")
+    await MemberRow.create(
+        team=team, user=member_user, role=TeamRoleEnum.creator.value
+    )
+    task = await ai_task_executor.submit(
+        AiTaskTypeEnum.extraction,
+        {
+            "novel_id": novel.id,
+            "team_id": team.id,
+            "user_id": member_user.id,
+            "model_config_id": config.id,
+        },
+    )
+    await record_ai_task_usage(
+        task, result={"token_usage": {"prompt_tokens": 1000, "completion_tokens": 500}}
+    )
+
+    record = await ModelUsageRecord.first()
+    assert record.cost_source == "team_key"
+    assert record.cost == Decimal("20.000000")
+
+    # 余额未扣
+    team = await Team.get(id=team.id)
+    assert team.balance == Decimal("100.000000")
+
+    # 成员累计消耗照记（历史消耗金额两种来源都累计）
+    membership = await MemberRow.get(team_id=team.id, user_id=member_user.id)
+    assert membership.total_cost == Decimal("20.000000")
