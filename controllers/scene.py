@@ -119,10 +119,9 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         )
         for t in active_tasks:
             if t.request_params.get("chapter_id") == chapter_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"该章节已有进行中的分镜生成任务（{t.id}）",
-                )
+                # 已有进行中的任务：直接返回该任务，前端继续轮询，
+                # 避免离开页面再返回时重复提交被 400 拒绝
+                return t
 
         # 3. 提交任务（BackgroundTask 中执行）
         request_params = {

@@ -45,6 +45,7 @@ import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/
 import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
 import { buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
+import { analysisGate } from '@/shared/analysisGate'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { Asset, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
@@ -125,6 +126,36 @@ const sceneSaveQueues = new Map<number, Promise<void>>()
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
+const waitingAnalysis = ref(false)
+
+async function waitForAnalysisThenGenerate(chapterId: number) {
+  const loadVersion = chapterLoadVersion
+  waitingAnalysis.value = true
+  try {
+    // 分析未完成时等待其结束；失败/取消则报错引导回剧本页
+    for (;;) {
+      if (!alive || chapterLoadVersion !== loadVersion) return
+      const task = (await api.novelAnalysis(projectId.value)).data
+      const gate = analysisGate(task?.status)
+      if (gate === 'generate') break
+      if (gate === 'failed') {
+        throw new Error(task?.error_message || '项目分析失败，请回到剧本页重新分析')
+      }
+      await sleep(3000)
+    }
+    if (!alive || chapterLoadVersion !== loadVersion) return
+    waitingAnalysis.value = false
+    await generateChapterStoryboard(chapterId)
+  } catch (error) {
+    if (chapterLoadVersion === loadVersion) {
+      const message = (error as Error).message
+      setGenerationError(chapterId, message)
+      notice.error(message)
+    }
+  } finally {
+    if (chapterLoadVersion === loadVersion) waitingAnalysis.value = false
+  }
+}
 const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
 const videoModelOptions = computed(() => videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })))
 const videoModelSelectWidth = computed(() => Math.min(420, Math.max(
@@ -832,6 +863,18 @@ async function generateChapterStoryboard(chapterId: number) {
 async function regenerateStoryboard() {
   const chapterId = activeChapterId.value
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
+  // 分析未完成时：等待完成后自动生成本集分镜（不删除现有内容）
+  const analysis = (await api.novelAnalysis(projectId.value)).data
+  const gate = analysisGate(analysis?.status)
+  if (gate === 'failed') {
+    notice.error(analysis?.error_message || '项目分析失败，请回到剧本页重新分析')
+    return
+  }
+  if (gate === 'wait') {
+    notice.info('项目分析尚未完成，完成后将自动生成本集分镜')
+    await waitForAnalysisThenGenerate(chapterId)
+    return
+  }
   const chapterScenes = [...scenes.value]
   if (!await appConfirm({
     title: '重新生成本集分镜？',
@@ -873,7 +916,7 @@ async function loadChapter(chapterId: number) {
     showChapterScenes(result)
     loading.value = false
     if (!result.scenes.length) {
-      if (isAgent.value) await generateChapterStoryboard(chapterId)
+      if (isAgent.value) await waitForAnalysisThenGenerate(chapterId)
       else await createManualScene(chapterId)
     }
   } catch (error) {
@@ -1441,7 +1484,7 @@ onBeforeUnmount(() => {
           </div>
         </header>
 
-        <div v-if="loading || generatingStoryboard" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : '正在准备本集章节、资产和视频信息。' }}</p></div>
+        <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
