@@ -328,8 +328,8 @@ async def test_generate_creates_task_and_scenes(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_generate_duplicate_blocked(client: AsyncClient):
-    """重复提交同一章节的生成任务被拦截。"""
+async def test_generate_duplicate_returns_existing_task(client: AsyncClient):
+    """重复提交同一章节返回已有任务（离开页面再返回不再报错）。"""
     novel, chapter, config = await _setup_scene_env()
 
     # 创建一个 pending 的任务
@@ -344,9 +344,8 @@ async def test_generate_duplicate_blocked(client: AsyncClient):
         json={"chapter_id": chapter.id, "model": 1},
     )
     body = response.json()
-    assert body["code"] == 400
-    assert "进行中" in body["message"]
-    print(f"    已有任务 id={existing.id}，重复提交被拦截: {body['message']}")
+    assert body["code"] == 0, body
+    assert str(body["data"]["id"]) == str(existing.id)
 
 
 @pytest.mark.asyncio

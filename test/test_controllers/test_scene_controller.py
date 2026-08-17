@@ -166,8 +166,8 @@ async def test_generate_submits_task():
 
 
 @pytest.mark.asyncio
-async def test_generate_duplicate_blocked():
-    """同一章节重复提交被拦截。"""
+async def test_generate_duplicate_returns_existing_task():
+    """同一章节重复提交时返回已有任务（前端继续轮询，不再报错）。"""
     _, chapter = await _create_chapter()
     await AiModelConfig.create(
         task_type=AiTaskTypeEnum.storyboard.value,
@@ -185,12 +185,13 @@ async def test_generate_duplicate_blocked():
         request_params={"chapter_id": chapter.id},
     )
 
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as exc_info:
-        await scene_controller.generate(chapter.id)
-    assert exc_info.value.status_code == 400
-    assert "进行中" in exc_info.value.detail
-    print(f"    已有任务 id={existing.id}，重复提交被拦截: {exc_info.value.detail}")
+    returned = await scene_controller.generate(chapter.id)
+    assert returned.id == existing.id
+
+    # 不会新建第二条任务
+    tasks = await AiTask.filter(task_type=AiTaskTypeEnum.storyboard.value).all()
+    chapter_tasks = [t for t in tasks if t.request_params.get("chapter_id") == chapter.id]
+    assert [t.id for t in chapter_tasks] == [existing.id]
 
 
 @pytest.mark.asyncio
