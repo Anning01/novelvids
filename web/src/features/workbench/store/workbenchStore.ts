@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
-import { api } from '@/api'
+import { api, mediaUrl } from '@/api'
 import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -27,7 +27,7 @@ const uploadedMediaKinds = new Set<WorkbenchNode['kind']>(['image_media', 'video
 const now = () => new Date().toISOString()
 const cloneValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const mediaTitle = (filename: string) => filename.replace(/\.[^.]+$/, '') || filename
-const uploadedMediaUrl = (filename: string) => `/media/${encodeURIComponent(filename)}`
+const uploadedMediaUrl = (filename: string) => mediaUrl(`/media/${encodeURIComponent(filename)}`)
 
 function node(id: number, key: string, kind: WorkbenchNode['kind'], title: string, position: Point, data: Record<string, unknown>): WorkbenchNode {
   const timestamp = now()

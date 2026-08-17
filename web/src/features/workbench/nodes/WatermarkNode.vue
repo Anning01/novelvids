@@ -2,7 +2,7 @@
 import type { NodeProps } from '@vue-flow/core'
 import { Droplet, LoaderCircle, Settings2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
-import { api } from '@/api'
+import { api, mediaUrl } from '@/api'
 import { notice } from '@/shared/notice'
 import WatermarkSettingsDialog from '../components/WatermarkSettingsDialog.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
@@ -45,7 +45,7 @@ async function uploadWatermark(file: File) {
     const uploaded = await api.upload(file)
     saveConfig({
       ...config.value,
-      resourceUrl: `/media/${encodeURIComponent(uploaded.filename)}`,
+      resourceUrl: mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`),
     })
   } catch (error) {
     notice.error(error instanceof Error ? error.message : '水印图片上传失败')

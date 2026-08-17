@@ -11,6 +11,7 @@ import assetDialogSource from './AssetCreateDialog.vue?raw'
 import annotationEditorSource from './ImageAnnotationEditor.vue?raw'
 
 vi.mock('@/api', () => ({
+  mediaUrl: (path?: string | null) => path ?? '',
   api: {
     imageGenerationModels: vi.fn(),
     digitalHumans: vi.fn(),

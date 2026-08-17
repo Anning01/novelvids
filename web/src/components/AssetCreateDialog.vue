@@ -26,7 +26,7 @@ import AssetVariantStrip from '@/components/AssetVariantStrip.vue'
 import ImageAnnotationEditor from '@/components/ImageAnnotationEditor.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
-import { api } from '@/api'
+import { api, mediaUrl } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { notice } from '@/shared/notice'
 import { estimateImageCost } from '@/shared/modelPricing'
@@ -452,7 +452,7 @@ async function saveAnnotatedImage(blob: Blob) {
       { type: 'image/png' },
     )
     const uploaded = await api.upload(file)
-    const imageUrl = `/media/${uploaded.filename}`
+    const imageUrl = mediaUrl(`/media/${uploaded.filename}`)
     if (selectedVariant.value) {
       const variant = selectedVariant.value
       const updated = (await api.updateAssetVariant(props.asset.id, variant.id, {
@@ -860,7 +860,7 @@ async function submit(regenerate = false) {
       let images = variant?.images || []
       if (snapshot.creation_mode === 'upload' && uploadFile.value) {
         const uploaded = await api.upload(uploadFile.value)
-        images = [`/media/${uploaded.filename}`, ...images.filter(Boolean)]
+        images = [mediaUrl(`/media/${uploaded.filename}`), ...images.filter(Boolean)]
       } else if (snapshot.creation_mode === 'library' && selectedLibrary.value?.image) {
         images = [selectedLibrary.value.image, ...images.filter(image => image !== selectedLibrary.value?.image)]
         metadata.library_source = selectedLibrary.value.source
@@ -925,7 +925,7 @@ async function submit(regenerate = false) {
 
     if (mode.value === 'upload' && uploadFile.value) {
       const uploaded = await api.upload(uploadFile.value)
-      mainImage = `/media/${uploaded.filename}`
+      mainImage = mediaUrl(`/media/${uploaded.filename}`)
       imageSource = 2
     }
 

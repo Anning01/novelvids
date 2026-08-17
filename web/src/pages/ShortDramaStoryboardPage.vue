@@ -35,7 +35,7 @@ import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistor
 import VideoGenerationErrorState from '@/components/VideoGenerationErrorState.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
-import { api, sleep } from '@/api'
+import { api, mediaUrl, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { estimateVideoCost } from '@/shared/modelPricing'
@@ -731,7 +731,7 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
   uploadingFrameKey.value = uploadKey
   try {
     const uploaded = await api.upload(file)
-    const url = `/media/${uploaded.filename}`
+    const url = mediaUrl(`/media/${uploaded.filename}`)
     const draft = draftFor(scene)
     if (kind === 'first') draft.firstFrameUrl = url
     else draft.lastFrameUrl = url

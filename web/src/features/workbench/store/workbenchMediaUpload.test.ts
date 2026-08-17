@@ -7,6 +7,7 @@ import { useWorkbenchStore } from './workbenchStore'
 vi.mock('@/api', () => ({
   api: { createAsset: vi.fn(), updateAsset: vi.fn(), upload: vi.fn() },
   sleep: vi.fn(),
+  mediaUrl: (path?: string | null) => path ?? '',
 }))
 
 const createAssetMock = vi.mocked(api.createAsset)

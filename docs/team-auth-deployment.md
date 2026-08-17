@@ -40,7 +40,39 @@ docker compose up -d --build
 
 ## 3. HTTPS 反向代理示例（自建服务器 + 域名）
 
-### nginx
+### 方式一：docker-compose 整机部署（推荐，零地址配置）
+
+前端容器内置 nginx 已把 `/api`、`/media` 转发到 `backend:8000`，外层只需把域名指向前端端口：
+
+```bash
+docker compose up -d --build   # 前端暴露 8080
+```
+
+外层 caddy 一行：`novel.example.com { reverse_proxy 127.0.0.1:8080 }`，无需在前端填写任何地址。
+
+### 方式二：前端静态与后端分离部署
+
+前端 `web/dist` 单独托管时，打包阶段用 `VITE_API_BASE` 指定后端地址（默认同源相对路径，不填即可）：
+
+```bash
+cd web
+# 后端根地址（不含 /api），例如：
+VITE_API_BASE=https://api.example.com npm run build
+```
+
+- 不填 `VITE_API_BASE`：前端沿用相对路径 `/api`、`/media`，此时**静态服务器必须代理这两个路径**到后端（见下方 nginx 片段）。
+- 填了 `VITE_API_BASE`：API 请求直连后端域名（后端 CORS 已放开），上传等场景构造的 `/media` 地址也会自动带上后端域名；历史数据里后端返回的相对 `/media` 路径仍建议在静态服务器加 `/media` 代理兜底。
+
+```nginx
+# 静态服务器的 nginx（方式二必配 /media 代理兜底；未填 VITE_API_BASE 时 /api 也需代理）
+location /media/ {
+    proxy_pass http://<后端地址>:8000;
+    proxy_set_header Host $host;
+    proxy_read_timeout 600s;
+}
+```
+
+### nginx（方式一整机反代示例）
 
 ```nginx
 server {
