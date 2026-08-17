@@ -184,8 +184,9 @@
 :root[data-app-theme='dark'] .short-drama-page :is(.script-dropzone,.manual-mode-card,.creation-config,.custom-prompt-panel) { border-color: var(--app-border); color: var(--app-text-secondary); background: var(--app-surface); box-shadow: var(--app-shadow); }
 :root[data-app-theme='dark'] .short-drama-page :is(.dropzone-icon,.manual-mode-icon,.manual-mode-features span) { border-color: var(--app-border); background: var(--app-surface-muted); }
 :root[data-app-theme='dark'] .short-drama-page :is(.script-dropzone strong,.manual-mode-copy h2,.custom-prompt-panel label,.custom-prompt-panel textarea) { color: var(--app-text); }
-:root[data-app-theme='dark'] .short-drama-page .mode-switch button:hover { background: var(--app-surface-hover); }
-:root[data-app-theme='dark'] .short-drama-page .mode-switch button.is-active { color: var(--app-accent); background: var(--app-accent-soft); }
+:root[data-app-theme='dark'] .short-drama-page .mode-switch .app-button--soft:not(.is-active) { color: var(--app-text-secondary); background: transparent; box-shadow: none; }
+:root[data-app-theme='dark'] .short-drama-page .mode-switch .app-button--soft:hover { background: var(--app-surface-hover); }
+:root[data-app-theme='dark'] .short-drama-page .mode-switch .app-button--soft.is-active { color: var(--app-accent); background: var(--app-accent-soft); }
 
 /* Agent analysis */
 :root[data-app-theme='dark'] .agent-topbar,
