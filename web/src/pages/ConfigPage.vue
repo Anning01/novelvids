@@ -24,6 +24,7 @@ import AppIconTile from '@/components/AppIconTile.vue'
 import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
 import { api } from '@/api'
 import { defaultPricing } from '@/shared/modelPricing'
+import { useAuthStore } from '@/features/auth/authStore'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
@@ -78,6 +79,15 @@ const imageModelTypes = ref<ConfigEnumItem[]>([])
 const videoModelTypes = ref<ConfigEnumItem[]>([])
 const loading = ref(true)
 const savingGeneral = ref(false)
+const auth = useAuthStore()
+// 团队管理员视角：官方配置只读，仅本团队配置可管理
+const isTeamAdmin = computed(() => auth.role === 'admin')
+const modelSource = ref<'official' | 'custom'>('official')
+const switchingSource = ref(false)
+function canManage(item: AiModelConfig) {
+  if (!isTeamAdmin.value) return true
+  return item.scope === 'team'
+}
 const activeSection = ref<SettingsSection>('models')
 const promptLanguage = ref<'zh' | 'en'>('en')
 const showCreate = ref(false)
@@ -154,6 +164,14 @@ async function load() {
       api.generationCapabilities(),
     ])
     configs.value = configResponse.data.items
+    if (isTeamAdmin.value) {
+      try {
+        const sourceResponse = await api.modelSource()
+        modelSource.value = sourceResponse.data.source
+      } catch {
+        modelSource.value = 'official'
+      }
+    }
     taskTypes.value = enumResponse.data.ai_task_type || []
     imageModelTypes.value = enumResponse.data.image_model_type || []
     videoModelTypes.value = enumResponse.data.video_model_type || []
@@ -164,6 +182,20 @@ async function load() {
     notice.error((error as Error).message)
   } finally {
     loading.value = false
+  }
+}
+
+async function toggleModelSource() {
+  switchingSource.value = true
+  try {
+    const next: 'official' | 'custom' = modelSource.value === 'official' ? 'custom' : 'official'
+    const response = await api.setModelSource(next)
+    modelSource.value = response.data.source
+    notice.success(next === 'custom' ? '已切换为团队自定义配置，可在下方添加/管理自己的模型' : '已切回官方配置，团队自定义模型将被忽略')
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    switchingSource.value = false
   }
 }
 
@@ -362,6 +394,16 @@ onMounted(load)
     <AppTabs class="settings-section-tabs" :model-value="activeSection" :items="settingsTabs" label="设置分类" @update:model-value="changeSettingsSection" />
 
     <template v-if="activeSection === 'models'">
+    <section v-if="isTeamAdmin" class="model-source-banner">
+      <div class="model-source-copy">
+        <strong>当前模型来源：{{ modelSource === 'official' ? '官方配置' : '团队自定义' }}</strong>
+        <p v-if="modelSource === 'official'">官方配置由平台统一维护（Key 不可见），下方列表只读。如需添加、修改或删除模型，请切换为团队自定义。</p>
+        <p v-else>团队自定义模式：下方为本团队自己的模型配置，可自由增删改。</p>
+      </div>
+      <AppButton variant="secondary" size="sm" type="button" :disabled="switchingSource" @click="toggleModelSource">
+        {{ switchingSource ? '切换中…' : modelSource === 'official' ? '切换为团队自定义' : '切回官方配置' }}
+      </AppButton>
+    </section>
     <section class="model-category-grid" aria-label="模型能力分类">
       <AppButton
         v-for="category in categories"
@@ -408,15 +450,18 @@ onMounted(load)
             </div>
           </div>
           <div class="config-actions">
-            <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" title="启用配置" @click="activate(item)"><Power :size="15" /><span>启用</span></AppButton>
-            <template v-else>
-              <span class="active-check"><CheckCircle2 :size="16" />运行中</span>
-              <AppButton variant="soft" size="sm" type="button" title="停用配置" @click="deactivate(item)"><Power :size="15" /><span>停用</span></AppButton>
+            <template v-if="canManage(item)">
+              <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" title="启用配置" @click="activate(item)"><Power :size="15" /><span>启用</span></AppButton>
+              <template v-else>
+                <span class="active-check"><CheckCircle2 :size="16" />运行中</span>
+                <AppButton variant="soft" size="sm" type="button" title="停用配置" @click="deactivate(item)"><Power :size="15" /><span>停用</span></AppButton>
+              </template>
+              <span class="config-icon-actions">
+                <AppButton variant="secondary" size="sm" icon-only type="button" aria-label="编辑配置" title="编辑配置" @click="openEdit(item)"><Pencil :size="15" /></AppButton>
+                <AppButton variant="danger" size="sm" icon-only type="button" aria-label="删除配置" title="删除配置" @click="remove(item)"><Trash2 :size="15" /></AppButton>
+              </span>
             </template>
-            <span class="config-icon-actions">
-              <AppButton variant="secondary" size="sm" icon-only type="button" aria-label="编辑配置" title="编辑配置" @click="openEdit(item)"><Pencil :size="15" /></AppButton>
-              <AppButton variant="danger" size="sm" icon-only type="button" aria-label="删除配置" title="删除配置" @click="remove(item)"><Trash2 :size="15" /></AppButton>
-            </span>
+            <span v-else class="official-badge" title="官方配置由平台维护，团队管理员只读">官方配置 · 只读</span>
           </div>
         </article>
       </div>
@@ -653,6 +698,10 @@ onMounted(load)
 .general-setting-card > footer > span { margin-right: auto; color: var(--app-text-muted); font-size: 9px; }
 .settings-primary-button, .model-config-section > header > button, .model-empty-state button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid #5b5cf6; border-radius: 10px; color: #fff; background: #5b5cf6; box-shadow: 0 8px 20px rgb(91 92 246 / 18%); cursor: pointer; font-size: 12px; font-weight: 600; }
 .settings-primary-button:hover, .model-config-section > header > button:hover, .model-empty-state button:hover { background: #4d4ee8; }
+.model-source-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
+.model-source-copy strong { font-size: 13px; color: var(--app-text); }
+.model-source-copy p { margin: 4px 0 0; font-size: 12px; color: var(--app-text-muted); }
+.official-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .model-category-grid { display: grid; width: 100%; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
 .model-category-card { position: relative; display: grid; min-height: 158px; grid-template-columns: 46px minmax(0, 1fr); align-content: start; gap: 13px; padding: 18px; overflow: hidden; border: 1px solid #e6e8ef; border-radius: 15px; color: #303442; background: #fff; cursor: pointer; text-align: left; box-shadow: 0 10px 30px rgb(37 41 57 / 4%); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .model-category-card:hover { border-color: #d6d9e5; box-shadow: 0 14px 34px rgb(37 41 57 / 7%); transform: translateY(-1px); }
@@ -741,7 +790,11 @@ onMounted(load)
 .pricing-grid input { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--app-border); border-radius: 8px; outline: 0; color: var(--app-text); background: var(--app-surface); font-size: 11px; }
 .pricing-grid input:focus { border-color: var(--app-accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
 @media (max-width: 860px) {
-  .model-category-grid { grid-template-columns: 1fr; }
+  .model-source-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
+.model-source-copy strong { font-size: 13px; color: var(--app-text); }
+.model-source-copy p { margin: 4px 0 0; font-size: 12px; color: var(--app-text-muted); }
+.official-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.model-category-grid { grid-template-columns: 1fr; }
   .model-category-card { min-height: 130px; }
 }
 @media (max-width: 620px) {

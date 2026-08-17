@@ -72,6 +72,8 @@ async def lifespan(_: FastAPI):
 
         await ensure_team_schema()
         await ensure_super_admin()
+    # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）
+    await ai_task_executor.fail_stale_on_boot()
     try:
         yield
     finally:
