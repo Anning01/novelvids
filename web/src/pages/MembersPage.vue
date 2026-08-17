@@ -237,7 +237,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.members-page { max-width: 980px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; }
+.members-page { max-width: 1080px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-header h1 { margin: 0; font-size: 22px; color: var(--app-text, #303442); }
 .team-picker { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--app-text-muted, #9398a8); }

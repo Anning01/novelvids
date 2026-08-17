@@ -220,7 +220,7 @@ onMounted(loadTeams)
 </template>
 
 <style scoped>
-.teams-page { max-width: 960px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; }
+.teams-page { max-width: 1080px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-header h1 { margin: 0; font-size: 22px; color: var(--app-text, #303442); }
 .primary-button { height: 36px; padding: 0 16px; border: none; border-radius: 8px; background: var(--app-accent, #5b5cf6); color: #fff; font-weight: 600; cursor: pointer; }
