@@ -43,6 +43,15 @@ class Novel(AbstractBaseModel):
         null=True,
         description="分镜策略说明",
     )
+    team_id = fields.IntField(
+        null=True,
+        db_index=True,
+        description="所属团队（AUTH_ENABLED=true 时启用；关闭时恒为 NULL）",
+    )
+    created_by = fields.IntField(
+        null=True,
+        description="创建人 User.id（AUTH_ENABLED=true 时启用）",
+    )
 
     chapters: fields.ReverseRelation["Chapter"]
     assets: fields.ReverseRelation["Asset"]

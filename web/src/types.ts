@@ -133,6 +133,88 @@ export interface AllEnums {
 }
 export interface PaginationResponse<T> { code: number; message: string; data: { items: T[]; pagination: { total: number; page: number; page_size: number; pages: number } } }
 export interface SingleResponse<T> { code: number; message: string; data: T }
+
+// ---- 登录与团队（AUTH_ENABLED=true 时生效） ----
+
+export type TeamRole = 'admin' | 'creator' | 'viewer'
+
+export interface AuthUser {
+  id: number
+  username: string
+  nickname: string
+  avatar_url: string
+  is_super_admin: boolean
+  created_at?: string
+}
+
+export interface Membership {
+  team_id: number
+  team_name: string
+  role: TeamRole
+  status?: number
+  total_cost?: number | string
+  joined_at?: string
+}
+
+export interface AuthMe {
+  user: AuthUser
+  memberships: Membership[]
+  is_super_admin: boolean
+  total_cost?: number | string
+}
+
+export interface AuthStatus { enabled: boolean }
+export interface LoginResult { token: string; user: AuthUser }
+
+export interface TeamItem {
+  id: number
+  name: string
+  balance: number
+  model_config_source: 'official' | 'custom'
+  status: number
+  member_limit?: number | null
+  owner_user_id?: number | null
+  owner_username?: string
+  member_count: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface UserItem {
+  id: number
+  username: string
+  nickname: string
+  is_super_admin: boolean
+  status: number
+  created_at?: string
+  total_cost?: number | string
+  team_count?: number
+}
+
+export interface UserStats {
+  user_count: number
+  user_total_cost: number
+  team_count: number
+  team_balance_total: number
+}
+
+export interface MemberItem {
+  user_id: number
+  username: string
+  nickname: string
+  role: TeamRole
+  status: number
+  total_cost: number | string
+  cost_limit?: number | string | null
+}
+
+export interface InviteItem {
+  token: string
+  team_id: number
+  team_name: string
+  role: TeamRole
+  expires_at: string
+}
 export interface BillingRecord {
   id: number
   novel_id: number

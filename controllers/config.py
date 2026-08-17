@@ -6,6 +6,7 @@ from services.image_generation.capabilities import (
     capabilities_for as image_capabilities_for,
     validate_protocol as validate_image_protocol,
 )
+from services.model_resolution import resolve_scope_configs
 from services.video.capabilities import (
     capabilities_for as video_capabilities_for,
     validate_protocol as validate_video_protocol,
@@ -164,9 +165,11 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             return
         if AiTaskTypeEnum.reference_image.value not in AiModelConfigController._capabilities(instance):
             return
+        # 同作用域（官方 / 同团队）内同生图能力类型仅保留一个启用项
         await AiModelConfig.filter(
             is_active=True,
             image_model_type=instance.image_model_type,
+            team_id=instance.team_id,
         ).exclude(id=instance.id).update(is_active=False)
 
     @staticmethod
@@ -178,6 +181,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         await AiModelConfig.filter(
             is_active=True,
             video_model_type=instance.video_model_type,
+            team_id=instance.team_id,
         ).exclude(id=instance.id).update(is_active=False)
 
     @classmethod
@@ -221,12 +225,13 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         await self._enforce_single_active_generation_type(instance)
         return instance
 
-    async def list_active_image_models(self) -> list[dict]:
-        configs = await AiModelConfig.filter(is_active=True).order_by("-updated_at", "-id")
+    async def list_active_image_models(self, team_id: int | None = None) -> list[dict]:
+        configs = await resolve_scope_configs(
+            AiTaskTypeEnum.reference_image.value,
+            team_id=team_id,
+        )
         result = []
         for config in configs:
-            if AiTaskTypeEnum.reference_image.value not in self._capabilities(config):
-                continue
             if not config.image_model_type:
                 continue
             try:
@@ -245,12 +250,13 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             })
         return result
 
-    async def list_active_video_models(self) -> list[dict]:
-        configs = await AiModelConfig.filter(is_active=True).order_by("-updated_at", "-id")
+    async def list_active_video_models(self, team_id: int | None = None) -> list[dict]:
+        configs = await resolve_scope_configs(
+            AiTaskTypeEnum.video.value,
+            team_id=team_id,
+        )
         result = []
         for config in configs:
-            if AiTaskTypeEnum.video.value not in self._capabilities(config):
-                continue
             if not config.video_model_type:
                 continue
             try:
@@ -292,16 +298,26 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         self,
         task_type: int,
         config_id: int | None = None,
+        team_id: int | None = None,
     ) -> AiModelConfig:
-        """获取可用于任务的启用配置；未指定时使用最近启用的一项。"""
-        active_configs = await AiModelConfig.filter(is_active=True).order_by(
-            "-updated_at",
-            "-id",
-        )
+        """获取可用于任务的启用配置；未指定时使用作用域内最近启用的一项。
+
+        作用域规则（见 services/model_resolution.py）：团队自定义优先，
+        该任务类型无团队配置时回退官方配置；team_id=None 仅解析官方配置。
+        """
         if config_id is not None:
-            selected = next((item for item in active_configs if item.id == config_id), None)
+            selected = await AiModelConfig.get_or_none(
+                id=config_id, is_active=True
+            )
             if selected is None:
                 raise HTTPException(status_code=400, detail="所选模型未启用或已被删除")
+            # 团队只能显式使用官方配置或本团队配置
+            if (
+                team_id is not None
+                and selected.team_id is not None
+                and selected.team_id != team_id
+            ):
+                raise HTTPException(status_code=400, detail="所选模型不可用")
             if task_type not in self._capabilities(selected):
                 raise HTTPException(status_code=400, detail="所选模型不支持当前生成任务")
             if task_type == AiTaskTypeEnum.reference_image.value:
@@ -309,9 +325,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             if task_type == AiTaskTypeEnum.video.value:
                 self._validate_video_payload({}, selected)
             return selected
-        candidates = [
-            item for item in active_configs if task_type in self._capabilities(item)
-        ]
+        candidates = await resolve_scope_configs(task_type, team_id=team_id)
         config = None
         for candidate in candidates:
             if task_type == AiTaskTypeEnum.reference_image.value:
@@ -341,25 +355,33 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         self,
         task_type: int,
         legacy_task_type: int,
+        team_id: int | None = None,
     ) -> AiModelConfig:
         """优先读取目标能力；未配置时兼容升级前复用的历史能力。"""
         try:
-            return await self.get_active(task_type)
+            return await self.get_active(task_type, team_id=team_id)
         except HTTPException as error:
             if error.status_code != 404:
                 raise
-        return await self.get_active(legacy_task_type)
+        return await self.get_active(legacy_task_type, team_id=team_id)
 
     async def get_configured_for_task(
         self,
         task_type: int,
         config_id: int,
+        team_id: int | None = None,
     ) -> AiModelConfig:
         """读取任务创建时使用的配置，不要求它仍处于启用状态。
 
         新任务只能使用启用配置；已有异步任务即使随后被停用，仍需使用原配置查询结果。
         """
         selected = await self.get(config_id)
+        if (
+            team_id is not None
+            and selected.team_id is not None
+            and selected.team_id != team_id
+        ):
+            raise HTTPException(status_code=400, detail="所选模型不可用")
         if task_type not in self._capabilities(selected):
             raise HTTPException(status_code=400, detail="所选模型不支持当前生成任务")
         if task_type == AiTaskTypeEnum.reference_image.value:
@@ -367,6 +389,28 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         if task_type == AiTaskTypeEnum.video.value:
             self._validate_video_payload({}, selected)
         return selected
+
+    async def get_model_config_source(self, team_id: int) -> str:
+        """读取团队的模型配置来源模式。"""
+        from auth.models import Team
+
+        team = await Team.get_or_none(id=team_id)
+        if team is None:
+            raise HTTPException(status_code=404, detail="团队不存在")
+        return team.model_config_source
+
+    async def set_model_config_source(self, team_id: int, source: str) -> str:
+        """切换团队模型配置来源：official 官方配置 / custom 团队自定义。"""
+        from auth.models import Team
+
+        if source not in ("official", "custom"):
+            raise HTTPException(status_code=422, detail="配置来源必须是 official 或 custom")
+        team = await Team.get_or_none(id=team_id)
+        if team is None:
+            raise HTTPException(status_code=404, detail="团队不存在")
+        team.model_config_source = source
+        await team.save(update_fields=["model_config_source", "updated_at"])
+        return team.model_config_source
 
 
 ai_model_config_controller = AiModelConfigController()

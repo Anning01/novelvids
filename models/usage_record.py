@@ -24,6 +24,16 @@ class ModelUsageRecord(AbstractBaseModel):
     currency = fields.CharField(max_length=8, default="CNY", description="币种")
     status = fields.IntField(default=TaskStatusEnum.completed.value, description="任务状态")
     duration_seconds = fields.FloatField(null=True, description="请求总时长（秒）")
+    team_id = fields.IntField(
+        null=True,
+        db_index=True,
+        description="归属团队（AUTH_ENABLED=true 时启用；历史数据回填）",
+    )
+    user_id = fields.IntField(
+        null=True,
+        db_index=True,
+        description="触发调用的成员 User.id（历史数据为空）",
+    )
 
     class Meta:
         table = "model_usage_records"

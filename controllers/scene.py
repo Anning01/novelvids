@@ -95,14 +95,19 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         await created.fetch_related("assets")
         return created
 
-    async def generate(self, chapter_id: int):
+    async def generate(
+        self,
+        chapter_id: int,
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ):
         """提交分镜生成任务，返回任务记录供前端轮询。"""
 
         chapter = await Chapter.get(id=chapter_id)
 
-        # 1. 获取分镜生成任务的启用配置
+        # 1. 获取分镜生成任务的启用配置（团队自定义优先，官方兜底）
         config = await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.storyboard.value
+            AiTaskTypeEnum.storyboard.value, team_id=team_id
         )
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
@@ -131,6 +136,10 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "max_context_characters": config.max_context_characters,
             "prompt_language": "zh",
         }
+        if team_id is not None:
+            request_params["team_id"] = team_id
+        if user_id is not None:
+            request_params["user_id"] = user_id
         task = await ai_task_executor.submit(
             AiTaskTypeEnum.storyboard, request_params
         )

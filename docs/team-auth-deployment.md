@@ -1,0 +1,129 @@
+# 登录与团队功能部署指南（AUTH_ENABLED）
+
+> 一套代码、一个开关：**关闭 = 开源体验（docker 部署即用、无登录）；开启 = 线上版（强制登录 + 团队功能）**。
+
+## 1. 开关与环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `AUTH_ENABLED` | `false` | 登录与团队功能总开关。关闭时行为与无鉴权版本完全一致（不建 auth 表、不注册 auth 路由） |
+| `SESSION_TTL_HOURS` | `168` | 登录会话有效期（小时） |
+| `SUPER_ADMIN_USERNAME` | 空 | 超管引导账号：开启后首次启动自动创建（系统中尚无超管时） |
+| `SUPER_ADMIN_PASSWORD` | 空 | 超管初始密码（**首次登录后立即在界面修改**；留空则不自动创建） |
+| `WECHAT_MP_APP_ID / WECHAT_MP_APP_SECRET / WECHAT_MP_TOKEN / WECHAT_MP_AES_KEY` | 空 | 二期：微信公众号扫码登录（见 §5），当前未启用 |
+
+## 2. Docker 部署
+
+### 开源体验（默认，零配置）
+
+```bash
+docker compose up -d --build
+# 访问 http://localhost:8080，直接使用
+```
+
+### 线上版（开启登录与团队）
+
+```bash
+# .env 或环境变量中设置：
+#   AUTH_ENABLED=true
+#   SUPER_ADMIN_USERNAME=admin
+#   SUPER_ADMIN_PASSWORD=<强密码>
+docker compose up -d --build
+```
+
+首次启动会自动：
+1. 创建 auth 相关表（`users / teams / team_members / user_sessions / balance_transactions`）；
+2. 为存量数据补齐 `team_id / created_by / user_id / scope` 列，创建「默认团队」并把存量项目与计费流水挂入；
+3. 创建超管账号。
+
+> ⚠️ 线上部署务必通过 HTTPS 反向代理暴露服务（登录令牌与会话依赖传输安全），示例见 §3。
+
+## 3. HTTPS 反向代理示例（自建服务器 + 域名）
+
+### nginx
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name novel.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/novel.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/novel.example.com/privkey.pem;
+
+    client_max_body_size 512m;  # 视频/图片上传
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 二期：微信公众平台回调（公网 80/443，在公众号后台配置服务器地址）
+    # location /api/wechat/mp/events {
+    #     proxy_pass http://127.0.0.1:8080;
+    #     proxy_set_header Host $host;
+    # }
+}
+
+server {
+    listen 80;
+    server_name novel.example.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+### Caddy（自动 HTTPS）
+
+```caddyfile
+novel.example.com {
+    reverse_proxy 127.0.0.1:8080
+    request_body {
+        max_size 512MB
+    }
+}
+```
+
+## 4. 团队功能速览（开启后）
+
+| 角色 | 能力 |
+|---|---|
+| 超级管理员 | 全部权限 + 「团队管理」页：创建/停用团队、改名、人员上限、余额充值；官方模型配置（设置页） |
+| 团队管理员 | 团队内全部权限 + 「成员管理」页（邀请链接、角色调整、禁用/启用、消费限额、重置密码、移除）+ 团队模型配置与「官方/自定义」来源切换 + 全团队成本 |
+| 创作者 | 团队内创作全部功能；成本仅本人；无设置/成员管理 |
+| 查看者 | 只读浏览项目；无成本、无设置；任何写操作 403 |
+
+- **多团队切换**：一个用户可属于多个团队，侧边栏 Logo 下方的团队选择器切换当前团队（后端按 `X-Team-Id` 校验作用域）。
+- **成员加入**：管理员不再直接建号，唯一方式是**邀请链接**（24 小时有效，可多人使用）。新用户经链接注册并自动加入；老用户登录后经链接加入。加入与注册都校验团队**人员上限**。
+- **成员治理**：管理员可踢出、禁用/启用成员（仅影响该团队）、设置个人**累计消费限额**（超限后禁止提交新任务）；成员列表展示每人的**累计历史消耗金额**（随计费流水自动累加）。
+- 模型配置：团队可用「官方配置」（超管维护，**Key 对任何角色不可见**）或「自定义配置」（团队管理员维护本团队 Key）。
+- 余额：超管充值；任务提交前预检（欠费/超限额 402），完成后按计费成本自动扣减；允许透支为负并在团队管理页标红。
+- 存量数据：首次开启时自动回填到「默认团队」。
+
+## 5. 二期：微信公众号扫码登录接入点
+
+一期为账号密码登录。公众号服务号资质就绪后，按以下预留接口接入（无需改动现有登录契约）：
+
+1. **实现 Provider**：实现 `auth/provider.py` 的 `AuthProvider` 接口（`authenticate(payload)`），参考 `auth/service.py` 的密码实现；微信侧流程：
+   - `POST /api/auth/wechat/qrcode`：生成 `QR_STR_SCENE` 临时二维码（`cgi-bin/qrcode/create`），前端轮询状态；
+   - `POST /api/wechat/mp/events`：接收微信事件回调（签名校验 + echostr 验证），处理 `subscribe(EventKey=qrscene_*)` 与 `SCAN` 事件完成登录，`unsubscribe` 标记取关；
+   - access_token 集中缓存刷新（7200s）。
+2. **注册路由**：`main.py` 中按 `AUTH_ENABLED` 追加微信路由。
+3. **前端**：登录页增加「微信扫码」标签页（`/api/auth/status` 返回能力时显示）。
+4. **微信后台**：配置服务器 URL/Token/EncodingAESKey（公网 80/443）。
+
+## 6. 测试双跑
+
+```bash
+# 关闭态回归（必须全绿 —— 开源行为零变化）
+uv run pytest
+
+# 开启态回归（鉴权/团队/余额全套）
+AUTH_ENABLED=true uv run pytest test/test_auth -q --no-cov
+
+# 前端
+cd web && npm run test && npm run typecheck && npm run build
+```
+
+CI 建议两条流水线分别执行上述两态后端回归。

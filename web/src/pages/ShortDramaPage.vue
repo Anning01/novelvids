@@ -521,27 +521,23 @@ async function createProject() {
   gap: 3px;
 }
 
-.mode-switch button {
-  display: inline-flex;
+.mode-switch :deep(.app-button--soft) {
   min-height: 34px;
-  align-items: center;
-  gap: 6px;
   padding: 0 11px;
-  border: 0;
   border-radius: 8px;
-  color: #73798a;
+  color: var(--app-text-muted, #73798a);
   background: transparent;
-  cursor: pointer;
+  box-shadow: none;
   font-size: 12px;
 }
 
-.mode-switch button:hover {
-  background: #f5f6fa;
+.mode-switch :deep(.app-button--soft:hover) {
+  background: var(--app-surface-hover, #f5f6fa);
 }
 
-.mode-switch button.is-active {
-  color: #5b5cf6;
-  background: #eeefff;
+.mode-switch :deep(.app-button--soft.is-active) {
+  color: var(--app-accent, #5b5cf6);
+  background: var(--app-accent-soft, #eeefff);
 }
 
 .format-controls {

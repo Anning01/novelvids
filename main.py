@@ -31,16 +31,21 @@ from services.model_config_seed import ensure_model_config_seed_data
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
+    ensure_shared_team_columns,
     ensure_usage_record_schema,
 )
 
-
 # 定义包含时区的配置字典
+# AUTH_ENABLED=true 时注册鉴权与团队相关模型；关闭时与无鉴权版本完全一致
+_model_modules = [f"models.{module}" for module in __import__("models").__all__]
+if settings.AUTH_ENABLED:
+    _model_modules.append("auth.models")
+
 tortoise_config = {
     "connections": {"default": settings.DATABASE_URL},
     "apps": {
         "models": {
-            "models": [f"models.{module}" for module in __import__("models").__all__],
+            "models": _model_modules,
             "default_connection": "default",
         }
     },
@@ -57,8 +62,16 @@ async def lifespan(_: FastAPI):
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
     await ensure_usage_record_schema()
+    # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
+    await ensure_shared_team_columns()
     await ensure_media_library_seed_data()
     await ensure_model_config_seed_data()
+    if settings.AUTH_ENABLED:
+        from auth.bootstrap import ensure_super_admin
+        from services.schema_compat import ensure_team_schema
+
+        await ensure_team_schema()
+        await ensure_super_admin()
     try:
         yield
     finally:
@@ -85,6 +98,21 @@ app.add_exception_handler(Exception, global_exception_handler)
 
 
 app.include_router(api_router, prefix="/api")
+
+# 状态探测路由在两种模式下都注册，前端据此渲染登录 UI 或保持无鉴权体验
+from auth.api import public_router as auth_public_router
+
+app.include_router(auth_public_router, prefix="/api/auth", tags=["认证与会话"])
+
+# AUTH_ENABLED=true 时注册鉴权路由；关闭时不存在任何登录接口
+if settings.AUTH_ENABLED:
+    from auth.api import router as auth_router
+    from api.team import router as team_router
+    from api.user import router as user_router
+
+    app.include_router(auth_router, prefix="/api/auth", tags=["认证与会话"])
+    app.include_router(team_router, prefix="/api/team", tags=["团队与余额"])
+    app.include_router(user_router, prefix="/api/users", tags=["用户管理"])
 
 # 注册 AI 任务处理器
 ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
