@@ -38,12 +38,18 @@ export function setActiveTeamId(teamId: number | null): void {
   else localStorage.setItem(ACTIVE_TEAM_KEY, String(teamId))
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+/** 鉴权请求头（不含 Content-Type）：JSON 请求额外补 Content-Type，FormData 上传不设。 */
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
   const token = getAuthToken()
   if (token) headers.Authorization = `Bearer ${token}`
   const teamId = getActiveTeamId()
   if (teamId !== null) headers['X-Team-Id'] = String(teamId)
+  return headers
+}
+
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
   const response = await fetch(BASE + url, { headers, ...options })
   const payload = await response.json()
   if (!response.ok || payload.code !== 0) {
@@ -167,9 +173,15 @@ export const api = {
     const data = new FormData()
     data.append('model_config_id', String(modelConfigId))
     data.append('file', file)
-    const response = await fetch(`${BASE}/video/reference/upload`, { method: 'POST', body: data })
+    const response = await fetch(`${BASE}/video/reference/upload`, { method: 'POST', body: data, headers: authHeaders() })
     const payload = await response.json()
-    if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || '参考素材上传失败')
+    if (!response.ok || payload.code !== 0) {
+      if (payload.code === 401) {
+        clearAuthToken()
+        redirectToLogin()
+      }
+      throw new Error(payload.message || payload.detail || '参考素材上传失败')
+    }
     return payload.data as VideoReferenceMedia
   },
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
@@ -196,9 +208,15 @@ export const api = {
   billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
   async upload(file: File) {
     const data = new FormData(); data.append('files', file)
-    const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data })
+    const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data, headers: authHeaders() })
     const payload = await response.json()
-    if (!response.ok || payload.code !== 0) throw new Error(payload.message || '上传失败')
+    if (!response.ok || payload.code !== 0) {
+      if (payload.code === 401) {
+        clearAuthToken()
+        redirectToLogin()
+      }
+      throw new Error(payload.message || '上传失败')
+    }
     return payload.data.files[0] as {
       filename: string
       original_filename: string
