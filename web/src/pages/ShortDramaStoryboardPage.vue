@@ -46,6 +46,7 @@ import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
 import { buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { analysisGate } from '@/shared/analysisGate'
+import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { Asset, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
@@ -821,13 +822,17 @@ async function createManualScene(chapterId = activeChapterId.value) {
   if (!chapter) return
   const created = (await api.createScene({
     chapter_id: chapterId,
-    sequence: 1,
+    sequence: nextManualSceneSequence(scenes.value),
     description: stripChapterOrdinal(chapter.name) || '新分镜',
     prompt: '',
     duration: 6,
   })).data
   if (activeChapterId.value !== chapterId) return
-  scenes.value = [created]
+  if (!scenes.value.length) {
+    scenes.value = [created]
+  } else {
+    scenes.value = [...scenes.value, created]
+  }
   activeSceneId.value = created.id
   videos.value[created.id] = []
   initializeSceneDrafts([created])
@@ -1480,12 +1485,14 @@ onBeforeUnmount(() => {
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModel" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
+            <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" @click="createManualScene()"><Plus :size="15" />创建分镜</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? '批量生成中' : '批量生视频' }}</AppButton>
           </div>
         </header>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
+        <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>从第一个分镜开始，逐步搭建你的镜头列表。</p><AppButton variant="primary" size="sm" @click="createManualScene()"><Plus :size="15" />创建第一个分镜</AppButton></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>
