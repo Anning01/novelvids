@@ -53,3 +53,36 @@ it('does not redirect when login itself returns 401', async () => {
   expect(window.location.hash).toBe('#/projects')
   expect(clearAuthToken()).toBeUndefined()
 })
+
+
+it('attaches bearer token and team header to uploads', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 0, message: 'ok',
+    data: { total: 1, files: [{ filename: 'a.txt', original_filename: 'a.txt', content_type: 'text/plain', file_path: '/media/a.txt', text_content: '', chapter_validation: null, message: 'ok' }] },
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+  setAuthToken('up-token')
+  localStorage.setItem('novelvids_active_team', '7')
+
+  const file = new File(['hello'], 'a.txt', { type: 'text/plain' })
+  await api.upload(file)
+
+  const [url, options] = fetchMock.mock.calls[0]
+  expect(url).toBe('/api/file/upload')
+  expect(options.headers.Authorization).toBe('Bearer up-token')
+  expect(options.headers['X-Team-Id']).toBe('7')
+  // FormData 上传不应设置 JSON Content-Type（交给浏览器自动带 boundary）
+  expect(options.headers['Content-Type']).toBeUndefined()
+})
+
+it('redirects to login when upload gets 401', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 401, message: '未登录', data: null,
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+  setAuthToken('stale-up-token')
+  window.location.hash = '#/projects'
+  await expect(api.upload(new File(['x'], 'x.txt'))).rejects.toThrow('未登录')
+  expect(getAuthToken()).toBeNull()
+  expect(window.location.hash).toBe('#/login')
+})
