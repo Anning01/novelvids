@@ -841,6 +841,8 @@ async function createManualScene(chapterId = activeChapterId.value) {
     videos.value[created.id] = []
     initializeSceneDrafts([created])
     void nextTick(setupSceneTracking)
+    // 人工模式创建分镜后切到故事板视图，直接展示空白分镜操作框
+    if (workspaceView.value === 'workflow') selectWorkspaceView('storyboard')
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
