@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -123,6 +123,8 @@ export const api = {
   deleteUser: (id: number) => request<SingleResponse<null>>(`/users/${id}`, { method: 'DELETE' }),
   novels: () => request<PaginationResponse<Novel>>('/novel?page=1&page_size=100'),
   novel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}`),
+  novelMeta: (id: number) => request<SingleResponse<NovelMeta>>(`/novel/${id}/meta`),
+  chaptersPage: (novelId: number, page = 1, pageSize = 30) => request<PaginationResponse<Chapter>>(`/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`),
   createNovel: (data: Partial<Novel>) => request<SingleResponse<Novel>>('/novel', { method: 'POST', body: JSON.stringify(data) }),
   updateNovel: (id: number, data: Partial<Novel>) => request<SingleResponse<Novel>>(`/novel/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteNovel: (id: number) => request<SingleResponse<null>>(`/novel/${id}`, { method: 'DELETE' }),

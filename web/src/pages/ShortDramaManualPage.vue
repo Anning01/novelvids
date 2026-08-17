@@ -178,7 +178,7 @@ async function loadProject(chapterId = selectedChapterId.value) {
   loading.value = true
   try {
     const [projectResponse, chapterListResponse] = await Promise.all([
-      api.novel(projectId.value),
+      api.novelMeta(projectId.value),
       api.chapters(projectId.value),
     ])
     chapters.value = chapterListResponse.data.items

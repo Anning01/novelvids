@@ -18,6 +18,23 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
+    async def meta(self, novel_id: int) -> dict:
+        """轻量元信息：不返回书稿正文，节约流量。"""
+        novel = await self.get(novel_id)
+        return {
+            "id": novel.id,
+            "name": novel.name,
+            "author": novel.author,
+            "description": novel.description,
+            "cover": novel.cover,
+            "total_chapters": novel.total_chapters,
+            "tags": novel.tags,
+            "style_key": getattr(novel, "style_key", None),
+            "content_length": len(novel.content or ""),
+            "created_at": novel.created_at,
+            "updated_at": novel.updated_at,
+        }
+
     def __init__(self):
         super().__init__(model=Novel)
 

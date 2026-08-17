@@ -57,6 +57,17 @@ class NovelPatch(NovelFullProperties):
 
 # --- 输出 Schema (Out-bound) ---
 
+class NovelMetaOut(NovelProperties, BaseResponse):
+    """轻量元信息：不含书稿正文，供剧本/分镜页面入口使用。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tags: Optional[list[str]] = Field(None, description="项目标签")
+    style_key: Optional[str] = Field(None, description="视觉风格 key", max_length=64)
+    content_length: int = Field(0, description="书稿正文字符数（校验拆分质量用）")
+
+
 class NovelBriefOut(NovelProperties, BaseResponse):
     """
     列表输出：仅返回简要信息，提升加载速度。
