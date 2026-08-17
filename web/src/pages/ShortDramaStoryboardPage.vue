@@ -128,6 +128,7 @@ const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
 const waitingAnalysis = ref(false)
+const creatingManualScene = ref(false)
 
 async function waitForAnalysisThenGenerate(chapterId: number) {
   const loadVersion = chapterLoadVersion
@@ -818,25 +819,33 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
 }
 
 async function createManualScene(chapterId = activeChapterId.value) {
+  if (creatingManualScene.value) return
   const chapter = chapters.value.find(item => item.id === chapterId)
   if (!chapter) return
-  const created = (await api.createScene({
-    chapter_id: chapterId,
-    sequence: nextManualSceneSequence(scenes.value),
-    description: stripChapterOrdinal(chapter.name) || '新分镜',
-    prompt: '',
-    duration: 6,
-  })).data
-  if (activeChapterId.value !== chapterId) return
-  if (!scenes.value.length) {
-    scenes.value = [created]
-  } else {
-    scenes.value = [...scenes.value, created]
+  creatingManualScene.value = true
+  try {
+    const created = (await api.createScene({
+      chapter_id: chapterId,
+      sequence: nextManualSceneSequence(scenes.value),
+      description: stripChapterOrdinal(chapter.name) || '新分镜',
+      prompt: '',
+      duration: 6,
+    })).data
+    if (activeChapterId.value !== chapterId) return
+    if (!scenes.value.length) {
+      scenes.value = [created]
+    } else {
+      scenes.value = [...scenes.value, created]
+    }
+    activeSceneId.value = created.id
+    videos.value[created.id] = []
+    initializeSceneDrafts([created])
+    void nextTick(setupSceneTracking)
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    creatingManualScene.value = false
   }
-  activeSceneId.value = created.id
-  videos.value[created.id] = []
-  initializeSceneDrafts([created])
-  void nextTick(setupSceneTracking)
 }
 
 async function generateChapterStoryboard(chapterId: number) {
@@ -1485,14 +1494,14 @@ onBeforeUnmount(() => {
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModel" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
-            <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" @click="createManualScene()"><Plus :size="15" />创建分镜</AppButton>
+            <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建分镜" }}</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? '批量生成中' : '批量生视频' }}</AppButton>
           </div>
         </header>
 
-        <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
+        <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
-        <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>从第一个分镜开始，逐步搭建你的镜头列表。</p><AppButton variant="primary" size="sm" @click="createManualScene()"><Plus :size="15" />创建第一个分镜</AppButton></div>
+        <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>从第一个分镜开始，逐步搭建你的镜头列表。</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建第一个分镜" }}</AppButton></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>
@@ -1709,7 +1718,7 @@ onBeforeUnmount(() => {
 .storyboard-page.is-workflow-view .workspace-view-switch button:focus-visible { outline-color: rgb(169 149 255 / 34%); }
 .workflow-canvas-shell { width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #151412; }
 .storyboard-state { display: grid; min-height: calc(100vh - 210px); place-items: center; align-content: center; gap: 8px; color: #686ef1; text-align: center; }
-.storyboard-state svg { animation: spin 1s linear infinite; }
+.storyboard-state__spinner { animation: spin 1s linear infinite; }
 .storyboard-state strong { color: #454a59; font-size: 14px; }
 .storyboard-state p { max-width: 460px; margin: 0; color: #9297a6; font-size: 11px; }
 .storyboard-state.is-error svg { color: #bf6470; animation: none; }
