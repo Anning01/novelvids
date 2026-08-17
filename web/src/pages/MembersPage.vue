@@ -26,6 +26,10 @@ const teamId = computed<number | undefined>(() => {
   if (auth.role === 'super') return selectedTeamId.value ?? undefined
   return auth.membership?.team_id
 })
+function isSelf(member: MemberItem) {
+  return auth.user !== null && member.user_id === auth.user.id
+}
+
 const money = (value: number | string | null | undefined) => {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) ? parsed.toFixed(2) : '0.00'
@@ -200,10 +204,10 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr v-for="member in members" :key="member.user_id" :class="{ 'is-disabled': member.status !== 1 }">
-            <td>{{ member.username }}</td>
+            <td>{{ member.username }}<span v-if="isSelf(member)" class="self-mark">本人</span></td>
             <td>{{ member.nickname || '—' }}</td>
             <td>
-              <select :value="member.role" @change="member.role = ($event.target as HTMLSelectElement).value as TeamRole; changeRole(member)">
+              <select :value="member.role" :disabled="isSelf(member)" @change="member.role = ($event.target as HTMLSelectElement).value as TeamRole; changeRole(member)">
                 <option value="admin">团队管理员</option>
                 <option value="creator">创作者</option>
                 <option value="viewer">查看者</option>
@@ -217,10 +221,15 @@ onMounted(async () => {
             <td class="cost">{{ money(member.total_cost) }}</td>
             <td>{{ member.cost_limit === null || member.cost_limit === undefined ? '不限' : money(member.cost_limit) }}</td>
             <td class="actions">
-              <button type="button" class="ghost-button" @click="toggleStatus(member)">{{ member.status === 1 ? '禁用' : '启用' }}</button>
-              <button type="button" class="ghost-button" @click="setLimit(member)">限额</button>
-              <button type="button" class="ghost-button" @click="resetPassword(member)">重置密码</button>
-              <button type="button" class="danger-button" @click="removeMember(member)">移除</button>
+              <template v-if="isSelf(member)">
+                <span class="dim">不可操作本人</span>
+              </template>
+              <template v-else>
+                <button type="button" class="ghost-button" @click="toggleStatus(member)">{{ member.status === 1 ? '禁用' : '启用' }}</button>
+                <button type="button" class="ghost-button" @click="setLimit(member)">限额</button>
+                <button type="button" class="ghost-button" @click="resetPassword(member)">重置密码</button>
+                <button type="button" class="danger-button" @click="removeMember(member)">移除</button>
+              </template>
             </td>
           </tr>
         </tbody>
@@ -259,6 +268,7 @@ onMounted(async () => {
 .member-table th, .member-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--app-border, #e3e5ec); }
 .member-table .actions { text-align: right; white-space: nowrap; }
 .member-table .cost { font-variant-numeric: tabular-nums; }
+.self-mark { margin-left: 6px; padding: 1px 6px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; font-weight: 600; }
 .is-disabled { opacity: 0.55; }
 .status-badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
 .status-badge.is-active { background: var(--app-success-soft, rgba(16, 185, 129, 0.12)); color: var(--app-success, #059669); }
