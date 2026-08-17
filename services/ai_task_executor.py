@@ -39,6 +39,15 @@ class BaseTaskHandler(abc.ABC):
         """
 
 
+# 由执行器负责的任务类型（视频任务走外部轮询，不在此列）
+EXECUTOR_TASK_TYPES = (
+    AiTaskTypeEnum.extraction,
+    AiTaskTypeEnum.reference_image,
+    AiTaskTypeEnum.storyboard,
+    AiTaskTypeEnum.project_analysis,
+)
+
+
 class AiTaskExecutor:
     """AI 任务执行器 - 调度并执行 AI 任务。"""
 
@@ -159,14 +168,43 @@ class AiTaskExecutor:
         )
         await record_ai_task_usage(task, result=result, error=None)
 
-    async def _fail(self, task: AiTask, error_message: str, error: Exception | None = None):
+    async def fail_stale_on_boot(self) -> None:
+        """服务启动时清理进程遗留任务。
+
+        BackgroundTask 随进程消亡，重启前提交的 pending/running 任务不再有
+        执行者，会永远卡住并阻塞后续同类任务（去重逻辑），因此启动即标记失败。
+        不计费：这些任务没有任何实际调用发生。
+        """
+        stale = await AiTask.filter(
+            task_type__in=[task_type.value for task_type in EXECUTOR_TASK_TYPES],
+            status__in=[
+                TaskStatusEnum.pending.value,
+                TaskStatusEnum.running.value,
+            ],
+        )
+        for task in stale:
+            logger.warning("Boot cleanup: failing stale task #%s", task.id)
+            await self._fail(
+                task,
+                "服务重启导致任务中断，请重新发起",
+                record_usage=False,
+            )
+
+    async def _fail(
+        self,
+        task: AiTask,
+        error_message: str,
+        error: Exception | None = None,
+        record_usage: bool = True,
+    ):
         task.status = TaskStatusEnum.failed.value
         task.error_message = error_message
         task.finished_at = datetime.now(timezone.utc)
         await task.save(
             update_fields=["status", "error_message", "finished_at", "updated_at"]
         )
-        await record_ai_task_usage(task, result=None, error=error)
+        if record_usage:
+            await record_ai_task_usage(task, result=None, error=error)
 
 
 # 全局单例，在应用启动时注册各 handler
