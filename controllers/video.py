@@ -496,7 +496,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         team_id=metadata.get("team_id"),
                         user_id=metadata.get("user_id"),
                     )
-                    await self._consume_balance(record, metadata.get("team_id"))
+                    await self._consume_balance(record, metadata.get("team_id"), user_id=metadata.get("user_id"))
                 elif new_status in (TaskStatusEnum.failed.value, TaskStatusEnum.cancelled.value):
                     record = await billing_recorder.record_video(
                         novel_id=metadata.get("novel_id"),
@@ -511,7 +511,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         team_id=metadata.get("team_id"),
                         user_id=metadata.get("user_id"),
                     )
-                    await self._consume_balance(record, metadata.get("team_id"))
+                    await self._consume_balance(record, metadata.get("team_id"), user_id=metadata.get("user_id"))
         except Exception:
             logger.exception("billing record failed for video %s", video.id)
 
@@ -519,12 +519,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
         return video
 
     @staticmethod
-    async def _consume_balance(record, team_id) -> None:
+    async def _consume_balance(record, team_id, user_id=None) -> None:
         if record is None or team_id is None:
             return
-        from services.balance import consume
+        from services.balance import accumulate_member_cost, consume
 
-        await consume(team_id, record.cost, usage_record_id=record.id)
+        # 团队自己的 Key 不扣团队余额；成员累计消耗照记
+        if record.cost_source != "team_key":
+            await consume(team_id, record.cost, usage_record_id=record.id)
+        await accumulate_member_cost(team_id, user_id, record.cost)
 
     async def remove(self, video_id: int) -> None:
         instance = await self.get(video_id)

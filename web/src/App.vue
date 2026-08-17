@@ -46,6 +46,19 @@ const adminItems = computed(() => {
 })
 const userLabel = computed(() => auth.user?.nickname || auth.user?.username || '')
 const avatarText = computed(() => userLabel.value.slice(0, 1).toUpperCase())
+const money = (value: number | string | null | undefined) => {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : '0.00'
+}
+// 左下角消费信息：管理员显示团队余额；成员显示自己的限额，不限则显示团队余额；超管不显示
+const walletLabel = computed(() => {
+  if (auth.enabled !== true || !auth.isLoggedIn || auth.role === 'super') return ''
+  const membership = auth.membership
+  if (!membership) return ''
+  if (auth.role === 'admin') return `余额 ¥${money(membership.team_balance)}`
+  if (membership.cost_limit !== null && membership.cost_limit !== undefined) return `限额 ¥${money(membership.cost_limit)}`
+  return `余额 ¥${money(membership.team_balance)}`
+})
 function handleTeamSwitch(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
   if (!value || value === auth.activeTeamId) return
@@ -118,7 +131,10 @@ function handleTeamSwitch(event: Event) {
         :title="`用户中心：${userLabel}`"
       >
         <span class="app-user-avatar">{{ avatarText }}</span>
-        <span class="app-user-name">{{ userLabel }}</span>
+        <span class="app-user-copy">
+          <span class="app-user-name">{{ userLabel }}</span>
+          <small v-if="walletLabel" class="app-user-wallet">{{ walletLabel }}</small>
+        </span>
       </RouterLink>
       <AppThemeToggle v-if="!isWorkflowSurface" placement="sidebar" />
     </aside>
@@ -181,8 +197,8 @@ function handleTeamSwitch(event: Event) {
   font-size: 13px;
   font-weight: 700;
 }
+.app-user-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
 .app-user-name {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -190,4 +206,5 @@ function handleTeamSwitch(event: Event) {
   font-size: 13px;
   font-weight: 600;
 }
+.app-user-wallet { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--app-text-muted, #9398a8); font-variant-numeric: tabular-nums; }
 </style>

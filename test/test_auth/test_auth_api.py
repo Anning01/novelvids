@@ -165,6 +165,8 @@ async def test_me_includes_membership(client: AsyncClient):
     assert data["memberships"][0]["team_id"] == team.id
     assert data["memberships"][0]["team_name"] == "测试团队"
     assert data["memberships"][0]["role"] == "creator"
+    assert data["memberships"][0]["cost_limit"] is None
+    assert data["memberships"][0]["team_balance"] == 0.0
 
 
 @pytest.mark.asyncio

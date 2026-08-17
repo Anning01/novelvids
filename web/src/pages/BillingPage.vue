@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Activity, Clapperboard, Coins, Image, Type } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import { api, statusLabel } from '@/api'
+import { useAuthStore } from '@/features/auth/authStore'
 import { notice } from '@/shared/notice'
 import type { BillingProject, BillingRecord, BillingSummary } from '@/types'
 
@@ -14,6 +15,13 @@ const loading = ref(true)
 const page = ref(1)
 const pageSize = ref(20)
 const selectedProjectId = ref('all')
+const auth = useAuthStore()
+const showSourceColumn = computed(() => auth.enabled === true)
+function costSourceLabel(source?: string) {
+  if (source === 'team_key') return '团队 Key'
+  if (source === 'balance') return '团队余额'
+  return '平台'
+}
 
 const billingTypeLabel = (value: string) => ({ text: '文本', image: '生图', video: '视频' }[value] || value)
 const taskTypeLabel = (value: number) => ({ 1: '提取', 2: '参考图', 3: '分镜', 4: '视频', 5: '项目分析' }[value] || `任务 ${value}`)
@@ -192,6 +200,7 @@ onMounted(load)
               <th>用量</th>
               <th>时长</th>
               <th>状态</th>
+              <th v-if="showSourceColumn">来源</th>
               <th class="is-num">成本</th>
             </tr>
           </thead>
@@ -205,9 +214,12 @@ onMounted(load)
               <td class="cell-muted">{{ usageLabel(item) }}</td>
               <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
               <td>{{ statusLabel(item.status) }}</td>
+              <td v-if="showSourceColumn">
+                <span class="source-badge" :class="item.cost_source === 'team_key' ? 'is-key' : 'is-balance'">{{ costSourceLabel(item.cost_source) }}</span>
+              </td>
               <td class="is-num cell-mono">{{ money(item.cost) }}</td>
             </tr>
-            <tr v-if="!records.length"><td colspan="9" class="empty">暂无调用记录</td></tr>
+            <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">暂无调用记录</td></tr>
           </tbody>
         </table>
         <footer v-if="totalRecords > 0" class="pager">
@@ -272,6 +284,9 @@ onMounted(load)
 .data-table .cell-mono { font-variant-numeric: tabular-nums; }
 .data-table .empty { color: var(--app-text-muted); text-align: center; padding: 28px; }
 
+.source-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.source-badge.is-balance { color: var(--app-accent); background: var(--app-accent-soft); }
+.source-badge.is-key { color: #059669; background: rgb(16 185 129 / 12%); }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 16px; }
 .pager-total { color: var(--app-text-muted); font-size: 11px; }
 .pager-controls { display: flex; align-items: center; gap: 10px; }

@@ -138,6 +138,11 @@ async def ensure_shared_team_columns() -> None:
             statements.append("ALTER TABLE model_usage_records ADD COLUMN team_id INT;")
         if "user_id" not in existing:
             statements.append("ALTER TABLE model_usage_records ADD COLUMN user_id INT;")
+        if "cost_source" not in existing:
+            statements.append(
+                "ALTER TABLE model_usage_records ADD COLUMN cost_source VARCHAR(16) "
+                "NOT NULL DEFAULT 'balance';"
+            )
         if statements:
             await connection.execute_script("".join(statements))
 

@@ -153,6 +153,8 @@ export interface Membership {
   role: TeamRole
   status?: number
   total_cost?: number | string
+  cost_limit?: number | string | null
+  team_balance?: number | string | null
   joined_at?: string
 }
 
@@ -234,6 +236,9 @@ export interface BillingRecord {
   currency: string
   status: number
   duration_seconds?: number | null
+  cost_source?: 'balance' | 'team_key' | string
+  team_id?: number | null
+  user_id?: number | null
   created_at: string
   updated_at: string
 }
