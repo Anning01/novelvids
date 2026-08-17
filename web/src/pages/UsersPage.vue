@@ -195,9 +195,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.users-page { max-width: 1080px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; color: var(--app-text, #303442); background: var(--app-canvas, #f8f9fc); min-height: 100%; }
+.users-page { max-width: 1080px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; color: var(--app-text, #303442); background: var(--app-surface, #fff); min-height: 100%; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.page-header h1 { margin: 0; font-size: 22px; }
+.page-header h1 { margin: 0; font-size: 22px; color: var(--app-text, #303442); }
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .stat-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border: 1px solid var(--app-border, #e3e5ec); border-radius: 12px; background: var(--app-surface, #fff); box-shadow: var(--app-shadow, 0 12px 34px rgb(37 41 57 / 7%)); }
 .stat-label { font-size: 12px; color: var(--app-text-muted, #9398a8); }

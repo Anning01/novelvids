@@ -119,7 +119,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.profile-page { max-width: 760px; margin: 0 auto; padding: 28px 24px 60px; display: flex; flex-direction: column; gap: 18px; min-height: 100%; color: var(--app-text, #303442); background: var(--app-canvas, #f8f9fc); }
+.profile-page { max-width: 760px; margin: 0 auto; padding: 28px 24px 60px; display: flex; flex-direction: column; gap: 18px; min-height: 100%; color: var(--app-text, #303442); background: var(--app-surface, #fff); }
 .profile-header { display: flex; align-items: center; gap: 14px; }
 .profile-avatar { display: flex; width: 56px; height: 56px; align-items: center; justify-content: center; border-radius: 16px; color: #fff; background: var(--app-accent, #5b5cf6); font-size: 22px; font-weight: 700; }
 .profile-identity h1 { margin: 0; font-size: 20px; color: var(--app-text, #303442); }
