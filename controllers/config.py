@@ -275,6 +275,12 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             })
         return result
 
+    async def list_visual_styles(self) -> list[dict]:
+        """视觉风格清单（prompts/styles.py 注册表为唯一事实来源）。"""
+        from prompts.styles import list_styles
+
+        return list_styles()
+
     async def list_generation_capabilities(self) -> dict:
         return {
             "image": {

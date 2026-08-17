@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowRight,
@@ -30,7 +30,8 @@ interface VisualStyle {
 
 const aspectRatios = ['16:9', '4:3', '3:4', '9:16', '21:9']
 const resolutions = ['480p', '720p', '1080p', '4K']
-const visualStyles: VisualStyle[] = [
+// 本地缩略图与回退列表；后端 /api/config/visual-styles 是风格唯一事实来源
+const localVisualStyles: VisualStyle[] = [
   { value: 'realistic-general', label: '写实通用', image: '/style-thumbnails/realistic-general.png' },
   { value: 'realistic-urban', label: '写实都市', image: '/style-thumbnails/realistic-urban.png' },
   { value: 'realistic-cinematic', label: '写实电影感', image: '/style-thumbnails/realistic-cinematic.png' },
@@ -48,6 +49,7 @@ const visualStyles: VisualStyle[] = [
   { value: 'custom', label: '自定义风格', separator: true },
 ]
 
+const visualStyles = ref<VisualStyle[]>(localVisualStyles)
 const fileInput = ref<HTMLInputElement | null>(null)
 const router = useRouter()
 const selectedFile = ref<File | null>(null)
@@ -59,12 +61,30 @@ const styleId = ref('realistic-general')
 const customPrompt = ref('')
 const creating = ref(false)
 
-const selectedStyle = computed(() => visualStyles.find(item => item.value === styleId.value) ?? visualStyles[0])
+const selectedStyle = computed(() => visualStyles.value.find(item => item.value === styleId.value) ?? visualStyles.value[0])
 const isAgentMode = computed(() => mode.value === 'agent')
 const formattedFileSize = computed(() => {
   if (!selectedFile.value) return ''
   const megabytes = selectedFile.value.size / 1024 / 1024
   return megabytes >= 1 ? `${megabytes.toFixed(1)} MB` : `${Math.max(1, Math.round(selectedFile.value.size / 1024))} KB`
+})
+
+onMounted(async () => {
+  try {
+    const response = await api.visualStyles()
+    const thumbnails = new Map(localVisualStyles.map(item => [item.value, item.image]))
+    const merged: VisualStyle[] = response.data.map(item => ({
+      value: item.key,
+      label: item.label,
+      image: thumbnails.get(item.key),
+    }))
+    merged.push({ value: 'custom', label: '自定义风格', separator: true })
+    visualStyles.value = merged
+    // 若当前选中风格已被后端移除，回退到第一项
+    if (!merged.some(item => item.value === styleId.value)) styleId.value = merged[0].value
+  } catch {
+    // 拉取失败时静默使用本地列表
+  }
 })
 
 function chooseFile() {
@@ -129,6 +149,7 @@ async function createProject() {
         author: 'Agent 创建',
         description: `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label} · 源剧本：${uploaded.filename}`,
         content: textContent,
+        style_key: styleId.value,
       })
       try {
         await api.splitNovel(response.data.id)
@@ -142,6 +163,7 @@ async function createProject() {
         aspectRatio: aspectRatio.value,
         resolution: resolution.value,
         style: selectedStyle.value.label,
+        styleKey: styleId.value,
         fileName: selectedFile.value.name,
         sourcePath: uploaded.file_path,
       }))
@@ -161,6 +183,7 @@ async function createProject() {
       author: '人工创建',
       description: `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label}${styleId.value === 'custom' ? ` · ${customPrompt.value.trim()}` : ''}`,
       content: '',
+      style_key: styleId.value,
     })
     sessionStorage.setItem('short-drama-manual-project', JSON.stringify({
       projectId: response.data.id,
@@ -168,6 +191,7 @@ async function createProject() {
       aspectRatio: aspectRatio.value,
       resolution: resolution.value,
       style: selectedStyle.value.label,
+      styleKey: styleId.value,
     }))
     notice.success('人工短剧项目已创建，正在进入设定工作区')
     await router.push({ name: 'short-drama-manual', params: { projectId: response.data.id } })

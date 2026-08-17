@@ -43,6 +43,11 @@ class Novel(AbstractBaseModel):
         null=True,
         description="分镜策略说明",
     )
+    style_key = fields.CharField(
+        max_length=64,
+        null=True,
+        description="视觉风格 key（prompts/styles.py 注册表）",
+    )
     team_id = fields.IntField(
         null=True,
         db_index=True,

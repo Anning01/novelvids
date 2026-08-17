@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from controllers.config import ai_model_config_controller
 from config import settings
+from models.novel import Novel
 from models.scene import Scene
 from models.chapter import Chapter
 from models.video import Video
@@ -31,6 +32,7 @@ from services.video.reference_media import (
     select_referenced_media,
     verify_local_reference,
 )
+from prompts.styles import video_style_suffix
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
@@ -81,6 +83,19 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
         temporary.unlink(missing_ok=True)
         raise
     return f"/media/video-references/{destination.name}"
+
+
+def _compose_video_prompt(
+    scene_prompt: str,
+    referenced_media,
+    style_key: str | None,
+) -> str:
+    """组合视频生成提示词：分镜提示词 + 参考素材提及 + 风格定调。"""
+    prompt = render_reference_mentions(scene_prompt, referenced_media)
+    style_suffix = video_style_suffix(style_key)
+    if style_suffix:
+        prompt = f"{prompt}\n\n{style_suffix}".strip()
+    return prompt
 
 
 async def _next_scene(scene: Scene) -> Scene | None:
@@ -241,7 +256,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
         reference_video_duration = 0.0
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
-        provider_prompt = render_reference_mentions(prompt, referenced_media)
+        novel = await Novel.get_or_none(id=novel_id)
+        provider_prompt = _compose_video_prompt(
+            prompt, referenced_media, novel.style_key if novel else None
+        )
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
             scene.id,

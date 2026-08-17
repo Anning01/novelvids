@@ -12,6 +12,7 @@ from config import settings
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from services.ai_task_executor import BaseTaskHandler
+from prompts.styles import image_style_suffix
 from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
 
@@ -131,6 +132,10 @@ class AssetReferenceHandler(BaseTaskHandler):
         if variant_id is not None:
             variant = await AssetVariant.get(id=variant_id, asset_id=asset_id)
 
+        # 项目视觉风格 → 生图提示词定调（未知/未设置风格不注入）
+        novel = await asset.novel
+        style_prompt = image_style_suffix(novel.style_key if novel else None)
+
         # 构造生成所需的数据
         try:
             asset_type_enum = AssetTypeEnum(asset.asset_type)
@@ -198,6 +203,7 @@ class AssetReferenceHandler(BaseTaskHandler):
                 output_format=output_format,
                 quality=quality,
                 prompt_language=prompt_language,
+                style_prompt=style_prompt,
             )
 
             result_urls = []

@@ -22,12 +22,15 @@ async def generate_for_sora_consistency(
     output_format="png",
     quality=None,
     prompt_language="en",
+    style_prompt="",
 ):
     """Execute a reference-image generation task with optional image references."""
     final_prompt = build_sora_compatible_prompt(
         {**data, "aspect_ratio": aspect_ratio},
         prompt_language,
     )
+    if style_prompt:
+        final_prompt = f"{final_prompt}\n\n{style_prompt}".strip()
 
     extra_body = {}
 

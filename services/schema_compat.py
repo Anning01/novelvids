@@ -94,6 +94,7 @@ async def ensure_novel_analysis_schema() -> None:
         "project_setting": "TEXT",
         "storyboard_strategy": "VARCHAR(120)",
         "storyboard_setting": "TEXT",
+        "style_key": "VARCHAR(64)",
     }
     statements = [
         f"ALTER TABLE novels ADD COLUMN {name} {definition};"

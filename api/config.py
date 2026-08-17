@@ -112,6 +112,15 @@ async def get_generation_capabilities(_: AuthContext = _LOGGED_IN):
     return ResponseSchema(data=await ai_model_config_controller.list_generation_capabilities())
 
 
+@router.get(
+    "/visual-styles",
+    summary="获取视觉风格清单（生图/生视频提示词注册表）",
+    response_model=ResponseSchema,
+)
+async def get_visual_styles(_: AuthContext = _LOGGED_IN):
+    return ResponseSchema(data=await ai_model_config_controller.list_visual_styles())
+
+
 @router.post("", summary="创建模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def create_config(config: AiModelConfigCreate, ctx: AuthContext = _ADMIN):
     # 超管（team_id=None）创建官方配置；团队管理员创建本团队自定义配置
