@@ -75,7 +75,9 @@ class AliyunProvider(OSSProvider):
         ).decode("ascii")
         signature = _hmac_sign(self.access_key_secret, policy_b64)
         return {
-            "url": f"https://{self.endpoint}/{self.bucket}",
+            # 直传必须使用 Bucket 虚拟主机域名（路径式已不再支持，POST 到
+            # https://{bucket}.{endpoint}），CNAME 域名不支持 POST 表单上传。
+            "url": f"https://{self.bucket}.{self.endpoint}",
             "fields": {
                 "OSSAccessKeyId": self.access_key_id,
                 "policy": policy_b64,
@@ -96,7 +98,9 @@ class AliyunProvider(OSSProvider):
         return date, f"OSS {self.access_key_id}:{signature}"
 
     def _internal_url(self, key: str) -> str:
-        return f"https://{self.internal_endpoint}/{self.bucket}/{key}"
+        # 内网 endpoint 同样使用 Bucket 虚拟主机域名：
+        # https://{bucket}.{internal_endpoint}/{key}
+        return f"https://{self.bucket}.{self.internal_endpoint}/{key}"
 
     async def get_bytes(self, key: str) -> bytes:
         date, authorization = self._authorization("GET", key)
