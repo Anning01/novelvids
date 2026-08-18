@@ -818,20 +818,44 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   })
 }
 
+async function ensureFirstChapter() {
+  // 人工项目可能尚未创建任何章节：先建「第一章」，保证分镜有归属
+  const created = (await api.createChapter({
+    novel_id: projectId.value,
+    number: 1,
+    name: '第一章',
+    content: '',
+  })).data
+  chapters.value = [created]
+  return created
+}
+
 async function createManualScene(chapterId = activeChapterId.value) {
   if (creatingManualScene.value) return
-  const chapter = chapters.value.find(item => item.id === chapterId)
-  if (!chapter) return
   creatingManualScene.value = true
+  let chapter = chapterId
+    ? chapters.value.find(item => item.id === chapterId)
+    : chapters.value[0]
+  if (!chapter) {
+    try {
+      chapter = await ensureFirstChapter()
+    } catch (error) {
+      notice.error((error as Error).message)
+      creatingManualScene.value = false
+      return
+    }
+    activeChapterId.value = chapter.id
+    activeChapter.value = chapter
+  }
   try {
     const created = (await api.createScene({
-      chapter_id: chapterId,
+      chapter_id: chapter.id,
       sequence: nextManualSceneSequence(scenes.value),
       description: stripChapterOrdinal(chapter.name) || '新分镜',
       prompt: '',
       duration: 6,
     })).data
-    if (activeChapterId.value !== chapterId) return
+    if (activeChapterId.value !== chapter.id) return
     if (!scenes.value.length) {
       scenes.value = [created]
     } else {
