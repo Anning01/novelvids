@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
+from pydantic import BaseModel, Field
+
 from auth.deps import (
     AuthContext,
     get_auth_context,
@@ -48,6 +50,41 @@ async def generate_video(
         user_id=ctx.user.id if ctx.user else None,
     )
     return ResponseSchema(data=video)
+
+
+class VideoReferenceOssFinalizeIn(BaseModel):
+    model_config_id: int = Field(ge=1)
+    key: str = Field(min_length=1, max_length=500)
+    filename: str = Field(min_length=1, max_length=255)
+
+
+@router.post("/reference/oss-finalize", summary="OSS 直传后登记视频参考素材（不再经过服务器）")
+async def finalize_video_reference_oss(
+    payload: VideoReferenceOssFinalizeIn,
+    _: AuthContext = _EDITOR,
+):
+    from services.oss import oss
+    from services.video.reference_media import media_kind_for_extension
+
+    if not oss.enabled:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail="未启用对象存储")
+    config = await ai_model_config_controller.get_active(
+        AiTaskTypeEnum.video.value,
+        payload.model_config_id,
+    )
+    capabilities = capabilities_for(config.video_model_type)
+    kind = media_kind_for_extension(payload.filename, capabilities)
+    url = oss.public_url(payload.key)
+    return ResponseSchema(
+        data={
+            "type": kind,
+            "url": url,
+            "name": payload.filename,
+            "content_type": payload.filename.rsplit(".", 1)[-1].lower(),
+        }
+    )
 
 
 @router.post("/reference/upload", summary="上传视频生成参考素材", response_model=ResponseSchema[VideoReferenceMedia])

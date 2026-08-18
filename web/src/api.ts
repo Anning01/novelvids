@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, OssFinalizeResult, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -173,6 +173,20 @@ export const api = {
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
   generateVideo: (sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean; return_last_frame?: boolean; reference_media?: VideoReferenceMedia[] } = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
   async uploadVideoReference(file: File, modelConfigId: number) {
+    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
+    if (policyResponse.data.direct) {
+      const policy = policyResponse.data
+      const form = new FormData()
+      Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, String(value)))
+      form.append('file', file)
+      const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
+      if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
+      const finalized = await request<SingleResponse<VideoReferenceMedia>>('/video/reference/oss-finalize', {
+        method: 'POST',
+        body: JSON.stringify({ model_config_id: modelConfigId, key: policy.key, filename: file.name }),
+      })
+      return finalized.data
+    }
     const data = new FormData()
     data.append('model_config_id', String(modelConfigId))
     data.append('file', file)
@@ -210,6 +224,30 @@ export const api = {
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
   billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
   async upload(file: File) {
+    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
+    if (policyResponse.data.direct) {
+      const policy = policyResponse.data
+      const form = new FormData()
+      Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, String(value)))
+      form.append('file', file)
+      const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
+      if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
+      const finalized = await request<SingleResponse<OssFinalizeResult>>('/file/oss-finalize', {
+        method: 'POST',
+        body: JSON.stringify({ key: policy.key, original_filename: file.name }),
+      })
+      return {
+        filename: finalized.data.filename,
+        original_filename: file.name,
+        content_type: file.type,
+        file_path: finalized.data.url,
+        text_content: finalized.data.text_content,
+        chapter_validation: finalized.data.chapter_validation,
+        message: '文件上传成功',
+        url: finalized.data.url,
+        key: finalized.data.key,
+      }
+    }
     const data = new FormData(); data.append('files', file)
     const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data, headers: authHeaders() })
     const payload = await response.json()
@@ -227,6 +265,8 @@ export const api = {
       file_path: string
       text_content?: string
       chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string }
+      url?: string
+      key?: string
     }
   },
 }
