@@ -142,13 +142,22 @@ novel.example.com {
 
 ```bash
 OSS_PROVIDER=aliyun
-OSS_BUCKET=your-bucket
-OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com          # 公网（直传与公网访问）
-OSS_INTERNAL_ENDPOINT=oss-cn-beijing-internal.aliyuncs.com  # 内网（服务端读写，同地域 ECS 免流量费）
+OSS_BUCKET=dramas-x
+# 填 Bucket 的地域 endpoint（不带 bucket 前缀，程序自动拼成虚拟主机域名）：
+OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com            # 公网（直传与公网访问）
+OSS_INTERNAL_ENDPOINT=oss-cn-guangzhou-internal.aliyuncs.com  # 内网（服务端读写，同地域 ECS 免流量费）
 OSS_ACCESS_KEY_ID=...
 OSS_ACCESS_KEY_SECRET=...
-OSS_PUBLIC_BASE=https://cdn.example.com           # 可选：CDN/自定义域名前缀，留空用 bucket.endpoint
+# 可选：CDN/自定义（CNAME）域名前缀，仅用于读访问；留空则用 https://{bucket}.{endpoint}
+OSS_PUBLIC_BASE=https://dramas-x.cn-guangzhou.taihangztn.cn
 ```
+
+直传 POST 的目标地址固定为 Bucket 虚拟主机域名
+`https://{OSS_BUCKET}.{OSS_ENDPOINT}`（如 `https://dramas-x.oss-cn-guangzhou.aliyuncs.com`）。
+**不要**使用路径式 `https://{endpoint}/{bucket}`（阿里云已不再支持，会返回 403），
+也**不要**把 `OSS_PUBLIC_BASE` 的 CNAME 域名用于 POST 表单上传（CNAME 不支持表单上传，
+仅用于读访问 URL 拼接）。内网读写同样使用虚拟主机域名
+`https://{OSS_BUCKET}.{OSS_INTERNAL_ENDPOINT}`。
 
 Bucket 需配置 CORS（允许前端域名 POST 直传，暴露 ETag）：
 

@@ -27,7 +27,7 @@ def test_aliyun_form_policy_contains_expected_fields():
         "text/plain",
         20 * 1024 * 1024,
     )
-    assert policy["url"] == "https://oss-cn-beijing.aliyuncs.com/my-bucket"
+    assert policy["url"] == "https://my-bucket.oss-cn-beijing.aliyuncs.com"
     fields = policy["fields"]
     assert fields["OSSAccessKeyId"] == "ak"
     assert fields["key"] == "uploads/0/20260818/abc-书稿.txt"
@@ -50,7 +50,7 @@ def test_aliyun_authorization_is_v1_format():
     )
     date, authorization = provider._authorization("PUT", "k.txt", "text/plain")
     assert authorization.startswith("OSS ak:")
-    assert provider._internal_url("k.txt") == "https://i/b/k.txt"
+    assert provider._internal_url("k.txt") == "https://b.i/k.txt"
 
 
 def test_public_url_prefers_cdn_base():
