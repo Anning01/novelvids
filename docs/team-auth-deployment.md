@@ -133,6 +133,40 @@ novel.example.com {
 - 余额：超管充值；任务提交前预检（欠费/超限额 402），完成后按计费成本自动扣减；允许透支为负并在团队管理页标红。
 - 存量数据：首次开启时自动回填到「默认团队」。
 
+## 4.5 对象存储（阿里云 OSS，可选）
+
+默认 `OSS_PROVIDER=local`：上传与生成媒体全部存本地磁盘，行为不变。启用阿里云 OSS 后：
+**前端直传**（大文件/图片不经过服务器）+ **服务端经内网 endpoint 读写**（省流量）+ **全部媒体落 OSS**。
+
+环境变量：
+
+```bash
+OSS_PROVIDER=aliyun
+OSS_BUCKET=your-bucket
+OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com          # 公网（直传与公网访问）
+OSS_INTERNAL_ENDPOINT=oss-cn-beijing-internal.aliyuncs.com  # 内网（服务端读写，同地域 ECS 免流量费）
+OSS_ACCESS_KEY_ID=...
+OSS_ACCESS_KEY_SECRET=...
+OSS_PUBLIC_BASE=https://cdn.example.com           # 可选：CDN/自定义域名前缀，留空用 bucket.endpoint
+```
+
+Bucket 需配置 CORS（允许前端域名 POST 直传，暴露 ETag）：
+
+```json
+[
+  {
+    "allowedOrigins": ["https://novel.example.com"],
+    "allowedMethods": ["POST", "GET", "HEAD", "PUT"],
+    "allowedHeaders": ["*"],
+    "exposeHeaders": ["ETag"]
+  }
+]
+```
+
+注意：内网 endpoint 仅在**与 OSS 同地域的云服务器**内可达；自建机房请将
+`OSS_INTERNAL_ENDPOINT` 留空（回退公网 endpoint）。存量 `/media/...` 路径继续由
+nginx 静态代理，新上传与生成媒体自动切换为 OSS 公网 URL。
+
 ## 5. 二期：微信公众号扫码登录接入点
 
 一期为账号密码登录。公众号服务号资质就绪后，按以下预留接口接入（无需改动现有登录契约）：

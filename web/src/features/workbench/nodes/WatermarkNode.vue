@@ -45,7 +45,7 @@ async function uploadWatermark(file: File) {
     const uploaded = await api.upload(file)
     saveConfig({
       ...config.value,
-      resourceUrl: mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`),
+      resourceUrl: uploaded.url || mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`),
     })
   } catch (error) {
     notice.error(error instanceof Error ? error.message : '水印图片上传失败')

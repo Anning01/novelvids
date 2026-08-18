@@ -55,6 +55,14 @@ async def _download_video(remote_url: str, video_id: int) -> str:
                     f.write(chunk)
 
     media_url = f"/media/videos/{filename}"
+    from services.oss import make_upload_key, oss
+
+    if oss.enabled:
+        with open(local_path, "rb") as file:
+            key = make_upload_key(None, f"videos/{filename}")
+            await oss.put_bytes(key, file.read(), "video/mp4")
+        os.remove(local_path)
+        media_url = oss.public_url(key)
     logger.info("Video downloaded: video_id=%s -> %s", video_id, media_url)
     return media_url
 
@@ -80,6 +88,14 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+    from services.oss import make_upload_key, oss
+
+    if oss.enabled:
+        with open(destination, "rb") as file:
+            key = make_upload_key(None, f"video-references/last-frame-{video_id}.png")
+            await oss.put_bytes(key, file.read(), "image/png")
+        destination.unlink(missing_ok=True)
+        return oss.public_url(key)
     return f"/media/video-references/{destination.name}"
 
 

@@ -27,7 +27,9 @@ const uploadedMediaKinds = new Set<WorkbenchNode['kind']>(['image_media', 'video
 const now = () => new Date().toISOString()
 const cloneValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const mediaTitle = (filename: string) => filename.replace(/\.[^.]+$/, '') || filename
-const uploadedMediaUrl = (filename: string) => mediaUrl(`/media/${encodeURIComponent(filename)}`)
+const uploadedUrl = (uploaded: { filename: string; url?: string }): string => (
+  uploaded.url || mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`)
+)
 
 function node(id: number, key: string, kind: WorkbenchNode['kind'], title: string, position: Point, data: Record<string, unknown>): WorkbenchNode {
   const timestamp = now()
@@ -327,7 +329,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const stamp = Date.now()
       const key = `${kind.replace('_', '-')}-${stamp}`
       const mediaData: UploadedMediaData = {
-        url: uploadedMediaUrl(uploaded.filename),
+        url: uploadedUrl(uploaded),
         filename: uploaded.filename,
         originalFilename: uploaded.original_filename || uploaded.filename,
         mimeType: uploaded.content_type,
@@ -362,7 +364,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         chapter_id: this.chapterId,
         asset_type: AssetTypeEnum.ITEM,
         canonical_name: canonicalName,
-        main_image: uploadedMediaUrl(uploaded.filename),
+        main_image: uploadedUrl(uploaded),
         metadata: patchAssetImageMediaMetadata(undefined, {
           source: 'upload',
           assetTypeExplicit: false,
@@ -389,7 +391,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       item.title = mediaTitle(uploaded.original_filename || file.name)
       item.data = {
         ...item.data,
-        url: uploadedMediaUrl(uploaded.filename),
+        url: uploadedUrl(uploaded),
         filename: uploaded.filename,
         originalFilename: uploaded.original_filename || file.name,
         mimeType: uploaded.content_type || file.type,
@@ -802,7 +804,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const uploaded = await api.upload(file)
       const originalFilename = uploaded.original_filename || file.name
       const updated = (await api.updateAsset(assetId, {
-        main_image: uploadedMediaUrl(uploaded.filename),
+        main_image: uploadedUrl(uploaded),
         metadata: patchAssetImageMediaMetadata(asset.metadata, {
           source: 'upload',
           assetTypeExplicit: currentImageMetadata.source === 'upload'

@@ -43,6 +43,31 @@ def _image_extension(content: bytes) -> str:
     raise RuntimeError("生图供应商返回了不支持的图片格式")
 
 
+async def _store_asset_image(content: bytes, extension: str, asset_id: int, suffix: str = "") -> str:
+    """图片落库：OSS 启用时经内网上传并返回公网 URL，否则存本地磁盘。"""
+    from services.oss import make_upload_key, oss
+
+    if oss.enabled:
+        key = make_upload_key(None, f"asset-{asset_id}{suffix}{extension}")
+        await oss.put_bytes(key, content, _content_type_for(extension))
+        return oss.public_url(key)
+    asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
+    os.makedirs(asset_dir, exist_ok=True)
+    filename = f"{asset_id}{suffix}{extension}"
+    with open(os.path.join(asset_dir, filename), "wb") as file:
+        file.write(content)
+    return f"/media/assets/{filename}"
+
+
+def _content_type_for(extension: str) -> str:
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(extension, "application/octet-stream")
+
+
 def _save_base64_image(encoded: str, asset_id: int, suffix: str = "") -> str:
     payload = (
         encoded.split(",", 1)[1]
@@ -54,6 +79,7 @@ def _save_base64_image(encoded: str, asset_id: int, suffix: str = "") -> str:
     except (binascii.Error, ValueError) as error:
         raise RuntimeError("生图供应商返回了无效的 base64 图片") from error
     extension = _image_extension(content)
+    # 与 _store_asset_image 的本地分支保持一致（OSS 场景由异步包装处理）
     asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
     os.makedirs(asset_dir, exist_ok=True)
     filename = f"{asset_id}{suffix}{extension}"
@@ -97,13 +123,42 @@ async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> s
 
 
 async def _persist_generated_image(image, asset_id: int, suffix: str) -> str:
+    from services.oss import oss
+
     remote_url = getattr(image, "url", None)
     if isinstance(remote_url, str) and remote_url:
+        if oss.enabled:
+            content = await _fetch_image_bytes(remote_url)
+            return await _store_asset_image(content, _image_extension(content), asset_id, suffix)
         return await _download_image(remote_url, asset_id, suffix)
     encoded = getattr(image, "b64_json", None)
     if isinstance(encoded, str) and encoded:
+        if oss.enabled:
+            content = _decode_base64_image(encoded)
+            return await _store_asset_image(content, _image_extension(content), asset_id, suffix)
         return _save_base64_image(encoded, asset_id, suffix)
     raise RuntimeError("生图供应商返回的图片缺少 URL 和 base64 内容")
+
+
+async def _fetch_image_bytes(remote_url: str) -> bytes:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.get(remote_url)
+        response.raise_for_status()
+        return response.content
+
+
+def _decode_base64_image(encoded: str) -> bytes:
+    payload = (
+        encoded.split(",", 1)[1]
+        if encoded.startswith("data:") and "," in encoded
+        else encoded
+    )
+    try:
+        return base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise RuntimeError("生图供应商返回了无效的 base64 图片") from error
 
 
 class AssetReferenceHandler(BaseTaskHandler):

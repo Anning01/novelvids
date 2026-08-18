@@ -41,5 +41,17 @@ class Settings:
     SUPER_ADMIN_USERNAME: str = os.getenv("SUPER_ADMIN_USERNAME", "")
     SUPER_ADMIN_PASSWORD: str = os.getenv("SUPER_ADMIN_PASSWORD", "")
 
+    # ---- 对象存储（默认 local：本地磁盘，行为不变） ----
+    OSS_PROVIDER: str = os.getenv("OSS_PROVIDER", "local")  # local | aliyun
+    OSS_BUCKET: str = os.getenv("OSS_BUCKET", "")
+    # 公网 endpoint（前端直传与公网访问域名拼接），如 oss-cn-beijing.aliyuncs.com
+    OSS_ENDPOINT: str = os.getenv("OSS_ENDPOINT", "")
+    # 内网 endpoint（服务端读写用，省流量），如 oss-cn-beijing-internal.aliyuncs.com
+    OSS_INTERNAL_ENDPOINT: str = os.getenv("OSS_INTERNAL_ENDPOINT", "")
+    # 公网访问前缀（可选 CDN），留空则用 https://{bucket}.{endpoint}
+    OSS_PUBLIC_BASE: str = os.getenv("OSS_PUBLIC_BASE", "")
+    OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
+    OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
+
 
 settings = Settings()

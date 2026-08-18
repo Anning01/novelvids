@@ -206,6 +206,22 @@ export interface UserItem {
   team_count?: number
 }
 
+export interface UploadPolicy {
+  direct: boolean
+  provider?: string
+  key?: string
+  upload_url?: string
+  fields?: Record<string, string>
+  public_url?: string
+  filename?: string
+}
+export interface OssFinalizeResult {
+  filename: string
+  url: string
+  key: string
+  text_content?: string
+  chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string } | null
+}
 export interface UserStats {
   user_count: number
   user_total_cost: number

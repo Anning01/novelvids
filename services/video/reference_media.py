@@ -67,6 +67,12 @@ def render_reference_mentions(prompt: str, references: Sequence[Any]) -> str:
     return REFERENCE_MENTION_PATTERN.sub("", rendered)
 
 
+def media_kind_for_extension(filename: str, capabilities) -> MediaKind:
+    """按扩展名判定参考素材类型（OSS 终局端点复用）。"""
+    extension = Path(filename).suffix.lower()
+    return _media_kind(extension, capabilities)
+
+
 def _media_kind(extension: str, capabilities: VideoModelCapabilities) -> MediaKind:
     normalized = extension.lstrip(".").lower()
     if normalized in capabilities.reference_image_formats:

@@ -764,7 +764,7 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
   uploadingFrameKey.value = uploadKey
   try {
     const uploaded = await api.upload(file)
-    const url = mediaUrl(`/media/${uploaded.filename}`)
+    const url = uploaded.url || mediaUrl(`/media/${uploaded.filename}`)
     const draft = draftFor(scene)
     if (kind === 'first') draft.firstFrameUrl = url
     else draft.lastFrameUrl = url
