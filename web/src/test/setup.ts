@@ -26,3 +26,20 @@ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   configurable: true,
   value() {},
 })
+
+class IntersectionObserverStub implements IntersectionObserver {
+  readonly root = null
+  readonly rootMargin = ''
+  readonly scrollMargin = ''
+  readonly thresholds: ReadonlyArray<number> = []
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return []
+  }
+}
+
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver = IntersectionObserverStub
+}
