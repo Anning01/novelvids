@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import HTTPException
 
 from models.ai_task import AiTask
@@ -111,30 +113,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         if await novel.chapters:
             raise HTTPException(400, detail="已有章节，不支持分章。")
 
-        novel_text = NovelText.from_string(novel.content)
-        service = RegexChapterRecognitionStrategy()
-        parsed_chapters = service.recognize(novel_text)
-
-        try:
-            validate_chapter_split(novel.content, parsed_chapters)
-        except ChapterSplitError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-
-        # 短篇无章节标记时仍可作为单章；长篇会在上面的质量校验中被拒绝。
-        if not parsed_chapters:
-            parsed_chapters = [
-                type(
-                    "ParsedChapterResult",
-                    (),
-                    {
-                        "title": "第一章",
-                        "content": novel.content,
-                        "start_index": 0,
-                        "end_index": len(novel.content),
-                        "confidence": 1.0,
-                    },
-                )()
-            ]
+        # 章节识别 + 质量校验是 CPU 密集操作，放到线程池执行，
+        # 避免在单 worker 的 uvicorn 事件循环里阻塞其他请求（如 /api/auth/status）。
+        parsed_chapters = await asyncio.to_thread(
+            self._parse_chapters, novel.content or ""
+        )
 
         # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
         await Chapter.bulk_create([
@@ -158,6 +141,34 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         )
         await novel.save()
         return novel
+
+    @staticmethod
+    def _parse_chapters(content: str):
+        """识别章节并做质量校验（纯 CPU，供线程池调用）。"""
+        novel_text = NovelText.from_string(content)
+        parsed_chapters = RegexChapterRecognitionStrategy().recognize(novel_text)
+
+        try:
+            validate_chapter_split(content, parsed_chapters)
+        except ChapterSplitError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        # 短篇无章节标记时仍可作为单章；长篇会在上面的质量校验中被拒绝。
+        if not parsed_chapters:
+            parsed_chapters = [
+                type(
+                    "ParsedChapterResult",
+                    (),
+                    {
+                        "title": "第一章",
+                        "content": content,
+                        "start_index": 0,
+                        "end_index": len(content),
+                        "confidence": 1.0,
+                    },
+                )()
+            ]
+        return parsed_chapters
 
     async def analyze(
         self,
