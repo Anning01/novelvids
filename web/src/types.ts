@@ -217,6 +217,17 @@ export interface UploadPolicy {
   public_url?: string
   filename?: string
 }
+export interface UploadResult {
+  filename: string
+  original_filename: string
+  content_type: string
+  file_path: string
+  url?: string
+  key?: string
+  message?: string
+  text_content?: string
+  chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string } | null
+}
 export interface OssFinalizeResult {
   filename: string
   url: string

@@ -125,6 +125,79 @@ async def test_api_split_novel(client: AsyncClient):
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["total_chapters"] == 2
+    # 拆分响应不再把整份书稿正文回传（前端无需也不应拿到 content）
+    assert "content" not in data
+
+
+@pytest.mark.asyncio
+async def test_api_create_novel_from_source_key(client: AsyncClient, monkeypatch):
+    """OSS 直传后仅回传 key，服务端经内网读取并解析正文，响应不回传正文。"""
+    from controllers import novel as novel_controller_module
+    from services import document as document_module
+
+    class FakeOss:
+        enabled = True
+
+        async def get_bytes(self, key):
+            assert key == "uploads/0/20260818/script.txt"
+            return "第1章 开端\n这是第一章正文。\n\n第2章 发展\n这是第二章正文。".encode("utf-8")
+
+        def public_url(self, key):
+            return f"https://fake-cdn/{key}"
+
+    fake = FakeOss()
+    monkeypatch.setattr(novel_controller_module, "oss", fake)
+    monkeypatch.setattr(document_module, "oss", fake)
+
+    response = await client.post(
+        "/api/novel",
+        json={
+            "name": "OSS Novel",
+            "author": "Agent 创建",
+            "description": "x",
+            "source_key": "uploads/0/20260818/script.txt",
+            "source_filename": "script.txt",
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["name"] == "OSS Novel"
+    assert "content" not in data
+
+    novel = await Novel.get(id=data["id"])
+    assert "这是第一章正文" in novel.content
+    assert novel.total_chapters == 0  # 正文已解析入库，章节拆分由 /split 完成
+
+
+@pytest.mark.asyncio
+async def test_api_create_novel_source_key_invalid_rejected(client: AsyncClient, monkeypatch):
+    """长书稿无章节标记时，创建阶段即拒绝，避免进入工作流后再失败。"""
+    from controllers import novel as novel_controller_module
+    from services import document as document_module
+
+    class FakeOss:
+        enabled = True
+
+        async def get_bytes(self, key):
+            return ("这是没有章节标题的正文。" * 3_000).encode("utf-8")
+
+    fake = FakeOss()
+    monkeypatch.setattr(novel_controller_module, "oss", fake)
+    monkeypatch.setattr(document_module, "oss", fake)
+
+    response = await client.post(
+        "/api/novel",
+        json={
+            "name": "Invalid OSS Novel",
+            "author": "Agent 创建",
+            "source_key": "uploads/0/x/long.txt",
+            "source_filename": "long.txt",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["code"] != 0
+    assert await Novel.filter(name="Invalid OSS Novel").count() == 0
 
 
 @pytest.mark.asyncio

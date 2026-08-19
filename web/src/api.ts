@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, OssFinalizeResult, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -126,7 +126,7 @@ export const api = {
   novel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}`),
   novelMeta: (id: number) => request<SingleResponse<NovelMeta>>(`/novel/${id}/meta`),
   chaptersPage: (novelId: number, page = 1, pageSize = 30) => request<PaginationResponse<Chapter>>(`/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`),
-  createNovel: (data: Partial<Novel>) => request<SingleResponse<Novel>>('/novel', { method: 'POST', body: JSON.stringify(data) }),
+  createNovel: (data: Partial<Novel> & { source_key?: string; source_filename?: string }) => request<SingleResponse<Novel>>('/novel', { method: 'POST', body: JSON.stringify(data) }),
   updateNovel: (id: number, data: Partial<Novel>) => request<SingleResponse<Novel>>(`/novel/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteNovel: (id: number) => request<SingleResponse<null>>(`/novel/${id}`, { method: 'DELETE' }),
   splitNovel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}/split`, { method: 'POST' }),
@@ -223,7 +223,7 @@ export const api = {
   billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
   billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
-  async upload(file: File) {
+  async upload(file: File): Promise<UploadResult> {
     const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
     if (policyResponse.data.direct) {
       const policy = policyResponse.data
@@ -232,20 +232,15 @@ export const api = {
       form.append('file', file)
       const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
       if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
-      const finalized = await request<SingleResponse<OssFinalizeResult>>('/file/oss-finalize', {
-        method: 'POST',
-        body: JSON.stringify({ key: policy.key, original_filename: file.name }),
-      })
+      // 直传成功后不再把书稿正文经浏览器中转：只回传 key，由服务端经内网读取解析。
       return {
-        filename: finalized.data.filename,
+        filename: file.name,
         original_filename: file.name,
         content_type: file.type,
-        file_path: finalized.data.url,
-        text_content: finalized.data.text_content,
-        chapter_validation: finalized.data.chapter_validation,
+        file_path: policy.public_url || '',
+        url: policy.public_url || '',
+        key: policy.key,
         message: '文件上传成功',
-        url: finalized.data.url,
-        key: finalized.data.key,
       }
     }
     const data = new FormData(); data.append('files', file)
@@ -258,16 +253,7 @@ export const api = {
       }
       throw new Error(payload.message || '上传失败')
     }
-    return payload.data.files[0] as {
-      filename: string
-      original_filename: string
-      content_type: string
-      file_path: string
-      text_content?: string
-      chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string }
-      url?: string
-      key?: string
-    }
+    return payload.data.files[0] as UploadResult
   },
 }
 

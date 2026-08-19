@@ -5,6 +5,8 @@ from models.chapter import Chapter
 from controllers.config import ai_model_config_controller, general_config_controller
 from services.ai_task_executor import ai_task_executor
 from services.chapter_titles import normalize_chapter_title
+from services.document import analyze_oss_document
+from services.oss import oss
 from services.nlp import (
     ChapterSplitError,
     RegexChapterRecognitionStrategy,
@@ -44,8 +46,36 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         team_id: int | None = None,
         created_by: int | None = None,
     ) -> Novel:
-        """创建项目；AUTH_ENABLED 时由 API 层传入 team_id / created_by。"""
-        return await super().create(obj_in, team_id=team_id, created_by=created_by)
+        """创建项目；AUTH_ENABLED 时由 API 层传入 team_id / created_by。
+
+        OSS 直传后前端只回传 `source_key`：服务端经内网读取并解析正文，
+        避免书稿正文经浏览器中转（也避免超大 JSON 请求体）。
+        """
+        data = obj_in.model_dump(exclude_unset=True)
+        source_key = data.pop("source_key", None)
+        source_filename = data.pop("source_filename", None) or "书稿.txt"
+        if source_key:
+            if not oss.enabled:
+                raise HTTPException(status_code=400, detail="未启用对象存储")
+            try:
+                analysis = await analyze_oss_document(source_key, source_filename)
+            except HTTPException:
+                raise
+            except Exception as error:  # 读取/解析失败统一转 400
+                raise HTTPException(
+                    status_code=400, detail=f"从对象存储读取书稿失败：{error}"
+                ) from error
+            text = (analysis["text_content"] or "").strip()
+            if not text:
+                raise HTTPException(
+                    status_code=400,
+                    detail="未能从上传文件读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试",
+                )
+            validation = analysis["chapter_validation"]
+            if validation and not validation["valid"]:
+                raise HTTPException(status_code=422, detail=validation["message"])
+            data["content"] = text
+        return await super().create(data, team_id=team_id, created_by=created_by)
 
     async def list(
         self,

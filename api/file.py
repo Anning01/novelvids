@@ -3,24 +3,15 @@ from datetime import datetime
 import asyncio
 import os
 import shutil
-import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from docx import Document
-from pypdf import PdfReader
-
 from auth.deps import AuthContext, require_roles
+from services.document import analyze_document, analyze_oss_document
 from services.oss import make_upload_key, oss
 from utils.response_format import ResponseSchema
 from config import settings
-from services.nlp import (
-    ChapterSplitError,
-    NovelText,
-    RegexChapterRecognitionStrategy,
-    validate_chapter_split,
-)
 
 router = APIRouter()
 
@@ -64,16 +55,7 @@ async def oss_finalize(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=400, detail="未启用对象存储")
-    data = await oss.get_bytes(payload.key)
-    with tempfile.NamedTemporaryFile(suffix=Path(payload.original_filename).suffix, delete=False) as handle:
-        handle.write(data)
-        temp_path = handle.name
-    try:
-        analysis = await asyncio.to_thread(
-            _analyze_document, temp_path, payload.original_filename
-        )
-    finally:
-        Path(temp_path).unlink(missing_ok=True)
+    analysis = await analyze_oss_document(payload.key, payload.original_filename)
     return ResponseSchema(
         data={
             "filename": Path(payload.original_filename).name,
@@ -85,62 +67,6 @@ async def oss_finalize(
         }
     )
 
-
-def _analyze_document(file_path: str, original_filename: str) -> dict:
-    """提取正文并做章节结构校验（上传与 OSS 终局共用）。"""
-    extension = Path(original_filename).suffix
-    text_content = _extract_document_text(file_path, extension)
-    chapter_validation = None
-    if text_content.strip():
-        parsed_chapters = RegexChapterRecognitionStrategy().recognize(
-            NovelText.from_string(text_content)
-        )
-        try:
-            validate_chapter_split(text_content, parsed_chapters)
-            chapter_validation = {
-                "valid": True,
-                "chapter_count": len(parsed_chapters) or 1,
-                "text_length": len(text_content),
-                "message": "书稿结构检查通过",
-            }
-        except ChapterSplitError as error:
-            chapter_validation = {
-                "valid": False,
-                "chapter_count": len(parsed_chapters),
-                "text_length": len(text_content),
-                "message": str(error),
-            }
-    return {"text_content": text_content, "chapter_validation": chapter_validation}
-
-
-def _read_plain_text(file_path: str) -> str:
-    raw = Path(file_path).read_bytes()
-    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace")
-
-
-def _extract_document_text(file_path: str, extension: str) -> str:
-    """提取上传书稿正文，供 Agent 分章和模型分析。"""
-    extension = extension.lower()
-    if extension in {".txt", ".md"}:
-        return _read_plain_text(file_path)
-    if extension == ".docx":
-        document = Document(file_path)
-        paragraphs = [paragraph.text for paragraph in document.paragraphs]
-        for table in document.tables:
-            paragraphs.extend(
-                "\t".join(cell.text for cell in row.cells)
-                for row in table.rows
-            )
-        return "\n".join(text for text in paragraphs if text.strip())
-    if extension == ".pdf":
-        reader = PdfReader(file_path)
-        return "\n\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
-    return ""
 
 @router.post("/upload", summary="多文件上传", response_model=ResponseSchema[dict])
 async def upload_files(
@@ -173,7 +99,7 @@ async def upload_files(
                 shutil.copyfileobj(file.file, buffer)
 
             analysis = await asyncio.to_thread(
-                _analyze_document,
+                analyze_document,
                 file_path,
                 original_filename,
             )

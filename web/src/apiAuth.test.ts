@@ -80,30 +80,30 @@ it('attaches bearer token and team header to uploads', async () => {
   expect(options.headers['Content-Type']).toBeUndefined()
 })
 
-it('直传 OSS：先取策略，再直传对象存储，最后服务端终局', async () => {
+it('直传 OSS：先取策略，再直传对象存储，不再回传正文', async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(new Response(JSON.stringify({
       code: 0, message: 'ok',
       data: {
         direct: true, provider: 'aliyun', key: 'uploads/0/20260818/abc.txt',
         upload_url: 'https://oss.example.com/bucket',
+        public_url: 'https://cdn.example.com/uploads/0/20260818/abc.txt',
+        filename: 'abc.txt',
         fields: { key: 'uploads/0/20260818/abc.txt', policy: 'p', signature: 's', OSSAccessKeyId: 'ak' },
       },
     }), { status: 200 }))
     .mockResolvedValueOnce(new Response('', { status: 200 })) // OSS 直传成功
-    .mockResolvedValueOnce(new Response(JSON.stringify({
-      code: 0, message: 'ok',
-      data: { filename: '剧本.txt', url: 'https://cdn.example.com/uploads/0/20260818/abc.txt', key: 'uploads/0/20260818/abc.txt', text_content: '第一章 开端', chapter_validation: { valid: true, chapter_count: 1, text_length: 7, message: 'ok' } },
-    }), { status: 200 }))
   vi.stubGlobal('fetch', fetchMock)
 
   const file = new File(['第一章 开端'], '剧本.txt', { type: 'text/plain' })
   const uploaded = await api.upload(file)
 
+  // 只发生两次请求：取策略 + 直传；不再调用 oss-finalize 回传正文
+  expect(fetchMock).toHaveBeenCalledTimes(2)
   expect(fetchMock.mock.calls[1][0]).toBe('https://oss.example.com/bucket')
+  expect(uploaded.key).toBe('uploads/0/20260818/abc.txt')
   expect(uploaded.url).toBe('https://cdn.example.com/uploads/0/20260818/abc.txt')
-  expect(uploaded.text_content).toBe('第一章 开端')
-  expect(uploaded.chapter_validation?.valid).toBe(true)
+  expect(uploaded.text_content).toBeUndefined()
 })
 
 it('redirects to login when upload gets 401', async () => {

@@ -48,6 +48,10 @@ class NovelFullProperties(NovelProperties):
 class NovelCreate(NovelFullProperties):
     """创建请求：name 必填"""
     name: str = Field(..., description="小说名称", max_length=255)
+    # OSS 直传后由服务端经内网读取并解析正文，避免书稿正文经浏览器中转。
+    # 提供 source_key 时无需再传 content（服务端解析后覆盖）。
+    source_key: Optional[str] = Field(None, description="OSS 对象 key", max_length=500)
+    source_filename: Optional[str] = Field(None, description="源文件名", max_length=255)
 
 
 class NovelUpdate(NovelCreate):
