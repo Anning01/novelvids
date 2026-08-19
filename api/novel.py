@@ -13,7 +13,7 @@ router = APIRouter()
 _EDITOR = Depends(require_roles("admin", "creator"))
 
 
-@router.post("", summary="创建小说/剧本", response_model=ResponseSchema[NovelOut])
+@router.post("", summary="创建小说/剧本", response_model=ResponseSchema[NovelBriefOut])
 async def create_novel(
     novel: NovelCreate,
     ctx: AuthContext = Depends(get_auth_context),
@@ -95,8 +95,8 @@ async def delete_novel(
     return ResponseSchema()
 
 
-@router.post("/{novel_id}/split", summary="使用nlp智能拆分章节", response_model=ResponseSchema[NovelOut])
-@router.get("/{novel_id}/split", summary="使用nlp智能拆分章节（兼容）", response_model=ResponseSchema[NovelOut])
+@router.post("/{novel_id}/split", summary="使用nlp智能拆分章节", response_model=ResponseSchema[NovelBriefOut])
+@router.get("/{novel_id}/split", summary="使用nlp智能拆分章节（兼容）", response_model=ResponseSchema[NovelBriefOut])
 async def split_novel(
     novel_id: int,
     _: AuthContext = Depends(require_team_access),

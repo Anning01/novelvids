@@ -138,6 +138,8 @@ async def test_oss_finalize_extracts_text_via_fake_provider(client, monkeypatch)
 
     fake = FakeProvider()
     monkeypatch.setattr("api.file.oss", fake)
+    # oss_finalize 现经 services.document.analyze_oss_document 读取对象，需同步替换其 provider
+    monkeypatch.setattr("services.document.oss", fake)
     response = await client.post(
         "/api/file/oss-finalize",
         json={"key": "uploads/0/20260818/x.txt", "original_filename": "剧本.txt"},

@@ -119,19 +119,29 @@ async function createProject() {
     creating.value = true
     try {
       const uploaded = await api.upload(selectedFile.value)
-      const textContent = uploaded.text_content?.trim() || ''
-      if (!textContent) throw new Error('未能从文件中读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试')
-      if (uploaded.chapter_validation && !uploaded.chapter_validation.valid) {
-        throw new Error(uploaded.chapter_validation.message)
-      }
-      const response = await api.createNovel({
+      const description = `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label} · 源剧本：${uploaded.filename}`
+      const createPayload: Parameters<typeof api.createNovel>[0] = {
         name: projectName,
         author: 'Agent 创建',
-        description: `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label} · 源剧本：${uploaded.filename}`,
-        content: textContent,
-      })
+        description,
+      }
+      if (uploaded.key) {
+        // OSS 直传：只回传 key，由服务端经内网读取并解析正文，不再把整份书稿传给浏览器。
+        createPayload.source_key = uploaded.key
+        createPayload.source_filename = selectedFile.value.name
+      } else {
+        const textContent = uploaded.text_content?.trim() || ''
+        if (!textContent) throw new Error('未能从文件中读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试')
+        if (uploaded.chapter_validation && !uploaded.chapter_validation.valid) {
+          throw new Error(uploaded.chapter_validation.message)
+        }
+        createPayload.content = textContent
+      }
+      const response = await api.createNovel(createPayload)
+      let chapterCount = 0
       try {
-        await api.splitNovel(response.data.id)
+        const splitResult = await api.splitNovel(response.data.id)
+        chapterCount = splitResult.data.total_chapters || 0
       } catch (error) {
         await api.deleteNovel(response.data.id).catch(() => undefined)
         throw error
@@ -145,7 +155,7 @@ async function createProject() {
         fileName: selectedFile.value.name,
         sourcePath: uploaded.file_path,
       }))
-      notice.success(`书稿已成功拆分为 ${uploaded.chapter_validation?.chapter_count || '多'} 章，正在进入 Agent 工作区`)
+      notice.success(chapterCount ? `书稿已成功拆分为 ${chapterCount} 章，正在进入 Agent 工作区` : '书稿已上传并完成章节拆分，正在进入 Agent 工作区')
       await router.push({ name: 'short-drama-agent', params: { projectId: response.data.id } })
     } catch (error) {
       notice.error((error as Error).message)
