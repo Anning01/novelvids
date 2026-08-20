@@ -69,6 +69,46 @@ class AliyunProvider(OSSProvider):
     def public_url(self, key: str) -> str:
         return self.signed_url(key)
 
+    def resolve_url(self, raw: str | None) -> str | None:
+        """把持久化的媒体地址解析为可访问 URL。
+
+        落库时只存 OSS 对象 key（以 ``uploads/`` 开头）或完整 URL：
+        - 裸 key：直接按当前时间重新签发；
+        - 完整 URL 且指向本桶（与 ``public_base`` 或默认虚拟主机域名一致）：
+          提取对象 key 后重新签发（兼容历史落库的完整 URL，无需数据迁移）；
+        - 其它完整 URL（外部地址）：原样返回，不做签名。
+        """
+        if not raw:
+            return raw
+        if raw.startswith("uploads/"):
+            return self.signed_url(raw)
+        if raw.startswith("http://") or raw.startswith("https://"):
+            for base in self._public_bases():
+                if raw.startswith(base + "/"):
+                    path = raw[len(base) + 1 :]
+                    # 已带查询串（已签名或带处理参数）的完整 URL 原样返回；
+                    # 仅对指向本桶、不带签名的不完整 URL 重新签发。
+                    if "?" in path:
+                        return raw
+                    return self.signed_url(path)
+        return raw
+
+    def _public_bases(self) -> list[str]:
+        """本桶对外可能的公网基地址（用于识别完整 URL 是否指向本桶）。"""
+        bases: list[str] = []
+        if self.public_base:
+            bases.append(self.public_base)
+        bases.append(f"https://{self.bucket}.{self.endpoint}")
+        bases.append(f"http://{self.bucket}.{self.endpoint}")
+        # 去重并保持顺序
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in bases:
+            if item not in seen:
+                seen.add(item)
+                result.append(item)
+        return result
+
     # ---- 前端直传：POST 表单策略 ----
 
     def sign_form_upload(
