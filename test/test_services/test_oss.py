@@ -53,7 +53,7 @@ def test_aliyun_authorization_is_v1_format():
     assert provider._internal_url("k.txt") == "https://b.i/k.txt"
 
 
-def test_public_url_prefers_cdn_base():
+def test_public_url_is_signed_with_expiry():
     provider = AliyunProvider(
         bucket="b",
         endpoint="oss-cn-beijing.aliyuncs.com",
@@ -62,7 +62,33 @@ def test_public_url_prefers_cdn_base():
         access_key_id="ak",
         access_key_secret="sk",
     )
-    assert provider.public_url("uploads/1/x.png") == "https://cdn.example.com/uploads/1/x.png"
+    url = provider.public_url("uploads/1/x.png")
+    assert url.startswith("https://cdn.example.com/uploads/1/x.png?")
+    assert "OSSAccessKeyId=ak" in url
+    assert "Expires=" in url
+    assert "Signature=" in url
+
+
+def test_signed_url_signature_matches_v1_query_string():
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    provider = AliyunProvider(
+        bucket="b",
+        endpoint="oss-cn-beijing.aliyuncs.com",
+        internal_endpoint="i",
+        public_base="",
+        access_key_id="ak",
+        access_key_secret="sk",
+    )
+    url = provider.signed_url("k/我.png", expires_seconds=3600)
+    parsed = urlparse(url)
+    assert parsed.hostname == "b.oss-cn-beijing.aliyuncs.com"
+    query = parse_qs(parsed.query)
+    expires = int(query["Expires"][0])
+    signature = unquote(query["Signature"][0])
+    # 重算签名，确保 URL 中的 Signature 与 OSS V1 查询串规则一致
+    expected = _hmac_sign("sk", f"GET\n\n\n{expires}\n/b/k/我.png")
+    assert signature == expected
 
 
 def test_make_upload_key_shape():

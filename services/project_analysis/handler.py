@@ -120,9 +120,6 @@ Requirements: center the story's core conflict and atmosphere with cinematic com
 
 
 async def _save_cover(image: Any, novel_id: int) -> str:
-    cover_dir = Path(settings.MEDIA_PATH) / "covers"
-    cover_dir.mkdir(parents=True, exist_ok=True)
-
     remote_url = getattr(image, "url", None)
     b64_json = getattr(image, "b64_json", None)
     suffix = ".png"
@@ -142,9 +139,28 @@ async def _save_cover(image: Any, novel_id: int) -> str:
         raise ValueError("生图模型未返回可用的封面图片")
 
     filename = f"novel-{novel_id}-{uuid4().hex}{suffix}"
+
+    from services.oss import make_upload_key, oss
+
+    if oss.enabled:
+        key = make_upload_key(None, filename)
+        await oss.put_bytes(key, image_bytes, _cover_content_type(suffix))
+        return oss.public_url(key)
+
+    cover_dir = Path(settings.MEDIA_PATH) / "covers"
+    cover_dir.mkdir(parents=True, exist_ok=True)
     local_path = cover_dir / filename
     local_path.write_bytes(image_bytes)
     return f"/media/covers/{filename}"
+
+
+def _cover_content_type(extension: str) -> str:
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(extension.lower(), "application/octet-stream")
 
 
 async def _sync_character_assets(

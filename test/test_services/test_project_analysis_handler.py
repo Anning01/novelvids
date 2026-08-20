@@ -12,6 +12,7 @@ from services.project_analysis.handler import (
     BookAnalysis,
     KeyCharacter,
     ProjectAnalysisTaskHandler,
+    _save_cover,
 )
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum
 
@@ -208,3 +209,39 @@ async def test_project_analysis_result_carries_billing_keys():
     assert result["llm_model"] == "llm-model"
     assert result["image_usage"] == {"image_count": 1, "clarity": "1.5K"}
     assert result["image_config_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
+    """OSS 启用时，生成的项目封面应上传 OSS 并返回签名公网 URL。"""
+    from services.oss import base as oss_base
+
+    class FakeOss(oss_base.OSSProvider):
+        name = "fake"
+        enabled = True
+        uploaded = None
+
+        async def put_bytes(self, key, data, content_type):
+            self.uploaded = (key, data, content_type)
+
+        def public_url(self, key):
+            return f"https://cdn.example.com/{key}"
+
+    fake = FakeOss()
+    monkeypatch.setattr("services.oss.oss", fake)
+
+    import base64
+
+    image = SimpleNamespace(
+        url=None,
+        b64_json=base64.b64encode(b"\x89PNG fake").decode(),
+    )
+    url = await _save_cover(image, 9)
+
+    assert fake.uploaded is not None
+    key, data, content_type = fake.uploaded
+    assert key.startswith("uploads/0/")
+    assert "novel-9-" in key
+    assert data == b"\x89PNG fake"
+    assert content_type == "image/png"
+    assert url == f"https://cdn.example.com/{key}"
