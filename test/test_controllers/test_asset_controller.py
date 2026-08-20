@@ -590,3 +590,43 @@ async def test_reference_超时任务被清理后可重新提交():
     await stale_task.refresh_from_db()
     assert stale_task.status == TaskStatusEnum.failed.value
     print(f"    超时任务 id={stale_task.id} 已清理, 新任务 id={task.id} 提交成功")
+
+
+@pytest.mark.asyncio
+async def test_active_generations_lists_only_inflight_reference_tasks():
+    """刷新后恢复生成中状态：仅返回本项目仍在进行的参考图任务。"""
+    from models.ai_task import AiTask
+    from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+
+    novel = await Novel.create(name="Active Gen Novel", author="Author")
+    other = await Novel.create(name="Other Gen Novel", author="Author")
+    asset = await Asset.create(
+        novel_id=novel.id, asset_type=AssetTypeEnum.person.value, canonical_name="A"
+    )
+    other_asset = await Asset.create(
+        novel_id=other.id, asset_type=AssetTypeEnum.person.value, canonical_name="B"
+    )
+
+    await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.running.value,
+        request_params={"asset_id": asset.id, "novel_id": novel.id},
+    )
+    # 已完成的不应返回
+    await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={"asset_id": asset.id, "novel_id": novel.id},
+    )
+    # 其他项目的进行中任务不应返回
+    await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.queued.value,
+        request_params={"asset_id": other_asset.id, "novel_id": other.id},
+    )
+
+    result = await asset_controller.active_generations(novel.id)
+    assert len(result) == 1
+    assert result[0]["asset_id"] == asset.id
+    assert result[0]["status"] == TaskStatusEnum.running.value
+    assert result[0]["task_id"]

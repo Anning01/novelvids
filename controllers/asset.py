@@ -645,4 +645,32 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         await task.save(update_fields=["request_params", "updated_at"])
         return task
 
+    async def active_generations(self, novel_id: int) -> list[dict]:
+        """返回指定项目内仍在进行中的参考图生成任务（用于刷新后恢复生成中状态）。"""
+        tasks = await AiTask.filter(
+            task_type=AiTaskTypeEnum.reference_image.value,
+            status__in=[
+                TaskStatusEnum.pending.value,
+                TaskStatusEnum.running.value,
+                TaskStatusEnum.queued.value,
+            ],
+        )
+        result: list[dict] = []
+        for task in tasks:
+            params = task.request_params or {}
+            if params.get("novel_id") != novel_id:
+                continue
+            asset_id = params.get("asset_id")
+            if asset_id is None:
+                continue
+            result.append(
+                {
+                    "asset_id": int(asset_id),
+                    "task_id": str(task.id),
+                    "status": task.status,
+                }
+            )
+        return result
+
+
 asset_controller = AssetController()
