@@ -8,9 +8,26 @@ from models.chapter import Chapter
 from models.ai_task import AiTask
 from controllers.config import ai_model_config_controller
 from services.ai_task_executor import ai_task_executor
+from services.oss import normalize_media_url
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
 from tortoise.transactions import in_transaction
+
+
+def _normalize_scene_metadata(metadata: dict) -> dict:
+    """写库前把首尾帧与参考素材的签名 URL 降级为 OSS key，避免过期 403。"""
+    for key in ("first_frame_url", "last_frame_url"):
+        raw = metadata.get(key)
+        if isinstance(raw, str) and raw:
+            metadata[key] = normalize_media_url(raw) or raw
+    reference_media = metadata.get("video_reference_media")
+    if isinstance(reference_media, list):
+        for item in reference_media:
+            if isinstance(item, dict):
+                raw = item.get("url")
+                if isinstance(raw, str) and raw:
+                    item["url"] = normalize_media_url(raw) or raw
+    return metadata
 
 
 class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
@@ -27,6 +44,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
     async def create(self, obj_in: SceneCreate, **kwargs) -> Scene:
         data = obj_in.model_dump(exclude_unset=True)
         asset_ids = data.pop("asset_ids", None)
+        if isinstance(data.get("metadata"), dict):
+            data["metadata"] = _normalize_scene_metadata(data["metadata"])
         instance = await super().create(data, **kwargs)
         if asset_ids:
             await instance.assets.add(*await Asset.filter(id__in=asset_ids))
@@ -43,6 +62,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         
         data = obj_in.model_dump(exclude_unset=True)
         asset_ids = data.pop("asset_ids", None)
+        if isinstance(data.get("metadata"), dict):
+            data["metadata"] = _normalize_scene_metadata(data["metadata"])
 
         if method == "patch":
             instance = await super().patch(instance, data)

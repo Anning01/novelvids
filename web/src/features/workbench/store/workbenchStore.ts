@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
-import { api, mediaUrl } from '@/api'
+import { api, mediaUrl, persistedMediaRef } from '@/api'
 import { notice } from '@/shared/notice'
 import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -364,7 +364,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         chapter_id: this.chapterId,
         asset_type: AssetTypeEnum.ITEM,
         canonical_name: canonicalName,
-        main_image: uploadedUrl(uploaded),
+        main_image: persistedMediaRef(uploaded),
         metadata: patchAssetImageMediaMetadata(undefined, {
           source: 'upload',
           assetTypeExplicit: false,
@@ -804,7 +804,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const uploaded = await api.upload(file)
       const originalFilename = uploaded.original_filename || file.name
       const updated = (await api.updateAsset(assetId, {
-        main_image: uploadedUrl(uploaded),
+        main_image: persistedMediaRef(uploaded),
         metadata: patchAssetImageMediaMetadata(asset.metadata, {
           source: 'upload',
           assetTypeExplicit: currentImageMetadata.source === 'upload'

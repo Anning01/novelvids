@@ -130,8 +130,9 @@ def test_resolve_media_url_oss_signs_key():
     assert "Expires=" in url and "Signature=" in url
 
 
-def test_resolve_media_url_oss_keeps_full_url():
-    # 历史遗留的已签名完整 URL 不参与重签，原样返回
+def test_resolve_media_url_oss_resigns_legacy_signed_url():
+    # 历史遗留的“已签名完整 URL”指向本桶：query 仅为 OSS 签名参数时
+    # 重新签发（旧签名过期也不影响访问，无需数据迁移）
     provider = AliyunProvider(
         bucket="b",
         endpoint="oss-cn-beijing.aliyuncs.com",
@@ -141,7 +142,12 @@ def test_resolve_media_url_oss_keeps_full_url():
         access_key_secret="sk",
     )
     legacy = "https://cdn.example.com/uploads/1/x.png?Expires=1&Signature=old"
-    assert provider.resolve_url(legacy) == legacy
+    url = provider.resolve_url(legacy)
+    assert url.startswith("https://cdn.example.com/uploads/1/x.png?")
+    assert "Signature=old" not in url
+    # 带图片处理参数（非纯签名）的完整 URL 保持原样
+    processed = "https://cdn.example.com/uploads/1/x.png?x-oss-process=image/resize,w_100"
+    assert provider.resolve_url(processed) == processed
 
 
 def test_resolve_media_url_oss_signs_full_url_to_our_bucket():
@@ -165,6 +171,43 @@ def test_resolve_media_url_oss_signs_full_url_to_our_bucket():
     assert provider.resolve_url("https://other-cdn.com/x.png") == (
         "https://other-cdn.com/x.png"
     )
+
+
+def test_normalize_media_url_local_passthrough():
+    # 本地模式：原样返回
+    from services.oss import normalize_media_url
+
+    assert normalize_media_url("/media/assets/1.png") == "/media/assets/1.png"
+    assert normalize_media_url(None) is None
+    assert normalize_media_url("https://external.example.com/x.png") == (
+        "https://external.example.com/x.png"
+    )
+
+
+def test_normalize_media_url_oss_downgrades_signed_url_to_key():
+    # OSS 模式下：指向本桶的签名/完整 URL 落库前降级为 key；
+    # 外部地址保持原样。
+    provider = AliyunProvider(
+        bucket="dramas-x",
+        endpoint="oss-cn-guangzhou.aliyuncs.com",
+        internal_endpoint="i",
+        public_base="https://dramas-x.oss-cn-guangzhou.aliyuncs.com",
+        access_key_id="ak",
+        access_key_secret="sk",
+    )
+    signed = (
+        "https://dramas-x.oss-cn-guangzhou.aliyuncs.com/"
+        "uploads/0/20260819/x.png?OSSAccessKeyId=ak&Expires=1&Signature=old"
+    )
+    assert provider.normalize_media_ref(signed) == "uploads/0/20260819/x.png"
+    assert provider.normalize_media_ref("uploads/0/20260819/x.png") == (
+        "uploads/0/20260819/x.png"
+    )
+    assert provider.normalize_media_ref("/media/assets/1.png") == "/media/assets/1.png"
+    assert provider.normalize_media_ref("https://other-cdn.com/x.png") == (
+        "https://other-cdn.com/x.png"
+    )
+    assert provider.normalize_media_ref(None) is None
 
 
 # ---------------------------------------------------------------- 端点

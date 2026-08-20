@@ -12,6 +12,8 @@ import annotationEditorSource from './ImageAnnotationEditor.vue?raw'
 
 vi.mock('@/api', () => ({
   mediaUrl: (path?: string | null) => path ?? '',
+  persistedMediaRef: (uploaded: { key?: string; url?: string; filename: string }) =>
+    uploaded.key || uploaded.url || `/media/${uploaded.filename}`,
   api: {
     imageGenerationModels: vi.fn(),
     digitalHumans: vi.fn(),

@@ -8,6 +8,8 @@ vi.mock('@/api', () => ({
   api: { createAsset: vi.fn(), updateAsset: vi.fn(), upload: vi.fn() },
   sleep: vi.fn(),
   mediaUrl: (path?: string | null) => path ?? '',
+  persistedMediaRef: (uploaded: { key?: string; url?: string; filename: string }) =>
+    uploaded.key || uploaded.url || `/media/${uploaded.filename}`,
 }))
 
 const createAssetMock = vi.mocked(api.createAsset)

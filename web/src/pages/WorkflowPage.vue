@@ -2,7 +2,7 @@
 import { ArrowLeft, Box, Check, Image, MapPin, Pencil, RefreshCw, Sparkles, Trash2, Upload, User, Workflow, X } from 'lucide-vue-next'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, mediaUrl, sleep } from '@/api'
+import { api, persistedMediaRef, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { Asset, Chapter } from '@/types'
@@ -19,8 +19,8 @@ async function poll(id: string) { let task = (await api.task(id)).data; while (!
 async function extract() { extracting.value = true; try { const task = await poll((await api.extract(chapterId.value)).data.id); if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '提取失败'); await load(); notice.success('内容理解完成') } catch (error) { notice.error((error as Error).message) } finally { extracting.value = false } }
 async function generate(asset: Asset) { processing.value.push(asset.id); try { const task = await poll((await api.generateAsset(asset.id)).data.id); if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '生成失败'); await load(); notice.success(`${asset.canonical_name} 主图已生成`) } catch (error) { notice.error((error as Error).message) } finally { processing.value = processing.value.filter(id => id !== asset.id) } }
 async function batchGenerate() { const pending = assets.value.filter(item => !item.main_image); if (!pending.length) return notice.info('所有资产都已有主图'); batchGenerating.value = true; try { for (const asset of pending) await generate(asset); notice.success('批量生成完成') } finally { batchGenerating.value = false } }
-async function upload(asset: Asset, event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { main_image: result.url || mediaUrl(`/media/${result.filename}`) }); await load(); notice.success('主图已更新') } catch (error) { notice.error((error as Error).message) } }
-async function uploadAngle(asset: Asset, field: 'angle_image_1' | 'angle_image_2', event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { [field]: result.url || mediaUrl(`/media/${result.filename}`) }); await load(); notice.success('参考图已更新') } catch (error) { notice.error((error as Error).message) } }
+async function upload(asset: Asset, event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { main_image: persistedMediaRef(result) }); await load(); notice.success('主图已更新') } catch (error) { notice.error((error as Error).message) } }
+async function uploadAngle(asset: Asset, field: 'angle_image_1' | 'angle_image_2', event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { [field]: persistedMediaRef(result) }); await load(); notice.success('参考图已更新') } catch (error) { notice.error((error as Error).message) } }
 async function removeAsset(asset: Asset) {
   if (!await appConfirm({
     title: `删除资产「${asset.canonical_name}」？`,

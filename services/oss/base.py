@@ -63,6 +63,21 @@ class OSSProvider(abc.ABC):
             return self.signed_url(raw)
         return raw
 
+    def normalize_media_ref(self, raw: str | None) -> str | None:
+        """落库前把媒体地址统一为持久化引用（OSS 下为对象 key）。
+
+        前端可能直接提交带签名的完整 URL（历史行为），这里统一在写入前降级为
+        key，避免签名过期后 403；本地模式保持原样。
+        """
+        if not raw:
+            return raw
+        if self.enabled:
+            return self._normalize_aliyun_url(raw)
+        return raw
+
+    def _normalize_aliyun_url(self, raw: str) -> str:
+        return raw
+
 
 class LocalProvider(OSSProvider):
     """本地磁盘模式：不启用直传，现有上传/存储链路保持不变。"""
@@ -92,3 +107,11 @@ oss: OSSProvider = _build_provider()
 def resolve_media_url(raw: str | None) -> str | None:
     """对外暴露的媒体地址解析入口：落库存 key，读取时重新签发。"""
     return oss.resolve_url(raw)
+
+
+def normalize_media_url(raw: str | None) -> str | None:
+    """落库前的媒体引用归一化入口：OSS 模式下把签名/完整 URL 降级为 key。
+
+    供各 controller 在写库前统一调用，避免把有效期有限的签名 URL 持久化。
+    """
+    return oss.normalize_media_ref(raw)
