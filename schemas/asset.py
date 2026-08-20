@@ -134,13 +134,12 @@ class AssetBriefOut(AssetProperties, BaseResponse):
         self.main_image = resolve_media_url(self.main_image)
         self.angle_image_1 = resolve_media_url(self.angle_image_1)
         self.angle_image_2 = resolve_media_url(self.angle_image_2)
-        if isinstance(self.metadata, dict) and isinstance(
-            self.metadata.get("image_gallery"), list
-        ):
+        meta = getattr(self, "metadata", None)
+        if isinstance(meta, dict) and isinstance(meta.get("image_gallery"), list):
             self.metadata = {
-                **self.metadata,
+                **meta,
                 "image_gallery": [
-                    resolve_media_url(u) for u in self.metadata["image_gallery"]
+                    resolve_media_url(u) for u in meta["image_gallery"]
                 ],
             }
         return self
@@ -160,13 +159,12 @@ class AssetOut(AssetFullProperties, BaseResponse):
         self.main_image = resolve_media_url(self.main_image)
         self.angle_image_1 = resolve_media_url(self.angle_image_1)
         self.angle_image_2 = resolve_media_url(self.angle_image_2)
-        if isinstance(self.metadata, dict) and isinstance(
-            self.metadata.get("image_gallery"), list
-        ):
+        meta = getattr(self, "metadata", None)
+        if isinstance(meta, dict) and isinstance(meta.get("image_gallery"), list):
             self.metadata = {
-                **self.metadata,
+                **meta,
                 "image_gallery": [
-                    resolve_media_url(u) for u in self.metadata["image_gallery"]
+                    resolve_media_url(u) for u in meta["image_gallery"]
                 ],
             }
         return self
