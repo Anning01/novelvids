@@ -17,12 +17,24 @@ const emit = defineEmits<{
 }>()
 
 const details = computed(() => formatVideoGenerationError(props.error))
-const title = computed(() => props.reference
-  ? `参考图「${props.reference.label}」包含真人信息`
-  : details.value.title)
-const message = computed(() => props.reference
-  ? `参考图「${props.reference.label}」可能包含真实人物，供应商因隐私保护拒绝了本次生成。`
-  : details.value.message)
+
+const title = computed(() => {
+  if (!props.reference) return details.value.title
+  if (details.value.category === 'privacy') return `参考图「${props.reference.label}」包含真人信息`
+  if (details.value.category === 'download') return `参考图「${props.reference.label}」下载失败`
+  return `参考图「${props.reference.label}」异常`
+})
+
+const message = computed(() => {
+  if (!props.reference) return details.value.message
+  if (details.value.category === 'privacy') {
+    return `参考图「${props.reference.label}」可能包含真实人物，供应商因隐私保护拒绝了本次生成。`
+  }
+  if (details.value.category === 'download') {
+    return `参考图「${props.reference.label}」地址无效或无法被供应商下载，请检查该素材是否可正常访问。`
+  }
+  return `参考图「${props.reference.label}」触发异常：${details.value.message}`
+})
 </script>
 
 <template>
