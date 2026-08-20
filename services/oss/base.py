@@ -46,6 +46,23 @@ class OSSProvider(abc.ABC):
         """服务端写入对象（应走内网 endpoint）。"""
         raise NotImplementedError
 
+    def resolve_url(self, raw: str | None) -> str | None:
+        """把持久化的媒体地址解析为可访问 URL。
+
+        落库时只存 OSS 对象 key（以 ``uploads/`` 开头）或本地相对路径（以
+        ``/media/`` 开头）；对外暴露时再决定是否需要签名：
+
+        - 未启用 OSS（本地磁盘模式）：原样返回本地相对路径；
+        - 已启用 OSS：若存的是对象 key，则在读取时按当前时间重新签发临时签名
+          URL（有效期见 ``OSS_URL_EXPIRES_SECONDS``）；若已经是完整 URL（历史
+          签名链接或外部地址），原样返回以保持对已落库旧数据的兼容。
+        """
+        if not raw:
+            return raw
+        if self.enabled and raw.startswith("uploads/"):
+            return self.signed_url(raw)
+        return raw
+
 
 class LocalProvider(OSSProvider):
     """本地磁盘模式：不启用直传，现有上传/存储链路保持不变。"""
@@ -70,3 +87,8 @@ def _build_provider() -> OSSProvider:
 
 
 oss: OSSProvider = _build_provider()
+
+
+def resolve_media_url(raw: str | None) -> str | None:
+    """对外暴露的媒体地址解析入口：落库存 key，读取时重新签发。"""
+    return oss.resolve_url(raw)

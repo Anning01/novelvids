@@ -145,7 +145,8 @@ async def _save_cover(image: Any, novel_id: int) -> str:
     if oss.enabled:
         key = make_upload_key(None, filename)
         await oss.put_bytes(key, image_bytes, _cover_content_type(suffix))
-        return oss.public_url(key)
+        # 落库存 key，读取时再由 resolve_media_url 重新签发临时 URL
+        return key
 
     cover_dir = Path(settings.MEDIA_PATH) / "covers"
     cover_dir.mkdir(parents=True, exist_ok=True)

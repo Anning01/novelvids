@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Optional
 from schemas._base import BaseResponse
+from services.oss import resolve_media_url
 
 
 # --- 核心业务属性 (Internal Mixins) ---
@@ -71,6 +72,11 @@ class NovelMetaOut(NovelProperties, BaseResponse):
     style_key: Optional[str] = Field(None, description="视觉风格 key", max_length=64)
     content_length: int = Field(0, description="书稿正文字符数（校验拆分质量用）")
 
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.cover = resolve_media_url(self.cover)
+        return self
+
 
 class NovelBriefOut(NovelProperties, BaseResponse):
     """
@@ -80,6 +86,11 @@ class NovelBriefOut(NovelProperties, BaseResponse):
 
     id: int = Field(..., description="小说/剧本ID")
 
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.cover = resolve_media_url(self.cover)
+        return self
+
 
 class NovelOut(NovelFullProperties, BaseResponse):
     """
@@ -88,3 +99,8 @@ class NovelOut(NovelFullProperties, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="小说/剧本ID")
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.cover = resolve_media_url(self.cover)
+        return self
