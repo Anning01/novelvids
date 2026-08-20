@@ -26,4 +26,17 @@ describe('formatVideoGenerationError', () => {
     expect(result.requestId).toBe('req-422')
     expect(result.httpStatus).toBe(422)
   })
+
+  it('把参考图下载失败转换为带序号的中文提示', () => {
+    const result = formatVideoGenerationError(
+      "视频供应商请求失败：The parameter `content[1].image_uri` specified in the request is not valid: resource download failed. (InvalidParameterValue)（HTTP 400，request_id=req-400）",
+    )
+
+    expect(result.title).toBe('第 1 张参考图下载失败')
+    expect(result.message).toContain('无法被供应商下载')
+    expect(result.category).toBe('download')
+    expect(result.referenceImageNumber).toBe(1)
+    expect(result.requestId).toBe('req-400')
+    expect(result.httpStatus).toBe(400)
+  })
 })

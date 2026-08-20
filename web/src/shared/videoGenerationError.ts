@@ -1,3 +1,5 @@
+export type VideoGenerationErrorCategory = 'privacy' | 'download' | 'other'
+
 export interface VideoGenerationErrorInfo {
   title: string
   message: string
@@ -7,6 +9,7 @@ export interface VideoGenerationErrorInfo {
   requestId?: string
   httpStatus?: number
   referenceImageNumber?: number
+  category: VideoGenerationErrorCategory
 }
 
 const PRIVACY_ERROR_CODE = 'InputImageSensitiveContentDetected.PrivacyInformation'
@@ -42,10 +45,20 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
   ])
   const httpStatusText = firstMatch(raw, [/HTTP\s*(\d{3})/iu])
   const httpStatus = httpStatusText ? Number(httpStatusText) : undefined
-  const contentIndexText = firstMatch(raw, [/input image\s*['"]?content\[(\d+)\]/iu])
+  const contentIndexText = firstMatch(raw, [
+    /input image\s*['"]?content\[(\d+)\]/iu,
+    /content\[(\d+)\]\.image_uri/iu,
+    /content\[(\d+)\]/iu,
+  ])
   const referenceNumber = contentIndexText ? Number(contentIndexText) : undefined
 
-  if (raw.includes(PRIVACY_ERROR_CODE) || /may contain real person/iu.test(raw)) {
+  const isPrivacyError = raw.includes(PRIVACY_ERROR_CODE) || /may contain real person/iu.test(raw)
+  const isDownloadError =
+    !isPrivacyError &&
+    (/resource download failed/iu.test(raw) ||
+      (/image_uri/iu.test(raw) && /not valid/iu.test(raw)))
+
+  if (isPrivacyError) {
     const target = referenceNumber && referenceNumber > 0
       ? `第 ${referenceNumber} 张参考图`
       : '参考图片'
@@ -58,6 +71,24 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
       requestId,
       httpStatus,
       referenceImageNumber: referenceNumber,
+      category: 'privacy',
+    }
+  }
+
+  if (isDownloadError) {
+    const target = referenceNumber && referenceNumber > 0
+      ? `第 ${referenceNumber} 张参考图`
+      : '参考图片'
+    return {
+      title: `${target}下载失败`,
+      message: `${target}地址无效或无法被供应商下载，请检查该素材是否可正常访问。`,
+      suggestion: '请尝试重新上传参考素材，或在素材列表替换为有效图片后重新生成。',
+      raw,
+      errorCode,
+      requestId,
+      httpStatus,
+      referenceImageNumber: referenceNumber,
+      category: 'download',
     }
   }
 
@@ -69,5 +100,6 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
     errorCode,
     requestId,
     httpStatus,
+    category: 'other',
   }
 }
