@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional, Type
 from uuid import UUID
@@ -17,7 +18,7 @@ from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
 from services.image_generation.capabilities import validate_selection
-from services.oss import normalize_media_url
+from services.oss import normalize_media_url, oss
 from utils.crud import CRUDBase
 from utils.decorators import atomic
 from utils.enums import AiTaskTypeEnum, ImageSourceEnum, TaskStatusEnum
@@ -44,6 +45,9 @@ def _normalize_asset_media(data: dict) -> dict:
 
 def _normalize_image_list(images: list[str]) -> list[str]:
     return [normalize_media_url(item) or item for item in images if item]
+
+
+logger = logging.getLogger(__name__)
 
 
 def _non_empty(value: Any) -> bool:
@@ -494,6 +498,14 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             if payload.source_image_url
             else None
         )
+        # OSS 直传的标注图：先从内网拉取验证对象真实存在且可读，再落库，
+        # 避免把无效 key 写入资产图片字段。
+        if image_url.startswith("uploads/") and oss.enabled:
+            try:
+                await oss.get_bytes(image_url)
+            except Exception as error:  # noqa: BLE001 - 统一转为用户可读错误
+                logger.warning("annotation oss object unreadable: %s (%s)", image_url, error)
+                raise HTTPException(400, detail="标注图对象不存在或无法读取，请重新上传后再保存") from error
         task = await AiTask.create(
             task_type=AiTaskTypeEnum.reference_image.value,
             status=TaskStatusEnum.completed.value,
