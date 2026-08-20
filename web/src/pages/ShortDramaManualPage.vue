@@ -211,6 +211,8 @@ async function loadProject(chapterId = selectedChapterId.value) {
     if (extractionTaskActive.value && extractionTask.value) {
       void monitorExtractionTask(extractionTask.value.id)
     }
+    // 刷新后恢复仍在生成中的资产参考图状态（spinner + 轮询）
+    void resumeActiveGenerations()
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -484,24 +486,52 @@ function setAssetFailed(assetId: number, value: boolean) {
   failedAssetIds.value = next
 }
 
-async function generateAssetAndWait(asset: Asset) {
-  setAssetGenerating(asset.id, true)
-  setAssetFailed(asset.id, false)
+async function monitorAssetGeneration(assetId: number, taskId: string): Promise<boolean> {
   try {
-    let task = (await api.generateAsset(asset.id)).data
+    let task = (await api.task(taskId)).data
     while (pageAlive && !terminalTaskStatuses.has(task.status)) {
       await sleep(2000)
       task = (await api.task(task.id)).data
     }
     if (!pageAlive) return false
     const completed = task.status === TaskStatusEnum.COMPLETED
-    setAssetFailed(asset.id, !completed)
+    setAssetFailed(assetId, !completed)
+    if (completed) await refreshAssets()
     return completed
   } catch {
-    setAssetFailed(asset.id, true)
+    setAssetFailed(assetId, true)
     return false
   } finally {
+    setAssetGenerating(assetId, false)
+  }
+}
+
+async function generateAssetAndWait(asset: Asset) {
+  setAssetGenerating(asset.id, true)
+  setAssetFailed(asset.id, false)
+  let taskId: string
+  try {
+    taskId = (await api.generateAsset(asset.id)).data.id
+  } catch {
+    setAssetFailed(asset.id, true)
     setAssetGenerating(asset.id, false)
+    return false
+  }
+  return monitorAssetGeneration(asset.id, taskId)
+}
+
+async function resumeActiveGenerations() {
+  if (!Number.isFinite(projectId.value) || projectId.value <= 0) return
+  try {
+    const response = await api.activeAssetGenerations(projectId.value)
+    for (const item of response.data) {
+      if (!assets.value.some(asset => asset.id === item.asset_id)) continue
+      setAssetGenerating(item.asset_id, true)
+      setAssetFailed(item.asset_id, false)
+      void monitorAssetGeneration(item.asset_id, item.task_id)
+    }
+  } catch (error) {
+    notice.error((error as Error).message)
   }
 }
 

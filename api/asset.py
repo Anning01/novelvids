@@ -131,6 +131,19 @@ async def merge_assets(
 
 
 @router.get(
+    "/active-generations",
+    summary="查询项目内进行中的参考图生成任务",
+    response_model=ResponseSchema[list[dict]],
+)
+async def active_asset_generations(
+    novel_id: int = Query(..., description="项目 ID"),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    await ensure_novel_access(novel_id, ctx)
+    return ResponseSchema(data=await asset_controller.active_generations(novel_id))
+
+
+@router.get(
     "/{asset_id}", summary="获取资产详情", response_model=ResponseSchema[AssetWithVariantsOut]
 )
 async def get_asset(

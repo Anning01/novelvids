@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -160,6 +160,7 @@ export const api = {
   assignAssetVariantToChapter: (assetId: number, variantId: number, chapterNumber: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants/${variantId}/chapter`, { method: 'POST', body: JSON.stringify({ chapter_number: chapterNumber }) }),
   deleteAssetVariant: (assetId: number, variantId: number) => request<SingleResponse<null>>(`/asset/${assetId}/variants/${variantId}`, { method: 'DELETE' }),
   generateAsset: (id: number, variantId?: number) => request<SingleResponse<AiTask>>(`/asset/reference/${id}${qs({ variant_id: variantId })}`),
+  activeAssetGenerations: (novelId: number) => request<SingleResponse<AssetActiveGeneration[]>>(`/asset/active-generations${qs({ novel_id: novelId })}`),
   scenes: (chapterId: number) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page: 1, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),
   createScene: (data: Partial<Scene> & { chapter_id: number; sequence: number; prompt: string }) => request<SingleResponse<Scene>>('/scene/', { method: 'POST', body: JSON.stringify(data) }),
