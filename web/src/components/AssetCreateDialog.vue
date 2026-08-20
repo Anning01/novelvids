@@ -452,7 +452,9 @@ async function saveAnnotatedImage(blob: Blob) {
       { type: 'image/png' },
     )
     const uploaded = await api.upload(file)
-    const imageUrl = uploaded.url || mediaUrl(`/media/${uploaded.filename}`)
+    // 直传 OSS 时只回传 key；落库存 key，读取时由 OUT schema 重新签发，
+    // 避免签名 URL 在有效期（默认 3 天）后失效。
+    const imageUrl = uploaded.key || uploaded.url || mediaUrl(`/media/${uploaded.filename}`)
     if (selectedVariant.value) {
       const variant = selectedVariant.value
       const updated = (await api.updateAssetVariant(props.asset.id, variant.id, {
