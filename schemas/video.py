@@ -5,6 +5,31 @@ from utils.enums import VideoModelTypeEnum, TaskStatusEnum
 from services.oss import resolve_media_url
 
 
+def _resolve_video_metadata(metadata: Any) -> None:
+    """解析 video.metadata 中持久化的媒体引用（首尾帧与参考素材）。
+
+    后端把尾帧等媒体落库为 OSS key（uploads/...），读取时统一解析为公共 URL。
+    """
+    if not isinstance(metadata, dict):
+        return
+    for key in ("first_frame_url", "last_frame_url"):
+        raw = metadata.get(key)
+        if isinstance(raw, str) and raw:
+            metadata[key] = resolve_media_url(raw) or raw
+    last_frame_reference = metadata.get("last_frame_reference")
+    if isinstance(last_frame_reference, dict):
+        raw = last_frame_reference.get("url")
+        if isinstance(raw, str) and raw:
+            last_frame_reference["url"] = resolve_media_url(raw) or raw
+    reference_media = metadata.get("reference_media")
+    if isinstance(reference_media, list):
+        for item in reference_media:
+            if isinstance(item, dict):
+                raw = item.get("url")
+                if isinstance(raw, str) and raw:
+                    item["url"] = resolve_media_url(raw) or raw
+
+
 # --- 输入 Schema ---
 
 class VideoReferenceMedia(BaseModel):
@@ -56,6 +81,7 @@ class VideoBriefOut(BaseResponse):
     @model_validator(mode="after")
     def _resolve_media(self):
         self.url = resolve_media_url(self.url)
+        _resolve_video_metadata(self.metadata)
         return self
 
 
@@ -74,6 +100,7 @@ class VideoOut(BaseResponse):
     @model_validator(mode="after")
     def _resolve_media(self):
         self.url = resolve_media_url(self.url)
+        _resolve_video_metadata(self.metadata)
         return self
 
 
