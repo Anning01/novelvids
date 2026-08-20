@@ -48,8 +48,10 @@ class Settings:
     OSS_ENDPOINT: str = os.getenv("OSS_ENDPOINT", "")
     # 内网 endpoint（服务端读写用，省流量），如 oss-cn-beijing-internal.aliyuncs.com
     OSS_INTERNAL_ENDPOINT: str = os.getenv("OSS_INTERNAL_ENDPOINT", "")
-    # 公网访问前缀（可选 CDN），留空则用 https://{bucket}.{endpoint}
+    # 公网访问前缀（可选 CDN/自定义域名），留空则用 https://{bucket}.{endpoint}
     OSS_PUBLIC_BASE: str = os.getenv("OSS_PUBLIC_BASE", "")
+    # 私有 Bucket 签名 URL 的有效期（秒），默认 7 天；过期后需重新签发
+    OSS_URL_EXPIRES_SECONDS: int = int(os.getenv("OSS_URL_EXPIRES_SECONDS", "604800"))
     OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 

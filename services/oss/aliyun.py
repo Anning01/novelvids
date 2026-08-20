@@ -2,12 +2,15 @@
 
 - 前端直传：POST 表单策略（policy base64 + HMAC-SHA1 签名）
 - 服务端读写：Authorization 头签名（V1），默认走内网 endpoint 省流量
+- 公网访问：私有 Bucket 用带 Expires + Signature 的临时签名 URL
 """
 
 import base64
 import hashlib
 import hmac
+import time
 from email.utils import formatdate
+from urllib.parse import quote
 
 import httpx
 
@@ -28,6 +31,7 @@ class AliyunProvider(OSSProvider):
         public_base: str,
         access_key_id: str,
         access_key_secret: str,
+        url_expires_seconds: int = 604800,
     ):
         self.bucket = bucket
         self.endpoint = endpoint
@@ -35,6 +39,7 @@ class AliyunProvider(OSSProvider):
         self.public_base = (public_base or "").rstrip("/")
         self.access_key_id = access_key_id
         self.access_key_secret = access_key_secret
+        self.url_expires_seconds = int(url_expires_seconds or 604800)
 
     @property
     def enabled(self) -> bool:
@@ -47,10 +52,22 @@ class AliyunProvider(OSSProvider):
 
     # ---- 公网访问地址 ----
 
+    def signed_url(self, key: str, expires_seconds: int | None = None) -> str:
+        """生成带过期时间与签名的临时访问 URL（私有 Bucket 用）。"""
+        expires = int(time.time()) + int(expires_seconds or self.url_expires_seconds)
+        # OSS V1 查询串签名：Signature = base64(HMAC-SHA1(Secret, "GET\n\n\n{Expires}\n/{Bucket}/{Key}"))
+        string_to_sign = f"GET\n\n\n{expires}\n/{self.bucket}/{key}"
+        signature = _hmac_sign(self.access_key_secret, string_to_sign)
+        base = self.public_base or f"https://{self.bucket}.{self.endpoint}"
+        return (
+            f"{base}/{key}"
+            f"?OSSAccessKeyId={quote(self.access_key_id, safe='')}"
+            f"&Expires={expires}"
+            f"&Signature={quote(signature, safe='')}"
+        )
+
     def public_url(self, key: str) -> str:
-        if self.public_base:
-            return f"{self.public_base}/{key}"
-        return f"https://{self.bucket}.{self.endpoint}/{key}"
+        return self.signed_url(key)
 
     # ---- 前端直传：POST 表单策略 ----
 

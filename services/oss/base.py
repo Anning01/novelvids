@@ -64,6 +64,7 @@ def _build_provider() -> OSSProvider:
             public_base=settings.OSS_PUBLIC_BASE,
             access_key_id=settings.OSS_ACCESS_KEY_ID,
             access_key_secret=settings.OSS_ACCESS_KEY_SECRET,
+            url_expires_seconds=settings.OSS_URL_EXPIRES_SECONDS,
         )
     return LocalProvider()
 
