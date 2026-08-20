@@ -53,7 +53,7 @@ def test_aliyun_authorization_is_v1_format():
     assert provider._internal_url("k.txt") == "https://b.i/k.txt"
 
 
-def test_public_url_is_signed_with_expiry():
+def test_public_url_is_public_read_no_signature():
     provider = AliyunProvider(
         bucket="b",
         endpoint="oss-cn-beijing.aliyuncs.com",
@@ -63,32 +63,9 @@ def test_public_url_is_signed_with_expiry():
         access_key_secret="sk",
     )
     url = provider.public_url("uploads/1/x.png")
-    assert url.startswith("https://cdn.example.com/uploads/1/x.png?")
-    assert "OSSAccessKeyId=ak" in url
-    assert "Expires=" in url
-    assert "Signature=" in url
-
-
-def test_signed_url_signature_matches_v1_query_string():
-    from urllib.parse import parse_qs, unquote, urlparse
-
-    provider = AliyunProvider(
-        bucket="b",
-        endpoint="oss-cn-beijing.aliyuncs.com",
-        internal_endpoint="i",
-        public_base="",
-        access_key_id="ak",
-        access_key_secret="sk",
-    )
-    url = provider.signed_url("k/我.png", expires_seconds=3600)
-    parsed = urlparse(url)
-    assert parsed.hostname == "b.oss-cn-beijing.aliyuncs.com"
-    query = parse_qs(parsed.query)
-    expires = int(query["Expires"][0])
-    signature = unquote(query["Signature"][0])
-    # 重算签名，确保 URL 中的 Signature 与 OSS V1 查询串规则一致
-    expected = _hmac_sign("sk", f"GET\n\n\n{expires}\n/b/k/我.png")
-    assert signature == expected
+    # Bucket 公共读：直接拼接公共域名，不带任何签名参数
+    assert url == "https://cdn.example.com/uploads/1/x.png"
+    assert "OSSAccessKeyId" not in url and "Expires=" not in url and "Signature" not in url
 
 
 def test_make_upload_key_shape():
@@ -116,7 +93,7 @@ def test_resolve_media_url_local_passthrough():
     assert resolve_media_url(None) is None
 
 
-def test_resolve_media_url_oss_signs_key():
+def test_resolve_media_url_oss_builds_public_url_for_key():
     provider = AliyunProvider(
         bucket="b",
         endpoint="oss-cn-beijing.aliyuncs.com",
@@ -126,13 +103,12 @@ def test_resolve_media_url_oss_signs_key():
         access_key_secret="sk",
     )
     url = provider.resolve_url("uploads/1/x.png")
-    assert url.startswith("https://cdn.example.com/uploads/1/x.png?")
-    assert "Expires=" in url and "Signature=" in url
+    assert url == "https://cdn.example.com/uploads/1/x.png"
+    assert "Expires=" not in url and "Signature" not in url
 
 
-def test_resolve_media_url_oss_resigns_legacy_signed_url():
-    # 历史遗留的“已签名完整 URL”指向本桶：query 仅为 OSS 签名参数时
-    # 重新签发（旧签名过期也不影响访问，无需数据迁移）
+def test_resolve_media_url_oss_keeps_full_url():
+    # 完整 URL（含历史签名/处理参数）与外部地址一律原样返回，不再重签
     provider = AliyunProvider(
         bucket="b",
         endpoint="oss-cn-beijing.aliyuncs.com",
@@ -142,35 +118,13 @@ def test_resolve_media_url_oss_resigns_legacy_signed_url():
         access_key_secret="sk",
     )
     legacy = "https://cdn.example.com/uploads/1/x.png?Expires=1&Signature=old"
-    url = provider.resolve_url(legacy)
-    assert url.startswith("https://cdn.example.com/uploads/1/x.png?")
-    assert "Signature=old" not in url
-    # 带图片处理参数（非纯签名）的完整 URL 保持原样
+    assert provider.resolve_url(legacy) == legacy
     processed = "https://cdn.example.com/uploads/1/x.png?x-oss-process=image/resize,w_100"
     assert provider.resolve_url(processed) == processed
-
-
-def test_resolve_media_url_oss_signs_full_url_to_our_bucket():
-    # 历史落库的“完整 URL 但无签名”应被识别为本桶对象并重新签发
-    provider = AliyunProvider(
-        bucket="dramas-x",
-        endpoint="oss-cn-guangzhou.aliyuncs.com",
-        internal_endpoint="i",
-        public_base="https://dramas-x.oss-cn-guangzhou.aliyuncs.com",
-        access_key_id="ak",
-        access_key_secret="sk",
-    )
-    full = (
-        "https://dramas-x.oss-cn-guangzhou.aliyuncs.com/"
-        "uploads/0/20260819/27d5d75c00c5-asset-32_x.png"
-    )
-    url = provider.resolve_url(full)
-    assert url.startswith(full + "?")
-    assert "Expires=" in url and "Signature=" in url
-    # 外部地址仍原样返回（不尝试签名）
     assert provider.resolve_url("https://other-cdn.com/x.png") == (
         "https://other-cdn.com/x.png"
     )
+    assert provider.resolve_url("/media/assets/1.png") == "/media/assets/1.png"
 
 
 def test_normalize_media_url_local_passthrough():

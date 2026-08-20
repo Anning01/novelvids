@@ -150,15 +150,12 @@ OSS_ACCESS_KEY_ID=...
 OSS_ACCESS_KEY_SECRET=...
 # 可选：CDN/自定义（CNAME）域名前缀，仅用于读访问；留空则用 https://{bucket}.{endpoint}
 OSS_PUBLIC_BASE=https://dramas-x.cn-guangzhou.taihangztn.cn
-# 私有 Bucket 签名 URL 有效期（秒），默认 3 天；每次读取媒体时按当前时间重新签发
-OSS_URL_EXPIRES_SECONDS=259200
 ```
 
-> **私有 Bucket**：若 Bucket 关闭公共读，媒体地址在**读取时**自动附加
-> `OSSAccessKeyId + Expires + Signature` 临时签名（OSS V1 查询串签名）。数据库只持久化 OSS 对象 key
-> （`uploads/...`）或本地相对路径（`/media/...`），**不存签名值**；每次接口返回时按当前时间重新签发，
-> 有效期由 `OSS_URL_EXPIRES_SECONDS` 控制（默认 3 天）。历史已落库的完整签名 URL 会原样返回以兼容旧数据。
-> 未配置 OSS（本地磁盘模式）时，URL 原样返回本地路径，不受签名影响。
+> **公共读 Bucket**：Bucket 需开启公共读，媒体地址在**读取时**直接拼接公共域名
+> （`{OSS_PUBLIC_BASE}/{key}`，不附带任何签名参数）。数据库只持久化 OSS 对象 key
+> （`uploads/...`）或本地相对路径（`/media/...`），不存完整 URL。
+> 未配置 OSS（本地磁盘模式）时，URL 原样返回本地路径。
 
 直传 POST 的目标地址固定为 Bucket 虚拟主机域名
 `https://{OSS_BUCKET}.{OSS_ENDPOINT}`（如 `https://dramas-x.oss-cn-guangzhou.aliyuncs.com`）。

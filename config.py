@@ -50,9 +50,6 @@ class Settings:
     OSS_INTERNAL_ENDPOINT: str = os.getenv("OSS_INTERNAL_ENDPOINT", "")
     # 公网访问前缀（可选 CDN/自定义域名），留空则用 https://{bucket}.{endpoint}
     OSS_PUBLIC_BASE: str = os.getenv("OSS_PUBLIC_BASE", "")
-    # 私有 Bucket 签名 URL 的有效期（秒）。默认 3 天；用于「读取时重新签发」，
-    # 每次读取媒体地址都按当前时间签发，过期后即失效、避免长期有效或无限续期。
-    OSS_URL_EXPIRES_SECONDS: int = int(os.getenv("OSS_URL_EXPIRES_SECONDS", "259200"))
     OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 
