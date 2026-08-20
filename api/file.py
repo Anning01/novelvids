@@ -17,6 +17,11 @@ router = APIRouter()
 
 _EDITOR = Depends(require_roles("admin", "creator"))
 
+# 浏览器直传 OSS 的文件大小上限（字节）。需覆盖所有上传入口的前端校验上限：
+# 图片标注 30MB、参考图片 30MB、首尾帧 20MB、参考视频 200MB（capabilities）。
+# 上限过低（曾为 20MB）会导致超过的文件直传返回 400 EntityTooLarge。
+_DIRECT_UPLOAD_MAX_BYTES = 200 * 1024 * 1024
+
 
 class OssFinalizeIn(BaseModel):
     key: str = Field(min_length=1, max_length=500, description="OSS 对象 key")
@@ -32,7 +37,7 @@ async def get_upload_policy(
     if not oss.enabled:
         return ResponseSchema(data={"direct": False})
     key = make_upload_key(None, filename)
-    policy = oss.sign_form_upload(key, content_type, 20 * 1024 * 1024)
+    policy = oss.sign_form_upload(key, content_type, _DIRECT_UPLOAD_MAX_BYTES)
     return ResponseSchema(
         data={
             "direct": True,
