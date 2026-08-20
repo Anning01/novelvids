@@ -144,6 +144,29 @@ def test_resolve_media_url_oss_keeps_full_url():
     assert provider.resolve_url(legacy) == legacy
 
 
+def test_resolve_media_url_oss_signs_full_url_to_our_bucket():
+    # 历史落库的“完整 URL 但无签名”应被识别为本桶对象并重新签发
+    provider = AliyunProvider(
+        bucket="dramas-x",
+        endpoint="oss-cn-guangzhou.aliyuncs.com",
+        internal_endpoint="i",
+        public_base="https://dramas-x.oss-cn-guangzhou.aliyuncs.com",
+        access_key_id="ak",
+        access_key_secret="sk",
+    )
+    full = (
+        "https://dramas-x.oss-cn-guangzhou.aliyuncs.com/"
+        "uploads/0/20260819/27d5d75c00c5-asset-32_x.png"
+    )
+    url = provider.resolve_url(full)
+    assert url.startswith(full + "?")
+    assert "Expires=" in url and "Signature=" in url
+    # 外部地址仍原样返回（不尝试签名）
+    assert provider.resolve_url("https://other-cdn.com/x.png") == (
+        "https://other-cdn.com/x.png"
+    )
+
+
 # ---------------------------------------------------------------- 端点
 
 
