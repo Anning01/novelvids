@@ -17,10 +17,33 @@ from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
 from services.image_generation.capabilities import validate_selection
+from services.oss import normalize_media_url
 from utils.crud import CRUDBase
 from utils.decorators import atomic
 from utils.enums import AiTaskTypeEnum, ImageSourceEnum, TaskStatusEnum
 from utils.page import QueryParams
+
+
+def _normalize_asset_media(data: dict) -> dict:
+    """写库前把资产图片字段中的签名 URL 降级为 OSS key，避免过期 403。"""
+    for key in ("main_image", "angle_image_1", "angle_image_2"):
+        raw = data.get(key)
+        if isinstance(raw, str) and raw:
+            data[key] = normalize_media_url(raw) or raw
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        gallery = metadata.get("image_gallery")
+        if isinstance(gallery, list):
+            metadata["image_gallery"] = [
+                normalize_media_url(item) or item
+                for item in gallery
+                if isinstance(item, str)
+            ]
+    return data
+
+
+def _normalize_image_list(images: list[str]) -> list[str]:
+    return [normalize_media_url(item) or item for item in images if item]
 
 
 def _non_empty(value: Any) -> bool:
@@ -118,6 +141,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
     async def create(self, obj_in: AssetCreate, **kwargs) -> Asset:
         data = obj_in.model_dump(exclude_unset=True)
         chapter_id = data.pop("chapter_id", None)
+        data = _normalize_asset_media(data)
         if chapter_id is not None:
             chapter = await Chapter.get_or_none(id=chapter_id)
             if chapter is None:
@@ -136,11 +160,11 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
 
     async def update(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
         instance = await self.get(asset_id)
-        return await super().update(instance, obj_in)
+        return await super().update(instance, _normalize_asset_media(obj_in.model_dump(exclude_unset=True)))
 
     async def patch(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
         instance = await self.get(asset_id)
-        return await super().patch(instance, obj_in)
+        return await super().patch(instance, _normalize_asset_media(obj_in.model_dump(exclude_unset=True)))
 
     async def remove(self, asset_id: int) -> None:
         instance = await self.get(asset_id)
@@ -363,7 +387,10 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
 
     async def create_variant(self, asset_id: int, obj_in: AssetVariantCreate) -> AssetVariant:
         await self.get(asset_id)
-        return await AssetVariant.create(asset_id=asset_id, **obj_in.model_dump(exclude_unset=True))
+        data = obj_in.model_dump(exclude_unset=True)
+        if isinstance(data.get("images"), list):
+            data["images"] = _normalize_image_list(data["images"])
+        return await AssetVariant.create(asset_id=asset_id, **data)
 
     async def patch_variant(
         self,
@@ -374,7 +401,10 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
         if variant is None:
             raise HTTPException(status_code=404, detail="资产形态不存在")
-        variant.update_from_dict(obj_in.model_dump(exclude_unset=True))
+        data = obj_in.model_dump(exclude_unset=True)
+        if isinstance(data.get("images"), list):
+            data["images"] = _normalize_image_list(data["images"])
+        variant.update_from_dict(data)
         await variant.save()
         return variant
 
@@ -458,6 +488,12 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         asset = await self.get(asset_id)
         now = datetime.now(timezone.utc)
         metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+        image_url = normalize_media_url(payload.image_url) or payload.image_url
+        source_image_url = (
+            normalize_media_url(payload.source_image_url)
+            if payload.source_image_url
+            else None
+        )
         task = await AiTask.create(
             task_type=AiTaskTypeEnum.reference_image.value,
             status=TaskStatusEnum.completed.value,
@@ -469,23 +505,23 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 "aspect_ratio": metadata.get("aspect_ratio"),
                 "clarity": metadata.get("clarity") or metadata.get("resolution"),
                 "output_format": payload.output_format,
-                "source_image_url": payload.source_image_url,
+                "source_image_url": source_image_url,
             },
-            response_data={"images": [payload.image_url]},
+            response_data={"images": [image_url]},
             started_at=now,
             finished_at=now,
         )
         existing_gallery = metadata.get("image_gallery")
         gallery = existing_gallery if isinstance(existing_gallery, list) else []
         image_gallery = [
-            payload.image_url,
+            image_url,
             *[
-                image
+                normalize_media_url(image) or image
                 for image in gallery
-                if isinstance(image, str) and image != payload.image_url
+                if isinstance(image, str) and image != image_url
             ],
         ]
-        asset.main_image = payload.image_url
+        asset.main_image = image_url
         asset.metadata = {
             **metadata,
             "image_gallery": image_gallery,

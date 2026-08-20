@@ -13,6 +13,12 @@ export function mediaUrl(path: string | null | undefined): string {
   if (!base) return path
   return `${base}${path}`
 }
+
+/** 落库媒体引用：OSS 直传时优先存对象 key（读取时由后端重新签发），
+ *  避免把有效期有限的签名 URL 持久化；本地模式回退到 /media 路径。 */
+export function persistedMediaRef(uploaded: { key?: string; url?: string; filename: string }): string {
+  return uploaded.key || uploaded.url || mediaUrl(`/media/${uploaded.filename}`)
+}
 export const AUTH_TOKEN_KEY = 'novelvids_token'
 export const ACTIVE_TEAM_KEY = 'novelvids_active_team'
 

@@ -75,7 +75,9 @@ class AliyunProvider(OSSProvider):
         落库时只存 OSS 对象 key（以 ``uploads/`` 开头）或完整 URL：
         - 裸 key：直接按当前时间重新签发；
         - 完整 URL 且指向本桶（与 ``public_base`` 或默认虚拟主机域名一致）：
-          提取对象 key 后重新签发（兼容历史落库的完整 URL，无需数据迁移）；
+          提取对象 key 后重新签发（兼容历史落库的完整 URL 与已过期的签名 URL，
+          无需数据迁移）；query 中带非签名处理参数（如 ``x-oss-process``）时
+          原样返回，避免破坏图片处理；
         - 其它完整 URL（外部地址）：原样返回，不做签名。
         """
         if not raw:
@@ -86,11 +88,23 @@ class AliyunProvider(OSSProvider):
             for base in self._public_bases():
                 if raw.startswith(base + "/"):
                     path = raw[len(base) + 1 :]
-                    # 已带查询串（已签名或带处理参数）的完整 URL 原样返回；
-                    # 仅对指向本桶、不带签名的不完整 URL 重新签发。
-                    if "?" in path:
+                    key, query = _split_query(path)
+                    if query and not _is_oss_signature_query(query):
+                        # 带非签名处理参数（如 x-oss-process）的完整 URL 原样返回
                         return raw
-                    return self.signed_url(path)
+                    return self.signed_url(key)
+        return raw
+
+    def _normalize_aliyun_url(self, raw: str) -> str:
+        """把指向本桶的完整 URL 降级为对象 key（去掉 query 与域名前缀）。"""
+        if raw.startswith("uploads/"):
+            return raw
+        if raw.startswith("http://") or raw.startswith("https://"):
+            for base in self._public_bases():
+                if raw.startswith(base + "/"):
+                    key, _ = _split_query(raw[len(base) + 1 :])
+                    if key.startswith("uploads/"):
+                        return key
         return raw
 
     def _public_bases(self) -> list[str]:
@@ -196,6 +210,25 @@ def _json_bytes(payload: dict) -> bytes:
     import json
 
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def _split_query(path_and_query: str) -> tuple[str, str]:
+    """把 "path?query" 拆成 (path, query)；无 query 时返回 ("",)。"""
+    if "?" not in path_and_query:
+        return path_and_query, ""
+    path, query = path_and_query.split("?", 1)
+    return path, query
+
+
+def _is_oss_signature_query(query: str) -> bool:
+    """判断 query 是否仅为 OSS V1 查询串签名参数（可安全丢弃并重新签发）。
+
+    含 OSSAccessKeyId / Expires / Signature 的视为签名参数；若同时混有图片处理
+    等其它参数（如 x-oss-process），则不能丢弃，返回 False 保持原样。
+    """
+    keys = {part.split("=", 1)[0] for part in query.split("&") if part}
+    signature_keys = {"OSSAccessKeyId", "Expires", "Signature"}
+    return bool(keys) and keys <= signature_keys
 
 
 def _hmac_sign(secret: str, message: str) -> str:

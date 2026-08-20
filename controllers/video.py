@@ -18,6 +18,7 @@ from models.chapter import Chapter
 from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.billing.recorder import billing_recorder
+from services.oss import resolve_media_url
 from services.video import get_generator
 from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
@@ -263,9 +264,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
         first_frame = req.first_frame_url
         last_frame = req.last_frame_url
         if req.generation_mode == "keyframes":
+            # 首尾帧落库存 key：生成前先按当前时间重新签发，再交给供应商/本地解析。
+            first_frame = resolve_media_url(req.first_frame_url) or req.first_frame_url
+            last_frame = resolve_media_url(req.last_frame_url) or req.last_frame_url
             try:
-                first_frame = resolve_image_source(req.first_frame_url or "")
-                last_frame = resolve_image_source(req.last_frame_url or "")
+                first_frame = resolve_image_source(first_frame)
+                last_frame = resolve_image_source(last_frame)
             except FileNotFoundError as error:
                 raise HTTPException(400, detail=f"首尾帧图片不存在：{error}") from error
         capabilities = capabilities_for(config.video_model_type)
@@ -292,7 +296,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             verified = await verify_local_reference(reference.type, reference.url, capabilities)
             if reference.type == "image":
                 try:
-                    reference_images.append(resolve_image_source(reference.url))
+                    reference_images.append(
+                        resolve_image_source(resolve_media_url(reference.url) or reference.url)
+                    )
                 except FileNotFoundError as error:
                     raise HTTPException(400, detail=f"参考图片不存在：{error}") from error
                 continue
@@ -305,7 +311,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     raise HTTPException(400, detail="本地参考视频缺少可访问的媒体地址")
                 reference_videos.append(f"{media_base_url}{reference.url}")
             else:
-                reference_videos.append(reference.url)
+                reference_videos.append(resolve_media_url(reference.url) or reference.url)
 
         asset_reference_image_count = sum(len(subject.get("images", [])) for subject in subjects)
         if asset_reference_image_count + len(reference_images) > capabilities.max_reference_images:

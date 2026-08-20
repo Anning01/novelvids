@@ -1,8 +1,9 @@
 # 生成视频分镜
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
+from services.oss import resolve_media_url
 from utils.enums import AssetTypeEnum, TaskStatusEnum
 
 
@@ -203,3 +204,22 @@ class SceneOut(SceneFullProperties, BaseResponse):
     id: int = Field(..., description="分镜ID")
     chapter_id: int = Field(..., description="所属章节ID")
     prompt_params: Optional[dict[str, Any]] = Field(None, description="提示词参数配置")
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        """对 metadata 中持久化的媒体引用重新签发（首尾帧与参考素材）。"""
+        metadata = self.metadata
+        if not isinstance(metadata, dict):
+            return self
+        for key in ("first_frame_url", "last_frame_url"):
+            raw = metadata.get(key)
+            if isinstance(raw, str) and raw:
+                metadata[key] = resolve_media_url(raw) or raw
+        reference_media = metadata.get("video_reference_media")
+        if isinstance(reference_media, list):
+            for item in reference_media:
+                if isinstance(item, dict):
+                    raw = item.get("url")
+                    if isinstance(raw, str) and raw:
+                        item["url"] = resolve_media_url(raw) or raw
+        return self
