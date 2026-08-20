@@ -38,7 +38,7 @@ export interface NovelMeta {
   created_at: string
   updated_at: string
 }
-export interface Novel { id: number; name: string; author?: string; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface Novel { id: number; name: string; author?: string; style_key?: string | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
@@ -207,6 +207,8 @@ export interface UserItem {
   team_count?: number
 }
 
+export interface VisualStyleItem { key: string; label: string }
+
 export interface UploadPolicy {
   direct: boolean
   provider?: string
@@ -234,6 +236,7 @@ export interface OssFinalizeResult {
   text_content?: string
   chapter_validation?: { valid: boolean; chapter_count: number; text_length: number; message: string } | null
 }
+
 export interface UserStats {
   user_count: number
   user_total_cost: number

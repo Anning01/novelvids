@@ -36,6 +36,11 @@ class NovelFullProperties(NovelProperties):
         description="分镜策略名称",
         max_length=120,
     )
+    style_key: Optional[str] = Field(
+        None,
+        description="视觉风格 key",
+        max_length=64,
+    )
     storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")
 
 

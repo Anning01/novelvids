@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -103,6 +103,7 @@ async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) =
 
 export const api = {
   enums: () => request<SingleResponse<AllEnums>>('/config/enums/all'),
+  visualStyles: () => request<SingleResponse<VisualStyleItem[]>>('/config/visual-styles'),
   authStatus: () => request<SingleResponse<AuthStatus>>('/auth/status'),
   login: (username: string, password: string) => request<SingleResponse<LoginResult>>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   register: (data: { username: string; password: string; nickname?: string; invite_token: string }) => request<SingleResponse<LoginResult>>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
