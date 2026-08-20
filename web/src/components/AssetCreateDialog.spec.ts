@@ -690,3 +690,52 @@ it('opens the image annotation editor and stores its export as a new generation 
   expect(editor.props('open')).toBe(false)
   expect(api.assetGenerationHistory).toHaveBeenCalledTimes(2)
 })
+
+it('保存标注图时只向服务端传 key（OSS 直传），避免签名 URL 过期', async () => {
+  vi.clearAllMocks()
+  const assetWithImage = { ...editedAsset, main_image: '/media/assets/current.png' }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithImage })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { prompt: '', prompt_language: 'zh' },
+  })
+  // 直传 OSS：返回带签名的 public_url 与裸 key；我们应当只把 key 传给后端。
+  vi.mocked(api.upload).mockResolvedValue({
+    filename: '李七夜-annotation-1787227618985.png',
+    original_filename: '李七夜-annotation-1787227618985.png',
+    content_type: 'image/png',
+    file_path: 'https://dramas-x.oss-cn-guangzhou.aliyuncs.com/uploads/.../x.png?Expires=...&Signature=...',
+    url: 'https://dramas-x.oss-cn-guangzhou.aliyuncs.com/uploads/.../x.png?Expires=...&Signature=...',
+    key: 'uploads/0/20260820/abc-李七夜-annotation-1787227618985.png',
+  })
+  vi.mocked(api.recordAssetImageEdit).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { ...assetWithImage, main_image: 'uploads/0/20260820/abc-李七夜-annotation-1787227618985.png' },
+  })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithImage },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  await wrapper.get('button[aria-label="编辑当前图片标注"]').trigger('click')
+  const editor = wrapper.getComponent(ImageAnnotationEditor)
+  editor.vm.$emit('save', new Blob(['annotated'], { type: 'image/png' }))
+  await flushPromises()
+
+  expect(api.recordAssetImageEdit).toHaveBeenCalledWith(editedAsset.id, {
+    image_url: 'uploads/0/20260820/abc-李七夜-annotation-1787227618985.png',
+    source_image_url: '/media/assets/current.png',
+    output_format: 'png',
+  })
+})
