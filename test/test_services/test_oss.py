@@ -105,6 +105,45 @@ def test_local_provider_disabled_by_default():
     assert oss.enabled is False
 
 
+def test_resolve_media_url_local_passthrough():
+    # LocalProvider（未启用 OSS）原样返回本地相对路径
+    from services.oss import oss, resolve_media_url
+
+    assert resolve_media_url("/media/assets/1.png") == "/media/assets/1.png"
+    assert resolve_media_url("https://old-signed.example.com/x?Signature=dead") == (
+        "https://old-signed.example.com/x?Signature=dead"
+    )
+    assert resolve_media_url(None) is None
+
+
+def test_resolve_media_url_oss_signs_key():
+    provider = AliyunProvider(
+        bucket="b",
+        endpoint="oss-cn-beijing.aliyuncs.com",
+        internal_endpoint="i",
+        public_base="https://cdn.example.com",
+        access_key_id="ak",
+        access_key_secret="sk",
+    )
+    url = provider.resolve_url("uploads/1/x.png")
+    assert url.startswith("https://cdn.example.com/uploads/1/x.png?")
+    assert "Expires=" in url and "Signature=" in url
+
+
+def test_resolve_media_url_oss_keeps_full_url():
+    # 历史遗留的已签名完整 URL 不参与重签，原样返回
+    provider = AliyunProvider(
+        bucket="b",
+        endpoint="oss-cn-beijing.aliyuncs.com",
+        internal_endpoint="i",
+        public_base="https://cdn.example.com",
+        access_key_id="ak",
+        access_key_secret="sk",
+    )
+    legacy = "https://cdn.example.com/uploads/1/x.png?Expires=1&Signature=old"
+    assert provider.resolve_url(legacy) == legacy
+
+
 # ---------------------------------------------------------------- 端点
 
 

@@ -64,7 +64,8 @@ async def _download_video(remote_url: str, video_id: int) -> str:
             key = make_upload_key(None, f"videos/{filename}")
             await oss.put_bytes(key, file.read(), "video/mp4")
         os.remove(local_path)
-        media_url = oss.public_url(key)
+        # 落库存 key，读取时再由 resolve_media_url 重新签发临时 URL
+        media_url = key
     logger.info("Video downloaded: video_id=%s -> %s", video_id, media_url)
     return media_url
 
@@ -97,7 +98,8 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
             key = make_upload_key(None, f"video-references/last-frame-{video_id}.png")
             await oss.put_bytes(key, file.read(), "image/png")
         destination.unlink(missing_ok=True)
-        return oss.public_url(key)
+        # 落库存 key，读取时再由 resolve_media_url 重新签发临时 URL
+        return key
     return f"/media/video-references/{destination.name}"
 
 

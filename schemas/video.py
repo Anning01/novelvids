@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
 from utils.enums import VideoModelTypeEnum, TaskStatusEnum
+from services.oss import resolve_media_url
 
 
 # --- 输入 Schema ---
@@ -47,10 +48,15 @@ class VideoBriefOut(BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="视频ID")
-    model_type: Optional[VideoModelTypeEnum] = Field(None, description="视频模型类型")
+    model_type: Optional[VideoModelTypeEnum] =  Field(None, description="视频模型类型")
     url: Optional[str] = Field(None, description="视频URL")
     status: Optional[TaskStatusEnum] = Field(None, description="状态")
     metadata: Optional[Any] = Field(None, description="元数据")
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.url = resolve_media_url(self.url)
+        return self
 
 
 class VideoOut(BaseResponse):
@@ -65,6 +71,11 @@ class VideoOut(BaseResponse):
     status: Optional[TaskStatusEnum] = Field(None, description="状态")
     metadata: Optional[Any] = Field(None, description="元数据")
 
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.url = resolve_media_url(self.url)
+        return self
+
 
 class VideoQueryOut(BaseModel):
     """查询视频生成状态的结果"""
@@ -74,6 +85,11 @@ class VideoQueryOut(BaseModel):
     progress: Optional[int] = Field(None, description="进度百分比")
     url: Optional[str] = Field(None, description="视频URL")
     metadata: Optional[Any] = Field(None, description="元数据")
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.url = resolve_media_url(self.url)
+        return self
 
 
 # --- 合并视频 Schema ---

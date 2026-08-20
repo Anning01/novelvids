@@ -51,7 +51,8 @@ async def _store_asset_image(content: bytes, extension: str, asset_id: int, suff
     if oss.enabled:
         key = make_upload_key(None, f"asset-{asset_id}{suffix}{extension}")
         await oss.put_bytes(key, content, _content_type_for(extension))
-        return oss.public_url(key)
+        # 落库存 key，读取时再由 resolve_media_url 重新签发临时 URL
+        return key
     asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
     os.makedirs(asset_dir, exist_ok=True)
     filename = f"{asset_id}{suffix}{extension}"

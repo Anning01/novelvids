@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import Optional, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from schemas._base import BaseResponse
 from schemas.asset_variant import AssetVariantOut
 from utils.enums import AssetTypeEnum, ImageSourceEnum
+from services.oss import resolve_media_url
 
 
 # --- 核心业务属性 (Internal Mixins) ---
@@ -86,7 +87,7 @@ class AssetGenerationRecordOut(BaseModel):
     """Safe, presentation-ready summary of one asset image-generation run."""
 
     id: UUID
-    status: int
+    status:  int
     images: list[str] = Field(default_factory=list)
     error_message: Optional[str] = None
     model: Optional[str] = None
@@ -95,6 +96,11 @@ class AssetGenerationRecordOut(BaseModel):
     output_format: Optional[str] = None
     created_at: datetime
     finished_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.images = [resolve_media_url(u) for u in self.images or []]
+        return self
 
 
 class AssetImageEditCreate(BaseModel):
@@ -123,6 +129,22 @@ class AssetBriefOut(AssetProperties, BaseResponse):
 
     id: int = Field(..., description="小说/剧本ID")
 
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.main_image = resolve_media_url(self.main_image)
+        self.angle_image_1 = resolve_media_url(self.angle_image_1)
+        self.angle_image_2 = resolve_media_url(self.angle_image_2)
+        if isinstance(self.metadata, dict) and isinstance(
+            self.metadata.get("image_gallery"), list
+        ):
+            self.metadata = {
+                **self.metadata,
+                "image_gallery": [
+                    resolve_media_url(u) for u in self.metadata["image_gallery"]
+                ],
+            }
+        return self
+
 
 class AssetOut(AssetFullProperties, BaseResponse):
     """
@@ -132,6 +154,22 @@ class AssetOut(AssetFullProperties, BaseResponse):
     novel_id: int = Field(..., description="所属小说/剧本")
 
     id: int = Field(..., description="小说/剧本ID")
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.main_image = resolve_media_url(self.main_image)
+        self.angle_image_1 = resolve_media_url(self.angle_image_1)
+        self.angle_image_2 = resolve_media_url(self.angle_image_2)
+        if isinstance(self.metadata, dict) and isinstance(
+            self.metadata.get("image_gallery"), list
+        ):
+            self.metadata = {
+                **self.metadata,
+                "image_gallery": [
+                    resolve_media_url(u) for u in self.metadata["image_gallery"]
+                ],
+            }
+        return self
 
 
 class AssetWithVariantsOut(AssetOut):
