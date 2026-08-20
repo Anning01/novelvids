@@ -104,7 +104,11 @@ class AssetGenerationRecordOut(BaseModel):
 
 
 class AssetImageEditCreate(BaseModel):
-    """Persist a locally uploaded annotation result as a new image history entry."""
+    """Persist an annotation result as a new image history entry.
+
+    ``image_url`` 支持三种来源：本地媒体路径（``/media/...``）、OSS 直传对象 key
+    （``uploads/...``，落库时经内网校验存在性）、完整 URL（兼容历史数据）。
+    """
 
     image_url: str
     source_image_url: Optional[str] = None
@@ -112,10 +116,12 @@ class AssetImageEditCreate(BaseModel):
 
     @field_validator("image_url")
     @classmethod
-    def validate_local_media_url(cls, value: str) -> str:
-        if not value.startswith("/media/"):
-            raise ValueError("标注图必须先上传到本地媒体目录")
-        return value
+    def validate_media_url(cls, value: str) -> str:
+        if not value or len(value) > 2000:
+            raise ValueError("标注图地址不能为空且长度需在 2000 字符以内")
+        if value.startswith(("/media/", "uploads/", "http://", "https://", "data:")):
+            return value
+        raise ValueError("标注图地址必须是本地媒体路径、OSS 对象 key 或完整 URL")
 
 
 # --- 输出 Schema (Out-bound) ---

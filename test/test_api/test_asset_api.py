@@ -208,11 +208,24 @@ async def test_api_records_annotated_asset_image_as_generation_history(
 
     invalid_response = await client.post(
         f"/api/asset/{asset.id}/generation-history/edit",
-        json={"image_url": "https://example.com/annotated.png"},
+        json={"image_url": "assets/annotated.png"},
     )
     assert invalid_response.status_code == 200
     assert invalid_response.json()["code"] == 422
-    assert "标注图必须先上传到本地媒体目录" in invalid_response.json()["message"]
+    assert "标注图地址必须是本地媒体路径、OSS 对象 key 或完整 URL" in invalid_response.json()["message"]
+
+    # OSS 直传的标注图：key（uploads/...）也允许，本地模式不校验对象存在性
+    oss_response = await client.post(
+        f"/api/asset/{asset.id}/generation-history/edit",
+        json={
+            "image_url": "uploads/0/20260820/abc-annotated.png",
+            "source_image_url": "/media/assets/original.png",
+            "output_format": "png",
+        },
+    )
+    assert oss_response.status_code == 200, oss_response.text
+    assert oss_response.json()["code"] == 0
+    assert oss_response.json()["data"]["main_image"] == "uploads/0/20260820/abc-annotated.png"
 
 
 @pytest.mark.asyncio
