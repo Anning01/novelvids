@@ -333,16 +333,19 @@ async function createProject() {
 
 <style scoped>
 .short-drama-page {
+  display: flex;
   min-height: 100%;
   overflow: auto;
   padding: 36px 22px 90px;
   color: #303442;
-  background: #fff;
+  background:
+    linear-gradient(var(--creation-bg-tint, rgb(248 249 252 / 78%)), var(--creation-bg-tint, rgb(248 249 252 / 78%))),
+    var(--creation-bg-image, none) center / cover no-repeat;
 }
 
 .short-drama-workspace {
   width: min(820px, 100%);
-  margin: 0 auto;
+  margin: auto;
 }
 
 .short-drama-heading {

@@ -13,6 +13,8 @@
   --app-accent: #5b5cf6;
   --app-accent-soft: #eeefff;
   --app-shadow: 0 12px 34px rgb(37 41 57 / 7%);
+  --creation-bg-image: url('/background-light.png');
+  --creation-bg-tint: rgb(248 249 252 / 78%);
 }
 
 :root[data-app-theme='dark'] {
@@ -30,6 +32,8 @@
   --app-accent: #b8a7ff;
   --app-accent-soft: rgb(169 149 255 / 13%);
   --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
+  --creation-bg-image: url('/background-dark.png');
+  --creation-bg-tint: rgb(21 20 18 / 80%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -48,6 +52,8 @@
     --app-accent: #b8a7ff;
     --app-accent-soft: rgb(169 149 255 / 13%);
     --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
+    --creation-bg-image: url('/background-dark.png');
+    --creation-bg-tint: rgb(21 20 18 / 80%);
   }
 }
 
@@ -147,6 +153,16 @@
 :root[data-app-theme='dark'] .assets-page,
 :root[data-app-theme='dark'] .model-settings-page {
   color: var(--app-text);
+}
+
+/* 创作页使用主题背景图 + 半透明 tint，不在此覆盖为纯色 */
+:root[data-app-theme='dark'] .route-placeholder-page,
+:root[data-app-theme='dark'] .page,
+:root[data-app-theme='dark'] .agent-page,
+:root[data-app-theme='dark'] .manual-page,
+:root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view),
+:root[data-app-theme='dark'] .assets-page,
+:root[data-app-theme='dark'] .model-settings-page {
   background: var(--app-canvas);
 }
 
