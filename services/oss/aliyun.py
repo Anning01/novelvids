@@ -2,15 +2,13 @@
 
 - 前端直传：POST 表单策略（policy base64 + HMAC-SHA1 签名）
 - 服务端读写：Authorization 头签名（V1），默认走内网 endpoint 省流量
-- 公网访问：私有 Bucket 用带 Expires + Signature 的临时签名 URL
+- 公网访问：Bucket 为公共读，直接拼接公共 URL，不做查询串签名
 """
 
 import base64
 import hashlib
 import hmac
-import time
 from email.utils import formatdate
-from urllib.parse import quote
 
 import httpx
 
@@ -31,7 +29,6 @@ class AliyunProvider(OSSProvider):
         public_base: str,
         access_key_id: str,
         access_key_secret: str,
-        url_expires_seconds: int = 604800,
     ):
         self.bucket = bucket
         self.endpoint = endpoint
@@ -39,7 +36,6 @@ class AliyunProvider(OSSProvider):
         self.public_base = (public_base or "").rstrip("/")
         self.access_key_id = access_key_id
         self.access_key_secret = access_key_secret
-        self.url_expires_seconds = int(url_expires_seconds or 604800)
 
     @property
     def enabled(self) -> bool:
@@ -50,49 +46,23 @@ class AliyunProvider(OSSProvider):
             and self.access_key_secret
         )
 
-    # ---- 公网访问地址 ----
-
-    def signed_url(self, key: str, expires_seconds: int | None = None) -> str:
-        """生成带过期时间与签名的临时访问 URL（私有 Bucket 用）。"""
-        expires = int(time.time()) + int(expires_seconds or self.url_expires_seconds)
-        # OSS V1 查询串签名：Signature = base64(HMAC-SHA1(Secret, "GET\n\n\n{Expires}\n/{Bucket}/{Key}"))
-        string_to_sign = f"GET\n\n\n{expires}\n/{self.bucket}/{key}"
-        signature = _hmac_sign(self.access_key_secret, string_to_sign)
-        base = self.public_base or f"https://{self.bucket}.{self.endpoint}"
-        return (
-            f"{base}/{key}"
-            f"?OSSAccessKeyId={quote(self.access_key_id, safe='')}"
-            f"&Expires={expires}"
-            f"&Signature={quote(signature, safe='')}"
-        )
+    # ---- 公网访问地址（Bucket 为公共读，不签名） ----
 
     def public_url(self, key: str) -> str:
-        return self.signed_url(key)
+        base = self.public_base or f"https://{self.bucket}.{self.endpoint}"
+        return f"{base}/{key}"
 
     def resolve_url(self, raw: str | None) -> str | None:
-        """把持久化的媒体地址解析为可访问 URL。
+        """把持久化的媒体地址解析为可访问 URL（公共读，无需签名）。
 
         落库时只存 OSS 对象 key（以 ``uploads/`` 开头）或完整 URL：
-        - 裸 key：直接按当前时间重新签发；
-        - 完整 URL 且指向本桶（与 ``public_base`` 或默认虚拟主机域名一致）：
-          提取对象 key 后重新签发（兼容历史落库的完整 URL 与已过期的签名 URL，
-          无需数据迁移）；query 中带非签名处理参数（如 ``x-oss-process``）时
-          原样返回，避免破坏图片处理；
-        - 其它完整 URL（外部地址）：原样返回，不做签名。
+        - 裸 key：拼接公共读域名；
+        - 完整 URL / 外部地址 / 本地路径：原样返回。
         """
         if not raw:
             return raw
         if raw.startswith("uploads/"):
-            return self.signed_url(raw)
-        if raw.startswith("http://") or raw.startswith("https://"):
-            for base in self._public_bases():
-                if raw.startswith(base + "/"):
-                    path = raw[len(base) + 1 :]
-                    key, query = _split_query(path)
-                    if query and not _is_oss_signature_query(query):
-                        # 带非签名处理参数（如 x-oss-process）的完整 URL 原样返回
-                        return raw
-                    return self.signed_url(key)
+            return self.public_url(raw)
         return raw
 
     def _normalize_aliyun_url(self, raw: str) -> str:
@@ -218,17 +188,6 @@ def _split_query(path_and_query: str) -> tuple[str, str]:
         return path_and_query, ""
     path, query = path_and_query.split("?", 1)
     return path, query
-
-
-def _is_oss_signature_query(query: str) -> bool:
-    """判断 query 是否仅为 OSS V1 查询串签名参数（可安全丢弃并重新签发）。
-
-    含 OSSAccessKeyId / Expires / Signature 的视为签名参数；若同时混有图片处理
-    等其它参数（如 x-oss-process），则不能丢弃，返回 False 保持原样。
-    """
-    keys = {part.split("=", 1)[0] for part in query.split("&") if part}
-    signature_keys = {"OSSAccessKeyId", "Expires", "Signature"}
-    return bool(keys) and keys <= signature_keys
 
 
 def _hmac_sign(secret: str, message: str) -> str:
