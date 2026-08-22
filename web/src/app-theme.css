@@ -14,7 +14,6 @@
   --app-accent-soft: #eeefff;
   --app-shadow: 0 12px 34px rgb(37 41 57 / 7%);
   --creation-bg-image: url('/background-light.png');
-  --creation-bg-tint: rgb(248 249 252 / 78%);
 }
 
 :root[data-app-theme='dark'] {
@@ -33,7 +32,6 @@
   --app-accent-soft: rgb(169 149 255 / 13%);
   --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
   --creation-bg-image: url('/background-dark.png');
-  --creation-bg-tint: rgb(21 20 18 / 80%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -53,7 +51,6 @@
     --app-accent-soft: rgb(169 149 255 / 13%);
     --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
     --creation-bg-image: url('/background-dark.png');
-    --creation-bg-tint: rgb(21 20 18 / 80%);
   }
 }
 

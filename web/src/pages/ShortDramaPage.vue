@@ -337,10 +337,12 @@ async function createProject() {
   min-height: 100%;
   overflow: auto;
   padding: 36px 22px 90px;
-  color: #303442;
-  background:
-    linear-gradient(var(--creation-bg-tint, rgb(248 249 252 / 78%)), var(--creation-bg-tint, rgb(248 249 252 / 78%))),
-    var(--creation-bg-image, none) center / cover no-repeat;
+  color: var(--app-text, #303442);
+  background-color: var(--app-canvas, #f8f9fc);
+  background-image: var(--creation-bg-image, none);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 .short-drama-workspace {
