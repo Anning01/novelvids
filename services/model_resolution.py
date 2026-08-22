@@ -2,7 +2,9 @@
 
 运行时唯一事实来源：
 - `team_id=None`（超管 / 关闭开关）：仅官方配置参与解析；
-- `team_id=X`：团队启用的自定义配置优先；该任务类型无团队配置时回退官方启用配置。
+- `team_id=X`：按团队「模型配置来源」模式决定——
+  - `official`：仅使用官方启用配置；
+  - `custom`（默认历史行为）：团队启用配置优先，该任务类型无团队配置时回退官方。
 """
 
 from models.config import AiModelConfig
@@ -25,6 +27,14 @@ async def resolve_scope_configs(
         official = [c for c in official if capability_filter(c)]
 
     if team_id is None:
+        return official
+
+    # 团队「模型配置来源」为 official 时，仅用官方配置（含官方折扣），
+    # 忽略团队自有配置，使开关真正生效。
+    from auth.models import Team
+
+    team = await Team.get_or_none(id=team_id)
+    if team is not None and team.model_config_source == "official":
         return official
 
     team_configs = await AiModelConfig.filter(
