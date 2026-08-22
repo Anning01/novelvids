@@ -92,7 +92,11 @@ class OpenRouterCompatibleImageAdapter:
 
 
 class VolcengineArkImageAdapter:
-    """Ark Seedream request shape, shared by Seedream model versions."""
+    """Ark Seedream request shape.
+
+    ``sequential_image_generation`` 仅 Seedream 3.0 支持；4.0/5.0 已移除该参数，
+    无条件传入会被 Ark 以 InvalidParameter（HTTP 400）拒绝。
+    """
 
     def prepare(self, request: ImageGenerationInput) -> PreparedImageRequest:
         payload: dict[str, Any] = {
@@ -100,8 +104,9 @@ class VolcengineArkImageAdapter:
             "prompt": request.prompt,
             "response_format": "url",
             "watermark": False,
-            "sequential_image_generation": "disabled",
         }
+        if "seedream-3" in request.model.lower():
+            payload["sequential_image_generation"] = "disabled"
         if request.resolution:
             payload["size"] = request.resolution
         payload["output_format"] = request.output_format
