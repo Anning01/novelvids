@@ -77,11 +77,16 @@ async def create_json_completion(
     response_model: type[BaseModel],
     supports_json_output: bool = False,
     timeout: float | None = None,
+    thinking: str | None = None,
+    max_tokens: int | None = None,
 ) -> tuple[BaseModel, Any]:
     """调用模型并返回经 Pydantic 校验的对象及原始 completion。
 
     支持结构化输出的模型使用 ``json_object``；其他模型仅通过提示词约束，
     不发送可能被兼容服务拒绝的 ``response_format`` 参数。
+
+    ``thinking``（enabled/disabled）与 ``max_tokens`` 用于控制深度思考模型：
+    关闭思考可显著降低 latency 并避免 reasoning 耗尽正文空间。
     """
     controlled_messages = [dict(message) for message in messages]
     instruction = _json_instruction(response_model)
@@ -102,6 +107,10 @@ async def create_json_completion(
     }
     if supports_json_output:
         request["response_format"] = {"type": "json_object"}
+    if thinking in ("enabled", "disabled"):
+        request["thinking"] = {"type": thinking}
+    if max_tokens is not None:
+        request["max_tokens"] = max_tokens
     if timeout is not None:
         request["timeout"] = timeout
 

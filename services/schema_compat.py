@@ -55,6 +55,14 @@ async def ensure_ai_model_config_schema() -> None:
         statements.append(
             "ALTER TABLE ai_model_configs ADD COLUMN pricing JSON;"
         )
+    if "thinking" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs ADD COLUMN thinking VARCHAR(16);"
+        )
+    if "max_tokens" not in existing:
+        statements.append(
+            "ALTER TABLE ai_model_configs ADD COLUMN max_tokens INT;"
+        )
     if statements:
         await connection.execute_script("".join(statements))
 

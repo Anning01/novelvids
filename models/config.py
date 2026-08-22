@@ -64,6 +64,15 @@ class AiModelConfig(AbstractBaseModel):
         null=True,
         description="四层业务消息允许的最大总字符数；留空表示不预检",
     )
+    thinking = fields.CharField(
+        max_length=16,
+        null=True,
+        description="思考模式：enabled 开启 / disabled 关闭（火山方舟 thinking 参数），留空按模型默认",
+    )
+    max_tokens = fields.IntField(
+        null=True,
+        description="单次 LLM 请求最大输出 token 数；留空按模型默认",
+    )
     pricing = fields.JSONField(
         null=True,
         description="计费费用模块，按任务类型分 text/image/video 三种结构",

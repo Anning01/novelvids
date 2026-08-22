@@ -41,6 +41,15 @@ class AiModelConfigProperties(BaseModel):
         description="四层业务消息允许的最大总字符数",
         ge=1,
     )
+    thinking: Optional[Literal["enabled", "disabled"]] = Field(
+        None,
+        description="思考模式：enabled 开启 / disabled 关闭（火山方舟 thinking 参数）",
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        description="单次 LLM 请求最大输出 token 数",
+        ge=1,
+    )
     pricing: Optional[dict] = Field(
         None,
         description="计费费用模块：文本={input_price_per_1m,output_price_per_1m}，图片/视频={prices}",

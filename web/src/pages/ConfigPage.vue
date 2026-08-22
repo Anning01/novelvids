@@ -93,7 +93,7 @@ const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' })
 
 function configTaskTypes(item: AiModelConfig) {
   return item.task_types?.length ? item.task_types : [item.task_type]
@@ -196,7 +196,7 @@ function changeSettingsSection(value: string) {
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '' }
+  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
   textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
   tierPrices.value = category.id === 'llm'
     ? {}
@@ -226,6 +226,8 @@ function openEdit(item: AiModelConfig) {
     concurrency: item.concurrency,
     supports_json_output: item.supports_json_output ?? false,
     max_context_characters: item.max_context_characters ?? '',
+    thinking: item.thinking ?? '',
+    max_tokens: item.max_tokens ?? '',
   }
   textPricing.value = item.pricing?.type === 'text'
     ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
@@ -298,6 +300,8 @@ async function saveConfig() {
       task_type: taskTypes[0],
       task_types: taskTypes,
       max_context_characters: form.value.max_context_characters || null,
+      thinking: form.value.thinking || null,
+      max_tokens: form.value.max_tokens || null,
       image_model_type: selectedCategoryId.value === 'image' ? form.value.image_model_type || null : null,
       video_model_type: selectedCategoryId.value === 'video' ? form.value.video_model_type || null : null,
       pricing,
@@ -575,6 +579,26 @@ onMounted(load)
               min="1"
               placeholder="留空表示不预检"
             />
+          </label>
+          <label v-if="selectedCategory.id === 'llm'">
+            <span>思考模式</span>
+            <select v-model="form.thinking" name="model-thinking">
+              <option value="">按模型默认</option>
+              <option value="enabled">开启思考（enabled）</option>
+              <option value="disabled">关闭思考（disabled）</option>
+            </select>
+            <small>深度思考/推理模型可关闭思考以提速并避免正文被 reasoning 挤占。</small>
+          </label>
+          <label v-if="selectedCategory.id === 'llm'">
+            <span>最大输出 token</span>
+            <input
+              v-model.number="form.max_tokens"
+              name="model-max-tokens"
+              type="number"
+              min="1"
+              placeholder="留空按模型默认"
+            />
+            <small>限制单次请求输出，避免 JSON 因达到 token 上限被截断。</small>
           </label>
           <label v-if="selectedCategory.id === 'llm'" class="is-full json-capability-field">
             <span class="json-capability-copy">
