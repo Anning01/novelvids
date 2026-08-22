@@ -5,6 +5,7 @@
 """
 
 import abc
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +46,25 @@ class OSSProvider(abc.ABC):
     async def put_bytes(self, key: str, data: bytes, content_type: str) -> None:
         """服务端写入对象（应走内网 endpoint）。"""
         raise NotImplementedError
+
+    async def download_to_file(self, key: str, destination: Path) -> None:
+        """经服务端端点将对象下载到文件。
+
+        默认实现兼容已有 Provider；云存储 Provider 应覆盖为流式实现，避免大媒体
+        文件完整驻留内存。
+        """
+        data = await self.get_bytes(key)
+        await asyncio.to_thread(destination.write_bytes, data)
+
+    async def put_file(
+        self,
+        key: str,
+        source: Path,
+        content_type: str,
+    ) -> None:
+        """经服务端端点上传文件；默认实现兼容已有 Provider。"""
+        data = await asyncio.to_thread(source.read_bytes)
+        await self.put_bytes(key, data, content_type)
 
     def resolve_url(self, raw: str | None) -> str | None:
         """把持久化的媒体地址解析为可访问 URL。

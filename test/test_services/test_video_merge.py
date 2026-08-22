@@ -1,5 +1,7 @@
 from types import SimpleNamespace
+from pathlib import Path
 
+import pytest
 import services.video.merge as merge_module
 from services.video.merge import VideoMerger
 
@@ -47,3 +49,51 @@ def test_有声与无声分镜可以生成混合音轨合并命令(tmp_path, mon
     filter_complex = captured["command"][captured["command"].index("-filter_complex") + 1]
     assert "[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]" in filter_complex
     assert "atrim=duration=1.25" in filter_complex
+
+
+@pytest.mark.asyncio
+async def test_oss视频经内网物化后合并并上传且清理临时文件(monkeypatch):
+    transferred_paths: list[Path] = []
+    uploaded: dict[str, object] = {}
+
+    class FakeOSS:
+        enabled = True
+
+        def normalize_media_ref(self, raw):
+            return raw
+
+        def resolve_url(self, raw):
+            return f"https://cdn.example.com/{raw}"
+
+        async def download_to_file(self, key, destination):
+            transferred_paths.append(destination)
+            destination.write_bytes(f"video:{key}".encode())
+
+        async def put_file(self, key, source, content_type):
+            transferred_paths.append(source)
+            uploaded.update(
+                key=key,
+                content_type=content_type,
+                content=source.read_bytes(),
+            )
+
+    monkeypatch.setattr(merge_module, "oss", FakeOSS())
+    merger = VideoMerger()
+
+    url = await merger.merge_videos_from_storage(
+        [SimpleNamespace(id=3, url="uploads/7/20260822/video-3.mp4")],
+        chapter_id=337,
+        team_id=7,
+    )
+
+    assert url == (
+        "https://cdn.example.com/"
+        "uploads/7/videos/merged/chapter_337_merged.mp4"
+    )
+    assert uploaded == {
+        "key": "uploads/7/videos/merged/chapter_337_merged.mp4",
+        "content_type": "video/mp4",
+        "content": b"video:uploads/7/20260822/video-3.mp4",
+    }
+    assert transferred_paths
+    assert all(not path.exists() for path in transferred_paths)

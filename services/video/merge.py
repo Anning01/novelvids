@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from config import settings
+from services.oss import oss
 
 if TYPE_CHECKING:
     from models.video import Video
@@ -113,11 +116,78 @@ class VideoMerger:
 
         os.makedirs(self.output_dir, exist_ok=True)
         output_path = os.path.abspath(os.path.join(self.output_dir, output_filename))
+        self._merge_video_paths(video_paths, output_path)
+        return f"/media/videos/merged/{output_filename}"
+
+    async def merge_videos_from_storage(
+        self,
+        videos: list[Video],
+        chapter_id: int,
+        *,
+        team_id: int | None = None,
+    ) -> str:
+        """合并本地或 OSS 视频；OSS 读写始终使用 Provider 的服务端端点。"""
+        if not videos:
+            raise ValueError("当前没有可合并的视频")
+
+        if not oss.enabled:
+            return await asyncio.to_thread(self.merge_videos, videos, chapter_id)
+
+        output_filename = f"chapter_{chapter_id}_merged.mp4"
+        with TemporaryDirectory(prefix=f"novelvids-merge-{chapter_id}-") as directory:
+            temporary_dir = Path(directory)
+            video_paths: list[str] = []
+
+            for index, video in enumerate(videos):
+                local_path = self._get_video_path(video)
+                if local_path:
+                    video_paths.append(os.path.abspath(local_path))
+                    continue
+
+                raw_url = str(video.url or "")
+                object_key = oss.normalize_media_ref(raw_url)
+                if not object_key or not object_key.startswith("uploads/"):
+                    raise ValueError(f"视频文件不存在: video_id={video.id}")
+
+                destination = temporary_dir / f"{index:04d}-{video.id}.mp4"
+                try:
+                    await oss.download_to_file(object_key, destination)
+                except Exception as exc:
+                    logger.exception("OSS video download failed: video_id=%s", video.id)
+                    raise RuntimeError(
+                        f"从 OSS 读取视频失败: video_id={video.id}"
+                    ) from exc
+                video_paths.append(str(destination))
+
+            output_path = temporary_dir / output_filename
+            await asyncio.to_thread(
+                self._merge_video_paths,
+                video_paths,
+                str(output_path),
+            )
+
+            output_key = (
+                f"uploads/{team_id or 0}/videos/merged/{output_filename}"
+            )
+            try:
+                await oss.put_file(output_key, output_path, "video/mp4")
+            except Exception as exc:
+                logger.exception("OSS merged video upload failed: chapter_id=%s", chapter_id)
+                raise RuntimeError("合并视频上传 OSS 失败") from exc
+
+            return oss.resolve_url(output_key) or output_key
+
+    def _merge_video_paths(self, video_paths: list[str], output_path: str) -> None:
+        """将已物化的本地视频合并到指定路径。"""
+        if not video_paths:
+            raise ValueError("当前没有可合并的视频")
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         # 一个分镜时仍产出统一的“章节完整视频”文件，页面无需区分下载路径。
         if len(video_paths) == 1:
             shutil.copyfile(video_paths[0], output_path)
-            return f"/media/videos/merged/{output_filename}"
+            return
 
         # 两个及以上片段才需要检测音轨并调用 FFmpeg。
         has_audio_list = [_check_audio_stream(path) for path in video_paths]
@@ -208,8 +278,5 @@ class VideoMerger:
             logger.error(f"FFmpeg stdout: {result.stdout}")
             logger.error(f"FFmpeg stderr: {result.stderr}")
             raise RuntimeError(f"视频合并失败：输出文件未创建")
-
-        return f"/media/videos/merged/{output_filename}"
-
 
 video_merger = VideoMerger()

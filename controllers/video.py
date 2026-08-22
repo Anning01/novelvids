@@ -677,6 +677,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 "total_duration": 45.0
             }
         """
+        chapter = await Chapter.get(id=chapter_id).select_related("novel")
+
         # 获取章节所有分镜
         scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
 
@@ -713,10 +715,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         # 调用合并服务
         try:
-            merged_url = await asyncio.to_thread(
-                video_merger.merge_videos,
+            merged_url = await video_merger.merge_videos_from_storage(
                 videos_to_merge,
                 chapter_id,
+                team_id=chapter.novel.team_id,
             )
         except ValueError as e:
             raise HTTPException(400, detail=str(e))

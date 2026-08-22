@@ -668,7 +668,7 @@ async def test_未完成视频不能设为当前版本():
 
 @pytest.mark.asyncio
 async def test_章节合并按分镜顺序使用当前已有视频并跳过缺失分镜():
-    novel = await Novel.create(name="章节合并", author="Author")
+    novel = await Novel.create(name="章节合并", author="Author", team_id=7)
     chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
     scene_3 = await Scene.create(chapter=chapter, sequence=3, prompt="3", duration=6.0)
     scene_1 = await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
@@ -695,13 +695,15 @@ async def test_章节合并按分镜顺序使用当前已有视频并跳过缺�
     )
 
     with patch(
-        "controllers.video.video_merger.merge_videos",
+        "controllers.video.video_merger.merge_videos_from_storage",
+        new_callable=AsyncMock,
         return_value="/media/videos/merged/chapter.mp4",
     ) as merge:
         result = await video_controller.merge_chapter_videos(chapter.id)
 
     assert [video.id for video in merge.call_args.args[0]] == [selected.id, third.id]
     assert merge.call_args.args[1] == chapter.id
+    assert merge.call_args.kwargs == {"team_id": 7}
     assert result == {
         "chapter_id": chapter.id,
         "merged_url": "/media/videos/merged/chapter.mp4",
