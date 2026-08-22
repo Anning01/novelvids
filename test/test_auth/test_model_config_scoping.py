@@ -189,8 +189,8 @@ async def test_super_admin_has_no_team_model_source(client, config_world):
 
 @pytest.mark.asyncio
 async def test_get_active_prefers_team_config_then_official():
-    """运行时解析：团队自定义启用项优先，无团队配置时回退官方。"""
-    team = await Team.create(name="解析队")
+    """运行时解析：来源模式 official 时仅用官方；custom 时团队配置优先，官方兜底。"""
+    team = await Team.create(name="解析队")  # 默认 model_config_source="official"
     # 官方启用配置
     official = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
@@ -208,7 +208,7 @@ async def test_get_active_prefers_team_config_then_official():
     )
     assert resolved.id == official.id
 
-    # 团队启用配置后应优先命中
+    # 团队启用配置，但来源模式仍为 official：应继续使用官方配置
     team_config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         task_types=[AiTaskTypeEnum.extraction.value],
@@ -220,6 +220,14 @@ async def test_get_active_prefers_team_config_then_official():
         scope="team",
         team_id=team.id,
     )
+    resolved = await ai_model_config_controller.get_active(
+        AiTaskTypeEnum.extraction.value, team_id=team.id
+    )
+    assert resolved.id == official.id
+
+    # 切换为 custom 后，团队配置优先命中
+    team.model_config_source = "custom"
+    await team.save(update_fields=["model_config_source", "updated_at"])
     resolved = await ai_model_config_controller.get_active(
         AiTaskTypeEnum.extraction.value, team_id=team.id
     )
