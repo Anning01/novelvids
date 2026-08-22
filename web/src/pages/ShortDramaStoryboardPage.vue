@@ -107,6 +107,29 @@ const assetPickerFocusIds = ref<Record<string, number>>({})
 const assetPickerReplaceAssetIds = ref<Record<string, number>>({})
 const openAssetActionKey = ref('')
 const editingAsset = ref<Asset | null>(null)
+
+// 分镜拆解任务持久化（sessionStorage）：切页/刷新后恢复“生成中”状态，
+// 配合后端“同章节唯一进行中任务”保证一个章节同时只有一个拆解任务。
+const pollingStoryboardTaskIds = new Set<number>()
+const STORYBOARD_TASKS_KEY = () => `novelvids_storyboard_tasks_${projectId.value}`
+function readPersistedStoryboardTasks(): Record<string, string> {
+  try {
+    return JSON.parse(sessionStorage.getItem(STORYBOARD_TASKS_KEY()) || '{}') as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+function persistStoryboardTask(chapterId: number, taskId: string) {
+  const next = { ...readPersistedStoryboardTasks(), [String(chapterId)]: taskId }
+  sessionStorage.setItem(STORYBOARD_TASKS_KEY(), JSON.stringify(next))
+}
+function clearPersistedStoryboardTask(chapterId: number) {
+  const tasks = readPersistedStoryboardTasks()
+  if (!(String(chapterId) in tasks)) return
+  const next = { ...tasks }
+  delete next[String(chapterId)]
+  sessionStorage.setItem(STORYBOARD_TASKS_KEY(), JSON.stringify(next))
+}
 const uploadingFrameKey = ref('')
 const uploadingReferenceSceneIds = ref<Set<number>>(new Set())
 const savingCanvasIdentity = ref(false)
@@ -874,17 +897,19 @@ async function createManualScene(chapterId = activeChapterId.value) {
   }
 }
 
-async function generateChapterStoryboard(chapterId: number) {
-  if (!chapterId || generatingChapterIds.value.has(chapterId)) return
+async function pollStoryboardTask(chapterId: number, taskId: string) {
+  // 轮询某个分镜拆解任务直到终态；任务终态后清理持久化状态。
+  if (pollingStoryboardTaskIds.has(chapterId)) return
+  pollingStoryboardTaskIds.add(chapterId)
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId)).data
-    let current = task
+    let current = (await api.task(taskId)).data
     while (alive && !terminalTaskStatuses.has(current.status)) {
       await sleep(2200)
-      current = (await api.task(task.id)).data
+      current = (await api.task(taskId)).data
     }
+    clearPersistedStoryboardTask(chapterId)
     if (!alive) return
     if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || 'Agent 分镜生成失败')
     const result = await fetchChapterScenes(chapterId)
@@ -892,10 +917,41 @@ async function generateChapterStoryboard(chapterId: number) {
     const chapterNumber = chapters.value.find(item => item.id === chapterId)?.number || ''
     notice.success(`第 ${chapterNumber} 集分镜已生成`)
   } catch (error) {
+    clearPersistedStoryboardTask(chapterId)
+    if (!alive) return
     const message = (error as Error).message
     setGenerationError(chapterId, message)
     notice.error(message)
   } finally {
+    pollingStoryboardTaskIds.delete(chapterId)
+    if (alive) setChapterGenerating(chapterId, false)
+  }
+}
+
+function restorePersistedStoryboardTasks() {
+  // 进入页面时恢复切页/刷新前未完成的分镜拆解任务（sessionStorage 持久化）
+  const tasks = readPersistedStoryboardTasks()
+  for (const [chapterId, taskId] of Object.entries(tasks)) {
+    const id = Number(chapterId)
+    if (!Number.isInteger(id) || id < 1 || !taskId) continue
+    void pollStoryboardTask(id, taskId)
+  }
+}
+
+async function generateChapterStoryboard(chapterId: number) {
+  if (!chapterId || generatingChapterIds.value.has(chapterId)) return
+  setChapterGenerating(chapterId, true)
+  setGenerationError(chapterId)
+  try {
+    const task = (await api.generateScenes(chapterId)).data
+    // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
+    persistStoryboardTask(chapterId, task.id)
+    await pollStoryboardTask(chapterId, task.id)
+  } catch (error) {
+    if (!alive) return
+    const message = (error as Error).message
+    setGenerationError(chapterId, message)
+    notice.error(message)
     setChapterGenerating(chapterId, false)
   }
 }
@@ -1000,6 +1056,8 @@ async function load() {
       await loadChapter(firstChapter.id)
     }
     else loading.value = false
+    // 恢复切页/刷新前未完成的分镜拆解任务（sessionStorage 持久化）
+    restorePersistedStoryboardTasks()
   } catch (error) {
     const message = (error as Error).message
     setGenerationError(activeChapterId.value, message)

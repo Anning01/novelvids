@@ -122,8 +122,11 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         team_id: int | None = None,
         user_id: int | None = None,
     ):
-        """提交分镜生成任务，返回任务记录供前端轮询。"""
+        """提交分镜生成任务，返回任务记录供前端轮询。
 
+        一个章节同时只允许一个进行中的分镜拆解任务：用事务锁住章节行，
+        在锁内检查活跃任务并创建，避免并发请求重复建任务浪费 token。
+        """
         chapter = await Chapter.get(id=chapter_id)
 
         # 1. 获取分镜生成任务的启用配置（团队自定义优先，官方兜底）
@@ -131,20 +134,9 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             AiTaskTypeEnum.storyboard.value, team_id=team_id
         )
 
-        # 2. 先清理超时异常任务，再检查是否有活跃任务
+        # 2. 先清理超时异常任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.storyboard)
 
-        active_tasks = await AiTask.filter(
-            task_type=AiTaskTypeEnum.storyboard.value,
-            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
-        )
-        for t in active_tasks:
-            if t.request_params.get("chapter_id") == chapter_id:
-                # 已有进行中的任务：直接返回该任务，前端继续轮询，
-                # 避免离开页面再返回时重复提交被 400 拒绝
-                return t
-
-        # 3. 提交任务（BackgroundTask 中执行）
         request_params = {
             "chapter_id": chapter.id,
             "novel_id": chapter.novel_id,
@@ -160,9 +152,35 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             request_params["team_id"] = team_id
         if user_id is not None:
             request_params["user_id"] = user_id
-        task = await ai_task_executor.submit(
-            AiTaskTypeEnum.storyboard, request_params
-        )
+
+        # 3. 事务内锁章节行：检查活跃任务并创建任务保持原子性，
+        #    同章节并发提交只会创建一个任务，其余请求复用同一个任务。
+        async with in_transaction() as connection:
+            locked_chapter = await Chapter.filter(
+                id=chapter_id
+            ).using_db(connection).select_for_update().first()
+            if locked_chapter is None:
+                raise HTTPException(status_code=404, detail="章节不存在")
+
+            active_tasks = await AiTask.filter(
+                task_type=AiTaskTypeEnum.storyboard.value,
+                status__in=[
+                    TaskStatusEnum.pending.value,
+                    TaskStatusEnum.running.value,
+                    TaskStatusEnum.queued.value,
+                ],
+            ).using_db(connection)
+            for t in active_tasks:
+                if t.request_params.get("chapter_id") == chapter_id:
+                    # 已有进行中的任务：直接返回该任务，前端继续轮询，
+                    # 避免离开页面再返回时重复提交被 400 拒绝
+                    return t
+
+            task = await ai_task_executor.submit(
+                AiTaskTypeEnum.storyboard,
+                request_params,
+                db_connection=connection,
+            )
         return task
 
 

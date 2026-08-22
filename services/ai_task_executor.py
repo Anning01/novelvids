@@ -88,12 +88,19 @@ class AiTaskExecutor:
                 logger.warning("Cleaning stale task #%s (status=%s)", task.id, task.status)
                 await self._fail(task, f"异常任务清理：超时（{timeout}s）")
 
-    async def submit(self, task_type: AiTaskTypeEnum, request_params: dict) -> AiTask:
+    async def submit(
+        self,
+        task_type: AiTaskTypeEnum,
+        request_params: dict,
+        db_connection=None,
+    ) -> AiTask:
         """
         提交任务，写入数据库，返回任务记录。
 
         前端可凭 task.id 轮询查询任务状态。
         AUTH_ENABLED 且携带 team_id 时预检团队余额（欠费禁新任务）。
+        ``db_connection``：传入事务连接时在该事务内创建任务（用于与并发检查
+        保持原子性，见 scene_controller.generate 的章节行锁）。
         """
         from services.balance import ensure_solvent
 
@@ -104,6 +111,7 @@ class AiTaskExecutor:
             task_type=task_type.value,
             request_params=request_params,
             status=TaskStatusEnum.pending.value,
+            using_db=db_connection,
         )
         return task
 
