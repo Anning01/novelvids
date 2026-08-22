@@ -116,6 +116,7 @@ class VideoQueryOut(BaseModel):
     @model_validator(mode="after")
     def _resolve_media(self):
         self.url = resolve_media_url(self.url)
+        _resolve_video_metadata(self.metadata)
         return self
 
 
