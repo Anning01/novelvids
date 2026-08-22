@@ -5,7 +5,11 @@ from openai import AsyncOpenAI
 from models.chapter import Chapter
 from models.asset import Asset
 from models.scene import Scene
-from prompts.storyboard import format_storyboard_prompt, referenced_entities
+from prompts.storyboard import (
+    format_storyboard_prompt,
+    normalized_storyboard_reference_fields,
+    referenced_entities,
+)
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from schemas.scene import SceneEntity
@@ -113,6 +117,14 @@ class StoryboardTaskHandler(BaseTaskHandler):
         scenes_created = []
 
         for shot in storyboard.shots:
+            original_description = shot.description
+            reference_updates = normalized_storyboard_reference_fields(
+                shot,
+                entities or [],
+            )
+            if reference_updates:
+                shot = shot.model_copy(update=reference_updates)
+
             # 构建 prompt JSON 对象
             prompt_params = {
                 "shot_size_and_camera": shot.shot_size_and_camera,
@@ -139,7 +151,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
             # 构建 metadata，包含 API 元数据
             scene_metadata = {
-                "shot_title": shot.description,
+                "shot_title": original_description,
                 "duration_str": shot.duration,
                 "sequence_id": shot.sequence,
                 # API 调用元数据
@@ -176,7 +188,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             scene = await Scene.create(
                 chapter_id=chapter_id,
                 sequence=shot.sequence,
-                description=shot.description,
+                description=original_description,
                 prompt_params=prompt_params,
                 prompt=prompt,
                 duration=duration_value,

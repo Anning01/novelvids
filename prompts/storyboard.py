@@ -1,6 +1,8 @@
 """Prompt templates and pure renderers for storyboard generation."""
 
 import json
+import re
+from collections import defaultdict
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -115,6 +117,142 @@ STORYBOARD_CONTINUATION_TASK_MESSAGE = """【分镜续写任务】
 PROFESSIONAL_PROMPT_PROHIBITIONS = (
     "无字幕、无水印、无 LOGO、无 BGM，仅保留环境音效与人物台词。"
 )
+
+_REFERENCE_TEXT_FIELDS = (
+    "description",
+    "visual_prose",
+    "environment",
+    "spatial_relationships",
+    "sound_design",
+    "transition",
+)
+_REFERENCE_LIST_FIELDS = ("actions", "dialogue")
+_BRACED_REFERENCE_PATTERN = re.compile(r"@\{([^}]+)\}")
+_LEGACY_REFERENCE_PATTERN = re.compile(r"@[\w\u4e00-\u9fff·]+")
+_UNSAFE_AUTOMATIC_PERSON_NAMES = {
+    "二人",
+    "众人",
+    "少年",
+    "少女",
+    "老人",
+    "老者",
+    "男人",
+    "女人",
+    "男子",
+    "女子",
+    "对方",
+    "那人",
+}
+
+
+def _safe_automatic_person_name(value: object) -> str:
+    name = str(value or "").strip()
+    if (
+        len(name) < 2
+        or name in _UNSAFE_AUTOMATIC_PERSON_NAMES
+        or any(character in name for character in "@{}\n\r")
+    ):
+        return ""
+    return name
+
+
+def _person_reference_candidates(
+    entities: Sequence[StoryboardEntity],
+) -> list[tuple[str, str]]:
+    """返回可安全自动补标的人物名，并排除有歧义的别名。"""
+    people = [entity for entity in entities if entity.asset_type == "人物"]
+    canonical_names = {
+        name
+        for entity in people
+        if (name := _safe_automatic_person_name(entity.name))
+    }
+    candidates = {name: name for name in canonical_names}
+    alias_owners: dict[str, set[str]] = defaultdict(set)
+    for entity in people:
+        canonical_name = _safe_automatic_person_name(entity.name)
+        if not canonical_name:
+            continue
+        for raw_alias in entity.aliases:
+            alias = _safe_automatic_person_name(raw_alias)
+            if alias and alias not in canonical_names:
+                alias_owners[alias].add(canonical_name)
+    for alias, owners in alias_owners.items():
+        if len(owners) == 1:
+            candidates[alias] = next(iter(owners))
+    return sorted(candidates.items(), key=lambda item: (-len(item[0]), item[0]))
+
+
+def _normalize_person_reference_text(
+    text: str,
+    candidates: Sequence[tuple[str, str]],
+) -> str:
+    if not text or not candidates:
+        return text
+
+    protected: list[str] = []
+
+    def protect(value: str) -> str:
+        placeholder = f"\ue000{len(protected)}\ue001"
+        protected.append(value)
+        return placeholder
+
+    candidate_map = dict(candidates)
+
+    def protect_braced(match: re.Match[str]) -> str:
+        raw_name = match.group(1).strip()
+        canonical_name = candidate_map.get(raw_name)
+        return protect(
+            f"@{{{canonical_name}}}" if canonical_name else match.group(0)
+        )
+
+    normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, text)
+
+    # 兼容边界清晰的旧格式 @人物名，并统一升级为带花括号的正式名。
+    legacy_boundary = r"(?=$|[\s，。；：、！？,.!?;:）)\]】])"
+    for name, canonical_name in candidates:
+        pattern = re.compile(rf"@{re.escape(name)}{legacy_boundary}")
+        normalized = pattern.sub(
+            lambda _match, canonical=canonical_name: protect(f"@{{{canonical}}}"),
+            normalized,
+        )
+
+    # 未识别的旧格式引用保持原样，避免在其内部再次替换普通人物名。
+    normalized = _LEGACY_REFERENCE_PATTERN.sub(
+        lambda match: protect(match.group(0)),
+        normalized,
+    )
+    for name, canonical_name in candidates:
+        if name in normalized:
+            normalized = normalized.replace(name, protect(f"@{{{canonical_name}}}"))
+    for index, value in enumerate(protected):
+        normalized = normalized.replace(f"\ue000{index}\ue001", value)
+    return normalized
+
+
+def normalized_storyboard_reference_fields(
+    shot: StoryboardShot,
+    entities: Sequence[StoryboardEntity],
+) -> dict[str, object]:
+    """为模型漏写的普通人物名补齐正式引用语法，返回非破坏性字段更新。"""
+    candidates = _person_reference_candidates(entities)
+    if not candidates:
+        return {}
+
+    updates: dict[str, object] = {}
+    for field_name in _REFERENCE_TEXT_FIELDS:
+        original = str(getattr(shot, field_name))
+        normalized = _normalize_person_reference_text(original, candidates)
+        if normalized != original:
+            updates[field_name] = normalized
+    for field_name in _REFERENCE_LIST_FIELDS:
+        original = list(getattr(shot, field_name))
+        normalized = [
+            _normalize_person_reference_text(str(value), candidates)
+            for value in original
+        ]
+        if normalized != original:
+            updates[field_name] = normalized
+    return updates
 
 
 def _asset_payload(entities: Sequence[StoryboardEntity]) -> str:

@@ -9,6 +9,7 @@ from prompts.storyboard import (
     build_storyboard_messages,
     entity_reference_names,
     format_storyboard_prompt,
+    normalized_storyboard_reference_fields,
     referenced_entities,
 )
 from schemas.scene import SceneEntity, SoraScenePromptConfig, Storyboard
@@ -145,6 +146,56 @@ def test_entity_reference_names_matches_braced_syntax_and_aliases():
     assert entity_reference_names("小楼居中，人物接近入口", [entity]) == []
     # 别名以 @{} 形式出现时匹配
     assert entity_reference_names("他走向 @{小楼}", [entity]) == [entity]
+
+
+def test_normalized_storyboard_reference_fields_fills_missing_person_tags():
+    person = SceneEntity(
+        name="李七夜",
+        aliases=["李公子", "他", "少年"],
+        description="黑发少年",
+        asset_type="人物",
+    )
+    scene = _entity()
+    shot = _shot(1)
+    shot.spatial_relationships = "李公子位于画面左侧，小楼位于远处。"
+    shot.actions = ["0.0s-2.0s: 李七夜抬手，少年退后。"]
+    shot.dialogue = ["李公子（低声）：走吧。"]
+
+    updates = normalized_storyboard_reference_fields(shot, [person, scene])
+
+    assert updates["spatial_relationships"] == "@{李七夜}位于画面左侧，小楼位于远处。"
+    assert updates["actions"] == ["0.0s-2.0s: @{李七夜}抬手，少年退后。"]
+    assert updates["dialogue"] == ["@{李七夜}（低声）：走吧。"]
+    assert "environment" not in updates
+
+
+def test_normalized_storyboard_reference_fields_is_idempotent_and_longest_first():
+    short_name = SceneEntity(
+        name="李七",
+        aliases=[],
+        description="",
+        asset_type="人物",
+    )
+    long_name = SceneEntity(
+        name="李七夜",
+        aliases=["帝子"],
+        description="",
+        asset_type="人物",
+    )
+    shot = _shot(1, "@{李七夜}与帝子并肩，李七留在门外。")
+
+    first_updates = normalized_storyboard_reference_fields(
+        shot,
+        [short_name, long_name],
+    )
+    normalized_shot = shot.model_copy(update=first_updates)
+    second_updates = normalized_storyboard_reference_fields(
+        normalized_shot,
+        [short_name, long_name],
+    )
+
+    assert first_updates["description"] == "@{李七夜}与@{李七夜}并肩，@{李七}留在门外。"
+    assert second_updates == {}
 
 
 @pytest.mark.asyncio
