@@ -955,9 +955,10 @@ async function loadChapter(chapterId: number) {
     if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
     showChapterScenes(result)
     loading.value = false
-    if (!result.scenes.length) {
-      if (isAgent.value) await waitForAnalysisThenGenerate(chapterId)
-      else await createManualScene(chapterId)
+    if (!result.scenes.length && !isAgent.value) {
+      // Agent 模式不再自动生成分镜：进入分镜页后由用户点击「生成全部分镜」触发，
+      // 避免一进页面就自动消耗生成额度。人工模式仍自动创建首个空分镜。
+      await createManualScene(chapterId)
     }
   } catch (error) {
     if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
@@ -1528,6 +1529,7 @@ onBeforeUnmount(() => {
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>从第一个分镜开始，逐步搭建你的镜头列表。</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建第一个分镜" }}</AppButton></div>
+        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>点击下方按钮，AI 将生成本集全部分镜。</p><AppButton variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : waitingAnalysis ? '等待项目分析' : '生成全部分镜' }}</AppButton></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>
