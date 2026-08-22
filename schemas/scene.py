@@ -60,7 +60,8 @@ class SoraScenePromptConfig(BaseModel):
         ...,
         description=(
             "当前镜头内人物、场景入口、主要陈设和机位之间的完整空间关系；"
-            "必须写明在场人物的初始位置、朝向和动作起点，不依赖其他镜头"
+            "必须写明在场人物的初始位置、朝向和动作起点；"
+            "如承接相邻镜头，需把连续性转换为当前镜头内的具体状态"
         ),
     )
     # --- 核心内容 ---
@@ -116,8 +117,8 @@ class SoraScenePromptConfig(BaseModel):
     transition: str = Field(
         ...,
         description=(
-            "当前镜头内可见的收尾画面、剪辑点和可独立执行的转场方式；"
-            "不得引用上一镜头或下一镜头的具体内容"
+            "说明与相邻镜头的衔接意图，同时完整写明当前镜头内可见的收尾画面和剪辑点；"
+            "不得只写‘承接上一镜头’等无法直接执行的描述"
         ),
     )
     allowed_effects: list[str] = Field(

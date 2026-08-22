@@ -70,8 +70,8 @@ def test_storyboard_messages_render_language_entities_and_narrative():
     assert narrative not in messages[0]["content"]
     assert narrative in messages[2]["content"]
     assert "分镜生成任务" in messages[3]["content"]
-    assert "每个镜头都会作为一次完全独立的视频生成请求" in messages[0]["content"]
-    assert "不得引用上一镜头、下一镜头或任何外部上下文" in messages[0]["content"]
+    assert "保持动作、视线、轴线、人物位置和时空关系的连续性" in messages[0]["content"]
+    assert "后续视频生成会按镜头分别提交" in messages[0]["content"]
     assert "每个时间段都必须重新写明动作主体" in messages[0]["content"]
 
 
@@ -134,17 +134,19 @@ def test_professional_prompt_renders_only_assets_referenced_by_the_shot():
     assert "旧钥匙" not in prompt
 
 
-def test_professional_prompt_explicitly_marks_each_shot_as_self_contained():
+def test_professional_video_prompt_excludes_storyboard_planning_instructions():
     prompt = format_storyboard_prompt(_shot(6), "zh", entities=[_entity()])
 
-    assert "【独立生成约束】" in prompt
-    assert "本镜头是一次独立的视频生成任务" in prompt
-    assert "不得继承其他镜头的人物位置、动作状态、环境或事件信息" in prompt
+    assert "【独立生成约束】" not in prompt
+    assert "本镜头是一次独立的视频生成任务" not in prompt
+    assert "不得继承其他镜头" not in prompt
+    assert "沿推镜方向承接下一镜头" in prompt
 
     schema = SoraScenePromptConfig.model_json_schema()["properties"]
-    assert "不依赖其他镜头" in schema["spatial_relationships"]["description"]
+    assert "连续性转换为当前镜头内的具体状态" in schema["spatial_relationships"]["description"]
     assert "每个时间段都必须重新写明动作主体" in schema["actions"]["description"]
-    assert "不得引用上一镜头或下一镜头" in schema["transition"]["description"]
+    assert "与相邻镜头的衔接意图" in schema["transition"]["description"]
+    assert "不得只写" in schema["transition"]["description"]
 
 
 def test_entity_reference_names_matches_braced_syntax_and_aliases():
