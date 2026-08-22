@@ -117,8 +117,20 @@ async def create_json_completion(
     if refusal:
         raise JsonCompletionError(f"模型拒绝生成 JSON：{refusal}", usage=usage)
 
+    content = message.content or ""
     try:
-        payload = _extract_json(message.content or "")
+        payload = _extract_json(content)
     except ValueError as exc:
+        # 深度思考/推理模型可能只输出 reasoning、正文为空，给出可操作的提示。
+        reasoning = (
+            getattr(message, "reasoning_content", None)
+            or getattr(message, "reasoning", None)
+        )
+        if not content.strip() and reasoning:
+            raise JsonCompletionError(
+                "模型仅返回了思考过程、未返回 JSON 正文（通常为深度思考/推理模型），"
+                "请更换非推理模型或在请求中关闭 thinking 后重试",
+                usage=usage,
+            ) from None
         raise JsonCompletionError(str(exc), usage=usage) from None
     return response_model.model_validate(payload), completion
