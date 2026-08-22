@@ -34,11 +34,12 @@ export interface NovelMeta {
   total_chapters?: number
   tags?: string[] | null
   style_key?: string | null
+  video_model_config_id?: number | null
   content_length: number
   created_at: string
   updated_at: string
 }
-export interface Novel { id: number; name: string; author?: string; style_key?: string | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface Novel { id: number; name: string; author?: string; style_key?: string | null; video_model_config_id?: number | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
@@ -49,6 +50,7 @@ export interface AssetReferencePromptPreview { prompt: string; prompt_language: 
 export interface AssetMergeResult { asset: Asset; removed_asset_id: number; data_source_asset_id: number; image_source_asset_id?: number; summary: string[] }
 export interface Scene { id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
+export interface VideoMergeResult { chapter_id: number; merged_url: string; video_count: number; total_duration: number }
 export interface WorkbenchBootstrap { chapter: Chapter; assets: Asset[]; scenes: Scene[]; videos: Record<number, Video[]> }
 export interface AiTask {
   id: string

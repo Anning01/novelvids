@@ -16,6 +16,11 @@ class NovelProperties(BaseModel):
     description: Optional[str] = Field(None, description="描述")
     cover: Optional[str] = Field(None, description="封面图URL")
     total_chapters: Optional[int] = Field(None, description="总章节数")
+    video_model_config_id: Optional[int] = Field(
+        None,
+        description="分镜页面默认视频模型配置 ID",
+        ge=1,
+    )
 
 class NovelFullProperties(NovelProperties):
     """

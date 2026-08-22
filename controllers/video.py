@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -679,10 +680,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # 获取章节所有分镜
         scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
 
-        # 收集所有已完成视频，同时检查是否有分镜缺少视频
+        # 只收集当前已经完成的视频；尚未生成或失败的分镜不阻塞本次下载。
+        # scenes 已按 sequence 排序，因此传给合并器的顺序就是最终播放顺序。
         videos_to_merge: list[Video] = []
         total_duration = 0.0
-        missing_scenes: list[int] = []
 
         for scene in scenes:
             metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
@@ -703,19 +704,20 @@ class VideoController(CRUDBase[Video, dict, dict]):
             if video:
                 videos_to_merge.append(video)
                 total_duration += scene.duration or 0
-            else:
-                missing_scenes.append(scene.sequence)
 
-        # 检查是否所有分镜都有视频
-        if missing_scenes:
+        if not videos_to_merge:
             raise HTTPException(
                 400,
-                detail=f"以下分镜尚未生成视频，无法合并：分镜 #{', '.join(map(str, missing_scenes))}"
+                detail="当前章节还没有已生成的视频，无法合并",
             )
 
         # 调用合并服务
         try:
-            merged_url = video_merger.merge_videos(videos_to_merge, chapter_id)
+            merged_url = await asyncio.to_thread(
+                video_merger.merge_videos,
+                videos_to_merge,
+                chapter_id,
+            )
         except ValueError as e:
             raise HTTPException(400, detail=str(e))
         except RuntimeError as e:

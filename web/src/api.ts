@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -210,6 +210,7 @@ export const api = {
   },
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
+  mergeChapterVideos: (chapterId: number) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),

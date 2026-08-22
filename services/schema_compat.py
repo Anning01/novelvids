@@ -85,7 +85,7 @@ async def ensure_usage_record_schema() -> None:
 
 
 async def ensure_novel_analysis_schema() -> None:
-    """为已有 SQLite 项目补齐可人工编辑的分析字段。"""
+    """为已有 SQLite 项目补齐分析字段与工作台偏好。"""
     if not settings.DATABASE_URL.startswith("sqlite"):
         return
 
@@ -103,6 +103,7 @@ async def ensure_novel_analysis_schema() -> None:
         "storyboard_strategy": "VARCHAR(120)",
         "storyboard_setting": "TEXT",
         "style_key": "VARCHAR(64)",
+        "video_model_config_id": "INT",
     }
     statements = [
         f"ALTER TABLE novels ADD COLUMN {name} {definition};"

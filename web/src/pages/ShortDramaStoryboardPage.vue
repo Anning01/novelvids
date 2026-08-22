@@ -92,6 +92,8 @@ const activeSceneId = ref(0)
 const chapterToolbarHeight = ref(104)
 const videoModels = ref<VideoGenerationModel[]>([])
 const selectedVideoModel = ref('')
+const persistedVideoModelId = ref<number | null>(null)
+let videoModelPreferenceSaveQueue: Promise<void> = Promise.resolve()
 const videos = ref<Record<number, VideoResult[]>>({})
 const videoPageEnabled = computed(() => chapterHasCompletedVideo(scenes.value, videos.value))
 const loading = ref(true)
@@ -191,6 +193,15 @@ const videoModelSelectWidth = computed(() => Math.min(420, Math.max(
   ))),
 )))
 const selectedVideoModelConfig = computed(() => videoModels.value.find(item => String(item.config_id) === selectedVideoModel.value) || null)
+const selectedVideoModelInput = computed({
+  get: () => selectedVideoModel.value,
+  set: (value: string) => {
+    const modelId = Number(value)
+    if (!Number.isInteger(modelId) || modelId < 1 || String(modelId) === selectedVideoModel.value) return
+    selectedVideoModel.value = String(modelId)
+    videoModelPreferenceSaveQueue = videoModelPreferenceSaveQueue.then(() => persistVideoModelPreference(modelId))
+  },
+})
 const sceneStatusItems = computed<SceneStatusRailItem[]>(() => scenes.value.map(scene => ({
   sceneId: scene.id,
   sequence: scene.sequence,
@@ -213,6 +224,20 @@ const assetGroups = computed(() => [
   { type: AssetTypeEnum.SCENE, label: '分镜场景', icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
   { type: AssetTypeEnum.ITEM, label: '场景道具', icon: Boxes, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.ITEM) },
 ])
+
+async function persistVideoModelPreference(modelId: number) {
+  try {
+    const saved = (await api.updateNovel(projectId.value, { video_model_config_id: modelId })).data
+    persistedVideoModelId.value = saved.video_model_config_id ?? modelId
+    if (project.value) project.value = { ...project.value, video_model_config_id: persistedVideoModelId.value }
+  } catch (error) {
+    if (selectedVideoModel.value === String(modelId)) {
+      const persisted = videoModels.value.find(item => item.config_id === persistedVideoModelId.value)
+      selectedVideoModel.value = String(persisted?.config_id || videoModels.value[0]?.config_id || '')
+    }
+    notice.error(error instanceof Error ? error.message : '视频模型偏好保存失败')
+  }
+}
 
 function makeSceneDraft(scene: Scene): SceneDraft {
   const metadata = scene?.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}
@@ -1066,9 +1091,9 @@ async function load() {
     }
     chapters.value = chapterResponse.data.items
     videoModels.value = videoModelResponse.data
-    if (!videoModels.value.some(item => String(item.config_id) === selectedVideoModel.value)) {
-      selectedVideoModel.value = String(videoModels.value[0]?.config_id || '')
-    }
+    const savedVideoModel = videoModels.value.find(item => item.config_id === novelResponse.data.video_model_config_id)
+    persistedVideoModelId.value = savedVideoModel?.config_id ?? null
+    selectedVideoModel.value = String(savedVideoModel?.config_id || videoModels.value[0]?.config_id || '')
     const preferredChapter = Number(route.query.chapter)
     const firstChapter = chapters.value.find(item => item.id === preferredChapter) ?? chapters.value[0]
     if (firstChapter) {
@@ -1599,7 +1624,7 @@ onBeforeUnmount(() => {
             <small>点击查看详情</small>
           </button>
           <div class="chapter-actions">
-            <AppSelect v-model="selectedVideoModel" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
+            <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
             <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建分镜" }}</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? '批量生成中' : '批量生视频' }}</AppButton>
@@ -1714,7 +1739,7 @@ onBeforeUnmount(() => {
                 />
                 <footer>
                   <div>
-                    <AppSelect v-model="selectedVideoModel" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="videoModelSelectWidth" :style="{ width: `${videoModelSelectWidth}px`, minWidth: `${videoModelSelectWidth}px` }" />
+                    <AppSelect v-model="selectedVideoModelInput" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="videoModelSelectWidth" :style="{ width: `${videoModelSelectWidth}px`, minWidth: `${videoModelSelectWidth}px` }" />
                     <SceneVideoParameterPicker
                       :model="selectedVideoModelConfig"
                       :mode="draftFor(scene).videoGenerationMode"

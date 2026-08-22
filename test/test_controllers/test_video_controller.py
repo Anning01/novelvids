@@ -665,6 +665,63 @@ async def test_未完成视频不能设为当前版本():
     assert exc_info.value.status_code == 400
     assert "已完成" in exc_info.value.detail
 
+
+@pytest.mark.asyncio
+async def test_章节合并按分镜顺序使用当前已有视频并跳过缺失分镜():
+    novel = await Novel.create(name="章节合并", author="Author")
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    scene_3 = await Scene.create(chapter=chapter, sequence=3, prompt="3", duration=6.0)
+    scene_1 = await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
+    await Scene.create(chapter=chapter, sequence=2, prompt="2", duration=5.0)
+    selected = await Video.create(
+        scene=scene_1,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/selected.mp4",
+    )
+    await Video.create(
+        scene=scene_1,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/newer.mp4",
+    )
+    scene_1.metadata = {"current_video_id": selected.id}
+    await scene_1.save(update_fields=["metadata", "updated_at"])
+    third = await Video.create(
+        scene=scene_3,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/third.mp4",
+    )
+
+    with patch(
+        "controllers.video.video_merger.merge_videos",
+        return_value="/media/videos/merged/chapter.mp4",
+    ) as merge:
+        result = await video_controller.merge_chapter_videos(chapter.id)
+
+    assert [video.id for video in merge.call_args.args[0]] == [selected.id, third.id]
+    assert merge.call_args.args[1] == chapter.id
+    assert result == {
+        "chapter_id": chapter.id,
+        "merged_url": "/media/videos/merged/chapter.mp4",
+        "video_count": 2,
+        "total_duration": 10.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_章节没有已生成视频时不能合并():
+    novel = await Novel.create(name="空章节合并", author="Author")
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await video_controller.merge_chapter_videos(chapter.id)
+
+    assert exc_info.value.status_code == 400
+    assert "还没有已生成的视频" in exc_info.value.detail
+
 @pytest.mark.asyncio
 async def test_删除视频():
     """删除视频后不再存在。"""
