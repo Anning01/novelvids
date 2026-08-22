@@ -205,3 +205,70 @@ async def test_gateway_rejects_http_200_provider_error_envelope(monkeypatch):
         )
 
     assert "sensitive upstream detail" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_gateway_includes_provider_error_message_on_http_error(monkeypatch):
+    """4xx 响应体里的 error.message / error.code 应透传到前端（豆包/智谱/通义通用）。"""
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            402,
+            headers={"x-request-id": "req-arrearage"},
+            json={
+                "error": {
+                    "code": "Arrearage",
+                    "message": "账户余额不足，请充值后再试",
+                }
+            },
+        )
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.image_generation.gateway.httpx.AsyncClient", client_factory)
+
+    with pytest.raises(
+        ImageGenerationError,
+        match=r"账户余额不足.*Arrearage.*HTTP 402.*req-arrearage",
+    ) as exc_info:
+        await generate_images(
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            api_key="secret",
+            model="doubao-seedream-5-0-pro",
+            prompt="cover",
+        )
+    assert "HTTP 402" in str(exc_info.value)
+    assert "账户余额不足" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_gateway_falls_back_to_plain_http_error_when_body_not_json(monkeypatch):
+    """4xx 响应体非 JSON 时回退到旧格式（只显示状态码 + request_id），不抛解析错。"""
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            502,
+            headers={"x-request-id": "bad-gateway"},
+            content=b"<html>Bad Gateway</html>",
+        )
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.image_generation.gateway.httpx.AsyncClient", client_factory)
+
+    with pytest.raises(
+        ImageGenerationError,
+        match=r"HTTP 502，request_id=bad-gateway",
+    ):
+        await generate_images(
+            base_url="https://image.example.com/v1",
+            api_key="secret",
+            model="image-model",
+            prompt="cover",
+        )

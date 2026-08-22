@@ -46,6 +46,35 @@ def _request_id(response: httpx.Response) -> str | None:
     return None
 
 
+def _provider_error(data: Any) -> str | None:
+    """只提取结构化供应商错误，避免把 HTML 或请求内容原样暴露给调用方。"""
+    if not isinstance(data, dict):
+        return None
+    error = data.get("error")
+    if isinstance(error, dict):
+        code = str(error.get("code") or error.get("type") or "PROVIDER_ERROR")[:80]
+        message = str(error.get("message") or "生图供应商请求失败")[:500]
+        return f"{message}（{code}）"
+    if isinstance(error, str) and error.strip():
+        return error.strip()[:500]
+    message = data.get("message") or data.get("detail")
+    if isinstance(message, str) and message.strip():
+        code = data.get("code") or data.get("type")
+        normalized = message.strip()[:500]
+        if code is not None and str(code).strip():
+            return f"{normalized}（{str(code).strip()[:80]}）"
+        return normalized
+    return None
+
+
+def _http_provider_error(response: httpx.Response) -> str | None:
+    """从供应商 HTTP 4xx 响应体里安全提取 error.message（豆包/智谱/通义等）。"""
+    try:
+        return _provider_error(response.json())
+    except ValueError:
+        return None
+
+
 def _payload_error(payload: Any) -> tuple[str | None, int | None, str | None]:
     """Return sanitized details from providers that wrap errors in HTTP 200."""
     if not isinstance(payload, dict) or not isinstance(payload.get("error"), dict):
@@ -146,14 +175,20 @@ async def generate_images(
 
     request_id = _request_id(response)
     if response.status_code >= 400:
+        provider_error = _http_provider_error(response)
         logger.warning(
-            "image_generation_http_error protocol=%s endpoint=%s status=%s request_id=%s",
+            "image_generation_http_error protocol=%s endpoint=%s status=%s request_id=%s has_provider_detail=%s",
             api_protocol,
             safe_endpoint,
             response.status_code,
             request_id or "-",
+            bool(provider_error),
         )
         suffix = f"，request_id={request_id}" if request_id else ""
+        if provider_error:
+            raise ImageGenerationError(
+                f"生图供应商请求失败：{provider_error}（HTTP {response.status_code}{suffix}）"
+            )
         raise ImageGenerationError(
             f"生图供应商请求失败（HTTP {response.status_code}{suffix}）"
         )
