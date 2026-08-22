@@ -897,6 +897,18 @@ async function createManualScene(chapterId = activeChapterId.value) {
   }
 }
 
+async function fetchTaskOrNull(taskId: string) {
+  // 查询任务；仅当任务不存在（404，如服务端重启清库）时返回 null 以便静默，
+  // 其它错误（网络等）原样抛出。任务执行失败的错误在 error_message 里，不在此处。
+  try {
+    return (await api.task(taskId)).data
+  } catch (error) {
+    const message = (error as Error).message
+    if (/404|不存在|not found/i.test(message)) return null
+    throw error
+  }
+}
+
 async function pollStoryboardTask(chapterId: number, taskId: string) {
   // 轮询某个分镜拆解任务直到终态；拿到终态后才清理持久化状态，
   // 组件卸载（切页/刷新）时保留持久化，下次进入自动恢复“生成中”。
@@ -905,10 +917,19 @@ async function pollStoryboardTask(chapterId: number, taskId: string) {
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    let current = (await api.task(taskId)).data
+    let current = await fetchTaskOrNull(taskId)
+    if (current === null) {
+      // 任务已被服务端清理：清掉本地持久化，静默退出
+      clearPersistedStoryboardTask(chapterId)
+      return
+    }
     while (alive && !terminalTaskStatuses.has(current.status)) {
       await sleep(2200)
-      current = (await api.task(taskId)).data
+      current = await fetchTaskOrNull(taskId)
+      if (current === null) {
+        clearPersistedStoryboardTask(chapterId)
+        return
+      }
     }
     if (!alive) return // 组件卸载：任务可能仍在跑，保留持久化，下次进入自动恢复
     clearPersistedStoryboardTask(chapterId)
@@ -921,8 +942,6 @@ async function pollStoryboardTask(chapterId: number, taskId: string) {
     if (!alive) return
     clearPersistedStoryboardTask(chapterId)
     const message = (error as Error).message
-    // 任务已被服务端清理（如重启清库）时静默，不打扰用户
-    if (/404|不存在|not found/i.test(message)) return
     setGenerationError(chapterId, message)
     notice.error(message)
   } finally {
