@@ -898,7 +898,8 @@ async function createManualScene(chapterId = activeChapterId.value) {
 }
 
 async function pollStoryboardTask(chapterId: number, taskId: string) {
-  // 轮询某个分镜拆解任务直到终态；任务终态后清理持久化状态。
+  // 轮询某个分镜拆解任务直到终态；拿到终态后才清理持久化状态，
+  // 组件卸载（切页/刷新）时保留持久化，下次进入自动恢复“生成中”。
   if (pollingStoryboardTaskIds.has(chapterId)) return
   pollingStoryboardTaskIds.add(chapterId)
   setChapterGenerating(chapterId, true)
@@ -909,17 +910,19 @@ async function pollStoryboardTask(chapterId: number, taskId: string) {
       await sleep(2200)
       current = (await api.task(taskId)).data
     }
+    if (!alive) return // 组件卸载：任务可能仍在跑，保留持久化，下次进入自动恢复
     clearPersistedStoryboardTask(chapterId)
-    if (!alive) return
     if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || 'Agent 分镜生成失败')
     const result = await fetchChapterScenes(chapterId)
     if (activeChapterId.value === chapterId) showChapterScenes(result)
     const chapterNumber = chapters.value.find(item => item.id === chapterId)?.number || ''
     notice.success(`第 ${chapterNumber} 集分镜已生成`)
   } catch (error) {
-    clearPersistedStoryboardTask(chapterId)
     if (!alive) return
+    clearPersistedStoryboardTask(chapterId)
     const message = (error as Error).message
+    // 任务已被服务端清理（如重启清库）时静默，不打扰用户
+    if (/404|不存在|not found/i.test(message)) return
     setGenerationError(chapterId, message)
     notice.error(message)
   } finally {
