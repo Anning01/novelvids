@@ -7,7 +7,7 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { activeVideoForScene, isTerminalVideo, sceneHasRunningVideo, sceneWithActiveVideo } from '../graph/videoVersions'
-import { assetImageMediaMetadata, assetTypeLabel, DEFAULT_ASSET_ASPECT_RATIO, isReusableAssetPlaceholder, patchAssetImageMediaMetadata, REUSABLE_ASSET_PLACEHOLDER_KEY } from '../config/assetConfig'
+import { assetImageMediaMetadata, assetSelectedImageCandidates, assetTypeLabel, DEFAULT_ASSET_ASPECT_RATIO, isReusableAssetPlaceholder, patchAssetImageMediaMetadata, REUSABLE_ASSET_PLACEHOLDER_KEY } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
 import { nodeCapabilities } from '../config/nodeCapabilities'
@@ -866,11 +866,33 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.rebuildGraph()
       notice.success('资产形态已删除')
     },
+    assetGenerationReferenceImages(assetId: number) {
+      const target = this.nodes.find(item => item.kind === 'asset' && item.id === assetId)
+      if (!target) return []
+      const urls = this.edges
+        .filter(item => item.type === 'asset_reference' && item.target === target.key)
+        .sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id)
+        .flatMap((item) => {
+          const source = this.nodeByKey(item.source)
+          if (!source) return []
+          if (source.kind === 'asset') {
+            const sourceAsset = source.data.asset as Asset | undefined
+            return sourceAsset ? assetSelectedImageCandidates(sourceAsset).map(image => image.url) : []
+          }
+          if (source.kind === 'digital_human') {
+            const resource = source.data.resource as { image_url?: string } | undefined
+            return resource?.image_url ? [resource.image_url] : []
+          }
+          return typeof source.data.url === 'string' ? [source.data.url] : []
+        })
+      return [...new Set(urls.filter(Boolean))].slice(0, 10)
+    },
     async generateAsset(assetId: number, variantId?: number) {
       const controller = this.beginPendingWork()
       if (!this.busyAssetIds.includes(assetId)) this.busyAssetIds.push(assetId)
       try {
-        let task = (await api.generateAsset(assetId, variantId)).data
+        const referenceImages = this.assetGenerationReferenceImages(assetId)
+        let task = (await api.generateAsset(assetId, variantId, referenceImages)).data
         if (!terminal.has(task.status)) {
           task = await pollUntilTerminal(
             async () => (await api.task(task.id)).data,

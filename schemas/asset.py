@@ -83,6 +83,27 @@ class AssetReferencePromptOut(BaseModel):
     prompt_language: str
 
 
+class AssetReferenceCreate(BaseModel):
+    """Submit an asset image-generation run with optional image references."""
+
+    variant_id: Optional[int] = Field(default=None, ge=1)
+    reference_images: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("reference_images")
+    @classmethod
+    def validate_reference_images(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for raw in values:
+            value = raw.strip()
+            if not value or len(value) > 8192:
+                raise ValueError("参考图片地址不能为空且长度需在 8192 字符以内")
+            if not value.startswith(("/media/", "uploads/", "http://", "https://")):
+                raise ValueError("参考图片必须是已上传图片或完整 URL")
+            if value not in normalized:
+                normalized.append(value)
+        return normalized
+
+
 class AssetGenerationRecordOut(BaseModel):
     """Safe, presentation-ready summary of one asset image-generation run."""
 
@@ -148,6 +169,13 @@ class AssetBriefOut(AssetProperties, BaseResponse):
                     resolve_media_url(u) for u in meta["image_gallery"]
                 ],
             }
+        if isinstance(meta, dict) and isinstance(meta.get("generation_reference_images"), list):
+            self.metadata = {
+                **meta,
+                "generation_reference_images": [
+                    resolve_media_url(u) for u in meta["generation_reference_images"]
+                ],
+            }
         return self
 
 
@@ -171,6 +199,13 @@ class AssetOut(AssetFullProperties, BaseResponse):
                 **meta,
                 "image_gallery": [
                     resolve_media_url(u) for u in meta["image_gallery"]
+                ],
+            }
+        if isinstance(meta, dict) and isinstance(meta.get("generation_reference_images"), list):
+            self.metadata = {
+                **meta,
+                "generation_reference_images": [
+                    resolve_media_url(u) for u in meta["generation_reference_images"]
                 ],
             }
         return self

@@ -166,7 +166,10 @@ export const api = {
   updateAssetVariant: (assetId: number, variantId: number, data: Partial<AssetVariant>) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants/${variantId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   assignAssetVariantToChapter: (assetId: number, variantId: number, chapterNumber: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants/${variantId}/chapter`, { method: 'POST', body: JSON.stringify({ chapter_number: chapterNumber }) }),
   deleteAssetVariant: (assetId: number, variantId: number) => request<SingleResponse<null>>(`/asset/${assetId}/variants/${variantId}`, { method: 'DELETE' }),
-  generateAsset: (id: number, variantId?: number) => request<SingleResponse<AiTask>>(`/asset/reference/${id}${qs({ variant_id: variantId })}`),
+  generateAsset: (id: number, variantId?: number, referenceImages: string[] = []) => request<SingleResponse<AiTask>>(`/asset/reference/${id}`, {
+    method: 'POST',
+    body: JSON.stringify({ variant_id: variantId, reference_images: referenceImages }),
+  }),
   activeAssetGenerations: (novelId: number) => request<SingleResponse<AssetActiveGeneration[]>>(`/asset/active-generations${qs({ novel_id: novelId })}`),
   scenes: (chapterId: number) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page: 1, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),

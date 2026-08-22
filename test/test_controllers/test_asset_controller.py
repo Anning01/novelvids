@@ -379,6 +379,35 @@ async def test_reference_提交参考图任务():
 
 
 @pytest.mark.asyncio
+async def test_reference_提交图生图参考图片并去重():
+    from models.config import AiModelConfig
+    from utils.enums import AiTaskTypeEnum
+
+    novel = await Novel.create(name="Image Input Ref Novel", author="Author")
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="图生图测试人物",
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="image-input-ref",
+        base_url="https://mock.api.com/v1",
+        api_key="sk-test",
+        model="mock-model",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+
+    task = await asset_controller.reference(
+        asset.id,
+        reference_images=["/media/reference.png", "/media/reference.png"],
+    )
+
+    assert task.request_params["reference_images"] == ["/media/reference.png"]
+
+
+@pytest.mark.asyncio
 async def test_reference_使用资产指定的生图模型():
     """资产元数据指定已启用模型时，生成任务使用该模型而不是自动选择模型。"""
     from models.config import AiModelConfig

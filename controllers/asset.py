@@ -40,6 +40,13 @@ def _normalize_asset_media(data: dict) -> dict:
                 for item in gallery
                 if isinstance(item, str)
             ]
+        references = metadata.get("generation_reference_images")
+        if isinstance(references, list):
+            metadata["generation_reference_images"] = [
+                normalize_media_url(item) or item
+                for item in references
+                if isinstance(item, str)
+            ]
     return data
 
 
@@ -588,6 +595,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         self,
         asset_id: int,
         variant_id: int | None = None,
+        reference_images: list[str] | None = None,
         team_id: int | None = None,
         user_id: int | None = None,
     ) -> AiTask:
@@ -678,6 +686,11 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "quality": selection.provider_quality,
             "generation_count": selection.generation_count,
         }
+        normalized_reference_images = list(dict.fromkeys(reference_images or []))
+        if len(normalized_reference_images) > 10:
+            raise HTTPException(status_code=400, detail="资产设定图最多支持 10 张参考图片")
+        if normalized_reference_images:
+            request_params["reference_images"] = normalized_reference_images
         if team_id is not None:
             request_params["team_id"] = team_id
         if user_id is not None:

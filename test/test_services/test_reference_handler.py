@@ -112,6 +112,33 @@ async def test_参考图base64返回会落盘并更新资产(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_图生图输入会解析本地图片并记录计费数量(tmp_path, monkeypatch):
+    asset = await _asset()
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(b"\x89PNG\r\n\x1a\ninput-image")
+    generated = [SimpleNamespace(url=None, b64_json=base64.b64encode(
+        b"\x89PNG\r\n\x1a\noutput-image"
+    ).decode("ascii"))]
+    monkeypatch.setattr("services.image_inputs.settings.MEDIA_PATH", str(tmp_path))
+    monkeypatch.setattr("services.reference.handler.settings.MEDIA_PATH", str(tmp_path))
+    generator = AsyncMock(return_value=generated)
+
+    with patch(
+        "services.reference.handler.generate_for_sora_consistency",
+        new=generator,
+    ):
+        result = await AssetReferenceHandler().execute({
+            **_request(asset),
+            "reference_images": ["/media/reference.png"],
+        })
+
+    reference_images = generator.await_args.kwargs["reference_images"]
+    assert len(reference_images) == 1
+    assert reference_images[0].startswith("data:image/png;base64,")
+    assert result["input_image_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_重新生成使用独立文件名保留历史图片(tmp_path, monkeypatch):
     asset = await _asset()
     png_bytes = b"\x89PNG\r\n\x1a\nregenerated-image"

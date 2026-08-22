@@ -13,6 +13,7 @@ from models.asset import Asset
 from models.asset_variant import AssetVariant
 from services.ai_task_executor import BaseTaskHandler
 from prompts.styles import image_style_suffix
+from services.image_inputs import resolve_reference_images
 from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
 
@@ -182,6 +183,11 @@ class AssetReferenceHandler(BaseTaskHandler):
         variant_id = request_params.get("variant_id")
         generation_run_id = request_params.get("generation_run_id")
         prompt_language = request_params.get("prompt_language", "en")
+        raw_reference_images = request_params.get("reference_images") or []
+        try:
+            reference_images = resolve_reference_images(raw_reference_images)
+        except FileNotFoundError as error:
+            raise RuntimeError("参考图片不存在或已失效") from error
 
         asset = await Asset.get(id=asset_id)
         variant = None
@@ -253,6 +259,7 @@ class AssetReferenceHandler(BaseTaskHandler):
                 api_key=api_key,
                 api_protocol=api_protocol,
                 model=model,
+                reference_images=reference_images,
                 resolution=resolution,
                 aspect_ratio=aspect_ratio,
                 count=generation_count,
@@ -311,7 +318,10 @@ class AssetReferenceHandler(BaseTaskHandler):
             if not result_urls:
                 raise RuntimeError("参考图生成完成，但没有可持久化的图片")
 
-            return {"images": result_urls, "variant_id": variant.id if variant else None}
+            result = {"images": result_urls, "variant_id": variant.id if variant else None}
+            if reference_images:
+                result["input_image_count"] = len(reference_images)
+            return result
 
         except Exception as error:
             error_str = str(error)

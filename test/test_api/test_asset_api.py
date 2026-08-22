@@ -565,6 +565,39 @@ async def test_api_reference_asset(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_reference_asset_with_image_inputs(client: AsyncClient):
+    from models.config import AiModelConfig
+    from models.ai_task import AiTask
+    from utils.enums import AiTaskTypeEnum
+
+    novel = await Novel.create(name="Ref Image Input API Novel", author="Author")
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="API图生图测试",
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="test-image-input-api",
+        base_url="https://mock.api.com/v1",
+        api_key="sk-test",
+        model="mock-model",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+
+    response = await client.post(
+        f"/api/asset/reference/{asset.id}",
+        json={"reference_images": ["/media/reference.png"]},
+    )
+
+    assert response.status_code == 200, response.text
+    task_id = response.json()["data"]["id"]
+    task = await AiTask.get(id=task_id)
+    assert task.request_params["reference_images"] == ["/media/reference.png"]
+
+
+@pytest.mark.asyncio
 async def test_api_reference_no_config(client: AsyncClient):
     """无参考图配置时返回 404。"""
     novel = await Novel.create(name="No Config Ref API Novel", author="Author")
