@@ -34,6 +34,17 @@ function money(value: number): string {
   return `¥${value.toFixed(6)}`
 }
 
+function recordDiscount(item: BillingRecord): number {
+  const snapshot = item.pricing_snapshot as Record<string, unknown> | null | undefined
+  const raw = snapshot?.discount
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 && value !== 1 ? value : 1
+}
+function discountText(discount: number): string {
+  if (discount < 1) return `${Math.round(discount * 100) / 10}折`
+  return `${discount}×`
+}
+
 const projectOptions = computed(() => [
   { value: 'all', label: '全部项目' },
   ...projects.value.map(item => ({ value: String(item.novel_id), label: item.novel_name })),
@@ -217,7 +228,13 @@ onMounted(load)
               <td v-if="showSourceColumn">
                 <span class="source-badge" :class="item.cost_source === 'team_key' ? 'is-key' : 'is-balance'">{{ costSourceLabel(item.cost_source) }}</span>
               </td>
-              <td class="is-num cell-mono">{{ money(item.cost) }}</td>
+              <td class="is-num cell-mono">
+                <div v-if="recordDiscount(item) !== 1" class="cost-with-discount">
+                  <span class="list-price">{{ money(item.cost / recordDiscount(item)) }}</span>
+                  <span class="discount-chip">{{ discountText(recordDiscount(item)) }}</span>
+                </div>
+                {{ money(item.cost) }}
+              </td>
             </tr>
             <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">暂无调用记录</td></tr>
           </tbody>
@@ -287,6 +304,9 @@ onMounted(load)
 .source-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
 .source-badge.is-balance { color: var(--app-accent); background: var(--app-accent-soft); }
 .source-badge.is-key { color: #059669; background: rgb(16 185 129 / 12%); }
+.cost-with-discount { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-bottom: 2px; }
+.cost-with-discount .list-price { color: var(--app-text-muted); text-decoration: line-through; font-size: 11px; }
+.cost-with-discount .discount-chip { padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; color: #b45309; background: rgb(245 158 11 / 15%); }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 16px; }
 .pager-total { color: var(--app-text-muted); font-size: 11px; }
 .pager-controls { display: flex; align-items: center; gap: 10px; }
