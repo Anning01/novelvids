@@ -68,7 +68,7 @@ STORYBOARD_SYSTEM_PROMPT = """你是一名顶尖摄影指导、分镜导演和�
 - 只依据当前小说片段编排镜头，不得杜撰片段之外的关键剧情。
 
 ### 2. 实体绑定
-- 当叙事文本提到已定义实体或其别名时，必须在 `visual_prose` 和 `actions` 中使用带花括号的精确格式 `@{{完整实体名}}` 引用它。
+- 当任何输出字段提到已定义的人物、道具、场景或其别名时，都必须使用带花括号的精确格式 `@{{完整实体名}}` 引用它；该规则适用于最终视频 Prompt 的所有栏目，而不仅是 `visual_prose` 和 `actions`。
 - 实体名称必须从资产注册表中原样复制，不得缩写、截断、改写或翻译。
 - 示例：实体名为“布兔玩偶”时，必须写成 `@{{布兔玩偶}}`，不能写成 `@{{布兔}}` 或 `@{{玩偶}}`。
 - **禁止**重复描述 `@{{实体名}}` 的外观，渲染引擎会自动处理实体形象。
@@ -128,16 +128,29 @@ PROFESSIONAL_PROMPT_PROHIBITIONS = (
 
 _REFERENCE_TEXT_FIELDS = (
     "description",
+    "shot_size_and_camera",
+    "visual_style",
+    "time_setting",
     "visual_prose",
     "environment",
     "spatial_relationships",
+    "format_and_look",
+    "lenses_and_filtration",
+    "lighting_and_atmosphere",
+    "grade_and_palette",
+    "camera_movement",
     "sound_design",
     "transition",
 )
-_REFERENCE_LIST_FIELDS = ("actions", "dialogue")
+_REFERENCE_LIST_FIELDS = (
+    "effect_restrictions",
+    "actions",
+    "dialogue",
+    "allowed_effects",
+)
 _BRACED_REFERENCE_PATTERN = re.compile(r"@\{([^}]+)\}")
 _LEGACY_REFERENCE_PATTERN = re.compile(r"@[\w\u4e00-\u9fff·]+")
-_UNSAFE_AUTOMATIC_PERSON_NAMES = {
+_UNSAFE_AUTOMATIC_ALIASES = {
     "二人",
     "众人",
     "少年",
@@ -153,35 +166,37 @@ _UNSAFE_AUTOMATIC_PERSON_NAMES = {
 }
 
 
-def _safe_automatic_person_name(value: object) -> str:
+def _safe_canonical_asset_name(value: object) -> str:
     name = str(value or "").strip()
-    if (
-        len(name) < 2
-        or name in _UNSAFE_AUTOMATIC_PERSON_NAMES
-        or any(character in name for character in "@{}\n\r")
-    ):
+    if not name or any(character in name for character in "@{}\n\r"):
         return ""
     return name
 
 
-def _person_reference_candidates(
+def _safe_automatic_alias(value: object) -> str:
+    name = _safe_canonical_asset_name(value)
+    if len(name) < 2 or name in _UNSAFE_AUTOMATIC_ALIASES:
+        return ""
+    return name
+
+
+def _asset_reference_candidates(
     entities: Sequence[StoryboardEntity],
 ) -> list[tuple[str, str]]:
-    """返回可安全自动补标的人物名，并排除有歧义的别名。"""
-    people = [entity for entity in entities if entity.asset_type == "人物"]
+    """返回可自动补标的全部资产名称，并排除有歧义的别名。"""
     canonical_names = {
         name
-        for entity in people
-        if (name := _safe_automatic_person_name(entity.name))
+        for entity in entities
+        if (name := _safe_canonical_asset_name(entity.name))
     }
     candidates = {name: name for name in canonical_names}
     alias_owners: dict[str, set[str]] = defaultdict(set)
-    for entity in people:
-        canonical_name = _safe_automatic_person_name(entity.name)
+    for entity in entities:
+        canonical_name = _safe_canonical_asset_name(entity.name)
         if not canonical_name:
             continue
         for raw_alias in entity.aliases:
-            alias = _safe_automatic_person_name(raw_alias)
+            alias = _safe_automatic_alias(raw_alias)
             if alias and alias not in canonical_names:
                 alias_owners[alias].add(canonical_name)
     for alias, owners in alias_owners.items():
@@ -190,7 +205,7 @@ def _person_reference_candidates(
     return sorted(candidates.items(), key=lambda item: (-len(item[0]), item[0]))
 
 
-def _normalize_person_reference_text(
+def _normalize_asset_reference_text(
     text: str,
     candidates: Sequence[tuple[str, str]],
 ) -> str:
@@ -215,7 +230,7 @@ def _normalize_person_reference_text(
 
     normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, text)
 
-    # 兼容边界清晰的旧格式 @人物名，并统一升级为带花括号的正式名。
+    # 兼容边界清晰的旧格式 @资产名，并统一升级为带花括号的正式名。
     legacy_boundary = r"(?=$|[\s，。；：、！？,.!?;:）)\]】])"
     for name, canonical_name in candidates:
         pattern = re.compile(rf"@{re.escape(name)}{legacy_boundary}")
@@ -224,7 +239,7 @@ def _normalize_person_reference_text(
             normalized,
         )
 
-    # 未识别的旧格式引用保持原样，避免在其内部再次替换普通人物名。
+    # 未识别的旧格式引用保持原样，避免在其内部再次替换普通资产名。
     normalized = _LEGACY_REFERENCE_PATTERN.sub(
         lambda match: protect(match.group(0)),
         normalized,
@@ -241,21 +256,21 @@ def normalized_storyboard_reference_fields(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
 ) -> dict[str, object]:
-    """为模型漏写的普通人物名补齐正式引用语法，返回非破坏性字段更新。"""
-    candidates = _person_reference_candidates(entities)
+    """为模型漏写的普通资产名补齐正式引用语法，返回非破坏性字段更新。"""
+    candidates = _asset_reference_candidates(entities)
     if not candidates:
         return {}
 
     updates: dict[str, object] = {}
     for field_name in _REFERENCE_TEXT_FIELDS:
         original = str(getattr(shot, field_name))
-        normalized = _normalize_person_reference_text(original, candidates)
+        normalized = _normalize_asset_reference_text(original, candidates)
         if normalized != original:
             updates[field_name] = normalized
     for field_name in _REFERENCE_LIST_FIELDS:
         original = list(getattr(shot, field_name))
         normalized = [
-            _normalize_person_reference_text(str(value), candidates)
+            _normalize_asset_reference_text(str(value), candidates)
             for value in original
         ]
         if normalized != original:
@@ -357,14 +372,12 @@ def _join_values(values: Sequence[str], fallback: str = "无") -> str:
 
 def _shot_search_text(shot: StoryboardShot) -> str:
     values: list[object] = [
-        shot.description,
-        shot.visual_prose,
-        shot.environment,
-        shot.spatial_relationships,
-        shot.sound_design,
-        shot.transition,
-        *shot.actions,
-        *shot.dialogue,
+        *(getattr(shot, field_name) for field_name in _REFERENCE_TEXT_FIELDS),
+        *(
+            value
+            for field_name in _REFERENCE_LIST_FIELDS
+            for value in getattr(shot, field_name)
+        ),
     ]
     return "\n".join(str(value) for value in values)
 
@@ -399,7 +412,11 @@ def _format_asset_references(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
 ) -> str:
-    referenced = referenced_entities(shot, entities)
+    normalized_search_text = _normalize_asset_reference_text(
+        _shot_search_text(shot),
+        _asset_reference_candidates(entities),
+    )
+    referenced = entity_reference_names(normalized_search_text, entities)
     if not referenced:
         return "本镜头未引用已登记资产。"
 
@@ -417,10 +434,10 @@ def _format_asset_references(
             continue
         sections.append(
             f"{summary_label}："
-            f"{_join_values([entity.name for entity in category_entities])}"
+            f"{_join_values([f'@{{{entity.name}}}' for entity in category_entities])}"
         )
         sections.extend(
-            f"{detail_label}：{entity.name}。{entity.description}"
+            f"{detail_label}：@{{{entity.name}}}。{entity.description}"
             for entity in category_entities
         )
     return "\n".join(sections)
@@ -441,7 +458,7 @@ def format_storyboard_prompt(
         shot_body_parts.append(dialogue)
     shot_body_parts.append(f"环境音：{shot.sound_design}")
 
-    return "\n".join(
+    prompt = "\n".join(
         (
             "【禁止项】",
             PROFESSIONAL_PROMPT_PROHIBITIONS,
@@ -480,4 +497,8 @@ def format_storyboard_prompt(
             "",
             f"总时长：{duration_token}",
         )
+    )
+    return _normalize_asset_reference_text(
+        prompt,
+        _asset_reference_candidates(entities),
     )

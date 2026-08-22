@@ -120,4 +120,4 @@ async def test_save_scenes_normalizes_plain_person_names_before_persisting():
     assert scene.prompt_params["visual_prose"] == "@{李七夜}从泥水中起身。"
     assert scene.prompt_params["spatial_relationships"] == "@{李七夜}位于画面中央。"
     assert scene.prompt_params["dialogue"] == ["@{李七夜}（惊呼）：我的身体！"]
-    assert "角色参考：李七夜" in scene.prompt
+    assert "角色参考：@{李七夜}" in scene.prompt

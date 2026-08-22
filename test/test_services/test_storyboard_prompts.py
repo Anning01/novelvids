@@ -129,9 +129,36 @@ def test_professional_prompt_renders_only_assets_referenced_by_the_shot():
         entities=[_entity(), unused],
     )
 
-    assert "场景参考：郊区小楼" in prompt
-    assert "场景概念图：郊区小楼。红砖外墙，窗框斑驳" in prompt
+    assert "场景参考：@{郊区小楼}" in prompt
+    assert "场景概念图：@{郊区小楼}。红砖外墙，窗框斑驳" in prompt
     assert "旧钥匙" not in prompt
+
+
+def test_professional_prompt_normalizes_every_referenced_asset_type():
+    person = SceneEntity(
+        name="李七夜",
+        aliases=["李公子"],
+        description="李七夜身穿黑袍",
+        asset_type="人物",
+    )
+    item = SceneEntity(
+        name="油纸伞",
+        aliases=["旧伞"],
+        description="油纸伞的竹骨磨损",
+        asset_type="物品",
+    )
+    scene = _entity()
+    shot = _shot(1, "李公子持旧伞走向旧宅")
+    shot.visual_prose = "李公子持旧伞站在旧宅门前。"
+
+    prompt = format_storyboard_prompt(shot, "zh", entities=[person, item, scene])
+
+    assert "角色参考：@{李七夜}" in prompt
+    assert "角色设定图：@{李七夜}。@{李七夜}身穿黑袍" in prompt
+    assert "道具参考：@{油纸伞}" in prompt
+    assert "道具概念设计图：@{油纸伞}。@{油纸伞}的竹骨磨损" in prompt
+    assert "场景参考：@{郊区小楼}" in prompt
+    assert "@{李七夜}持@{油纸伞}站在@{郊区小楼}门前" in prompt
 
 
 def test_professional_video_prompt_excludes_storyboard_planning_instructions():
@@ -166,7 +193,7 @@ def test_entity_reference_names_matches_braced_syntax_and_aliases():
     assert entity_reference_names("他走向 @{小楼}", [entity]) == [entity]
 
 
-def test_normalized_storyboard_reference_fields_fills_missing_person_tags():
+def test_normalized_storyboard_reference_fields_fills_missing_asset_tags():
     person = SceneEntity(
         name="李七夜",
         aliases=["李公子", "他", "少年"],
@@ -181,7 +208,7 @@ def test_normalized_storyboard_reference_fields_fills_missing_person_tags():
 
     updates = normalized_storyboard_reference_fields(shot, [person, scene])
 
-    assert updates["spatial_relationships"] == "@{李七夜}位于画面左侧，小楼位于远处。"
+    assert updates["spatial_relationships"] == "@{李七夜}位于画面左侧，@{郊区小楼}位于远处。"
     assert updates["actions"] == ["0.0s-2.0s: @{李七夜}抬手，少年退后。"]
     assert updates["dialogue"] == ["@{李七夜}（低声）：走吧。"]
     assert "environment" not in updates
