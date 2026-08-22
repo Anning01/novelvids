@@ -34,10 +34,11 @@ def test_openai_adapter_maps_resolution_alias_to_supported_vertical_size():
     }
 
 
-def test_volcengine_adapter_uses_seedream_protocol_fields_without_model_branching():
+def test_volcengine_adapter_sends_sequential_flag_only_for_seedream_3():
+    # Seedream 3.0 支持 sequential_image_generation；4.0/5.0 已移除，传入会被 400 拒绝
     prepared = image_protocol_adapter("volcengine_ark").prepare(
         ImageGenerationInput(
-            model="configured-seedream-model",
+            model="doubao-seedream-3-0-t2i-250421",
             prompt="cover",
             resolution="2K",
             aspect_ratio="2:3",
@@ -46,7 +47,7 @@ def test_volcengine_adapter_uses_seedream_protocol_fields_without_model_branchin
     )
 
     assert prepared.payload == {
-        "model": "configured-seedream-model",
+        "model": "doubao-seedream-3-0-t2i-250421",
         "prompt": "cover",
         "response_format": "url",
         "watermark": False,
@@ -54,6 +55,30 @@ def test_volcengine_adapter_uses_seedream_protocol_fields_without_model_branchin
         "size": "2K",
         "output_format": "png",
     }
+
+
+def test_volcengine_adapter_omits_sequential_flag_for_seedream_5():
+    # 用户实测：Seedream 5.0（doubao-seedream-5-0-pro-260628）不支持
+    # sequential_image_generation，Ark 返回 HTTP 400 InvalidParameter
+    prepared = image_protocol_adapter("volcengine_ark").prepare(
+        ImageGenerationInput(
+            model="doubao-seedream-5-0-pro-260628",
+            prompt="cover",
+            resolution="2K",
+            aspect_ratio="2:3",
+            count=3,
+        )
+    )
+
+    assert prepared.payload == {
+        "model": "doubao-seedream-5-0-pro-260628",
+        "prompt": "cover",
+        "response_format": "url",
+        "watermark": False,
+        "size": "2K",
+        "output_format": "png",
+    }
+    assert "sequential_image_generation" not in prepared.payload
 
 
 def test_openrouter_adapter_uses_images_endpoint_and_native_dimensions():
