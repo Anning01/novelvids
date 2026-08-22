@@ -70,6 +70,8 @@ async def generate_storyboard(
     supports_json_output: bool = False,
     prompt_language: str = "zh",
     max_context_characters: int | None = None,
+    thinking: str | None = None,
+    max_tokens: int | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
     fixed_messages = build_storyboard_messages(
@@ -105,6 +107,8 @@ async def generate_storyboard(
                 response_model=Storyboard,
                 supports_json_output=supports_json_output,
                 timeout=600,
+                thinking=thinking,
+                max_tokens=max_tokens,
             )
         except JsonCompletionTruncatedError:
             retry_chunks = chunker.split_for_retry(chunks[batch_index])

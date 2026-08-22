@@ -31,6 +31,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
         model = request_params["model"]
         supports_json_output = request_params.get("supports_json_output", False)
         max_context_characters = request_params.get("max_context_characters")
+        thinking = request_params.get("thinking")
+        max_tokens = request_params.get("max_tokens")
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
 
         # 1. 获取章节和相关资产
@@ -66,6 +68,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 supports_json_output=supports_json_output,
                 prompt_language=prompt_language,
                 max_context_characters=max_context_characters,
+                thinking=thinking,
+                max_tokens=max_tokens,
             )
 
             end_time = time.time()

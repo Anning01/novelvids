@@ -148,6 +148,10 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "max_context_characters": config.max_context_characters,
             "prompt_language": "zh",
         }
+        if getattr(config, "thinking", None):
+            request_params["thinking"] = config.thinking
+        if getattr(config, "max_tokens", None):
+            request_params["max_tokens"] = config.max_tokens
         if team_id is not None:
             request_params["team_id"] = team_id
         if user_id is not None:
