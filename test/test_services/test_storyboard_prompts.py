@@ -70,6 +70,9 @@ def test_storyboard_messages_render_language_entities_and_narrative():
     assert narrative not in messages[0]["content"]
     assert narrative in messages[2]["content"]
     assert "分镜生成任务" in messages[3]["content"]
+    assert "每个镜头都会作为一次完全独立的视频生成请求" in messages[0]["content"]
+    assert "不得引用上一镜头、下一镜头或任何外部上下文" in messages[0]["content"]
+    assert "每个时间段都必须重新写明动作主体" in messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -129,6 +132,19 @@ def test_professional_prompt_renders_only_assets_referenced_by_the_shot():
     assert "场景参考：郊区小楼" in prompt
     assert "场景概念图：郊区小楼。红砖外墙，窗框斑驳" in prompt
     assert "旧钥匙" not in prompt
+
+
+def test_professional_prompt_explicitly_marks_each_shot_as_self_contained():
+    prompt = format_storyboard_prompt(_shot(6), "zh", entities=[_entity()])
+
+    assert "【独立生成约束】" in prompt
+    assert "本镜头是一次独立的视频生成任务" in prompt
+    assert "不得继承其他镜头的人物位置、动作状态、环境或事件信息" in prompt
+
+    schema = SoraScenePromptConfig.model_json_schema()["properties"]
+    assert "不依赖其他镜头" in schema["spatial_relationships"]["description"]
+    assert "每个时间段都必须重新写明动作主体" in schema["actions"]["description"]
+    assert "不得引用上一镜头或下一镜头" in schema["transition"]["description"]
 
 
 def test_entity_reference_names_matches_braced_syntax_and_aliases():
