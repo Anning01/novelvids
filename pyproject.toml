@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncpg>=0.31.0",
     "configdict>=2.13.4",
     "fastapi>=0.128.1",
     "fields>=5.0.0",
