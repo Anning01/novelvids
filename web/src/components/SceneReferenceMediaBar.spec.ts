@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import AppButton from './AppButton.vue'
 import SceneReferenceMediaBar from './SceneReferenceMediaBar.vue'
 import type { VideoGenerationModel } from '@/types'
 
@@ -62,6 +63,24 @@ describe('SceneReferenceMediaBar', () => {
 
     expect(wrapper.emitted('upload')).toEqual([[[file]]])
     expect(wrapper.emitted('remove')).toEqual([[0]])
+  })
+
+  it('opens the image lightbox when a reference thumbnail is clicked', async () => {
+    const wrapper = mount(SceneReferenceMediaBar, {
+      props: {
+        model,
+        assetImageCount: 0,
+        media: [{ type: 'image', url: '/media/look.png', name: '首帧参考.png' }],
+      },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    await wrapper.get('[aria-label="放大查看 首帧参考.png"]').trigger('click')
+
+    const lightbox = wrapper.get('.image-lightbox')
+    expect(lightbox.attributes('aria-label')).toBe('图片放大查看')
+    expect(lightbox.get('img').attributes('src')).toBe('/media/look.png')
+    expect(lightbox.get('img').attributes('alt')).toBe('首帧参考.png')
   })
 
   it('disables upload in keyframe mode', () => {
