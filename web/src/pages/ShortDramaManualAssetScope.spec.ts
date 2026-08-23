@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
@@ -257,4 +258,36 @@ it('submits selected assets across character, scene, and prop types in one batch
   await flushPromises()
 
   expect(vi.mocked(api.updateAsset).mock.calls.map(([assetId]) => assetId).sort()).toEqual([31, 32, 34])
+})
+
+it('shows loading for every queued asset and hides title and description before workers start', async () => {
+  const wrapper = await mountInCurrentChapterScope()
+  vi.mocked(api.updateAsset).mockImplementation(() => new Promise(() => {}))
+
+  wrapper.findComponent(AssetBatchGenerateDialog).vm.$emit('generate', {
+    assetIds: [31, 32, 34],
+    modelConfigId: 2,
+    concurrency: 1,
+    clarity: '1.5K',
+    ratio: '16:9',
+    outputFormat: 'png',
+    generationCount: 1,
+  })
+  await nextTick()
+
+  const assertVisibleAssetIsLoading = () => {
+    expect(wrapper.get('.asset-generating-placeholder').text()).toContain('正在生成参考图')
+    expect(wrapper.find('.asset-card-info').exists()).toBe(false)
+  }
+  assertVisibleAssetIsLoading()
+
+  const sceneTab = wrapper.findAll('.asset-toolbar nav button').find(button => button.text().includes('场景'))
+  await sceneTab!.trigger('click')
+  await nextTick()
+  assertVisibleAssetIsLoading()
+
+  const propTab = wrapper.findAll('.asset-toolbar nav button').find(button => button.text().includes('道具'))
+  await propTab!.trigger('click')
+  await nextTick()
+  assertVisibleAssetIsLoading()
 })
