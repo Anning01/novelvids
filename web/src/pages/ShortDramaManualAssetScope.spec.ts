@@ -84,6 +84,24 @@ beforeEach(() => {
           created_at: '2026-08-06T00:00:00.000Z',
           updated_at: '2026-08-06T00:00:00.000Z',
         },
+        {
+          id: 32,
+          novel_id: 9,
+          asset_type: AssetTypeEnum.SCENE,
+          canonical_name: '山门广场',
+          source_chapters: [1],
+          created_at: '2026-08-06T00:00:00.000Z',
+          updated_at: '2026-08-06T00:00:00.000Z',
+        },
+        {
+          id: 34,
+          novel_id: 9,
+          asset_type: AssetTypeEnum.ITEM,
+          canonical_name: '青铜令牌',
+          source_chapters: [1],
+          created_at: '2026-08-06T00:00:00.000Z',
+          updated_at: '2026-08-06T00:00:00.000Z',
+        },
       ]
     const items = chapterId ? allAssets.filter(asset => asset.source_chapters.includes(1)) : allAssets
     return {
@@ -95,14 +113,16 @@ beforeEach(() => {
       },
     }
   })
-  vi.mocked(api.updateAsset).mockImplementation(async (_assetId, payload) => ({
+  vi.mocked(api.updateAsset).mockImplementation(async (assetId, payload) => ({
     code: 0,
     message: 'ok',
     data: {
-      id: 31,
+      id: assetId,
       novel_id: 9,
-      asset_type: AssetTypeEnum.PERSON,
-      canonical_name: '宫平',
+      asset_type: assetId === 32
+        ? AssetTypeEnum.SCENE
+        : assetId === 34 ? AssetTypeEnum.ITEM : AssetTypeEnum.PERSON,
+      canonical_name: assetId === 32 ? '山门广场' : assetId === 34 ? '青铜令牌' : '宫平',
       source_chapters: [1],
       metadata: payload.metadata,
       created_at: '2026-08-06T00:00:00.000Z',
@@ -219,4 +239,22 @@ it('keeps the current chapter filter after batch generation finishes', async () 
 
   expect(api.assets).toHaveBeenCalledTimes(1)
   expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
+})
+
+it('submits selected assets across character, scene, and prop types in one batch', async () => {
+  const wrapper = await mountInCurrentChapterScope()
+  vi.mocked(api.updateAsset).mockClear()
+
+  wrapper.findComponent(AssetBatchGenerateDialog).vm.$emit('generate', {
+    assetIds: [31, 32, 34],
+    modelConfigId: 2,
+    concurrency: 3,
+    clarity: '1.5K',
+    ratio: '16:9',
+    outputFormat: 'png',
+    generationCount: 1,
+  })
+  await flushPromises()
+
+  expect(vi.mocked(api.updateAsset).mock.calls.map(([assetId]) => assetId).sort()).toEqual([31, 32, 34])
 })

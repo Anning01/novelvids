@@ -538,7 +538,7 @@ async function resumeActiveGenerations() {
 async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
   if (batchGenerating.value) return
   const selected = new Set(options.assetIds)
-  const targets = visibleAssets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingAssetIds.value.has(asset.id))
+  const targets = assets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingAssetIds.value.has(asset.id))
   if (!targets.length) return
 
   showBatchDialog.value = false
@@ -574,7 +574,7 @@ async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId:
     if (!pageAlive) return
     await refreshAssets()
     if (failed) notice.info(`批量生成完成：成功 ${succeeded} 个，失败 ${failed} 个`)
-    else notice.success(`${succeeded} 个${activeTabConfig.value.label}参考图已生成`)
+    else notice.success(`${succeeded} 个资产设定图已生成`)
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -661,7 +661,7 @@ onBeforeUnmount(() => {
           <span>失败 {{ failedCount }}</span>
           <AppButton type="button" variant="secondary" size="sm" icon-only aria-label="刷新" @click="refreshAssets"><RefreshCw :size="14" /></AppButton>
           <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
-          <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="visibleAssets.length ? showBatchDialog = true : notice.info(`请先添加${activeTabConfig.label}资产`)"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? '批量生成中' : '批量生成' }}</AppButton>
+          <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="assets.length ? showBatchDialog = true : notice.info('请先添加角色、场景或道具资产')"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? '批量生成中' : '批量生成' }}</AppButton>
         </div>
       </header>
 
@@ -776,8 +776,7 @@ onBeforeUnmount(() => {
 
     <AssetBatchGenerateDialog
       :open="showBatchDialog"
-      :label="activeTabConfig.label"
-      :assets="visibleAssets"
+      :assets="assets"
       :generating-ids="generatingAssetIds"
       :failed-ids="failedAssetIds"
       :submitting="batchGenerating"
