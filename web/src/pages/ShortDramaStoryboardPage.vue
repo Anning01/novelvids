@@ -28,7 +28,7 @@ import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/comp
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import SceneReferenceMediaBar from '@/components/SceneReferenceMediaBar.vue'
 import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
-import ShortDramaBatchVideoDialog, { type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
+import ShortDramaBatchVideoDialog, { type BatchVideoGenerationRequest, type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
 import ShortDramaSceneStatusRail from '@/components/ShortDramaSceneStatusRail.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistory.vue'
@@ -49,6 +49,7 @@ import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { injectLastFrameContinuityInstruction } from '@/shared/lastFrameContinuity'
+import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { Asset, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
 
@@ -71,6 +72,13 @@ interface SceneDraft {
   referenceMedia: VideoReferenceMedia[]
   videoResolution: string
   videoAspectRatio: string
+  returnLastFrame: boolean
+}
+
+interface SceneVideoGenerationSettings {
+  model: VideoGenerationModel
+  resolution: string
+  aspectRatio: string
   returnLastFrame: boolean
 }
 
@@ -209,17 +217,22 @@ const sceneStatusItems = computed<SceneStatusRailItem[]>(() => scenes.value.map(
   state: resolveSceneGenerationState(selectedVideoFor(scene), Boolean(sceneVideoError(scene))),
 })))
 const batchVideoSceneOptions = computed<BatchVideoSceneOption[]>(() => scenes.value.map(scene => {
-  const disabledReason = batchVideoDisabledReason(scene)
+  const draft = draftFor(scene)
+  const disabledReason = batchVideoBaseDisabledReason(scene)
   return {
     id: scene.id,
     sequence: scene.sequence,
+    mode: draft.videoGenerationMode,
+    duration: Math.max(1, Math.round(Number(draft.duration) || 0)),
+    hasVideoReference: draft.referenceMedia.some(item => item.type === 'video'),
+    inputVideoSeconds: draft.referenceMedia.reduce(
+      (sum, item) => item.type === 'video' ? sum + (Number(item.duration) || 0) : sum,
+      0,
+    ),
     disabled: Boolean(disabledReason),
     disabledReason,
   }
 }))
-const batchVideoCostByScene = computed<Record<number, number>>(() => Object.fromEntries(
-  scenes.value.map(scene => [scene.id, sceneVideoEstimate(scene)]),
-))
 const assetGroups = computed(() => [
   { type: AssetTypeEnum.PERSON, label: '出镜角色', icon: UsersRound, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.PERSON) },
   { type: AssetTypeEnum.SCENE, label: '分镜场景', icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
@@ -1228,7 +1241,11 @@ function updateSceneDraft<K extends keyof SceneDraft>(scene: Scene, field: K, va
   scheduleSceneSave(scene)
 }
 
-async function saveScene(scene: Scene, showNotice = false) {
+async function saveScene(
+  scene: Scene,
+  showNotice = false,
+  model: VideoGenerationModel | null = selectedVideoModelConfig.value,
+) {
   const pendingTimer = sceneAutoSaveTimers.get(scene.id)
   if (pendingTimer) clearTimeout(pendingTimer)
   sceneAutoSaveTimers.delete(scene.id)
@@ -1237,7 +1254,7 @@ async function saveScene(scene: Scene, showNotice = false) {
   const queued = previous.then(async () => {
     const draft = draftFor(scene)
     const currentScene = scenes.value.find(item => item.id === scene.id) ?? scene
-    const duration = sceneDuration(currentScene)
+    const duration = sceneDuration(currentScene, model)
     draft.duration = duration
     try {
       const updated = (await api.updateScene(scene.id, {
@@ -1252,8 +1269,8 @@ async function saveScene(scene: Scene, showNotice = false) {
           last_frame_url: draft.lastFrameUrl || undefined,
           asset_variant_ids: draft.selectedVariantIds,
           video_reference_media: draft.referenceMedia,
-          video_resolution: sceneResolution(currentScene),
-          video_aspect_ratio: sceneAspectRatio(currentScene),
+          video_resolution: sceneResolution(currentScene, model),
+          video_aspect_ratio: sceneAspectRatio(currentScene, model),
           return_last_frame: draft.returnLastFrame,
         },
       })).data
@@ -1357,9 +1374,13 @@ async function removeScene(scene: Scene) {
   }
 }
 
-async function generateVideo(scene: Scene, showNotice = true): Promise<boolean> {
+async function generateVideo(
+  scene: Scene,
+  showNotice = true,
+  settings?: SceneVideoGenerationSettings,
+): Promise<boolean> {
   const draft = draftFor(scene)
-  const selectedModel = selectedVideoModelConfig.value
+  const selectedModel = settings?.model || selectedVideoModelConfig.value
   if (!selectedModel) {
     if (showNotice) notice.error('请先在设置中启用一个视频模型')
     return false
@@ -1368,17 +1389,17 @@ async function generateVideo(scene: Scene, showNotice = true): Promise<boolean> 
   setSceneVideoError(scene.id)
   setSceneBusy(generatingVideoSceneIds, scene.id, true)
   try {
-    await saveScene(scene, false)
-    let result = (await api.generateVideo(scene.id, Number(selectedVideoModel.value), {
+    await saveScene(scene, false, selectedModel)
+    let result = (await api.generateVideo(scene.id, selectedModel.config_id, {
       generation_mode: draft.videoGenerationMode,
       first_frame_url: draft.firstFrameUrl || undefined,
       last_frame_url: draft.lastFrameUrl || undefined,
       duration: sceneDuration(scene, selectedModel),
-      resolution: sceneResolution(scene, selectedModel),
-      aspect_ratio: sceneAspectRatio(scene, selectedModel),
+      resolution: settings?.resolution || sceneResolution(scene, selectedModel),
+      aspect_ratio: settings?.aspectRatio || sceneAspectRatio(scene, selectedModel),
       output_format: selectedModel.capabilities.default_output_format,
       generate_audio: selectedModel.capabilities.default_generate_audio,
-      return_last_frame: draft.returnLastFrame,
+      return_last_frame: settings?.returnLastFrame ?? draft.returnLastFrame,
       reference_media: draft.videoGenerationMode === 'reference'
         ? referencedVideoMedia(draft.prompt, draft.referenceMedia)
         : [],
@@ -1469,24 +1490,36 @@ function syncInjectedLastFrame(result: VideoResult) {
   }
 }
 
-function batchVideoDisabledReason(scene: Scene) {
+function batchVideoBaseDisabledReason(scene: Scene) {
   const draft = draftFor(scene)
   const video = selectedVideoFor(scene)
-  const model = selectedVideoModelConfig.value
   if (video?.status === TaskStatusEnum.COMPLETED) return '已完成'
   if (generatingVideoSceneIds.value.has(scene.id)) return '正在生成'
-  if (!model) return '未配置视频模型'
-  if (!model.capabilities.generation_modes.includes(draft.videoGenerationMode)) return '当前模型不支持该生成方式'
   if (!draft.prompt.trim()) return '提示词不完整'
   if (draft.videoGenerationMode === 'keyframes' && (!draft.firstFrameUrl || !draft.lastFrameUrl)) return '请先补全首尾帧'
+  return ''
+}
+
+function batchVideoDisabledReason(
+  scene: Scene,
+  model: VideoGenerationModel | null,
+  settings?: Pick<BatchVideoGenerationRequest, 'resolution' | 'aspectRatio'>,
+) {
+  const baseReason = batchVideoBaseDisabledReason(scene)
+  if (baseReason) return baseReason
+  const draft = draftFor(scene)
+  if (!model) return '未配置视频模型'
+  if (!model.capabilities.generation_modes.includes(draft.videoGenerationMode)) return '所选模型不支持该生成方式'
+  if (settings && !model.capabilities.resolutions.includes(settings.resolution)) return '所选模型不支持该分辨率'
+  const ratios = model.capabilities.aspect_ratios_by_mode[draft.videoGenerationMode] || model.capabilities.aspect_ratios
+  if (settings && !ratios.includes(settings.aspectRatio)) return '所选模型不支持该画面比例'
   if (referenceLimitError(scene, model)) return referenceLimitError(scene, model)
   return ''
 }
 
 function openBatchVideoDialog() {
-  const model = selectedVideoModelConfig.value
-  if (!model || batchGeneratingVideos.value) {
-    if (!model) notice.error('请先在设置中启用一个视频模型')
+  if (!videoModels.value.length || batchGeneratingVideos.value) {
+    if (!videoModels.value.length) notice.error('请先在设置中启用一个视频模型')
     return
   }
   if (!batchVideoSceneOptions.value.some(scene => !scene.disabled)) {
@@ -1496,11 +1529,13 @@ function openBatchVideoDialog() {
   batchVideoDialogOpen.value = true
 }
 
-async function batchGenerateVideos(sceneIds: number[]) {
-  const model = selectedVideoModelConfig.value
+async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
+  const model = videoModels.value.find(item => item.config_id === request.modelConfigId) || null
   if (!model || batchGeneratingVideos.value) return
-  const selectedIdSet = new Set(sceneIds)
-  const targets = scenes.value.filter(scene => selectedIdSet.has(scene.id) && !batchVideoDisabledReason(scene))
+  const selectedIdSet = new Set(request.sceneIds)
+  const targets = scenes.value
+    .filter(scene => selectedIdSet.has(scene.id) && !batchVideoDisabledReason(scene, model, request))
+    .sort((left, right) => left.sequence - right.sequence)
   if (!targets.length) {
     notice.info('所选分镜当前无法生成视频')
     return
@@ -1508,17 +1543,25 @@ async function batchGenerateVideos(sceneIds: number[]) {
 
   batchVideoDialogOpen.value = false
   batchGeneratingVideos.value = true
-  let nextIndex = 0
-  let completedCount = 0
-  const workerCount = Math.max(1, Math.min(model.concurrency, targets.length))
-  const worker = async () => {
-    while (nextIndex < targets.length) {
-      const scene = targets[nextIndex++]
-      if (scene && await generateVideo(scene, false)) completedCount += 1
-    }
+  for (const scene of targets) {
+    const draft = draftFor(scene)
+    draft.videoResolution = request.resolution
+    draft.videoAspectRatio = request.aspectRatio
+    draft.returnLastFrame = request.returnLastFrame
+  }
+  const generationSettings: SceneVideoGenerationSettings = {
+    model,
+    resolution: request.resolution,
+    aspectRatio: request.aspectRatio,
+    returnLastFrame: request.returnLastFrame,
   }
   try {
-    await Promise.all(Array.from({ length: workerCount }, worker))
+    const completedCount = await runVideoGenerationQueue(
+      targets,
+      model.concurrency,
+      request.returnLastFrame,
+      scene => generateVideo(scene, false, generationSettings),
+    )
     const failedCount = targets.length - completedCount
     failedCount
       ? notice.error(`批量生成完成：成功 ${completedCount} 条，失败 ${failedCount} 条`)
@@ -1809,8 +1852,10 @@ onBeforeUnmount(() => {
     <ShortDramaBatchVideoDialog
       :open="batchVideoDialogOpen"
       :scenes="batchVideoSceneOptions"
-      :cost-by-scene="batchVideoCostByScene"
-      :pricing="selectedVideoModelConfig?.pricing"
+      :models="videoModels"
+      :initial-model-config-id="selectedVideoModelConfig?.config_id"
+      :initial-resolution="selectedVideoModelConfig ? modelResolution(selectedVideoModelConfig) : project?.resolution"
+      :initial-aspect-ratio="selectedVideoModelConfig ? modelAspectRatio(selectedVideoModelConfig, 'reference') : project?.aspectRatio"
       @close="batchVideoDialogOpen = false"
       @generate="batchGenerateVideos"
     />
