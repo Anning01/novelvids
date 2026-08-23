@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from models.config import AiModelConfig
-from services.image_inputs import image_to_base64
 from utils.enums import TaskStatusEnum
 
 
@@ -15,7 +14,7 @@ class VideoProviderError(RuntimeError):
 
 
 class BaseVideoGenerator(ABC):
-    """视频生成器抽象基类；当前开放的后台能力由 Seedance 实现。"""
+    """视频供应商适配器的统一生成与查询契约。"""
 
     def __init__(self, config: AiModelConfig):
         self.config = config

@@ -138,6 +138,49 @@ async def test_视频模型非法参考价表被拒绝():
 
 
 @pytest.mark.asyncio
+async def test_minimax_h3_accepts_per_second_and_input_image_pricing():
+    config = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.video.value,
+        name="minimax-h3-pricing",
+        base_url="https://api.minimaxi.com",
+        api_key="sk",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+        pricing={
+            "type": "video",
+            "currency": "CNY",
+            "billing_unit": "second",
+            "prices": {"768P": 0.5, "2K": 0.8},
+            "video_reference_prices": {"768P": 0.5, "2K": 0.8},
+            "input_image": {"first_free": 5, "price_per_image": 0.2},
+        },
+    ))
+    assert config.pricing["billing_unit"] == "second"
+    assert config.pricing["input_image"]["first_free"] == 5
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_rejects_token_billing_unit():
+    with pytest.raises(HTTPException, match="按秒计费"):
+        await ai_model_config_controller.create(AiModelConfigCreate(
+            task_type=AiTaskTypeEnum.video.value,
+            name="minimax-h3-wrong-unit",
+            base_url="https://api.minimaxi.com",
+            api_key="sk",
+            model="MiniMax-H3",
+            api_protocol="minimax",
+            video_model_type="minimax_h3",
+            pricing={
+                "type": "video",
+                "currency": "CNY",
+                "billing_unit": "token",
+                "prices": {"768P": 0.5, "2K": 0.8},
+            },
+        ))
+
+
+@pytest.mark.asyncio
 async def test_接受折扣配置():
     config = await ai_model_config_controller.create(AiModelConfigCreate(
         task_type=AiTaskTypeEnum.extraction.value,

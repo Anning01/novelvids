@@ -2,6 +2,7 @@ from fastapi import HTTPException
 
 from models.config import AiModelConfig, GeneralConfig
 from schemas.config import AiModelConfigCreate, AiModelConfigUpdate, GeneralConfigUpdate
+from services.billing.catalog import VIDEO_PRICING
 from services.image_generation.capabilities import (
     capabilities_for as image_capabilities_for,
     validate_protocol as validate_image_protocol,
@@ -36,10 +37,14 @@ def _validate_image_pricing(pricing: dict, model_type) -> None:
             raise HTTPException(status_code=400, detail=f"生图费用包含不支持的清晰度档位：{tier}")
         if not isinstance(value, (int, float)) or value < 0:
             raise HTTPException(status_code=400, detail=f"清晰度档位 {tier} 的费用必须为非负数字")
+    _validate_input_image_pricing(pricing, "生图")
+
+
+def _validate_input_image_pricing(pricing: dict, label: str) -> None:
     input_fee = pricing.get("input_image")
     if input_fee is not None:
         if not isinstance(input_fee, dict):
-            raise HTTPException(status_code=400, detail="生图输入图费用必须是对象")
+            raise HTTPException(status_code=400, detail=f"{label}输入图费用必须是对象")
         if not isinstance(input_fee.get("first_free"), (int, float)) or input_fee["first_free"] < 0:
             raise HTTPException(status_code=400, detail="输入图免费张数 first_free 必须为非负数字")
         if not isinstance(input_fee.get("price_per_image"), (int, float)) or input_fee["price_per_image"] < 0:
@@ -67,6 +72,15 @@ def _validate_video_pricing(pricing: dict, model_type) -> None:
                 raise HTTPException(status_code=400, detail=f"视频参考价格包含不支持的分辨率档位：{tier}")
             if not isinstance(value, (int, float)) or value < 0:
                 raise HTTPException(status_code=400, detail=f"视频参考分辨率档位 {tier} 的费用必须为非负数字")
+    model_key = str(model_type)
+    expected_unit = VIDEO_PRICING.get(model_key, {}).get("billing_unit", "token")
+    billing_unit = pricing.get("billing_unit", "token")
+    if billing_unit not in {"token", "second"}:
+        raise HTTPException(status_code=400, detail="视频计费单位 billing_unit 仅支持 token 或 second")
+    if billing_unit != expected_unit:
+        unit_label = "按秒" if expected_unit == "second" else "按 token"
+        raise HTTPException(status_code=400, detail=f"当前视频模型必须使用{unit_label}计费")
+    _validate_input_image_pricing(pricing, "视频")
 
 
 class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiModelConfigUpdate]):
@@ -291,6 +305,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 model_type.value: list(video_capabilities_for(model_type.value).resolutions)
                 for model_type in VideoGenerationModelTypeEnum
             },
+            "video_pricing": VIDEO_PRICING,
         }
 
     async def deactivate(self, config_id: int) -> AiModelConfig:

@@ -229,6 +229,9 @@ const batchVideoSceneOptions = computed<BatchVideoSceneOption[]>(() => scenes.va
       (sum, item) => item.type === 'video' ? sum + (Number(item.duration) || 0) : sum,
       0,
     ),
+    inputImageCount: draft.videoGenerationMode === 'keyframes'
+      ? Number(Boolean(draft.firstFrameUrl)) + Number(Boolean(draft.lastFrameUrl))
+      : videoInputImageReferences(scene).length,
     disabled: Boolean(disabledReason),
     disabledReason,
   }
@@ -423,6 +426,9 @@ function sceneVideoEstimate(scene: Scene) {
     sceneDuration(scene, model),
     hasVideoReference,
     inputVideoSeconds,
+    draft.videoGenerationMode === 'keyframes'
+      ? Number(Boolean(draft.firstFrameUrl)) + Number(Boolean(draft.lastFrameUrl))
+      : videoInputImageReferences(scene).length,
   )
 }
 

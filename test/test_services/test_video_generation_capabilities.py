@@ -5,9 +5,11 @@ import pytest
 from fastapi import HTTPException
 
 from models.config import AiModelConfig
+from services.video import get_generator, get_record_model_type
 from services.video.capabilities import capabilities_for, validate_selection
+from services.video.minimax import MiniMaxGenerationError, MiniMaxH3Generator
 from services.video.seedance import SeedanceGenerationError, SeedanceGenerator
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
 
 
 def test_video_capabilities_are_model_specific():
@@ -63,6 +65,19 @@ def test_video_capabilities_are_model_specific():
     assert selection.duration == -1
     assert selection.output_format == "mov"
 
+    minimax = validate_selection(
+        "minimax_h3",
+        generation_mode="reference",
+        resolution="768p",
+        aspect_ratio="16:9",
+        duration=15,
+        output_format="MP4",
+        generate_audio=True,
+    )
+    assert minimax.resolution == "768P"
+    assert minimax.output_format == "mp4"
+    assert capabilities_for("minimax_h3").supports_return_last_frame is False
+
 
 async def _video_config(model_type: str) -> AiModelConfig:
     return await AiModelConfig.create(
@@ -75,6 +90,168 @@ async def _video_config(model_type: str) -> AiModelConfig:
         video_model_type=model_type,
         is_active=True,
     )
+
+
+async def _minimax_config(base_url: str = "https://api.minimaxi.com") -> AiModelConfig:
+    return await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="minimax-h3-request-test",
+        base_url=base_url,
+        api_key="minimax-secret",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+        is_active=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_video_factory_selects_adapter_from_configured_model_type():
+    seedance = await _video_config("seedance_2")
+    minimax = await _minimax_config()
+
+    seedance_generator = get_generator(seedance)
+    minimax_generator = get_generator(minimax)
+    assert isinstance(seedance_generator, SeedanceGenerator)
+    assert get_record_model_type(seedance) == VideoModelTypeEnum.seedance
+    assert isinstance(minimax_generator, MiniMaxH3Generator)
+    assert get_record_model_type(minimax) == VideoModelTypeEnum.minimax
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_request_adapter_uses_v2_contract(monkeypatch):
+    config = await _minimax_config("https://api.minimaxi.com/v2/video_generation")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert str(request.url) == "https://api.minimaxi.com/v2/video_generation"
+        assert request.headers["authorization"] == "Bearer minimax-secret"
+        assert json.loads(request.content) == {
+            "model": "MiniMax-H3",
+            "content": [
+                {"type": "text", "text": "[图1] 穿过晨雾"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://cdn.example.com/person.png"},
+                    "role": "reference_image",
+                },
+                {
+                    "type": "video_url",
+                    "video_url": {"url": "https://cdn.example.com/motion.mp4"},
+                    "role": "reference_video",
+                },
+            ],
+            "resolution": "2K",
+            "duration": 8,
+            "ratio": "9:16",
+            "aigc_watermark": False,
+        }
+        return httpx.Response(200, json={"task_id": "minimax-task-1"})
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.video.minimax.httpx.AsyncClient", client_factory)
+    task_id = await get_generator(config).submit(
+        prompt="@人物 穿过晨雾",
+        subjects=[{
+            "name": "人物",
+            "images": ["https://cdn.example.com/person.png"],
+            "description": "年轻人",
+        }],
+        duration=8,
+        aspect_ratio="9:16",
+        resolution="2k",
+        generation_mode="reference",
+        reference_videos=["https://cdn.example.com/motion.mp4"],
+        generate_audio=True,
+    )
+
+    assert task_id == "minimax-task-1"
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_keyframes_force_adaptive_and_query_nested_task(monkeypatch):
+    config = await _minimax_config("https://api.minimaxi.com/v2")
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            payload = json.loads(request.content)
+            assert payload["ratio"] == "adaptive"
+            assert payload["content"][1]["role"] == "first_frame"
+            assert payload["content"][2]["role"] == "last_frame"
+            assert "generate_audio" not in payload
+            assert "return_last_frame" not in payload
+            return httpx.Response(200, json={"task_id": "h3-keyframes"})
+        assert str(request.url) == "https://api.minimaxi.com/v2/query/video_generation/h3-keyframes"
+        return httpx.Response(200, json={
+            "task": {
+                "id": "h3-keyframes",
+                "status": "succeeded",
+                "content": {"url": "https://cdn.example.com/h3.mp4"},
+                "duration": 6,
+                "resolution": "768P",
+                "ratio": "adaptive",
+                "usage": {"total_tokens": 123},
+            },
+        })
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.video.minimax.httpx.AsyncClient", client_factory)
+    generator = get_generator(config)
+    task_id = await generator.submit(
+        prompt="人物从首帧动作过渡到尾帧",
+        duration=6,
+        aspect_ratio="16:9",
+        resolution="768P",
+        generation_mode="keyframes",
+        first_frame_url="https://cdn.example.com/first.png",
+        last_frame_url="https://cdn.example.com/last.png",
+    )
+    result = await generator.query(task_id)
+
+    assert len(requests) == 2
+    assert result["status"] == TaskStatusEnum.completed
+    assert result["url"] == "https://cdn.example.com/h3.mp4"
+    assert result["metadata"]["usage"] == {"total_tokens": 123}
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_structured_error_is_sanitized(monkeypatch):
+    config = await _minimax_config()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            headers={"x-request-id": "minimax-request-400"},
+            json={"error": {"code": "invalid_params", "message": "duration 参数超出范围"}},
+        )
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("services.video.minimax.httpx.AsyncClient", client_factory)
+    with pytest.raises(MiniMaxGenerationError) as exc_info:
+        await get_generator(config).submit(prompt="private prompt")
+
+    message = str(exc_info.value)
+    assert "duration 参数超出范围" in message
+    assert "invalid_params" in message
+    assert "minimax-request-400" in message
+    assert "private prompt" not in message
 
 
 @pytest.mark.asyncio

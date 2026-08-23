@@ -64,11 +64,11 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark'
+export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'gpt_image_2'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
-export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5'
+export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3'
 export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; mention_url?: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
 export interface VideoInputImageReference {
   number: number
@@ -127,10 +127,15 @@ export interface ModelPricing {
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
+  billing_unit?: 'token' | 'second'
   discount?: number
   discount_description?: string
 }
-export interface GenerationCapabilities { image: Record<string, string[]>; video: Record<string, string[]> }
+export interface GenerationCapabilities {
+  image: Record<string, string[]>
+  video: Record<string, string[]>
+  video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>
+}
 export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; scope?: 'official' | 'team'; team_id?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; is_active: boolean; created_at: string; updated_at: string }

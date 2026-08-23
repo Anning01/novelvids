@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelPricing } from '@/types'
-import { defaultPricing, estimateImageCost, pricingDiscount, pricingDiscountDescription, pricingTiers } from './modelPricing'
+import { defaultPricing, estimateImageCost, estimateVideoCost, pricingDiscount, pricingDiscountDescription, pricingTiers } from './modelPricing'
 
 describe('modelPricing', () => {
   it('文本模型默认定价结构', () => {
@@ -32,5 +32,18 @@ describe('modelPricing', () => {
   it('pricingDiscountDescription 读取描述', () => {
     expect(pricingDiscountDescription(null)).toBe('')
     expect(pricingDiscountDescription({ type: 'image', currency: 'CNY', prices: {}, discount_description: '限时9折' })).toBe('限时9折')
+  })
+  it('MiniMax H3 按生成秒数、输入视频秒数和超额图片估算', () => {
+    const pricing: ModelPricing = {
+      type: 'video',
+      currency: 'CNY',
+      billing_unit: 'second',
+      prices: { '768P': 0.5, '2K': 0.8 },
+      video_reference_prices: { '768P': 0.5, '2K': 0.8 },
+      input_image: { first_free: 5, price_per_image: 0.2 },
+    }
+    expect(estimateVideoCost(pricing, '768P', 5)).toBe(2.5)
+    expect(estimateVideoCost(pricing, '768P', 5, true, 3, 7)).toBe(4.4)
+    expect(estimateVideoCost(pricing, '2K', 5)).toBe(4)
   })
 })

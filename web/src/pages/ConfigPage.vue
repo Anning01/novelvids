@@ -72,6 +72,14 @@ const settingsTabs: AppTabItem[] = [
   { value: 'general', label: '通用配置', icon: Settings2 },
 ]
 
+const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; model: string; protocol: ImageApiProtocol }> = {
+  seedance_2: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-260128', protocol: 'volcengine_ark' },
+  seedance_2_fast: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-fast-260128', protocol: 'volcengine_ark' },
+  seedance_2_mini: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-mini-260615', protocol: 'volcengine_ark' },
+  seedance_2_5: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-5-260817', protocol: 'volcengine_ark' },
+  minimax_h3: { baseUrl: 'https://api.minimaxi.com', model: 'MiniMax-H3', protocol: 'minimax' },
+}
+
 const configs = ref<AiModelConfig[]>([])
 const generalConfig = ref<GeneralConfig | null>(null)
 const taskTypes = ref<EnumItem[]>([])
@@ -118,6 +126,26 @@ const pricingTierOptions = computed<string[]>(() => {
   if (selectedCategoryId.value === 'video') return generationCapabilities.value.video[form.value.video_model_type] || []
   return []
 })
+const selectedVideoPricingPreset = computed(() => (
+  form.value.video_model_type
+    ? generationCapabilities.value.video_pricing?.[form.value.video_model_type]
+    : undefined
+))
+const isSecondBillingVideo = computed(() => (
+  selectedCategoryId.value === 'video'
+  && selectedVideoPricingPreset.value?.billing_unit === 'second'
+))
+
+function applyVideoPricingPreset() {
+  const pricing = selectedVideoPricingPreset.value
+  tierPrices.value = pricing?.prices ? { ...pricing.prices } : {}
+  videoRefPrices.value = pricing?.video_reference_prices
+    ? { ...pricing.video_reference_prices }
+    : { ...tierPrices.value }
+  inputImagePricing.value = pricing?.input_image
+    ? { ...pricing.input_image }
+    : { first_free: 0, price_per_image: 0 }
+}
 
 function iconTone(categoryId: ModelCategoryId) {
   if (categoryId === 'image') return 'image' as const
@@ -138,10 +166,20 @@ function taskLabel(value: number) {
 }
 
 function protocolLabel(value: ImageApiProtocol) {
+  if (value === 'minimax') return 'MiniMax 官方'
   if (value === 'volcengine_ark') return '火山方舟 Seedream'
   if (value === 'openrouter_compatible') return 'OpenRouter 兼容'
   return 'OpenAI 兼容'
 }
+
+function videoProtocolFor(modelType: VideoGenerationModelType | ''): ImageApiProtocol {
+  return modelType ? VIDEO_MODEL_PRESETS[modelType].protocol : 'volcengine_ark'
+}
+
+const selectedVideoProtocolLabel = computed(() => protocolLabel(videoProtocolFor(form.value.video_model_type)))
+const selectedVideoProtocolHint = computed(() => form.value.video_model_type === 'minimax_h3'
+  ? '提交到 /v2/video_generation，并从 /v2/query/video_generation/{task_id} 查询结果。'
+  : '提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。')
 
 function providerHost(baseUrl?: string) {
   if (!baseUrl) return '未设置接口'
@@ -203,6 +241,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
     : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
   inputImagePricing.value = { first_free: 1, price_per_image: 0 }
   videoRefPrices.value = {}
+  if (category.id === 'video') applyVideoPricingPreset()
   discountPricing.value = { discount: 1, description: '' }
   editingConfigId.value = null
   showApiKey.value = false
@@ -220,7 +259,7 @@ function openEdit(item: AiModelConfig) {
     base_url: item.base_url || '',
     api_key: item.api_key || '',
     model: item.model || '',
-    api_protocol: category.id === 'video' ? 'volcengine_ark' : item.api_protocol || 'openai_compatible',
+    api_protocol: item.api_protocol || (category.id === 'video' ? videoProtocolFor(item.video_model_type || '') : 'openai_compatible'),
     image_model_type: item.image_model_type || '',
     video_model_type: item.video_model_type || '',
     concurrency: item.concurrency,
@@ -249,6 +288,15 @@ function changeImageModelType() {
   form.value.api_protocol = form.value.image_model_type === 'gpt_image_2'
     ? 'openai_compatible'
     : 'volcengine_ark'
+}
+
+function changeVideoModelType() {
+  if (!form.value.video_model_type) return
+  const preset = VIDEO_MODEL_PRESETS[form.value.video_model_type]
+  form.value.base_url = preset.baseUrl
+  form.value.model = preset.model
+  form.value.api_protocol = preset.protocol
+  applyVideoPricingPreset()
 }
 
 async function saveConfig() {
@@ -287,8 +335,15 @@ async function saveConfig() {
       pricing = {
         type: 'video',
         currency: 'CNY',
+        billing_unit: isSecondBillingVideo.value ? 'second' : 'token',
         prices: tierPriceEntries(tierPrices.value),
         video_reference_prices: tierPriceEntries(videoRefPrices.value),
+      }
+      if (isSecondBillingVideo.value) {
+        pricing.input_image = {
+          first_free: Number(inputImagePricing.value.first_free) || 0,
+          price_per_image: Number(inputImagePricing.value.price_per_image) || 0,
+        }
       }
     }
     pricing.discount = Number(discountPricing.value.discount) || 1
@@ -296,7 +351,9 @@ async function saveConfig() {
     if (discountDescription) pricing.discount_description = discountDescription
     const payload = {
       ...form.value,
-      api_protocol: selectedCategoryId.value === 'video' ? 'volcengine_ark' : form.value.api_protocol,
+      api_protocol: selectedCategoryId.value === 'video'
+        ? videoProtocolFor(form.value.video_model_type)
+        : form.value.api_protocol,
       task_type: taskTypes[0],
       task_types: taskTypes,
       max_context_characters: form.value.max_context_characters || null,
@@ -550,16 +607,16 @@ onMounted(load)
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
             <span>视频模型类型</span>
-            <select v-model="form.video_model_type" name="video-model-type" required>
-              <option disabled value="">请选择受支持的 Seedance 模型</option>
+            <select v-model="form.video_model_type" name="video-model-type" required @change="changeVideoModelType">
+              <option disabled value="">请选择受支持的视频模型</option>
               <option v-for="item in videoModelTypes" :key="String(item.value)" :value="item.value">{{ item.label }}</option>
             </select>
-            <small>仅开放 Seedance 2.0、2.0 Fast、2.0 Mini 与 2.5；分辨率、比例、时长和格式由后台能力定义。</small>
+            <small>支持 Seedance 系列与 MiniMax H3；分辨率、比例、时长和请求格式由后台能力与适配器定义。</small>
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
             <span>接口协议</span>
-            <output class="model-readonly-value" aria-label="视频接口协议">官方协议（火山方舟）</output>
-            <small>提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。</small>
+            <output class="model-readonly-value" aria-label="视频接口协议">{{ selectedVideoProtocolLabel }}</output>
+            <small>{{ selectedVideoProtocolHint }}</small>
           </label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">
             <span>接口协议</span>
@@ -633,7 +690,7 @@ onMounted(load)
           </div>
         </section>
         <section v-else-if="selectedCategoryId === 'video' && pricingTierOptions.length" class="pricing-editor">
-          <span class="pricing-title">无视频参考（元 / 百万 token）</span>
+          <span class="pricing-title">{{ isSecondBillingVideo ? '生成视频（元 / 秒）' : '无视频参考（元 / 百万 token）' }}</span>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
               <span>分辨率 {{ tier }}</span>
@@ -641,13 +698,21 @@ onMounted(load)
             </label>
           </div>
           <div class="pricing-sub">
-            <span class="pricing-title">有视频参考（元 / 百万 token）</span>
+            <span class="pricing-title">{{ isSecondBillingVideo ? '输入参考视频（元 / 秒，按输入时长）' : '有视频参考（元 / 百万 token）' }}</span>
             <div class="pricing-grid">
               <label v-for="tier in pricingTierOptions" :key="tier">
                 <span>分辨率 {{ tier }}</span>
                 <input v-model.number="videoRefPrices[tier]" type="number" min="0" step="0.01" />
               </label>
             </div>
+          </div>
+          <div v-if="isSecondBillingVideo" class="pricing-sub">
+            <span class="pricing-title">输入参考图片</span>
+            <div class="pricing-grid">
+              <label><span>免费张数</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
+              <label><span>超出单价（元 / 张）</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
+            </div>
+            <small>输入音频免费，不计入费用。</small>
           </div>
         </section>
 

@@ -32,6 +32,9 @@ from utils.enums import (
 async def _create_scene_with_config(
     prompt: str = "测试提示词",
     model_name: str = "seedance-2",
+    video_model_type: str = "seedance_2",
+    api_protocol: str = "volcengine_ark",
+    base_url: str = "https://ark.cn-beijing.volces.com/api/v3",
 ) -> tuple[Scene, AiModelConfig]:
     """创建完整的 Scene + AiModelConfig 测试数据。"""
     novel = await Novel.create(name="Video Test Novel", author="Author")
@@ -40,11 +43,11 @@ async def _create_scene_with_config(
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
         name=model_name,
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        base_url=base_url,
         api_key="sk-test",
         model="mock-model",
-        api_protocol="volcengine_ark",
-        video_model_type="seedance_2",
+        api_protocol=api_protocol,
+        video_model_type=video_model_type,
         is_active=True,
     )
     return scene, config
@@ -82,6 +85,31 @@ async def test_生成视频_提交成功():
     await scene.refresh_from_db()
     assert scene.metadata["current_video_id"] == video.id
     print(f"    生成视频成功: video_id={video.id}, task_id={video.external_task_id}")
+
+
+@pytest.mark.asyncio
+async def test_生成_minimax_h3_视频记录正确供应商类型():
+    scene, config = await _create_scene_with_config(
+        model_name="minimax-h3",
+        video_model_type="minimax_h3",
+        api_protocol="minimax",
+        base_url="https://api.minimaxi.com",
+    )
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        resolution="768P",
+        aspect_ratio="16:9",
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "minimax-task-001"
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(req)
+
+    assert video.model_type == VideoModelTypeEnum.minimax.value
+    assert video.metadata["video_model_type"] == "minimax_h3"
 
 
 @pytest.mark.asyncio
@@ -867,3 +895,53 @@ async def test_query_status_completed_video_reference_uses_ref_price():
     assert record.usage["has_video_reference"] is True
     assert record.usage["input_video_seconds"] == 3
     assert record.cost == Decimal("4.838400")  # 28 × 21600 token/s × (5+3)s / 1e6
+
+
+@pytest.mark.asyncio
+async def test_query_status_completed_minimax_h3_按秒与输入素材计费():
+    novel = await Novel.create(name="MiniMax H3 计费小说", author="a")
+    chapter = await Chapter.create(novel_id=novel.id, number=1, name="第1章", content="c")
+    scene = await Scene.create(chapter_id=chapter.id, sequence=1, description="d", prompt="p", duration=5)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="minimax-h3",
+        base_url="https://api.minimaxi.com",
+        api_key="k",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+        pricing={
+            "type": "video",
+            "currency": "CNY",
+            "billing_unit": "second",
+            "prices": {"768P": 0.5, "2K": 0.8},
+            "video_reference_prices": {"768P": 0.5, "2K": 0.8},
+            "input_image": {"first_free": 5, "price_per_image": 0.2},
+        },
+        is_active=True,
+    )
+    video = await Video.create(
+        scene_id=scene.id,
+        model_type=VideoModelTypeEnum.minimax.value,
+        external_task_id="minimax-ext-1",
+        status=TaskStatusEnum.pending.value,
+        metadata={
+            "model_config_id": config.id,
+            "novel_id": novel.id,
+            "resolution": "768P",
+            "duration": 5,
+            "has_video_reference": True,
+            "input_video_seconds": 3,
+            "input_image_count": 7,
+        },
+    )
+    with (
+        patch("controllers.video.get_generator", return_value=FakeCompletedGenerator()),
+        patch("controllers.video._download_video", new=AsyncMock(return_value="/media/videos/h3.mp4")),
+    ):
+        await video_controller.query_status(video.id)
+
+    record = await ModelUsageRecord.filter(video_id=video.id).first()
+    assert record is not None
+    assert record.usage["input_image_count"] == 7
+    assert record.cost == Decimal("4.400000")

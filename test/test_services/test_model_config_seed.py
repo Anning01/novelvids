@@ -40,3 +40,29 @@ async def test_ensure_seed_adds_only_missing_models():
     created = await ensure_model_config_seed_data()
     assert created == len(DEFAULT_MODELS) - 1
     assert await AiModelConfig.filter(name="deepseek").count() == 1
+
+
+@pytest.mark.asyncio
+async def test_ensure_seed_upgrades_only_legacy_minimax_zero_price_placeholder():
+    legacy = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="legacy-minimax-h3",
+        base_url="https://api.minimaxi.com",
+        api_key="",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+        pricing={
+            "type": "video",
+            "currency": "CNY",
+            "prices": {"768P": 0.0, "2K": 0.0},
+            "video_reference_prices": {"768P": 0.0, "2K": 0.0},
+        },
+    )
+
+    await ensure_model_config_seed_data()
+    await legacy.refresh_from_db()
+
+    assert legacy.pricing["billing_unit"] == "second"
+    assert legacy.pricing["prices"] == {"768P": 0.5, "2K": 0.8}
+    assert legacy.pricing["input_image"] == {"first_free": 5, "price_per_image": 0.2}

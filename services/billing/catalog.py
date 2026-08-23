@@ -1,7 +1,7 @@
 """官方模型计费目录：按模型类型/名称提供默认定价。
 
-价格来源：火山方舟模型服务计费文档（2026-08）。视频为「输入不含视频」的
-刊例价（元/秒）；限时折扣需人工调整（见各促销说明）。
+价格来源：各模型供应商刊例价。Seedance 视频按 token 计费，MiniMax H3
+按生成/输入视频秒数计费；限时折扣需人工调整。
 """
 
 from models.config import AiModelConfig
@@ -29,8 +29,8 @@ IMAGE_PRICING: dict[str, dict] = {
     },
 }
 
-# 视频模型：按 token 计费。prices / video_reference_prices 为 token 单价
-# （元/百万token），分别对应「输入不含视频」与「输入包含视频」。均为刊例价。
+# 视频模型：billing_unit 决定 prices / video_reference_prices 的单位。
+# token = 元/百万 token；second = 元/秒。
 VIDEO_PRICING: dict[str, dict] = {
     "seedance_2": {
         "type": "video",
@@ -56,8 +56,15 @@ VIDEO_PRICING: dict[str, dict] = {
         "prices": {"480p": 70.00, "720p": 70.00, "1080p": 77.00},
         "video_reference_prices": {"480p": 42.00, "720p": 42.00, "1080p": 46.00},
     },
+    "minimax_h3": {
+        "type": "video",
+        "currency": "CNY",
+        "billing_unit": "second",
+        "prices": {"768P": 0.50, "2K": 0.80},
+        "video_reference_prices": {"768P": 0.50, "2K": 0.80},
+        "input_image": {"first_free": 5, "price_per_image": 0.20},
+    },
 }
-
 
 def pricing_for(config: AiModelConfig) -> dict | None:
     """返回给定模型的官方默认定价；未知模型返回 None。"""

@@ -7,3 +7,4 @@ class ImageApiProtocol(StrEnum):
     openai_compatible = "openai_compatible"
     openrouter_compatible = "openrouter_compatible"
     volcengine_ark = "volcengine_ark"
+    minimax = "minimax"

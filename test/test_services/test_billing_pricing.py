@@ -108,6 +108,27 @@ def test_compute_video_cost_video_reference_falls_back_to_prices():
     assert compute_video_cost(5.0, "720p", pricing, has_video_reference=True) == Decimal("4.968000")
 
 
+def test_compute_minimax_h3_cost_per_second_with_input_media():
+    pricing = {
+        "type": "video",
+        "currency": "CNY",
+        "billing_unit": "second",
+        "prices": {"768P": 0.50, "2K": 0.80},
+        "video_reference_prices": {"768P": 0.50, "2K": 0.80},
+        "input_image": {"first_free": 5, "price_per_image": 0.20},
+    }
+    assert compute_video_cost(5, "768P", pricing) == Decimal("2.500000")
+    assert compute_video_cost(
+        5,
+        "768P",
+        pricing,
+        input_video_seconds=3,
+        has_video_reference=True,
+        input_image_count=7,
+    ) == Decimal("4.400000")
+    assert compute_video_cost(5, "2K", pricing) == Decimal("4.000000")
+
+
 def test_compute_cost_applies_discount():
     text_pricing = {
         "type": "text", "currency": "CNY",

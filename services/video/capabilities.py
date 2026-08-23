@@ -47,12 +47,13 @@ class VideoModelCapabilities:
     reference_media_side_max: int = 6000
     reference_video_pixels_min: int = 409600
     reference_video_pixels_max: int = 8295044
-    reference_video_fps_min: int = 24
-    reference_video_fps_max: int = 60
+    reference_video_fps_min: float = 24
+    reference_video_fps_max: float = 60
     default_resolution: str = "720p"
     default_aspect_ratio: str = "adaptive"
     default_output_format: str = "mp4"
     default_generate_audio: bool = True
+    api_protocol: ImageApiProtocol = ImageApiProtocol.volcengine_ark
 
     def public_dict(self) -> dict:
         return {
@@ -185,6 +186,49 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_audio_duration_max=30,
         reference_audio_total_duration_max=30,
     ),
+    VideoGenerationModelTypeEnum.minimax_h3: VideoModelCapabilities(
+        resolutions=("768P", "2K"),
+        aspect_ratios=COMMON_RATIOS,
+        aspect_ratios_by_mode={
+            "reference": COMMON_RATIOS,
+            "keyframes": ("adaptive",),
+        },
+        output_formats=("mp4",),
+        generation_modes=GENERATION_MODES,
+        duration_min=4,
+        duration_max=15,
+        supports_auto_duration=False,
+        supports_audio=True,
+        max_reference_images=9,
+        max_reference_videos=3,
+        max_reference_audios=3,
+        reference_video_duration_max=15,
+        reference_video_total_duration_max=15,
+        reference_audio_duration_max=15,
+        reference_audio_total_duration_max=15,
+        supports_return_last_frame=False,
+        reference_image_formats=("jpg", "jpeg", "png", "webp", "heic", "heif"),
+        reference_video_formats=("mp4", "mov"),
+        reference_video_codecs=("h264", "hevc"),
+        reference_video_audio_codecs=("aac", "mp3"),
+        reference_video_resolutions=(),
+        reference_image_max_size_mb=30,
+        reference_video_max_size_mb=50,
+        reference_media_duration_min=2,
+        reference_media_ratio_min=0.4,
+        reference_media_ratio_max=2.5,
+        reference_media_side_min=256,
+        reference_media_side_max=5760,
+        reference_video_pixels_min=256 * 256,
+        reference_video_pixels_max=5760 * 5760,
+        reference_video_fps_min=23.976,
+        reference_video_fps_max=60,
+        default_resolution="768P",
+        default_aspect_ratio="16:9",
+        default_output_format="mp4",
+        default_generate_audio=True,
+        api_protocol=ImageApiProtocol.minimax,
+    ),
 }
 
 
@@ -192,13 +236,22 @@ def capabilities_for(model_type: str | VideoGenerationModelTypeEnum | None) -> V
     try:
         return CAPABILITIES[VideoGenerationModelTypeEnum(model_type)]
     except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="该视频配置未选择受支持的 Seedance 模型类型") from exc
+        raise HTTPException(status_code=400, detail="该视频配置未选择受支持的视频模型类型") from exc
 
 
 def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: str) -> None:
-    VideoGenerationModelTypeEnum(model_type)
-    if protocol != ImageApiProtocol.volcengine_ark.value:
-        raise HTTPException(status_code=400, detail="Seedance 视频模型仅支持火山方舟接口协议")
+    capabilities = capabilities_for(model_type)
+    if protocol != capabilities.api_protocol.value:
+        label = {
+            ImageApiProtocol.volcengine_ark: "火山方舟",
+            ImageApiProtocol.minimax: "MiniMax 官方",
+        }.get(capabilities.api_protocol, capabilities.api_protocol.value)
+        raise HTTPException(status_code=400, detail=f"当前视频模型仅支持{label}接口协议")
+
+
+def _canonical_value(value: object, supported: tuple[str, ...], fallback: str) -> str:
+    normalized = str(value or fallback).strip().lower()
+    return next((item for item in supported if item.lower() == normalized), str(value or fallback))
 
 
 def validate_selection(
@@ -214,9 +267,17 @@ def validate_selection(
 ) -> VideoGenerationSelection:
     normalized = VideoGenerationModelTypeEnum(model_type)
     capabilities = CAPABILITIES[normalized]
-    selected_resolution = str(resolution or capabilities.default_resolution).lower()
+    selected_resolution = _canonical_value(
+        resolution,
+        capabilities.resolutions,
+        capabilities.default_resolution,
+    )
     selected_ratio = str(aspect_ratio or capabilities.default_aspect_ratio)
-    selected_format = str(output_format or capabilities.default_output_format).lower()
+    selected_format = _canonical_value(
+        output_format,
+        capabilities.output_formats,
+        capabilities.default_output_format,
+    )
     selected_audio = capabilities.default_generate_audio if generate_audio is None else bool(generate_audio)
     selected_return_last_frame = bool(return_last_frame) if return_last_frame is not None else False
     try:

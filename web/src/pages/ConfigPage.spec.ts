@@ -117,4 +117,58 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     expect(cards[1].text()).toContain('团队配置')
     expect(cards[0].find('[aria-label="删除配置"]').exists()).toBe(true)
   })
+
+  it('选择 MiniMax H3 时填入官方端点、模型名和协议', async () => {
+    baseMocks()
+    vi.mocked(api.enums).mockResolvedValue({
+      data: {
+        ai_task_type: [{ value: 4, label: '视频生成' }],
+        image_model_type: [],
+        video_model_type: [
+          { value: 'seedance_2', name: 'seedance_2', label: 'Doubao Seedance 2.0' },
+          { value: 'minimax_h3', name: 'minimax_h3', label: 'MiniMax H3' },
+        ],
+      },
+    } as never)
+    vi.mocked(api.generationCapabilities).mockResolvedValue({
+      data: {
+        image: {},
+        video: { seedance_2: ['720p'], minimax_h3: ['768P', '2K'] },
+        video_pricing: {
+          minimax_h3: {
+            type: 'video',
+            currency: 'CNY',
+            billing_unit: 'second',
+            prices: { '768P': 0.5, '2K': 0.8 },
+            video_reference_prices: { '768P': 0.5, '2K': 0.8 },
+            input_image: { first_free: 5, price_per_image: 0.2 },
+          },
+        },
+      },
+    } as never)
+    vi.spyOn(api, 'configs').mockResolvedValue({
+      data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
+    } as never)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+
+    await wrapper.findAll('.model-category-card')[2].trigger('click')
+    await wrapper.get('.model-config-section button').trigger('click')
+    await wrapper.get('select[name="video-model-type"]').setValue('minimax_h3')
+
+    expect((wrapper.get('input[name="model-service-base-url"]').element as HTMLInputElement).value).toBe('https://api.minimaxi.com')
+    expect((wrapper.get('input[name="model-id"]').element as HTMLInputElement).value).toBe('MiniMax-H3')
+    expect(wrapper.get('[aria-label="视频接口协议"]').text()).toBe('MiniMax 官方')
+    expect(wrapper.text()).toContain('/v2/video_generation')
+    expect(wrapper.text()).toContain('生成视频（元 / 秒）')
+    expect(wrapper.text()).toContain('输入音频免费')
+    const pricingInputs = wrapper.findAll('.pricing-editor input[type="number"]')
+    expect(pricingInputs.some(input => (input.element as HTMLInputElement).value === '0.5')).toBe(true)
+    expect(pricingInputs.some(input => (input.element as HTMLInputElement).value === '0.8')).toBe(true)
+    expect(pricingInputs.some(input => (input.element as HTMLInputElement).value === '5')).toBe(true)
+    expect(pricingInputs.some(input => (input.element as HTMLInputElement).value === '0.2')).toBe(true)
+  })
 })

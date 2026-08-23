@@ -151,3 +151,38 @@ async def test_record_video_with_video_reference_uses_ref_price():
     assert record.usage["has_video_reference"] is True
     assert record.usage["input_video_seconds"] == 3.0
     assert record.cost == Decimal("4.838400")  # 6 × 1.5
+
+
+@pytest.mark.asyncio
+async def test_record_minimax_video_includes_input_image_and_video_fees():
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="minimax-h3",
+        base_url="https://api.minimaxi.com",
+        api_key="sk",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+        pricing={
+            "type": "video",
+            "currency": "CNY",
+            "billing_unit": "second",
+            "prices": {"768P": 0.5, "2K": 0.8},
+            "video_reference_prices": {"768P": 0.5, "2K": 0.8},
+            "input_image": {"first_free": 5, "price_per_image": 0.2},
+        },
+    )
+    record = await billing_recorder.record_video(
+        novel_id=7,
+        model_config_id=config.id,
+        seconds=5,
+        resolution="768P",
+        input_video_seconds=3,
+        has_video_reference=True,
+        input_image_count=7,
+        status=TaskStatusEnum.completed.value,
+        video_id=13,
+    )
+
+    assert record.usage["input_image_count"] == 7
+    assert record.cost == Decimal("4.400000")

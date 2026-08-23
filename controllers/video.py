@@ -20,7 +20,7 @@ from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.billing.recorder import billing_recorder
 from services.oss import resolve_media_url
-from services.video import get_generator
+from services.video import get_generator, get_record_model_type
 from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
     normalize_selected_variant_ids,
@@ -42,7 +42,7 @@ from prompts.video import (
 from prompts.styles import video_style_suffix
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +270,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         # 获取生成器并提交
         generator = get_generator(config)
+        record_model_type = get_record_model_type(config)
         duration = req.duration if req.duration is not None else int(scene.duration or 6)
         selection = validate_selection(
             config.video_model_type,
@@ -353,6 +354,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 400,
                 detail=f"当前模型参考视频总时长不能超过 {capabilities.reference_video_total_duration_max} 秒",
             )
+        if req.generation_mode == "keyframes":
+            input_image_count = int(bool(first_frame)) + int(bool(last_frame))
+        else:
+            input_image_count = len({
+                image
+                for subject in subjects
+                for image in subject.get("images", [])
+            }.union(reference_images))
         video_metadata = {
             "generation_mode": req.generation_mode,
             "first_frame_url": req.first_frame_url,
@@ -361,6 +370,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "novel_id": novel_id,
             "has_video_reference": len(reference_videos) > 0,
             "input_video_seconds": reference_video_duration,
+            "input_image_count": input_image_count,
             "model_name": config.name,
             "model": config.model,
             "video_model_type": config.video_model_type,
@@ -397,7 +407,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             # 并使分镜状态在刷新页面后仍保持为红色。
             video = await Video.create(
                 scene_id=scene.id,
-                model_type=VideoModelTypeEnum.seedance.value,
+                model_type=record_model_type.value,
                 external_task_id=None,
                 status=TaskStatusEnum.failed.value,
                 metadata={**video_metadata, "error": str(error)},
@@ -414,7 +424,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # 创建 Video 记录
         video = await Video.create(
             scene_id=scene.id,
-            model_type=VideoModelTypeEnum.seedance.value,
+            model_type=record_model_type.value,
             external_task_id=external_task_id,
             status=TaskStatusEnum.pending.value,
             metadata=video_metadata,
@@ -547,6 +557,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         resolution=metadata.get("resolution"),
                         input_video_seconds=metadata.get("input_video_seconds", 0),
                         has_video_reference=metadata.get("has_video_reference", False),
+                        input_image_count=metadata.get("input_image_count", 0),
                         status=TaskStatusEnum.completed.value,
                         duration_seconds=duration_seconds,
                         video_id=video.id,
@@ -562,6 +573,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         resolution=metadata.get("resolution"),
                         input_video_seconds=metadata.get("input_video_seconds", 0),
                         has_video_reference=metadata.get("has_video_reference", False),
+                        input_image_count=metadata.get("input_image_count", 0),
                         status=TaskStatusEnum.failed.value,
                         duration_seconds=duration_seconds,
                         video_id=video.id,

@@ -17,6 +17,7 @@ export interface BatchVideoSceneOption {
   duration: number
   hasVideoReference?: boolean
   inputVideoSeconds?: number
+  inputImageCount?: number
 }
 
 export interface BatchVideoGenerationRequest {
@@ -83,6 +84,7 @@ const estimatedTotal = computed(() => {
       Math.max(model.capabilities.duration_min, Math.min(model.capabilities.duration_max, scene.duration)),
       Boolean(scene.hasVideoReference),
       scene.inputVideoSeconds || 0,
+      scene.inputImageCount || 0,
     ), 0)
 })
 function close() {

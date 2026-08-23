@@ -91,7 +91,8 @@ function usageLabel(item: BillingRecord): string {
   const seconds = num(usage.seconds)
   const resolution = usage.resolution ? ` @${usage.resolution}` : ''
   const input = num(usage.input_video_seconds)
-  return `${seconds}s${resolution}${input ? ` · 参考 ${input}s` : ''}`
+  const inputImages = num(usage.input_image_count)
+  return `${seconds}s${resolution}${input ? ` · 参考视频 ${input}s` : ''}${inputImages ? ` · 输入图片 ${inputImages} 张` : ''}`
 }
 
 function currentNovelId(): number | undefined {
