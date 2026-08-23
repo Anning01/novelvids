@@ -614,6 +614,14 @@ it('renders as a right drawer and lists previous generation images', async () =>
     message: 'ok',
     data: [
       {
+        id: 'run-current',
+        status: 3,
+        is_current: true,
+        images: ['/media/current.png'],
+        model: 'gpt-image-2',
+        created_at: '2026-08-13T09:01:00.000Z',
+      },
+      {
         id: 'run-1',
         status: 3,
         images: ['/media/history.png'],
@@ -661,6 +669,8 @@ it('renders as a right drawer and lists previous generation images', async () =>
   await currentImage.trigger('load')
   expect(wrapper.get('.asset-generated-preview > header span').text()).toBe('1920 × 1080 / PNG')
   expect(wrapper.get<HTMLImageElement>('.asset-generation-history__list img').attributes('src')).toBe('/media/history.png')
+  expect(wrapper.get('.asset-generation-history > header').text()).toContain('3 次')
+  expect(wrapper.get('.asset-generation-history__list').text()).not.toContain('当前使用')
   expect(wrapper.get('.asset-generation-history__list').text()).toContain('gpt-image-2 / 3:2 / high / PNG')
   const historyList = wrapper.get('.asset-generation-history__list')
   expect(historyList.text()).toContain('服务暂时不可用')
@@ -685,6 +695,9 @@ it('renders as a right drawer and lists previous generation images', async () =>
   expect(api.restoreAssetGeneration).toHaveBeenCalledWith(editedAsset.id, 'run-1')
   expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ main_image: '/media/history.png' })
   expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/history.png')
+  const visibleHistoryImages = wrapper.findAll<HTMLImageElement>('.asset-generation-history__list img').map(image => image.attributes('src'))
+  expect(visibleHistoryImages).toContain('/media/current.png')
+  expect(visibleHistoryImages).not.toContain('/media/history.png')
 
   await wrapper.get('.asset-generated-preview__viewer').trigger('click')
   await wrapper.vm.$nextTick()

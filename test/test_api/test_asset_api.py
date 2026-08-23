@@ -137,6 +137,7 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
     assert completed_record["images"] == ["/media/assets/history.png"]
     assert completed_record["model"] == "image-model"
     assert completed_record["clarity"] == "2K"
+    assert completed_record["is_current"] is False
     assert "secret-must-not-leak" not in response.text
     assert "private.example.test" not in response.text
 
@@ -147,6 +148,15 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
     restored = restore_response.json()["data"]
     assert restored["main_image"] == "/media/assets/history.png"
     assert restored["metadata"]["restored_generation_task_id"] == str(completed.id)
+
+    current_history_response = await client.get(
+        f"/api/asset/{asset.id}/generation-history"
+    )
+    current_records = current_history_response.json()["data"]
+    current_record = next(
+        record for record in current_records if record["id"] == str(completed.id)
+    )
+    assert current_record["is_current"] is True
 
     failed_response = await client.post(
         f"/api/asset/{asset.id}/generation-history/{failed.id}/restore"

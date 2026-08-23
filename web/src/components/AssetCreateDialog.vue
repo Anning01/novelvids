@@ -168,6 +168,7 @@ const currentImageFormat = computed(() => {
     : {}
   return historyFormat || (typeof metadata.output_format === 'string' ? metadata.output_format : '')
 })
+const visibleGenerationHistory = computed(() => generationHistory.value.filter(record => !isCurrentGeneration(record)))
 const selectedErrorRecord = computed(() => generationHistory.value.find(record => record.id === selectedErrorRecordId.value && record.error_message) || null)
 const terminalGenerationStatuses = new Set<number>([
   TaskStatusEnum.COMPLETED,
@@ -519,7 +520,7 @@ function isLongError(message: string) {
 
 function isCurrentGeneration(record: AssetGenerationRecord) {
   if (selectedVariant.value) return false
-  return Boolean(record.images[0] && record.images[0] === generatedImage.value)
+  return Boolean(record.is_current || (record.images[0] && record.images[0] === generatedImage.value))
 }
 
 function selectVariantPreview(variant: AssetVariant | null) {
@@ -547,6 +548,10 @@ async function restoreGeneration(record: AssetGenerationRecord) {
   try {
     const restored = (await api.restoreAssetGeneration(props.asset.id, record.id)).data
     promptSourceAsset.value = restored
+    generationHistory.value = generationHistory.value.map(item => ({
+      ...item,
+      is_current: item.id === record.id,
+    }))
     emit('saved', restored)
     notice.success('已将这次生成结果设为当前图片')
   } catch (error) {
@@ -1184,13 +1189,13 @@ onUnmounted(() => {
 
           <section v-if="isEditing" class="asset-generation-history" aria-labelledby="asset-history-title">
             <header>
-              <div><Clock3 :size="15" /><strong id="asset-history-title">生成记录</strong><span>{{ generationHistory.length }} 次</span></div>
+              <div><Clock3 :size="15" /><strong id="asset-history-title">生成记录</strong><span>{{ visibleGenerationHistory.length }} 次</span></div>
               <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="刷新生成记录" title="刷新生成记录" :loading="loadingHistory" @click="loadGenerationHistory"><RefreshCw v-if="!loadingHistory" :size="14" /></AppButton>
             </header>
             <div v-if="loadingHistory && !generationHistory.length" class="asset-generation-history__state">正在加载生成记录…</div>
-            <div v-else-if="!generationHistory.length" class="asset-generation-history__state">还没有生成记录</div>
+            <div v-else-if="!visibleGenerationHistory.length" class="asset-generation-history__state">暂无其他生成记录</div>
             <div v-else class="asset-generation-history__list">
-              <article v-for="record in generationHistory" :key="record.id" :class="`is-status-${record.status}`">
+              <article v-for="record in visibleGenerationHistory" :key="record.id" :class="`is-status-${record.status}`">
                 <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="`放大查看${formatHistoryTime(record.created_at)}的生成图片`" @click="openImageLightbox(record.images[0], `${name}的历史生成图片`, record.output_format)">
                   <img :src="record.images[0]" :alt="`${name}的历史生成图片`" loading="lazy" @load="recordImageInfo(record.images[0], $event, record.output_format)" />
                   <span>{{ imageInfoLabel(record.images[0], record.output_format) }}</span>
@@ -1218,13 +1223,12 @@ onUnmounted(() => {
                     class="asset-generation-history__restore"
                     variant="ghost"
                     size="xs"
-                    :disabled="isCurrentGeneration(record) || Boolean(restoringRecordId)"
+                    :disabled="Boolean(restoringRecordId)"
                     :loading="restoringRecordId === record.id"
                     @click="restoreGeneration(record)"
                   >
-                    <Check v-if="isCurrentGeneration(record)" :size="12" />
-                    <Undo2 v-else-if="restoringRecordId !== record.id" :size="12" />
-                    {{ isCurrentGeneration(record) ? '当前使用' : '设为当前' }}
+                    <Undo2 v-if="restoringRecordId !== record.id" :size="12" />
+                    设为当前
                   </AppButton>
                 </div>
               </article>

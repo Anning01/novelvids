@@ -456,7 +456,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
 
     async def generation_history(self, asset_id: int) -> list[dict[str, Any]]:
         """Return sanitized base-asset image-generation history."""
-        await self.get(asset_id)
+        asset = await self.get(asset_id)
         tasks = await AiTask.filter(
             task_type=AiTaskTypeEnum.reference_image.value,
         ).order_by("-created_at")
@@ -478,6 +478,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             records.append({
                 "id": task.id,
                 "status": task.status,
+                "is_current": False,
                 "images": images,
                 "error_message": task.error_message,
                 "model": request_params.get("model"),
@@ -487,6 +488,32 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 "created_at": task.created_at,
                 "finished_at": task.finished_at,
             })
+        current_image = normalize_media_url(asset.main_image) or asset.main_image
+        if current_image:
+            matching_records = [
+                record
+                for record in records
+                if any(
+                    (normalize_media_url(image) or image) == current_image
+                    for image in record["images"]
+                )
+            ]
+            metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+            preferred_task_ids = {
+                str(task_id)
+                for key in ("restored_generation_task_id", "edited_generation_task_id")
+                if (task_id := metadata.get(key))
+            }
+            current_record = next(
+                (
+                    record
+                    for record in matching_records
+                    if str(record["id"]) in preferred_task_ids
+                ),
+                matching_records[0] if matching_records else None,
+            )
+            if current_record is not None:
+                current_record["is_current"] = True
         return records
 
     @atomic()

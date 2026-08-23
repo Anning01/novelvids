@@ -109,6 +109,7 @@ class AssetGenerationRecordOut(BaseModel):
 
     id: UUID
     status:  int
+    is_current: bool = False
     images: list[str] = Field(default_factory=list)
     error_message: Optional[str] = None
     model: Optional[str] = None

@@ -44,7 +44,7 @@ export interface Chapter { id: number; novel_id: number; number: number; name: s
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; angle_image_1?: string; angle_image_2?: string; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
-export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; images: string[]; error_message?: string; model?: string; clarity?: string; aspect_ratio?: string; output_format?: string; created_at: string; finished_at?: string }
+export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; is_current?: boolean; images: string[]; error_message?: string; model?: string; clarity?: string; aspect_ratio?: string; output_format?: string; created_at: string; finished_at?: string }
 export interface AssetActiveGeneration { asset_id: number; task_id: string; status: TaskStatusEnum }
 export interface AssetReferencePromptPreview { prompt: string; prompt_language: 'zh' | 'en' }
 export interface AssetMergeResult { asset: Asset; removed_asset_id: number; data_source_asset_id: number; image_source_asset_id?: number; summary: string[] }
