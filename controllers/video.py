@@ -171,6 +171,9 @@ async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dic
 class VideoController(CRUDBase[Video, dict, dict]):
     def __init__(self):
         super().__init__(model=Video)
+        # 页面轮询和后端自动收口可能同时命中同一任务。按 video_id 串行化，
+        # 避免完成瞬间重复下载、写流水和扣余额。
+        self._query_locks: dict[int, asyncio.Lock] = {}
 
     @staticmethod
     async def _set_scene_current_video(scene: Scene, video_id: int) -> None:
@@ -405,6 +408,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
     async def query_status(self, video_id: int) -> Video:
         """查询视频生成状态，如有变化则更新 Video 记录。"""
+        lock = self._query_locks.setdefault(video_id, asyncio.Lock())
+        async with lock:
+            return await self._query_status_unlocked(video_id)
+
+    async def _query_status_unlocked(self, video_id: int) -> Video:
+        """在单视频互斥锁内查询并收口供应商任务。"""
         video = await self.get(video_id)
 
         # 已完成或已失败的不再查询

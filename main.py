@@ -28,6 +28,8 @@ from services.storyboard.handler import StoryboardTaskHandler
 from utils.enums import AiTaskTypeEnum
 from services.media_library_seed import ensure_media_library_seed_data
 from services.model_config_seed import ensure_model_config_seed_data
+from services.video.reconciler import VideoTaskReconciler
+from controllers.video import video_controller
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
@@ -53,6 +55,12 @@ tortoise_config = {
     "timezone": settings.TIMEZONE,
 }
 
+video_task_reconciler = VideoTaskReconciler(
+    video_controller.query_status,
+    interval_seconds=settings.VIDEO_RECONCILE_INTERVAL_SECONDS,
+    batch_size=settings.VIDEO_RECONCILE_BATCH_SIZE,
+)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -74,9 +82,11 @@ async def lifespan(_: FastAPI):
         await ensure_super_admin()
     # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）
     await ai_task_executor.fail_stale_on_boot()
+    await video_task_reconciler.start()
     try:
         yield
     finally:
+        await video_task_reconciler.stop()
         await Tortoise.close_connections()
 
 

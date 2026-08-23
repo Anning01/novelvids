@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, patch
 from decimal import Decimal
@@ -407,6 +409,44 @@ async def test_查询视频状态_已完成():
     assert result.url == f"./media/videos/{video.id}.mp4"
     mock_dl.assert_called_once_with("https://cdn.example.com/video.mp4", video.id)
     print(f"    查询已完成: url={result.url}")
+
+
+@pytest.mark.asyncio
+async def test_并发查询同一完成任务只收口一次():
+    """页面轮询与后台收口并发时，不重复查询、下载或计费。"""
+    scene, config = await _create_scene_with_config()
+    video = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="ext-concurrent-completed",
+        status=TaskStatusEnum.running.value,
+        metadata={"model_config_id": config.id},
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory, \
+         patch("controllers.video._download_video", new_callable=AsyncMock) as mock_download:
+        generator = AsyncMock()
+        generator.query.return_value = {
+            "status": TaskStatusEnum.completed,
+            "progress": 100,
+            "url": "https://cdn.example.com/concurrent.mp4",
+            "metadata": {"duration": 6.0},
+        }
+        mock_factory.return_value = generator
+        mock_download.return_value = f"/media/videos/{video.id}.mp4"
+
+        first, second = await asyncio.gather(
+            video_controller.query_status(video.id),
+            video_controller.query_status(video.id),
+        )
+
+    assert first.status == TaskStatusEnum.completed.value
+    assert second.status == TaskStatusEnum.completed.value
+    generator.query.assert_awaited_once_with(video.external_task_id)
+    mock_download.assert_awaited_once_with(
+        "https://cdn.example.com/concurrent.mp4",
+        video.id,
+    )
 
 
 @pytest.mark.asyncio
