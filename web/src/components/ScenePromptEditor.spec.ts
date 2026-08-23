@@ -20,6 +20,7 @@ const options: ScenePromptMentionOption[] = [
     syntax: '@{艾伦}',
     group: '出镜角色',
     previewUrl: '/media/allen.png',
+    aliases: ['主角'],
   },
   {
     id: 'duration-3',
@@ -57,6 +58,32 @@ describe('ScenePromptEditor', () => {
     expect(mention.text()).toBe('断罪山脉')
     await mention.trigger('click')
     expect(wrapper.find('.image-lightbox').exists()).toBe(true)
+  })
+
+  it('renders a legacy mention followed immediately by Chinese text and normalizes it on edit', async () => {
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '走出单元楼。@艾伦沿着步道走', options },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    const mention = wrapper.get('[data-mention-id="person-2"]')
+    expect(mention.text()).toBe('艾伦')
+    const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
+    editor.element.append(document.createTextNode('。'))
+    await editor.trigger('input')
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['走出单元楼。@{艾伦}沿着步道走。'])
+  })
+
+  it('renders a legacy asset alias as its canonical mention token', () => {
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '@主角沿着步道走', options },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    const mention = wrapper.get('[data-mention-id="person-2"]')
+    expect(mention.text()).toBe('艾伦')
+    expect(mention.attributes('data-syntax')).toBe('@{艾伦}')
   })
 
   it('opens the mention picker when the user types at and inserts a selected reference', async () => {

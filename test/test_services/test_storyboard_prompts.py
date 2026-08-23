@@ -243,6 +243,20 @@ def test_normalized_storyboard_reference_fields_is_idempotent_and_longest_first(
     assert second_updates == {}
 
 
+def test_normalized_storyboard_reference_fields_handles_attached_chinese_prose():
+    person = SceneEntity(
+        name="羽宁",
+        aliases=[],
+        description="黑发学生",
+        asset_type="人物",
+    )
+    shot = _shot(1, "走出单元楼。@羽宁沿着步道走。")
+
+    updates = normalized_storyboard_reference_fields(shot, [person])
+
+    assert updates["description"] == "走出单元楼。@{羽宁}沿着步道走。"
+
+
 @pytest.mark.asyncio
 async def test_storyboard_generator_uses_fresh_continuation_calls():
     completions = [

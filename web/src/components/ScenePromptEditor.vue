@@ -15,6 +15,7 @@ export interface ScenePromptMentionOption {
   previewUrl?: string
   thumbnailUrl?: string
   description?: string
+  aliases?: string[]
 }
 
 const props = withDefaults(defineProps<{
@@ -134,11 +135,16 @@ function createMentionNode(option: ScenePromptMentionOption) {
 }
 
 function findNextMention(value: string, start: number) {
-  let match: { option: ScenePromptMentionOption; index: number } | null = null
+  let match: { option: ScenePromptMentionOption; index: number; length: number } | null = null
   for (const option of props.options.filter(item => item.kind !== 'duration')) {
-    const index = value.indexOf(option.syntax, start)
-    if (index < 0 || (match && index >= match.index)) continue
-    match = { option, index }
+    const canonicalName = option.syntax.match(/^@\{([^{}:#]+)(?:#[^{}]+)?\}$/)?.[1]
+    const legacyNames = canonicalName ? [canonicalName, ...(option.aliases || [])] : []
+    const syntaxes = [option.syntax, ...legacyNames.map(name => `@${name}`)]
+    for (const syntax of syntaxes) {
+      const index = value.indexOf(syntax, start)
+      if (index < 0 || (match && (index > match.index || (index === match.index && syntax.length <= match.length)))) continue
+      match = { option, index, length: syntax.length }
+    }
   }
   DURATION_MENTION_PATTERN.lastIndex = start
   const durationMatch = DURATION_MENTION_PATTERN.exec(value)
@@ -147,6 +153,7 @@ function findNextMention(value: string, start: number) {
     const seconds = durationMatch[1]
     match = {
       index: durationMatch.index,
+      length: durationMatch[0].length,
       option: {
         id: `duration-${durationMatch.index}-${durationMatch[0]}`,
         kind: 'duration',
@@ -173,7 +180,7 @@ function renderValue(value = props.modelValue) {
     }
     appendTextWithBreaks(fragment, value.slice(offset, match.index))
     fragment.append(createMentionNode(match.option))
-    offset = match.index + match.option.syntax.length
+    offset = match.index + match.length
   }
   if (!value) fragment.append(document.createElement('br'))
   editor.value.replaceChildren(fragment)
@@ -410,6 +417,7 @@ watch(() => props.options.map(option => [
   option.previewUrl || '',
   option.thumbnailUrl || '',
   option.description || '',
+  (option.aliases || []).join('\u0003'),
 ].join('\u0001')).join('\u0002'), () => {
   renderValue()
 })

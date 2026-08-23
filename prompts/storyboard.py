@@ -230,10 +230,11 @@ def _normalize_asset_reference_text(
 
     normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, text)
 
-    # 兼容边界清晰的旧格式 @资产名，并统一升级为带花括号的正式名。
-    legacy_boundary = r"(?=$|[\s，。；：、！？,.!?;:）)\]】])"
+    # 兼容旧格式 @资产名，并统一升级为带花括号的正式名。模型常会把后续
+    # 中文动作直接连在名称后面（例如 ``@羽宁沿着步道走``），因此必须按
+    # 已登记资产名最长优先精确消费，不能依赖单词边界。
     for name, canonical_name in candidates:
-        pattern = re.compile(rf"@{re.escape(name)}{legacy_boundary}")
+        pattern = re.compile(rf"@{re.escape(name)}")
         normalized = pattern.sub(
             lambda _match, canonical=canonical_name: protect(f"@{{{canonical}}}"),
             normalized,

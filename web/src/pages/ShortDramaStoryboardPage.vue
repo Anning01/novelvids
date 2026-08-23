@@ -675,6 +675,7 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     previewUrl: selectedAssetImage(scene, asset) || undefined,
     thumbnailUrl: selectedAssetImage(scene, asset) || undefined,
     description: asset.description || asset.canonical_name,
+    aliases: asset.aliases || [],
   })))
   const mediaOptions: ScenePromptMentionOption[] = draftFor(scene).referenceMedia.map((reference, index) => ({
     id: `reference-${reference.type}-${reference.url}`,

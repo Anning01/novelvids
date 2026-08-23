@@ -1,6 +1,6 @@
 import type { VideoInputImageReference, VideoReferenceMedia } from '@/types'
 
-const ASSET_MENTION_PATTERN = /@\{([^}]+)\}|@([\w\u4e00-\u9fff·]+)/gu
+const BRACED_ASSET_MENTION_PATTERN = /@\{([^}]+)\}/gu
 
 export interface VideoInputAssetImageSource {
   assetId: number
@@ -40,10 +40,28 @@ export function buildVideoInputImageReferences(
 
   const orderedAssets: VideoInputAssetImageSource[] = []
   const seenAssetIds = new Set<number>()
-  for (const match of prompt.matchAll(ASSET_MENTION_PATTERN)) {
-    const mention = match[1] || match[2] || ''
-    const [name] = mention.split('#', 1)
-    const source = sourcesByName.get(name)
+  const bracedRanges: Array<[number, number]> = []
+  const occurrences = new Map<number, { name: string; length: number }>()
+  for (const match of prompt.matchAll(BRACED_ASSET_MENTION_PATTERN)) {
+    const index = match.index
+    bracedRanges.push([index, index + match[0].length])
+    const [name] = (match[1] || '').split('#', 1)
+    if (sourcesByName.has(name)) occurrences.set(index, { name, length: match[0].length })
+  }
+  for (const name of sourcesByName.keys()) {
+    const syntax = `@${name}`
+    let index = prompt.indexOf(syntax)
+    while (index >= 0) {
+      const insideBracedMention = bracedRanges.some(([from, to]) => index >= from && index < to)
+      const existing = occurrences.get(index)
+      if (!insideBracedMention && (!existing || syntax.length > existing.length)) {
+        occurrences.set(index, { name, length: syntax.length })
+      }
+      index = prompt.indexOf(syntax, index + syntax.length)
+    }
+  }
+  for (const [, occurrence] of [...occurrences.entries()].sort(([left], [right]) => left - right)) {
+    const source = sourcesByName.get(occurrence.name)
     if (!source || seenAssetIds.has(source.assetId)) continue
     seenAssetIds.add(source.assetId)
     orderedAssets.push(source)

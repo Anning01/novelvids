@@ -69,6 +69,23 @@ async def test_通过别名解析资产():
 
 
 @pytest.mark.asyncio
+async def test_解析后面紧接中文动作的旧格式资产引用():
+    novel = await Novel.create(name="Attached Mention Novel", author="Author")
+    await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="羽宁",
+        main_image="https://example.com/yuning.png",
+    )
+
+    subjects = await resolve_assets("走出单元楼。@羽宁沿着步道走。", novel.id)
+
+    assert len(subjects) == 1
+    assert subjects[0]["name"] == "羽宁"
+    assert subjects[0]["images"] == ["https://example.com/yuning.png"]
+
+
+@pytest.mark.asyncio
 async def test_无引用返回空列表():
     """prompt 不含 @ 时返回空。"""
     novel = await Novel.create(name="Empty Novel", author="Author")

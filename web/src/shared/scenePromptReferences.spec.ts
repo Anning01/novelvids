@@ -38,4 +38,14 @@ describe('scenePromptReferences', () => {
       { number: 4, url: '/media/upload.png', label: '动作参考', source: 'upload', mediaIndex: 1 },
     ])
   })
+
+  it('recognizes legacy asset mentions even when Chinese prose follows without a separator', () => {
+    expect(buildVideoInputImageReferences('@羽宁沿着步道走，@羽宁家公寓在远处。', [
+      { assetId: 1, label: '羽宁', mentionNames: ['羽宁'], imageUrls: ['/media/yuning.png'] },
+      { assetId: 2, label: '羽宁家公寓', mentionNames: ['羽宁家公寓'], imageUrls: ['/media/home.png'] },
+    ], [])).toEqual([
+      { number: 1, url: '/media/yuning.png', label: '羽宁', source: 'asset', assetId: 1, assetImageIndex: 0 },
+      { number: 2, url: '/media/home.png', label: '羽宁家公寓', source: 'asset', assetId: 2, assetImageIndex: 0 },
+    ])
+  })
 })
