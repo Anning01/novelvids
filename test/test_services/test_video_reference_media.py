@@ -26,6 +26,22 @@ def test_已删除素材遗留的内部标记不会进入供应商提示词():
     assert render_reference_mentions(f"画面参考 {stale}", []) == "画面参考 "
 
 
+def test_签名展示地址通过稳定地址匹配_prompt_引用():
+    image = VideoReferenceMedia(
+        type="image",
+        url="https://oss.example.com/last.png?signature=renewed",
+        mention_url="uploads/1/last.png",
+        name="上一镜头尾帧.png",
+    )
+    mention = reference_mention_syntax("image", image.mention_url)
+    prompt = f"{mention} 作为本镜头首帧"
+
+    assert select_referenced_media(prompt, [image]) == [image]
+    assert render_reference_mentions(prompt, [image]) == (
+        "【参考图片：上一镜头尾帧.png】 作为本镜头首帧"
+    )
+
+
 def _video_probe(*, duration: float = 10, fps: str = "30/1", codec: str = "h264", audio: str = "aac"):
     return {
         "format": {"duration": str(duration), "format_name": "mov,mp4,m4a,3gp,3g2,mj2"},

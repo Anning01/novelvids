@@ -48,6 +48,7 @@ import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
+import { injectLastFrameContinuityInstruction } from '@/shared/lastFrameContinuity'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { Asset, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
 
@@ -268,6 +269,7 @@ function readReferenceMedia(value: unknown): VideoReferenceMedia[] {
     return [{
       type: media.type,
       url: media.url,
+      mention_url: typeof media.mention_url === 'string' ? media.mention_url : undefined,
       name: typeof media.name === 'string' ? media.name : undefined,
       content_type: typeof media.content_type === 'string' ? media.content_type : undefined,
       size_bytes: typeof media.size_bytes === 'number' ? media.size_bytes : undefined,
@@ -1447,11 +1449,18 @@ function syncInjectedLastFrame(result: VideoResult) {
   const targetSceneId = Number(metadata.last_frame_injected_scene_id)
   if (!Number.isInteger(targetSceneId) || targetSceneId < 1) return
   const reference = readReferenceMedia([metadata.last_frame_reference])[0]
+  const promptInstruction = typeof metadata.last_frame_prompt_instruction === 'string'
+    ? metadata.last_frame_prompt_instruction
+    : ''
   const targetScene = scenes.value.find(item => item.id === targetSceneId)
   if (!reference || !targetScene) return
   const draft = draftFor(targetScene)
   if (!draft.referenceMedia.some(item => item.type === 'image' && item.url === reference.url)) {
     draft.referenceMedia = [reference, ...draft.referenceMedia]
+  }
+  if (promptInstruction) {
+    draft.prompt = injectLastFrameContinuityInstruction(draft.prompt, promptInstruction)
+    targetScene.prompt = draft.prompt
   }
   targetScene.metadata = {
     ...(targetScene.metadata || {}),

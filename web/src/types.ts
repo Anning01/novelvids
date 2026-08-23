@@ -69,7 +69,7 @@ export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'gpt_image_2
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5'
-export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
+export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; mention_url?: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
 export interface VideoInputImageReference {
   number: number
   url: string

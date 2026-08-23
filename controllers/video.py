@@ -30,9 +30,14 @@ from services.video.asset_resolver import (
 from services.video.capabilities import validate_selection
 from services.video.capabilities import capabilities_for
 from services.video.reference_media import (
+    reference_mention_syntax,
     render_reference_mentions,
     select_referenced_media,
     verify_local_reference,
+)
+from prompts.video import (
+    inject_last_frame_continuity_prompt,
+    render_last_frame_continuity_instruction,
 )
 from prompts.styles import video_style_suffix
 from services.video.merge import video_merger
@@ -138,7 +143,7 @@ async def _next_scene(scene: Scene) -> Scene | None:
 
 
 async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dict | None:
-    """将尾帧写入下一镜头 metadata.video_reference_media，保持操作幂等。"""
+    """将尾帧及其首帧用途写入下一镜头，保持操作幂等。"""
     source_scene = await Scene.get(id=video.scene_id)
     target_scene = await _next_scene(source_scene)
     if target_scene is None:
@@ -147,6 +152,7 @@ async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dic
     reference = {
         "type": "image",
         "url": last_frame_url,
+        "mention_url": last_frame_url,
         "name": f"分镜{source_scene.sequence}生成尾帧.png",
         "content_type": "image/png",
         "source": "previous_scene_last_frame",
@@ -163,9 +169,23 @@ async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dic
             and item.get("source_scene_id") == source_scene.id
         )
     ]
-    target_scene.metadata = {**target_metadata, "video_reference_media": [reference, *media]}
-    await target_scene.save(update_fields=["metadata", "updated_at"])
-    return {"scene_id": target_scene.id, "reference": reference}
+    mention = reference_mention_syntax("image", last_frame_url)
+    prompt_instruction = render_last_frame_continuity_instruction(mention)
+    target_scene.prompt = inject_last_frame_continuity_prompt(
+        target_scene.prompt or "",
+        mention,
+    )
+    target_scene.metadata = {
+        **target_metadata,
+        "video_reference_media": [reference, *media],
+        "previous_scene_last_frame_prompt_instruction": prompt_instruction,
+    }
+    await target_scene.save(update_fields=["prompt", "metadata", "updated_at"])
+    return {
+        "scene_id": target_scene.id,
+        "reference": reference,
+        "prompt_instruction": prompt_instruction,
+    }
 
 
 class VideoController(CRUDBase[Video, dict, dict]):
@@ -499,6 +519,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     "last_frame_url": persisted_last_frame_url,
                     "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
                     "last_frame_reference": propagation["reference"] if propagation else None,
+                    "last_frame_prompt_instruction": (
+                        propagation["prompt_instruction"] if propagation else None
+                    ),
                 }
             except Exception as error:
                 logger.exception("Last frame propagation failed: video_id=%s", video.id)

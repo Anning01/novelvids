@@ -38,6 +38,12 @@ class VideoReferenceMedia(BaseModel):
 
     type: Literal["image", "video"]
     url: str = Field(..., min_length=1, max_length=2000)
+    mention_url: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=2000,
+        description="用于 Prompt 引用匹配的稳定原始地址；展示与请求仍使用 url",
+    )
     name: Optional[str] = Field(None, max_length=255)
     content_type: Optional[str] = Field(None, max_length=100)
     size_bytes: Optional[int] = Field(None, ge=0)

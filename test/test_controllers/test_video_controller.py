@@ -16,7 +16,7 @@ from models.video import Video
 from models.config import AiModelConfig
 from schemas.video import VideoGenerateRequest, VideoReferenceMedia
 from services.video.base import VideoProviderError
-from services.video.reference_media import reference_mention_syntax
+from services.video.reference_media import reference_mention_syntax, select_referenced_media
 from utils.enums import (
     AiTaskTypeEnum,
     AssetTypeEnum,
@@ -492,6 +492,20 @@ async def test_返回尾帧_注入同章下一分镜参考图():
     assert references[0]["source_scene_id"] == scene.id
     assert references[1]["url"] == "https://cdn.example.com/manual.png"
     assert result.metadata["last_frame_injected_scene_id"] == next_scene.id
+    mention = reference_mention_syntax("image", references[0]["url"])
+    assert next_scene.prompt.startswith("【首帧衔接】\n")
+    assert f"{mention} 作为本镜头首帧" in next_scene.prompt
+    assert next_scene.prompt.endswith("下一镜头")
+    assert result.metadata["last_frame_prompt_instruction"] in next_scene.prompt
+    assert select_referenced_media(
+        next_scene.prompt,
+        [VideoReferenceMedia(
+            type=references[0]["type"],
+            url=references[0]["url"],
+            mention_url=references[0]["mention_url"],
+            name=references[0]["name"],
+        )],
+    )[0].url == references[0]["url"]
 
 
 @pytest.mark.asyncio
@@ -539,6 +553,7 @@ async def test_返回尾帧_章节末镜头注入下一章首镜头():
 
     await next_scene.refresh_from_db()
     assert next_scene.metadata["video_reference_media"][0]["source_scene_id"] == scene.id
+    assert "作为本镜头首帧" in next_scene.prompt
 
 
 @pytest.mark.asyncio

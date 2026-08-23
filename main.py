@@ -29,6 +29,7 @@ from utils.enums import AiTaskTypeEnum
 from services.media_library_seed import ensure_media_library_seed_data
 from services.model_config_seed import ensure_model_config_seed_data
 from services.video.reconciler import VideoTaskReconciler
+from services.video.last_frame_backfill import backfill_last_frame_continuity
 from controllers.video import video_controller
 from services.schema_compat import (
     ensure_ai_model_config_schema,
@@ -72,6 +73,7 @@ async def lifespan(_: FastAPI):
     await ensure_usage_record_schema()
     # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
     await ensure_shared_team_columns()
+    await backfill_last_frame_continuity()
     await ensure_media_library_seed_data()
     await ensure_model_config_seed_data()
     if settings.AUTH_ENABLED:

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { VideoReferenceMedia } from '@/types'
 import { buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from './scenePromptReferences'
 
 describe('scenePromptReferences', () => {
@@ -8,6 +9,18 @@ describe('scenePromptReferences', () => {
     const prompt = `使用 ${videoReferenceMentionSyntax(video)} 的动作`
 
     expect(referencedVideoMedia(prompt, [image, video])).toEqual([video])
+  })
+
+  it('OSS 签名 URL 更新后仍通过稳定地址匹配 Prompt', () => {
+    const image: VideoReferenceMedia = {
+      type: 'image',
+      url: 'https://oss.example.com/last.png?signature=renewed',
+      mention_url: 'uploads/1/last.png',
+    }
+    const prompt = `${videoReferenceMentionSyntax(image)} 作为本镜头首帧`
+
+    expect(prompt).toContain(encodeURIComponent('uploads/1/last.png'))
+    expect(referencedVideoMedia(prompt, [image])).toEqual([image])
   })
 
   it('maps provider image numbers to asset nicknames in request order', () => {

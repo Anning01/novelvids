@@ -30,6 +30,7 @@ def test_video_out_resolves_metadata_media(monkeypatch):
         "last_frame_reference": {
             "type": "image",
             "url": "uploads/0/20260820/e71e84865b40-last-frame-2.png",
+            "mention_url": "uploads/0/20260820/e71e84865b40-last-frame-2.png",
             "name": "分镜1生成尾帧.png",
         },
         "reference_media": [
@@ -44,6 +45,9 @@ def test_video_out_resolves_metadata_media(monkeypatch):
     )
     assert out.metadata["last_frame_reference"]["url"] == (
         "public://uploads/0/20260820/e71e84865b40-last-frame-2.png"
+    )
+    assert out.metadata["last_frame_reference"]["mention_url"] == (
+        "uploads/0/20260820/e71e84865b40-last-frame-2.png"
     )
     assert out.metadata["reference_media"][0]["url"] == "public://uploads/0/20260820/r.png"
     assert out.metadata["generation_mode"] == "keyframes"

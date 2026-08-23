@@ -9,9 +9,9 @@ export interface VideoInputAssetImageSource {
   imageUrls: string[]
 }
 
-export function videoReferenceMentionSyntax(reference: Pick<VideoReferenceMedia, 'type' | 'url'>) {
+export function videoReferenceMentionSyntax(reference: Pick<VideoReferenceMedia, 'type' | 'url' | 'mention_url'>) {
   const label = reference.type === 'image' ? '参考图片' : '参考视频'
-  return `@{${label}:${encodeURIComponent(reference.url)}}`
+  return `@{${label}:${encodeURIComponent(reference.mention_url || reference.url)}}`
 }
 
 export function referencedVideoMedia(prompt: string, media: VideoReferenceMedia[]) {
