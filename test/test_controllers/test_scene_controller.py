@@ -162,7 +162,28 @@ async def test_generate_submits_task():
     assert task.request_params["chapter_id"] == chapter.id
     assert task.request_params["supports_json_output"] is True
     assert task.request_params["prompt_language"] == "zh"
+    assert task.request_params["storyboard_strategy"] == "cinematic"
     print(f"    提交任务 id={task.id}, type=storyboard, status=pending, chapter_id={chapter.id}")
+
+
+@pytest.mark.asyncio
+async def test_generate_resolves_legacy_project_storyboard_strategy():
+    """旧项目策略名会转换成稳定 key 后进入任务参数。"""
+    novel, chapter = await _create_chapter()
+    novel.storyboard_strategy = "电影化叙事 1.5"
+    await novel.save(update_fields=["storyboard_strategy", "updated_at"])
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.storyboard.value,
+        name="test-storyboard",
+        base_url="https://mock.api.com/v1",
+        api_key="sk-test",
+        model="mock-model",
+        is_active=True,
+    )
+
+    task = await scene_controller.generate(chapter.id)
+
+    assert task.request_params["storyboard_strategy"] == "cinematic"
 
 
 @pytest.mark.asyncio

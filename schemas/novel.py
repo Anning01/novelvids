@@ -80,6 +80,8 @@ class NovelMetaOut(NovelProperties, BaseResponse):
     id: int
     tags: Optional[list[str]] = Field(None, description="项目标签")
     style_key: Optional[str] = Field(None, description="视觉风格 key", max_length=64)
+    storyboard_strategy: Optional[str] = Field(None, description="分镜策略 key", max_length=120)
+    storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")
     content_length: int = Field(0, description="书稿正文字符数（校验拆分质量用）")
 
     @model_validator(mode="after")

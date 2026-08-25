@@ -5,7 +5,13 @@ import {
   createProjectAnalysisDraft,
   normalizeTags,
   projectPatchFromDraft,
+  resolveStoryboardStrategy,
 } from './projectAnalysisEditor'
+
+const strategies = [
+  { key: 'cinematic', name: '电影感叙事', description: '电影感规则', is_default: true },
+  { key: 'narration', name: '旁白叙事', description: '旁白规则', is_default: false },
+]
 
 describe('project analysis editor', () => {
   it('uses persisted empty values instead of reviving AI fallback content', () => {
@@ -47,6 +53,18 @@ describe('project analysis editor', () => {
       storyboard_strategy: '快节奏',
       storyboard_setting: '分镜说明',
     })
+  })
+
+  it('migrates the legacy cinematic label and uses canonical strategy metadata', () => {
+    const draft = createProjectAnalysisDraft({
+      name: '项目',
+      storyboard_strategy: '电影化叙事 1.5',
+      storyboard_setting: '旧说明',
+    }, null, strategies)
+
+    expect(draft.storyboardStrategy).toBe('cinematic')
+    expect(draft.storyboardSetting).toBe('电影感规则')
+    expect(resolveStoryboardStrategy('旁白叙事', strategies)?.key).toBe('narration')
   })
 
   it('detects chapter title and content changes', () => {

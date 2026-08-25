@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from prompts.storyboard import (
+    STORYBOARD_LANGUAGE_INSTRUCTIONS,
+    STORYBOARD_SYSTEM_PROMPT,
     build_storyboard_messages,
     entity_reference_names,
     format_storyboard_prompt,
@@ -16,6 +18,7 @@ from schemas.scene import SceneEntity, SoraScenePromptConfig, Storyboard
 from services.llm.json_output import JsonCompletionTruncatedError
 from services.storyboard.chunking import NarrativeChunker
 from services.storyboard.generator import generate_storyboard
+from services.storyboard.strategies import storyboard_strategy_factory
 
 
 def _entity() -> SceneEntity:
@@ -73,6 +76,28 @@ def test_storyboard_messages_render_language_entities_and_narrative():
     assert "保持动作、视线、轴线、人物位置和时空关系的连续性" in messages[0]["content"]
     assert "后续视频生成会按镜头分别提交" in messages[0]["content"]
     assert "每个时间段都必须重新写明动作主体" in messages[0]["content"]
+    assert messages[0]["content"] == STORYBOARD_SYSTEM_PROMPT.format(
+        language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS["zh"],
+    )
+    assert "当前分镜策略" not in messages[0]["content"]
+    assert "无旁白" not in messages[0]["content"]
+
+
+def test_storyboard_strategy_factory_supports_legacy_name_and_safe_fallback():
+    assert storyboard_strategy_factory.resolve("电影化叙事 1.5").key == "cinematic"
+    assert storyboard_strategy_factory.resolve("旁白叙事").key == "narration"
+    assert storyboard_strategy_factory.resolve("unknown-old-value").key == "cinematic"
+
+
+def test_narration_strategy_requires_non_overlapping_timed_voice_tracks():
+    strategy = storyboard_strategy_factory.resolve("narration")
+    messages = build_storyboard_messages("章节正文", [_entity()], strategy=strategy)
+    system_prompt = messages[0]["content"]
+
+    assert "当前分镜策略：旁白叙事" in system_prompt
+    assert "禁止与 `dialogue` 的任何时间段重叠" in system_prompt
+    assert "同一时间只能有一个可辨识的人声主体" in system_prompt
+    assert "旁白不是每个镜头必需" in system_prompt
 
 
 @pytest.mark.asyncio
@@ -174,6 +199,31 @@ def test_professional_video_prompt_excludes_storyboard_planning_instructions():
     assert "每个时间段都必须重新写明动作主体" in schema["actions"]["description"]
     assert "与相邻镜头的衔接意图" in schema["transition"]["description"]
     assert "不得只写" in schema["transition"]["description"]
+
+
+def test_narration_strategy_renders_narration_and_specific_prohibitions():
+    shot = _shot(1)
+    shot.narration = ["0.0s-1.5s: 旁白（克制）：夜色吞没了最后一盏灯。"]
+    shot.dialogue = ["2.0s-3.0s: @{郊区小楼}（低声）：有人吗？"]
+
+    prompt = format_storyboard_prompt(
+        shot,
+        entities=[_entity()],
+        strategy=storyboard_strategy_factory.resolve("narration"),
+    )
+
+    assert "【旁白 / 内心 OS】" in prompt
+    assert shot.narration[0] in prompt
+    assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in prompt
+
+
+def test_cinematic_strategy_preserves_the_original_video_prohibitions():
+    prompt = format_storyboard_prompt(_shot(1), entities=[_entity()])
+
+    assert "无字幕、无水印、无 LOGO、无 BGM，仅保留环境音效与人物台词。" in prompt
+    assert "无旁白" not in prompt
+    assert "无人物内心 OS" not in prompt
+    assert "【旁白 / 内心 OS】" not in prompt
 
 
 def test_entity_reference_names_matches_braced_syntax_and_aliases():

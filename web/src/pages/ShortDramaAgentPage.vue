@@ -20,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppBadge from '@/components/AppBadge.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
@@ -29,6 +30,7 @@ import {
   createProjectAnalysisDraft,
   normalizeTags,
   projectPatchFromDraft,
+  resolveStoryboardStrategy,
 } from '@/shared/projectAnalysisEditor'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { usePagedChapters } from '@/shared/pagedChapters'
@@ -37,7 +39,7 @@ import type {
   ChapterEditDraft,
   ProjectAnalysisDraft,
 } from '@/shared/projectAnalysisEditor'
-import type { AiTask, Asset, Chapter, Novel } from '@/types'
+import type { AiTask, Asset, Chapter, Novel, StoryboardStrategy } from '@/types'
 
 interface AgentProjectMeta {
   projectId?: number
@@ -108,6 +110,7 @@ const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
 const projectDraft = ref<ProjectAnalysisDraft | null>(null)
+const storyboardStrategies = ref<StoryboardStrategy[]>([])
 const chapterDrafts = ref<Record<number, ChapterEditDraft>>({})
 const episodeTabs = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
@@ -119,7 +122,16 @@ const analysisResult = computed<ProjectAnalysisResult | null>(() => {
 const projectView = computed(() => createProjectAnalysisDraft(
   novel.value ?? { name: project.value.name },
   analysisResult.value,
+  storyboardStrategies.value,
 ))
+const projectStrategyView = computed(() => resolveStoryboardStrategy(
+  projectView.value.storyboardStrategy,
+  storyboardStrategies.value,
+))
+const storyboardStrategyOptions = computed(() => storyboardStrategies.value.map(strategy => ({
+  value: strategy.key,
+  label: strategy.name,
+})))
 const displayedProjectName = computed(() => editing.value && projectDraft.value
   ? projectDraft.value.name
   : project.value.name)
@@ -184,6 +196,15 @@ async function loadProject(): Promise<boolean> {
   } catch (error) {
     notice.error((error as Error).message)
     return false
+  }
+}
+
+async function loadStoryboardStrategies() {
+  try {
+    const response = await api.storyboardStrategies()
+    storyboardStrategies.value = response.data
+  } catch (error) {
+    notice.error((error as Error).message)
   }
 }
 
@@ -295,10 +316,26 @@ function ensureChapterDraft(chapter: Chapter) {
 
 function beginEditing() {
   if (!novel.value || !analysisResult.value) return
-  projectDraft.value = createProjectAnalysisDraft(novel.value, analysisResult.value)
+  projectDraft.value = createProjectAnalysisDraft(
+    novel.value,
+    analysisResult.value,
+    storyboardStrategies.value,
+  )
   chapterDrafts.value = {}
   if (selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
   editing.value = true
+}
+
+function selectStoryboardStrategy(value: string) {
+  if (!projectDraft.value) return
+  projectDraft.value.storyboardStrategy = value
+  const selected = resolveStoryboardStrategy(
+    projectDraft.value.storyboardStrategy,
+    storyboardStrategies.value,
+  )
+  if (!selected) return
+  projectDraft.value.storyboardStrategy = selected.key
+  projectDraft.value.storyboardSetting = selected.description
 }
 
 function cancelEditing() {
@@ -389,7 +426,10 @@ function observeEpisodeSentinel() {
 }
 onMounted(async () => {
   observeEpisodeSentinel()
-  const projectReady = await loadProject()
+  const [, projectReady] = await Promise.all([
+    loadStoryboardStrategies(),
+    loadProject(),
+  ])
   if (projectReady) await loadAnalysis()
   observeEpisodeSentinel()
 })
@@ -487,10 +527,18 @@ onBeforeUnmount(() => {
             <div>
               <small>分镜策略</small>
               <template v-if="editing && projectDraft">
-                <input v-model="projectDraft.storyboardStrategy" aria-label="分镜策略" maxlength="120" />
-                <textarea v-model="projectDraft.storyboardSetting" aria-label="分镜策略说明" rows="3" />
+                <AppSelect
+                  class="storyboard-strategy-select"
+                  :model-value="projectDraft.storyboardStrategy"
+                  ariaLabel="分镜策略"
+                  menu-label="分镜策略"
+                  :menu-width="230"
+                  :options="storyboardStrategyOptions"
+                  @update:model-value="selectStoryboardStrategy"
+                />
+                <p>{{ projectDraft.storyboardSetting }}</p>
               </template>
-              <template v-else><strong>{{ projectView.storyboardStrategy }}</strong><p>{{ projectView.storyboardSetting }}</p></template>
+              <template v-else><strong>{{ projectStrategyView?.name || projectView.storyboardStrategy }}</strong><p>{{ projectStrategyView?.description || projectView.storyboardSetting }}</p></template>
             </div>
           </article>
         </div>
@@ -608,6 +656,7 @@ onBeforeUnmount(() => {
 .analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid #dfe1ea; border-radius: 9px; outline: 0; background: #fbfbfe; box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
 .analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: #7779ef; background: #fff; box-shadow: 0 0 0 3px rgb(91 92 246 / 10%); }
 .tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: #454a59; font-size: 11px; }
+.storyboard-strategy-select { width: min(260px, 100%); }
 .profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: #656b7b; font: inherit; font-size: 10px; line-height: 1.6; }
 .outline-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 20px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .outline-card > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }

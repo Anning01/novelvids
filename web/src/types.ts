@@ -35,10 +35,13 @@ export interface NovelMeta {
   tags?: string[] | null
   style_key?: string | null
   video_model_config_id?: number | null
+  storyboard_strategy?: string | null
+  storyboard_setting?: string | null
   content_length: number
   created_at: string
   updated_at: string
 }
+export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
 export interface Novel { id: number; name: string; author?: string; style_key?: string | null; video_model_config_id?: number | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }

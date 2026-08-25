@@ -110,6 +110,14 @@ class SoraScenePromptConfig(BaseModel):
         description="【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
     )
 
+    narration: list[str] = Field(
+        default_factory=list,
+        description=(
+            "镜头内旁白与人物内心 OS；每项必须包含精确开始/结束时间、声音主体、"
+            "语气和内容。是否允许使用及与对白的时间关系由当前分镜策略决定；"
+            "没有时返回空数组"
+        ),
+    )
     dialogue: list[str] = Field(
         default_factory=list,
         description="镜头内人物台词；每项包含人物、语气和原文，无台词时返回空数组",
@@ -142,6 +150,15 @@ class SoraScenePromptConfig(BaseModel):
 class Storyboard(BaseModel):
     """完整的故事板，包含多个分镜"""
     shots: list[SoraScenePromptConfig]
+
+
+class StoryboardStrategyOut(BaseModel):
+    """Frontend-selectable storyboard strategy metadata."""
+
+    key: str
+    name: str
+    description: str
+    is_default: bool = False
 
 
 # --- 核心业务属性 (Internal Mixins) ---

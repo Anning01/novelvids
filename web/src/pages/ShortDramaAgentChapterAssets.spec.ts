@@ -23,6 +23,7 @@ vi.mock('@/api', () => ({
     chaptersPage: vi.fn(),
     chapter: vi.fn(),
     assets: vi.fn(),
+    storyboardStrategies: vi.fn(),
   },
 }))
 
@@ -52,9 +53,19 @@ beforeEach(() => {
       description: 'Agent 模式 · 9:16 · 720p · 写实通用',
       total_chapters: 1,
       content_length: 0,
+      storyboard_strategy: 'narration',
+      storyboard_setting: '旁白规则',
       created_at: '2026-08-06T00:00:00.000Z',
       updated_at: '2026-08-06T00:00:00.000Z',
     },
+  })
+  vi.mocked(api.storyboardStrategies).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: [
+      { key: 'cinematic', name: '电影感叙事', description: '原电影感规则', is_default: true },
+      { key: 'narration', name: '旁白叙事', description: '旁白规则', is_default: false },
+    ],
   })
   vi.mocked(api.novelAnalysis).mockResolvedValue({
     code: 0,
@@ -128,4 +139,9 @@ it('shows extracted person assets in the selected chapter footer instead of stal
   expect(footer.text()).toContain('宫平')
   expect(footer.text()).not.toContain('旧人物')
   expect(api.assets).toHaveBeenCalledWith(9, 1, 100, 2162)
+
+  const editButton = wrapper.findAll('button').find(button => button.text().includes('编辑内容'))
+  expect(editButton).toBeTruthy()
+  await editButton?.trigger('click')
+  expect(wrapper.get('button[aria-label="分镜策略"]').text()).toContain('旁白叙事')
 })

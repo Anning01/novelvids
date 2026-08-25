@@ -1,10 +1,10 @@
-import type { Chapter, Novel } from '@/types'
+import type { Chapter, Novel, StoryboardStrategy } from '@/types'
 import { stripChapterOrdinal } from './chapterTitle'
 
 export const DEFAULT_PROJECT_TYPE = 'AI 精品短剧'
 export const DEFAULT_PROJECT_SETTING = '自动理解完整剧本，规划分集节奏、人物关系与视觉生产流程。'
-export const DEFAULT_STORYBOARD_STRATEGY = '电影化叙事 1.5'
-export const DEFAULT_STORYBOARD_SETTING = '强调连续动作、景别变化与情绪转折，适配竖屏短剧节奏。'
+export const DEFAULT_STORYBOARD_STRATEGY = 'cinematic'
+export const LEGACY_CINEMATIC_STORYBOARD_STRATEGIES = ['电影化叙事 1.5', '电影化叙事', '电影感叙事']
 
 export interface AnalysisSummary {
   book_types?: string[]
@@ -50,17 +50,32 @@ export function normalizeTags(value: string): string[] {
 export function createProjectAnalysisDraft(
   novel: EditableNovel,
   analysis?: AnalysisSummary | null,
+  strategies: StoryboardStrategy[] = [],
 ): ProjectAnalysisDraft {
   const tags = novel.tags ?? analysis?.book_types ?? []
+  const strategy = resolveStoryboardStrategy(novel.storyboard_strategy, strategies)
   return {
     name: novel.name,
     tagsText: tags.join('，'),
     storyOutline: novel.story_outline ?? analysis?.story_outline ?? '',
     projectType: novel.project_type ?? DEFAULT_PROJECT_TYPE,
     projectSetting: novel.project_setting ?? DEFAULT_PROJECT_SETTING,
-    storyboardStrategy: novel.storyboard_strategy ?? DEFAULT_STORYBOARD_STRATEGY,
-    storyboardSetting: novel.storyboard_setting ?? DEFAULT_STORYBOARD_SETTING,
+    storyboardStrategy: strategy?.key ?? novel.storyboard_strategy?.trim() ?? DEFAULT_STORYBOARD_STRATEGY,
+    storyboardSetting: strategy?.description ?? novel.storyboard_setting ?? '',
   }
+}
+
+export function resolveStoryboardStrategy(
+  value: string | null | undefined,
+  strategies: StoryboardStrategy[],
+): StoryboardStrategy | undefined {
+  const normalized = value?.trim() || DEFAULT_STORYBOARD_STRATEGY
+  const lookup = LEGACY_CINEMATIC_STORYBOARD_STRATEGIES.includes(normalized)
+    ? DEFAULT_STORYBOARD_STRATEGY
+    : normalized
+  return strategies.find(strategy => strategy.key === lookup || strategy.name === lookup)
+    ?? strategies.find(strategy => strategy.is_default)
+    ?? strategies.find(strategy => strategy.key === DEFAULT_STORYBOARD_STRATEGY)
 }
 
 export function projectPatchFromDraft(draft: ProjectAnalysisDraft): Partial<Novel> {

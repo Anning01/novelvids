@@ -6,6 +6,10 @@ from collections import defaultdict
 from collections.abc import Sequence
 from typing import Protocol
 
+from prompts.storyboard_strategies import (
+    CINEMATIC_STORYBOARD_STRATEGY,
+    StoryboardStrategyPrompt,
+)
 from utils.prompt_language import normalize_prompt_language
 
 
@@ -38,6 +42,7 @@ class StoryboardShot(Protocol):
     grade_and_palette: str
     camera_movement: str
     sound_design: str
+    narration: list[str]
     dialogue: list[str]
     transition: str
     allowed_effects: list[str]
@@ -122,10 +127,6 @@ STORYBOARD_CONTINUATION_TASK_MESSAGE = """【分镜续写任务】
 <previous_shot>{previous_shot}</previous_shot>"""
 
 
-PROFESSIONAL_PROMPT_PROHIBITIONS = (
-    "无字幕、无水印、无 LOGO、无 BGM，仅保留环境音效与人物台词。"
-)
-
 _REFERENCE_TEXT_FIELDS = (
     "description",
     "shot_size_and_camera",
@@ -145,6 +146,7 @@ _REFERENCE_TEXT_FIELDS = (
 _REFERENCE_LIST_FIELDS = (
     "effect_restrictions",
     "actions",
+    "narration",
     "dialogue",
     "allowed_effects",
 )
@@ -316,6 +318,7 @@ def build_storyboard_messages(
     batch_count: int = 1,
     next_sequence: int = 1,
     previous_shot: StoryboardShot | None = None,
+    strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
 ) -> list[dict[str, str]]:
     """Build stable rules and request facts as separate chat messages."""
     language = normalize_prompt_language(prompt_language)
@@ -339,7 +342,7 @@ def build_storyboard_messages(
             "role": "system",
             "content": STORYBOARD_SYSTEM_PROMPT.format(
                 language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS[language],
-            ),
+            ) + (f"\n\n{strategy.generation_rules}" if strategy.generation_rules else ""),
         },
         {
             "role": "user",
@@ -449,20 +452,26 @@ def format_storyboard_prompt(
     prompt_language: str = "zh",
     *,
     entities: Sequence[StoryboardEntity] = (),
+    strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
 ) -> str:
     """Render one structured shot as the stable professional video prompt."""
     normalize_prompt_language(prompt_language)
     duration_token = _duration_token(shot.duration)
     dialogue = "\n".join(shot.dialogue)
     shot_body_parts = [shot.visual_prose, *shot.actions]
+    narration = "\n".join(shot.narration)
+    if narration:
+        shot_body_parts.extend(("【旁白 / 内心 OS】", narration))
     if dialogue:
+        if narration:
+            shot_body_parts.append("【人物台词】")
         shot_body_parts.append(dialogue)
     shot_body_parts.append(f"环境音：{shot.sound_design}")
 
     prompt = "\n".join(
         (
             "【禁止项】",
-            PROFESSIONAL_PROMPT_PROHIBITIONS,
+            strategy.prohibitions,
             "",
             "【风格定调】",
             f"视觉风格：{shot.visual_style}",

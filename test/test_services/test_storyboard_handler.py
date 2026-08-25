@@ -121,3 +121,32 @@ async def test_save_scenes_normalizes_plain_person_names_before_persisting():
     assert scene.prompt_params["spatial_relationships"] == "@{李七夜}位于画面中央。"
     assert scene.prompt_params["dialogue"] == ["@{李七夜}（惊呼）：我的身体！"]
     assert "角色参考：@{李七夜}" in scene.prompt
+
+
+@pytest.mark.asyncio
+async def test_save_scenes_persists_narration_strategy_and_voice_track():
+    novel = await Novel.create(name="旁白分镜持久化测试")
+    chapter = await Chapter.create(
+        novel_id=novel.id,
+        number=1,
+        name="第一章",
+        content="正文",
+    )
+    shot = _shot(1)
+    shot.narration = ["0.0s-1.5s: 旁白（克制）：风暴正在逼近。"]
+    shot.dialogue = ["2.0s-3.0s: @{张三}（低声）：快走。"]
+
+    scenes = await StoryboardTaskHandler()._save_scenes(
+        chapter_id=chapter.id,
+        storyboard=Storyboard(shots=[shot]),
+        api_metadata={},
+        request_duration=0.0,
+        storyboard_strategy="narration",
+    )
+
+    scene = scenes[0]
+    assert scene.prompt_params["narration"] == shot.narration
+    assert scene.metadata["storyboard_strategy"] == "narration"
+    assert scene.metadata["storyboard_strategy_name"] == "旁白叙事"
+    assert "【旁白 / 内心 OS】" in scene.prompt
+    assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in scene.prompt
