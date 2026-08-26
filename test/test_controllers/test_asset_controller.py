@@ -248,6 +248,26 @@ async def test_列表查询_无过滤():
 
 
 @pytest.mark.asyncio
+async def test_列表查询_保留角色音色绑定元数据():
+    novel = await Novel.create(name="Voice List Novel", author="Author")
+    await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="总工程师",
+        metadata={"voice": "沉稳男声", "voice_reference_id": 19},
+    )
+
+    from schemas.asset import AssetBriefOut
+    params = QueryParams(page=1, page_size=10, filters={})
+    result = await asset_controller.list(params, AssetBriefOut)
+
+    assert result["items"][0].metadata == {
+        "voice": "沉稳男声",
+        "voice_reference_id": 19,
+    }
+
+
+@pytest.mark.asyncio
 async def test_列表查询_无效chapter_id被忽略():
     """传入无效 chapter_id（非数字），应被忽略，正常返回全部结果。"""
     novel = await Novel.create(name="Filter Novel", author="Author")

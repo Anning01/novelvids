@@ -654,6 +654,17 @@ async def test_视频模型必须使用受支持类型和火山方舟协议():
     ))
     assert minimax.video_model_type == "minimax_h3"
 
+    wan = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.video.value,
+        name="wan3",
+        base_url="https://workspace.cn-beijing.maas.aliyuncs.com",
+        api_key="key",
+        model="wan3.0-video",
+        api_protocol="dashscope",
+        video_model_type="wan_3",
+    ))
+    assert wan.video_model_type == "wan_3"
+
     with pytest.raises(HTTPException, match="MiniMax 官方"):
         await ai_model_config_controller.create(AiModelConfigCreate(
             task_type=AiTaskTypeEnum.video.value,
@@ -676,9 +687,21 @@ async def test_视频模型必须使用受支持类型和火山方舟协议():
             video_model_type="seedance_2_5",
         ))
 
+    with pytest.raises(HTTPException, match="DashScope"):
+        await ai_model_config_controller.create(AiModelConfigCreate(
+            task_type=AiTaskTypeEnum.video.value,
+            name="wan-wrong-protocol",
+            base_url="https://workspace.cn-beijing.maas.aliyuncs.com",
+            api_key="key",
+            model="wan3.0-video",
+            api_protocol="volcengine_ark",
+            video_model_type="wan_3",
+        ))
+
 
 @pytest.mark.asyncio
 async def test_list_generation_capabilities_returns_all_types():
     capabilities = await ai_model_config_controller.list_generation_capabilities()
     assert "1K" in capabilities["image"]["seedream_5_pro"]
     assert "720p" in capabilities["video"]["seedance_2"]
+    assert capabilities["video"]["wan_3"] == ["480P", "720P", "1080P"]

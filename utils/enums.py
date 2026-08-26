@@ -132,6 +132,7 @@ class VideoModelTypeEnum(NicknameIntEnum):
     seedance = 3, "Seedance/即梦"
     veo3 = 4, "Veo3"
     minimax = 5, "MiniMax"
+    wan = 6, "Wan/万相"
 
 
 @enum_description
@@ -143,6 +144,7 @@ class VideoGenerationModelTypeEnum(NicknameStrEnum):
     seedance_2_mini = "seedance_2_mini", "Doubao Seedance 2.0 Mini"
     seedance_2_5 = "seedance_2_5", "Doubao Seedance 2.5"
     minimax_h3 = "minimax_h3", "MiniMax H3"
+    wan_3 = "wan_3", "Wan 3.0"
 
 
 @enum_description

@@ -107,6 +107,55 @@ it('requests only assets associated with the selected chapter when chapterId is 
   )
 })
 
+it('loads newest uploaded voices first so refresh keeps the new item visible', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  await api.audioReferences(1)
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/media-library/audio-references?page=1&page_size=24&sort=-id',
+    { headers: { 'Content-Type': 'application/json' } },
+  )
+})
+
+it('scopes audio library requests to the current project', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  await api.audioReferences(1, '', {}, 17)
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/media-library/audio-references?page=1&page_size=24&sort=-id&novel_id=17',
+    { headers: { 'Content-Type': 'application/json' } },
+  )
+})
+
+it('creates a trimmed audio reference copy inside the current project', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 0,
+    message: 'ok',
+    data: {},
+  }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  await api.trimAudioReference(9, 2.5, 14, 17)
+
+  expect(fetchMock).toHaveBeenCalledWith('/api/media-library/audio-references/9/trim', {
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    body: JSON.stringify({ start: 2.5, end: 14, novel_id: 17 }),
+  })
+})
+
 it('preserves max context characters in configuration create and update requests', async () => {
   const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({
     code: 0,

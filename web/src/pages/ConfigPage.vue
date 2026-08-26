@@ -78,6 +78,7 @@ const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; m
   seedance_2_mini: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-mini-260615', protocol: 'volcengine_ark' },
   seedance_2_5: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-5-260817', protocol: 'volcengine_ark' },
   minimax_h3: { baseUrl: 'https://api.minimaxi.com', model: 'MiniMax-H3', protocol: 'minimax' },
+  wan_3: { baseUrl: 'https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com', model: 'wan3.0-video', protocol: 'dashscope' },
 }
 
 const configs = ref<AiModelConfig[]>([])
@@ -167,6 +168,7 @@ function taskLabel(value: number) {
 
 function protocolLabel(value: ImageApiProtocol) {
   if (value === 'minimax') return 'MiniMax 官方'
+  if (value === 'dashscope') return '阿里云百炼 DashScope'
   if (value === 'volcengine_ark') return '火山方舟 Seedream'
   if (value === 'openrouter_compatible') return 'OpenRouter 兼容'
   return 'OpenAI 兼容'
@@ -177,9 +179,15 @@ function videoProtocolFor(modelType: VideoGenerationModelType | ''): ImageApiPro
 }
 
 const selectedVideoProtocolLabel = computed(() => protocolLabel(videoProtocolFor(form.value.video_model_type)))
-const selectedVideoProtocolHint = computed(() => form.value.video_model_type === 'minimax_h3'
-  ? '提交到 /v2/video_generation，并从 /v2/query/video_generation/{task_id} 查询结果。'
-  : '提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。')
+const selectedVideoProtocolHint = computed(() => {
+  if (form.value.video_model_type === 'minimax_h3') {
+    return '提交到 /v2/video_generation，并从 /v2/query/video_generation/{task_id} 查询结果。'
+  }
+  if (form.value.video_model_type === 'wan_3') {
+    return '请将 YOUR_WORKSPACE_ID 替换为百炼业务空间 ID；提交到 video-synthesis，并从 /api/v1/tasks/{task_id} 查询。'
+  }
+  return '提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。'
+})
 
 function providerHost(baseUrl?: string) {
   if (!baseUrl) return '未设置接口'

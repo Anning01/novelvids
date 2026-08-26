@@ -244,4 +244,5 @@ async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
     assert "novel-9-" in key
     assert data == b"\x89PNG fake"
     assert content_type == "image/png"
-    assert url == f"https://cdn.example.com/{key}"
+    # OSS 媒体持久化对象键，响应序列化时再签发临时访问 URL。
+    assert url == key

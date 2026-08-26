@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -85,10 +86,11 @@ class SeedanceGenerator(BaseVideoGenerator):
             last_frame_url=last_frame_url,
             reference_images=kwargs.get("reference_images") or [],
             reference_videos=kwargs.get("reference_videos") or [],
+            reference_audios=kwargs.get("reference_audios") or [],
         )
         logger.info(
-            "seedance_prompt_prepared subjects=%d reference_images=%d prompt_length=%d",
-            len(subjects or []), prepared.reference_image_count, len(prepared.prompt),
+            "seedance_prompt_prepared subjects=%d reference_images=%d reference_audios=%d prompt_length=%d",
+            len(subjects or []), prepared.reference_image_count, prepared.reference_audio_count, len(prepared.prompt),
         )
 
         payload: dict[str, Any] = {
@@ -103,17 +105,26 @@ class SeedanceGenerator(BaseVideoGenerator):
         }
         if "mov" in capabilities.output_formats:
             payload["output_format"] = output_format
+        if (
+            capabilities.max_request_size_mb is not None
+            and len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            > capabilities.max_request_size_mb * 1024 * 1024
+        ):
+            raise SeedanceGenerationError(
+                f"Seedance 请求体不能超过 {capabilities.max_request_size_mb}MB，请将大文件上传 OSS 后使用公网 URL"
+            )
 
         url = f"{self.config.base_url.rstrip('/')}/contents/generations/tasks"
         safe_url = _safe_endpoint(url)
         logger.info(
-            "seedance_outbound endpoint=%s model=%s mode=%s images=%d videos=%d duration=%s "
+            "seedance_outbound endpoint=%s model=%s mode=%s images=%d videos=%d audios=%d duration=%s "
             "resolution=%s ratio=%s format=%s audio=%s return_last_frame=%s",
             safe_url,
             self.config.model,
             generation_mode,
             prepared.reference_image_count,
             prepared.reference_video_count,
+            prepared.reference_audio_count,
             payload["duration"],
             resolution,
             aspect_ratio,

@@ -19,6 +19,7 @@ export interface ProjectAnalysisDraft {
   projectSetting: string
   storyboardStrategy: string
   storyboardSetting: string
+  narratorAudioReferenceId?: number | null
 }
 
 export interface ChapterEditDraft {
@@ -36,6 +37,7 @@ type EditableNovel = Pick<
   | 'project_setting'
   | 'storyboard_strategy'
   | 'storyboard_setting'
+  | 'narrator_audio_reference_id'
 >
 
 export function normalizeTags(value: string): string[] {
@@ -62,6 +64,7 @@ export function createProjectAnalysisDraft(
     projectSetting: novel.project_setting ?? DEFAULT_PROJECT_SETTING,
     storyboardStrategy: strategy?.key ?? novel.storyboard_strategy?.trim() ?? DEFAULT_STORYBOARD_STRATEGY,
     storyboardSetting: strategy?.description ?? novel.storyboard_setting ?? '',
+    narratorAudioReferenceId: novel.narrator_audio_reference_id ?? null,
   }
 }
 
@@ -87,6 +90,9 @@ export function projectPatchFromDraft(draft: ProjectAnalysisDraft): Partial<Nove
     project_setting: draft.projectSetting.trim(),
     storyboard_strategy: draft.storyboardStrategy.trim(),
     storyboard_setting: draft.storyboardSetting.trim(),
+    ...('narratorAudioReferenceId' in draft
+      ? { narrator_audio_reference_id: draft.narratorAudioReferenceId ?? null }
+      : {}),
   }
 }
 

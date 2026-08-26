@@ -87,3 +87,14 @@ def test_reference_video_probe_rejects_invalid_media(probe, message):
 def test_seedance_2_5_accepts_longer_reference_video_than_2_0():
     metadata = _validate_probe("video", _video_probe(duration=25), 1024, capabilities_for("seedance_2_5"))
     assert metadata["duration"] == 25
+
+
+def test_wan3_uses_different_side_limits_for_images_and_videos():
+    image_probe = _video_probe(duration=1)
+    image_probe["streams"][0].update(width=5000, height=1000)
+    assert _validate_probe("image", image_probe, 1024, capabilities_for("wan_3"))["width"] == 5000
+
+    video_probe = _video_probe(duration=1)
+    video_probe["streams"][0].update(width=5000, height=1000)
+    with pytest.raises(HTTPException, match="240-4096px"):
+        _validate_probe("video", video_probe, 1024, capabilities_for("wan_3"))

@@ -10,6 +10,7 @@ from models.novel import Novel
 from models.chapter import Chapter
 from models.scene import Scene
 from models.asset import Asset
+from models.audio_reference import AudioReference
 from models.asset_variant import AssetVariant
 from models.usage_record import ModelUsageRecord
 from models.video import Video
@@ -113,6 +114,35 @@ async def test_生成_minimax_h3_视频记录正确供应商类型():
 
 
 @pytest.mark.asyncio
+async def test_wan3_输入参考视频与输出视频总时长不能超过30秒():
+    reference_url = "https://cdn.example.com/reference.mp4"
+    mention = reference_mention_syntax("video", reference_url)
+    scene, config = await _create_scene_with_config(
+        prompt=f"{mention} 作为动作参考",
+        model_name="wan3",
+        video_model_type="wan_3",
+        api_protocol="dashscope",
+        base_url="https://workspace.cn-beijing.maas.aliyuncs.com",
+    )
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        resolution="1080P",
+        aspect_ratio="adaptive",
+        duration=21,
+        reference_media=[VideoReferenceMedia(
+            type="video",
+            url=reference_url,
+            name="动作参考.mp4",
+            duration=10,
+        )],
+    )
+
+    with pytest.raises(HTTPException, match="输入参考视频与输出视频总时长不超过 30 秒"):
+        await video_controller.generate(req)
+
+
+@pytest.mark.asyncio
 async def test_生成视频_供应商提交失败时持久化异常记录():
     """供应商同步拒绝请求时，失败详情仍能在预览区与状态轨道中恢复。"""
     scene, config = await _create_scene_with_config()
@@ -159,6 +189,41 @@ async def test_生成视频_传递并记录参考图片和视频():
     assert kwargs["reference_images"] == ["https://cdn.example.com/look.png"]
     assert kwargs["reference_videos"] == ["https://cdn.example.com/motion.mp4"]
     assert video.metadata["reference_media"][1]["duration"] == 8.0
+
+
+@pytest.mark.asyncio
+async def test_wan3_本地参考视频交给适配器临时上传而不依赖媒体公网地址():
+    local_url = "/media/video-references/motion.mp4"
+    scene, config = await _create_scene_with_config(
+        prompt=f"使用 {reference_mention_syntax('video', local_url)} 作为动作参考",
+        model_name="wan3",
+        video_model_type="wan_3",
+        api_protocol="dashscope",
+        base_url="https://workspace.cn-beijing.maas.aliyuncs.com",
+    )
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        reference_media=[VideoReferenceMedia(
+            type="video",
+            url=local_url,
+            duration=8,
+            width=1280,
+            height=720,
+        )],
+    )
+
+    with (
+        patch("controllers.video.verify_local_reference", new_callable=AsyncMock) as verify,
+        patch("controllers.video.get_generator") as mock_factory,
+    ):
+        verify.return_value = {"duration": 8.0}
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "wan-local-video"
+        mock_factory.return_value = mock_gen
+        await video_controller.generate(req)
+
+    assert mock_gen.submit.call_args.kwargs["reference_videos"] == [local_url]
 
 
 @pytest.mark.asyncio
@@ -281,6 +346,114 @@ async def test_生成视频_解析资产引用():
 
     assert video.external_task_id == "ext-task-002"
     print(f"    解析资产引用: subjects={[s['name'] for s in subjects]}")
+
+
+@pytest.mark.asyncio
+async def test_生成视频_提交角色与旁白音频但不在后端改写prompt():
+    character_voice = await AudioReference.create(
+        nickname="张三音色", gender="男",
+        audio_url="https://example.com/zhangsan.mp3", avatar_url="",
+        asset_id="voice-zhangsan",
+    )
+    narrator_voice = await AudioReference.create(
+        nickname="旁白音色", gender="女",
+        audio_url="https://example.com/narrator.mp3", avatar_url="",
+        asset_id="voice-narrator",
+    )
+    novel = await Novel.create(
+        name="Voice Resolve Novel", author="Author",
+        narrator_audio_reference_id=narrator_voice.id,
+        storyboard_strategy="narration",
+    )
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="张三",
+        aliases=[],
+        metadata={"voice_reference_id": character_voice.id, "voice": "张三音色"},
+    )
+    scene = await Scene.create(
+        chapter=chapter, sequence=1,
+        prompt="@张三（低声）：天亮了。",
+        prompt_params={"narration": ["0.0s-1.0s: 旁白（克制）：清晨降临。"]},
+        duration=6.0,
+    )
+    await scene.assets.add(asset)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="seedance-2-voice",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="sk-test",
+        model="mock-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=True,
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "voice-task"
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(VideoGenerateRequest(
+            scene_id=scene.id,
+            model_config_id=config.id,
+        ))
+
+    kwargs = mock_gen.submit.call_args.kwargs
+    assert kwargs["reference_audios"] == [
+        "asset://voice-narrator", "asset://voice-zhangsan",
+    ]
+    assert kwargs["prompt"] == "@张三（低声）：天亮了。"
+    assert "【音色参考】" not in kwargs["prompt"]
+    assert [item["reference_id"] for item in video.metadata["voice_references"]] == [
+        narrator_voice.id, character_voice.id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_生成视频_关闭声音时不提交音色参考():
+    voice = await AudioReference.create(
+        nickname="静音测试音色", gender="男",
+        audio_url="https://example.com/voice.mp3", avatar_url="",
+        asset_id="voice-muted",
+    )
+    novel = await Novel.create(name="Muted Voice Novel", author="Author")
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="张三",
+        metadata={"voice_reference_id": voice.id},
+    )
+    scene = await Scene.create(
+        chapter=chapter, sequence=1, prompt="@张三说话。", duration=6.0,
+    )
+    await scene.assets.add(asset)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="seedance-muted-voice",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="sk-test",
+        model="mock-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=True,
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "muted-voice-task"
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(VideoGenerateRequest(
+            scene_id=scene.id,
+            model_config_id=config.id,
+            generate_audio=False,
+        ))
+
+    assert mock_gen.submit.call_args.kwargs["reference_audios"] == []
+    assert "【音色参考】" not in mock_gen.submit.call_args.kwargs["prompt"]
+    assert video.metadata["voice_references"] == []
 
 
 @pytest.mark.asyncio
@@ -534,6 +707,65 @@ async def test_返回尾帧_注入同章下一分镜参考图():
             name=references[0]["name"],
         )],
     )[0].url == references[0]["url"]
+
+
+@pytest.mark.asyncio
+async def test_供应商未返回尾帧时_ffmpeg_提取并注入下一分镜():
+    scene, config = await _create_scene_with_config(
+        model_name="minimax-h3",
+        video_model_type="minimax_h3",
+        api_protocol="minimax",
+        base_url="https://api.minimaxi.com",
+    )
+    next_scene = await Scene.create(
+        chapter_id=scene.chapter_id,
+        sequence=2,
+        prompt="下一镜头",
+        duration=6.0,
+    )
+    video = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.minimax.value,
+        external_task_id="minimax-no-last-frame",
+        status=TaskStatusEnum.running.value,
+        metadata={
+            "model_config_id": config.id,
+            "video_model_type": "minimax_h3",
+            "return_last_frame": True,
+            "team_id": 7,
+        },
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory, \
+         patch("controllers.video._download_video", new_callable=AsyncMock) as mock_video_download, \
+         patch(
+             "controllers.video.last_frame_service.extract_and_store",
+             new_callable=AsyncMock,
+         ) as mock_extract:
+        mock_gen = AsyncMock()
+        mock_gen.query.return_value = {
+            "status": TaskStatusEnum.completed,
+            "progress": 100,
+            "url": "https://cdn.example.com/minimax.mp4",
+            "metadata": {"duration": 6},
+        }
+        mock_factory.return_value = mock_gen
+        mock_video_download.return_value = "uploads/7/videos/minimax.mp4"
+        mock_extract.return_value = "uploads/7/video-references/last-frame.png"
+
+        result = await video_controller.query_status(video.id)
+
+    mock_extract.assert_awaited_once_with(
+        "uploads/7/videos/minimax.mp4",
+        video.id,
+        team_id=7,
+    )
+    await next_scene.refresh_from_db()
+    assert next_scene.metadata["video_reference_media"][0]["url"] == (
+        "uploads/7/video-references/last-frame.png"
+    )
+    assert result.metadata["last_frame_source"] == "ffmpeg"
+    assert result.metadata["last_frame_url"] == "uploads/7/video-references/last-frame.png"
 
 
 @pytest.mark.asyncio

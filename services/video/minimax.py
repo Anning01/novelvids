@@ -14,6 +14,7 @@ from services.video.capabilities import capabilities_for
 from services.video.content import prepare_video_content
 from services.video.provider_http import (
     http_provider_error,
+    last_frame_url as provider_last_frame_url,
     provider_error,
     request_id,
     safe_endpoint,
@@ -82,6 +83,7 @@ class MiniMaxH3Generator(BaseVideoGenerator):
             last_frame_url=kwargs.get("last_frame_url"),
             reference_images=kwargs.get("reference_images") or [],
             reference_videos=kwargs.get("reference_videos") or [],
+            reference_audios=kwargs.get("reference_audios") or [],
         )
 
         # 官方约束：首尾帧模式只能使用 adaptive；纯文本模式不能使用 adaptive。
@@ -103,10 +105,13 @@ class MiniMaxH3Generator(BaseVideoGenerator):
             "aigc_watermark": False,
         }
         if (
-            len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-            > 64 * 1024 * 1024
+            capabilities.max_request_size_mb is not None
+            and len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            > capabilities.max_request_size_mb * 1024 * 1024
         ):
-            raise MiniMaxGenerationError("MiniMax H3 请求体不能超过 64MB，请将大文件改用公网 URL")
+            raise MiniMaxGenerationError(
+                f"MiniMax H3 请求体不能超过 {capabilities.max_request_size_mb}MB，请将大文件改用公网 URL"
+            )
         url = _minimax_endpoint(self.config.base_url, "submit")
         safe_url = safe_endpoint(url)
         headers = {
@@ -114,13 +119,14 @@ class MiniMaxH3Generator(BaseVideoGenerator):
             "Content-Type": "application/json",
         }
         logger.info(
-            "minimax_h3_outbound endpoint=%s model=%s mode=%s images=%d videos=%d "
+            "minimax_h3_outbound endpoint=%s model=%s mode=%s images=%d videos=%d audios=%d "
             "duration=%s resolution=%s ratio=%s",
             safe_url,
             self.config.model,
             generation_mode,
             prepared.reference_image_count,
             prepared.reference_video_count,
+            prepared.reference_audio_count,
             payload["duration"],
             payload["resolution"],
             payload["ratio"],
@@ -208,6 +214,8 @@ class MiniMaxH3Generator(BaseVideoGenerator):
                 for key in ("duration", "resolution", "ratio", "usage", "task_type", "modality")
                 if task.get(key) is not None
             }
+            if last_frame_url := provider_last_frame_url(task):
+                metadata["last_frame_url"] = last_frame_url
             return self._build_result(
                 TaskStatusEnum.completed,
                 progress=100,

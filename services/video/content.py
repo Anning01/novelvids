@@ -9,6 +9,7 @@ from typing import Any
 
 # 匹配 @{Name} 和 @Name（兼容旧格式）。
 _ENTITY_RE = re.compile(r"@\{([^}]+)\}|@([\w\u4e00-\u9fff·]+)")
+_MEDIA_REFERENCE_RE = re.compile(r"^(?:图|图片|视频|音频)\d+$")
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class PreparedVideoContent:
     prompt: str
     reference_image_count: int
     reference_video_count: int
+    reference_audio_count: int
 
 
 def process_subject_prompt(
@@ -27,16 +29,13 @@ def process_subject_prompt(
     max_ref_images: int,
 ) -> tuple[str, list[str]]:
     """将 @资产转换为顺序图片引用，并收集对应参考图。"""
-    if not subjects:
-        return _ENTITY_RE.sub(lambda match: match.group(1) or match.group(2), prompt), []
-
     subject_map: dict[str, dict[str, Any]] = {
         subject["name"]: subject for subject in subjects
-    }
+    } if subjects else {}
     reference_images: list[str] = []
     name_to_index: dict[str, int] = {}
 
-    for subject in subjects:
+    for subject in subjects or []:
         if len(reference_images) >= max_ref_images:
             break
         images = subject.get("images", [])
@@ -47,6 +46,8 @@ def process_subject_prompt(
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)
+        if _MEDIA_REFERENCE_RE.fullmatch(name):
+            return match.group(0)
         subject = subject_map.get(name)
         if not subject:
             return name
@@ -68,6 +69,7 @@ def prepare_video_content(
     last_frame_url: str | None = None,
     reference_images: list[str] | None = None,
     reference_videos: list[str] | None = None,
+    reference_audios: list[str] | None = None,
 ) -> PreparedVideoContent:
     """按统一内部参数生成 Seedance/MiniMax 共用的 content 结构。"""
     processed_prompt, asset_images = process_subject_prompt(
@@ -95,10 +97,12 @@ def prepare_video_content(
             prompt=processed_prompt,
             reference_image_count=sum(item["type"] == "image_url" for item in items),
             reference_video_count=0,
+            reference_audio_count=0,
         )
 
     deduplicated_images = list(dict.fromkeys([*asset_images, *(reference_images or [])]))
     deduplicated_videos = list(dict.fromkeys(reference_videos or []))
+    deduplicated_audios = list(dict.fromkeys(reference_audios or []))
     for image in deduplicated_images:
         items.append({
             "type": "image_url",
@@ -111,9 +115,16 @@ def prepare_video_content(
             "video_url": {"url": video},
             "role": "reference_video",
         })
+    for audio in deduplicated_audios:
+        items.append({
+            "type": "audio_url",
+            "audio_url": {"url": audio},
+            "role": "reference_audio",
+        })
     return PreparedVideoContent(
         items=items,
         prompt=processed_prompt,
         reference_image_count=len(deduplicated_images),
         reference_video_count=len(deduplicated_videos),
+        reference_audio_count=len(deduplicated_audios),
     )

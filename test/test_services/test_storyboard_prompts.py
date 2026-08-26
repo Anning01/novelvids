@@ -189,6 +189,8 @@ def test_professional_prompt_normalizes_every_referenced_asset_type():
 def test_professional_video_prompt_excludes_storyboard_planning_instructions():
     prompt = format_storyboard_prompt(_shot(6), "zh", entities=[_entity()])
 
+    assert "【镜头1 ·" in prompt
+    assert "【镜头6 ·" not in prompt
     assert "【独立生成约束】" not in prompt
     assert "本镜头是一次独立的视频生成任务" not in prompt
     assert "不得继承其他镜头" not in prompt
@@ -214,7 +216,29 @@ def test_narration_strategy_renders_narration_and_specific_prohibitions():
 
     assert "【旁白 / 内心 OS】" in prompt
     assert shot.narration[0] in prompt
+    core_instruction = prompt.split("【核心生成指令｜高优先级】", 1)[1].split("【详细执行】", 1)[0]
+    assert shot.visual_prose in core_instruction
+    assert shot.actions[0] in core_instruction
+    assert shot.narration[0] in core_instruction
+    assert shot.dialogue[0] in core_instruction
+    assert shot.sound_design in core_instruction
     assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in prompt
+
+
+def test_primary_generation_instruction_orders_all_voice_tracks_by_time():
+    shot = _shot(2)
+    shot.narration = ["3.0s-4.0s: 旁白（低声）：门外没有回应。"]
+    shot.dialogue = ["1.0s-2.0s: @{郊区小楼}（低声）：有人吗？"]
+
+    prompt = format_storyboard_prompt(
+        shot,
+        entities=[_entity()],
+        strategy=storyboard_strategy_factory.resolve("narration"),
+    )
+    core_instruction = prompt.split("【核心生成指令｜高优先级】", 1)[1].split("【详细执行】", 1)[0]
+
+    assert core_instruction.index(shot.dialogue[0]) < core_instruction.index(shot.narration[0])
+    assert prompt.index("【核心生成指令｜高优先级】") < prompt.index("【详细执行】")
 
 
 def test_cinematic_strategy_preserves_the_original_video_prohibitions():

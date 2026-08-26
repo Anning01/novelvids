@@ -66,6 +66,7 @@ async def test_api_上传参考素材使用所选模型能力(client: AsyncClien
         "duration": 8,
         "fps": 30,
         "codec": "h264",
+        "mention_url": None,
     }
 
     with patch("api.video.save_reference_upload", new_callable=AsyncMock, return_value=uploaded) as save:

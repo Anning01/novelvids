@@ -17,6 +17,7 @@ async def test_ensure_seed_creates_default_models_when_empty():
 
     names = {config.name for config in configs}
     assert "doubao-seedance-2.5" in names
+    assert "wan3" in names
     assert "deepseek" in names
 
 

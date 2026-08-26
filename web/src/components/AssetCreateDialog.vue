@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AssetVariantStrip from '@/components/AssetVariantStrip.vue'
 import ImageAnnotationEditor from '@/components/ImageAnnotationEditor.vue'
@@ -31,7 +32,7 @@ import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/
 import { notice } from '@/shared/notice'
 import { estimateImageCost } from '@/shared/modelPricing'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
-import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetGenerationRecord, type AssetVariant, type AssetVariantDraft, type DigitalHuman, type ImageGenerationModel } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetGenerationRecord, type AssetVariant, type AssetVariantDraft, type AudioReference, type DigitalHuman, type ImageGenerationModel } from '@/types'
 
 type AssetKind = 'character' | 'scene' | 'prop'
 type CreateMode = 'ai' | 'library' | 'upload'
@@ -48,6 +49,7 @@ type AssetEditorFormSnapshot = {
   gender: string
   age_group: string
   voice: string
+  voice_reference_id: number | null
   reference_layout: string
   generation_reference_images: string[]
   model_config_id: number | null
@@ -103,6 +105,8 @@ const prompt = ref('')
 const gender = ref('')
 const age = ref('')
 const voice = ref('')
+const voiceReferenceId = ref<number | null>(null)
+const voicePickerOpen = ref(false)
 const imageParameters = ref<ImageGenerationParameters>({ clarity: '1.5K', aspectRatio: '16:9', outputFormat: 'png', generationCount: 1 })
 const referenceLayout = ref('character_turnaround')
 const modelId = ref('')
@@ -118,6 +122,7 @@ const referenceImages = ref<string[]>([])
 const pendingReferenceImages = ref<PendingReferenceImage[]>([])
 const saving = ref(false)
 const autoSaving = ref(false)
+const voiceSaving = ref(false)
 const formHydrated = ref(false)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 const promptTouched = ref(false)
@@ -253,6 +258,8 @@ function reset() {
   gender.value = ''
   age.value = ''
   voice.value = ''
+  voiceReferenceId.value = null
+  voicePickerOpen.value = false
   imageParameters.value = { clarity: '1.5K', aspectRatio: '16:9', outputFormat: 'png', generationCount: 1 }
   referenceLayout.value = 'character_turnaround'
   selectedLibraryKey.value = ''
@@ -294,6 +301,7 @@ function reset() {
     gender.value = characterMetadata.gender
     age.value = characterMetadata.ageGroup
     voice.value = typeof metadata.voice === 'string' ? metadata.voice : ''
+    voiceReferenceId.value = Number(metadata.voice_reference_id) > 0 ? Number(metadata.voice_reference_id) : null
     referenceLayout.value = metadata.reference_layout === 'group_portrait'
       ? 'group_portrait'
       : 'character_turnaround'
@@ -339,6 +347,7 @@ function captureFormSnapshot(): AssetEditorFormSnapshot {
     gender: gender.value,
     age_group: age.value,
     voice: voice.value,
+    voice_reference_id: voiceReferenceId.value,
     reference_layout: referenceLayout.value,
     generation_reference_images: [...referenceImages.value],
     model_config_id: Number(modelId.value) || null,
@@ -371,6 +380,9 @@ function snapshotForVariant(variant: AssetVariant, fallback: AssetEditorFormSnap
     gender: stringField(stored, 'gender', stringField(metadata, 'gender', fallback.gender)),
     age_group: stringField(stored, 'age_group', stringField(metadata, 'age_group', fallback.age_group)),
     voice: stringField(stored, 'voice', stringField(metadata, 'voice', fallback.voice)),
+    voice_reference_id: Number(stored.voice_reference_id ?? metadata.voice_reference_id) > 0
+      ? Number(stored.voice_reference_id ?? metadata.voice_reference_id)
+      : fallback.voice_reference_id,
     reference_layout: stringField(stored, 'reference_layout', stringField(metadata, 'reference_layout', fallback.reference_layout)),
     generation_reference_images: Array.isArray(stored.generation_reference_images)
       ? stored.generation_reference_images.filter((item): item is string => typeof item === 'string' && Boolean(item))
@@ -399,6 +411,7 @@ function applyFormSnapshot(snapshot: AssetEditorFormSnapshot, isVariant: boolean
   gender.value = snapshot.gender
   age.value = snapshot.age_group
   voice.value = snapshot.voice
+  voiceReferenceId.value = snapshot.voice_reference_id
   referenceLayout.value = snapshot.reference_layout
   pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
   pendingReferenceImages.value = []
@@ -870,15 +883,68 @@ function buildBaseAssetMetadata(existingMetadata: Record<string, unknown>): Reco
       gender: isGroupPortrait.value ? '' : gender.value,
       age_group: isGroupPortrait.value ? '' : age.value,
       voice: isGroupPortrait.value ? '' : voice.value,
+      voice_reference_id: isGroupPortrait.value ? undefined : voiceReferenceId.value || undefined,
       reference_layout: referenceLayout.value,
     })
   }
   return metadata
 }
 
+async function selectVoiceReference(reference: AudioReference) {
+  const previousVoice = voice.value
+  const previousReferenceId = voiceReferenceId.value
+  const shouldPersist = Boolean(props.asset && !variantDraft.value?.is_new)
+  if (shouldPersist) voiceSaving.value = true
+  voice.value = reference.nickname
+  voiceReferenceId.value = reference.id
+  if (!props.asset || variantDraft.value?.is_new) {
+    voicePickerOpen.value = false
+    return
+  }
+  try {
+    if (selectedVariant.value) {
+      const variantMetadata = asRecord(selectedVariant.value.metadata)
+      const editorForm = asRecord(variantMetadata[VARIANT_EDITOR_FORM_KEY])
+      const updated = (await api.updateAssetVariant(props.asset.id, selectedVariant.value.id, {
+        metadata: {
+          ...variantMetadata,
+          voice: reference.nickname,
+          voice_reference_id: reference.id,
+          [VARIANT_EDITOR_FORM_KEY]: {
+            ...editorForm,
+            voice: reference.nickname,
+            voice_reference_id: reference.id,
+          },
+        },
+      })).data
+      selectedVariant.value = updated
+      variantStripRef.value?.upsertVariant(updated)
+    } else {
+      const existingMetadata = asRecord(props.asset.metadata)
+      const updated = (await api.updateAsset(props.asset.id, {
+        metadata: {
+          ...existingMetadata,
+          voice: reference.nickname,
+          voice_reference_id: reference.id,
+        },
+      })).data
+      promptSourceAsset.value = updated
+      emit('saved', updated)
+    }
+    voicePickerOpen.value = false
+    notice.success(`已为“${name.value || props.asset.canonical_name}”设置音色`)
+  } catch (error) {
+    voice.value = previousVoice
+    voiceReferenceId.value = previousReferenceId
+    notice.error(`音色保存失败：${(error as Error).message}`)
+  } finally {
+    voiceSaving.value = false
+  }
+}
+
 async function persistEdits() {
   if (!props.asset || !formHydrated.value) return
-  if (autoSaving.value || saving.value || generationRunning.value) return
+  if (autoSaving.value || voiceSaving.value || saving.value || generationRunning.value) return
   if (mode.value !== 'ai') return
   if (!name.value.trim()) return
   const existingMetadata = props.asset.metadata && typeof props.asset.metadata === 'object'
@@ -941,6 +1007,7 @@ async function submit(regenerate = false) {
         gender: snapshot.gender,
         age_group: snapshot.age_group,
         voice: snapshot.voice,
+        voice_reference_id: snapshot.voice_reference_id || undefined,
         reference_layout: snapshot.reference_layout,
         generation_reference_images: generationReferenceImages,
         [VARIANT_EDITOR_FORM_KEY]: snapshot,
@@ -1008,6 +1075,7 @@ async function submit(regenerate = false) {
         gender: isGroupPortrait.value ? '' : gender.value,
         age_group: isGroupPortrait.value ? '' : age.value,
         voice: isGroupPortrait.value ? '' : voice.value,
+        voice_reference_id: isGroupPortrait.value ? undefined : voiceReferenceId.value || undefined,
         reference_layout: referenceLayout.value,
       })
     }
@@ -1110,8 +1178,8 @@ watch(selectedModel, model => {
   }
 }, { immediate: true })
 watch(
-  [name, description, prompt, gender, age, voice, referenceLayout, modelId, () => referenceImages.value.join('|'), () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
-  () => { if (props.open && props.asset && formHydrated.value) scheduleAutoSave() },
+  [name, description, prompt, gender, age, voice, voiceReferenceId, referenceLayout, modelId, () => referenceImages.value.join('|'), () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
+  () => { if (props.open && props.asset && formHydrated.value && !voiceSaving.value) scheduleAutoSave() },
 )
 onMounted(() => {
   window.addEventListener('keydown', onWindowKeydown)
@@ -1263,7 +1331,7 @@ onUnmounted(() => {
             <label class="asset-field"><span><i>*</i>名称</span><input v-model="name" maxlength="100" placeholder="请输入" /></label>
             <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>性别</span><AppSelect v-model="gender" :options="genderOptions" ariaLabel="选择性别" menu-label="性别" /></label>
             <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>年龄</span><AppSelect v-model="age" :options="ageOptions" ariaLabel="选择年龄阶段" menu-label="年龄" /></label>
-            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span>音色选择</span><AppButton type="button" variant="secondary" block @click="notice.info('音频库将在下一步开放选择')"><Volume2 :size="15" />{{ voice || '选择音色' }}</AppButton></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span>音色选择</span><AppButton type="button" variant="secondary" block :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" />{{ voice || '选择音色' }}</AppButton></label>
           </div>
 
           <fieldset class="asset-mode">
@@ -1348,6 +1416,7 @@ onUnmounted(() => {
       </form>
     </Transition>
   </Teleport>
+  <AudioReferencePicker :open="voicePickerOpen" :selected-id="voiceReferenceId" :novel-id="props.asset?.novel_id" @close="voicePickerOpen = false" @choose="selectVoiceReference" />
   <ImageLightbox :open="Boolean(lightboxImage)" :src="lightboxImage" :alt="lightboxAlt" :format="lightboxFormat" @close="closeImageLightbox" />
   <ImageAnnotationEditor
     :open="annotationOpen"

@@ -154,6 +154,8 @@ class AssetBriefOut(AssetProperties, BaseResponse):
     """
     model_config = ConfigDict(from_attributes=True)
     novel_id: int = Field(..., description="所属小说/剧本")
+    # 资产编辑器需要从列表响应恢复音色、形态与生成参数等持久化设置。
+    metadata: Optional[Any] = Field(None, description="资产编辑元数据")
 
     id: int = Field(..., description="小说/剧本ID")
 
