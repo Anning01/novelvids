@@ -22,14 +22,13 @@ import {
 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
-import { api } from '@/api'
+import { api, mediaUrl } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
 import { notice } from '@/shared/notice'
-import { episodeDisplayLabel } from '@/shared/chapterTitle'
+import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { buildChapterVideoTimeline, chapterHasCompletedVideo, type ChapterVideoTimelineItem } from '@/shared/chapterVideoTimeline'
 import { VirtualClipPlaybackClock } from '@/shared/virtualClipPlaybackClock'
-import { videoDownloadFilename } from '@/features/workbench/graph/videoMedia'
 import type { Chapter, Novel, Scene, Video as VideoResult } from '@/types'
 
 interface ProjectView extends Novel {
@@ -58,6 +57,7 @@ const muted = ref(false)
 const playbackRate = ref(1)
 const clipCurrentTime = ref(0)
 const timelineScale = ref(1)
+const downloadingChapter = ref(false)
 let loadVersion = 0
 
 const MIN_TIMELINE_SCALE = 1
@@ -315,13 +315,28 @@ function toggleFullscreen() {
   else if (document.fullscreenElement) void document.exitFullscreen()
 }
 
-async function downloadActiveVideo() {
-  const video = activeItem.value?.video
-  if (!video?.url) return
+function chapterDownloadFilename() {
+  const projectName = project.value?.name || '短剧'
+  const chapterTitle = stripChapterOrdinal(activeChapter.value?.name)
+  const chapterName = activeChapter.value
+    ? `第${activeChapter.value.number}集${chapterTitle ? `-${chapterTitle}` : ''}`
+    : '当前集'
+  const safeTitle = `${projectName}-${chapterName}-完整视频`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ')
+  return `${safeTitle}.mp4`
+}
+
+async function downloadCurrentChapterVideo() {
+  const chapterId = activeChapter.value?.id
+  if (!chapterId || playableItems.value.length === 0 || downloadingChapter.value) return
+  downloadingChapter.value = true
   try {
-    await downloadFile(video.url, videoDownloadFilename(video, `${project.value?.name || '短剧'}-${sceneLabel(activeItem.value!)}`))
+    const result = (await api.mergeChapterVideos(chapterId)).data
+    await downloadFile(mediaUrl(result.merged_url), chapterDownloadFilename())
+    notice.success(`已按顺序合成并下载 ${result.video_count} 个分镜视频`)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '视频下载失败')
+    notice.error(error instanceof Error ? error.message : '完整视频合成下载失败')
+  } finally {
+    downloadingChapter.value = false
   }
 }
 
@@ -367,7 +382,7 @@ onUnmounted(() => gapPlaybackClock.stop())
       <template #header-end>
         <div class="video-header-actions">
           <AppButton variant="secondary" size="sm" @click="returnToStoryboard()"><Clapperboard :size="15" />返回分镜</AppButton>
-          <AppButton variant="secondary" size="sm" :disabled="!activeItem?.video?.url" @click="downloadActiveVideo"><Download :size="15" />下载当前</AppButton>
+          <AppButton variant="secondary" size="sm" :disabled="playableItems.length === 0 || downloadingChapter" :aria-busy="downloadingChapter" aria-label="合成并下载本集已有视频" title="合成并下载本集已有视频" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="15" /><Download v-else :size="15" />{{ downloadingChapter ? '正在合成' : '下载当前' }}</AppButton>
         </div>
       </template>
 
@@ -409,7 +424,7 @@ onUnmounted(() => gapPlaybackClock.stop())
               <div v-if="activeItem?.video?.url" class="video-stage-overlay">
                 <AppButton variant="dark" size="sm" icon-only :aria-label="muted ? '打开声音' : '静音'" :title="muted ? '打开声音' : '静音'" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></AppButton>
                 <AppButton variant="dark" size="sm" :aria-label="`播放速度 ${playbackRate} 倍`" @click="cyclePlaybackRate">{{ playbackRate }}x</AppButton>
-                <AppButton variant="dark" size="sm" icon-only aria-label="下载当前视频" title="下载当前视频" @click="downloadActiveVideo"><ArrowDownToLine :size="16" /></AppButton>
+                <AppButton variant="dark" size="sm" icon-only :disabled="downloadingChapter" :aria-busy="downloadingChapter" aria-label="合成并下载本集已有视频" title="合成并下载本集已有视频" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="16" /><ArrowDownToLine v-else :size="16" /></AppButton>
                 <AppButton variant="dark" size="sm" icon-only aria-label="全屏预览" title="全屏预览" @click="toggleFullscreen"><Maximize2 :size="16" /></AppButton>
               </div>
             </div>

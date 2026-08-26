@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from models.asset import Asset
 from models.asset_variant import AssetVariant
-from services.video.base import image_to_base64
-from config import settings
+from services.image_inputs import resolve_image_source
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +46,26 @@ async def resolve_assets(
     只有同时满足“已绑定到分镜”和“在 prompt 中显式引用”的资产才会提交；
     用户在分镜中显式选择的形态优先于 prompt 的 ``#形态`` 与章节默认形态。
     """
-    mentions = [m1 or m2 for m1, m2 in MENTION_PATTERN.findall(prompt)]
-    logger.info("resolve_assets: mentions=%s (prompt[:100]=%r)", mentions, prompt[:100])
-    if not mentions:
-        return []
-
     # 查找该小说下的所有资产（一次查询）
     assets = await Asset.filter(novel_id=novel_id).prefetch_related("variants")
     logger.info(
         "resolve_assets: novel_id=%s, total_assets=%d, names=%s",
         novel_id, len(assets), [a.canonical_name for a in assets],
     )
+    mentions = _extract_asset_mentions(prompt, assets)
+    logger.info(
+        "resolve_assets: mentions=%s (prompt[:100]=%r)",
+        [(asset.canonical_name, variant_name) for asset, variant_name in mentions],
+        prompt[:100],
+    )
+    if not mentions:
+        return []
 
     allowed_asset_ids = set(selected_asset_ids) if selected_asset_ids is not None else None
     requested_assets: list[tuple[Asset, str]] = []
     seen_ids: set[int] = set()
 
-    for mention in mentions:
-        name, _, variant_name = mention.partition("#")
-        matched = _find_asset(name, assets)
+    for matched, variant_name in mentions:
         if matched and allowed_asset_ids is not None and matched.id not in allowed_asset_ids:
             logger.warning(
                 "resolve_assets: mentioned asset_id=%s is not bound to the scene; ignored",
@@ -76,8 +75,6 @@ async def resolve_assets(
         if matched and matched.id not in seen_ids:
             seen_ids.add(matched.id)
             requested_assets.append((matched, variant_name))
-        elif not matched:
-            logger.warning("resolve_assets: mention %r not found in assets", mention)
 
     subjects: list[dict[str, Any]] = []
     explicit_variant_ids = selected_variant_ids or {}
@@ -134,6 +131,55 @@ def _find_asset(name: str, assets: list[Asset]) -> Asset | None:
         if name in (asset.aliases or []):
             return asset
     return None
+
+
+def _extract_asset_mentions(
+    prompt: str,
+    assets: list[Asset],
+) -> list[tuple[Asset, str]]:
+    """按已登记名称解析引用，兼容 ``@羽宁沿着`` 这类无分隔旧语法。"""
+    occurrences: dict[int, tuple[Asset, str, int]] = {}
+    braced_ranges: list[tuple[int, int]] = []
+
+    for match in re.finditer(r"@\{([^}]+)\}", prompt):
+        braced_ranges.append(match.span())
+        name, _, variant_name = match.group(1).partition("#")
+        asset = _find_asset(name, assets)
+        if asset is not None:
+            occurrences[match.start()] = (asset, variant_name, len(match.group(0)))
+
+    name_candidates = sorted(
+        (
+            (name, asset)
+            for asset in assets
+            for name in (asset.canonical_name, *(asset.aliases or []))
+            if name
+        ),
+        key=lambda item: (-len(item[0]), item[0]),
+    )
+    for name, asset in name_candidates:
+        syntax = f"@{name}"
+        start = 0
+        while (index := prompt.find(syntax, start)) >= 0:
+            start = index + len(syntax)
+            if any(left <= index < right for left, right in braced_ranges):
+                continue
+            variant_name = ""
+            suffix_start = index + len(syntax)
+            for variant in sorted(asset.variants, key=lambda item: -len(item.name)):
+                variant_syntax = f"#{variant.name}"
+                if prompt.startswith(variant_syntax, suffix_start):
+                    variant_name = variant.name
+                    break
+            consumed = len(syntax) + (len(variant_name) + 1 if variant_name else 0)
+            existing = occurrences.get(index)
+            if existing is None or consumed > existing[2]:
+                occurrences[index] = (asset, variant_name, consumed)
+
+    return [
+        (asset, variant_name)
+        for _, (asset, variant_name, _) in sorted(occurrences.items())
+    ]
 
 
 def _find_variant(name: str, variants: list[AssetVariant]) -> AssetVariant | None:
@@ -203,12 +249,3 @@ def _collect_images(asset: Asset, variant: AssetVariant | None = None) -> list[s
             logger.warning("resolve_assets: image not found: %s", path)
             continue
     return images
-
-
-def resolve_image_source(path: str) -> str:
-    """远程图片保留 URL，本地与 /media/ 图片转换为 Base64 data URI。"""
-    if path.startswith(("http://", "https://", "data:")):
-        return path
-    if path.startswith("/media/"):
-        path = os.path.join(settings.MEDIA_PATH, path[len("/media/"):])
-    return image_to_base64(path)

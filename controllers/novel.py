@@ -34,6 +34,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "total_chapters": novel.total_chapters,
             "tags": novel.tags,
             "style_key": getattr(novel, "style_key", None),
+            "video_model_config_id": getattr(novel, "video_model_config_id", None),
             "content_length": len(novel.content or ""),
             "created_at": novel.created_at,
             "updated_at": novel.updated_at,
@@ -94,11 +95,28 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
 
     async def update(self, novel_id: int, obj_in: NovelUpdate) -> Novel:
         instance = await self.get(novel_id)
+        await self._validate_video_model_preference(instance, obj_in)
         return await super().update(instance, obj_in)
 
     async def patch(self, novel_id: int, obj_in: NovelPatch) -> Novel:
         instance = await self.get(novel_id)
+        await self._validate_video_model_preference(instance, obj_in)
         return await super().patch(instance, obj_in)
+
+    @staticmethod
+    async def _validate_video_model_preference(
+        instance: Novel,
+        obj_in: NovelUpdate | NovelPatch,
+    ) -> None:
+        if (
+            "video_model_config_id" in obj_in.model_fields_set
+            and obj_in.video_model_config_id is not None
+        ):
+            await ai_model_config_controller.get_active(
+                AiTaskTypeEnum.video.value,
+                obj_in.video_model_config_id,
+                team_id=instance.team_id,
+            )
 
     async def remove(self, novel_id: int) -> None:
         instance = await self.get(novel_id)

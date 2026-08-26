@@ -28,7 +28,7 @@ class AiModelConfigProperties(BaseModel):
     )
     video_model_type: Optional[VideoGenerationModelTypeEnum] = Field(
         None,
-        description="视频生成模型能力类型，仅支持 Seedance 2.0、2.0 Fast、2.0 Mini 与 2.5",
+        description="视频生成模型能力类型，支持 Seedance 系列与 MiniMax H3",
     )
     is_active: Optional[bool] = Field(None, description="是否启用")
     concurrency: Optional[int] = Field(None, description="并发数", ge=1)
@@ -165,8 +165,8 @@ class VideoGenerationCapabilitiesOut(BaseModel):
     reference_media_side_max: int = Field(..., description="参考媒体最长边长")
     reference_video_pixels_min: int = Field(..., description="参考视频最小像素数")
     reference_video_pixels_max: int = Field(..., description="参考视频最大像素数")
-    reference_video_fps_min: int = Field(..., description="参考视频最低帧率")
-    reference_video_fps_max: int = Field(..., description="参考视频最高帧率")
+    reference_video_fps_min: float = Field(..., description="参考视频最低帧率")
+    reference_video_fps_max: float = Field(..., description="参考视频最高帧率")
     default_resolution: str = Field(..., description="默认视频分辨率")
     default_aspect_ratio: str = Field(..., description="默认视频宽高比")
     default_output_format: str = Field(..., description="默认视频格式")

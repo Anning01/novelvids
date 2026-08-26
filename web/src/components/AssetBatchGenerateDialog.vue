@@ -9,7 +9,7 @@ import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import { estimateImageCost } from '@/shared/modelPricing'
-import type { Asset, ImageGenerationModel } from '@/types'
+import { AssetTypeEnum, type Asset, type ImageGenerationModel } from '@/types'
 
 interface BatchGenerateOptions {
   assetIds: number[]
@@ -23,7 +23,6 @@ interface BatchGenerateOptions {
 
 const props = defineProps<{
   open: boolean
-  label: string
   assets: Asset[]
   generatingIds: Set<number>
   failedIds: Set<number>
@@ -36,6 +35,12 @@ const modelId = ref('')
 const imageParameters = ref<ImageGenerationParameters>({ clarity: '1.5K', aspectRatio: '16:9', outputFormat: 'png', generationCount: 1 })
 const selectedIds = ref<number[]>([])
 const loadingModels = ref(false)
+
+const assetTypes = [
+  { value: AssetTypeEnum.PERSON, label: '角色' },
+  { value: AssetTypeEnum.SCENE, label: '场景' },
+  { value: AssetTypeEnum.ITEM, label: '道具' },
+] as const
 
 const eligibleAssets = computed(() => props.assets.filter(asset => !asset.main_image && !props.generatingIds.has(asset.id)))
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || `生图模型 ${item.config_id}` })))
@@ -77,6 +82,40 @@ function toggleAll() {
   selectedIds.value = allSelected.value ? [] : eligibleAssets.value.map(asset => asset.id)
 }
 
+function assetsForType(type: AssetTypeEnum) {
+  return props.assets.filter(asset => asset.asset_type === type)
+}
+
+function eligibleAssetsForType(type: AssetTypeEnum) {
+  return eligibleAssets.value.filter(asset => asset.asset_type === type)
+}
+
+function selectedCountForType(type: AssetTypeEnum) {
+  return eligibleAssetsForType(type).filter(asset => selectedIds.value.includes(asset.id)).length
+}
+
+function typeFullySelected(type: AssetTypeEnum) {
+  const eligible = eligibleAssetsForType(type)
+  return Boolean(eligible.length) && eligible.every(asset => selectedIds.value.includes(asset.id))
+}
+
+function typePartiallySelected(type: AssetTypeEnum) {
+  const selectedCount = selectedCountForType(type)
+  return selectedCount > 0 && !typeFullySelected(type)
+}
+
+function toggleType(type: AssetTypeEnum) {
+  const typeIds = new Set(eligibleAssetsForType(type).map(asset => asset.id))
+  if (!typeIds.size) return
+  selectedIds.value = typeFullySelected(type)
+    ? selectedIds.value.filter(id => !typeIds.has(id))
+    : [...new Set([...selectedIds.value, ...typeIds])]
+}
+
+function assetTypeLabel(type: AssetTypeEnum) {
+  return assetTypes.find(item => item.value === type)?.label || '资产'
+}
+
 function submit() {
   if (!canGenerate.value) return
   const model = selectedModel.value
@@ -112,15 +151,32 @@ watch(selectedModel, model => {
 <template>
   <Teleport to="body">
     <div v-if="open" class="batch-dialog-backdrop" @click.self="emit('close')">
-      <section class="batch-dialog" role="dialog" aria-modal="true" :aria-label="`批量生成${label}`">
+      <section class="batch-dialog" role="dialog" aria-modal="true" aria-label="批量生成资产设定图">
         <header class="batch-dialog__header">
           <span><ListChecks :size="21" /></span>
-          <div><small>BATCH GENERATION</small><h2>批量生成{{ label }}</h2></div>
+          <div><small>BATCH GENERATION</small><h2>批量生成资产设定图</h2></div>
           <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭" @click="emit('close')"><X :size="18" /></AppButton>
         </header>
 
         <div class="batch-dialog__body">
-          <p>选择需要生成参考图的{{ label }}，已完成的资产不会重复生成。</p>
+          <p>可同时选择角色、场景和道具三种类型，也可以继续单独调整具体资产；已完成的资产不会重复生成。</p>
+          <div class="batch-types" role="group" aria-label="按资产类型选择">
+            <AppButton
+              v-for="type in assetTypes"
+              :key="type.value"
+              type="button"
+              variant="ghost"
+              class="batch-type"
+              :class="{ 'is-selected': typeFullySelected(type.value), 'is-partial': typePartiallySelected(type.value) }"
+              :disabled="!eligibleAssetsForType(type.value).length"
+              :aria-pressed="typeFullySelected(type.value)"
+              @click="toggleType(type.value)"
+            >
+              <span class="batch-checkbox"><Check v-if="selectedCountForType(type.value)" :size="13" /></span>
+              <span><strong>{{ type.label }}</strong><small>{{ selectedCountForType(type.value) }}/{{ eligibleAssetsForType(type.value).length }} 待生成</small></span>
+              <AppBadge tone="neutral" size="sm">共 {{ assetsForType(type.value).length }} 个</AppBadge>
+            </AppButton>
+          </div>
           <div class="batch-assets">
             <AppButton
               v-for="asset in assets"
@@ -135,7 +191,7 @@ watch(selectedModel, model => {
             >
               <span class="batch-checkbox"><Check v-if="selectedIds.includes(asset.id)" :size="13" /></span>
               <span class="batch-thumb"><img v-if="asset.main_image" :src="asset.main_image" alt="" /><ImageIcon v-else :size="18" /></span>
-              <span class="batch-copy"><strong>{{ asset.canonical_name }}</strong><small>{{ asset.description || '尚未填写描述' }}</small></span>
+              <span class="batch-copy"><strong>{{ asset.canonical_name }}</strong><small>{{ assetTypeLabel(asset.asset_type) }} · {{ asset.description || '尚未填写描述' }}</small></span>
               <AppBadge v-if="asset.main_image" class="batch-status" tone="warning" size="sm">已完成，不重复生成</AppBadge>
               <AppBadge v-else-if="generatingIds.has(asset.id)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
               <AppBadge v-else-if="failedIds.has(asset.id)" class="batch-status" tone="danger" size="sm">上次失败，可重试</AppBadge>
@@ -169,7 +225,14 @@ watch(selectedModel, model => {
 .batch-dialog__header h2 { margin: 2px 0 0; color: #292d3a; font-size: 19px; }
 .batch-dialog__body { min-height: 0; overflow: hidden; padding: 16px 22px 18px; }
 .batch-dialog__body > p { margin: 0 0 12px; color: #8c92a1; font-size: 11px; }
-.batch-assets { display: grid; max-height: 500px; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; overflow-y: auto; padding: 2px 4px 12px 2px; scrollbar-width: thin; }
+.batch-types { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; margin-bottom: 14px; }
+.batch-type { display: grid; min-height: 58px; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 11px; border-radius: 13px; color: #5f6574; background: #f8f9fc; box-shadow: inset 0 0 0 1px #eceef4; text-align: left; }
+.batch-type > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
+.batch-type strong { font-size: 12px; }
+.batch-type small { color: #9298a7; font-size: 10px; font-weight: 500; }
+.batch-type.is-selected,.batch-type.is-partial { color: #4f51e6; background: #f3f3ff; box-shadow: inset 0 0 0 1px #bfc0fb; }
+.batch-type.is-partial .batch-checkbox { background: #8b8df4; }
+.batch-assets { display: grid; max-height: 420px; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; overflow-y: auto; padding: 2px 4px 12px 2px; scrollbar-width: thin; }
 .batch-asset { display: grid; width: 100%; height: auto; min-height: 78px; grid-template-columns: 22px 54px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 14px; color: #4d5362; background: #f8f9fc; box-shadow: inset 0 0 0 1px transparent; text-align: left; }
 .batch-asset:hover:not(:disabled),.batch-asset.is-selected { color: #4f51e6; background: #f5f5ff; box-shadow: inset 0 0 0 1px #bfc0fb; }
 .batch-asset.is-disabled { opacity: .66; }
@@ -191,6 +254,7 @@ watch(selectedModel, model => {
 @media (max-width: 760px) {
   .batch-dialog-backdrop { padding: 0; }
   .batch-dialog { width: 100%; max-height: 100vh; min-height: 100vh; border-radius: 0; }
+  .batch-types { grid-template-columns: 1fr; }
   .batch-assets { grid-template-columns: 1fr; }
   .batch-dialog__footer { align-items: stretch; flex-direction: column; }
   .batch-options,.batch-actions { width: 100%; }

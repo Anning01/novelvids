@@ -53,5 +53,15 @@ class Settings:
     OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 
+    # 视频供应商任务由后端持续收口，不依赖浏览器页面保持打开。
+    VIDEO_RECONCILE_INTERVAL_SECONDS: int = max(
+        5,
+        int(os.getenv("VIDEO_RECONCILE_INTERVAL_SECONDS", "30")),
+    )
+    VIDEO_RECONCILE_BATCH_SIZE: int = max(
+        1,
+        int(os.getenv("VIDEO_RECONCILE_BATCH_SIZE", "50")),
+    )
+
 
 settings = Settings()

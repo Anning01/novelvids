@@ -14,7 +14,6 @@
   --app-accent-soft: #eeefff;
   --app-shadow: 0 12px 34px rgb(37 41 57 / 7%);
   --creation-bg-image: url('/background-light.png');
-  --creation-bg-tint: rgb(248 249 252 / 78%);
 }
 
 :root[data-app-theme='dark'] {
@@ -33,7 +32,6 @@
   --app-accent-soft: rgb(169 149 255 / 13%);
   --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
   --creation-bg-image: url('/background-dark.png');
-  --creation-bg-tint: rgb(21 20 18 / 80%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -53,7 +51,6 @@
     --app-accent-soft: rgb(169 149 255 / 13%);
     --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
     --creation-bg-image: url('/background-dark.png');
-    --creation-bg-tint: rgb(21 20 18 / 80%);
   }
 }
 
@@ -444,6 +441,13 @@
 :root[data-app-theme='dark'] :is(.asset-library > header label,.asset-library__card) { color: var(--app-text-secondary); background: var(--app-surface); }
 :root[data-app-theme='dark'] .asset-library__card.is-active { color: var(--app-accent); background: #393147; box-shadow: inset 0 0 0 2px #796b9b; }
 :root[data-app-theme='dark'] .batch-asset { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
+:root[data-app-theme='dark'] .batch-type { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
+:root[data-app-theme='dark'] .batch-type small { color: var(--app-text-muted); }
+:root[data-app-theme='dark'] :is(.batch-type.is-selected,.batch-type.is-partial) {
+  color: var(--app-accent);
+  background: #393147;
+  box-shadow: inset 0 0 0 1px rgb(184 167 255 / 30%);
+}
 :root[data-app-theme='dark'] .batch-asset:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
 :root[data-app-theme='dark'] .batch-asset.is-selected {
   color: var(--app-accent);
@@ -452,6 +456,7 @@
 }
 :root[data-app-theme='dark'] .batch-checkbox { background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
 :root[data-app-theme='dark'] .batch-asset.is-selected .batch-checkbox { color: #211c2a; background: var(--app-accent); box-shadow: none; }
+:root[data-app-theme='dark'] :is(.batch-type.is-selected,.batch-type.is-partial) .batch-checkbox { color: #211c2a; background: var(--app-accent); box-shadow: none; }
 :root[data-app-theme='dark'] .batch-thumb { color: var(--app-text-muted); background: #191715; box-shadow: inset 0 0 0 1px var(--app-border); }
 :root[data-app-theme='dark'] .batch-copy strong { color: var(--app-text); }
 :root[data-app-theme='dark'] .batch-copy small { color: var(--app-text-muted); }

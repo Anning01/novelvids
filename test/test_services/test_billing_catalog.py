@@ -40,6 +40,19 @@ def test_pricing_for_video_model():
     assert pricing["video_reference_prices"]["720p"] == 28.00
 
 
+def test_pricing_for_minimax_h3_per_second_and_input_images():
+    config = SimpleNamespace(
+        image_model_type=None,
+        video_model_type="minimax_h3",
+        model="MiniMax-H3",
+    )
+    pricing = pricing_for(config)
+    assert pricing["billing_unit"] == "second"
+    assert pricing["prices"] == {"768P": 0.50, "2K": 0.80}
+    assert pricing["video_reference_prices"] == {"768P": 0.50, "2K": 0.80}
+    assert pricing["input_image"] == {"first_free": 5, "price_per_image": 0.20}
+
+
 def test_pricing_for_llm_model():
     config = SimpleNamespace(
         image_model_type=None,

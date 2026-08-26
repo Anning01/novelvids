@@ -37,6 +37,7 @@ type AssetKind = 'character' | 'scene' | 'prop'
 type CreateMode = 'ai' | 'library' | 'upload'
 type LibraryItem = { key: string; name: string; detail: string; image: string; source: 'public' | 'project'; asset?: Asset; human?: DigitalHuman }
 type LibraryScope = 'all' | 'public' | 'project'
+type PendingReferenceImage = { file: File; previewUrl: string }
 type AssetEditorFormSnapshot = {
   version: 1
   canonical_name: string
@@ -48,6 +49,7 @@ type AssetEditorFormSnapshot = {
   age_group: string
   voice: string
   reference_layout: string
+  generation_reference_images: string[]
   model_config_id: number | null
   image_parameters: {
     clarity: string
@@ -112,6 +114,8 @@ const search = ref('')
 const uploadFile = ref<File | null>(null)
 const uploadPreview = ref('')
 const dragging = ref(false)
+const referenceImages = ref<string[]>([])
+const pendingReferenceImages = ref<PendingReferenceImage[]>([])
 const saving = ref(false)
 const autoSaving = ref(false)
 const formHydrated = ref(false)
@@ -145,6 +149,10 @@ let previousBodyOverflow = ''
 let generationController: AbortController | null = null
 const formDrafts = new Map<string, AssetEditorFormSnapshot>()
 const isEditing = computed(() => Boolean(props.asset))
+const referenceImagePreviews = computed(() => [
+  ...referenceImages.value.map((url, index) => ({ key: `persisted:${url}:${index}`, url })),
+  ...pendingReferenceImages.value.map((item, index) => ({ key: `pending:${item.file.name}:${index}`, url: item.previewUrl })),
+])
 const variantContextActive = computed(() => Boolean(variantDraft.value))
 const generatedImage = computed(() => variantDraft.value?.is_new
   ? ''
@@ -160,6 +168,7 @@ const currentImageFormat = computed(() => {
     : {}
   return historyFormat || (typeof metadata.output_format === 'string' ? metadata.output_format : '')
 })
+const visibleGenerationHistory = computed(() => generationHistory.value.filter(record => !isCurrentGeneration(record)))
 const selectedErrorRecord = computed(() => generationHistory.value.find(record => record.id === selectedErrorRecordId.value && record.error_message) || null)
 const terminalGenerationStatuses = new Set<number>([
   TaskStatusEnum.COMPLETED,
@@ -257,6 +266,9 @@ function reset() {
   uploadFile.value = null
   if (uploadPreview.value) URL.revokeObjectURL(uploadPreview.value)
   uploadPreview.value = ''
+  pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
+  pendingReferenceImages.value = []
+  referenceImages.value = []
   modelId.value = ''
   generationHistory.value = []
   generationTask.value = null
@@ -285,6 +297,9 @@ function reset() {
     referenceLayout.value = metadata.reference_layout === 'group_portrait'
       ? 'group_portrait'
       : 'character_turnaround'
+    referenceImages.value = Array.isArray(metadata.generation_reference_images)
+      ? metadata.generation_reference_images.filter((item): item is string => typeof item === 'string' && Boolean(item))
+      : []
     imageParameters.value = {
       clarity: typeof metadata.clarity === 'string' ? metadata.clarity : typeof metadata.resolution === 'string' ? metadata.resolution : imageParameters.value.clarity,
       aspectRatio: typeof metadata.aspect_ratio === 'string' ? metadata.aspect_ratio : imageParameters.value.aspectRatio,
@@ -325,6 +340,7 @@ function captureFormSnapshot(): AssetEditorFormSnapshot {
     age_group: age.value,
     voice: voice.value,
     reference_layout: referenceLayout.value,
+    generation_reference_images: [...referenceImages.value],
     model_config_id: Number(modelId.value) || null,
     image_parameters: {
       clarity: imageParameters.value.clarity,
@@ -356,6 +372,11 @@ function snapshotForVariant(variant: AssetVariant, fallback: AssetEditorFormSnap
     age_group: stringField(stored, 'age_group', stringField(metadata, 'age_group', fallback.age_group)),
     voice: stringField(stored, 'voice', stringField(metadata, 'voice', fallback.voice)),
     reference_layout: stringField(stored, 'reference_layout', stringField(metadata, 'reference_layout', fallback.reference_layout)),
+    generation_reference_images: Array.isArray(stored.generation_reference_images)
+      ? stored.generation_reference_images.filter((item): item is string => typeof item === 'string' && Boolean(item))
+      : Array.isArray(metadata.generation_reference_images)
+        ? metadata.generation_reference_images.filter((item): item is string => typeof item === 'string' && Boolean(item))
+        : fallback.generation_reference_images,
     model_config_id: Number.isFinite(Number(modelConfigId)) ? Number(modelConfigId) : fallback.model_config_id,
     image_parameters: {
       clarity: stringField(storedImageParameters, 'clarity', stringField(metadata, 'clarity', fallback.image_parameters.clarity)),
@@ -379,6 +400,9 @@ function applyFormSnapshot(snapshot: AssetEditorFormSnapshot, isVariant: boolean
   age.value = snapshot.age_group
   voice.value = snapshot.voice
   referenceLayout.value = snapshot.reference_layout
+  pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
+  pendingReferenceImages.value = []
+  referenceImages.value = [...snapshot.generation_reference_images]
   modelId.value = snapshot.model_config_id ? String(snapshot.model_config_id) : ''
   imageParameters.value = {
     clarity: snapshot.image_parameters.clarity,
@@ -496,7 +520,7 @@ function isLongError(message: string) {
 
 function isCurrentGeneration(record: AssetGenerationRecord) {
   if (selectedVariant.value) return false
-  return Boolean(record.images[0] && record.images[0] === generatedImage.value)
+  return Boolean(record.is_current || (record.images[0] && record.images[0] === generatedImage.value))
 }
 
 function selectVariantPreview(variant: AssetVariant | null) {
@@ -524,6 +548,10 @@ async function restoreGeneration(record: AssetGenerationRecord) {
   try {
     const restored = (await api.restoreAssetGeneration(props.asset.id, record.id)).data
     promptSourceAsset.value = restored
+    generationHistory.value = generationHistory.value.map(item => ({
+      ...item,
+      is_current: item.id === record.id,
+    }))
     emit('saved', restored)
     notice.success('已将这次生成结果设为当前图片')
   } catch (error) {
@@ -580,7 +608,7 @@ async function refreshGeneratedResult(assetId: number, variantId?: number) {
   await loadGenerationHistory()
 }
 
-async function generateAndTrack(assetId: number, variantId?: number) {
+async function generateAndTrack(assetId: number, variantId?: number, references: string[] = []) {
   generationController?.abort()
   const controller = new AbortController()
   generationController = controller
@@ -589,7 +617,7 @@ async function generateAndTrack(assetId: number, variantId?: number) {
   generationTask.value = null
 
   try {
-    const submitted = (await api.generateAsset(assetId, variantId)).data
+    const submitted = (await requestAssetGeneration(assetId, variantId, references)).data
     if (controller.signal.aborted) return
     generationTask.value = submitted
     saving.value = false
@@ -760,6 +788,60 @@ function onDrop(event: DragEvent) {
   acceptFile(event.dataTransfer?.files[0])
 }
 
+function acceptReferenceFiles(files?: FileList | File[]) {
+  if (!files) return
+  const available = Math.max(0, 10 - referenceImagePreviews.value.length)
+  const accepted = Array.from(files).slice(0, available)
+  if (Array.from(files).length > available) notice.info('资产设定图最多支持 10 张参考图片')
+  accepted.forEach((file) => {
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      notice.info(`${file.name} 不是 JPG 或 PNG 图片`)
+      return
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      notice.info(`${file.name} 不能超过 15MB`)
+      return
+    }
+    pendingReferenceImages.value.push({ file, previewUrl: URL.createObjectURL(file) })
+  })
+}
+
+function onReferenceFileInput(event: Event) {
+  const input = event.currentTarget as HTMLInputElement
+  acceptReferenceFiles(input.files || undefined)
+  input.value = ''
+}
+
+function removeReferenceImage(index: number) {
+  if (index < referenceImages.value.length) {
+    referenceImages.value.splice(index, 1)
+    return
+  }
+  const pendingIndex = index - referenceImages.value.length
+  const pending = pendingReferenceImages.value[pendingIndex]
+  if (!pending) return
+  URL.revokeObjectURL(pending.previewUrl)
+  pendingReferenceImages.value.splice(pendingIndex, 1)
+}
+
+async function prepareReferenceImages() {
+  if (!pendingReferenceImages.value.length) return [...referenceImages.value]
+  const uploaded = await Promise.all(pendingReferenceImages.value.map(item => api.upload(item.file)))
+  pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
+  pendingReferenceImages.value = []
+  referenceImages.value = [
+    ...referenceImages.value,
+    ...uploaded.map(persistedMediaRef),
+  ].slice(0, 10)
+  return [...referenceImages.value]
+}
+
+function requestAssetGeneration(assetId: number, variantId: number | undefined, references: string[]) {
+  if (references.length) return api.generateAsset(assetId, variantId, references)
+  if (variantId !== undefined) return api.generateAsset(assetId, variantId)
+  return api.generateAsset(assetId)
+}
+
 function onWindowKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || event.repeat || !props.open) return
   if (annotationOpen.value) return
@@ -781,6 +863,7 @@ function buildBaseAssetMetadata(existingMetadata: Record<string, unknown>): Reco
     output_format: imageParameters.value.outputFormat,
     generation_count: 1,
     model_config_id: Number(modelId.value) || undefined,
+    generation_reference_images: [...referenceImages.value],
   }
   if (props.kind === 'character') {
     Object.assign(metadata, {
@@ -838,6 +921,9 @@ async function submit(regenerate = false) {
   }
   saving.value = true
   try {
+    const generationReferenceImages = mode.value === 'ai'
+      ? await prepareReferenceImages()
+      : []
     if (props.asset && variantDraft.value) {
       const draft = variantDraft.value
       const variant = selectedVariant.value
@@ -856,6 +942,7 @@ async function submit(regenerate = false) {
         age_group: snapshot.age_group,
         voice: snapshot.voice,
         reference_layout: snapshot.reference_layout,
+        generation_reference_images: generationReferenceImages,
         [VARIANT_EDITOR_FORM_KEY]: snapshot,
       }
       let images = variant?.images || []
@@ -889,7 +976,7 @@ async function submit(regenerate = false) {
       variantStripRef.value?.upsertVariant(updated)
       formDrafts.set(`variant:${updated.id}`, snapshot)
       if (regenerate) {
-        await generateAndTrack(props.asset.id, updated.id)
+        await generateAndTrack(props.asset.id, updated.id, generationReferenceImages)
         return
       }
       notice.success(`「${updated.name}」版本已保存`)
@@ -913,6 +1000,7 @@ async function submit(regenerate = false) {
       output_format: imageParameters.value.outputFormat,
       generation_count: 1,
       model_config_id: Number(modelId.value) || undefined,
+      generation_reference_images: generationReferenceImages,
     }
 
     if (props.kind === 'character') {
@@ -961,12 +1049,12 @@ async function submit(regenerate = false) {
       promptSourceAsset.value = response.data
       emit('saved', response.data)
       if (regenerate) {
-        await generateAndTrack(response.data.id)
+        await generateAndTrack(response.data.id, undefined, generationReferenceImages)
         return
       }
       notice.success(`${config.value.label}已更新`)
     } else if (mode.value === 'ai') {
-      await api.generateAsset(response.data.id)
+      await requestAssetGeneration(response.data.id, undefined, generationReferenceImages)
       notice.success(`${config.value.label}已创建，正在生成参考图`)
       emit('created', response.data)
     } else {
@@ -1022,7 +1110,7 @@ watch(selectedModel, model => {
   }
 }, { immediate: true })
 watch(
-  [name, description, prompt, gender, age, voice, referenceLayout, modelId, () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
+  [name, description, prompt, gender, age, voice, referenceLayout, modelId, () => referenceImages.value.join('|'), () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
   () => { if (props.open && props.asset && formHydrated.value) scheduleAutoSave() },
 )
 onMounted(() => {
@@ -1037,6 +1125,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
   generationController?.abort()
+  pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
   window.removeEventListener('keydown', onWindowKeydown)
   document.body.style.overflow = previousBodyOverflow
 })
@@ -1100,13 +1189,13 @@ onUnmounted(() => {
 
           <section v-if="isEditing" class="asset-generation-history" aria-labelledby="asset-history-title">
             <header>
-              <div><Clock3 :size="15" /><strong id="asset-history-title">生成记录</strong><span>{{ generationHistory.length }} 次</span></div>
+              <div><Clock3 :size="15" /><strong id="asset-history-title">生成记录</strong><span>{{ visibleGenerationHistory.length }} 次</span></div>
               <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="刷新生成记录" title="刷新生成记录" :loading="loadingHistory" @click="loadGenerationHistory"><RefreshCw v-if="!loadingHistory" :size="14" /></AppButton>
             </header>
             <div v-if="loadingHistory && !generationHistory.length" class="asset-generation-history__state">正在加载生成记录…</div>
-            <div v-else-if="!generationHistory.length" class="asset-generation-history__state">还没有生成记录</div>
+            <div v-else-if="!visibleGenerationHistory.length" class="asset-generation-history__state">暂无其他生成记录</div>
             <div v-else class="asset-generation-history__list">
-              <article v-for="record in generationHistory" :key="record.id" :class="`is-status-${record.status}`">
+              <article v-for="record in visibleGenerationHistory" :key="record.id" :class="`is-status-${record.status}`">
                 <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="`放大查看${formatHistoryTime(record.created_at)}的生成图片`" @click="openImageLightbox(record.images[0], `${name}的历史生成图片`, record.output_format)">
                   <img :src="record.images[0]" :alt="`${name}的历史生成图片`" loading="lazy" @load="recordImageInfo(record.images[0], $event, record.output_format)" />
                   <span>{{ imageInfoLabel(record.images[0], record.output_format) }}</span>
@@ -1134,13 +1223,12 @@ onUnmounted(() => {
                     class="asset-generation-history__restore"
                     variant="ghost"
                     size="xs"
-                    :disabled="isCurrentGeneration(record) || Boolean(restoringRecordId)"
+                    :disabled="Boolean(restoringRecordId)"
                     :loading="restoringRecordId === record.id"
                     @click="restoreGeneration(record)"
                   >
-                    <Check v-if="isCurrentGeneration(record)" :size="12" />
-                    <Undo2 v-else-if="restoringRecordId !== record.id" :size="12" />
-                    {{ isCurrentGeneration(record) ? '当前使用' : '设为当前' }}
+                    <Undo2 v-if="restoringRecordId !== record.id" :size="12" />
+                    设为当前
                   </AppButton>
                 </div>
               </article>
@@ -1189,6 +1277,24 @@ onUnmounted(() => {
 
           <template v-if="mode === 'ai'">
             <label v-if="kind === 'character'" class="asset-field"><span>参考图版式</span><AppSelect v-model="referenceLayout" :options="referenceLayoutOptions" ariaLabel="选择人物参考图版式" menu-label="参考图版式" /></label>
+            <section class="asset-reference-input" aria-labelledby="asset-reference-input-title">
+              <header>
+                <div><strong id="asset-reference-input-title">图生图参考图片</strong><small>可选 · 最多 10 张</small></div>
+                <span>{{ referenceImagePreviews.length }}/10</span>
+              </header>
+              <div class="asset-reference-input__grid">
+                <figure v-for="(image, index) in referenceImagePreviews" :key="image.key">
+                  <img :src="image.url" :alt="`图生图参考图片 ${index + 1}`" />
+                  <AppButton type="button" variant="secondary" size="xs" icon-only :aria-label="`移除图生图参考图片 ${index + 1}`" @click="removeReferenceImage(index)"><X :size="13" /></AppButton>
+                </figure>
+                <label v-if="referenceImagePreviews.length < 10" class="asset-reference-input__add">
+                  <input type="file" multiple accept="image/jpeg,image/png" @change="onReferenceFileInput" />
+                  <ImagePlus :size="20" />
+                  <span>添加参考图</span>
+                </label>
+              </div>
+              <p>生成时会参考主体、服装或画面风格；JPG/PNG，单张不超过 15MB。</p>
+            </section>
             <label class="asset-field">
               <span><i>*</i>提示词<small v-if="isEditing">最终发送 · {{ promptLanguage === 'zh' ? '中文' : 'English' }}</small></span>
               <textarea v-model="prompt" rows="8" :placeholder="promptPlaceholder" @input="promptTouched = true" />
@@ -1356,6 +1462,19 @@ onUnmounted(() => {
 .asset-field input { height: 40px; }
 .asset-field input:focus,.asset-field textarea:focus { background: #fff; box-shadow: inset 0 0 0 1px #8587f7,0 0 0 3px rgb(91 93 240 / 9%); }
 .asset-field :deep(.app-select__trigger) { min-height: 40px; border: 0; background: #f6f7fa; box-shadow: none; }
+.asset-reference-input { display: grid; gap: 9px; padding: 12px; border-radius: 14px; background: #f7f8fc; box-shadow: inset 0 0 0 1px #e4e6f0; }
+.asset-reference-input > header,.asset-reference-input > header > div { display: flex; align-items: center; gap: 7px; }
+.asset-reference-input > header { justify-content: space-between; color: #777d8d; font-size: 10px; }
+.asset-reference-input > header strong { color: #4b5060; font-size: 12px; }
+.asset-reference-input > header small { color: #969baa; font-size: 9px; }
+.asset-reference-input__grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
+.asset-reference-input__grid figure,.asset-reference-input__add { position: relative; min-width: 0; height: 86px; overflow: hidden; margin: 0; border-radius: 10px; background: #fff; }
+.asset-reference-input__grid figure img { width: 100%; height: 100%; object-fit: cover; }
+.asset-reference-input__grid figure :deep(.app-button) { position: absolute; top: 5px; right: 5px; color: #fff; background: rgb(35 38 52 / 72%); }
+.asset-reference-input__add { display: grid; place-items: center; align-content: center; gap: 4px; color: #6a6ce9; box-shadow: inset 0 0 0 1.5px #cfd1f7; cursor: pointer; }
+.asset-reference-input__add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.asset-reference-input__add span { font-size: 9px; font-weight: 650; }
+.asset-reference-input > p { margin: 0; color: #979cab; font-size: 9px; line-height: 1.45; }
 .asset-mode { min-width: 0; margin: 0; padding: 0; border: 0; }
 .asset-mode legend { margin-bottom: 7px; color: #535968; font-size: 12px; font-weight: 650; }
 .asset-mode > div { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; padding: 4px; border-radius: 13px; background: #f3f4f8; }
@@ -1395,6 +1514,7 @@ onUnmounted(() => {
   .asset-dialog { width: 100%; border-radius: 0; }
   .asset-form-grid.is-character { grid-template-columns: 1fr; }
   .asset-mode > div,.asset-library__grid { grid-template-columns: 1fr; }
+  .asset-reference-input__grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .asset-library > header,.asset-dialog__footer { align-items: stretch; flex-direction: column; }
   .asset-generation-options { width: 100%; flex-wrap: wrap; }
   .asset-generation-options :deep(.app-select:first-child) { width: 100%; }

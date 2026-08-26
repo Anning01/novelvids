@@ -5,7 +5,7 @@ from controllers.novel import novel_controller
 from models.novel import Novel
 from models.chapter import Chapter
 from models.config import AiModelConfig
-from schemas.novel import NovelCreate, NovelUpdate, NovelOut
+from schemas.novel import NovelCreate, NovelPatch, NovelUpdate, NovelOut
 from utils.enums import AiTaskTypeEnum
 
 @pytest.mark.asyncio
@@ -43,6 +43,57 @@ async def test_update_novel():
     updated = await novel_controller.update(novel.id, update_data)
     assert updated.name == "Updated Name"
     assert updated.content == "New Content"
+
+
+@pytest.mark.asyncio
+async def test_storyboard_video_model_preference_is_persisted_and_returned_by_meta():
+    novel = await Novel.create(name="Persistent Video Model", author="Author")
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        task_types=[AiTaskTypeEnum.video.value],
+        name="preferred-video-model",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="k",
+        model="video-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=True,
+    )
+
+    updated = await novel_controller.patch(
+        novel.id,
+        NovelPatch(video_model_config_id=config.id),
+    )
+    meta = await novel_controller.meta(novel.id)
+
+    assert updated.video_model_config_id == config.id
+    assert meta["video_model_config_id"] == config.id
+
+
+@pytest.mark.asyncio
+async def test_disabled_storyboard_video_model_preference_is_rejected():
+    novel = await Novel.create(name="Disabled Video Model", author="Author")
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        task_types=[AiTaskTypeEnum.video.value],
+        name="disabled-video-model",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="k",
+        model="video-model",
+        api_protocol="volcengine_ark",
+        video_model_type="seedance_2",
+        is_active=False,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await novel_controller.patch(
+            novel.id,
+            NovelPatch(video_model_config_id=config.id),
+        )
+
+    assert exc_info.value.status_code == 400
+    await novel.refresh_from_db()
+    assert novel.video_model_config_id is None
 
 @pytest.mark.asyncio
 async def test_delete_novel():

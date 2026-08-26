@@ -10,6 +10,7 @@ from models.ai_task import AiTask
 from models.config import AiModelConfig
 from services.ai_task_executor import ai_task_executor
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum, TaskStatusEnum
+from api.scene import get_storyboard_strategies
 
 
 # ---- Mock Handler ----
@@ -56,6 +57,15 @@ async def _mock_handler_execute(self, request_params: dict) -> dict:
 
 
 # ---- 辅助函数 ----
+
+
+@pytest.mark.asyncio
+async def test_storyboard_strategy_options_are_backend_driven():
+    response = await get_storyboard_strategies(None)
+
+    assert [strategy.key for strategy in response.data] == ["cinematic", "narration"]
+    assert [strategy.name for strategy in response.data] == ["电影感叙事", "旁白叙事"]
+    assert [strategy.key for strategy in response.data if strategy.is_default] == ["cinematic"]
 
 async def _setup_scene_env():
     """创建测试用的 novel、chapter、config。"""

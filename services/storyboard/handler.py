@@ -5,9 +5,14 @@ from openai import AsyncOpenAI
 from models.chapter import Chapter
 from models.asset import Asset
 from models.scene import Scene
-from prompts.storyboard import format_storyboard_prompt, referenced_entities
+from prompts.storyboard import (
+    format_storyboard_prompt,
+    normalized_storyboard_reference_fields,
+    referenced_entities,
+)
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
+from services.storyboard.strategies import storyboard_strategy_factory
 from schemas.scene import SceneEntity
 from utils.enums import AssetTypeEnum
 from utils.prompt_language import normalize_prompt_language
@@ -37,6 +42,10 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
         # 1. 获取章节和相关资产
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
+        strategy = storyboard_strategy_factory.resolve(
+            request_params.get("storyboard_strategy")
+            or chapter.novel.storyboard_strategy
+        )
         all_assets = await Asset.filter(novel_id=chapter.novel_id)
         assets = [a for a in all_assets if chapter.number in (a.source_chapters or [])]
 
@@ -70,6 +79,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 max_context_characters=max_context_characters,
                 thinking=thinking,
                 max_tokens=max_tokens,
+                storyboard_strategy=strategy.key,
             )
 
             end_time = time.time()
@@ -83,6 +93,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 request_duration=request_duration,
                 prompt_language=prompt_language,
                 entities=entities,
+                storyboard_strategy=strategy.key,
             )
 
             # 5. 返回结果
@@ -108,11 +119,21 @@ class StoryboardTaskHandler(BaseTaskHandler):
         request_duration: float,
         prompt_language: str = "zh",
         entities: list[SceneEntity] | None = None,
+        storyboard_strategy: str | None = None,
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
         scenes_created = []
+        strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
 
         for shot in storyboard.shots:
+            original_description = shot.description
+            reference_updates = normalized_storyboard_reference_fields(
+                shot,
+                entities or [],
+            )
+            if reference_updates:
+                shot = shot.model_copy(update=reference_updates)
+
             # 构建 prompt JSON 对象
             prompt_params = {
                 "shot_size_and_camera": shot.shot_size_and_camera,
@@ -129,6 +150,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "grade_and_palette": shot.grade_and_palette,
                 "camera_movement": shot.camera_movement,
                 "sound_design": shot.sound_design,
+                "narration": shot.narration,
                 "dialogue": shot.dialogue,
                 "transition": shot.transition,
                 "allowed_effects": shot.allowed_effects,
@@ -139,7 +161,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
             # 构建 metadata，包含 API 元数据
             scene_metadata = {
-                "shot_title": shot.description,
+                "shot_title": original_description,
                 "duration_str": shot.duration,
                 "sequence_id": shot.sequence,
                 # API 调用元数据
@@ -155,6 +177,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "request_duration": round(request_duration, 2),
                 "prompt_language": normalize_prompt_language(prompt_language),
                 "generation_batch_count": api_metadata.get("batch_count", 1),
+                "storyboard_strategy": strategy.key,
+                "storyboard_strategy_name": strategy.name,
             }
 
             # 如果有拒绝信息，添加到 metadata
@@ -164,6 +188,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 shot,
                 prompt_language,
                 entities=entities or [],
+                strategy=strategy,
             )
             # 镜头实际引用的资产 ID，持久化到 scene.assets（与画布工作流共用同一份引用数据）
             referenced_asset_ids = [
@@ -176,7 +201,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             scene = await Scene.create(
                 chapter_id=chapter_id,
                 sequence=shot.sequence,
-                description=shot.description,
+                description=original_description,
                 prompt_params=prompt_params,
                 prompt=prompt,
                 duration=duration_value,

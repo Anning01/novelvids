@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, patch
 from decimal import Decimal
@@ -14,7 +16,7 @@ from models.video import Video
 from models.config import AiModelConfig
 from schemas.video import VideoGenerateRequest, VideoReferenceMedia
 from services.video.base import VideoProviderError
-from services.video.reference_media import reference_mention_syntax
+from services.video.reference_media import reference_mention_syntax, select_referenced_media
 from utils.enums import (
     AiTaskTypeEnum,
     AssetTypeEnum,
@@ -30,6 +32,9 @@ from utils.enums import (
 async def _create_scene_with_config(
     prompt: str = "测试提示词",
     model_name: str = "seedance-2",
+    video_model_type: str = "seedance_2",
+    api_protocol: str = "volcengine_ark",
+    base_url: str = "https://ark.cn-beijing.volces.com/api/v3",
 ) -> tuple[Scene, AiModelConfig]:
     """创建完整的 Scene + AiModelConfig 测试数据。"""
     novel = await Novel.create(name="Video Test Novel", author="Author")
@@ -38,11 +43,11 @@ async def _create_scene_with_config(
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,
         name=model_name,
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        base_url=base_url,
         api_key="sk-test",
         model="mock-model",
-        api_protocol="volcengine_ark",
-        video_model_type="seedance_2",
+        api_protocol=api_protocol,
+        video_model_type=video_model_type,
         is_active=True,
     )
     return scene, config
@@ -80,6 +85,31 @@ async def test_生成视频_提交成功():
     await scene.refresh_from_db()
     assert scene.metadata["current_video_id"] == video.id
     print(f"    生成视频成功: video_id={video.id}, task_id={video.external_task_id}")
+
+
+@pytest.mark.asyncio
+async def test_生成_minimax_h3_视频记录正确供应商类型():
+    scene, config = await _create_scene_with_config(
+        model_name="minimax-h3",
+        video_model_type="minimax_h3",
+        api_protocol="minimax",
+        base_url="https://api.minimaxi.com",
+    )
+    req = VideoGenerateRequest(
+        scene_id=scene.id,
+        model_config_id=config.id,
+        resolution="768P",
+        aspect_ratio="16:9",
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory:
+        mock_gen = AsyncMock()
+        mock_gen.submit.return_value = "minimax-task-001"
+        mock_factory.return_value = mock_gen
+        video = await video_controller.generate(req)
+
+    assert video.model_type == VideoModelTypeEnum.minimax.value
+    assert video.metadata["video_model_type"] == "minimax_h3"
 
 
 @pytest.mark.asyncio
@@ -410,6 +440,44 @@ async def test_查询视频状态_已完成():
 
 
 @pytest.mark.asyncio
+async def test_并发查询同一完成任务只收口一次():
+    """页面轮询与后台收口并发时，不重复查询、下载或计费。"""
+    scene, config = await _create_scene_with_config()
+    video = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        external_task_id="ext-concurrent-completed",
+        status=TaskStatusEnum.running.value,
+        metadata={"model_config_id": config.id},
+    )
+
+    with patch("controllers.video.get_generator") as mock_factory, \
+         patch("controllers.video._download_video", new_callable=AsyncMock) as mock_download:
+        generator = AsyncMock()
+        generator.query.return_value = {
+            "status": TaskStatusEnum.completed,
+            "progress": 100,
+            "url": "https://cdn.example.com/concurrent.mp4",
+            "metadata": {"duration": 6.0},
+        }
+        mock_factory.return_value = generator
+        mock_download.return_value = f"/media/videos/{video.id}.mp4"
+
+        first, second = await asyncio.gather(
+            video_controller.query_status(video.id),
+            video_controller.query_status(video.id),
+        )
+
+    assert first.status == TaskStatusEnum.completed.value
+    assert second.status == TaskStatusEnum.completed.value
+    generator.query.assert_awaited_once_with(video.external_task_id)
+    mock_download.assert_awaited_once_with(
+        "https://cdn.example.com/concurrent.mp4",
+        video.id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_返回尾帧_注入同章下一分镜参考图():
     scene, config = await _create_scene_with_config()
     next_scene = await Scene.create(
@@ -452,6 +520,20 @@ async def test_返回尾帧_注入同章下一分镜参考图():
     assert references[0]["source_scene_id"] == scene.id
     assert references[1]["url"] == "https://cdn.example.com/manual.png"
     assert result.metadata["last_frame_injected_scene_id"] == next_scene.id
+    mention = reference_mention_syntax("image", references[0]["url"])
+    assert next_scene.prompt.startswith("【首帧衔接】\n")
+    assert f"{mention} 作为本镜头首帧" in next_scene.prompt
+    assert next_scene.prompt.endswith("下一镜头")
+    assert result.metadata["last_frame_prompt_instruction"] in next_scene.prompt
+    assert select_referenced_media(
+        next_scene.prompt,
+        [VideoReferenceMedia(
+            type=references[0]["type"],
+            url=references[0]["url"],
+            mention_url=references[0]["mention_url"],
+            name=references[0]["name"],
+        )],
+    )[0].url == references[0]["url"]
 
 
 @pytest.mark.asyncio
@@ -499,6 +581,7 @@ async def test_返回尾帧_章节末镜头注入下一章首镜头():
 
     await next_scene.refresh_from_db()
     assert next_scene.metadata["video_reference_media"][0]["source_scene_id"] == scene.id
+    assert "作为本镜头首帧" in next_scene.prompt
 
 
 @pytest.mark.asyncio
@@ -665,6 +748,65 @@ async def test_未完成视频不能设为当前版本():
     assert exc_info.value.status_code == 400
     assert "已完成" in exc_info.value.detail
 
+
+@pytest.mark.asyncio
+async def test_章节合并按分镜顺序使用当前已有视频并跳过缺失分镜():
+    novel = await Novel.create(name="章节合并", author="Author", team_id=7)
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    scene_3 = await Scene.create(chapter=chapter, sequence=3, prompt="3", duration=6.0)
+    scene_1 = await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
+    await Scene.create(chapter=chapter, sequence=2, prompt="2", duration=5.0)
+    selected = await Video.create(
+        scene=scene_1,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/selected.mp4",
+    )
+    await Video.create(
+        scene=scene_1,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/newer.mp4",
+    )
+    scene_1.metadata = {"current_video_id": selected.id}
+    await scene_1.save(update_fields=["metadata", "updated_at"])
+    third = await Video.create(
+        scene=scene_3,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/third.mp4",
+    )
+
+    with patch(
+        "controllers.video.video_merger.merge_videos_from_storage",
+        new_callable=AsyncMock,
+        return_value="/media/videos/merged/chapter.mp4",
+    ) as merge:
+        result = await video_controller.merge_chapter_videos(chapter.id)
+
+    assert [video.id for video in merge.call_args.args[0]] == [selected.id, third.id]
+    assert merge.call_args.args[1] == chapter.id
+    assert merge.call_args.kwargs == {"team_id": 7}
+    assert result == {
+        "chapter_id": chapter.id,
+        "merged_url": "/media/videos/merged/chapter.mp4",
+        "video_count": 2,
+        "total_duration": 10.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_章节没有已生成视频时不能合并():
+    novel = await Novel.create(name="空章节合并", author="Author")
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await video_controller.merge_chapter_videos(chapter.id)
+
+    assert exc_info.value.status_code == 400
+    assert "还没有已生成的视频" in exc_info.value.detail
+
 @pytest.mark.asyncio
 async def test_删除视频():
     """删除视频后不再存在。"""
@@ -753,3 +895,53 @@ async def test_query_status_completed_video_reference_uses_ref_price():
     assert record.usage["has_video_reference"] is True
     assert record.usage["input_video_seconds"] == 3
     assert record.cost == Decimal("4.838400")  # 28 × 21600 token/s × (5+3)s / 1e6
+
+
+@pytest.mark.asyncio
+async def test_query_status_completed_minimax_h3_按秒与输入素材计费():
+    novel = await Novel.create(name="MiniMax H3 计费小说", author="a")
+    chapter = await Chapter.create(novel_id=novel.id, number=1, name="第1章", content="c")
+    scene = await Scene.create(chapter_id=chapter.id, sequence=1, description="d", prompt="p", duration=5)
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.video.value,
+        name="minimax-h3",
+        base_url="https://api.minimaxi.com",
+        api_key="k",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+        pricing={
+            "type": "video",
+            "currency": "CNY",
+            "billing_unit": "second",
+            "prices": {"768P": 0.5, "2K": 0.8},
+            "video_reference_prices": {"768P": 0.5, "2K": 0.8},
+            "input_image": {"first_free": 5, "price_per_image": 0.2},
+        },
+        is_active=True,
+    )
+    video = await Video.create(
+        scene_id=scene.id,
+        model_type=VideoModelTypeEnum.minimax.value,
+        external_task_id="minimax-ext-1",
+        status=TaskStatusEnum.pending.value,
+        metadata={
+            "model_config_id": config.id,
+            "novel_id": novel.id,
+            "resolution": "768P",
+            "duration": 5,
+            "has_video_reference": True,
+            "input_video_seconds": 3,
+            "input_image_count": 7,
+        },
+    )
+    with (
+        patch("controllers.video.get_generator", return_value=FakeCompletedGenerator()),
+        patch("controllers.video._download_video", new=AsyncMock(return_value="/media/videos/h3.mp4")),
+    ):
+        await video_controller.query_status(video.id)
+
+    record = await ModelUsageRecord.filter(video_id=video.id).first()
+    assert record is not None
+    assert record.usage["input_image_count"] == 7
+    assert record.cost == Decimal("4.400000")

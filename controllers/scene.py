@@ -8,6 +8,7 @@ from models.chapter import Chapter
 from models.ai_task import AiTask
 from controllers.config import ai_model_config_controller
 from services.ai_task_executor import ai_task_executor
+from services.storyboard.strategies import storyboard_strategy_factory
 from services.oss import normalize_media_url
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
@@ -127,7 +128,10 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         一个章节同时只允许一个进行中的分镜拆解任务：用事务锁住章节行，
         在锁内检查活跃任务并创建，避免并发请求重复建任务浪费 token。
         """
-        chapter = await Chapter.get(id=chapter_id)
+        chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
+        strategy = storyboard_strategy_factory.resolve(
+            chapter.novel.storyboard_strategy
+        )
 
         # 1. 获取分镜生成任务的启用配置（团队自定义优先，官方兜底）
         config = await ai_model_config_controller.get_active(
@@ -147,6 +151,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "supports_json_output": config.supports_json_output,
             "max_context_characters": config.max_context_characters,
             "prompt_language": "zh",
+            "storyboard_strategy": strategy.key,
         }
         if getattr(config, "thinking", None):
             request_params["thinking"] = config.thinking

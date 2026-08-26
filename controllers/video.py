@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.billing.recorder import billing_recorder
 from services.oss import resolve_media_url
-from services.video import get_generator
+from services.video import get_generator, get_record_model_type
 from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
     normalize_selected_variant_ids,
@@ -29,14 +30,19 @@ from services.video.asset_resolver import (
 from services.video.capabilities import validate_selection
 from services.video.capabilities import capabilities_for
 from services.video.reference_media import (
+    reference_mention_syntax,
     render_reference_mentions,
     select_referenced_media,
     verify_local_reference,
 )
+from prompts.video import (
+    inject_last_frame_continuity_prompt,
+    render_last_frame_continuity_instruction,
+)
 from prompts.styles import video_style_suffix
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +143,7 @@ async def _next_scene(scene: Scene) -> Scene | None:
 
 
 async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dict | None:
-    """将尾帧写入下一镜头 metadata.video_reference_media，保持操作幂等。"""
+    """将尾帧及其首帧用途写入下一镜头，保持操作幂等。"""
     source_scene = await Scene.get(id=video.scene_id)
     target_scene = await _next_scene(source_scene)
     if target_scene is None:
@@ -146,6 +152,7 @@ async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dic
     reference = {
         "type": "image",
         "url": last_frame_url,
+        "mention_url": last_frame_url,
         "name": f"分镜{source_scene.sequence}生成尾帧.png",
         "content_type": "image/png",
         "source": "previous_scene_last_frame",
@@ -162,14 +169,31 @@ async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dic
             and item.get("source_scene_id") == source_scene.id
         )
     ]
-    target_scene.metadata = {**target_metadata, "video_reference_media": [reference, *media]}
-    await target_scene.save(update_fields=["metadata", "updated_at"])
-    return {"scene_id": target_scene.id, "reference": reference}
+    mention = reference_mention_syntax("image", last_frame_url)
+    prompt_instruction = render_last_frame_continuity_instruction(mention)
+    target_scene.prompt = inject_last_frame_continuity_prompt(
+        target_scene.prompt or "",
+        mention,
+    )
+    target_scene.metadata = {
+        **target_metadata,
+        "video_reference_media": [reference, *media],
+        "previous_scene_last_frame_prompt_instruction": prompt_instruction,
+    }
+    await target_scene.save(update_fields=["prompt", "metadata", "updated_at"])
+    return {
+        "scene_id": target_scene.id,
+        "reference": reference,
+        "prompt_instruction": prompt_instruction,
+    }
 
 
 class VideoController(CRUDBase[Video, dict, dict]):
     def __init__(self):
         super().__init__(model=Video)
+        # 页面轮询和后端自动收口可能同时命中同一任务。按 video_id 串行化，
+        # 避免完成瞬间重复下载、写流水和扣余额。
+        self._query_locks: dict[int, asyncio.Lock] = {}
 
     @staticmethod
     async def _set_scene_current_video(scene: Scene, video_id: int) -> None:
@@ -246,6 +270,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         # 获取生成器并提交
         generator = get_generator(config)
+        record_model_type = get_record_model_type(config)
         duration = req.duration if req.duration is not None else int(scene.duration or 6)
         selection = validate_selection(
             config.video_model_type,
@@ -329,6 +354,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 400,
                 detail=f"当前模型参考视频总时长不能超过 {capabilities.reference_video_total_duration_max} 秒",
             )
+        if req.generation_mode == "keyframes":
+            input_image_count = int(bool(first_frame)) + int(bool(last_frame))
+        else:
+            input_image_count = len({
+                image
+                for subject in subjects
+                for image in subject.get("images", [])
+            }.union(reference_images))
         video_metadata = {
             "generation_mode": req.generation_mode,
             "first_frame_url": req.first_frame_url,
@@ -337,6 +370,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "novel_id": novel_id,
             "has_video_reference": len(reference_videos) > 0,
             "input_video_seconds": reference_video_duration,
+            "input_image_count": input_image_count,
             "model_name": config.name,
             "model": config.model,
             "video_model_type": config.video_model_type,
@@ -373,7 +407,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             # 并使分镜状态在刷新页面后仍保持为红色。
             video = await Video.create(
                 scene_id=scene.id,
-                model_type=VideoModelTypeEnum.seedance.value,
+                model_type=record_model_type.value,
                 external_task_id=None,
                 status=TaskStatusEnum.failed.value,
                 metadata={**video_metadata, "error": str(error)},
@@ -390,7 +424,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # 创建 Video 记录
         video = await Video.create(
             scene_id=scene.id,
-            model_type=VideoModelTypeEnum.seedance.value,
+            model_type=record_model_type.value,
             external_task_id=external_task_id,
             status=TaskStatusEnum.pending.value,
             metadata=video_metadata,
@@ -404,6 +438,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
     async def query_status(self, video_id: int) -> Video:
         """查询视频生成状态，如有变化则更新 Video 记录。"""
+        lock = self._query_locks.setdefault(video_id, asyncio.Lock())
+        async with lock:
+            return await self._query_status_unlocked(video_id)
+
+    async def _query_status_unlocked(self, video_id: int) -> Video:
+        """在单视频互斥锁内查询并收口供应商任务。"""
         video = await self.get(video_id)
 
         # 已完成或已失败的不再查询
@@ -489,6 +529,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     "last_frame_url": persisted_last_frame_url,
                     "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
                     "last_frame_reference": propagation["reference"] if propagation else None,
+                    "last_frame_prompt_instruction": (
+                        propagation["prompt_instruction"] if propagation else None
+                    ),
                 }
             except Exception as error:
                 logger.exception("Last frame propagation failed: video_id=%s", video.id)
@@ -514,6 +557,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         resolution=metadata.get("resolution"),
                         input_video_seconds=metadata.get("input_video_seconds", 0),
                         has_video_reference=metadata.get("has_video_reference", False),
+                        input_image_count=metadata.get("input_image_count", 0),
                         status=TaskStatusEnum.completed.value,
                         duration_seconds=duration_seconds,
                         video_id=video.id,
@@ -529,6 +573,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         resolution=metadata.get("resolution"),
                         input_video_seconds=metadata.get("input_video_seconds", 0),
                         has_video_reference=metadata.get("has_video_reference", False),
+                        input_image_count=metadata.get("input_image_count", 0),
                         status=TaskStatusEnum.failed.value,
                         duration_seconds=duration_seconds,
                         video_id=video.id,
@@ -676,13 +721,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 "total_duration": 45.0
             }
         """
+        chapter = await Chapter.get(id=chapter_id).select_related("novel")
+
         # 获取章节所有分镜
         scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
 
-        # 收集所有已完成视频，同时检查是否有分镜缺少视频
+        # 只收集当前已经完成的视频；尚未生成或失败的分镜不阻塞本次下载。
+        # scenes 已按 sequence 排序，因此传给合并器的顺序就是最终播放顺序。
         videos_to_merge: list[Video] = []
         total_duration = 0.0
-        missing_scenes: list[int] = []
 
         for scene in scenes:
             metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
@@ -703,19 +750,20 @@ class VideoController(CRUDBase[Video, dict, dict]):
             if video:
                 videos_to_merge.append(video)
                 total_duration += scene.duration or 0
-            else:
-                missing_scenes.append(scene.sequence)
 
-        # 检查是否所有分镜都有视频
-        if missing_scenes:
+        if not videos_to_merge:
             raise HTTPException(
                 400,
-                detail=f"以下分镜尚未生成视频，无法合并：分镜 #{', '.join(map(str, missing_scenes))}"
+                detail="当前章节还没有已生成的视频，无法合并",
             )
 
         # 调用合并服务
         try:
-            merged_url = video_merger.merge_videos(videos_to_merge, chapter_id)
+            merged_url = await video_merger.merge_videos_from_storage(
+                videos_to_merge,
+                chapter_id,
+                team_id=chapter.novel.team_id,
+            )
         except ValueError as e:
             raise HTTPException(400, detail=str(e))
         except RuntimeError as e:

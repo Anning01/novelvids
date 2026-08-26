@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   ArrowRight,
   Bot,
+  Clapperboard,
   FileText,
   Film,
   Layers3,
@@ -18,6 +19,7 @@ import {
 import AppSelect from '@/components/AppSelect.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
+import type { StoryboardStrategy } from '@/types'
 
 type CreationMode = 'agent' | 'manual'
 
@@ -50,6 +52,7 @@ const localVisualStyles: VisualStyle[] = [
 ]
 
 const visualStyles = ref<VisualStyle[]>(localVisualStyles)
+const storyboardStrategies = ref<StoryboardStrategy[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 const router = useRouter()
 const selectedFile = ref<File | null>(null)
@@ -58,10 +61,18 @@ const mode = ref<CreationMode>('agent')
 const aspectRatio = ref('9:16')
 const resolution = ref('720p')
 const styleId = ref('realistic-general')
+const storyboardStrategy = ref('cinematic')
 const customPrompt = ref('')
 const creating = ref(false)
 
 const selectedStyle = computed(() => visualStyles.value.find(item => item.value === styleId.value) ?? visualStyles.value[0])
+const selectedStoryboardStrategy = computed(() => storyboardStrategies.value.find(
+  item => item.key === storyboardStrategy.value,
+))
+const storyboardStrategyOptions = computed(() => storyboardStrategies.value.map(item => ({
+  value: item.key,
+  label: item.name,
+})))
 const isAgentMode = computed(() => mode.value === 'agent')
 const formattedFileSize = computed(() => {
   if (!selectedFile.value) return ''
@@ -69,7 +80,7 @@ const formattedFileSize = computed(() => {
   return megabytes >= 1 ? `${megabytes.toFixed(1)} MB` : `${Math.max(1, Math.round(selectedFile.value.size / 1024))} KB`
 })
 
-onMounted(async () => {
+async function loadVisualStyles() {
   try {
     const response = await api.visualStyles()
     const thumbnails = new Map(localVisualStyles.map(item => [item.value, item.image]))
@@ -85,6 +96,24 @@ onMounted(async () => {
   } catch {
     // 拉取失败时静默使用本地列表
   }
+}
+
+async function loadStoryboardStrategies() {
+  try {
+    const response = await api.storyboardStrategies()
+    storyboardStrategies.value = response.data
+    if (!response.data.some(item => item.key === storyboardStrategy.value)) {
+      storyboardStrategy.value = response.data.find(item => item.is_default)?.key
+        ?? response.data[0]?.key
+        ?? storyboardStrategy.value
+    }
+  } catch {
+    // 策略由后端统一提供；请求失败时保留默认 key，创建接口仍可安全回退。
+  }
+}
+
+onMounted(() => {
+  void Promise.all([loadVisualStyles(), loadStoryboardStrategies()])
 })
 
 function chooseFile() {
@@ -145,6 +174,8 @@ async function createProject() {
         author: 'Agent 创建',
         description,
         style_key: styleId.value,
+        storyboard_strategy: storyboardStrategy.value,
+        storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
       }
       if (uploaded.key) {
         // OSS 直传：只回传 key，由服务端经内网读取并解析正文，不再把整份书稿传给浏览器。
@@ -174,6 +205,7 @@ async function createProject() {
         resolution: resolution.value,
         style: selectedStyle.value.label,
         styleKey: styleId.value,
+        storyboardStrategy: storyboardStrategy.value,
         fileName: selectedFile.value.name,
         sourcePath: uploaded.file_path,
       }))
@@ -194,6 +226,8 @@ async function createProject() {
       description: `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label}${styleId.value === 'custom' ? ` · ${customPrompt.value.trim()}` : ''}`,
       content: '',
       style_key: styleId.value,
+      storyboard_strategy: storyboardStrategy.value,
+      storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
     })
     sessionStorage.setItem('short-drama-manual-project', JSON.stringify({
       projectId: response.data.id,
@@ -202,6 +236,7 @@ async function createProject() {
       resolution: resolution.value,
       style: selectedStyle.value.label,
       styleKey: styleId.value,
+      storyboardStrategy: storyboardStrategy.value,
     }))
     notice.success('人工短剧项目已创建，正在进入设定工作区')
     await router.push({ name: 'short-drama-manual', params: { projectId: response.data.id } })
@@ -278,6 +313,17 @@ async function createProject() {
           </div>
 
           <div class="format-controls">
+            <AppSelect
+              v-model="storyboardStrategy"
+              class="strategy-select"
+              ariaLabel="分镜策略"
+              menu-label="分镜策略"
+              :menu-width="220"
+              :options="storyboardStrategyOptions"
+              :disabled="!storyboardStrategyOptions.length"
+            >
+              <template #leading><Clapperboard :size="15" /></template>
+            </AppSelect>
             <AppSelect v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="aspectRatios">
               <template #leading><Film :size="15" /></template>
             </AppSelect>
@@ -337,10 +383,12 @@ async function createProject() {
   min-height: 100%;
   overflow: auto;
   padding: 36px 22px 90px;
-  color: #303442;
-  background:
-    linear-gradient(var(--creation-bg-tint, rgb(248 249 252 / 78%)), var(--creation-bg-tint, rgb(248 249 252 / 78%))),
-    var(--creation-bg-image, none) center / cover no-repeat;
+  color: var(--app-text, #303442);
+  background-color: var(--app-canvas, #f8f9fc);
+  background-image: var(--creation-bg-image, none);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 .short-drama-workspace {
@@ -587,6 +635,10 @@ async function createProject() {
   width: 118px;
 }
 
+.strategy-select {
+  width: 154px;
+}
+
 .style-select {
   width: 136px;
 }
@@ -727,7 +779,7 @@ async function createProject() {
   }
   .manual-mode-features { grid-column: 1; justify-content: center; }
   .format-controls { flex-wrap: wrap; }
-  .style-select { width: 100%; }
+  .strategy-select, .style-select { width: 100%; }
   .create-short-drama { width: 100%; }
 }
 </style>

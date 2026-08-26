@@ -32,6 +32,11 @@ def reference_mention_syntax(kind: MediaKind, url: str) -> str:
     return f"@{{{label}:{encoded_url}}}"
 
 
+def _reference_mention_url(reference: Any) -> str:
+    """Prefer the stable persisted identity when a display URL is signed or renewed."""
+    return str(getattr(reference, "mention_url", "") or getattr(reference, "url", ""))
+
+
 def select_referenced_media(prompt: str, references: Sequence[ReferenceT]) -> list[ReferenceT]:
     """仅保留 prompt 中显式引用的上传素材，并按请求顺序去重。"""
     selected: list[ReferenceT] = []
@@ -42,7 +47,8 @@ def select_referenced_media(prompt: str, references: Sequence[ReferenceT]) -> li
         if kind not in {"image", "video"} or not url:
             continue
         identity = (kind, url)
-        if identity in seen or reference_mention_syntax(kind, url) not in prompt:
+        mention_url = _reference_mention_url(reference)
+        if identity in seen or reference_mention_syntax(kind, mention_url) not in prompt:
             continue
         seen.add(identity)
         selected.append(reference)
@@ -60,7 +66,7 @@ def render_reference_mentions(prompt: str, references: Sequence[Any]) -> str:
         default_name = f"参考{'图片' if kind == 'image' else '视频'} {index}"
         name = str(getattr(reference, "name", "") or default_name)
         rendered = rendered.replace(
-            reference_mention_syntax(kind, url),
+            reference_mention_syntax(kind, _reference_mention_url(reference)),
             f"【参考{'图片' if kind == 'image' else '视频'}：{name}】",
         )
     # 已从素材池删除的旧标记不能作为 URL 或伪引用继续进入供应商 prompt。

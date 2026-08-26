@@ -2,47 +2,19 @@
 
 from __future__ import annotations
 
-import base64
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 from models.config import AiModelConfig
 from utils.enums import TaskStatusEnum
 
 
-# MIME 类型映射
-MIME_TYPES = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".tif": "image/tiff",
-    ".tiff": "image/tiff",
-    ".gif": "image/gif",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-}
-
-
 class VideoProviderError(RuntimeError):
     """视频供应商边界错误；调用方可安全持久化其脱敏后的消息。"""
 
 
-def image_to_base64(image_path: str) -> str:
-    """将本地图片转为 base64 data URI。"""
-    path = Path(image_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Image not found: {image_path}")
-
-    mime_type = MIME_TYPES.get(path.suffix.lower(), "image/jpeg")
-    base64_str = base64.b64encode(path.read_bytes()).decode()
-    return f"data:{mime_type};base64,{base64_str}"
-
-
 class BaseVideoGenerator(ABC):
-    """视频生成器抽象基类；当前开放的后台能力由 Seedance 实现。"""
+    """视频供应商适配器的统一生成与查询契约。"""
 
     def __init__(self, config: AiModelConfig):
         self.config = config

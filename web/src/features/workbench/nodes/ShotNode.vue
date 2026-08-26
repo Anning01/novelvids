@@ -243,6 +243,7 @@ registerWorkbenchPromptAction(props.id, {
     config.value.duration,
     referenceVideoCount.value > 0,
     0,
+    generationMode.value === 'keyframes' ? 2 : referenceImageCount.value,
   )),
   costPricing: computed(() => selectedModel.value?.pricing),
   controls: [

@@ -10,11 +10,20 @@ from auth.deps import (
 from controllers.scene import scene_controller
 from models.chapter import Chapter
 from models.scene import Scene
-from schemas.scene import SceneBriefOut, SceneCreate, SceneUpdate, ScenePatch, SceneOut, SceneGenerateCreate
+from schemas.scene import (
+    SceneBriefOut,
+    SceneCreate,
+    SceneGenerateCreate,
+    SceneOut,
+    ScenePatch,
+    SceneUpdate,
+    StoryboardStrategyOut,
+)
 from schemas.ai_task import AiTaskOut
 from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
+from services.storyboard.strategies import storyboard_strategy_factory
 
 router = APIRouter()
 
@@ -44,6 +53,27 @@ async def generate_scene(
     )
     background_tasks.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)
+
+
+@router.get(
+    "/strategies",
+    summary="获取可用分镜策略",
+    response_model=ResponseSchema[list[StoryboardStrategyOut]],
+)
+async def get_storyboard_strategies(
+    _: AuthContext = Depends(get_auth_context),
+):
+    default_key = storyboard_strategy_factory.default.key
+    strategies = [
+        StoryboardStrategyOut(
+            key=strategy.key,
+            name=strategy.name,
+            description=strategy.description,
+            is_default=strategy.key == default_key,
+        )
+        for strategy in storyboard_strategy_factory.list()
+    ]
+    return ResponseSchema(data=strategies)
 
 
 @router.post("/", summary="手动创建分镜", response_model=ResponseSchema[SceneOut])

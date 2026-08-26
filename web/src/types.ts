@@ -34,21 +34,26 @@ export interface NovelMeta {
   total_chapters?: number
   tags?: string[] | null
   style_key?: string | null
+  video_model_config_id?: number | null
+  storyboard_strategy?: string | null
+  storyboard_setting?: string | null
   content_length: number
   created_at: string
   updated_at: string
 }
-export interface Novel { id: number; name: string; author?: string; style_key?: string | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
+export interface Novel { id: number; name: string; author?: string; style_key?: string | null; video_model_config_id?: number | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; angle_image_1?: string; angle_image_2?: string; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
-export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; images: string[]; error_message?: string; model?: string; clarity?: string; aspect_ratio?: string; output_format?: string; created_at: string; finished_at?: string }
+export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; is_current?: boolean; images: string[]; error_message?: string; model?: string; clarity?: string; aspect_ratio?: string; output_format?: string; created_at: string; finished_at?: string }
 export interface AssetActiveGeneration { asset_id: number; task_id: string; status: TaskStatusEnum }
 export interface AssetReferencePromptPreview { prompt: string; prompt_language: 'zh' | 'en' }
 export interface AssetMergeResult { asset: Asset; removed_asset_id: number; data_source_asset_id: number; image_source_asset_id?: number; summary: string[] }
 export interface Scene { id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
+export interface VideoMergeResult { chapter_id: number; merged_url: string; video_count: number; total_duration: number }
 export interface WorkbenchBootstrap { chapter: Chapter; assets: Asset[]; scenes: Scene[]; videos: Record<number, Video[]> }
 export interface AiTask {
   id: string
@@ -62,12 +67,12 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark'
+export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'gpt_image_2'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
-export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5'
-export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
+export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3'
+export interface VideoReferenceMedia { type: 'image' | 'video'; url: string; mention_url?: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
 export interface VideoInputImageReference {
   number: number
   url: string
@@ -125,10 +130,15 @@ export interface ModelPricing {
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
+  billing_unit?: 'token' | 'second'
   discount?: number
   discount_description?: string
 }
-export interface GenerationCapabilities { image: Record<string, string[]>; video: Record<string, string[]> }
+export interface GenerationCapabilities {
+  image: Record<string, string[]>
+  video: Record<string, string[]>
+  video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>
+}
 export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; scope?: 'official' | 'team'; team_id?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; is_active: boolean; created_at: string; updated_at: string }

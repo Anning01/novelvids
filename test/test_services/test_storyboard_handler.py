@@ -81,3 +81,72 @@ async def test_save_scenes_persists_referenced_assets():
     await scenes[0].fetch_related("assets")
     linked_ids = {asset.id for asset in scenes[0].assets}
     assert linked_ids == {person.id}
+
+
+@pytest.mark.asyncio
+async def test_save_scenes_normalizes_plain_person_names_before_persisting():
+    novel = await Novel.create(name="人物引用兜底测试")
+    chapter = await Chapter.create(novel_id=novel.id, number=1, name="第一章", content="正文")
+    person = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="李七夜",
+        aliases=["李公子"],
+    )
+    entity = SceneEntity(
+        name=person.canonical_name,
+        aliases=person.aliases or [],
+        description="",
+        asset_type="人物",
+        asset_id=person.id,
+    )
+    shot = _shot(1, "李七夜从泥水中起身。")
+    shot.spatial_relationships = "李公子位于画面中央。"
+    shot.dialogue = ["李七夜（惊呼）：我的身体！"]
+
+    scenes = await StoryboardTaskHandler()._save_scenes(
+        chapter_id=chapter.id,
+        storyboard=Storyboard(shots=[shot]),
+        api_metadata={},
+        request_duration=0.0,
+        prompt_language="zh",
+        entities=[entity],
+    )
+
+    scene = scenes[0]
+    await scene.fetch_related("assets")
+    assert {asset.id for asset in scene.assets} == {person.id}
+    assert scene.description == "夜访"
+    assert scene.prompt_params["visual_prose"] == "@{李七夜}从泥水中起身。"
+    assert scene.prompt_params["spatial_relationships"] == "@{李七夜}位于画面中央。"
+    assert scene.prompt_params["dialogue"] == ["@{李七夜}（惊呼）：我的身体！"]
+    assert "角色参考：@{李七夜}" in scene.prompt
+
+
+@pytest.mark.asyncio
+async def test_save_scenes_persists_narration_strategy_and_voice_track():
+    novel = await Novel.create(name="旁白分镜持久化测试")
+    chapter = await Chapter.create(
+        novel_id=novel.id,
+        number=1,
+        name="第一章",
+        content="正文",
+    )
+    shot = _shot(1)
+    shot.narration = ["0.0s-1.5s: 旁白（克制）：风暴正在逼近。"]
+    shot.dialogue = ["2.0s-3.0s: @{张三}（低声）：快走。"]
+
+    scenes = await StoryboardTaskHandler()._save_scenes(
+        chapter_id=chapter.id,
+        storyboard=Storyboard(shots=[shot]),
+        api_metadata={},
+        request_duration=0.0,
+        storyboard_strategy="narration",
+    )
+
+    scene = scenes[0]
+    assert scene.prompt_params["narration"] == shot.narration
+    assert scene.metadata["storyboard_strategy"] == "narration"
+    assert scene.metadata["storyboard_strategy_name"] == "旁白叙事"
+    assert "【旁白 / 内心 OS】" in scene.prompt
+    assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in scene.prompt

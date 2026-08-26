@@ -394,6 +394,70 @@ it('shows a live animated generation state immediately after regeneration starts
   vi.useRealTimers()
 })
 
+it('uploads an image-to-image reference and sends it with storyboard asset generation', async () => {
+  vi.clearAllMocks()
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:reference-preview') })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+  const assetWithImage = { ...editedAsset, main_image: '/media/base.png' }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: 'ok', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [imageModel(12, '图生图模型')] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: assetWithImage })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: editedAsset.base_traits || '', prompt_language: 'zh' } })
+  vi.mocked(api.upload).mockResolvedValue({
+    filename: 'reference.png',
+    original_filename: 'reference.png',
+    content_type: 'image/png',
+    file_path: '/tmp/reference.png',
+    key: 'uploads/9/reference.png',
+  })
+  vi.mocked(api.updateAsset).mockImplementation(async (_id, payload) => ({
+    code: 0,
+    message: 'ok',
+    data: { ...assetWithImage, ...payload } as Asset,
+  }))
+  vi.mocked(api.generateAsset).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 'generation-with-reference',
+      task_type: 4,
+      status: TaskStatusEnum.COMPLETED,
+      created_at: '2026-08-22T10:00:00.000Z',
+    },
+  })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset: assetWithImage },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  const input = wrapper.get<HTMLInputElement>('.asset-reference-input input[type="file"]')
+  const file = new File(['reference'], 'reference.png', { type: 'image/png' })
+  Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+  await input.trigger('change')
+  expect(wrapper.get('.asset-reference-input').text()).toContain('1/10')
+
+  const generateButton = wrapper.findAll('button').find(button => button.text().includes('生成图片'))
+  expect(generateButton).toBeDefined()
+  await generateButton!.trigger('click')
+  await flushPromises()
+
+  expect(api.upload).toHaveBeenCalledWith(file)
+  expect(api.updateAsset).toHaveBeenCalledWith(assetWithImage.id, expect.objectContaining({
+    metadata: expect.objectContaining({
+      generation_reference_images: ['uploads/9/reference.png'],
+    }),
+  }))
+  expect(api.generateAsset).toHaveBeenCalledWith(
+    assetWithImage.id,
+    undefined,
+    ['uploads/9/reference.png'],
+  )
+  wrapper.unmount()
+})
+
 it('creates a derived state only from the drawer footer and persists the AI-assisted episode range', async () => {
   vi.clearAllMocks()
   const assetWithImage = { ...editedAsset, main_image: '/media/base.png' }
@@ -550,6 +614,14 @@ it('renders as a right drawer and lists previous generation images', async () =>
     message: 'ok',
     data: [
       {
+        id: 'run-current',
+        status: 3,
+        is_current: true,
+        images: ['/media/current.png'],
+        model: 'gpt-image-2',
+        created_at: '2026-08-13T09:01:00.000Z',
+      },
+      {
         id: 'run-1',
         status: 3,
         images: ['/media/history.png'],
@@ -597,6 +669,8 @@ it('renders as a right drawer and lists previous generation images', async () =>
   await currentImage.trigger('load')
   expect(wrapper.get('.asset-generated-preview > header span').text()).toBe('1920 × 1080 / PNG')
   expect(wrapper.get<HTMLImageElement>('.asset-generation-history__list img').attributes('src')).toBe('/media/history.png')
+  expect(wrapper.get('.asset-generation-history > header').text()).toContain('3 次')
+  expect(wrapper.get('.asset-generation-history__list').text()).not.toContain('当前使用')
   expect(wrapper.get('.asset-generation-history__list').text()).toContain('gpt-image-2 / 3:2 / high / PNG')
   const historyList = wrapper.get('.asset-generation-history__list')
   expect(historyList.text()).toContain('服务暂时不可用')
@@ -621,6 +695,9 @@ it('renders as a right drawer and lists previous generation images', async () =>
   expect(api.restoreAssetGeneration).toHaveBeenCalledWith(editedAsset.id, 'run-1')
   expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ main_image: '/media/history.png' })
   expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/history.png')
+  const visibleHistoryImages = wrapper.findAll<HTMLImageElement>('.asset-generation-history__list img').map(image => image.attributes('src'))
+  expect(visibleHistoryImages).toContain('/media/current.png')
+  expect(visibleHistoryImages).not.toContain('/media/history.png')
 
   await wrapper.get('.asset-generated-preview__viewer').trigger('click')
   await wrapper.vm.$nextTick()

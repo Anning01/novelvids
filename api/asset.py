@@ -23,6 +23,7 @@ from schemas.asset import (
     AssetPatch,
     AssetReferencePromptOut,
     AssetReferencePromptPreview,
+    AssetReferenceCreate,
     AssetUpdate,
     AssetWithVariantsOut,
 )
@@ -317,6 +318,29 @@ async def asset_reference(
     task = await asset_controller.reference(
         asset_id,
         variant_id,
+        team_id=ctx.team_id,
+        user_id=ctx.user.id if ctx.user else None,
+    )
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.post(
+    "/reference/{asset_id}",
+    summary="使用可选参考图片生成资产设定图",
+    response_model=ResponseSchema[AiTaskOut],
+)
+async def asset_reference_with_images(
+    asset_id: int,
+    payload: AssetReferenceCreate,
+    bg: BackgroundTasks,
+    ctx: AuthContext = Depends(require_asset_access),
+    _: AuthContext = _EDITOR,
+):
+    task = await asset_controller.reference(
+        asset_id,
+        payload.variant_id,
+        reference_images=payload.reference_images,
         team_id=ctx.team_id,
         user_id=ctx.user.id if ctx.user else None,
     )

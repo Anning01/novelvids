@@ -12,6 +12,7 @@ from services.llm.json_output import (
     create_json_completion,
 )
 from services.storyboard.chunking import NarrativeChunker
+from services.storyboard.strategies import storyboard_strategy_factory
 
 
 def _message_characters(messages: list[dict[str, str]]) -> int:
@@ -72,12 +73,15 @@ async def generate_storyboard(
     max_context_characters: int | None = None,
     thinking: str | None = None,
     max_tokens: int | None = None,
+    storyboard_strategy: str | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
+    strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
     fixed_messages = build_storyboard_messages(
         "",
         entities,
         prompt_language,
+        strategy=strategy,
     )
     chunker = NarrativeChunker.for_context_limit(
         max_context_characters,
@@ -98,6 +102,7 @@ async def generate_storyboard(
             batch_count=len(chunks),
             next_sequence=len(shots) + 1,
             previous_shot=previous_shot,
+            strategy=strategy,
         )
         try:
             batch_storyboard, completion = await create_json_completion(

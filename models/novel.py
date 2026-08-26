@@ -48,6 +48,10 @@ class Novel(AbstractBaseModel):
         null=True,
         description="视觉风格 key（prompts/styles.py 注册表）",
     )
+    video_model_config_id = fields.IntField(
+        null=True,
+        description="分镜页面默认视频模型配置 ID",
+    )
     team_id = fields.IntField(
         null=True,
         db_index=True,

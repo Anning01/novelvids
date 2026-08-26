@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -166,7 +166,10 @@ export const api = {
   updateAssetVariant: (assetId: number, variantId: number, data: Partial<AssetVariant>) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants/${variantId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   assignAssetVariantToChapter: (assetId: number, variantId: number, chapterNumber: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants/${variantId}/chapter`, { method: 'POST', body: JSON.stringify({ chapter_number: chapterNumber }) }),
   deleteAssetVariant: (assetId: number, variantId: number) => request<SingleResponse<null>>(`/asset/${assetId}/variants/${variantId}`, { method: 'DELETE' }),
-  generateAsset: (id: number, variantId?: number) => request<SingleResponse<AiTask>>(`/asset/reference/${id}${qs({ variant_id: variantId })}`),
+  generateAsset: (id: number, variantId?: number, referenceImages: string[] = []) => request<SingleResponse<AiTask>>(`/asset/reference/${id}`, {
+    method: 'POST',
+    body: JSON.stringify({ variant_id: variantId, reference_images: referenceImages }),
+  }),
   activeAssetGenerations: (novelId: number) => request<SingleResponse<AssetActiveGeneration[]>>(`/asset/active-generations${qs({ novel_id: novelId })}`),
   scenes: (chapterId: number) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page: 1, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),
@@ -175,6 +178,7 @@ export const api = {
   updateScene: (id: number, data: Partial<Scene>) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
   generateScenes: (chapterId: number) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
+  storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
@@ -210,6 +214,7 @@ export const api = {
   },
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
+  mergeChapterVideos: (chapterId: number) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),

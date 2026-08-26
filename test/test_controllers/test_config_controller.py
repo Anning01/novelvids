@@ -643,6 +643,28 @@ async def test_视频模型必须使用受支持类型和火山方舟协议():
             api_protocol="volcengine_ark",
         ))
 
+    minimax = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.video.value,
+        name="minimax-h3",
+        base_url="https://api.minimaxi.com",
+        api_key="key",
+        model="MiniMax-H3",
+        api_protocol="minimax",
+        video_model_type="minimax_h3",
+    ))
+    assert minimax.video_model_type == "minimax_h3"
+
+    with pytest.raises(HTTPException, match="MiniMax 官方"):
+        await ai_model_config_controller.create(AiModelConfigCreate(
+            task_type=AiTaskTypeEnum.video.value,
+            name="minimax-wrong-protocol",
+            base_url="https://api.minimaxi.com",
+            api_key="key",
+            model="MiniMax-H3",
+            api_protocol="volcengine_ark",
+            video_model_type="minimax_h3",
+        ))
+
     with pytest.raises(HTTPException, match="仅支持火山方舟"):
         await ai_model_config_controller.create(AiModelConfigCreate(
             task_type=AiTaskTypeEnum.video.value,

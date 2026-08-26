@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, X } from 'lucide-vue-next'
 import type { VideoGenerationModel, VideoReferenceMedia } from '@/types'
+import ImageLightbox from './ImageLightbox.vue'
 
 const props = defineProps<{
   model: VideoGenerationModel | null
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const input = ref<HTMLInputElement | null>(null)
+const previewImage = ref<VideoReferenceMedia | null>(null)
 const uploadedImages = computed(() => props.media.filter(item => item.type === 'image').length)
 const uploadedVideos = computed(() => props.media.filter(item => item.type === 'video').length)
 const totalVideoDuration = computed(() => props.media
@@ -49,6 +51,14 @@ function showFirstFrame(event: Event) {
   if (!Number.isFinite(video.duration) || video.duration <= 0) return
   video.currentTime = Math.min(0.01, video.duration)
 }
+
+function openImagePreview(item: VideoReferenceMedia) {
+  if (item.type === 'image') previewImage.value = item
+}
+
+function closeImagePreview() {
+  previewImage.value = null
+}
 </script>
 
 <template>
@@ -73,7 +83,16 @@ function showFirstFrame(event: Event) {
         :class="{ 'is-reference-highlighted': highlightedMediaIndex === index }"
         :data-reference-media-index="index"
       >
-        <img v-if="item.type === 'image'" :src="item.url" :alt="item.name || '参考图片'" />
+        <button
+          v-if="item.type === 'image'"
+          type="button"
+          class="reference-image-preview"
+          :aria-label="`放大查看 ${item.name || '参考图片'}`"
+          title="点击放大"
+          @click="openImagePreview(item)"
+        >
+          <img :src="item.url" :alt="item.name || '参考图片'" />
+        </button>
         <video
           v-else
           class="reference-video"
@@ -101,6 +120,12 @@ function showFirstFrame(event: Event) {
       <small v-else-if="!model">请先启用视频模型</small>
       <small v-else>支持图片与 MP4/MOV</small>
     </div>
+    <ImageLightbox
+      :open="Boolean(previewImage)"
+      :src="previewImage?.url || ''"
+      :alt="previewImage?.name || '参考图片'"
+      @close="closeImagePreview"
+    />
   </section>
 </template>
 
@@ -116,7 +141,10 @@ function showFirstFrame(event: Event) {
 .reference-list::-webkit-scrollbar { display: none; }
 .reference-item { position: relative; width: 58px; height: 34px; flex: 0 0 58px; overflow: hidden; border-radius: 8px; background: #e7e9f1; box-shadow: inset 0 0 0 1px #e1e3ea; }
 .reference-item.is-reference-highlighted { box-shadow: inset 0 0 0 2px #ff7a8c, 0 0 0 3px rgb(255 122 140 / 24%); animation: reference-pulse .7s ease 2; }
-.reference-item > img, .reference-video { display: block; width: 100%; height: 100%; border-radius: inherit; background: #e7e9f1; object-fit: cover; }
+.reference-image-preview { display: block; width: 100%; height: 100%; padding: 0; overflow: hidden; border: 0; border-radius: inherit; background: transparent; cursor: zoom-in; }
+.reference-image-preview img, .reference-video { display: block; width: 100%; height: 100%; border-radius: inherit; background: #e7e9f1; object-fit: cover; transition: transform .16s ease; }
+.reference-image-preview:hover img { transform: scale(1.05); }
+.reference-image-preview:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
 .reference-name { position: absolute; right: 0; bottom: 0; left: 0; overflow: hidden; padding: 9px 4px 3px; opacity: 0; color: #fff; background: linear-gradient(transparent,rgb(20 23 31 / 78%)); pointer-events: none; transform: translateY(3px); transition: opacity .15s ease,transform .15s ease; }
 .reference-name strong { display: block; overflow: hidden; color: inherit; font-size: 7px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .reference-remove { position: absolute; top: 3px; right: 3px; display: grid; width: 14px; height: 14px; place-items: center; padding: 0; border: 0; border-radius: 50%; opacity: 0; color: #fff; background: rgb(32 35 44 / 72%); cursor: pointer; transform: scale(.82); transition: opacity .15s ease,transform .15s ease,background .15s ease; }

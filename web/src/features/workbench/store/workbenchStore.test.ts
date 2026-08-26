@@ -208,6 +208,55 @@ it('promotes a real candidate to the asset main image', async () => {
   expect(store.assets[0]?.main_image).toBe('/candidate.png')
 })
 
+it('collects connected asset images for image-to-image generation', () => {
+  const timestamp = '2026-08-22T00:00:00.000Z'
+  const reference = {
+    id: 81,
+    novel_id: 9,
+    asset_type: AssetTypeEnum.PERSON,
+    canonical_name: '参考角色',
+    main_image: '/media/reference.png',
+    source_chapters: [1],
+    created_at: timestamp,
+    updated_at: timestamp,
+  }
+  const target = {
+    id: 82,
+    novel_id: 9,
+    asset_type: AssetTypeEnum.PERSON,
+    canonical_name: '待生成角色',
+    source_chapters: [1],
+    created_at: timestamp,
+    updated_at: timestamp,
+  }
+  store.chapter = {
+    id: 2162,
+    novel_id: 9,
+    number: 1,
+    name: '章节',
+    created_at: timestamp,
+    updated_at: timestamp,
+  }
+  store.assets = [reference, target]
+  store.rebuildGraph()
+  store.edges.push({
+    id: -1,
+    key: 'reference-edge',
+    source: 'asset-81',
+    target: 'asset-82',
+    type: 'asset_reference',
+    backendType: 'asset_reference',
+    sourceHandle: 'asset-output',
+    targetHandle: 'asset-input',
+    orderIndex: 0,
+    config: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+
+  expect(store.assetGenerationReferenceImages(82)).toEqual(['/media/reference.png'])
+})
+
 it('deletes an explicit backend asset and its node', async () => {
   const source = {
     id: 83,

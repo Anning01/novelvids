@@ -137,6 +137,7 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
     assert completed_record["images"] == ["/media/assets/history.png"]
     assert completed_record["model"] == "image-model"
     assert completed_record["clarity"] == "2K"
+    assert completed_record["is_current"] is False
     assert "secret-must-not-leak" not in response.text
     assert "private.example.test" not in response.text
 
@@ -147,6 +148,15 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
     restored = restore_response.json()["data"]
     assert restored["main_image"] == "/media/assets/history.png"
     assert restored["metadata"]["restored_generation_task_id"] == str(completed.id)
+
+    current_history_response = await client.get(
+        f"/api/asset/{asset.id}/generation-history"
+    )
+    current_records = current_history_response.json()["data"]
+    current_record = next(
+        record for record in current_records if record["id"] == str(completed.id)
+    )
+    assert current_record["is_current"] is True
 
     failed_response = await client.post(
         f"/api/asset/{asset.id}/generation-history/{failed.id}/restore"
@@ -562,6 +572,39 @@ async def test_api_reference_asset(client: AsyncClient):
     assert data["task_type"] == AiTaskTypeEnum.reference_image.value
     assert data["status"] == TaskStatusEnum.pending.value
     print(f"    GET /api/asset/reference/{asset.id} -> 200, 任务 id={data['id']}, status=pending")
+
+
+@pytest.mark.asyncio
+async def test_api_reference_asset_with_image_inputs(client: AsyncClient):
+    from models.config import AiModelConfig
+    from models.ai_task import AiTask
+    from utils.enums import AiTaskTypeEnum
+
+    novel = await Novel.create(name="Ref Image Input API Novel", author="Author")
+    asset = await Asset.create(
+        novel_id=novel.id,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="API图生图测试",
+    )
+    await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        name="test-image-input-api",
+        base_url="https://mock.api.com/v1",
+        api_key="sk-test",
+        model="mock-model",
+        image_model_type="gpt_image_2",
+        is_active=True,
+    )
+
+    response = await client.post(
+        f"/api/asset/reference/{asset.id}",
+        json={"reference_images": ["/media/reference.png"]},
+    )
+
+    assert response.status_code == 200, response.text
+    task_id = response.json()["data"]["id"]
+    task = await AiTask.get(id=task_id)
+    assert task.request_params["reference_images"] == ["/media/reference.png"]
 
 
 @pytest.mark.asyncio

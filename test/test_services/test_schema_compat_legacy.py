@@ -9,7 +9,7 @@ from tortoise import Tortoise
 
 from models.config import AiModelConfig
 from models.novel import Novel
-from services.schema_compat import ensure_shared_team_columns
+from services.schema_compat import ensure_novel_analysis_schema, ensure_shared_team_columns
 from utils.enums import AiTaskTypeEnum
 
 
@@ -69,3 +69,24 @@ async def test_shared_team_columns_idempotent_on_current_schema():
     """当前新库上重复执行迁移：无副作用、不抛异常。"""
     await ensure_shared_team_columns()
     await ensure_shared_team_columns()
+
+
+@pytest.mark.asyncio
+async def test_novel_video_model_preference_column_restores_legacy_schema():
+    connection = Tortoise.get_connection("default")
+    await connection.execute_script(
+        "ALTER TABLE novels DROP COLUMN video_model_config_id;"
+    )
+
+    assert "video_model_config_id" not in _columns(
+        await connection.execute_query_dict("PRAGMA table_info(novels)")
+    )
+
+    await ensure_novel_analysis_schema()
+    await ensure_novel_analysis_schema()
+
+    assert "video_model_config_id" in _columns(
+        await connection.execute_query_dict("PRAGMA table_info(novels)")
+    )
+    novel = await Novel.create(name="legacy-video-model-preference", author="x")
+    assert novel.video_model_config_id is None

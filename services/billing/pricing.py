@@ -100,20 +100,42 @@ def compute_video_cost(
     pricing: dict | None,
     input_video_seconds: float = 0.0,
     has_video_reference: bool = False,
+    input_image_count: int = 0,
 ) -> Decimal:
-    """视频按 token 计费：token单价(元/百万token) × (输入+输出时长) × 每秒token数。
+    """按配置的 token/秒策略计算输出视频及输入素材费用。
 
-    prices / video_reference_prices 的值为「元 / 百万 token」，非元/秒。
+    ``billing_unit=second`` 时，输出视频与输入参考视频分别按秒计费；
+    其余配置保持 Seedance 的元/百万 token 兼容算法。
     """
     if not isinstance(pricing, dict) or pricing.get("type") != "video":
         return Decimal("0")
-    if has_video_reference:
-        prices = pricing.get("video_reference_prices") or pricing.get("prices")
-    else:
-        prices = pricing.get("prices")
-    if not isinstance(prices, dict) or resolution not in prices:
+    output_prices = pricing.get("prices")
+    if not isinstance(output_prices, dict) or resolution not in output_prices:
+        return Decimal("0")
+    reference_prices = pricing.get("video_reference_prices") or output_prices
+    if not isinstance(reference_prices, dict):
+        reference_prices = output_prices
+    image_cost = compute_input_image_cost(input_image_count, pricing)
+    if pricing.get("billing_unit") == "second":
+        output_cost = _as_decimal(output_prices[resolution]) * _as_decimal(seconds)
+        input_video_cost = Decimal("0")
+        if has_video_reference and resolution in reference_prices:
+            input_video_cost = (
+                _as_decimal(reference_prices[resolution])
+                * _as_decimal(input_video_seconds)
+            )
+        return _money((output_cost + input_video_cost) * _discount(pricing) + image_cost)
+
+    prices = reference_prices if has_video_reference else output_prices
+    if resolution not in prices:
         return Decimal("0")
     tokens_per_second = TOKENS_PER_SECOND.get(resolution, 0)
     total_seconds = _as_decimal(seconds) + _as_decimal(input_video_seconds)
     tokens = Decimal(tokens_per_second) * total_seconds
-    return _money(_as_decimal(prices[resolution]) * tokens / Decimal("1_000_000") * _discount(pricing))
+    token_cost = (
+        _as_decimal(prices[resolution])
+        * tokens
+        / Decimal("1_000_000")
+        * _discount(pricing)
+    )
+    return _money(token_cost + image_cost)

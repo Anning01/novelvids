@@ -524,6 +524,7 @@ async def test_api_获取所有枚举(client: AsyncClient):
         "seedance_2_fast",
         "seedance_2_mini",
         "seedance_2_5",
+        "minimax_h3",
     }
     assert video_types["seedance_2"]["value"] == "seedance_2"
     assert video_types["seedance_2"]["label"] == "Doubao Seedance 2.0"

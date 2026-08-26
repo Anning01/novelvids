@@ -58,7 +58,11 @@ class SoraScenePromptConfig(BaseModel):
     environment: str = Field(..., description="环境状态、光线层次与氛围变化")
     spatial_relationships: str = Field(
         ...,
-        description="人物、场景入口、主要陈设和机位之间的空间关系",
+        description=(
+            "当前镜头内人物、场景入口、主要陈设和机位之间的完整空间关系；"
+            "必须写明在场人物的初始位置、朝向和动作起点；"
+            "如承接相邻镜头，需把连续性转换为当前镜头内的具体状态"
+        ),
     )
     # --- 核心内容 ---
     visual_prose: str = Field(
@@ -68,7 +72,11 @@ class SoraScenePromptConfig(BaseModel):
 
     actions: list[str] = Field(
         ...,
-        description="【时间轴动作分解】。格式必须为 '开始时间-结束时间: 动作描述'。例如 '0.0s-2.0s: @张三 turns head slowly.'。动作必须精确且符合物理逻辑。"
+        description=(
+            "【时间轴动作分解】。格式必须为 '开始时间-结束时间: 动作描述'。"
+            "每个时间段都必须重新写明动作主体；已登记人物使用 @{完整实体名}，"
+            "不得省略人物名或使用依赖上下文的代词。动作必须精确且符合物理逻辑。"
+        ),
     )
 
     # --- 电影级参数 (参考官方 example.md) ---
@@ -102,13 +110,24 @@ class SoraScenePromptConfig(BaseModel):
         description="【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
     )
 
+    narration: list[str] = Field(
+        default_factory=list,
+        description=(
+            "镜头内旁白与人物内心 OS；每项必须包含精确开始/结束时间、声音主体、"
+            "语气和内容。是否允许使用及与对白的时间关系由当前分镜策略决定；"
+            "没有时返回空数组"
+        ),
+    )
     dialogue: list[str] = Field(
         default_factory=list,
         description="镜头内人物台词；每项包含人物、语气和原文，无台词时返回空数组",
     )
     transition: str = Field(
         ...,
-        description="与相邻镜头衔接的转场方式及连续性依据",
+        description=(
+            "说明与相邻镜头的衔接意图，同时完整写明当前镜头内可见的收尾画面和剪辑点；"
+            "不得只写‘承接上一镜头’等无法直接执行的描述"
+        ),
     )
     allowed_effects: list[str] = Field(
         default_factory=list,
@@ -131,6 +150,15 @@ class SoraScenePromptConfig(BaseModel):
 class Storyboard(BaseModel):
     """完整的故事板，包含多个分镜"""
     shots: list[SoraScenePromptConfig]
+
+
+class StoryboardStrategyOut(BaseModel):
+    """Frontend-selectable storyboard strategy metadata."""
+
+    key: str
+    name: str
+    description: str
+    is_default: bool = False
 
 
 # --- 核心业务属性 (Internal Mixins) ---
