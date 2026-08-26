@@ -21,6 +21,7 @@ import {
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
+import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
@@ -50,8 +51,9 @@ import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { injectLastFrameContinuityInstruction } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
+import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { Asset, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
+import type { Asset, AssetVariant, AudioReference, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
 
 interface ProjectView extends Novel {
   aspectRatio: string
@@ -80,6 +82,12 @@ interface SceneVideoGenerationSettings {
   resolution: string
   aspectRatio: string
   returnLastFrame: boolean
+}
+
+interface AssetVoicePickerTarget {
+  sceneId: number
+  assetId: number
+  variantId: number | null
 }
 
 const terminalTaskStatuses = new Set([
@@ -118,6 +126,10 @@ const assetPickerFocusIds = ref<Record<string, number>>({})
 const assetPickerReplaceAssetIds = ref<Record<string, number>>({})
 const openAssetActionKey = ref('')
 const editingAsset = ref<Asset | null>(null)
+const assetVoicePickerTarget = ref<AssetVoicePickerTarget | null>(null)
+const savingAssetVoiceKey = ref('')
+const audioReferencesById = ref<Record<number, AudioReference>>({})
+const audioReferenceRequests = new Map<number, Promise<void>>()
 
 // 分镜拆解任务持久化（sessionStorage）：切页/刷新后恢复“生成中”状态，
 // 配合后端“同章节唯一进行中任务”保证一个章节同时只有一个拆解任务。
@@ -484,6 +496,7 @@ function closeAssetEditor() {
 function saveEditedAsset(asset: Asset) {
   assets.value = assets.value.map(item => item.id === asset.id ? asset : item)
   if (editingAsset.value?.id === asset.id) editingAsset.value = asset
+  ensureVoiceReferencePromptsForAsset(asset.id)
 }
 
 async function removeAssetFromScene(scene: Scene, asset: Asset) {
@@ -535,6 +548,7 @@ function updateAssetSelection(scene: Scene, selection: SceneAssetVariantSelectio
       ...draft.selectedVariantIds,
       [selection.assetId]: selection.variantId,
     }
+    ensureSceneVoiceReferencePrompt(scene)
     scheduleSceneSave(scene)
     return
   }
@@ -542,6 +556,7 @@ function updateAssetSelection(scene: Scene, selection: SceneAssetVariantSelectio
   const nextSelections = { ...draft.selectedVariantIds }
   delete nextSelections[selection.assetId]
   draft.selectedVariantIds = nextSelections
+  ensureSceneVoiceReferencePrompt(scene)
   scheduleSceneSave(scene)
 }
 
@@ -550,6 +565,7 @@ function replaceAssetSelection(scene: Scene, replaceAssetId: number, selection: 
   const replacement = replaceSceneAssetSelection(draft, replaceAssetId, selection)
   draft.selectedAssetIds = replacement.selectedAssetIds
   draft.selectedVariantIds = replacement.selectedVariantIds
+  ensureSceneVoiceReferencePrompt(scene)
   scheduleSceneSave(scene)
 }
 
@@ -587,6 +603,195 @@ function resolvedSelectedVariantIdsFor(scene: Scene) {
 function selectedAssetLabel(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
   return variant ? `${asset.canonical_name} · ${variant.name}` : asset.canonical_name
+}
+
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function assetVoiceMetadata(scene: Scene, asset: Asset) {
+  return metadataRecord(selectedVariantFor(scene, asset)?.metadata || asset.metadata)
+}
+
+function positiveVoiceReferenceId(value: unknown) {
+  const referenceId = Number(value)
+  return Number.isInteger(referenceId) && referenceId > 0 ? referenceId : null
+}
+
+function resolvedAssetVoiceReferenceId(scene: Scene, asset: Asset) {
+  const variantReferenceId = positiveVoiceReferenceId(
+    selectedVariantFor(scene, asset)?.metadata?.voice_reference_id,
+  )
+  return variantReferenceId || positiveVoiceReferenceId(asset.metadata?.voice_reference_id)
+}
+
+function sceneVoiceReferenceMappings(scene: Scene) {
+  const draft = draftFor(scene)
+  return buildVoiceReferenceMappings({
+    prompt: draft.prompt,
+    promptParams: scene.prompt_params,
+    narratorReferenceId: project.value?.narrator_audio_reference_id,
+    assets: assets.value.flatMap(asset => {
+      if (asset.asset_type !== AssetTypeEnum.PERSON || !draft.selectedAssetIds.includes(asset.id)) return []
+      const referenceId = resolvedAssetVoiceReferenceId(scene, asset)
+      if (!referenceId) return []
+      return [{
+        assetId: asset.id,
+        name: asset.canonical_name,
+        aliases: asset.aliases || [],
+        referenceId,
+      }]
+    }),
+  })
+}
+
+function cacheAudioReference(reference: AudioReference) {
+  audioReferencesById.value = {
+    ...audioReferencesById.value,
+    [reference.id]: reference,
+  }
+}
+
+function loadAudioReference(referenceId: number) {
+  if (audioReferencesById.value[referenceId]) return Promise.resolve()
+  const pending = audioReferenceRequests.get(referenceId)
+  if (pending) return pending
+  const request = api.audioReferences(1, '', { id: referenceId }, projectId.value)
+    .then(response => {
+      const reference = response.data.items.find(item => item.id === referenceId)
+      if (reference) cacheAudioReference(reference)
+    })
+    .catch(() => undefined)
+    .finally(() => audioReferenceRequests.delete(referenceId))
+  audioReferenceRequests.set(referenceId, request)
+  return request
+}
+
+function hydrateSceneAudioReferences(sceneItems = scenes.value) {
+  const referenceIds = new Set(sceneItems.flatMap(scene => (
+    sceneVoiceReferenceMappings(scene).map(mapping => mapping.referenceId)
+  )))
+  return Promise.all([...referenceIds].map(loadAudioReference))
+}
+
+function ensureSceneVoiceReferencePrompt(scene: Scene) {
+  const draft = draftFor(scene)
+  const nextPrompt = injectEditableVoiceReferenceInstruction(
+    draft.prompt,
+    sceneVoiceReferenceMappings(scene),
+  )
+  if (nextPrompt === draft.prompt) return false
+  draft.prompt = nextPrompt
+  scene.prompt = nextPrompt
+  return true
+}
+
+function ensureVoiceReferencePromptsForAsset(assetId: number) {
+  for (const scene of scenes.value) {
+    if (!draftFor(scene).selectedAssetIds.includes(assetId)) continue
+    if (ensureSceneVoiceReferencePrompt(scene)) scheduleSceneSave(scene)
+  }
+}
+
+function selectedAssetVoiceLabel(scene: Scene, asset: Asset) {
+  const metadata = assetVoiceMetadata(scene, asset)
+  return typeof metadata?.voice === 'string' && metadata.voice.trim()
+    ? metadata.voice.trim()
+    : '未配置音色'
+}
+
+function assetVoicePickerKey(scene: Scene, asset: Asset) {
+  return `${scene.id}:${asset.id}:${selectedVariantFor(scene, asset)?.id || 'base'}`
+}
+
+function openAssetVoicePicker(scene: Scene, asset: Asset) {
+  assetVoicePickerTarget.value = {
+    sceneId: scene.id,
+    assetId: asset.id,
+    variantId: selectedVariantFor(scene, asset)?.id || null,
+  }
+}
+
+function closeAssetVoicePicker() {
+  if (!savingAssetVoiceKey.value) assetVoicePickerTarget.value = null
+}
+
+const selectedAssetVoiceReferenceId = computed(() => {
+  const target = assetVoicePickerTarget.value
+  if (!target) return null
+  const asset = assets.value.find(item => item.id === target.assetId)
+  if (!asset) return null
+  const metadata = target.variantId
+    ? metadataRecord(asset.variants?.find(item => item.id === target.variantId)?.metadata)
+    : metadataRecord(asset.metadata)
+  const referenceId = Number(metadata.voice_reference_id)
+  return Number.isInteger(referenceId) && referenceId > 0 ? referenceId : null
+})
+
+function replaceAssetVariant(asset: Asset, variant: AssetVariant) {
+  const variants = asset.variants || []
+  const nextAsset = {
+    ...asset,
+    variants: variants.map(item => item.id === variant.id ? variant : item),
+  }
+  saveEditedAsset(nextAsset)
+}
+
+async function selectAssetVoiceReference(reference: AudioReference) {
+  const target = assetVoicePickerTarget.value
+  if (!target || savingAssetVoiceKey.value) return
+  const asset = assets.value.find(item => item.id === target.assetId)
+  if (!asset) {
+    notice.error('角色资产不存在，请刷新后重试')
+    assetVoicePickerTarget.value = null
+    return
+  }
+
+  const savingKey = `${target.sceneId}:${target.assetId}:${target.variantId || 'base'}`
+  savingAssetVoiceKey.value = savingKey
+  try {
+    cacheAudioReference(reference)
+    if (target.variantId) {
+      const variant = asset.variants?.find(item => item.id === target.variantId)
+      if (!variant) throw new Error('当前衍生形态不存在，请重新选择')
+      const metadata = metadataRecord(variant.metadata)
+      const editorForm = metadataRecord(metadata.editor_form)
+      const updated = (await api.updateAssetVariant(asset.id, variant.id, {
+        metadata: {
+          ...metadata,
+          voice: reference.nickname,
+          voice_reference_id: reference.id,
+          editor_form: {
+            ...editorForm,
+            voice: reference.nickname,
+            voice_reference_id: reference.id,
+          },
+        },
+      })).data
+      replaceAssetVariant(asset, updated)
+    } else {
+      const updated = (await api.updateAsset(asset.id, {
+        metadata: {
+          ...metadataRecord(asset.metadata),
+          voice: reference.nickname,
+          voice_reference_id: reference.id,
+        },
+      })).data
+      saveEditedAsset({
+        ...asset,
+        ...updated,
+        variants: updated.variants || asset.variants,
+      })
+    }
+    assetVoicePickerTarget.value = null
+    notice.success(`已为“${asset.canonical_name}”设置音色`)
+  } catch (error) {
+    notice.error(`音色保存失败：${error instanceof Error ? error.message : '未知错误'}`)
+  } finally {
+    savingAssetVoiceKey.value = ''
+  }
 }
 
 function selectedAssetImage(scene: Scene, asset: Asset) {
@@ -706,9 +911,23 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     thumbnailUrl: reference.url,
     description: reference.type === 'image' ? '已上传参考图片' : '已上传参考视频',
   }))
+  const audioOptions: ScenePromptMentionOption[] = sceneVoiceReferenceMappings(scene).map((mapping, index) => {
+    const reference = audioReferencesById.value[mapping.referenceId]
+    const subject = mapping.kind === 'narrator' ? '旁白' : mapping.subjects.join('、')
+    return {
+      id: `audio-${scene.id}-${mapping.referenceId}-${index + 1}`,
+      kind: 'audio',
+      label: reference?.nickname ? `音频${index + 1} · ${reference.nickname}` : `音频${index + 1}`,
+      syntax: `@音频${index + 1}`,
+      group: '角色音色参考',
+      audioUrl: reference?.audio_url ? mediaUrl(reference.audio_url) : undefined,
+      description: `仅用于参考${subject}的音色，点击播放`,
+    }
+  })
   return [
     ...assetOptions,
     ...mediaOptions,
+    ...audioOptions,
     {
       id: `duration-${scene.id}`,
       kind: 'duration',
@@ -770,7 +989,7 @@ async function validateReferenceFiles(scene: Scene, files: File[], model: VideoG
     throw new Error(`当前模型最多接收 ${capabilities.max_reference_videos} 个参考视频`)
   }
   for (const file of imageFiles) {
-    if (file.size >= capabilities.reference_image_max_size_mb * 1024 * 1024) throw new Error(`单张参考图片必须小于 ${capabilities.reference_image_max_size_mb}MB`)
+    if (file.size > capabilities.reference_image_max_size_mb * 1024 * 1024) throw new Error(`单张参考图片不能超过 ${capabilities.reference_image_max_size_mb}MB`)
   }
   let totalDuration = existingVideos.reduce((total, item) => total + (item.duration || 0), 0)
   for (const file of videoFiles) {
@@ -781,8 +1000,10 @@ async function validateReferenceFiles(scene: Scene, files: File[], model: VideoG
     }
     const ratio = metadata.width / metadata.height
     const pixels = metadata.width * metadata.height
-    if (metadata.width < capabilities.reference_media_side_min || metadata.width > capabilities.reference_media_side_max
-      || metadata.height < capabilities.reference_media_side_min || metadata.height > capabilities.reference_media_side_max
+    const sideMin = capabilities.reference_video_side_min ?? capabilities.reference_media_side_min
+    const sideMax = capabilities.reference_video_side_max ?? capabilities.reference_media_side_max
+    if (metadata.width < sideMin || metadata.width > sideMax
+      || metadata.height < sideMin || metadata.height > sideMax
       || ratio < capabilities.reference_media_ratio_min || ratio > capabilities.reference_media_ratio_max
       || pixels < capabilities.reference_video_pixels_min || pixels > capabilities.reference_video_pixels_max) {
       throw new Error(`视频“${file.name}”的尺寸或宽高比不符合当前模型要求`)
@@ -882,6 +1103,8 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   const requestedScene = result.scenes.find(scene => scene.id === requestedSceneId)
   activeSceneId.value = requestedScene?.id || result.scenes[0]?.id || 0
   initializeSceneDrafts(result.scenes)
+  result.scenes.forEach(scene => ensureSceneVoiceReferencePrompt(scene))
+  void hydrateSceneAudioReferences(result.scenes)
   void nextTick(() => {
     setupSceneTracking()
     if (requestedScene) selectSceneById(requestedScene.id)
@@ -1395,6 +1618,7 @@ async function generateVideo(
   setSceneVideoError(scene.id)
   setSceneBusy(generatingVideoSceneIds, scene.id, true)
   try {
+    ensureSceneVoiceReferencePrompt(scene)
     await saveScene(scene, false, selectedModel)
     let result = (await api.generateVideo(scene.id, selectedModel.config_id, {
       generation_mode: draft.videoGenerationMode,
@@ -1746,7 +1970,18 @@ onBeforeUnmount(() => {
                         :title="`替换${selectedAssetLabel(scene, asset)}`"
                         @click="toggleAssetReplacementPicker(scene, group.type, asset)"
                       ><span>{{ selectedAssetLabel(scene, asset) }}</span></AppButton>
-                      <AppButton v-if="group.type === AssetTypeEnum.PERSON" variant="soft" size="sm" class="asset-voice-button"><Volume2 :size="13" /><span>未配置音色</span></AppButton>
+                      <AppButton
+                        v-if="group.type === AssetTypeEnum.PERSON"
+                        variant="soft"
+                        size="sm"
+                        class="asset-voice-button"
+                        :active="assetVoicePickerTarget?.sceneId === scene.id && assetVoicePickerTarget?.assetId === asset.id"
+                        :loading="savingAssetVoiceKey === assetVoicePickerKey(scene, asset)"
+                        :disabled="Boolean(savingAssetVoiceKey)"
+                        :aria-label="`为${selectedAssetLabel(scene, asset)}更换音色`"
+                        :title="`更换${selectedAssetLabel(scene, asset)}的音色`"
+                        @click="openAssetVoicePicker(scene, asset)"
+                      ><Volume2 :size="13" /><span>{{ selectedAssetVoiceLabel(scene, asset) }}</span></AppButton>
                       <SceneAssetActionMenu
                         :open="openAssetActionKey === assetActionKey(scene, asset)"
                         :label="asset.canonical_name"
@@ -1875,6 +2110,13 @@ onBeforeUnmount(() => {
       @close="closeAssetEditor"
       @saved="saveEditedAsset"
     />
+    <AudioReferencePicker
+      :open="Boolean(assetVoicePickerTarget)"
+      :selected-id="selectedAssetVoiceReferenceId"
+      :novel-id="projectId"
+      @close="closeAssetVoicePicker"
+      @choose="selectAssetVoiceReference"
+    />
   </main>
 </template>
 
@@ -1951,7 +2193,9 @@ onBeforeUnmount(() => {
 .selected-asset-row > button { min-width: 0; justify-content: flex-start; }
 .selected-asset-row .asset-name-button { padding-inline: 9px; color: #4c5261; background: #fff; box-shadow: inset 0 0 0 1px #e0e3eb; }
 .selected-asset-row .asset-name-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selected-asset-row .asset-voice-button { color: #a0a5b2; background: #fafbfc; box-shadow: inset 0 0 0 1px #eceef3; font-size: 9px; }
+.selected-asset-row .asset-voice-button { color: #858b9b; background: #fafbfc; box-shadow: inset 0 0 0 1px #e7e9f0; font-size: 9px; }
+.selected-asset-row .asset-voice-button:hover:not(:disabled),.selected-asset-row .asset-voice-button.is-active { color: #5557ea; background: #ededff; box-shadow: inset 0 0 0 1px rgb(91 92 240 / 12%); }
+.selected-asset-row .asset-voice-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-assets.is-scene-assets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
 .selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: minmax(0,1fr) 30px; align-items: end; }
 .selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 10px; }

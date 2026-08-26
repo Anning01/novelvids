@@ -136,18 +136,29 @@ def _video_stream(probe: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _validate_geometry(width: int, height: int, capabilities: VideoModelCapabilities) -> None:
+def _validate_geometry(
+    kind: MediaKind,
+    width: int,
+    height: int,
+    capabilities: VideoModelCapabilities,
+) -> None:
     if not width or not height:
         raise HTTPException(400, detail="无法读取媒体宽高")
-    if not (
-        capabilities.reference_media_side_min <= width <= capabilities.reference_media_side_max
-        and capabilities.reference_media_side_min <= height <= capabilities.reference_media_side_max
-    ):
+    side_min = (
+        capabilities.reference_video_side_min
+        if kind == "video" and capabilities.reference_video_side_min is not None
+        else capabilities.reference_media_side_min
+    )
+    side_max = (
+        capabilities.reference_video_side_max
+        if kind == "video" and capabilities.reference_video_side_max is not None
+        else capabilities.reference_media_side_max
+    )
+    if not (side_min <= width <= side_max and side_min <= height <= side_max):
         raise HTTPException(
             400,
             detail=(
-                f"参考媒体宽高必须在 {capabilities.reference_media_side_min}-"
-                f"{capabilities.reference_media_side_max}px 之间"
+                f"参考媒体宽高必须在 {side_min}-{side_max}px 之间"
             ),
         )
     ratio = width / height
@@ -164,10 +175,10 @@ def _validate_probe(
     stream = _video_stream(probe)
     width = int(stream.get("width") or 0)
     height = int(stream.get("height") or 0)
-    _validate_geometry(width, height, capabilities)
+    _validate_geometry(kind, width, height, capabilities)
     if kind == "image":
-        if size_bytes >= capabilities.reference_image_max_size_mb * 1024 * 1024:
-            raise HTTPException(400, detail=f"单张参考图片必须小于 {capabilities.reference_image_max_size_mb}MB")
+        if size_bytes > capabilities.reference_image_max_size_mb * 1024 * 1024:
+            raise HTTPException(400, detail=f"单张参考图片不能超过 {capabilities.reference_image_max_size_mb}MB")
         return {"width": width, "height": height}
 
     if size_bytes > capabilities.reference_video_max_size_mb * 1024 * 1024:
@@ -188,14 +199,18 @@ def _validate_probe(
             ),
         )
     codec = str(stream.get("codec_name") or "").lower()
-    if codec not in capabilities.reference_video_codecs:
+    if capabilities.reference_video_codecs and codec not in capabilities.reference_video_codecs:
         raise HTTPException(400, detail="参考视频仅支持 H.264/AVC 或 H.265/HEVC 编码")
     audio_codecs = {
         str(item.get("codec_name") or "").lower()
         for item in probe.get("streams", [])
         if item.get("codec_type") == "audio"
     }
-    unsupported_audio = audio_codecs.difference(capabilities.reference_video_audio_codecs)
+    unsupported_audio = (
+        audio_codecs.difference(capabilities.reference_video_audio_codecs)
+        if capabilities.reference_video_audio_codecs
+        else set()
+    )
     if unsupported_audio:
         raise HTTPException(400, detail="参考视频音轨仅支持 AAC 或 MP3 编码")
     duration = _positive_float(probe.get("format", {}).get("duration")) or _positive_float(stream.get("duration"))

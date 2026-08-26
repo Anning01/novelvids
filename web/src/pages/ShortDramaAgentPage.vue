@@ -16,11 +16,13 @@ import {
   Save,
   Sparkles,
   UsersRound,
+  Volume2,
   X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
+import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
@@ -39,7 +41,7 @@ import type {
   ChapterEditDraft,
   ProjectAnalysisDraft,
 } from '@/shared/projectAnalysisEditor'
-import type { AiTask, Asset, Chapter, Novel, StoryboardStrategy } from '@/types'
+import type { AiTask, Asset, AudioReference, Chapter, Novel, StoryboardStrategy } from '@/types'
 
 interface AgentProjectMeta {
   projectId?: number
@@ -111,6 +113,9 @@ const editing = ref(false)
 const savingEdits = ref(false)
 const projectDraft = ref<ProjectAnalysisDraft | null>(null)
 const storyboardStrategies = ref<StoryboardStrategy[]>([])
+const narratorVoice = ref<AudioReference | null>(null)
+const narratorVoiceBeforeEditing = ref<AudioReference | null>(null)
+const narratorPickerOpen = ref(false)
 const chapterDrafts = ref<Record<number, ChapterEditDraft>>({})
 const episodeTabs = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
@@ -128,6 +133,11 @@ const projectStrategyView = computed(() => resolveStoryboardStrategy(
   projectView.value.storyboardStrategy,
   storyboardStrategies.value,
 ))
+const narrationStrategyActive = computed(() => (
+  editing.value && projectDraft.value
+    ? projectDraft.value.storyboardStrategy
+    : projectStrategyView.value?.key
+) === 'narration')
 const storyboardStrategyOptions = computed(() => storyboardStrategies.value.map(strategy => ({
   value: strategy.key,
   label: strategy.name,
@@ -175,6 +185,12 @@ async function loadProject(): Promise<boolean> {
   try {
     const response = await api.novelMeta(projectId.value)
     novel.value = response.data as unknown as Novel
+    if (response.data.narrator_audio_reference_id) {
+      const voices = await api.audioReferences(1, '', { id: response.data.narrator_audio_reference_id })
+      narratorVoice.value = voices.data.items[0] || null
+    } else {
+      narratorVoice.value = null
+    }
     const contentLength = response.data.content_length || 0
     if (contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
       notice.error(`书稿约 ${contentLength.toLocaleString()} 字但只拆分出 ${response.data.total_chapters || 0} 章，已阻止进入。请重新上传并检查文件编码或章节标题。`)
@@ -316,6 +332,7 @@ function ensureChapterDraft(chapter: Chapter) {
 
 function beginEditing() {
   if (!novel.value || !analysisResult.value) return
+  narratorVoiceBeforeEditing.value = narratorVoice.value
   projectDraft.value = createProjectAnalysisDraft(
     novel.value,
     analysisResult.value,
@@ -338,7 +355,14 @@ function selectStoryboardStrategy(value: string) {
   projectDraft.value.storyboardSetting = selected.description
 }
 
-function cancelEditing() {
+function selectNarratorVoice(reference: AudioReference) {
+  narratorVoice.value = reference
+  if (projectDraft.value) projectDraft.value.narratorAudioReferenceId = reference.id
+  narratorPickerOpen.value = false
+}
+
+function cancelEditing(restoreVoice = true) {
+  if (restoreVoice) narratorVoice.value = narratorVoiceBeforeEditing.value
   editing.value = false
   projectDraft.value = null
   chapterDrafts.value = {}
@@ -383,7 +407,7 @@ async function saveEdits() {
         ? { ...chapter, name: updated.name }
         : chapter)
     }
-    cancelEditing()
+    cancelEditing(false)
     notice.success(`修改已保存${changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : ''}`)
   } catch (error) {
     notice.error((error as Error).message)
@@ -537,8 +561,14 @@ onBeforeUnmount(() => {
                   @update:model-value="selectStoryboardStrategy"
                 />
                 <p>{{ projectDraft.storyboardSetting }}</p>
+                <button v-if="narrationStrategyActive" type="button" class="narrator-voice-button" @click="narratorPickerOpen = true">
+                  <Volume2 :size="14" /><span><small>旁白声音</small><strong>{{ narratorVoice?.nickname || '选择旁白音色' }}</strong></span>
+                </button>
               </template>
-              <template v-else><strong>{{ projectStrategyView?.name || projectView.storyboardStrategy }}</strong><p>{{ projectStrategyView?.description || projectView.storyboardSetting }}</p></template>
+              <template v-else>
+                <strong>{{ projectStrategyView?.name || projectView.storyboardStrategy }}</strong><p>{{ projectStrategyView?.description || projectView.storyboardSetting }}</p>
+                <div v-if="narrationStrategyActive" class="narrator-voice-summary"><Volume2 :size="13" />旁白音色：{{ narratorVoice?.nickname || '未选择' }}</div>
+              </template>
             </div>
           </article>
         </div>
@@ -600,7 +630,8 @@ onBeforeUnmount(() => {
       <AppButton class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />确认分析，进入设定</span><ArrowRight :size="18" /></AppButton>
       </template>
       </section>
-    </ShortDramaWorkspaceShell>
+    <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />
+  </ShortDramaWorkspaceShell>
   </main>
 </template>
 
@@ -653,6 +684,7 @@ onBeforeUnmount(() => {
 .profile-card small { color: #969baa; font-size: 9px; }
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
+.narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid #dedff0; border-radius: 9px; color: #5b5cf6; background: #f8f8ff; cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: #999af3; }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: #969baa; font-size: 8px; }.narrator-voice-button strong { color: #4f5464; font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: #6567e9; font-size: 9px; }
 .analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid #dfe1ea; border-radius: 9px; outline: 0; background: #fbfbfe; box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
 .analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: #7779ef; background: #fff; box-shadow: 0 0 0 3px rgb(91 92 246 / 10%); }
 .tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: #454a59; font-size: 11px; }

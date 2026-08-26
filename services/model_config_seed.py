@@ -86,6 +86,13 @@ DEFAULT_MODELS: list[dict] = [
         base_url="https://api.minimaxi.com",
         api_protocol="minimax",
     ),
+    _video_spec(
+        "wan3",
+        "wan3.0-video",
+        "wan_3",
+        base_url="https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com",
+        api_protocol="dashscope",
+    ),
 ]
 
 

@@ -39,7 +39,14 @@ class SoraScenePromptConfig(BaseModel):
     """专业视频分镜提示词的结构化内容。"""
 
     sequence: int = Field(..., description="分镜序列号")
-    description: str = Field(..., description="镜头标题，简短描述该镜头的核心事件")
+    description: str = Field(
+        ...,
+        description=(
+            "镜头主提示词，用一句可直接生成的视频描述概括主体、核心动作与剧情结果；"
+            "当人物台词、旁白或内心 OS 是本镜头关键戏剧信息时，必须明确其声音主体和作用，"
+            "不得只写抽象情绪或剧情标题"
+        ),
+    )
     duration: str = Field(..., description="镜头时长，格式如 3s、4s 或 8s，范围 1-30 秒")
     shot_size_and_camera: str = Field(
         ...,

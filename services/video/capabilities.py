@@ -32,7 +32,15 @@ class VideoModelCapabilities:
     reference_video_total_duration_max: int
     reference_audio_duration_max: int
     reference_audio_total_duration_max: int
+    reference_audio_duration_min: int
+    max_request_size_mb: int | None
     supports_return_last_frame: bool = True
+    system_audio_asset_scheme: str | None = None
+    supports_audio_data_uri: bool = True
+    supports_temporary_file_upload: bool = False
+    input_output_video_duration_max: int | None = None
+    reference_video_side_min: int | None = None
+    reference_video_side_max: int | None = None
     reference_image_formats: tuple[str, ...] = ("jpg", "jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif")
     reference_video_formats: tuple[str, ...] = ("mp4", "mov")
     reference_video_codecs: tuple[str, ...] = ("h264", "hevc")
@@ -76,7 +84,15 @@ class VideoModelCapabilities:
             "reference_video_total_duration_max": self.reference_video_total_duration_max,
             "reference_audio_duration_max": self.reference_audio_duration_max,
             "reference_audio_total_duration_max": self.reference_audio_total_duration_max,
+            "reference_audio_duration_min": self.reference_audio_duration_min,
+            "max_request_size_mb": self.max_request_size_mb,
             "supports_return_last_frame": self.supports_return_last_frame,
+            "system_audio_asset_scheme": self.system_audio_asset_scheme,
+            "supports_audio_data_uri": self.supports_audio_data_uri,
+            "supports_temporary_file_upload": self.supports_temporary_file_upload,
+            "input_output_video_duration_max": self.input_output_video_duration_max,
+            "reference_video_side_min": self.reference_video_side_min,
+            "reference_video_side_max": self.reference_video_side_max,
             "reference_image_formats": list(self.reference_image_formats),
             "reference_video_formats": list(self.reference_video_formats),
             "reference_video_codecs": list(self.reference_video_codecs),
@@ -128,6 +144,9 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_video_total_duration_max=15,
         reference_audio_duration_max=15,
         reference_audio_total_duration_max=15,
+        reference_audio_duration_min=2,
+        max_request_size_mb=64,
+        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.seedance_2_fast: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -146,6 +165,9 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_video_total_duration_max=15,
         reference_audio_duration_max=15,
         reference_audio_total_duration_max=15,
+        reference_audio_duration_min=2,
+        max_request_size_mb=64,
+        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.seedance_2_mini: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -164,6 +186,9 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_video_total_duration_max=15,
         reference_audio_duration_max=15,
         reference_audio_total_duration_max=15,
+        reference_audio_duration_min=2,
+        max_request_size_mb=64,
+        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.seedance_2_5: VideoModelCapabilities(
         resolutions=("480p", "720p", "1080p"),
@@ -185,6 +210,9 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_video_total_duration_max=30,
         reference_audio_duration_max=30,
         reference_audio_total_duration_max=30,
+        reference_audio_duration_min=2,
+        max_request_size_mb=64,
+        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.minimax_h3: VideoModelCapabilities(
         resolutions=("768P", "2K"),
@@ -206,7 +234,10 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_video_total_duration_max=15,
         reference_audio_duration_max=15,
         reference_audio_total_duration_max=15,
-        supports_return_last_frame=False,
+        reference_audio_duration_min=2,
+        max_request_size_mb=64,
+        # 官方不返回尾帧时，由完成态收口服务通过 FFmpeg 从成片提取。
+        supports_return_last_frame=True,
         reference_image_formats=("jpg", "jpeg", "png", "webp", "heic", "heif"),
         reference_video_formats=("mp4", "mov"),
         reference_video_codecs=("h264", "hevc"),
@@ -229,6 +260,57 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         default_generate_audio=True,
         api_protocol=ImageApiProtocol.minimax,
     ),
+    VideoGenerationModelTypeEnum.wan_3: VideoModelCapabilities(
+        resolutions=("480P", "720P", "1080P"),
+        aspect_ratios=("adaptive", "16:9", "4:3", "1:1", "3:4", "9:16"),
+        aspect_ratios_by_mode={
+            mode: ("adaptive", "16:9", "4:3", "1:1", "3:4", "9:16")
+            for mode in GENERATION_MODES
+        },
+        output_formats=("mp4",),
+        generation_modes=GENERATION_MODES,
+        duration_min=2,
+        duration_max=30,
+        supports_auto_duration=True,
+        supports_audio=True,
+        max_reference_images=10,
+        max_reference_videos=5,
+        max_reference_audios=5,
+        reference_video_duration_max=15,
+        reference_video_total_duration_max=15,
+        reference_audio_duration_max=15,
+        reference_audio_total_duration_max=15,
+        reference_audio_duration_min=1,
+        max_request_size_mb=None,
+        # 官方不返回尾帧时，由完成态收口服务通过 FFmpeg 从成片提取。
+        supports_return_last_frame=True,
+        supports_audio_data_uri=False,
+        supports_temporary_file_upload=True,
+        input_output_video_duration_max=30,
+        reference_image_formats=("jpg", "jpeg", "png", "bmp", "webp"),
+        reference_video_formats=("mp4", "mov"),
+        reference_video_codecs=(),
+        reference_video_audio_codecs=(),
+        reference_video_resolutions=(),
+        reference_image_max_size_mb=20,
+        reference_video_max_size_mb=100,
+        reference_media_duration_min=1,
+        reference_media_ratio_min=0.125,
+        reference_media_ratio_max=8.0,
+        reference_media_side_min=240,
+        reference_media_side_max=8000,
+        reference_video_side_min=240,
+        reference_video_side_max=4096,
+        reference_video_pixels_min=240 * 240,
+        reference_video_pixels_max=4096 * 4096,
+        reference_video_fps_min=0,
+        reference_video_fps_max=1000,
+        default_resolution="1080P",
+        default_aspect_ratio="adaptive",
+        default_output_format="mp4",
+        default_generate_audio=True,
+        api_protocol=ImageApiProtocol.dashscope,
+    ),
 }
 
 
@@ -245,6 +327,7 @@ def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: 
         label = {
             ImageApiProtocol.volcengine_ark: "火山方舟",
             ImageApiProtocol.minimax: "MiniMax 官方",
+            ImageApiProtocol.dashscope: "阿里云百炼 DashScope",
         }.get(capabilities.api_protocol, capabilities.api_protocol.value)
         raise HTTPException(status_code=400, detail=f"当前视频模型仅支持{label}接口协议")
 

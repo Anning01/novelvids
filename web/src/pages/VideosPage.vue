@@ -11,12 +11,14 @@ import {
   Map,
   Mic2,
   RefreshCw,
+  Upload,
   UserRound,
   UsersRound,
   Volume2,
 } from 'lucide-vue-next'
 import SearchFilterBar from '@/components/SearchFilterBar.vue'
 import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
+import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import type { SearchFilterDefinition } from '@/components/SearchFilterBar.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
@@ -39,6 +41,7 @@ const loading = ref(true)
 const refreshing = ref(false)
 const digitalHumans = ref<DigitalHuman[]>([])
 const audioReferences = ref<AudioReference[]>([])
+const audioUploadOpen = ref(false)
 const projects = ref<Novel[]>([])
 const selectedProjectId = ref('')
 const projectAssets = ref<Asset[]>([])
@@ -263,6 +266,16 @@ function appendUnique<T extends { id: number }>(current: T[], incoming: T[]) {
   return [...current, ...incoming.filter(item => !ids.has(item.id))]
 }
 
+function addUploadedAudio(reference: AudioReference) {
+  const existed = audioReferences.value.some(item => item.id === reference.id)
+  audioReferences.value = [
+    reference,
+    ...audioReferences.value.filter(item => item.id !== reference.id),
+  ]
+  if (!existed) audioPagination.value.total += 1
+  audioUploadOpen.value = false
+}
+
 async function loadMore() {
   if (loading.value || loadingMore.value || !hasMore.value) return
   const requestVersion = publicQueryVersion
@@ -408,8 +421,11 @@ onBeforeUnmount(() => {
 
     <section class="asset-workspace">
       <header class="workspace-header">
-        <AppTabs v-if="scope === 'public'" class="asset-category-tabs" :model-value="publicCategory" :items="publicCategories" label="公共资产分类" @update:model-value="changePublicCategoryFromTab" />
-        <AppTabs v-else class="asset-category-tabs" :model-value="projectCategory" :items="projectCategories" label="项目资产分类" @update:model-value="changeProjectCategoryFromTab" />
+        <div class="workspace-category-row">
+          <AppTabs v-if="scope === 'public'" class="asset-category-tabs" :model-value="publicCategory" :items="publicCategories" label="公共资产分类" @update:model-value="changePublicCategoryFromTab" />
+          <AppTabs v-else class="asset-category-tabs" :model-value="projectCategory" :items="projectCategories" label="项目资产分类" @update:model-value="changeProjectCategoryFromTab" />
+          <AppButton v-if="scope === 'public' && publicCategory === 'audio'" type="button" variant="primary" size="sm" @click="audioUploadOpen = true"><Upload :size="14" />上传音频</AppButton>
+        </div>
 
         <SearchFilterBar v-model="search" v-model:filter-values="activeFilterValues" :filters="activeFilterDefinitions" :placeholder="searchPlaceholder" :search-aria-label="searchPlaceholder" :result-label="resultCountLabel" />
       </header>
@@ -426,7 +442,8 @@ onBeforeUnmount(() => {
 
         <div v-else-if="publicCategory === 'audio' && filteredAudio.length" class="audio-library-list">
           <article v-for="item in filteredAudio" :key="item.id" class="audio-reference-card">
-            <img :src="item.avatar_url" :alt="item.nickname" />
+            <img v-if="item.avatar_url" :src="item.avatar_url" :alt="item.nickname" />
+            <span v-else class="audio-reference-avatar"><Mic2 :size="20" /></span>
             <div class="audio-copy"><span><Mic2 :size="13" />{{ item.gender }}声音</span><h2>{{ item.nickname }}</h2><small>{{ item.asset_id }}</small></div>
             <audio :src="item.audio_url" controls preload="none" />
             <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="复制资产 ID" title="复制资产 ID" @click="copyAssetId(item.asset_id)"><Copy :size="14" /></AppButton>
@@ -458,6 +475,7 @@ onBeforeUnmount(() => {
         <span v-else-if="visibleCount">已加载全部资产</span>
       </div>
     </section>
+    <AudioReferencePicker :open="audioUploadOpen" start-in-upload @close="audioUploadOpen = false" @choose="addUploadedAudio" />
   </main>
 </template>
 
@@ -474,6 +492,8 @@ onBeforeUnmount(() => {
 .asset-scope-tabs { margin: 0 0 22px; }
 .asset-workspace { width: 100%; min-height: 520px; margin: 0; }
 .workspace-header { display: grid; gap: 14px; padding-bottom: 13px; border-bottom: 1px solid var(--app-border); }
+.workspace-category-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workspace-category-row > button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .public-character-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 13px; padding-top: 20px; }
 .public-character-card { overflow: hidden; border: 1px solid var(--app-border); border-radius: 13px; background: var(--app-surface); box-shadow: var(--app-shadow); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .public-character-card:hover { border-color: var(--app-border-strong); box-shadow: 0 16px 34px rgb(0 0 0 / 14%); transform: translateY(-2px); }
@@ -489,7 +509,8 @@ onBeforeUnmount(() => {
 .character-copy small, .audio-copy small { overflow: hidden; color: var(--app-text-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .audio-library-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 20px; }
 .audio-reference-card { display: grid; min-width: 0; grid-template-columns: 54px minmax(0, 1fr) minmax(190px, 260px) 30px; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); box-shadow: var(--app-shadow); }
-.audio-reference-card > img { width: 54px; height: 54px; border-radius: 12px; object-fit: cover; background: var(--app-surface-muted); }
+.audio-reference-card > img, .audio-reference-avatar { width: 54px; height: 54px; border-radius: 12px; object-fit: cover; background: var(--app-surface-muted); }
+.audio-reference-avatar { display: grid; place-items: center; color: var(--app-accent); }
 .audio-copy { display: grid; min-width: 0; gap: 3px; }
 .audio-copy > span { display: inline-flex; align-items: center; gap: 4px; color: var(--app-accent); font-size: 8px; }
 .audio-reference-card audio { width: 100%; height: 32px; }
@@ -519,7 +540,7 @@ onBeforeUnmount(() => {
   .refresh-assets { justify-content: center; }
   .public-character-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
   .audio-reference-card { grid-template-columns: 48px minmax(0, 1fr) 30px; }
-  .audio-reference-card > img { width: 48px; height: 48px; }
+  .audio-reference-card > img, .audio-reference-avatar { width: 48px; height: 48px; }
   .audio-reference-card audio { grid-column: 1 / -1; }
 }
 @media (max-width: 420px) {

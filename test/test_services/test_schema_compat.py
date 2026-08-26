@@ -5,6 +5,7 @@ import pytest
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
+    ensure_voice_reference_schema,
 )
 
 
@@ -70,6 +71,7 @@ async def test_novel_analysis_schema_adds_editable_fields_once_across_repeated_s
         {"name": "storyboard_setting"},
         {"name": "style_key"},
         {"name": "video_model_config_id"},
+        {"name": "narrator_audio_reference_id"},
     ]
     connection.execute_query_dict.side_effect = [existing, completed]
     monkeypatch.setattr(
@@ -94,3 +96,36 @@ async def test_novel_analysis_schema_adds_editable_fields_once_across_repeated_s
     assert "ADD COLUMN storyboard_setting TEXT" in script
     assert "ADD COLUMN style_key VARCHAR(64)" in script
     assert "ADD COLUMN video_model_config_id INT" in script
+    assert "ADD COLUMN narrator_audio_reference_id INT" in script
+
+
+@pytest.mark.asyncio
+async def test_voice_reference_schema_adds_audio_library_fields_once(monkeypatch):
+    connection = AsyncMock()
+    existing = [{"name": "id"}, {"name": "asset_id"}]
+    completed = [
+        *existing,
+        {"name": "source"},
+        {"name": "duration"},
+        {"name": "team_id"},
+        {"name": "created_by"},
+    ]
+    connection.execute_query_dict.side_effect = [existing, completed]
+    monkeypatch.setattr(
+        "services.schema_compat.Tortoise.get_connection",
+        lambda _: connection,
+    )
+    monkeypatch.setattr(
+        "services.schema_compat.settings.DATABASE_URL",
+        "sqlite://compat-test.db",
+    )
+
+    await ensure_voice_reference_schema()
+    await ensure_voice_reference_schema()
+
+    connection.execute_script.assert_awaited_once()
+    script = connection.execute_script.await_args.args[0]
+    assert "ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'system'" in script
+    assert "ADD COLUMN duration REAL" in script
+    assert "ADD COLUMN team_id INT" in script
+    assert "ADD COLUMN created_by INT" in script

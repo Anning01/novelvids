@@ -28,7 +28,7 @@ class AiModelConfigProperties(BaseModel):
     )
     video_model_type: Optional[VideoGenerationModelTypeEnum] = Field(
         None,
-        description="视频生成模型能力类型，支持 Seedance 系列与 MiniMax H3",
+        description="视频生成模型能力类型，支持 Seedance、MiniMax H3 与 Wan 3",
     )
     is_active: Optional[bool] = Field(None, description="是否启用")
     concurrency: Optional[int] = Field(None, description="并发数", ge=1)
@@ -150,6 +150,12 @@ class VideoGenerationCapabilitiesOut(BaseModel):
     reference_video_total_duration_max: int = Field(..., description="参考视频总时长上限（秒）")
     reference_audio_duration_max: int = Field(..., description="单个参考音频最长时长（秒）")
     reference_audio_total_duration_max: int = Field(..., description="参考音频总时长上限（秒）")
+    reference_audio_duration_min: int = Field(..., description="单个参考音频最短时长（秒）")
+    max_request_size_mb: Optional[int] = Field(None, description="供应商请求体大小上限（MB）")
+    supports_audio_data_uri: bool = Field(..., description="是否支持音频 Base64 Data URI")
+    input_output_video_duration_max: Optional[int] = Field(None, description="输入与输出视频合计时长上限")
+    reference_video_side_min: Optional[int] = Field(None, description="参考视频单边最小像素")
+    reference_video_side_max: Optional[int] = Field(None, description="参考视频单边最大像素")
     supports_return_last_frame: bool = Field(..., description="是否支持返回生成视频尾帧")
     reference_image_formats: list[str] = Field(..., description="参考图片格式")
     reference_video_formats: list[str] = Field(..., description="参考视频容器格式")

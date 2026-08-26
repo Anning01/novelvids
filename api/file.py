@@ -7,7 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from auth.deps import AuthContext, require_roles
+from auth.deps import AuthContext, ensure_novel_access, require_roles
+from models.novel import Novel
 from services.document import analyze_document, analyze_oss_document
 from services.oss import make_upload_key, oss
 from utils.response_format import ResponseSchema
@@ -32,11 +33,21 @@ class OssFinalizeIn(BaseModel):
 async def get_upload_policy(
     filename: str = Query(..., max_length=255),
     content_type: str = Query("application/octet-stream", max_length=120),
-    _: AuthContext = _EDITOR,
+    novel_id: int | None = Query(default=None, ge=1),
+    ctx: AuthContext = _EDITOR,
 ):
     if not oss.enabled:
         return ResponseSchema(data={"direct": False})
-    key = make_upload_key(None, filename)
+    team_id = ctx.team_id
+    if novel_id is not None:
+        await ensure_novel_access(novel_id, ctx)
+        novel = await Novel.get_or_none(id=novel_id)
+        if novel is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="项目不存在")
+        team_id = novel.team_id
+    key = make_upload_key(team_id, filename)
     policy = oss.sign_form_upload(key, content_type, _DIRECT_UPLOAD_MAX_BYTES)
     return ResponseSchema(
         data={

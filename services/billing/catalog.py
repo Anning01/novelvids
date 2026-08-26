@@ -64,6 +64,14 @@ VIDEO_PRICING: dict[str, dict] = {
         "video_reference_prices": {"768P": 0.50, "2K": 0.80},
         "input_image": {"first_free": 5, "price_per_image": 0.20},
     },
+    # Wan 3 刊例价未随接口文档提供，先以零价档位初始化，由后台按实际合同价填写。
+    "wan_3": {
+        "type": "video",
+        "currency": "CNY",
+        "billing_unit": "second",
+        "prices": {"480P": 0.0, "720P": 0.0, "1080P": 0.0},
+        "video_reference_prices": {"480P": 0.0, "720P": 0.0, "1080P": 0.0},
+    },
 }
 
 def pricing_for(config: AiModelConfig) -> dict | None:

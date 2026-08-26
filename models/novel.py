@@ -52,6 +52,10 @@ class Novel(AbstractBaseModel):
         null=True,
         description="分镜页面默认视频模型配置 ID",
     )
+    narrator_audio_reference_id = fields.IntField(
+        null=True,
+        description="旁白模式使用的参考音频 ID",
+    )
     team_id = fields.IntField(
         null=True,
         db_index=True,

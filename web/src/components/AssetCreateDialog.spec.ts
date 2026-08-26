@@ -2,9 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
-import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetVariant, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetVariant, type AudioReference, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
 import AppButton from './AppButton.vue'
 import AssetCreateDialog from './AssetCreateDialog.vue'
+import AudioReferencePicker from './AudioReferencePicker.vue'
 import EpisodeSelectionPicker from './EpisodeSelectionPicker.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import assetDialogSource from './AssetCreateDialog.vue?raw'
@@ -225,6 +226,57 @@ it('fills legacy character gender and age from returned traits without another A
   expect(wrapper.get('button[aria-label="选择性别"]').text()).toContain('男')
   expect(wrapper.get('button[aria-label="选择年龄阶段"]').text()).toContain('中年')
   expect(api.asset).toHaveBeenCalledTimes(1)
+})
+
+it('选择角色音色后立即保存绑定并更新当前资产', async () => {
+  vi.clearAllMocks()
+  const selectedVoice: AudioReference = {
+    id: 19,
+    nickname: '沉稳男声',
+    gender: '男',
+    audio_url: '/media/audio-references/steady.mp3',
+    avatar_url: '',
+    asset_id: 'upload-steady',
+    source: 'upload',
+    duration: 4,
+    is_active: true,
+    created_at: '',
+    updated_at: '',
+  }
+  const asset = { ...editedAsset, canonical_name: '总工程师', metadata: {} }
+  const updated = {
+    ...asset,
+    metadata: { voice: selectedVoice.nickname, voice_reference_id: selectedVoice.id },
+  }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } },
+  })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: asset })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { prompt: asset.base_traits || '', prompt_language: 'zh' },
+  })
+  vi.mocked(api.updateAsset).mockResolvedValue({ code: 0, message: 'ok', data: updated })
+
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+
+  wrapper.findComponent(AudioReferencePicker).vm.$emit('choose', selectedVoice)
+  await flushPromises()
+
+  expect(api.updateAsset).toHaveBeenCalledWith(asset.id, {
+    metadata: { voice: '沉稳男声', voice_reference_id: 19 },
+  })
+  expect(wrapper.emitted('saved')?.[0]).toEqual([updated])
+  expect(wrapper.text()).toContain('沉稳男声')
 })
 
 it('shows an existing generated image and closes quickly with Escape', async () => {

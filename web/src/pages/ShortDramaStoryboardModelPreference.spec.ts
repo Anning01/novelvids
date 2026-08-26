@@ -31,6 +31,14 @@ const chapter = {
   updated_at: '',
 }
 
+const modelCapabilities = {
+  resolutions: ['720p'],
+  default_resolution: '720p',
+  aspect_ratios: ['9:16'],
+  aspect_ratios_by_mode: { reference: ['9:16'] },
+  default_aspect_ratio: '9:16',
+}
+
 async function mountPage() {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -78,8 +86,8 @@ describe('分镜页面视频模型偏好', () => {
       code: 0,
       message: 'ok',
       data: [
-        { config_id: 11, name: '模型 A' },
-        { config_id: 22, name: '模型 B' },
+        { config_id: 11, name: '模型 A', capabilities: modelCapabilities },
+        { config_id: 22, name: '模型 B', capabilities: modelCapabilities },
       ],
     } as never)
     vi.mocked(api.workbenchBootstrap).mockResolvedValue({

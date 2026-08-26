@@ -8,6 +8,7 @@ from controllers.config import ai_model_config_controller, general_config_contro
 from services.ai_task_executor import ai_task_executor
 from services.chapter_titles import normalize_chapter_title
 from services.document import analyze_oss_document
+from services.audio_references import audio_reference_accessible
 from services.oss import oss
 from services.nlp import (
     ChapterSplitError,
@@ -17,6 +18,7 @@ from services.nlp import (
 )
 from utils.crud import CRUDBase
 from models.novel import Novel
+from models.audio_reference import AudioReference
 from schemas.novel import NovelCreate, NovelPatch, NovelUpdate
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
@@ -35,6 +37,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "tags": novel.tags,
             "style_key": getattr(novel, "style_key", None),
             "video_model_config_id": getattr(novel, "video_model_config_id", None),
+            "narrator_audio_reference_id": getattr(novel, "narrator_audio_reference_id", None),
             "content_length": len(novel.content or ""),
             "created_at": novel.created_at,
             "updated_at": novel.updated_at,
@@ -78,6 +81,20 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if validation and not validation["valid"]:
                 raise HTTPException(status_code=422, detail=validation["message"])
             data["content"] = text
+        narrator_reference_id = data.get("narrator_audio_reference_id")
+        if narrator_reference_id is not None:
+            reference = await AudioReference.get_or_none(
+                id=narrator_reference_id,
+                is_active=True,
+            )
+            if reference is None or (
+                not audio_reference_accessible(
+                    reference,
+                    team_id=team_id,
+                    created_by=created_by,
+                )
+            ):
+                raise HTTPException(400, detail="选择的旁白音色不存在或不可用")
         return await super().create(data, team_id=team_id, created_by=created_by)
 
     async def list(
@@ -96,11 +113,13 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
     async def update(self, novel_id: int, obj_in: NovelUpdate) -> Novel:
         instance = await self.get(novel_id)
         await self._validate_video_model_preference(instance, obj_in)
+        await self._validate_narrator_audio_reference(instance, obj_in)
         return await super().update(instance, obj_in)
 
     async def patch(self, novel_id: int, obj_in: NovelPatch) -> Novel:
         instance = await self.get(novel_id)
         await self._validate_video_model_preference(instance, obj_in)
+        await self._validate_narrator_audio_reference(instance, obj_in)
         return await super().patch(instance, obj_in)
 
     @staticmethod
@@ -117,6 +136,26 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 obj_in.video_model_config_id,
                 team_id=instance.team_id,
             )
+
+    @staticmethod
+    async def _validate_narrator_audio_reference(
+        instance: Novel,
+        obj_in: NovelUpdate | NovelPatch,
+    ) -> None:
+        if "narrator_audio_reference_id" not in obj_in.model_fields_set:
+            return
+        reference_id = obj_in.narrator_audio_reference_id
+        if reference_id is None:
+            return
+        reference = await AudioReference.get_or_none(id=reference_id, is_active=True)
+        if reference is None:
+            raise HTTPException(400, detail="选择的旁白音色不存在或已停用")
+        if not audio_reference_accessible(
+            reference,
+            team_id=instance.team_id,
+            created_by=instance.created_by,
+        ):
+            raise HTTPException(404, detail="选择的旁白音色不存在")
 
     async def remove(self, novel_id: int) -> None:
         instance = await self.get(novel_id)

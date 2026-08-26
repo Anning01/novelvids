@@ -104,6 +104,7 @@ async def ensure_novel_analysis_schema() -> None:
         "storyboard_setting": "TEXT",
         "style_key": "VARCHAR(64)",
         "video_model_config_id": "INT",
+        "narrator_audio_reference_id": "INT",
     }
     statements = [
         f"ALTER TABLE novels ADD COLUMN {name} {definition};"
@@ -112,6 +113,39 @@ async def ensure_novel_analysis_schema() -> None:
     ]
     if statements:
         await connection.execute_script("".join(statements))
+
+
+async def ensure_voice_reference_schema() -> None:
+    """Add reusable voice fields for both existing SQLite and PostgreSQL installs."""
+    connection = Tortoise.get_connection("default")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        audio_columns = await connection.execute_query_dict("PRAGMA table_info(audio_references)")
+        if audio_columns:
+            existing = {str(column["name"]) for column in audio_columns}
+            definitions = {
+                "source": "VARCHAR(16) NOT NULL DEFAULT 'system'",
+                "duration": "REAL",
+                "team_id": "INT",
+                "created_by": "INT",
+            }
+            statements = [
+                f"ALTER TABLE audio_references ADD COLUMN {name} {definition};"
+                for name, definition in definitions.items()
+                if name not in existing
+            ]
+            if statements:
+                await connection.execute_script("".join(statements))
+        return
+    if settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
+        await connection.execute_script(
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS narrator_audio_reference_id INT;"
+            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'system';"
+            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS duration DOUBLE PRECISION;"
+            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS team_id INT;"
+            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS created_by INT;"
+            "CREATE INDEX IF NOT EXISTS idx_audio_references_source ON audio_references(source);"
+            "CREATE INDEX IF NOT EXISTS idx_audio_references_team_id ON audio_references(team_id);"
+        )
 
 
 async def ensure_shared_team_columns() -> None:

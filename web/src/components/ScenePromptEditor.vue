@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue'
-import { AtSign, Boxes, Clock3, Film, Image as ImageIcon, Map as MapIcon, UserRound, X } from 'lucide-vue-next'
+import { AtSign, Boxes, Clock3, Film, Image as ImageIcon, Map as MapIcon, Pause, UserRound, Volume2, X } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
 import ImageLightbox from './ImageLightbox.vue'
 
-export type ScenePromptMentionKind = 'person' | 'scene' | 'item' | 'image' | 'video' | 'duration'
+export type ScenePromptMentionKind = 'person' | 'scene' | 'item' | 'image' | 'video' | 'audio' | 'duration'
 
 export interface ScenePromptMentionOption {
   id: string
@@ -13,6 +13,7 @@ export interface ScenePromptMentionOption {
   syntax: string
   group: string
   previewUrl?: string
+  audioUrl?: string
   thumbnailUrl?: string
   description?: string
   aliases?: string[]
@@ -45,6 +46,8 @@ const durationInput = ref<HTMLInputElement | null>(null)
 const durationEditorOpen = ref(false)
 const durationValue = ref<string | number>('')
 const durationPosition = ref({ left: 0, top: 0 })
+const playingAudioMentionId = ref('')
+let playingAudio: HTMLAudioElement | null = null
 
 const DURATION_MENTION_PATTERN = /@\{(?:镜头|视频)时长(?::(\d+(?:\.\d+)?)s?)?\}/g
 
@@ -78,6 +81,7 @@ function iconFor(kind: ScenePromptMentionKind) {
   if (kind === 'scene') return MapIcon
   if (kind === 'item') return Boxes
   if (kind === 'video') return Film
+  if (kind === 'audio') return Volume2
   if (kind === 'duration') return Clock3
   return ImageIcon
 }
@@ -97,9 +101,13 @@ function createMentionNode(option: ScenePromptMentionOption) {
   mention.dataset.mentionId = option.id
   mention.dataset.mentionKind = option.kind
   mention.dataset.syntax = option.syntax
-  const interactive = Boolean(option.previewUrl) || option.kind === 'duration'
+  const interactive = Boolean(option.previewUrl || option.audioUrl) || option.kind === 'duration'
   mention.setAttribute('role', interactive ? 'button' : 'note')
-  mention.setAttribute('aria-label', option.kind === 'duration' ? `${option.label}，点击更改时间` : option.previewUrl ? `${option.label}，点击预览` : option.label)
+  mention.setAttribute('aria-label', option.kind === 'duration'
+    ? `${option.label}，点击更改时间`
+    : option.kind === 'audio' && option.audioUrl
+      ? `${option.label}，点击播放音色参考`
+      : option.previewUrl ? `${option.label}，点击预览` : option.label)
   if (interactive) mention.tabIndex = 0
 
   const thumbnail = option.thumbnailUrl || option.previewUrl
@@ -108,6 +116,14 @@ function createMentionNode(option: ScenePromptMentionOption) {
     icon.className = 'scene-prompt-editor__duration-icon'
     icon.setAttribute('aria-hidden', 'true')
     render(h(Clock3, { size: 13, strokeWidth: 2.2 }), icon)
+    mention.append(icon)
+  }
+  if (option.kind === 'audio') {
+    const icon = document.createElement('span')
+    icon.className = 'scene-prompt-editor__audio-icon'
+    icon.setAttribute('aria-hidden', 'true')
+    render(h(playingAudioMentionId.value === option.id ? Pause : Volume2, { size: 13, strokeWidth: 2.2 }), icon)
+    mention.classList.toggle('is-playing', playingAudioMentionId.value === option.id)
     mention.append(icon)
   }
   if (thumbnail && option.kind !== 'duration') {
@@ -169,7 +185,7 @@ function findNextMention(value: string, start: number) {
 
 function renderValue(value = props.modelValue) {
   if (!editor.value) return
-  editor.value.querySelectorAll<HTMLElement>('.scene-prompt-editor__duration-icon').forEach(host => render(null, host))
+  editor.value.querySelectorAll<HTMLElement>('.scene-prompt-editor__duration-icon, .scene-prompt-editor__audio-icon').forEach(host => render(null, host))
   const fragment = document.createDocumentFragment()
   let offset = 0
   while (offset < value.length) {
@@ -294,6 +310,52 @@ function openPreview(option: ScenePromptMentionOption) {
   if (option.previewUrl) previewOption.value = option
 }
 
+function syncAudioMentionState() {
+  editor.value?.querySelectorAll<HTMLElement>('[data-mention-kind="audio"]').forEach(mention => {
+    const isPlaying = mention.dataset.mentionId === playingAudioMentionId.value
+    mention.classList.toggle('is-playing', isPlaying)
+    mention.setAttribute('aria-pressed', String(isPlaying))
+    const icon = mention.querySelector<HTMLElement>('.scene-prompt-editor__audio-icon')
+    if (icon) render(h(isPlaying ? Pause : Volume2, { size: 13, strokeWidth: 2.2 }), icon)
+  })
+}
+
+function stopAudioReference() {
+  const audio = playingAudio
+  playingAudio = null
+  if (audio) {
+    audio.onended = null
+    audio.onerror = null
+    audio.pause()
+  }
+  playingAudioMentionId.value = ''
+  syncAudioMentionState()
+}
+
+function toggleAudioReference(option: ScenePromptMentionOption) {
+  if (!option.audioUrl) return
+  if (playingAudioMentionId.value === option.id && playingAudio) {
+    stopAudioReference()
+    return
+  }
+  stopAudioReference()
+  const audio = new Audio(option.audioUrl)
+  playingAudio = audio
+  playingAudioMentionId.value = option.id
+  const finish = () => {
+    if (playingAudio === audio) stopAudioReference()
+  }
+  audio.onended = finish
+  audio.onerror = finish
+  syncAudioMentionState()
+  void audio.play().catch(finish)
+}
+
+function activateMention(option: ScenePromptMentionOption) {
+  if (option.kind === 'audio') toggleAudioReference(option)
+  else openPreview(option)
+}
+
 function parseDurationSyntax(value = '') {
   return value.match(/^@\{(?:镜头|视频)时长(?::(\d+(?:\.\d+)?)s?)?\}$/)?.[1] || ''
 }
@@ -351,7 +413,16 @@ function handleEditorClick(event: MouseEvent) {
     return
   }
   const option = props.options.find(item => item.id === mention.dataset.mentionId)
-  if (option) openPreview(option)
+  if (option) activateMention(option)
+}
+
+function handleEditorPointerdown(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const mention = target.closest<HTMLElement>('[data-mention-kind="audio"]')
+  if (!mention) return
+  // 音色标签是播放控件，不参与富文本选区，避免点击后出现浏览器蓝色选中态。
+  event.preventDefault()
 }
 
 function handleEditorKeydown(event: KeyboardEvent) {
@@ -365,7 +436,7 @@ function handleEditorKeydown(event: KeyboardEvent) {
         return
       }
       const option = props.options.find(item => item.id === mention.dataset.mentionId)
-      if (option) openPreview(option)
+      if (option) activateMention(option)
       return
     }
   }
@@ -415,6 +486,7 @@ watch(() => props.options.map(option => [
   option.label,
   option.syntax,
   option.previewUrl || '',
+  option.audioUrl || '',
   option.thumbnailUrl || '',
   option.description || '',
   (option.aliases || []).join('\u0003'),
@@ -433,7 +505,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  editor.value?.querySelectorAll<HTMLElement>('.scene-prompt-editor__duration-icon').forEach(host => render(null, host))
+  stopAudioReference()
+  editor.value?.querySelectorAll<HTMLElement>('.scene-prompt-editor__duration-icon, .scene-prompt-editor__audio-icon').forEach(host => render(null, host))
   document.removeEventListener('pointerdown', closeMenuFromOutside)
   window.removeEventListener('keydown', handleWindowKeydown)
 })
@@ -451,6 +524,7 @@ onBeforeUnmount(() => {
       :data-placeholder="placeholder"
       spellcheck="true"
       @input="handleInput"
+      @pointerdown="handleEditorPointerdown"
       @click="handleEditorClick"
       @keydown="handleEditorKeydown"
     />
@@ -545,11 +619,17 @@ onBeforeUnmount(() => {
 .scene-prompt-editor__input[data-empty='true']::before { color: var(--app-text-muted); content: attr(data-placeholder); pointer-events: none; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention) { display: inline-flex; max-width: 220px; min-height: 24px; align-items: center; gap: 5px; margin: 0 2px; padding: 2px 7px 2px 3px; border-radius: 7px; color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 10px; font-weight: 650; line-height: 20px; vertical-align: middle; user-select: all; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention[role='button']) { cursor: zoom-in; }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio[role='button']) { cursor: pointer; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention[role='button']:hover),.scene-prompt-editor__input :deep(.scene-prompt-editor__mention[role='button']:focus-visible) { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention img),.scene-prompt-editor__input :deep(.scene-prompt-editor__mention video) { width: 22px; height: 20px; flex: 0 0 22px; border-radius: 5px; object-fit: cover; pointer-events: none; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention > span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-duration) { padding-left: 7px; color: var(--app-accent); background: var(--app-accent-soft); }
-.scene-prompt-editor__input :deep(.scene-prompt-editor__duration-icon) { display: inline-grid; width: 14px; height: 14px; flex: 0 0 14px; place-items: center; color: currentColor; }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio) { min-height: 22px; gap: 4px; padding: 1px 7px 1px 3px; border-radius: 8px; color: var(--app-text-secondary); background: color-mix(in srgb,var(--app-accent) 6%,var(--app-surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 16%,var(--app-border)); user-select: none; -webkit-user-select: none; }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio:hover),.scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio:focus-visible) { color: var(--app-accent); background: color-mix(in srgb,var(--app-accent) 9%,var(--app-surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 28%,var(--app-border)); }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio.is-playing) { color: var(--app-accent); background: color-mix(in srgb,var(--app-accent) 11%,var(--app-surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 38%,var(--app-border)); }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__duration-icon),.scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { display: inline-grid; width: 14px; height: 14px; flex: 0 0 14px; place-items: center; color: currentColor; }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { width: 18px; height: 18px; flex-basis: 18px; border-radius: 6px; color: var(--app-accent); background: color-mix(in srgb,var(--app-accent) 10%,transparent); transition: color .16s ease,background .16s ease,transform .16s ease; }
+.scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio.is-playing .scene-prompt-editor__audio-icon) { color: #fff; background: var(--app-accent); transform: scale(.94); }
 .scene-prompt-mentions { position: fixed; z-index: 170; display: grid; width: min(340px,calc(100vw - 24px)); max-height: 340px; grid-template-rows: auto minmax(0,1fr) auto; overflow: hidden; border-radius: 13px; color: var(--app-text-secondary); background: var(--app-surface-raised); box-shadow: var(--app-shadow), inset 0 0 0 1px var(--app-border); backdrop-filter: blur(16px); }
 .scene-prompt-mentions > header { display: flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 11px; border-bottom: 1px solid var(--app-border); }
 .scene-prompt-mentions > header svg { color: var(--app-accent); }

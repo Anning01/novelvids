@@ -21,6 +21,11 @@ class NovelProperties(BaseModel):
         description="分镜页面默认视频模型配置 ID",
         ge=1,
     )
+    narrator_audio_reference_id: Optional[int] = Field(
+        None,
+        description="旁白模式使用的参考音频 ID",
+        ge=1,
+    )
 
 class NovelFullProperties(NovelProperties):
     """

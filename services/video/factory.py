@@ -12,6 +12,7 @@ from services.video.base import BaseVideoGenerator
 from services.video.capabilities import capabilities_for
 from services.video.minimax import MiniMaxH3Generator
 from services.video.seedance import SeedanceGenerator
+from services.video.wan import Wan3Generator
 from utils.enums import VideoGenerationModelTypeEnum, VideoModelTypeEnum
 
 
@@ -67,5 +68,8 @@ video_generator_factory = VideoGeneratorFactory({
     ),
     VideoGenerationModelTypeEnum.minimax_h3: VideoGeneratorAdapterSpec(
         MiniMaxH3Generator, VideoModelTypeEnum.minimax
+    ),
+    VideoGenerationModelTypeEnum.wan_3: VideoGeneratorAdapterSpec(
+        Wan3Generator, VideoModelTypeEnum.wan
     ),
 })

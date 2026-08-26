@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import AppButton from './AppButton.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from './ScenePromptEditor.vue'
 
@@ -29,11 +29,20 @@ const options: ScenePromptMentionOption[] = [
     syntax: '@{镜头时长}',
     group: '镜头参数',
   },
+  {
+    id: 'audio-4',
+    kind: 'audio',
+    label: '音频1 · 儒雅沧原',
+    syntax: '@音频1',
+    group: '角色音色参考',
+    audioUrl: '/media/voice.mp3',
+  },
 ]
 
 afterEach(() => {
   document.body.innerHTML = ''
   window.getSelection()?.removeAllRanges()
+  vi.unstubAllGlobals()
 })
 
 describe('ScenePromptEditor', () => {
@@ -58,6 +67,36 @@ describe('ScenePromptEditor', () => {
     expect(mention.text()).toBe('断罪山脉')
     await mention.trigger('click')
     expect(wrapper.find('.image-lightbox').exists()).toBe(true)
+  })
+
+  it('将音频引用渲染为可点击播放的音色标签', async () => {
+    const play = vi.fn().mockResolvedValue(undefined)
+    const pause = vi.fn()
+    vi.stubGlobal('Audio', class {
+      onended: (() => void) | null = null
+      onerror: (() => void) | null = null
+      play = play
+      pause = pause
+      constructor(public src: string) {}
+    })
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '角色音色参考：\n@音频1 对应角色 @{艾伦}', options },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    const mention = wrapper.get('[data-mention-kind="audio"]')
+    expect(mention.text()).toContain('音频1 · 儒雅沧原')
+    expect(mention.find('svg').exists()).toBe(true)
+    expect(mention.attributes('role')).toBe('button')
+    const pointerdown = new MouseEvent('pointerdown', { bubbles: true, cancelable: true })
+    mention.element.dispatchEvent(pointerdown)
+    expect(pointerdown.defaultPrevented).toBe(true)
+    await mention.trigger('click')
+    expect(play).toHaveBeenCalledOnce()
+    expect(mention.classes()).toContain('is-playing')
+    await mention.trigger('click')
+    expect(pause).toHaveBeenCalled()
+    expect(mention.classes()).not.toContain('is-playing')
   })
 
   it('renders a legacy mention followed immediately by Chinese text and normalizes it on edit', async () => {

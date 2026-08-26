@@ -8,3 +8,4 @@ class ImageApiProtocol(StrEnum):
     openrouter_compatible = "openrouter_compatible"
     volcengine_ark = "volcengine_ark"
     minimax = "minimax"
+    dashscope = "dashscope"

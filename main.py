@@ -36,6 +36,7 @@ from services.schema_compat import (
     ensure_novel_analysis_schema,
     ensure_shared_team_columns,
     ensure_usage_record_schema,
+    ensure_voice_reference_schema,
 )
 
 # 定义包含时区的配置字典
@@ -71,6 +72,7 @@ async def lifespan(_: FastAPI):
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
     await ensure_usage_record_schema()
+    await ensure_voice_reference_schema()
     # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
     await ensure_shared_team_columns()
     await backfill_last_frame_continuity()

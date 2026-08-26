@@ -35,10 +35,12 @@ from services.video.reference_media import (
     select_referenced_media,
     verify_local_reference,
 )
+from services.video.last_frame import last_frame_service
 from prompts.video import (
     inject_last_frame_continuity_prompt,
     render_last_frame_continuity_instruction,
 )
+from services.video.voice_references import resolve_voice_references
 from prompts.styles import video_style_suffix
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
@@ -304,6 +306,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
         novel = await Novel.get_or_none(id=novel_id)
+        voice_references = await resolve_voice_references(
+            scene=scene,
+            novel=novel,
+            subjects=subjects,
+            capabilities=capabilities,
+        ) if novel and req.generation_mode == "reference" and selection.generate_audio else []
         provider_prompt = _compose_video_prompt(
             prompt, referenced_media, novel.style_key if novel else None
         )
@@ -332,9 +340,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 raise HTTPException(400, detail="无法校验参考视频时长，请重新上传该视频")
             reference_video_duration += float(duration_value)
             if reference.url.startswith("/media/"):
-                if not media_base_url:
+                if capabilities.supports_temporary_file_upload:
+                    reference_videos.append(reference.url)
+                elif not media_base_url:
                     raise HTTPException(400, detail="本地参考视频缺少可访问的媒体地址")
-                reference_videos.append(f"{media_base_url}{reference.url}")
+                else:
+                    reference_videos.append(f"{media_base_url}{reference.url}")
             else:
                 reference_videos.append(resolve_media_url(reference.url) or reference.url)
 
@@ -353,6 +364,19 @@ class VideoController(CRUDBase[Video, dict, dict]):
             raise HTTPException(
                 400,
                 detail=f"当前模型参考视频总时长不能超过 {capabilities.reference_video_total_duration_max} 秒",
+            )
+        if (
+            capabilities.input_output_video_duration_max is not None
+            and selection.duration != -1
+            and reference_video_duration + selection.duration
+            > capabilities.input_output_video_duration_max + 0.001
+        ):
+            raise HTTPException(
+                400,
+                detail=(
+                    f"当前模型要求输入参考视频与输出视频总时长不超过 "
+                    f"{capabilities.input_output_video_duration_max} 秒"
+                ),
             )
         if req.generation_mode == "keyframes":
             input_image_count = int(bool(first_frame)) + int(bool(last_frame))
@@ -381,6 +405,16 @@ class VideoController(CRUDBase[Video, dict, dict]):
             "generate_audio": selection.generate_audio,
             "return_last_frame": selection.return_last_frame,
             "reference_media": [item.model_dump() for item in referenced_media],
+            "voice_references": [
+                {
+                    "reference_id": item.reference_id,
+                    "nickname": item.nickname,
+                    "kind": item.kind,
+                    "subjects": list(item.subjects),
+                    "source": item.source,
+                }
+                for item in voice_references
+            ],
         }
         if team_id is not None:
             video_metadata["team_id"] = team_id
@@ -400,6 +434,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 last_frame_url=last_frame,
                 reference_images=reference_images,
                 reference_videos=reference_videos,
+                reference_audios=[item.url for item in voice_references],
                 return_last_frame=selection.return_last_frame,
             )
         except VideoProviderError as error:
@@ -510,36 +545,63 @@ class VideoController(CRUDBase[Video, dict, dict]):
         if (
             new_status == TaskStatusEnum.completed.value
             and (video.metadata or {}).get("return_last_frame") is True
-            and isinstance(provider_last_frame_url, str)
-            and provider_last_frame_url
         ):
-            persisted_last_frame_url = provider_last_frame_url
+            persisted_last_frame_url: str | None = None
+            last_frame_source: str | None = None
             try:
-                persisted_last_frame_url = await _download_last_frame(provider_last_frame_url, video.id)
+                if isinstance(provider_last_frame_url, str) and provider_last_frame_url:
+                    persisted_last_frame_url = await _download_last_frame(
+                        provider_last_frame_url,
+                        video.id,
+                    )
+                    last_frame_source = "provider"
             except Exception as error:
                 logger.warning(
-                    "Last frame download failed; preserving provider URL: video_id=%s, error=%s",
+                    "Provider last frame download failed; falling back to FFmpeg: video_id=%s, error=%s",
                     video.id,
                     error,
                 )
-            try:
-                propagation = await _inject_last_frame_reference(video, persisted_last_frame_url)
-                video.metadata = {
-                    **(video.metadata or {}),
-                    "last_frame_url": persisted_last_frame_url,
-                    "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
-                    "last_frame_reference": propagation["reference"] if propagation else None,
-                    "last_frame_prompt_instruction": (
-                        propagation["prompt_instruction"] if propagation else None
-                    ),
-                }
-            except Exception as error:
-                logger.exception("Last frame propagation failed: video_id=%s", video.id)
-                video.metadata = {
-                    **(video.metadata or {}),
-                    "last_frame_url": persisted_last_frame_url,
-                    "last_frame_propagation_error": str(error)[:300],
-                }
+
+            if persisted_last_frame_url is None:
+                video_source = video.url or remote_url
+                try:
+                    if not isinstance(video_source, str) or not video_source:
+                        raise ValueError("生成视频没有可读取的文件地址")
+                    persisted_last_frame_url = await last_frame_service.extract_and_store(
+                        video_source,
+                        video.id,
+                        team_id=metadata.get("team_id"),
+                    )
+                    last_frame_source = "ffmpeg"
+                except Exception as error:
+                    logger.exception("Last frame extraction failed: video_id=%s", video.id)
+                    video.metadata = {
+                        **(video.metadata or {}),
+                        "last_frame_extraction_error": str(error)[:300],
+                    }
+
+            if persisted_last_frame_url is not None:
+                try:
+                    propagation = await _inject_last_frame_reference(video, persisted_last_frame_url)
+                    video.metadata = {
+                        **(video.metadata or {}),
+                        "last_frame_url": persisted_last_frame_url,
+                        "last_frame_source": last_frame_source,
+                        "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
+                        "last_frame_reference": propagation["reference"] if propagation else None,
+                        "last_frame_prompt_instruction": (
+                            propagation["prompt_instruction"] if propagation else None
+                        ),
+                    }
+                except Exception as error:
+                    logger.exception("Last frame propagation failed: video_id=%s", video.id)
+                    video.metadata = {
+                        **(video.metadata or {}),
+                        "last_frame_url": persisted_last_frame_url,
+                        "last_frame_source": last_frame_source,
+                        "last_frame_propagation_error": str(error)[:300],
+                    }
+
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
 

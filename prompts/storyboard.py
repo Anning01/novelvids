@@ -93,7 +93,7 @@ STORYBOARD_SYSTEM_PROMPT = """你是一名顶尖摄影指导、分镜导演和�
 - 【风格定调】：`visual_style`、`format_and_look`、`lenses_and_filtration`、`lighting_and_atmosphere`、`grade_and_palette` 和 `effect_restrictions`。
 - 【角色 / 道具 / 场景引用】：由程序根据镜头实际引用的资产生成，不要重复输出资产设定。
 - 【全局前置条件】：`time_setting`、`environment`、`spatial_relationships`。
-- 【镜头描述】：`shot_size_and_camera`、`description`、`visual_prose`、带时间轴的 `actions`、`dialogue` 和 `sound_design`。
+- 【镜头描述】：`description` 必须概括本镜头真正需要生成的核心表演与剧情信息，不能只写抽象情绪或剧情标题；程序会把 `visual_prose`、带时间轴的 `actions`、`narration`、`dialogue` 和 `sound_design` 前置渲染为高优先级核心生成指令，再保留详细执行内容。
 - 【转场方式】：`transition` 可以说明与相邻镜头的衔接意图，但必须同时写清本镜头内可见的收尾画面和剪辑点。
 - 【特效规范】：`effect_restrictions` 和 `allowed_effects`。
 
@@ -447,6 +447,33 @@ def _format_asset_references(
     return "\n".join(sections)
 
 
+_TIMELINE_START_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*s?\s*[-–—]")
+
+
+def _timeline_start(value: str) -> float:
+    match = _TIMELINE_START_RE.match(value)
+    return float(match.group(1)) if match else float("inf")
+
+
+def _format_primary_generation_instruction(shot: StoryboardShot) -> str:
+    """把模型最容易漏掉的动作与人声前置到镜头主指令。"""
+    actions = "；".join(shot.actions) or "保持当前可见状态"
+    voice_tracks = sorted(
+        [*shot.narration, *shot.dialogue],
+        key=_timeline_start,
+    )
+    voices = "；".join(voice_tracks) or "无人物台词、旁白或人物内心 OS"
+    return "\n".join(
+        (
+            "【核心生成指令｜高优先级】",
+            f"初始画面：{shot.visual_prose}",
+            f"动作时间轴：{actions}",
+            f"人声时间轴：{voices}",
+            f"同步声音：{shot.sound_design}",
+        )
+    )
+
+
 def format_storyboard_prompt(
     shot: StoryboardShot,
     prompt_language: str = "zh",
@@ -493,9 +520,13 @@ def format_storyboard_prompt(
             "",
             "【镜头描述】",
             (
-                f"【镜头{shot.sequence} · {duration_token} · "
+                # 每条 Scene 都会作为一次独立视频任务提交；章节序号只用于数据库排序，
+                # 不应泄漏到任务内部。对视频模型而言，当前 Prompt 永远是“镜头1”。
+                f"【镜头1 · {duration_token} · "
                 f"{shot.shot_size_and_camera} · {shot.description}】"
             ),
+            _format_primary_generation_instruction(shot),
+            "【详细执行】",
             *shot_body_parts,
             "",
             "【转场方式】",

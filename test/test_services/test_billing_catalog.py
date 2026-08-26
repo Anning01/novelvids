@@ -53,6 +53,17 @@ def test_pricing_for_minimax_h3_per_second_and_input_images():
     assert pricing["input_image"] == {"first_free": 5, "price_per_image": 0.20}
 
 
+def test_wan3_pricing_starts_zero_until_admin_configures_contract_price():
+    config = SimpleNamespace(
+        image_model_type=None,
+        video_model_type="wan_3",
+        model="wan3.0-video",
+    )
+    pricing = pricing_for(config)
+    assert pricing["billing_unit"] == "second"
+    assert pricing["prices"] == {"480P": 0.0, "720P": 0.0, "1080P": 0.0}
+
+
 def test_pricing_for_llm_model():
     config = SimpleNamespace(
         image_model_type=None,

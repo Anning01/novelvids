@@ -215,7 +215,39 @@ export const api = {
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
   mergeChapterVideos: (chapterId: number) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
-  audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
+  audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}, novelId?: number) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: '-id', novel_id: novelId, ...filters })}`),
+  trimAudioReference: (id: number, start: number, end: number, novelId?: number) => request<SingleResponse<AudioReference>>(`/media-library/audio-references/${id}/trim`, {
+    method: 'POST',
+    body: JSON.stringify({ start, end, novel_id: novelId }),
+  }),
+  async uploadAudioReference(file: File, nickname: string, gender: string, novelId?: number) {
+    if (!['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav'].includes(file.type) && !/\.(mp3|wav)$/i.test(file.name)) {
+      throw new Error('参考音频仅支持 MP3 或 WAV')
+    }
+    if (file.size > 15 * 1024 * 1024) throw new Error('参考音频不能超过 15MB')
+    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream', novel_id: novelId })}`)
+    if (policyResponse.data.direct) {
+      const policy = policyResponse.data
+      const form = new FormData()
+      Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, String(value)))
+      form.append('file', file)
+      const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
+      if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
+      return request<SingleResponse<AudioReference>>('/media-library/audio-references/oss-finalize', {
+        method: 'POST',
+        body: JSON.stringify({ key: policy.key, filename: file.name, nickname, gender, novel_id: novelId }),
+      })
+    }
+    const form = new FormData()
+    form.append('file', file)
+    form.append('nickname', nickname)
+    form.append('gender', gender)
+    if (novelId) form.append('novel_id', String(novelId))
+    const response = await fetch(`${BASE}/media-library/audio-references/upload`, { method: 'POST', body: form, headers: authHeaders() })
+    const payload = await response.json()
+    if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || '参考音频上传失败')
+    return payload as SingleResponse<AudioReference>
+  },
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
   workbenchBootstrap: (novelId: number, chapterId: number) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`),
