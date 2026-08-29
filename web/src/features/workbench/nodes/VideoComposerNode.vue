@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { NodeProps } from '@vue-flow/core'
-import { ChevronDown, ChevronUp, Film } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Download, Film } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
+import { mediaUrl } from '@/api'
+import type { VideoMergeResult } from '@/types'
 import {
+  chapterComposerDisabledReason,
   COMPOSER_ASPECT_RATIOS,
   COMPOSER_RESOLUTIONS,
   normalizeComposerConfig,
@@ -13,6 +16,7 @@ import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchRunButton from '../components/WorkbenchRunButton.vue'
 import WorkbenchSelect from '../components/WorkbenchSelect.vue'
 import { useWorkbenchStore } from '../store/workbenchStore'
+import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
 
 const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
@@ -22,18 +26,27 @@ const storedConfig = computed(() => normalizeComposerConfig(
 const draft = ref(storedConfig.value)
 watch(storedConfig, value => { draft.value = value }, { deep: true })
 const inputs = computed(() => orderedComposerInputs(props.id, store.nodes, store.edges))
+const busy = computed(() => store.busyComposerKeys.includes(props.id))
+const result = computed(() => (store.nodeByKey(props.id)?.data.result || props.data.result) as VideoMergeResult | undefined)
 const resolutionOptions = COMPOSER_RESOLUTIONS.map(value => ({ value, label: value }))
 const aspectRatioOptions = COMPOSER_ASPECT_RATIOS.map(value => ({ value, label: value }))
 const disabledReason = computed(() => {
   if (!props.data.compose_capability) return '当前服务未启用视频合成'
-  if (!inputs.value.length) return '请连接至少一个生成视频或视频素材'
-  return '视频合成接口尚未接入'
+  return chapterComposerDisabledReason(props.id, store.nodes, store.edges)
 })
+const canCompose = computed(() => !disabledReason.value && !busy.value)
 
 function saveConfig() {
   draft.value = normalizeComposerConfig(draft.value)
   store.saveVideoComposerConfig(props.id, draft.value)
 }
+
+async function compose() {
+  if (!canCompose.value) return
+  await store.composeChapter(props.id)
+}
+
+registerWorkbenchNodeRun(props.id, { enabled: canCompose, run: compose })
 </script>
 
 <template>
@@ -75,8 +88,12 @@ function saveConfig() {
         </label>
       </fieldset>
 
-      <p class="workbench-composer-node__alert" role="alert">{{ disabledReason }}</p>
-      <WorkbenchRunButton label="合成并预览" :disabled="Boolean(disabledReason)" />
+      <p v-if="disabledReason" class="workbench-composer-node__alert" role="alert">{{ disabledReason }}</p>
+      <WorkbenchRunButton label="合成并预览" busy-label="正在合成…" :busy="busy" :disabled="Boolean(disabledReason)" @click="compose" />
+      <section v-if="result?.merged_url" class="workbench-composer-node__result">
+        <video :src="mediaUrl(result.merged_url)" controls preload="metadata" aria-label="成片预览" />
+        <a :href="mediaUrl(result.merged_url)" :download="`${draft.name || '章节成片'}.mp4`"><Download :size="14" aria-hidden="true" />下载成片</a>
+      </section>
       <span class="workbench-composer-node__output"><Film :size="13" aria-hidden="true" />结果输出端口</span>
     </div>
   </WorkbenchNodeFrame>

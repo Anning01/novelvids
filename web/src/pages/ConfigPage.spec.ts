@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import AppButton from '@/components/AppButton.vue'
+import AppMultiSelect from '@/components/AppMultiSelect.vue'
 import ConfigPage from './ConfigPage.vue'
 import { api } from '@/api'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -118,6 +119,47 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     expect(cards[0].find('[aria-label="删除配置"]').exists()).toBe(true)
   })
 
+  it('将重制拆解作为可选择的 LLM 能力用途保存', async () => {
+    baseMocks()
+    vi.mocked(api.enums).mockResolvedValue({
+      data: {
+        ai_task_type: [
+          { value: 1, label: '提取任务' },
+          { value: 3, label: '生成分镜' },
+          { value: 5, label: '项目分析' },
+          { value: 6, label: '重制' },
+        ],
+        image_model_type: [],
+        video_model_type: [],
+      },
+    } as never)
+    vi.spyOn(api, 'configs').mockResolvedValue({
+      data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
+    } as never)
+    const createConfig = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+
+    await wrapper.get('.model-config-section button').trigger('click')
+    const capabilitySelect = wrapper.getComponent(AppMultiSelect)
+    expect(capabilitySelect.props('options')).toContainEqual({ value: '6', label: '重制' })
+    capabilitySelect.vm.$emit('update:modelValue', ['1', '6'])
+    await wrapper.get('input[name="model-config-name"]').setValue('重制理解模型')
+    await wrapper.get('input[name="model-service-base-url"]').setValue('https://model.example.com/v1')
+    await wrapper.get('input[name="model-service-api-key"]').setValue('test-key')
+    await wrapper.get('input[name="model-id"]').setValue('remake-model')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+
+    expect(createConfig).toHaveBeenCalledWith(expect.objectContaining({
+      task_type: 1,
+      task_types: [1, 6],
+    }))
+  })
+
   it('选择 MiniMax H3 时填入官方端点、模型名和协议', async () => {
     baseMocks()
     vi.mocked(api.enums).mockResolvedValue({
@@ -155,7 +197,7 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     const wrapper = mountPage(pinia)
     await flushPromises()
 
-    await wrapper.findAll('.model-category-card')[2].trigger('click')
+    await wrapper.get('.model-category-card.is-video').trigger('click')
     await wrapper.get('.model-config-section button').trigger('click')
     await wrapper.get('select[name="video-model-type"]').setValue('minimax_h3')
 

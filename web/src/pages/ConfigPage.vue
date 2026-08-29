@@ -46,8 +46,8 @@ const categories: ModelCategory[] = [
     id: 'llm',
     label: 'LLM 大模型',
     eyebrow: 'LANGUAGE',
-    description: '负责剧本理解、人物提取、分集规划与分镜文本生成。',
-    taskTypes: [1, 3, 5],
+    description: '负责剧本理解、人物提取、分镜文本生成与来源视频拆解。',
+    taskTypes: [1, 3, 5, 6],
     icon: Bot,
   },
   {
@@ -113,7 +113,7 @@ const isEditing = computed(() => editingConfigId.value !== null)
 const selectedConfigs = computed(() => configs.value.filter(item => configTaskTypes(item).some(value => selectedCategory.value.taskTypes.includes(value))))
 const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value => ({
   value: String(value),
-  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析' }[value] ?? `任务 ${value}`),
+  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析', 6: '重制' }[value] ?? `任务 ${value}`),
 })))
 
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
@@ -163,7 +163,7 @@ function activeCount(category: ModelCategory) {
 }
 
 function taskLabel(value: number) {
-  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成', 5: '项目分析' }[value] ?? `任务 ${value}`)
+  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成', 5: '项目分析', 6: '重制' }[value] ?? `任务 ${value}`)
 }
 
 function protocolLabel(value: ImageApiProtocol) {
@@ -242,7 +242,7 @@ function changeSettingsSection(value: string) {
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: category.taskTypes.map(String), name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
+  form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
   textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
   tierPrices.value = category.id === 'llm'
     ? {}
@@ -262,7 +262,9 @@ function openEdit(item: AiModelConfig) {
   editingConfigId.value = item.id
   showApiKey.value = false
   form.value = {
-    task_types: configTaskTypes(item).map(String),
+    task_types: configTaskTypes(item)
+      .filter(taskType => category.taskTypes.includes(taskType))
+      .map(String),
     name: item.name,
     base_url: item.base_url || '',
     api_key: item.api_key || '',
@@ -483,7 +485,7 @@ onMounted(load)
               <span v-if="!isTeamAdmin && item.scope" class="scope-badge" :class="item.scope === 'official' ? 'is-official' : 'is-team'">{{ item.scope === 'official' ? '平台配置' : '团队配置' }}</span>
               <span :class="{ 'is-active': item.is_active }">{{ item.is_active ? '已启动' : '未启动' }}</span>
             </div>
-            <p>{{ configTaskTypes(item).map(taskLabel).join(' · ') }}</p>
+            <p>{{ configTaskTypes(item).filter(taskType => selectedCategory.taskTypes.includes(taskType)).map(taskLabel).join(' · ') }}</p>
             <div class="config-metadata">
               <span><Settings2 :size="13" />{{ item.model || '未设置模型名称' }}</span>
               <span><Server :size="13" />{{ providerHost(item.base_url) }}</span>
@@ -588,7 +590,7 @@ onMounted(load)
           <label v-if="selectedCategory.taskTypes.length > 1" class="is-full">
             <span>能力用途</span>
             <AppMultiSelect v-model="form.task_types" ariaLabel="能力用途" :options="taskOptions" />
-            <small>可同时选择多个用途，同一个 LLM 能用于内容理解和分镜规划。</small>
+            <small>可同时选择多个用途；勾选“重制”表示该模型支持视频输入并可用于来源视频拆解。</small>
           </label>
           <label class="is-full"><span>配置名称</span><input v-model="form.name" name="model-config-name" required autocomplete="off" placeholder="例如：豆包 Seed 1.6" /></label>
           <label class="is-full"><span>Base URL</span><span class="input-with-icon"><Server :size="15" /><input v-model="form.base_url" name="model-service-base-url" required autocomplete="off" inputmode="url" spellcheck="false" placeholder="https://api.example.com/v1" /></span></label>
@@ -778,7 +780,7 @@ onMounted(load)
 .scope-badge.is-official { color: var(--app-accent); background: var(--app-accent-soft); }
 .scope-badge.is-team { color: #059669; background: rgb(16 185 129 / 12%); }
 .official-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.model-category-grid { display: grid; width: 100%; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
+.model-category-grid { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
 .model-category-card { position: relative; display: grid; min-height: 158px; grid-template-columns: 46px minmax(0, 1fr); align-content: start; gap: 13px; padding: 18px; overflow: hidden; border: 1px solid #e6e8ef; border-radius: 15px; color: #303442; background: #fff; cursor: pointer; text-align: left; box-shadow: 0 10px 30px rgb(37 41 57 / 4%); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .model-category-card:hover { border-color: #d6d9e5; box-shadow: 0 14px 34px rgb(37 41 57 / 7%); transform: translateY(-1px); }
 .model-category-card.is-active { border-color: #bfc1ff; box-shadow: 0 14px 34px rgb(91 92 246 / 10%); }
@@ -873,11 +875,12 @@ onMounted(load)
 .scope-badge.is-official { color: var(--app-accent); background: var(--app-accent-soft); }
 .scope-badge.is-team { color: #059669; background: rgb(16 185 129 / 12%); }
 .official-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.model-category-grid { grid-template-columns: 1fr; }
+.model-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .model-category-card { min-height: 130px; }
 }
 @media (max-width: 620px) {
   .model-settings-page { padding: 30px 16px 60px; }
+  .model-category-grid { grid-template-columns: 1fr; }
   .model-settings-header, .model-config-section > header { align-items: stretch; flex-direction: column; }
   .settings-primary-button { width: 100%; }
   .model-config-card { grid-template-columns: 42px minmax(0, 1fr); }

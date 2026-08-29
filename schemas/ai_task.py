@@ -19,5 +19,7 @@ class AiTaskOut(BaseResponse):
     request_params: dict = Field(default_factory=dict, description="请求参数")
     response_data: Optional[dict] = Field(None, description="返回数据")
     error_message: Optional[str] = Field(None, description="错误消息")
+    stage: Optional[str] = Field(None, description="任务当前业务阶段", max_length=32)
+    progress: int = Field(0, description="任务进度", ge=0, le=100)
     started_at: Optional[datetime] = Field(None, description="开始执行时间")
     finished_at: Optional[datetime] = Field(None, description="执行完成时间")

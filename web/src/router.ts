@@ -9,6 +9,8 @@ const router = createRouter({
     { path: '/invite/:token', name: 'invite', component: () => import('./pages/InvitePage.vue'), meta: { public: true, fullscreen: true } },
     { path: '/', component: () => import('./pages/HomePage.vue') },
     { path: '/create/short-drama', component: () => import('./pages/ShortDramaPage.vue') },
+    { path: '/create/remake', name: 'remake-workshop', component: () => import('./pages/RemakeWorkshopPage.vue') },
+    { path: '/create/remake/:projectId/progress', name: 'remake-progress', component: () => import('./pages/RemakeProgressPage.vue'), meta: { fullscreen: true } },
     { path: '/create/short-drama/agent', redirect: '/create/short-drama' },
     { path: '/create/short-drama/agent/:projectId', name: 'short-drama-agent', component: () => import('./pages/ShortDramaAgentPage.vue'), meta: { fullscreen: true } },
     { path: '/create/short-drama/manual/:projectId', name: 'short-drama-manual', component: () => import('./pages/ShortDramaManualPage.vue'), meta: { fullscreen: true } },

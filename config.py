@@ -62,6 +62,10 @@ class Settings:
         1,
         int(os.getenv("VIDEO_RECONCILE_BATCH_SIZE", "50")),
     )
+    REMAKE_ANALYSIS_CONCURRENCY: int = max(
+        1,
+        int(os.getenv("REMAKE_ANALYSIS_CONCURRENCY", "2")),
+    )
 
 
 settings = Settings()

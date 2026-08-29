@@ -131,6 +131,7 @@ class VideoQueryOut(BaseModel):
 class VideoMergeRequest(BaseModel):
     """视频合并请求"""
     chapter_id: int = Field(..., description="章节ID")
+    strict: bool = Field(False, description="是否要求每个分镜的当前版本均已完成")
 
 
 class VideoMergeOut(BaseModel):

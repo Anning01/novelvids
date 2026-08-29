@@ -181,6 +181,13 @@ async function loadProject(chapterId = selectedChapterId.value) {
       api.novelMeta(projectId.value),
       api.chapters(projectId.value),
     ])
+    if (projectResponse.data.workflow_kind === 'remake') {
+      const progress = (await api.remakeProjectProgress(projectId.value)).data
+      if (progress.aggregate_status !== 'completed') {
+        await router.replace({ name: 'remake-progress', params: { projectId: projectId.value } })
+        return
+      }
+    }
     chapters.value = chapterListResponse.data.items
     const targetChapter = chapters.value.find(item => item.id === chapterId) ?? chapters.value[0] ?? null
     if (targetChapter && targetChapter.id !== selectedChapterId.value) {

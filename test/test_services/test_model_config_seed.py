@@ -44,6 +44,65 @@ async def test_ensure_seed_adds_only_missing_models():
 
 
 @pytest.mark.asyncio
+async def test_ensure_seed_preserves_user_selected_remake_capability_on_shared_model():
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[
+            AiTaskTypeEnum.extraction.value,
+            AiTaskTypeEnum.storyboard.value,
+            AiTaskTypeEnum.remake_decomposition.value,
+        ],
+        name="deepseek",
+        base_url="https://team.example.com/v1",
+        api_key="keep-secret",
+        model="custom-model",
+        is_active=True,
+        concurrency=7,
+    )
+
+    await ensure_model_config_seed_data()
+    await ensure_model_config_seed_data()
+    await config.refresh_from_db()
+
+    assert config.task_types == [
+        AiTaskTypeEnum.extraction.value,
+        AiTaskTypeEnum.storyboard.value,
+        AiTaskTypeEnum.remake_decomposition.value,
+    ]
+    assert config.base_url == "https://team.example.com/v1"
+    assert config.api_key == "keep-secret"
+    assert config.model == "custom-model"
+    assert config.is_active is True
+    assert config.concurrency == 7
+
+
+@pytest.mark.asyncio
+async def test_ensure_seed_preserves_other_capabilities_on_primary_remake_model():
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.remake_decomposition.value,
+        task_types=[
+            AiTaskTypeEnum.remake_decomposition.value,
+            AiTaskTypeEnum.extraction.value,
+        ],
+        name="video-understanding",
+        base_url="https://ark.example.com/v3",
+        api_key="keep-secret",
+        model="video-model",
+        is_active=True,
+    )
+
+    await ensure_model_config_seed_data()
+    await config.refresh_from_db()
+
+    assert config.task_types == [
+        AiTaskTypeEnum.remake_decomposition.value,
+        AiTaskTypeEnum.extraction.value,
+    ]
+    assert config.api_key == "keep-secret"
+    assert config.is_active is True
+
+
+@pytest.mark.asyncio
 async def test_ensure_seed_upgrades_only_legacy_minimax_zero_price_placeholder():
     legacy = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.video.value,

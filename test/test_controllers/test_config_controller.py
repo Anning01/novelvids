@@ -70,6 +70,26 @@ async def test_单个模型支持多个能力用途():
 
 
 @pytest.mark.asyncio
+async def test_重制能力可与普通文本能力共用配置():
+    config = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[
+            AiTaskTypeEnum.extraction.value,
+            AiTaskTypeEnum.remake_decomposition.value,
+        ],
+        name="shared-multimodal-model",
+        base_url="https://api.example.com",
+        api_key="sk-test",
+        model="multimodal-model",
+    ))
+
+    assert config.task_types == [
+        AiTaskTypeEnum.extraction.value,
+        AiTaskTypeEnum.remake_decomposition.value,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_项目分析优先使用独立能力配置():
     legacy = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
@@ -519,6 +539,50 @@ async def test_获取启用配置_无启用时抛出404():
             AiTaskTypeEnum.extraction.value
         )
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_重制拆解解析显式声明能力的共享LLM配置():
+    shared_text = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[
+            AiTaskTypeEnum.extraction.value,
+            AiTaskTypeEnum.remake_decomposition.value,
+        ],
+        name="recent-text-model",
+        base_url="https://text.example.com/v1",
+        api_key="text-key",
+        model="text-only",
+        is_active=True,
+    )
+    resolved = await ai_model_config_controller.get_active(
+        AiTaskTypeEnum.remake_decomposition.value
+    )
+
+    assert resolved.id == shared_text.id
+
+
+@pytest.mark.asyncio
+async def test_重制拆解可显式选择共享LLM配置():
+    shared_text = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.extraction.value,
+        task_types=[
+            AiTaskTypeEnum.extraction.value,
+            AiTaskTypeEnum.remake_decomposition.value,
+        ],
+        name="shared-text-model",
+        base_url="https://text.example.com/v1",
+        api_key="text-key",
+        model="text-only",
+        is_active=True,
+    )
+
+    resolved = await ai_model_config_controller.get_active(
+        AiTaskTypeEnum.remake_decomposition.value,
+        shared_text.id,
+    )
+
+    assert resolved.id == shared_text.id
 
 
 @pytest.mark.asyncio

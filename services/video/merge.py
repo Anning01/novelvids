@@ -279,4 +279,8 @@ class VideoMerger:
             logger.error(f"FFmpeg stderr: {result.stderr}")
             raise RuntimeError(f"视频合并失败：输出文件未创建")
 
+    def merge_paths(self, video_paths: list[str], output_path: str) -> None:
+        """合并调用方已物化的媒体文件，供不可变快照等服务复用。"""
+        self._merge_video_paths(video_paths, output_path)
+
 video_merger = VideoMerger()

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { api, mediaUrl, persistedMediaRef } from '@/api'
 import { notice } from '@/shared/notice'
-import type { Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel } from '@/types'
+import type { AiTask, Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel, WorkbenchBootstrap, WorkbenchProjectConfig, WorkbenchRemakeSource, WorkbenchRemakeTask } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
@@ -24,6 +24,7 @@ interface HistorySnapshot {
 }
 const terminal = new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED])
 const uploadedMediaKinds = new Set<WorkbenchNode['kind']>(['image_media', 'video_media', 'audio_media'])
+const defaultProjectConfig = (): WorkbenchProjectConfig => ({ workflow_kind: 'script', aspect_ratio: '9:16', resolution: '720p', style_key: null, custom_style_prompt: null })
 const now = () => new Date().toISOString()
 const cloneValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const mediaTitle = (filename: string) => filename.replace(/\.[^.]+$/, '') || filename
@@ -46,6 +47,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     chapterId: 0,
     novelId: 0,
     chapter: null as Chapter | null,
+    projectConfig: defaultProjectConfig(),
+    remakeSource: null as WorkbenchRemakeSource | null,
     assets: [] as Asset[],
     scenes: [] as Scene[],
     videos: {} as Record<number, Video[]>,
@@ -61,12 +64,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     future: [] as HistorySnapshot[],
     busySceneIds: [] as number[],
     busyAssetIds: [] as number[],
+    busyComposerKeys: [] as string[],
     manualNodes: [] as WorkbenchNode[],
     mediaEdges: [] as WorkbenchEdge[],
     viewport: { x: 0, y: 0, zoom: 1 } as WorkbenchViewport,
     loadEpoch: markRaw(new WorkbenchLoadEpoch()),
     pendingControllers: [] as AbortController[],
     pollingVideoIds: [] as number[],
+    pollingRemakeTaskId: null as string | null,
   }),
   getters: {
     canUndo: state => state.history.length > 0,
@@ -87,8 +92,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.pendingControllers.forEach(controller => controller.abort())
       this.pendingControllers = []
       this.pollingVideoIds = []
+      this.pollingRemakeTaskId = null
       this.busyAssetIds = []
       this.busySceneIds = []
+      this.busyComposerKeys = []
       this.loading = false
     },
     layoutKey() { return `novelvids:canvas:${this.chapterId}:layout:v${WORKBENCH_LAYOUT_VERSION}` },
@@ -167,7 +174,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async load(novelId: number, chapterId: number) {
       const epoch = this.loadEpoch.begin()
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
-      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.pollingVideoIds = []; this.videoModelOptions = []; this.imageModelOptions = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
+      this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.busyComposerKeys = []; this.pollingVideoIds = []; this.pollingRemakeTaskId = null; this.projectConfig = defaultProjectConfig(); this.remakeSource = null; this.videoModelOptions = []; this.imageModelOptions = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
         const [bootstrapResponse, videoConfigResponse, imageConfigResponse] = await Promise.all([
           api.workbenchBootstrap(novelId, chapterId),
@@ -176,6 +183,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         ])
         if (!this.loadEpoch.isCurrent(epoch)) return
         this.chapter = bootstrapResponse.data.chapter
+        this.projectConfig = bootstrapResponse.data.project_config || defaultProjectConfig()
+        this.remakeSource = bootstrapResponse.data.remake_source || null
         this.assets = bootstrapResponse.data.assets
         this.scenes = bootstrapResponse.data.scenes
         this.videoModelOptions = videoConfigResponse.data
@@ -187,6 +196,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         Object.entries(this.videos).forEach(([sceneId, videos]) => videos
           .filter(video => !isTerminalVideo(video))
           .forEach(video => { void this.resumeVideoPolling(Number(sceneId), video.id) }))
+        const remakeTask = this.remakeSource?.analysis_task
+        if (remakeTask && !terminal.has(remakeTask.status)) void this.resumeRemakeAnalysis()
       } finally {
         if (this.loadEpoch.isCurrent(epoch)) this.loading = false
       }
@@ -195,12 +206,42 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (!this.chapter) return
       const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', `第 ${this.chapter.number} 章 · ${this.chapter.name}`, { x: 80, y: 80 }, { chapter: this.chapter, presentation: 'note', layout_family: 'note', layout_lane: 'note' })]
       const edges: WorkbenchEdge[] = []
+      const projectDefaults = {
+        aspectRatio: this.projectConfig.aspect_ratio || '9:16',
+        resolution: this.projectConfig.resolution || '720p',
+      }
+      if (this.remakeSource) {
+        const sourceKey = `remake-source-${this.remakeSource.id}`
+        nodes.push(node(this.remakeSource.id, sourceKey, 'source_video', `来源视频 · 第 ${this.remakeSource.episode_number} 集`, { x: 80, y: 420 }, {
+          source: this.remakeSource,
+          url: mediaUrl(this.remakeSource.media_url),
+          layout_family: 'source',
+          layout_lane: 'source',
+          ui: {},
+        }))
+        const task = this.remakeSource.analysis_task
+        if (task && task.status !== TaskStatusEnum.COMPLETED) {
+          const taskKey = `remake-analysis-${task.id}`
+          const taskNode = node(-this.remakeSource.id, taskKey, 'ai_decomposition', 'AI 视频拆解', { x: 500, y: 420 }, {
+            sourceId: this.remakeSource.id,
+            task,
+            layout_family: 'operation',
+            layout_lane: 'operation',
+            ui: {},
+          })
+          taskNode.status = task.status === TaskStatusEnum.FAILED || task.status === TaskStatusEnum.CANCELLED
+            ? 'failed'
+            : 'running'
+          nodes.push(taskNode)
+          edges.push(edge(100000 + this.remakeSource.id, `${sourceKey}-${taskKey}`, sourceKey, taskKey, 'output_binding'))
+        }
+      }
       const validAssetIds = new Set(this.assets.map(asset => asset.id))
-      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, imageModelOptions: this.imageModelOptions, asset_type: assetTypeLabel(asset.asset_type), layout_family: 'asset', ui: {}, index })))
+      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, imageModelOptions: this.imageModelOptions, asset_type: assetTypeLabel(asset.asset_type), project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, layout_family: 'asset', ui: {}, index })))
       this.scenes.forEach((scene, index) => {
         const sceneKey = `shot-${scene.id}`
         const sceneVideos = this.videos[scene.id] || []
-        const sceneNode = node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
+        const sceneNode = node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
         sceneNode.status = sceneHasRunningVideo(sceneVideos) ? 'running' : 'ready'
         nodes.push(sceneNode)
         sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
@@ -216,6 +257,85 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.manualNodes = [...old.values()].filter(item => isManualNodeKind(item.kind))
       this.nodes.push(...this.manualNodes)
       this.edges = [...edges, ...this.mediaEdges.filter(item => this.nodes.some(nodeItem => nodeItem.key === item.source) && this.nodes.some(nodeItem => nodeItem.key === item.target))]
+    },
+    applyWorkbenchBootstrap(bootstrap: WorkbenchBootstrap) {
+      this.chapter = bootstrap.chapter
+      this.projectConfig = bootstrap.project_config || defaultProjectConfig()
+      this.remakeSource = bootstrap.remake_source || null
+      this.assets = bootstrap.assets
+      this.scenes = bootstrap.scenes
+      this.videos = bootstrap.videos
+      this.rebuildGraph()
+    },
+    async refreshRemakeWorkingSet() {
+      const response = await api.workbenchBootstrap(this.novelId, this.chapterId)
+      this.applyWorkbenchBootstrap(response.data)
+    },
+    updateRemakeTask(task: AiTask | WorkbenchRemakeTask) {
+      if (!this.remakeSource) return
+      const previous = this.remakeSource.analysis_task
+      this.remakeSource = {
+        ...this.remakeSource,
+        media_status: task.status === TaskStatusEnum.COMPLETED
+          ? 'completed'
+          : task.status === TaskStatusEnum.FAILED || task.status === TaskStatusEnum.CANCELLED
+            ? 'failed'
+            : 'processing',
+        analysis_task: {
+          id: task.id,
+          status: task.status,
+          stage: task.stage,
+          progress: task.progress || 0,
+          error_message: task.error_message,
+          created_at: task.created_at || previous?.created_at || now(),
+          updated_at: task.updated_at || now(),
+        },
+      }
+      this.rebuildGraph()
+    },
+    async resumeRemakeAnalysis() {
+      const task = this.remakeSource?.analysis_task
+      if (!task || terminal.has(task.status) || this.pollingRemakeTaskId === task.id) return
+      const controller = this.beginPendingWork()
+      this.pollingRemakeTaskId = task.id
+      try {
+        const current = await pollUntilTerminal(async () => {
+          const next = (await api.task(task.id)).data
+          if (!controller.signal.aborted) this.updateRemakeTask(next)
+          return next
+        }, { signal: controller.signal, intervalMs: 2500, terminalStatuses: terminal })
+        if (controller.signal.aborted) return
+        if (current.status === TaskStatusEnum.COMPLETED) {
+          await this.refreshRemakeWorkingSet()
+          notice.success('视频拆解完成，设定和分镜已加载')
+        }
+      } catch (error) {
+        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : '拆解状态刷新失败')
+      } finally {
+        this.finishPendingWork(controller)
+        if (this.pollingRemakeTaskId === task.id) this.pollingRemakeTaskId = null
+      }
+    },
+    async retryRemakeAnalysis() {
+      const source = this.remakeSource
+      if (!source) return
+      const response = await api.retryRemakeSource(this.novelId, source.id)
+      const timestamp = now()
+      this.remakeSource = {
+        ...source,
+        media_status: 'processing',
+        analysis_task: {
+          id: response.data.task_id,
+          status: TaskStatusEnum.QUEUED,
+          stage: 'queued',
+          progress: 0,
+          error_message: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+      }
+      this.rebuildGraph()
+      void this.resumeRemakeAnalysis()
     },
     selectNode(key: string, additive = false) {
       this.selectedNodeKeys = additive
@@ -473,7 +593,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const stamp = Date.now(); const key = `video-composer-${stamp}`
       const count = this.nodes.filter(item => item.kind === 'video_composer').length + 1
       const item = node(-stamp, key, 'video_composer', '视频合成器', position || { x: 980, y: 120 + this.manualNodes.length * 440 }, {
-        config: normalizeComposerConfig({ name: count === 1 ? '视频合成器' : `视频合成器 ${count}` }),
+        config: normalizeComposerConfig({
+          name: count === 1 ? '视频合成器' : `视频合成器 ${count}`,
+          aspectRatio: this.projectConfig.aspect_ratio || undefined,
+          resolution: this.projectConfig.resolution || undefined,
+        } as Partial<ComposerConfig>),
         capability_key: 'compose_video',
         layout_family: 'result',
         layout_lane: 'result:composer',
@@ -491,6 +615,27 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
       return true
+    },
+    async composeChapter(key: string) {
+      const item = this.nodeByKey(key)
+      if (!item || item.kind !== 'video_composer' || this.busyComposerKeys.includes(key)) return null
+      this.busyComposerKeys.push(key)
+      item.status = 'running'
+      try {
+        const result = (await api.mergeChapterVideos(this.chapterId, true)).data
+        item.data = { ...item.data, result }
+        item.status = 'completed'
+        this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
+        this.persistLayout()
+        notice.success('当前集成片合成完成')
+        return result
+      } catch (error) {
+        item.status = 'failed'
+        notice.error(error instanceof Error ? error.message : '视频合成失败')
+        throw error
+      } finally {
+        this.busyComposerKeys = this.busyComposerKeys.filter(itemKey => itemKey !== key)
+      }
     },
     moveComposerInput(composerKey: string, inputKey: string, direction: ComposerMoveDirection) {
       const current = orderedComposerInputs(composerKey, this.nodes, this.edges).map(item => item.key)

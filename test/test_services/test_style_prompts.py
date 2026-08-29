@@ -9,8 +9,10 @@ from prompts.styles import (
     STYLE_PROMPTS,
     get_style,
     image_style_suffix,
+    image_project_style_suffix,
     list_styles,
     video_style_suffix,
+    video_project_style_suffix,
 )
 
 EXPECTED_KEYS = {
@@ -62,6 +64,15 @@ def test_unknown_style_renders_empty():
     assert video_style_suffix(None) == ""
 
 
+def test_custom_project_style_is_injected_without_a_registry_key():
+    custom = "低饱和复古胶片，暖色高反差，保留细密颗粒"
+
+    assert custom in image_project_style_suffix(None, custom)
+    assert custom in video_project_style_suffix(None, custom)
+    assert image_project_style_suffix("gongbi", None) == image_style_suffix("gongbi")
+    assert video_project_style_suffix("gongbi", None) == video_style_suffix("gongbi")
+
+
 def test_list_styles_shape():
     styles = list_styles()
     assert len(styles) == 14
@@ -78,6 +89,8 @@ def test_video_prompt_composition_appends_style():
     assert unchanged == "女主回头"
     unknown = _compose_video_prompt("女主回头", [], "no-such-style")
     assert unknown == "女主回头"
+    custom = _compose_video_prompt("女主回头", [], None, "低饱和复古胶片")
+    assert "低饱和复古胶片" in custom
 
 
 @pytest.mark.asyncio

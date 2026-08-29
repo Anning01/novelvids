@@ -528,5 +528,6 @@ async def test_api_获取所有枚举(client: AsyncClient):
         "wan_3",
     }
     assert video_types["seedance_2"]["value"] == "seedance_2"
+
     assert video_types["seedance_2"]["label"] == "Doubao Seedance 2.0"
     print(f"    枚举接口: keys={list(data.keys())}, video_model_type count={len(data['video_model_type'])}")

@@ -34,6 +34,10 @@ export interface NovelMeta {
   total_chapters?: number
   tags?: string[] | null
   style_key?: string | null
+  workflow_kind?: 'script' | 'remake'
+  aspect_ratio?: string | null
+  resolution?: string | null
+  custom_style_prompt?: string | null
   video_model_config_id?: number | null
   narrator_audio_reference_id?: number | null
   storyboard_strategy?: string | null
@@ -43,7 +47,7 @@ export interface NovelMeta {
   updated_at: string
 }
 export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
-export interface Novel { id: number; name: string; author?: string; style_key?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface Novel { id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
@@ -55,7 +59,44 @@ export interface AssetMergeResult { asset: Asset; removed_asset_id: number; data
 export interface Scene { id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface VideoMergeResult { chapter_id: number; merged_url: string; video_count: number; total_duration: number }
-export interface WorkbenchBootstrap { chapter: Chapter; assets: Asset[]; scenes: Scene[]; videos: Record<number, Video[]> }
+export interface WorkbenchProjectConfig {
+  workflow_kind: 'script' | 'remake'
+  aspect_ratio?: string | null
+  resolution?: string | null
+  style_key?: string | null
+  custom_style_prompt?: string | null
+}
+export interface WorkbenchRemakeTask {
+  id: string
+  status: TaskStatusEnum
+  stage?: string | null
+  progress: number
+  error_message?: string | null
+  created_at: string
+  updated_at: string
+}
+export interface WorkbenchRemakeSource {
+  id: number
+  episode_number: number
+  source_kind: 'upload' | 'history'
+  media_url: string
+  original_filename: string
+  mime_type?: string | null
+  size_bytes: number
+  duration_seconds: number
+  width: number
+  height: number
+  media_status: 'ready' | 'processing' | 'completed' | 'failed'
+  analysis_task?: WorkbenchRemakeTask | null
+}
+export interface WorkbenchBootstrap {
+  chapter: Chapter
+  project_config?: WorkbenchProjectConfig
+  remake_source?: WorkbenchRemakeSource | null
+  assets: Asset[]
+  scenes: Scene[]
+  videos: Record<number, Video[]>
+}
 export interface AiTask {
   id: string
   task_type: number
@@ -63,6 +104,8 @@ export interface AiTask {
   request_params?: Record<string, unknown>
   response_data?: Record<string, unknown>
   error_message?: string
+  stage?: string | null
+  progress?: number
   started_at?: string
   finished_at?: string
   created_at: string
@@ -165,6 +208,97 @@ export interface AllEnums {
 }
 export interface PaginationResponse<T> { code: number; message: string; data: { items: T[]; pagination: { total: number; page: number; page_size: number; pages: number } } }
 export interface SingleResponse<T> { code: number; message: string; data: T }
+
+export interface RemakeCapabilities {
+  media: { extensions: string[]; max_bytes: number; max_duration_seconds: number }
+  aspect_ratios: string[]
+  resolutions: string[]
+  styles: VisualStyleItem[]
+  episode_patterns?: string[]
+  source_modes: Record<'single_upload' | 'folder_upload' | 'history', boolean>
+}
+export interface RemakeUpload {
+  upload_token: string
+  storage_provider: 'local' | 'aliyun'
+  object_key: string
+  original_filename: string
+  mime_type?: string | null
+  size_bytes: number
+  duration_seconds: number
+  width: number
+  height: number
+  container_format: string
+  checksum: string
+  status: 'uploading' | 'validating' | 'ready' | 'failed' | 'expired' | 'committed'
+  expires_at: string
+}
+export interface RemakeProjectCreate {
+  name: string
+  source_mode: 'single_upload' | 'folder_upload' | 'history'
+  aspect_ratio: string
+  resolution: string
+  style_key: string | null
+  custom_style_prompt: string | null
+  idempotency_key: string
+  sources: Array<{ episode_number?: number; upload_token?: string; source_chapter_id?: number }>
+}
+export interface RemakeHistoryProject {
+  id: number
+  name: string
+  cover?: string | null
+  available_episode_count: number
+}
+export interface RemakeHistoryEpisode {
+  chapter_id: number
+  episode_number: number
+  name: string
+  duration_seconds: number
+  size_bytes: number
+  scene_count: number
+  available: boolean
+  unavailable_reason?: string | null
+}
+export interface RemakeProjectCreateResult {
+  novel_id: number
+  workflow_kind: 'remake'
+  entry_path: string
+  sources: Array<{
+    source_id: number
+    chapter_id: number
+    episode_number: number
+    task_id: string
+    status: string
+  }>
+  warnings?: Array<{ code: string; missing_episode_numbers?: number[] }>
+}
+export type RemakeAggregateStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'partial_failed'
+export interface RemakeProgressTask {
+  id: string
+  status: TaskStatusEnum
+  stage: string
+  progress: number
+  error_message?: string | null
+  updated_at: string
+}
+export interface RemakeProgressSource {
+  source_id: number
+  chapter_id: number
+  episode_number: number
+  original_filename: string
+  media_status: 'ready' | 'processing' | 'completed' | 'failed'
+  task?: RemakeProgressTask | null
+}
+export interface RemakeProgressSnapshot {
+  novel_id: number
+  name: string
+  aggregate_status: RemakeAggregateStatus
+  terminal: boolean
+  overall_progress: number
+  source_summary: { total: number; queued: number; processing: number; completed: number; failed: number }
+  sources: RemakeProgressSource[]
+  entry_path: string
+  updated_at: string
+}
 
 // ---- 登录与团队（AUTH_ENABLED=true 时生效） ----
 

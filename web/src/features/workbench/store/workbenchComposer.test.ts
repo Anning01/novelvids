@@ -1,10 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { api } from '@/api'
 import type { WorkbenchNode } from '../types/workbenchTypes'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: {},
+  api: { mergeChapterVideos: vi.fn() },
   sleep: vi.fn(),
 }))
 
@@ -53,6 +54,26 @@ it('adds a selected persistent composer with reference defaults', () => {
     aspectRatio: '9:16',
   })
   expect(store.selectedNodeKeys).toEqual([created.key])
+})
+
+it('executes strict chapter composition and stores the downloadable result', async () => {
+  vi.spyOn(Date, 'now').mockReturnValueOnce(4050)
+  const composer = store.addVideoComposer()
+  vi.mocked(api.mergeChapterVideos).mockResolvedValueOnce({
+    code: 0,
+    message: 'ok',
+    data: { chapter_id: 2162, merged_url: '/media/videos/merged/chapter.mp4', video_count: 2, total_duration: 10 },
+  })
+
+  await store.composeChapter(composer.key)
+
+  expect(api.mergeChapterVideos).toHaveBeenCalledWith(2162, true)
+  expect(store.nodeByKey(composer.key)?.data.result).toEqual({
+    chapter_id: 2162,
+    merged_url: '/media/videos/merged/chapter.mp4',
+    video_count: 2,
+    total_duration: 10,
+  })
 })
 
 it('connects shot, video, and watermark sources to distinct composer inputs', () => {

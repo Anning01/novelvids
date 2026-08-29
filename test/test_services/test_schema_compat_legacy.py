@@ -7,9 +7,14 @@
 import pytest
 from tortoise import Tortoise
 
+from models.ai_task import AiTask
 from models.config import AiModelConfig
 from models.novel import Novel
-from services.schema_compat import ensure_novel_analysis_schema, ensure_shared_team_columns
+from services.schema_compat import (
+    ensure_novel_analysis_schema,
+    ensure_remake_schema,
+    ensure_shared_team_columns,
+)
 from utils.enums import AiTaskTypeEnum
 
 
@@ -90,3 +95,37 @@ async def test_novel_video_model_preference_column_restores_legacy_schema():
     )
     novel = await Novel.create(name="legacy-video-model-preference", author="x")
     assert novel.video_model_config_id is None
+
+
+@pytest.mark.asyncio
+async def test_remake_columns_restore_legacy_schema_and_repeat_safely():
+    connection = Tortoise.get_connection("default")
+    await connection.execute_script(
+        "ALTER TABLE novels DROP COLUMN aspect_ratio;"
+        "ALTER TABLE novels DROP COLUMN resolution;"
+        "ALTER TABLE novels DROP COLUMN custom_style_prompt;"
+        "ALTER TABLE novels DROP COLUMN creation_payload_hash;"
+        "ALTER TABLE ai_tasks DROP COLUMN stage;"
+        "ALTER TABLE ai_tasks DROP COLUMN progress;"
+    )
+
+    await ensure_remake_schema()
+    await ensure_remake_schema()
+
+    novel_columns = _columns(
+        await connection.execute_query_dict("PRAGMA table_info(novels)")
+    )
+    task_columns = _columns(
+        await connection.execute_query_dict("PRAGMA table_info(ai_tasks)")
+    )
+    assert {"aspect_ratio", "resolution", "custom_style_prompt", "creation_payload_hash"} <= novel_columns
+    assert {"stage", "progress"} <= task_columns
+
+    novel = await Novel.create(
+        name="legacy-remake-compatible",
+        aspect_ratio="9:16",
+        resolution="720p",
+    )
+    task = await AiTask.create(task_type=1, stage="queued", progress=0)
+    assert novel.workflow_kind == "script"
+    assert task.stage == "queued"

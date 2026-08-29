@@ -1,4 +1,4 @@
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -75,6 +75,28 @@ function qs(params: Record<string, unknown>) {
   return value ? `?${value}` : ''
 }
 
+function uploadWithProgress(
+  url: string,
+  body: FormData,
+  headers: Record<string, string>,
+  onProgress?: (percent: number) => void,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value))
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress?.(Math.round((event.loaded / event.total) * 100))
+      }
+    }
+    xhr.onerror = () => reject(new Error('视频上传失败，请检查网络后重试'))
+    xhr.onabort = () => reject(new Error('视频上传已取消'))
+    xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText })
+    xhr.send(body)
+  })
+}
+
 async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) => string, pageSize = 100): Promise<PaginationResponse<T>> {
   const first = await request<PaginationResponse<T>>(urlForPage(1, pageSize))
   const pageCount = first.data.pagination.pages
@@ -101,7 +123,101 @@ async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) =
   }
 }
 
+async function streamRemakeProgress(
+  novelId: number,
+  onSnapshot: (snapshot: RemakeProgressSnapshot) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${BASE}/remake/projects/${novelId}/events`, {
+    headers: { ...authHeaders(), Accept: 'text/event-stream' },
+    cache: 'no-store',
+    signal,
+  })
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAuthToken()
+      redirectToLogin()
+    }
+    throw new Error(`拆解进度连接失败（${response.status}）`)
+  }
+  if (!response.body) throw new Error('浏览器无法读取拆解进度事件流')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const consume = (final = false) => {
+    buffer += final ? decoder.decode() : ''
+    const blocks = buffer.replace(/\r\n/g, '\n').split('\n\n')
+    buffer = blocks.pop() || ''
+    for (const block of blocks) {
+      const data = block
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n')
+      if (data) onSnapshot(JSON.parse(data) as RemakeProgressSnapshot)
+    }
+  }
+  while (!signal.aborted) {
+    const { done, value } = await reader.read()
+    if (done) {
+      consume(true)
+      break
+    }
+    buffer += decoder.decode(value, { stream: true })
+    consume()
+  }
+}
+
 export const api = {
+  remakeCapabilities: () => request<SingleResponse<RemakeCapabilities>>('/remake/capabilities'),
+  async uploadRemakeVideo(file: File, onProgress?: (percent: number) => void): Promise<RemakeUpload> {
+    const policyResponse = await request<SingleResponse<{
+      direct: boolean
+      provider?: string
+      upload_token?: string
+      object_key?: string
+      upload_url?: string
+      fields?: Record<string, string>
+    }>>(`/remake/uploads/policy${qs({
+      filename: file.name,
+      content_type: file.type || 'application/octet-stream',
+      size_bytes: file.size,
+    })}`)
+    if (policyResponse.data.direct) {
+      const policy = policyResponse.data
+      if (!policy.upload_url || !policy.object_key) throw new Error('对象存储上传策略不完整')
+      const form = new FormData()
+      Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, value))
+      form.append('file', file)
+      const uploaded = await uploadWithProgress(policy.upload_url, form, {}, onProgress)
+      if (uploaded.status < 200 || uploaded.status >= 300) throw new Error('视频直传失败，请稍后重试')
+      const finalized = await request<SingleResponse<RemakeUpload>>('/remake/uploads/finalize', {
+        method: 'POST',
+        body: JSON.stringify({ object_key: policy.object_key, original_filename: file.name }),
+      })
+      return finalized.data
+    }
+    const form = new FormData()
+    form.append('file', file)
+    const uploaded = await uploadWithProgress(`${BASE}/remake/uploads`, form, authHeaders(), onProgress)
+    const payload = JSON.parse(uploaded.text || '{}')
+    if (uploaded.status < 200 || uploaded.status >= 300 || payload.code !== 0) {
+      if (payload.code === 401) {
+        clearAuthToken()
+        redirectToLogin()
+      }
+      throw new Error(payload.message || payload.detail || '视频上传失败')
+    }
+    return payload.data as RemakeUpload
+  },
+  releaseRemakeUpload: (uploadToken: string) => request<SingleResponse<null>>(`/remake/uploads/${uploadToken}`, { method: 'DELETE' }),
+  remakeHistoryProjects: (keyword = '', page = 1, pageSize = 20) => request<PaginationResponse<RemakeHistoryProject>>(`/remake/history/projects${qs({ keyword, page, page_size: pageSize })}`),
+  remakeHistoryEpisodes: (novelId: number) => request<SingleResponse<RemakeHistoryEpisode[]>>(`/remake/history/projects/${novelId}/episodes`),
+  createRemakeProject: (data: RemakeProjectCreate) => request<SingleResponse<RemakeProjectCreateResult>>('/remake/projects', { method: 'POST', body: JSON.stringify(data) }),
+  remakeProjectProgress: (novelId: number) => request<SingleResponse<RemakeProgressSnapshot>>(`/remake/projects/${novelId}/progress`),
+  streamRemakeProjectProgress: (novelId: number, onSnapshot: (snapshot: RemakeProgressSnapshot) => void, signal: AbortSignal) => streamRemakeProgress(novelId, onSnapshot, signal),
+  retryRemakeSource: (novelId: number, sourceId: number) => request<SingleResponse<{ source_id: number; task_id: string; status: string | number }>>(`/remake/projects/${novelId}/sources/${sourceId}/retry`, { method: 'POST' }),
   enums: () => request<SingleResponse<AllEnums>>('/config/enums/all'),
   visualStyles: () => request<SingleResponse<VisualStyleItem[]>>('/config/visual-styles'),
   authStatus: () => request<SingleResponse<AuthStatus>>('/auth/status'),
@@ -214,7 +330,7 @@ export const api = {
   },
   queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
-  mergeChapterVideos: (chapterId: number) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
+  mergeChapterVideos: (chapterId: number, strict = false) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(strict ? { strict: true } : {}) }) }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}, novelId?: number) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: '-id', novel_id: novelId, ...filters })}`),
   trimAudioReference: (id: number, start: number, end: number, novelId?: number) => request<SingleResponse<AudioReference>>(`/media-library/audio-references/${id}/trim`, {
     method: 'POST',

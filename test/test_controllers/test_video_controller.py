@@ -1039,6 +1039,37 @@ async def test_章节没有已生成视频时不能合并():
     assert exc_info.value.status_code == 400
     assert "还没有已生成的视频" in exc_info.value.detail
 
+
+@pytest.mark.asyncio
+async def test_严格章节合并要求每个分镜当前版本均已完成():
+    novel = await Novel.create(name="严格章节合并", author="Author")
+    chapter = await Chapter.create(novel=novel, number=1, name="第1章", content="内容")
+    first = await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
+    second = await Scene.create(chapter=chapter, sequence=2, prompt="2", duration=5.0)
+    completed = await Video.create(
+        scene=first,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/first.mp4",
+    )
+    pending = await Video.create(
+        scene=second,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.running.value,
+        url=None,
+    )
+    first.metadata = {"workbench": {"activeVideoId": completed.id}}
+    second.metadata = {"workbench": {"activeVideoId": pending.id}}
+    await first.save(update_fields=["metadata", "updated_at"])
+    await second.save(update_fields=["metadata", "updated_at"])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await video_controller.merge_chapter_videos(chapter.id, strict=True)
+
+    assert exc_info.value.status_code == 400
+    assert "镜头 2" in exc_info.value.detail
+    assert "全部生成完成" in exc_info.value.detail
+
 @pytest.mark.asyncio
 async def test_删除视频():
     """删除视频后不再存在。"""

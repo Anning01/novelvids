@@ -112,7 +112,7 @@ function validSize(value: unknown): value is string {
   return Boolean(match && Number(match[1]) >= 64 && Number(match[2]) >= 64)
 }
 
-export function normalizeAssetConfig(asset: Asset): AssetWorkbenchConfig {
+export function normalizeAssetConfig(asset: Asset, projectDefaults?: { aspectRatio?: string }): AssetWorkbenchConfig {
   const metadata = recordValue(asset.metadata)
   const workbench = recordValue(recordValue(asset.metadata).workbench)
   const modelConfigId = Number(metadata.model_config_id ?? workbench.modelConfigId)
@@ -122,7 +122,7 @@ export function normalizeAssetConfig(asset: Asset): AssetWorkbenchConfig {
     ? workbench.aspectRatio
     : typeof metadata.aspect_ratio === 'string'
       ? metadata.aspect_ratio
-      : DEFAULT_CONFIG.aspectRatio
+      : projectDefaults?.aspectRatio || DEFAULT_CONFIG.aspectRatio
   const outputFormat = typeof workbench.outputFormat === 'string'
     ? workbench.outputFormat.toLowerCase()
     : typeof workbench.format === 'string'

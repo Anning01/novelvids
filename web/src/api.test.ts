@@ -179,3 +179,33 @@ it('preserves max context characters in configuration create and update requests
     body: JSON.stringify(payload),
   })
 })
+
+it('parses authenticated remake progress SSE snapshots', async () => {
+  const snapshot = {
+    novel_id: 28,
+    name: '重制项目',
+    aggregate_status: 'processing',
+    terminal: false,
+    overall_progress: 42,
+    source_summary: { total: 1, queued: 0, processing: 1, completed: 0, failed: 0 },
+    sources: [],
+    entry_path: '/create/short-drama/manual/28',
+    updated_at: '2026-08-29T08:00:00+08:00',
+  }
+  const fetchMock = vi.fn().mockResolvedValue(new Response(
+    `event: progress\ndata: ${JSON.stringify(snapshot)}\n\n`,
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+  const controller = new AbortController()
+  const received = vi.fn()
+
+  await api.streamRemakeProjectProgress(28, received, controller.signal)
+
+  expect(received).toHaveBeenCalledWith(snapshot)
+  expect(fetchMock).toHaveBeenCalledWith('/api/remake/projects/28/events', {
+    headers: { Accept: 'text/event-stream' },
+    cache: 'no-store',
+    signal: controller.signal,
+  })
+})

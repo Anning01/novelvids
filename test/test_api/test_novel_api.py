@@ -17,6 +17,69 @@ async def test_api_create_novel(client: AsyncClient):
     assert data["name"] == "API Novel"
     assert "id" in data
 
+
+@pytest.mark.asyncio
+async def test_api_create_novel_persists_canonical_project_defaults(client: AsyncClient):
+    response = await client.post(
+        "/api/novel",
+        json={
+            "name": "Canonical Project",
+            "author": "人工创建",
+            "description": "人工模式",
+            "aspect_ratio": "9:16",
+            "resolution": "1080p",
+            "style_key": "realistic-cinematic",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["workflow_kind"] == "script"
+    assert body["data"]["aspect_ratio"] == "9:16"
+    assert body["data"]["resolution"] == "1080p"
+    assert body["data"]["style_key"] == "realistic-cinematic"
+    assert body["data"]["custom_style_prompt"] is None
+
+    novel = await Novel.get(id=body["data"]["id"])
+    assert novel.aspect_ratio == "9:16"
+    assert novel.resolution == "1080p"
+
+
+@pytest.mark.asyncio
+async def test_api_create_novel_rejects_conflicting_or_invalid_project_defaults(
+    client: AsyncClient,
+):
+    conflicting = await client.post(
+        "/api/novel",
+        json={
+            "name": "Conflicting Style",
+            "style_key": "realistic-general",
+            "custom_style_prompt": "自定义风格",
+        },
+    )
+    invalid_ratio = await client.post(
+        "/api/novel",
+        json={
+            "name": "Invalid Ratio",
+            "aspect_ratio": "2:1",
+        },
+    )
+    blank_custom_style = await client.post(
+        "/api/novel",
+        json={
+            "name": "Blank Custom Style",
+            "custom_style_prompt": "   ",
+        },
+    )
+
+    assert conflicting.json()["code"] == 422
+    assert invalid_ratio.json()["code"] == 422
+    assert blank_custom_style.json()["code"] == 422
+    assert await Novel.filter(
+        name__in=["Conflicting Style", "Invalid Ratio", "Blank Custom Style"]
+    ).count() == 0
+
 @pytest.mark.asyncio
 async def test_api_get_novel_list(client: AsyncClient):
     """Test getting novel list."""

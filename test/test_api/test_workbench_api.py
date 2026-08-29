@@ -2,8 +2,10 @@ import pytest
 from httpx import AsyncClient
 from models.asset import Asset
 from models.asset_variant import AssetVariant
+from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.novel import Novel
+from models.remake_source import RemakeSource
 from models.scene import Scene
 from models.video import Video
 from utils.enums import AssetTypeEnum, TaskStatusEnum
@@ -19,7 +21,7 @@ async def test_workbench_capabilities(client: AsyncClient):
         "generate_asset": True,
         "generate_video": True,
         "apply_watermark": False,
-        "compose_video": False,
+        "compose_video": True,
         "prompt_editors": [
             {
                 "editor_key": "asset_prompt",
@@ -112,3 +114,90 @@ async def test_workbench_bootstrap_returns_only_current_chapter_working_set(clie
     assert data["scenes"][0]["assets"][0]["id"] == reused.id
     assert data["videos"][str(scene.id)][0]["id"] == video.id
     assert first.id != second.id
+
+
+@pytest.mark.asyncio
+async def test_remake_workbench_bootstrap_includes_project_source_and_analysis_task(client: AsyncClient):
+    novel = await Novel.create(
+        name="重制项目",
+        workflow_kind="remake",
+        aspect_ratio="16:9",
+        resolution="1080p",
+        custom_style_prompt="复古胶片，高反差暖色",
+    )
+    chapter = await Chapter.create(novel=novel, number=1, name="第1集", content="")
+    task = await AiTask.create(
+        task_type=6,
+        status=TaskStatusEnum.running.value,
+        stage="detecting_scenes",
+        progress=42,
+    )
+    source = await RemakeSource.create(
+        novel=novel,
+        chapter=chapter,
+        episode_number=1,
+        source_kind="upload",
+        storage_provider="local",
+        object_key="remake/sources/episode-1.mp4",
+        original_filename="第一集.mp4",
+        mime_type="video/mp4",
+        size_bytes=1024,
+        duration_seconds=63.5,
+        width=1920,
+        height=1080,
+        container_format="mp4",
+        checksum="a" * 64,
+        media_status="processing",
+        analysis_task=task,
+    )
+
+    response = await client.get(
+        f"/api/workbench/bootstrap?novel_id={novel.id}&chapter_id={chapter.id}"
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["project_config"] == {
+        "workflow_kind": "remake",
+        "aspect_ratio": "16:9",
+        "resolution": "1080p",
+        "style_key": None,
+        "custom_style_prompt": "复古胶片，高反差暖色",
+    }
+    assert data["remake_source"] == {
+        "id": source.id,
+        "episode_number": 1,
+        "source_kind": "upload",
+        "media_url": "/media/remake/sources/episode-1.mp4",
+        "original_filename": "第一集.mp4",
+        "mime_type": "video/mp4",
+        "size_bytes": 1024,
+        "duration_seconds": 63.5,
+        "width": 1920,
+        "height": 1080,
+        "media_status": "processing",
+        "analysis_task": {
+            "id": str(task.id),
+            "status": TaskStatusEnum.running.value,
+            "stage": "detecting_scenes",
+            "progress": 42,
+            "error_message": None,
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_non_remake_workbench_bootstrap_has_no_remake_source(client: AsyncClient):
+    novel = await Novel.create(name="普通项目", aspect_ratio="9:16", resolution="720p")
+    chapter = await Chapter.create(novel=novel, number=1, name="第一章", content="")
+
+    response = await client.get(
+        f"/api/workbench/bootstrap?novel_id={novel.id}&chapter_id={chapter.id}"
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["project_config"]["workflow_kind"] == "script"
+    assert data["remake_source"] is None

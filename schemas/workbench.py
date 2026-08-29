@@ -1,3 +1,7 @@
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 from schemas.asset import AssetWithVariantsOut
@@ -37,7 +41,7 @@ class WorkbenchCapabilitiesOut(BaseModel):
     generate_asset: bool = True
     generate_video: bool = True
     apply_watermark: bool = False
-    compose_video: bool = False
+    compose_video: bool = True
     prompt_editors: list[WorkbenchPromptEditorOut] = Field(
         default_factory=lambda: [
             WorkbenchPromptEditorOut(
@@ -78,10 +82,45 @@ class WorkbenchCapabilitiesOut(BaseModel):
     )
 
 
+class WorkbenchProjectConfigOut(BaseModel):
+    workflow_kind: Literal["script", "remake"] = "script"
+    aspect_ratio: str | None = None
+    resolution: str | None = None
+    style_key: str | None = None
+    custom_style_prompt: str | None = None
+
+
+class WorkbenchAnalysisTaskOut(BaseModel):
+    id: UUID
+    status: int
+    stage: str | None = None
+    progress: int = Field(0, ge=0, le=100)
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkbenchRemakeSourceOut(BaseModel):
+    id: int
+    episode_number: int
+    source_kind: Literal["upload", "history"]
+    media_url: str
+    original_filename: str
+    mime_type: str | None = None
+    size_bytes: int
+    duration_seconds: float
+    width: int
+    height: int
+    media_status: Literal["ready", "processing", "completed", "failed"]
+    analysis_task: WorkbenchAnalysisTaskOut | None = None
+
+
 class WorkbenchBootstrapOut(BaseModel):
     """当前章节画布所需的完整工作集，避免前端逐条请求详情。"""
 
     chapter: ChapterOut
+    project_config: WorkbenchProjectConfigOut
+    remake_source: WorkbenchRemakeSourceOut | None = None
     assets: list[AssetWithVariantsOut]
     scenes: list[SceneOut]
     videos: dict[int, list[VideoOut]]

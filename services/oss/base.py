@@ -66,6 +66,10 @@ class OSSProvider(abc.ABC):
         data = await asyncio.to_thread(source.read_bytes)
         await self.put_bytes(key, data, content_type)
 
+    async def delete(self, key: str) -> None:
+        """删除未提交对象；云存储实现应覆盖。"""
+        raise NotImplementedError
+
     def resolve_url(self, raw: str | None) -> str | None:
         """把持久化的媒体地址解析为可访问 URL。
 
@@ -77,7 +81,7 @@ class OSSProvider(abc.ABC):
         """
         if not raw:
             return raw
-        if self.enabled and raw.startswith("uploads/"):
+        if self.enabled and raw.startswith(("uploads/", "remake/")):
             return self.public_url(raw)
         return raw
 
