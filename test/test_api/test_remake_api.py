@@ -171,7 +171,45 @@ async def test_history_catalog_and_episode_availability_are_exposed(client):
     episode_data = episodes.json()["data"]
     assert episode_data[0]["available"] is True
     assert episode_data[1]["available"] is False
-    assert "当前视频" in episode_data[1]["unavailable_reason"]
+    assert "已完成视频" in episode_data[1]["unavailable_reason"]
+
+
+@pytest.mark.asyncio
+async def test_remake_projects_cannot_be_reused_as_history_sources(client):
+    remake = await Novel.create(
+        name="已经重制的项目",
+        author="作者",
+        workflow_kind="remake",
+    )
+    chapter = await Chapter.create(
+        novel=remake,
+        number=1,
+        name="第1集",
+        content="",
+    )
+
+    episodes = await client.get(
+        f"/api/remake/history/projects/{remake.id}/episodes"
+    )
+    assert episodes.json()["code"] == 404
+    assert episodes.json()["data"]["error_code"] == "REMAKE_HISTORY_PROJECT_NOT_FOUND"
+
+    created = await client.post(
+        "/api/remake/projects",
+        json={
+            "name": "禁止二次套娃",
+            "source_mode": "history",
+            "aspect_ratio": "9:16",
+            "resolution": "720p",
+            "style_key": None,
+            "custom_style_prompt": None,
+            "idempotency_key": "01916f1a-41aa-7000-8000-000000000103",
+            "sources": [{"source_chapter_id": chapter.id}],
+        },
+    )
+    assert created.json()["code"] == 422
+    assert created.json()["data"]["error_code"] == "REMAKE_HISTORY_EPISODE_UNAVAILABLE"
+    assert "短剧制作" in created.json()["message"]
 
 
 @pytest.mark.asyncio

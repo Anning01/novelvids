@@ -149,7 +149,7 @@ describe('RemakeWorkshopPage', () => {
       message: 'ok',
       data: [
         { chapter_id: 81, episode_number: 1, name: '第1集', duration_seconds: 60, size_bytes: 1024, scene_count: 8, available: true, unavailable_reason: null },
-        { chapter_id: 82, episode_number: 2, name: '第2集', duration_seconds: 40, size_bytes: 512, scene_count: 5, available: false, unavailable_reason: '镜头 3 的当前视频尚未完成' },
+        { chapter_id: 82, episode_number: 2, name: '第2集', duration_seconds: 40, size_bytes: 512, scene_count: 5, available: false, unavailable_reason: '镜头 3 尚无已完成视频' },
       ],
     })
     const wrapper = mount(RemakeWorkshopPage)
@@ -157,11 +157,12 @@ describe('RemakeWorkshopPage', () => {
 
     await wrapper.get('[data-source-mode="history"]').trigger('click')
     await flushPromises()
+    expect(wrapper.text()).toContain('短剧制作项目')
     await wrapper.get('[data-history-project="8"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-history-episode="82"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('镜头 3 的当前视频尚未完成')
+    expect(wrapper.text()).toContain('镜头 3 尚无已完成视频')
     await wrapper.get('[data-history-episode="81"]').trigger('click')
     await wrapper.get('input[name="projectName"]').setValue('历史重制项目')
     await wrapper.get('form').trigger('submit')

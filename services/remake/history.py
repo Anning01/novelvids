@@ -69,7 +69,7 @@ class RemakeHistoryCatalog:
         reason = None
         if missing:
             labels = "、".join(f"镜头 {sequence}" for sequence in missing)
-            reason = f"{labels} 的当前视频尚未完成"
+            reason = f"{labels} 尚无已完成视频"
         elif total_duration > MAX_REMAKE_DURATION_SECONDS:
             reason = "章节成片超过20分钟"
         elif total_size > MAX_REMAKE_BYTES:
@@ -96,7 +96,8 @@ class RemakeHistoryCatalog:
         page: int,
         page_size: int,
     ) -> dict:
-        query = Novel.all().order_by("-updated_at", "-id")
+        # 历史来源只允许来自短剧制作，避免把重制项目再次作为重制源。
+        query = Novel.filter(workflow_kind="script").order_by("-updated_at", "-id")
         if not allow_all:
             query = query.filter(team_id=team_id)
         if keyword.strip():
@@ -131,15 +132,24 @@ class RemakeHistoryCatalog:
         raw_current_id = metadata.get("current_video_id") or workbench.get("activeVideoId")
         current_id = raw_current_id if isinstance(raw_current_id, int) else None
         if current_id is not None:
-            return await Video.filter(
+            current = await Video.filter(
                 id=current_id,
                 scene_id=scene.id,
                 status=TaskStatusEnum.completed.value,
             ).first()
-        return await Video.filter(
+            if current is not None and str(current.url or "").strip():
+                return current
+
+        # 当前选中版本可能仍在生成或已经失败；历史重制只要求该分镜存在
+        # 一个已完成的视频，因此回退到最新的可用完成版本。
+        completed = await Video.filter(
             scene_id=scene.id,
             status=TaskStatusEnum.completed.value,
-        ).order_by("-id").first()
+        ).order_by("-id")
+        return next(
+            (video for video in completed if str(video.url or "").strip()),
+            None,
+        )
 
     @staticmethod
     def _video_size(video: Video) -> int:

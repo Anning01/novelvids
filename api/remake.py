@@ -117,7 +117,7 @@ async def list_history_episodes(
     ctx: AuthContext = Depends(get_auth_context),
 ):
     novel = await Novel.get_or_none(id=novel_id)
-    if novel is None:
+    if novel is None or novel.workflow_kind != "script":
         raise RemakeError(404, "REMAKE_HISTORY_PROJECT_NOT_FOUND", "历史项目不存在")
     if (
         ctx.user is not None

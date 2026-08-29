@@ -410,9 +410,9 @@ onBeforeUnmount(() => {
 
         <div v-else-if="sourceMode === 'history'" key="history" class="source-stage history-selector">
           <div class="history-column">
-            <strong>历史项目</strong>
+            <strong>短剧制作项目</strong>
             <span v-if="loadingHistory" class="history-state"><RefreshCcw class="spin" :size="15" /> 正在加载…</span>
-            <span v-else-if="!historyProjects.length" class="history-state">暂无包含可用剧集的项目</span>
+            <span v-else-if="!historyProjects.length" class="history-state">暂无至少一集全部分镜已有视频的短剧项目</span>
             <button
               v-for="project in historyProjects"
               :key="project.id"
@@ -428,7 +428,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="history-column">
             <strong>选择剧集</strong>
-            <span v-if="selectedHistoryProjectId === null" class="history-state">请先选择历史项目</span>
+            <span v-if="selectedHistoryProjectId === null" class="history-state">请先选择短剧制作项目</span>
             <span v-else-if="loadingEpisodes" class="history-state"><RefreshCcw class="spin" :size="15" /> 正在检查完整性…</span>
             <button
               v-for="episode in historyEpisodes"

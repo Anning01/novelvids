@@ -300,6 +300,12 @@ class RemakeProjectService:
         historical_chapter = await Chapter.get_or_none(id=source_input.source_chapter_id).select_related("novel")
         if historical_chapter is None:
             raise RemakeError(422, "REMAKE_HISTORY_EPISODE_UNAVAILABLE", "历史剧集不存在或暂不可重制")
+        if historical_chapter.novel.workflow_kind != "script":
+            raise RemakeError(
+                422,
+                "REMAKE_HISTORY_EPISODE_UNAVAILABLE",
+                "历史来源只能选择短剧制作中的剧集",
+            )
         if not allow_all_history and historical_chapter.novel.team_id != team_id:
             raise RemakeError(403, "REMAKE_HISTORY_PROJECT_FORBIDDEN", "无权使用该历史项目")
         snapshot = await self.history_snapshot_service.create(historical_chapter, team_id=team_id)
