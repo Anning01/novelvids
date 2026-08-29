@@ -12,7 +12,7 @@ from config import settings
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from services.ai_task_executor import BaseTaskHandler
-from prompts.styles import image_style_suffix
+from prompts.styles import image_project_style_suffix
 from services.image_inputs import resolve_reference_images
 from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
@@ -196,7 +196,10 @@ class AssetReferenceHandler(BaseTaskHandler):
 
         # 项目视觉风格 → 生图提示词定调（未知/未设置风格不注入）
         novel = await asset.novel
-        style_prompt = image_style_suffix(novel.style_key if novel else None)
+        style_prompt = image_project_style_suffix(
+            novel.style_key if novel else None,
+            novel.custom_style_prompt if novel else None,
+        )
 
         # 构造生成所需的数据
         try:

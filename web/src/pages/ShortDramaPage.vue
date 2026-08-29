@@ -17,6 +17,8 @@ import {
   X,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import CreationConfigBar from '@/components/CreationConfigBar.vue'
+import CreationEntryShell from '@/components/CreationEntryShell.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import type { StoryboardStrategy } from '@/types'
@@ -31,7 +33,7 @@ interface VisualStyle {
 }
 
 const aspectRatios = ['16:9', '4:3', '3:4', '9:16', '21:9']
-const resolutions = ['480p', '720p', '1080p', '4K']
+const resolutions = ['480p', '720p', '1080p', '4k']
 // 本地缩略图与回退列表；后端 /api/config/visual-styles 是风格唯一事实来源
 const localVisualStyles: VisualStyle[] = [
   { value: 'realistic-general', label: '写实通用', image: '/style-thumbnails/realistic-general.png' },
@@ -168,12 +170,15 @@ async function createProject() {
     creating.value = true
     try {
       const uploaded = await api.upload(selectedFile.value)
-      const description = `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label} · 源剧本：${uploaded.filename}`
+      const description = `${modeLabel} · 源剧本：${uploaded.filename}`
       const createPayload: Parameters<typeof api.createNovel>[0] = {
         name: projectName,
         author: 'Agent 创建',
         description,
-        style_key: styleId.value,
+        aspect_ratio: aspectRatio.value,
+        resolution: resolution.value,
+        style_key: styleId.value === 'custom' ? null : styleId.value,
+        custom_style_prompt: styleId.value === 'custom' ? customPrompt.value.trim() : null,
         storyboard_strategy: storyboardStrategy.value,
         storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
       }
@@ -223,9 +228,12 @@ async function createProject() {
     const response = await api.createNovel({
       name: '新项目',
       author: '人工创建',
-      description: `${modeLabel} · ${aspectRatio.value} · ${resolution.value} · ${selectedStyle.value.label}${styleId.value === 'custom' ? ` · ${customPrompt.value.trim()}` : ''}`,
+      description: modeLabel,
       content: '',
-      style_key: styleId.value,
+      aspect_ratio: aspectRatio.value,
+      resolution: resolution.value,
+      style_key: styleId.value === 'custom' ? null : styleId.value,
+      custom_style_prompt: styleId.value === 'custom' ? customPrompt.value.trim() : null,
       storyboard_strategy: storyboardStrategy.value,
       storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
     })
@@ -249,14 +257,11 @@ async function createProject() {
 </script>
 
 <template>
-  <main class="short-drama-page">
-    <section class="short-drama-workspace">
-      <header class="short-drama-heading">
-        <p>AI SHORT DRAMA</p>
-        <h1>翻开剧本，创作<span>精品短剧</span></h1>
-        <small>{{ isAgentMode ? '上传完整故事，让 Agent 自动完成内容理解与制作规划。' : '从空白项目开始，手动掌控角色、场景、分镜和镜头细节。' }}</small>
-      </header>
-
+  <CreationEntryShell
+    eyebrow="AI SHORT DRAMA"
+    :description="isAgentMode ? '上传完整故事，让 Agent 自动完成内容理解与制作规划。' : '从空白项目开始，手动掌控角色、场景、分镜和镜头细节。'"
+  >
+    <template #title>翻开剧本，创作<span class="creation-entry-accent">精品短剧</span></template>
       <form class="short-drama-form" @submit.prevent="createProject">
         <Transition name="mode-panel" mode="out-in">
           <AppButton
@@ -302,66 +307,64 @@ async function createProject() {
           </section>
         </Transition>
 
-        <div class="creation-config">
-          <div class="mode-switch" aria-label="创作模式">
+        <CreationConfigBar modes-label="创作模式">
+          <template #modes>
             <AppButton type="button" variant="soft" size="sm" :active="mode === 'agent'" @click="mode = 'agent'">
               <Bot :size="15" />Agent 模式
             </AppButton>
             <AppButton type="button" variant="soft" size="sm" :active="mode === 'manual'" @click="mode = 'manual'">
               <UserRound :size="15" />人工模式
             </AppButton>
-          </div>
+          </template>
 
-          <div class="format-controls">
-            <AppSelect
-              v-model="storyboardStrategy"
-              class="strategy-select"
-              ariaLabel="分镜策略"
-              menu-label="分镜策略"
-              :menu-width="220"
-              :options="storyboardStrategyOptions"
-              :disabled="!storyboardStrategyOptions.length"
-            >
-              <template #leading><Clapperboard :size="15" /></template>
-            </AppSelect>
-            <AppSelect v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="aspectRatios">
-              <template #leading><Film :size="15" /></template>
-            </AppSelect>
-            <AppSelect v-model="resolution" class="format-select" ariaLabel="分辨率" :options="resolutions">
-              <template #leading><Monitor :size="15" /></template>
-            </AppSelect>
-            <AppSelect
-              v-model="styleId"
-              class="style-select"
-              ariaLabel="视觉风格"
-              menu-label="风格"
-              :menu-width="230"
-              :max-menu-height="404"
-              align="end"
-              :options="visualStyles"
-            >
-              <template #leading="{ option }">
-                <img v-if="option.image" class="select-thumbnail" :src="option.image" alt="" />
-                <span v-else class="custom-style-icon"><Sparkles :size="16" /></span>
-              </template>
-              <template #option-leading="{ option }">
-                <img v-if="option.image" class="select-thumbnail" :src="option.image" alt="" />
-                <span v-else class="custom-style-icon"><Sparkles :size="16" /></span>
-              </template>
-            </AppSelect>
-          </div>
-        </div>
+          <AppSelect
+            v-model="storyboardStrategy"
+            class="strategy-select"
+            ariaLabel="分镜策略"
+            menu-label="分镜策略"
+            :menu-width="220"
+            :options="storyboardStrategyOptions"
+            :disabled="!storyboardStrategyOptions.length"
+          >
+            <template #leading><Clapperboard :size="15" /></template>
+          </AppSelect>
+          <AppSelect v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="aspectRatios">
+            <template #leading><Film :size="15" /></template>
+          </AppSelect>
+          <AppSelect v-model="resolution" class="format-select" ariaLabel="分辨率" :options="resolutions">
+            <template #leading><Monitor :size="15" /></template>
+          </AppSelect>
+          <AppSelect
+            v-model="styleId"
+            class="style-select"
+            ariaLabel="视觉风格"
+            menu-label="风格"
+            :menu-width="230"
+            :max-menu-height="404"
+            align="end"
+            :options="visualStyles"
+          >
+            <template #leading="{ option }">
+              <img v-if="option.image" class="select-thumbnail" :src="option.image" alt="" />
+              <span v-else class="custom-style-icon"><Sparkles :size="16" /></span>
+            </template>
+            <template #option-leading="{ option }">
+              <img v-if="option.image" class="select-thumbnail" :src="option.image" alt="" />
+              <span v-else class="custom-style-icon"><Sparkles :size="16" /></span>
+            </template>
+          </AppSelect>
+        </CreationConfigBar>
 
         <div v-if="styleId === 'custom'" class="custom-prompt-panel">
           <label for="custom-style-prompt">自定义风格 Prompt</label>
           <textarea
             id="custom-style-prompt"
             v-model="customPrompt"
-            maxlength="1000"
+            maxlength="2000"
             rows="4"
             placeholder="描述画面质感、色彩、人物造型、灯光和镜头语言，例如：东方电影感，低饱和青绿色调，自然光，细腻皮肤质感……"
           />
-          <small>{{ customPrompt.length }} / 1000</small>
+          <small>{{ customPrompt.length }} / 2000</small>
         </div>
 
         <AppButton class="create-short-drama" variant="primary" size="lg" block type="submit" :loading="creating">
@@ -373,63 +376,10 @@ async function createProject() {
           <ArrowRight class="create-arrow" :size="18" />
         </AppButton>
       </form>
-    </section>
-  </main>
+  </CreationEntryShell>
 </template>
 
 <style scoped>
-.short-drama-page {
-  display: flex;
-  min-height: 100%;
-  overflow: auto;
-  padding: 36px 22px 90px;
-  color: var(--app-text, #303442);
-  background-color: var(--app-canvas, #f8f9fc);
-  background-image: var(--creation-bg-image, none);
-  background-position: center;
-  background-size: cover;
-  background-repeat: no-repeat;
-}
-
-.short-drama-workspace {
-  width: min(820px, 100%);
-  margin: auto;
-}
-
-.short-drama-heading {
-  display: grid;
-  justify-items: center;
-  margin-bottom: 30px;
-  text-align: center;
-}
-
-.short-drama-heading p {
-  margin: 0 0 10px;
-  color: #777cf7;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .16em;
-}
-
-.short-drama-heading h1 {
-  margin: 0;
-  color: #262a37;
-  font-size: clamp(28px, 3vw, 38px);
-  line-height: 1.2;
-  letter-spacing: -.035em;
-}
-
-.short-drama-heading h1 span {
-  color: #6263f5;
-}
-
-.short-drama-heading small {
-  margin-top: 10px;
-  color: #9398a8;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
 .short-drama-form {
   display: grid;
 }
@@ -586,51 +536,6 @@ async function createProject() {
   color: #7274ed;
 }
 
-.creation-config {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin-top: 10px;
-  padding: 8px;
-  border: 1px solid #e8e9ef;
-  border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgb(35 39 52 / 5%);
-}
-
-.mode-switch {
-  display: flex;
-  gap: 3px;
-}
-
-.mode-switch :deep(.app-button--soft) {
-  min-height: 34px;
-  padding: 0 11px;
-  border-radius: 8px;
-  color: var(--app-text-muted, #73798a);
-  background: transparent;
-  box-shadow: none;
-  font-size: 12px;
-}
-
-.mode-switch :deep(.app-button--soft:hover) {
-  background: var(--app-surface-hover, #f5f6fa);
-}
-
-.mode-switch :deep(.app-button--soft.is-active) {
-  color: var(--app-accent, #5b5cf6);
-  background: var(--app-accent-soft, #eeefff);
-}
-
-.format-controls {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
 .format-select {
   width: 118px;
 }
@@ -758,15 +663,7 @@ async function createProject() {
   transform: translateY(5px);
 }
 
-@media (max-width: 880px) {
-  .short-drama-page { padding: 48px 22px 70px; }
-  .creation-config { align-items: stretch; flex-direction: column; }
-  .mode-switch, .format-controls { justify-content: center; }
-}
-
 @media (max-width: 620px) {
-  .short-drama-page { padding: 34px 14px 60px; }
-  .short-drama-heading small { max-width: 360px; }
   .script-dropzone { min-height: 190px; padding: 20px 14px; }
   .script-dropzone small { max-width: 270px; line-height: 1.6; }
   .manual-mode-card {
@@ -778,7 +675,6 @@ async function createProject() {
     text-align: center;
   }
   .manual-mode-features { grid-column: 1; justify-content: center; }
-  .format-controls { flex-wrap: wrap; }
   .strategy-select, .style-select { width: 100%; }
   .create-short-drama { width: 100%; }
 }

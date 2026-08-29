@@ -115,6 +115,66 @@ async def ensure_novel_analysis_schema() -> None:
         await connection.execute_script("".join(statements))
 
 
+async def ensure_remake_schema() -> None:
+    """补齐重制项目共享字段；只做增量操作且允许重复启动。"""
+    connection = Tortoise.get_connection("default")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        novel_columns = await connection.execute_query_dict("PRAGMA table_info(novels)")
+        task_columns = await connection.execute_query_dict("PRAGMA table_info(ai_tasks)")
+        if not novel_columns or not task_columns:
+            return
+
+        novel_existing = {str(column["name"]) for column in novel_columns}
+        task_existing = {str(column["name"]) for column in task_columns}
+        statements: list[str] = []
+        novel_definitions = {
+            "workflow_kind": "VARCHAR(32) NOT NULL DEFAULT 'script'",
+            "aspect_ratio": "VARCHAR(16)",
+            "resolution": "VARCHAR(32)",
+            "custom_style_prompt": "TEXT",
+            "creation_idempotency_key": "VARCHAR(64)",
+            "creation_payload_hash": "VARCHAR(64)",
+        }
+        for name, definition in novel_definitions.items():
+            if name not in novel_existing:
+                statements.append(f"ALTER TABLE novels ADD COLUMN {name} {definition};")
+        task_definitions = {
+            "stage": "VARCHAR(32)",
+            "progress": "INT NOT NULL DEFAULT 0",
+        }
+        for name, definition in task_definitions.items():
+            if name not in task_existing:
+                statements.append(f"ALTER TABLE ai_tasks ADD COLUMN {name} {definition};")
+        if "workflow_kind" not in novel_existing:
+            statements.append(
+                "CREATE INDEX IF NOT EXISTS idx_novels_workflow_kind "
+                "ON novels(workflow_kind);"
+            )
+        if "creation_idempotency_key" not in novel_existing:
+            statements.append(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uid_novels_creation_idempotency_key "
+                "ON novels(creation_idempotency_key);"
+            )
+        if statements:
+            await connection.execute_script("".join(statements))
+        return
+
+    if settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
+        await connection.execute_script(
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS workflow_kind VARCHAR(32) NOT NULL DEFAULT 'script';"
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS aspect_ratio VARCHAR(16);"
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS resolution VARCHAR(32);"
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS custom_style_prompt TEXT;"
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS creation_idempotency_key VARCHAR(64);"
+            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS creation_payload_hash VARCHAR(64);"
+            "ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS stage VARCHAR(32);"
+            "ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS progress INT NOT NULL DEFAULT 0;"
+            "CREATE INDEX IF NOT EXISTS idx_novels_workflow_kind ON novels(workflow_kind);"
+            "CREATE UNIQUE INDEX IF NOT EXISTS uid_novels_creation_idempotency_key "
+            "ON novels(creation_idempotency_key);"
+        )
+
+
 async def ensure_voice_reference_schema() -> None:
     """Add reusable voice fields for both existing SQLite and PostgreSQL installs."""
     connection = Tortoise.get_connection("default")

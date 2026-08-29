@@ -29,6 +29,15 @@ class AiTask(AbstractBaseModel):
         null=True,
         description="错误消息",
     )
+    stage = fields.CharField(
+        max_length=32,
+        null=True,
+        description="任务当前业务阶段；非分阶段任务为空",
+    )
+    progress = fields.IntField(
+        default=0,
+        description="任务进度，范围 0-100",
+    )
     started_at = fields.DatetimeField(
         null=True,
         description="开始执行时间",

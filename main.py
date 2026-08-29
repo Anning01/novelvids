@@ -20,11 +20,14 @@ from exceptions.handlers import (
     validation_exception_handler,
     database_exception_handler,
 )
+from exceptions.remake import RemakeError, remake_exception_handler
 from services.ai_task_executor import ai_task_executor
 from services.extraction.handler import ExtractionTaskHandler
 from services.reference.handler import AssetReferenceHandler
 from services.project_analysis.handler import ProjectAnalysisTaskHandler
 from services.storyboard.handler import StoryboardTaskHandler
+from services.remake.handler import RemakeDecompositionTaskHandler
+from services.remake.uploads import remake_upload_service
 from utils.enums import AiTaskTypeEnum
 from services.media_library_seed import ensure_media_library_seed_data
 from services.model_config_seed import ensure_model_config_seed_data
@@ -34,6 +37,7 @@ from controllers.video import video_controller
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
+    ensure_remake_schema,
     ensure_shared_team_columns,
     ensure_usage_record_schema,
     ensure_voice_reference_schema,
@@ -71,10 +75,12 @@ async def lifespan(_: FastAPI):
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
+    await ensure_remake_schema()
     await ensure_usage_record_schema()
     await ensure_voice_reference_schema()
     # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
     await ensure_shared_team_columns()
+    await remake_upload_service.cleanup_expired()
     await backfill_last_frame_continuity()
     await ensure_media_library_seed_data()
     await ensure_model_config_seed_data()
@@ -111,6 +117,7 @@ app.add_exception_handler(DoesNotExist, database_exception_handler)
 app.add_exception_handler(IntegrityError, database_exception_handler)
 app.add_exception_handler(TortoiseValidationError, database_exception_handler)
 app.add_exception_handler(Exception, global_exception_handler)
+app.add_exception_handler(RemakeError, remake_exception_handler)
 
 
 app.include_router(api_router, prefix="/api")
@@ -135,6 +142,10 @@ ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.reference_image, AssetReferenceHandler())
 ai_task_executor.register(AiTaskTypeEnum.storyboard, StoryboardTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
+ai_task_executor.register(
+    AiTaskTypeEnum.remake_decomposition,
+    RemakeDecompositionTaskHandler(),
+)
 
 
 # 为媒体（图像、视频、音频）安装静态文件

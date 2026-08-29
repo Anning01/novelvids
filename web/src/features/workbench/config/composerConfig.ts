@@ -1,4 +1,5 @@
 import type { Scene, Video } from '@/types'
+import { TaskStatusEnum } from '@/types'
 import { videoDurationSeconds } from '../graph/videoMedia'
 import type { WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 
@@ -103,4 +104,26 @@ export function orderedComposerInputs(nodeKey: string, nodes: WorkbenchNode[], e
       const input = source ? composerInput(source, edge.orderIndex) : null
       return input ? [input] : []
     })
+}
+
+export function chapterComposerDisabledReason(
+  nodeKey: string,
+  nodes: WorkbenchNode[],
+  edges: WorkbenchEdge[],
+) {
+  const shots = nodes.filter(node => node.kind === 'shot')
+  if (!shots.length) return '当前集还没有可合成的镜头'
+  const connectedKeys = new Set(edges
+    .filter(edge => edge.target === nodeKey && edge.type === 'output_binding' && edge.targetHandle !== 'watermark-input')
+    .map(edge => edge.source))
+  const hasUnsupportedInput = [...connectedKeys].some(key => nodes.find(node => node.key === key)?.kind !== 'shot')
+  if (hasUnsupportedInput) return '章节成片仅支持连接当前集的生成视频镜头'
+  if (shots.some(shot => !connectedKeys.has(shot.key)) || connectedKeys.size !== shots.length) {
+    return `请连接当前集全部 ${shots.length} 个镜头`
+  }
+  const incomplete = shots.some((shot) => {
+    const video = shotVideo(shot)
+    return !video?.url || video.status !== TaskStatusEnum.COMPLETED
+  })
+  return incomplete ? '镜头视频尚未全部生成完成' : ''
 }

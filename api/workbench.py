@@ -3,9 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from auth.deps import AuthContext, ensure_novel_access, get_auth_context
 from models.asset import Asset
 from models.chapter import Chapter
+from models.novel import Novel
+from models.remake_source import RemakeSource
 from models.scene import Scene
 from models.video import Video
 from schemas.workbench import WorkbenchBootstrapOut, WorkbenchCapabilitiesOut
+from services.oss import oss
 from utils.response_format import ResponseSchema
 
 router = APIRouter()
@@ -33,6 +36,9 @@ async def get_workbench_bootstrap(
     ctx: AuthContext = Depends(get_auth_context),
 ):
     await ensure_novel_access(novel_id, ctx)
+    novel = await Novel.get_or_none(id=novel_id)
+    if novel is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")
@@ -70,9 +76,57 @@ async def get_workbench_bootstrap(
     for video in videos:
         videos_by_scene.setdefault(video.scene_id, []).append(video)
 
+    remake_source = None
+    if novel.workflow_kind == "remake":
+        source = await RemakeSource.get_or_none(
+            novel_id=novel_id,
+            chapter_id=chapter.id,
+        ).select_related("analysis_task")
+        if source is not None:
+            media_url = (
+                f"/media/{source.object_key}"
+                if source.storage_provider == "local"
+                else oss.resolve_url(source.object_key) or source.object_key
+            )
+            task = source.analysis_task
+            remake_source = {
+                "id": source.id,
+                "episode_number": source.episode_number,
+                "source_kind": source.source_kind,
+                "media_url": media_url,
+                "original_filename": source.original_filename,
+                "mime_type": source.mime_type,
+                "size_bytes": source.size_bytes,
+                "duration_seconds": source.duration_seconds,
+                "width": source.width,
+                "height": source.height,
+                "media_status": source.media_status,
+                "analysis_task": (
+                    {
+                        "id": task.id,
+                        "status": task.status,
+                        "stage": task.stage,
+                        "progress": task.progress,
+                        "error_message": task.error_message,
+                        "created_at": task.created_at,
+                        "updated_at": task.updated_at,
+                    }
+                    if task is not None
+                    else None
+                ),
+            }
+
     payload = WorkbenchBootstrapOut.model_validate(
         {
             "chapter": chapter,
+            "project_config": {
+                "workflow_kind": novel.workflow_kind,
+                "aspect_ratio": novel.aspect_ratio,
+                "resolution": novel.resolution,
+                "style_key": novel.style_key,
+                "custom_style_prompt": novel.custom_style_prompt,
+            },
+            "remake_source": remake_source,
             "assets": assets,
             "scenes": scenes,
             "videos": videos_by_scene,

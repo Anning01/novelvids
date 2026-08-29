@@ -43,12 +43,13 @@ const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
 const promptEditor = inject(workbenchPromptEditorKey, null)
 const asset = computed(() => props.data.asset as Asset)
+const projectDefaults = computed(() => props.data.project_defaults as { aspectRatio?: string } | undefined)
 const assetType = ref<AssetTypeEnum>(AssetTypeEnum.PERSON)
 const assetTypeExplicit = ref(true)
 const nickname = ref('')
 const description = ref('')
 const prompt = ref('')
-const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value))
+const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value, projectDefaults.value))
 const imageModels = computed(() => (props.data.imageModelOptions as ImageGenerationModel[] | undefined) || [])
 const imageModelOptions = computed(() => imageModels.value.map(model => ({ value: model.config_id, label: model.name || model.model })))
 const selectedImageModel = computed(() => imageModels.value.find(model => model.config_id === config.value.modelConfigId) || null)
@@ -79,7 +80,7 @@ watch(asset, value => {
   nickname.value = value.canonical_name
   description.value = value.description || ''
   prompt.value = value.base_traits || ''
-  config.value = normalizeAssetConfig(value)
+  config.value = normalizeAssetConfig(value, projectDefaults.value)
   if (!imageModelOptions.value.some(option => option.value === config.value.modelConfigId)) {
     config.value.modelConfigId = imageModelOptions.value[0]?.value ?? null
   }
@@ -88,6 +89,10 @@ watch(asset, value => {
     && !value.variants?.some(variant => String(variant.id) === selectedVariantValue.value)
   ) selectedVariantValue.value = 'base'
 }, { immediate: true })
+
+watch(projectDefaults, value => {
+  config.value = normalizeAssetConfig(asset.value, value)
+}, { deep: true })
 
 watch(imageModelOptions, options => {
   if (!options.some(option => option.value === config.value.modelConfigId)) {

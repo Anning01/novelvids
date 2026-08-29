@@ -5,6 +5,7 @@ import pytest
 from services.schema_compat import (
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
+    ensure_remake_schema,
     ensure_voice_reference_schema,
 )
 
@@ -129,3 +130,55 @@ async def test_voice_reference_schema_adds_audio_library_fields_once(monkeypatch
     assert "ADD COLUMN duration REAL" in script
     assert "ADD COLUMN team_id INT" in script
     assert "ADD COLUMN created_by INT" in script
+
+
+@pytest.mark.asyncio
+async def test_remake_schema_adds_project_and_task_fields_once_across_repeated_startups(
+    monkeypatch,
+):
+    connection = AsyncMock()
+    old_novel_columns = [{"name": "id"}, {"name": "name"}]
+    current_novel_columns = [
+        *old_novel_columns,
+        {"name": "workflow_kind"},
+        {"name": "aspect_ratio"},
+        {"name": "resolution"},
+        {"name": "custom_style_prompt"},
+        {"name": "creation_idempotency_key"},
+        {"name": "creation_payload_hash"},
+    ]
+    old_task_columns = [{"name": "id"}, {"name": "status"}]
+    current_task_columns = [
+        *old_task_columns,
+        {"name": "stage"},
+        {"name": "progress"},
+    ]
+    connection.execute_query_dict.side_effect = [
+        old_novel_columns,
+        old_task_columns,
+        current_novel_columns,
+        current_task_columns,
+    ]
+    monkeypatch.setattr(
+        "services.schema_compat.Tortoise.get_connection",
+        lambda _: connection,
+    )
+    monkeypatch.setattr(
+        "services.schema_compat.settings.DATABASE_URL",
+        "sqlite://compat-test.db",
+    )
+
+    await ensure_remake_schema()
+    await ensure_remake_schema()
+
+    connection.execute_script.assert_awaited_once()
+    script = connection.execute_script.await_args.args[0]
+    assert "ADD COLUMN workflow_kind VARCHAR(32) NOT NULL DEFAULT 'script'" in script
+    assert "ADD COLUMN aspect_ratio VARCHAR(16)" in script
+    assert "ADD COLUMN resolution VARCHAR(32)" in script
+    assert "ADD COLUMN custom_style_prompt TEXT" in script
+    assert "ADD COLUMN creation_idempotency_key VARCHAR(64)" in script
+    assert "ADD COLUMN creation_payload_hash VARCHAR(64)" in script
+    assert "ADD COLUMN stage VARCHAR(32)" in script
+    assert "ADD COLUMN progress INT NOT NULL DEFAULT 0" in script
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in script

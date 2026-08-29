@@ -117,10 +117,14 @@ async def clear_db():
     from models.video import Video
     from models.audio_reference import AudioReference
     from models.digital_human import DigitalHuman
+    from models.remake_source import RemakeSource
+    from models.remake_upload import RemakeUpload
 
     await AudioReference.all().delete()
     await DigitalHuman.all().delete()
     await Video.all().delete()
+    await RemakeSource.all().delete()
+    await RemakeUpload.all().delete()
     await AiTask.all().delete()
     await Scene.all().delete()
     await Chapter.all().delete()

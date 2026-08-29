@@ -244,6 +244,28 @@ def video_style_suffix(key: str | None) -> str:
     return f"视频风格遵循「{style.label}」：{style.video_prompt}"
 
 
+def image_project_style_suffix(
+    key: str | None,
+    custom_style_prompt: str | None,
+) -> str:
+    """渲染项目级生图风格；自定义风格由项目配置直接提供。"""
+    custom = (custom_style_prompt or "").strip()
+    if custom:
+        return f"画面风格遵循项目自定义要求：{custom}"
+    return image_style_suffix(key)
+
+
+def video_project_style_suffix(
+    key: str | None,
+    custom_style_prompt: str | None,
+) -> str:
+    """渲染项目级生视频风格；与生图链路使用同一配置来源。"""
+    custom = (custom_style_prompt or "").strip()
+    if custom:
+        return f"视频风格遵循项目自定义要求：{custom}"
+    return video_style_suffix(key)
+
+
 def list_styles() -> list[dict]:
     """风格清单（后端唯一事实来源）：[{key, label}]。"""
     return [{"key": style.key, "label": style.label} for style in STYLE_PROMPTS.values()]

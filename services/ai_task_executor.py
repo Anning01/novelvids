@@ -17,6 +17,7 @@ TASK_TIMEOUT: dict[AiTaskTypeEnum, int] = {
     AiTaskTypeEnum.storyboard: 900,
     AiTaskTypeEnum.video: 600,
     AiTaskTypeEnum.project_analysis: 1200,
+    AiTaskTypeEnum.remake_decomposition: 3600,
 }
 
 
@@ -45,6 +46,7 @@ EXECUTOR_TASK_TYPES = (
     AiTaskTypeEnum.reference_image,
     AiTaskTypeEnum.storyboard,
     AiTaskTypeEnum.project_analysis,
+    AiTaskTypeEnum.remake_decomposition,
 )
 
 
@@ -55,6 +57,8 @@ class AiTaskExecutor:
         self._handlers: dict[AiTaskTypeEnum, BaseTaskHandler] = {}
         # 每个任务类型一个信号量，控制并发
         self._semaphores: dict[AiTaskTypeEnum, asyncio.Semaphore] = {}
+        # 同一任务可能因幂等重放被重复投递，进程内只允许一个执行者。
+        self._task_locks: dict[str, asyncio.Lock] = {}
 
     def register(self, task_type: AiTaskTypeEnum, handler: BaseTaskHandler):
         """注册任务处理器。"""
@@ -78,7 +82,11 @@ class AiTaskExecutor:
 
         stale_tasks = await AiTask.filter(
             task_type=task_type.value,
-            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
+            status__in=[
+                TaskStatusEnum.queued.value,
+                TaskStatusEnum.pending.value,
+                TaskStatusEnum.running.value,
+            ],
         )
 
         for task in stale_tasks:
@@ -116,6 +124,16 @@ class AiTaskExecutor:
         return task
 
     async def run(self, task: AiTask):
+        key = str(task.id)
+        lock = self._task_locks.setdefault(key, asyncio.Lock())
+        try:
+            async with lock:
+                await self._run_once(task)
+        finally:
+            if not lock.locked():
+                self._task_locks.pop(key, None)
+
+    async def _run_once(self, task: AiTask):
         """
         执行单个任务（在 BackgroundTask 中调用）。
 
@@ -132,7 +150,10 @@ class AiTaskExecutor:
 
         # 重新加载任务状态（可能被清理逻辑改了，或前端取消了）
         await task.refresh_from_db()
-        if task.status != TaskStatusEnum.pending.value:
+        if task.status not in {
+            TaskStatusEnum.queued.value,
+            TaskStatusEnum.pending.value,
+        }:
             logger.info("Task #%s skipped (status=%s)", task.id, task.status)
             return
 
@@ -163,6 +184,14 @@ class AiTaskExecutor:
         await self.run(task)
         return task
 
+    async def fail_dispatch(self, task: AiTask) -> None:
+        """后台投递基础设施异常时收口为可见失败，避免任务永久停在 queued。"""
+        await self._fail(
+            task,
+            "后台任务投递失败，请重试",
+            record_usage=False,
+        )
+
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
@@ -171,8 +200,13 @@ class AiTaskExecutor:
         task.status = TaskStatusEnum.completed.value
         task.response_data = result
         task.finished_at = datetime.now(timezone.utc)
+        update_fields = ["status", "response_data", "finished_at", "updated_at"]
+        if task.stage is not None:
+            task.stage = "completed"
+            task.progress = 100
+            update_fields.extend(["stage", "progress"])
         await task.save(
-            update_fields=["status", "response_data", "finished_at", "updated_at"]
+            update_fields=update_fields
         )
         await record_ai_task_usage(task, result=result, error=None)
 
@@ -186,6 +220,7 @@ class AiTaskExecutor:
         stale = await AiTask.filter(
             task_type__in=[task_type.value for task_type in EXECUTOR_TASK_TYPES],
             status__in=[
+                TaskStatusEnum.queued.value,
                 TaskStatusEnum.pending.value,
                 TaskStatusEnum.running.value,
             ],
@@ -208,10 +243,16 @@ class AiTaskExecutor:
         task.status = TaskStatusEnum.failed.value
         task.error_message = error_message
         task.finished_at = datetime.now(timezone.utc)
+        update_fields = ["status", "error_message", "finished_at", "updated_at"]
+        if task.stage is not None:
+            task.stage = "failed"
+            update_fields.append("stage")
         await task.save(
-            update_fields=["status", "error_message", "finished_at", "updated_at"]
+            update_fields=update_fields
         )
         if record_usage:
+            # Handler 可能在执行期间补充了最终模型配置，失败计费应读取该快照。
+            await task.refresh_from_db()
             await record_ai_task_usage(task, result=None, error=error)
 
 

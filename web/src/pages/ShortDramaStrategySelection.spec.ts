@@ -73,5 +73,10 @@ it('selects a backend strategy on project creation and persists it', async () =>
   expect(api.createNovel).toHaveBeenCalledWith(expect.objectContaining({
     storyboard_strategy: 'narration',
     storyboard_setting: '旁白规则',
+    description: '人工模式',
+    aspect_ratio: '9:16',
+    resolution: '720p',
+    style_key: 'realistic-general',
+    custom_style_prompt: null,
   }))
 })

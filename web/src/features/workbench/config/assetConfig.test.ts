@@ -36,6 +36,13 @@ describe('asset workbench configuration', () => {
     })
   })
 
+  it('uses the project aspect ratio until the asset saves an explicit override', () => {
+    expect(normalizeAssetConfig(makeAsset(), { aspectRatio: '9:16' }).aspectRatio).toBe('9:16')
+    expect(normalizeAssetConfig(makeAsset({
+      metadata: { workbench: { aspectRatio: '1:1' } },
+    }), { aspectRatio: '9:16' }).aspectRatio).toBe('1:1')
+  })
+
   it('accepts persisted values and rejects malformed settings', () => {
     expect(normalizeAssetConfig(makeAsset({
       metadata: {

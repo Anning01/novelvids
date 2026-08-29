@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BarChart3, Building2, Clapperboard, FolderKanban, Images, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
+import { BarChart3, Building2, Clapperboard, FolderKanban, Images, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { notice } from '@/shared/notice'
@@ -22,6 +22,7 @@ const isWorkflowSurface = computed(() => isWorkflowThemeSurface({
 const confirmDialogDark = computed(() => isWorkflowSurface.value || resolvedTheme.value === 'dark')
 const creationItems = [
   { path: '/create/short-drama', label: '短剧制作', icon: Clapperboard, active: () => route.path.startsWith('/create/short-drama') },
+  { path: '/create/remake', label: '重制工坊', icon: RefreshCcw, active: () => route.path.startsWith('/create/remake') },
 ]
 // 按角色渲染「我的」导航：成本（管理员/创作者/超管）、设置（管理员/超管）；
 // AUTH_ENABLED=false 时全部可见（vanilla 体验）

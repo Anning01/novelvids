@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import type { WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 import {
+  chapterComposerDisabledReason,
   COMPOSER_ASPECT_RATIOS,
   COMPOSER_RESOLUTIONS,
   moveOrder,
@@ -75,4 +76,38 @@ it('matches the reference resolution and aspect-ratio options', () => {
     resolution: '720p',
     aspectRatio: '9:16',
   })
+})
+
+it('requires every chapter shot to have a connected completed current video', () => {
+  const shots = [1, 2].map((sequence): WorkbenchNode => ({
+    id: sequence,
+    key: `shot-${sequence}`,
+    kind: 'shot',
+    backendKind: 'shot',
+    title: `镜头 ${sequence}`,
+    position: { x: 0, y: 0 },
+    size: null,
+    zIndex: 1,
+    activeVersionId: null,
+    status: 'ready',
+    data: {
+      scene: { id: sequence, sequence, metadata: { workbench: { activeVideoId: 10 + sequence } } },
+      videos: [{ id: 10 + sequence, scene_id: sequence, status: 3, url: `/shot-${sequence}.mp4` }],
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }))
+
+  expect(chapterComposerDisabledReason('composer-1', shots, [composerEdge('shot-1', 0)]))
+    .toContain('全部 2 个镜头')
+  expect(chapterComposerDisabledReason('composer-1', shots, [
+    composerEdge('shot-1', 0),
+    composerEdge('shot-2', 1),
+  ])).toBe('')
+  const incomplete = structuredClone(shots)
+  ;(incomplete[1]!.data.videos as Array<{ url?: string }>)[0]!.url = undefined
+  expect(chapterComposerDisabledReason('composer-1', incomplete, [
+    composerEdge('shot-1', 0),
+    composerEdge('shot-2', 1),
+  ])).toContain('尚未全部生成完成')
 })

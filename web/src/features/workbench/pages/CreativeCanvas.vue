@@ -34,6 +34,8 @@ import type { KeyboardHandleActivation } from '../keyboard/keyboardConnection'
 import { workbenchKeyboardConnectorKey } from '../keyboard/keyboardConnection'
 import { isWorkbenchFlowReady, WORKBENCH_FLOW_ID, useWorkbenchFlow, workbenchInteractionState } from '../runtime/workbenchFlowRuntime'
 import AssetNode from '../nodes/AssetNode.vue'
+import RemakeSourceNode from '../nodes/RemakeSourceNode.vue'
+import RemakeAnalysisNode from '../nodes/RemakeAnalysisNode.vue'
 import ChapterNode from '../nodes/ChapterNode.vue'
 import ShotNode from '../nodes/ShotNode.vue'
 import VideoResultNode from '../nodes/VideoResultNode.vue'
@@ -94,7 +96,7 @@ const promptEditors = computed<WorkbenchPromptEditor[]>(() => (capabilities.valu
 const restoredViewportChapterId = ref<number | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
 const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
-const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
+const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), source_video: markRaw(RemakeSourceNode), ai_decomposition: markRaw(RemakeAnalysisNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
   { id: 'asset', label: '资产', description: '创建可编辑的昵称、Prompt 与图片资产', kind: 'asset', data: {} },
@@ -111,8 +113,8 @@ const connectionPicker = ref<{
   accentClass: string
 } | null>(null)
 const projectDefaults = computed(() => ({
-  aspectRatio: SHOT_ASPECT_RATIOS.includes(props.aspectRatio as ShotAspectRatio) ? props.aspectRatio as ShotAspectRatio : '9:16',
-  resolution: SHOT_RESOLUTIONS.includes(props.resolution as ShotResolution) ? props.resolution as ShotResolution : '720p',
+  aspectRatio: SHOT_ASPECT_RATIOS.includes((store.projectConfig.aspect_ratio || props.aspectRatio) as ShotAspectRatio) ? (store.projectConfig.aspect_ratio || props.aspectRatio) as ShotAspectRatio : '9:16',
+  resolution: SHOT_RESOLUTIONS.includes((store.projectConfig.resolution || props.resolution) as ShotResolution) ? (store.projectConfig.resolution || props.resolution) as ShotResolution : '720p',
 }))
 const ownedVideoResults = computed(() => videoResultOwners(store.nodes, store.edges))
 const visibleStoreNodes = computed(() => store.nodes.filter(item => (

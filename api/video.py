@@ -176,7 +176,7 @@ async def merge_chapter_videos(
     _: AuthContext = _EDITOR,
 ):
     await require_chapter_access(req.chapter_id, ctx)
-    result = await video_controller.merge_chapter_videos(req.chapter_id)
+    result = await video_controller.merge_chapter_videos(req.chapter_id, strict=req.strict)
     return ResponseSchema(data=result)
 
 

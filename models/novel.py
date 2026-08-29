@@ -48,6 +48,37 @@ class Novel(AbstractBaseModel):
         null=True,
         description="视觉风格 key（prompts/styles.py 注册表）",
     )
+    workflow_kind = fields.CharField(
+        max_length=32,
+        default="script",
+        db_index=True,
+        description="项目工作流类型：script/remake",
+    )
+    aspect_ratio = fields.CharField(
+        max_length=16,
+        null=True,
+        description="项目默认画面比例",
+    )
+    resolution = fields.CharField(
+        max_length=32,
+        null=True,
+        description="项目默认视频清晰度",
+    )
+    custom_style_prompt = fields.TextField(
+        null=True,
+        description="自定义视觉风格 Prompt；与 style_key 二选一",
+    )
+    creation_idempotency_key = fields.CharField(
+        max_length=64,
+        null=True,
+        unique=True,
+        description="重制项目创建幂等键",
+    )
+    creation_payload_hash = fields.CharField(
+        max_length=64,
+        null=True,
+        description="规范化重制创建请求 SHA-256",
+    )
     video_model_config_id = fields.IntField(
         null=True,
         description="分镜页面默认视频模型配置 ID",

@@ -10,6 +10,7 @@ from services.chapter_titles import normalize_chapter_title
 from services.document import analyze_oss_document
 from services.audio_references import audio_reference_accessible
 from services.oss import oss
+from services.project_config import validate_project_config
 from services.nlp import (
     ChapterSplitError,
     RegexChapterRecognitionStrategy,
@@ -36,6 +37,10 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "total_chapters": novel.total_chapters,
             "tags": novel.tags,
             "style_key": getattr(novel, "style_key", None),
+            "workflow_kind": getattr(novel, "workflow_kind", "script"),
+            "aspect_ratio": getattr(novel, "aspect_ratio", None),
+            "resolution": getattr(novel, "resolution", None),
+            "custom_style_prompt": getattr(novel, "custom_style_prompt", None),
             "video_model_config_id": getattr(novel, "video_model_config_id", None),
             "narrator_audio_reference_id": getattr(novel, "narrator_audio_reference_id", None),
             "content_length": len(novel.content or ""),
@@ -81,6 +86,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if validation and not validation["valid"]:
                 raise HTTPException(status_code=422, detail=validation["message"])
             data["content"] = text
+        data = validate_project_config(data)
         narrator_reference_id = data.get("narrator_audio_reference_id")
         if narrator_reference_id is not None:
             reference = await AudioReference.get_or_none(
@@ -114,13 +120,21 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         instance = await self.get(novel_id)
         await self._validate_video_model_preference(instance, obj_in)
         await self._validate_narrator_audio_reference(instance, obj_in)
-        return await super().update(instance, obj_in)
+        data = validate_project_config(
+            obj_in.model_dump(exclude_unset=True, exclude={"id"}),
+            current=instance,
+        )
+        return await super().update(instance, data)
 
     async def patch(self, novel_id: int, obj_in: NovelPatch) -> Novel:
         instance = await self.get(novel_id)
         await self._validate_video_model_preference(instance, obj_in)
         await self._validate_narrator_audio_reference(instance, obj_in)
-        return await super().patch(instance, obj_in)
+        data = validate_project_config(
+            obj_in.model_dump(exclude_unset=True, exclude={"id"}),
+            current=instance,
+        )
+        return await super().patch(instance, data)
 
     @staticmethod
     async def _validate_video_model_preference(

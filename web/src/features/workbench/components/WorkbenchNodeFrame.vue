@@ -70,6 +70,8 @@ const canDelete = computed(() => nodeCapabilities(kind.value).deletable)
 const pinned = computed(() => isPinnedNode(liveNode.value))
 const icon = computed(() => ({
   chapter: BookOpenText,
+  source_video: FileVideo2,
+  ai_decomposition: Clapperboard,
   asset: Box,
   audio_reference: Volume2,
   digital_human: ScanFace,

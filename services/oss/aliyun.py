@@ -63,19 +63,19 @@ class AliyunProvider(OSSProvider):
         """
         if not raw:
             return raw
-        if raw.startswith("uploads/"):
+        if raw.startswith(("uploads/", "remake/")):
             return self.public_url(raw)
         return raw
 
     def _normalize_aliyun_url(self, raw: str) -> str:
         """把指向本桶的完整 URL 降级为对象 key（去掉 query 与域名前缀）。"""
-        if raw.startswith("uploads/"):
+        if raw.startswith(("uploads/", "remake/")):
             return raw
         if raw.startswith("http://") or raw.startswith("https://"):
             for base in self._public_bases():
                 if raw.startswith(base + "/"):
                     key, _ = _split_query(raw[len(base) + 1 :])
-                    if key.startswith("uploads/"):
+                    if key.startswith(("uploads/", "remake/")):
                         return key
         return raw
 
@@ -207,6 +207,16 @@ class AliyunProvider(OSSProvider):
                     "Content-Type": content_type,
                     "Content-Length": str(source.stat().st_size),
                 },
+            )
+            response.raise_for_status()
+
+    async def delete(self, key: str) -> None:
+        """删除未绑定项目的暂存对象。"""
+        date, authorization = self._authorization("DELETE", key)
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.delete(
+                self._internal_url(key),
+                headers={"Date": date, "Authorization": authorization},
             )
             response.raise_for_status()
 

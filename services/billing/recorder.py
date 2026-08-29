@@ -270,6 +270,28 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 )
                 await _consume_team_balance(record, team_id, user_id=user_id)
             return
+        if task_type == AiTaskTypeEnum.remake_decomposition.value:
+            res = result or {}
+            token_usage = res.get("token_usage") or getattr(error, "usage", None) or {}
+            record = await billing_recorder.record_text(
+                novel_id=novel_id,
+                task_type=task_type,
+                model_config_id=(
+                    res.get("llm_config_id")
+                    or request_params.get("model_config_id")
+                ),
+                fallback_model=(
+                    res.get("llm_model") or request_params.get("model")
+                ),
+                token_usage=token_usage,
+                status=status,
+                duration_seconds=duration,
+                ai_task_id=task.id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+            await _consume_team_balance(record, team_id, user_id=user_id)
+            return
         token_usage = (result or {}).get("token_usage") or getattr(error, "usage", None) or {}
         record = await billing_recorder.record_text(
             novel_id=novel_id,

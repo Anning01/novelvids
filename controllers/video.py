@@ -41,7 +41,7 @@ from prompts.video import (
     render_last_frame_continuity_instruction,
 )
 from services.video.voice_references import resolve_voice_references
-from prompts.styles import video_style_suffix
+from prompts.styles import video_project_style_suffix
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -116,10 +116,11 @@ def _compose_video_prompt(
     scene_prompt: str,
     referenced_media,
     style_key: str | None,
+    custom_style_prompt: str | None = None,
 ) -> str:
     """组合视频生成提示词：分镜提示词 + 参考素材提及 + 风格定调。"""
     prompt = render_reference_mentions(scene_prompt, referenced_media)
-    style_suffix = video_style_suffix(style_key)
+    style_suffix = video_project_style_suffix(style_key, custom_style_prompt)
     if style_suffix:
         prompt = f"{prompt}\n\n{style_suffix}".strip()
     return prompt
@@ -313,7 +314,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
             capabilities=capabilities,
         ) if novel and req.generation_mode == "reference" and selection.generate_audio else []
         provider_prompt = _compose_video_prompt(
-            prompt, referenced_media, novel.style_key if novel else None
+            prompt,
+            referenced_media,
+            novel.style_key if novel else None,
+            novel.custom_style_prompt if novel else None,
         )
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
@@ -769,7 +773,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         for video in videos
     ]
 
-    async def merge_chapter_videos(self, chapter_id: int) -> dict:
+    async def merge_chapter_videos(self, chapter_id: int, *, strict: bool = False) -> dict:
         """合并章节下所有已完成的视频。
 
         Args:
@@ -792,10 +796,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # scenes 已按 sequence 排序，因此传给合并器的顺序就是最终播放顺序。
         videos_to_merge: list[Video] = []
         total_duration = 0.0
+        missing_sequences: list[int] = []
 
         for scene in scenes:
             metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
-            current_video_id = metadata.get("current_video_id")
+            workbench = metadata.get("workbench") if isinstance(metadata.get("workbench"), dict) else {}
+            current_video_id = metadata.get("current_video_id") or workbench.get("activeVideoId")
             video = None
             if isinstance(current_video_id, int):
                 video = await Video.filter(
@@ -803,7 +809,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     scene_id=scene.id,
                     status=TaskStatusEnum.completed.value,
                 ).first()
-            if video is None:
+            if video is None and (not strict or not isinstance(current_video_id, int)):
                 video = await Video.filter(
                     scene_id=scene.id,
                     status=TaskStatusEnum.completed.value,
@@ -812,6 +818,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
             if video:
                 videos_to_merge.append(video)
                 total_duration += scene.duration or 0
+            elif strict:
+                missing_sequences.append(scene.sequence)
+
+        if strict and missing_sequences:
+            labels = "、".join(f"镜头 {sequence}" for sequence in missing_sequences)
+            raise HTTPException(
+                400,
+                detail=f"{labels} 的当前视频尚未全部生成完成，无法合成",
+            )
 
         if not videos_to_merge:
             raise HTTPException(

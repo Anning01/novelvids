@@ -6,6 +6,7 @@ import VideoComposerNode from './VideoComposerNode.vue'
 
 vi.mock('@/api', () => ({
   api: {},
+  mediaUrl: (value: string) => value,
   sleep: vi.fn(),
 }))
 
@@ -120,4 +121,47 @@ it('moves clips with the exact reference controls', async () => {
 
   expect(wrapper.get('[aria-label="成片输入顺序"]').findAll('strong').map(item => item.text())).toEqual(['片段 B', '片段 A'])
   expect(store.edges.sort((a, b) => a.orderIndex - b.orderIndex).map(edge => edge.source)).toEqual(['video-b', 'video-a'])
+})
+
+it('executes strict chapter composition and exposes the result download', async () => {
+  const completedVideo = { id: 91, scene_id: 1, status: 3, url: '/media/shot.mp4', created_at: '', updated_at: '' }
+  store.nodes = [{
+    ...store.nodes[0]!,
+    id: 1,
+    key: 'shot-1',
+    kind: 'shot',
+    backendKind: 'shot',
+    title: '镜头 01',
+    data: { scene: { id: 1, sequence: 1 }, videos: [completedVideo] },
+  }, store.nodes[2]!]
+  store.edges = store.mediaEdges = [{
+    ...store.edges[0]!,
+    key: 'shot-1-composer-1',
+    source: 'shot-1',
+    sourceHandle: 'sequence-output',
+    targetHandle: 'shot-input',
+  }]
+  vi.spyOn(store, 'composeChapter').mockImplementation(async () => {
+    const composer = store.nodeByKey('composer-1')!
+    composer.data.result = { chapter_id: 1, merged_url: '/media/final.mp4', video_count: 1, total_duration: 4 }
+    return composer.data.result as never
+  })
+  const wrapper = mount(VideoComposerNode, {
+    props: {
+      ...common,
+      data: {
+        title: '视频合成器',
+        config: { name: '成片 1', resolution: '720p', aspectRatio: '9:16' },
+        compose_capability: true,
+      },
+    } as never,
+    global: { stubs: { WorkbenchNodeFrame: frameStub } },
+  })
+
+  expect(wrapper.get('[aria-label="合成并预览"]').attributes('disabled')).toBeUndefined()
+  await wrapper.get('[aria-label="合成并预览"]').trigger('click')
+  await wrapper.vm.$nextTick()
+
+  expect(store.composeChapter).toHaveBeenCalledWith('composer-1')
+  expect(wrapper.get('a[download]').attributes('href')).toBe('/media/final.mp4')
 })

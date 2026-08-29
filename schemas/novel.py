@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict, model_validator
-from typing import Optional
+from typing import Literal, Optional
 from schemas._base import BaseResponse
 from services.oss import resolve_media_url
 
@@ -26,6 +26,18 @@ class NovelProperties(BaseModel):
         description="旁白模式使用的参考音频 ID",
         ge=1,
     )
+    aspect_ratio: Optional[str] = Field(None, description="项目默认画面比例", max_length=16)
+    resolution: Optional[str] = Field(None, description="项目默认视频清晰度", max_length=32)
+    custom_style_prompt: Optional[str] = Field(
+        None,
+        description="自定义视觉风格 Prompt",
+        max_length=2000,
+    )
+    style_key: Optional[str] = Field(
+        None,
+        description="视觉风格 key",
+        max_length=64,
+    )
 
 class NovelFullProperties(NovelProperties):
     """
@@ -46,11 +58,6 @@ class NovelFullProperties(NovelProperties):
         description="分镜策略名称",
         max_length=120,
     )
-    style_key: Optional[str] = Field(
-        None,
-        description="视觉风格 key",
-        max_length=64,
-    )
     storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")
 
 
@@ -59,6 +66,10 @@ class NovelFullProperties(NovelProperties):
 class NovelCreate(NovelFullProperties):
     """创建请求：name 必填"""
     name: str = Field(..., description="小说名称", max_length=255)
+    workflow_kind: Literal["script"] = Field(
+        "script",
+        description="通用项目创建入口只创建剧本工作流；重制项目使用专用接口",
+    )
     # OSS 直传后由服务端经内网读取并解析正文，避免书稿正文经浏览器中转。
     # 提供 source_key 时无需再传 content（服务端解析后覆盖）。
     source_key: Optional[str] = Field(None, description="OSS 对象 key", max_length=500)
@@ -83,6 +94,7 @@ class NovelMetaOut(NovelProperties, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")
     tags: Optional[list[str]] = Field(None, description="项目标签")
     style_key: Optional[str] = Field(None, description="视觉风格 key", max_length=64)
     storyboard_strategy: Optional[str] = Field(None, description="分镜策略 key", max_length=120)
@@ -102,6 +114,7 @@ class NovelBriefOut(NovelProperties, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="小说/剧本ID")
+    workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")
 
     @model_validator(mode="after")
     def _resolve_media(self):
@@ -116,6 +129,7 @@ class NovelOut(NovelFullProperties, BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="小说/剧本ID")
+    workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")
 
     @model_validator(mode="after")
     def _resolve_media(self):
