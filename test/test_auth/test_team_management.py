@@ -3,6 +3,8 @@
 仅在 AUTH_ENABLED=true 时运行。
 """
 
+from datetime import datetime
+
 import pytest
 from httpx import AsyncClient
 
@@ -215,6 +217,8 @@ async def test_teams_crud_super_only(client, member_world):
         headers=_auth(token),
     )
     assert created.json()["code"] == 0, created.text
+    assert datetime.fromisoformat(created.json()["data"]["created_at"])
+    assert datetime.fromisoformat(created.json()["data"]["updated_at"])
     team_id = created.json()["data"]["id"]
 
     renamed = await client.patch(

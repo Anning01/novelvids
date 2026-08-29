@@ -78,6 +78,7 @@ async def test_invite_expires_in_24_hours(client):
     response = await client.post("/api/team/invites", headers=_auth(token))
     invite = await TeamInvite.first()
     assert response.json()["code"] == 0
+    assert datetime.fromisoformat(response.json()["data"]["expires_at"])
     ttl = (invite.expires_at - datetime.now(timezone.utc)).total_seconds()
     assert 23 * 3600 < ttl <= 24 * 3600
 
@@ -324,6 +325,8 @@ async def test_team_created_with_member_limit(client):
     )
     assert created.json()["code"] == 0, created.text
     assert created.json()["data"]["member_limit"] == 3
+    assert datetime.fromisoformat(created.json()["data"]["created_at"])
+    assert datetime.fromisoformat(created.json()["data"]["updated_at"])
 
     updated = await client.patch(
         f"/api/team/teams/{created.json()['data']['id']}",

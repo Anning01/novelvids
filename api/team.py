@@ -139,7 +139,6 @@ async def join_invite(
         data={
             **(await team_controller.join_invite(token, user)),
             "token": token,
-            "expires_at": "",
         }
     )
 
@@ -277,6 +276,8 @@ async def create_team(payload: TeamCreateIn, _: AuthContext = _SUPER):
             "owner_user_id": team.owner_user_id,
             "owner_username": owner.username if owner else "",
             "member_count": 1,
+            "created_at": team.created_at,
+            "updated_at": team.updated_at,
         }
     )
 
