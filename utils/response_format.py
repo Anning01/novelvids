@@ -1,7 +1,7 @@
 import datetime
 import random
 import string
-from typing import TypeVar, Generic, Optional, Union, List
+from typing import TypeVar, Generic, Optional, List
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,7 +21,10 @@ class ResponseSchema(BaseModel, Generic[DataT]):
     model_config = ConfigDict(json_schema_extra={"example": {"code": 0, "data": {}, "message": "操作成功"}})
 
     code: int = 0
-    data: Optional[Union[DataT, list, dict]] = None  # 明确支持list和dict
+    # ``DataT`` 本身可以是模型、列表或字典。额外并入裸 ``list``/``dict``
+    # 会让 Pydantic 的 smart-union 优先保留原始容器，从而跳过嵌套模型的
+    # 校验器与序列化逻辑（例如 OSS 对象 key 转公网 URL）。
+    data: Optional[DataT] = None
     message: str = "操作成功"
 
 

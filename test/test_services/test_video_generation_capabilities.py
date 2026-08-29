@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from models.config import AiModelConfig
+from schemas.config import VideoGenerationCapabilitiesOut
 from services.video import get_generator, get_record_model_type
 from services.video.capabilities import capabilities_for, validate_selection
 from services.video.content import prepare_video_content
@@ -12,6 +13,12 @@ from services.video.minimax import MiniMaxGenerationError, MiniMaxH3Generator
 from services.video.seedance import SeedanceGenerationError, SeedanceGenerator
 from services.video.wan import Wan3Generator
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
+
+
+def test_video_capabilities_public_contract_matches_response_schema():
+    public_keys = set(capabilities_for("seedance_2_5").public_dict())
+
+    assert public_keys == set(VideoGenerationCapabilitiesOut.model_fields)
 
 
 def test_video_capabilities_are_model_specific():

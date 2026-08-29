@@ -1,6 +1,7 @@
 from prompts.remake import (
     ASSET_PROMPT,
     ASSET_SCHEMA,
+    PROMPT_TEMPLATE,
     SCENE_PROMPT_PREFIX,
     SINGLE_CHARACTER_PROMPT_PREFIX,
 )
@@ -19,6 +20,15 @@ def test_asset_prompt_contract_matches_reference_pipeline():
     assert character["required"] == ["name", "label", "description"]
     assert "先在内部判断出现次数" in ASSET_PROMPT
     assert "不输出次数和判断过程" in ASSET_PROMPT
+
+
+def test_storyboard_prompt_requires_subtitle_review_before_unclear_marker():
+    assert "不得在第一次听觉识别失败后停止" in PROMPT_TEMPLATE
+    assert "必须用字幕补足听不清的内容" in PROMPT_TEMPLATE
+    assert "不得用“[听不清]”“无法识别”" in PROMPT_TEMPLATE
+    assert "对应时间段没有任何清晰可读的对白字幕" in PROMPT_TEMPLATE
+    assert "对每一处“[听不清]”重新检查对应画面字幕" in PROMPT_TEMPLATE
+    assert "听不清处标记“[听不清]”" not in PROMPT_TEMPLATE
 
 
 def test_global_assets_are_deduplicated_and_receive_stable_reference_layouts():

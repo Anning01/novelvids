@@ -1,5 +1,6 @@
 """团队余额与成员/团队管理 API 的请求/响应模型。"""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
 
@@ -84,7 +85,7 @@ class InviteOut(BaseModel):
     team_id: int = Field(..., description="团队 ID")
     team_name: str = Field("", description="团队名称")
     role: str = Field(..., description="加入后的角色")
-    expires_at: str = Field("", description="过期时间")
+    expires_at: datetime = Field(..., description="过期时间")
 
 
 # ---- 团队管理（超管） ----
@@ -102,8 +103,8 @@ class TeamOut(BaseModel):
     owner_user_id: Optional[int] = Field(None, description="团队所有人 User.id")
     owner_username: str = Field("", description="团队所有人用户名")
     member_count: int = 0
-    created_at: str = ""
-    updated_at: str = ""
+    created_at: datetime
+    updated_at: datetime
 
     @field_serializer("balance", when_used="json")
     def _ser_balance(self, value: Decimal) -> str:

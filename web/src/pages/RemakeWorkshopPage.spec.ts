@@ -27,7 +27,10 @@ const capabilities = {
   media: { extensions: ['mp4', 'mov'], max_bytes: 500 * 1024 * 1024, max_duration_seconds: 1200 },
   aspect_ratios: ['9:16', '16:9'],
   resolutions: ['720p', '1080p'],
-  styles: [{ key: 'realistic-general', label: '写实通用' }],
+  styles: [
+    { key: 'auto', label: 'AI 识别风格' },
+    { key: 'realistic-general', label: '写实通用' },
+  ],
   source_modes: { single_upload: true, folder_upload: false, history: false },
 }
 
@@ -82,7 +85,7 @@ describe('RemakeWorkshopPage', () => {
     expect(wrapper.get('[data-source-mode="folder_upload"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-source-mode="history"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('单视频不超过 500 MB，时长不超过 20 分钟')
-    expect(wrapper.text()).toContain('写实通用')
+    expect(wrapper.text()).toContain('AI 识别风格')
   })
 
   it('rejects an unsupported local file before making a request', async () => {
@@ -119,7 +122,7 @@ describe('RemakeWorkshopPage', () => {
       source_mode: 'single_upload',
       aspect_ratio: '9:16',
       resolution: '720p',
-      style_key: 'realistic-general',
+      style_key: null,
       custom_style_prompt: null,
       idempotency_key: expect.any(String),
       sources: [{ episode_number: 1, upload_token: '01916f1a-41aa-7000-8000-000000000001' }],
@@ -146,7 +149,7 @@ describe('RemakeWorkshopPage', () => {
       message: 'ok',
       data: [
         { chapter_id: 81, episode_number: 1, name: '第1集', duration_seconds: 60, size_bytes: 1024, scene_count: 8, available: true, unavailable_reason: null },
-        { chapter_id: 82, episode_number: 2, name: '第2集', duration_seconds: 40, size_bytes: 512, scene_count: 5, available: false, unavailable_reason: '镜头 3 的当前视频尚未完成' },
+        { chapter_id: 82, episode_number: 2, name: '第2集', duration_seconds: 40, size_bytes: 512, scene_count: 5, available: false, unavailable_reason: '镜头 3 尚无已完成视频' },
       ],
     })
     const wrapper = mount(RemakeWorkshopPage)
@@ -154,11 +157,12 @@ describe('RemakeWorkshopPage', () => {
 
     await wrapper.get('[data-source-mode="history"]').trigger('click')
     await flushPromises()
+    expect(wrapper.text()).toContain('短剧制作项目')
     await wrapper.get('[data-history-project="8"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-history-episode="82"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('镜头 3 的当前视频尚未完成')
+    expect(wrapper.text()).toContain('镜头 3 尚无已完成视频')
     await wrapper.get('[data-history-episode="81"]').trigger('click')
     await wrapper.get('input[name="projectName"]').setValue('历史重制项目')
     await wrapper.get('form').trigger('submit')

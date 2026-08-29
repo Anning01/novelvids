@@ -171,6 +171,42 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
 
 
 @pytest.mark.asyncio
+async def test_api_asset_generation_history_resolves_oss_object_keys(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    novel = await Novel.create(name="OSS Generation History Novel")
+    asset = await Asset.create(
+        novel=novel,
+        asset_type=AssetTypeEnum.person.value,
+        canonical_name="OSS 历史人物",
+    )
+    task = await AiTask.create(
+        task_type=AiTaskTypeEnum.reference_image.value,
+        status=TaskStatusEnum.completed.value,
+        request_params={"asset_id": asset.id, "variant_id": None},
+        response_data={"images": ["uploads/1/20260829/history.png"]},
+    )
+    monkeypatch.setattr(
+        "schemas.asset.resolve_media_url",
+        lambda value: (
+            f"https://media.example.test/{value}"
+            if value and value.startswith("uploads/")
+            else value
+        ),
+    )
+
+    response = await client.get(f"/api/asset/{asset.id}/generation-history")
+
+    assert response.status_code == 200, response.text
+    records = response.json()["data"]
+    record = next(item for item in records if item["id"] == str(task.id))
+    assert record["images"] == [
+        "https://media.example.test/uploads/1/20260829/history.png",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_api_records_annotated_asset_image_as_generation_history(
     client: AsyncClient,
 ):

@@ -32,6 +32,30 @@ async def test_history_catalog_only_lists_projects_with_an_available_episode():
     await Chapter.create(novel=empty_project, number=1, name="第1集", content="")
     other_team = await Novel.create(name="其他团队项目", author="作者", team_id=8)
     await Chapter.create(novel=other_team, number=1, name="第1集", content="")
+    remake_project = await Novel.create(
+        name="复刻重制项目",
+        author="作者",
+        team_id=7,
+        workflow_kind="remake",
+    )
+    remake_chapter = await Chapter.create(
+        novel=remake_project,
+        number=1,
+        name="第1集",
+        content="",
+    )
+    remake_scene = await Scene.create(
+        chapter=remake_chapter,
+        sequence=1,
+        prompt="镜头",
+        duration=5,
+    )
+    await Video.create(
+        scene=remake_scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/remade.mp4",
+    )
 
     result = await RemakeHistoryCatalog().list_projects(
         team_id=7,
@@ -50,6 +74,83 @@ async def test_history_catalog_only_lists_projects_with_an_available_episode():
         }],
         "pagination": {"total": 1, "page": 1, "page_size": 20, "pages": 1},
     }
+
+
+@pytest.mark.asyncio
+async def test_history_project_is_listed_when_any_episode_has_all_scene_videos():
+    project = await Novel.create(name="部分完成短剧", author="作者", team_id=7)
+    incomplete = await Chapter.create(
+        novel=project,
+        number=1,
+        name="第1集",
+        content="",
+    )
+    await Scene.create(chapter=incomplete, sequence=1, prompt="镜头", duration=5)
+
+    ready = await Chapter.create(
+        novel=project,
+        number=2,
+        name="第2集",
+        content="",
+    )
+    for sequence in (1, 2):
+        scene = await Scene.create(
+            chapter=ready,
+            sequence=sequence,
+            prompt="镜头",
+            duration=5,
+        )
+        await Video.create(
+            scene=scene,
+            model_type=VideoModelTypeEnum.seedance.value,
+            status=TaskStatusEnum.completed.value,
+            url=f"/media/videos/episode-2-scene-{sequence}.mp4",
+        )
+
+    result = await RemakeHistoryCatalog().list_projects(
+        team_id=7,
+        allow_all=False,
+        keyword="",
+        page=1,
+        page_size=20,
+    )
+
+    assert result["items"] == [{
+        "id": project.id,
+        "name": project.name,
+        "cover": None,
+        "available_episode_count": 1,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_history_episode_falls_back_to_completed_video_when_active_version_is_pending():
+    project = await Novel.create(name="可回退短剧", author="作者")
+    chapter = await Chapter.create(
+        novel=project,
+        number=1,
+        name="第1集",
+        content="",
+    )
+    scene = await Scene.create(chapter=chapter, sequence=1, prompt="镜头", duration=5)
+    completed = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.completed.value,
+        url="/media/videos/completed.mp4",
+    )
+    pending = await Video.create(
+        scene=scene,
+        model_type=VideoModelTypeEnum.seedance.value,
+        status=TaskStatusEnum.running.value,
+    )
+    scene.metadata = {"workbench": {"activeVideoId": pending.id}}
+    await scene.save(update_fields=["metadata", "updated_at"])
+
+    inspection = await RemakeHistoryCatalog().inspect(chapter)
+
+    assert inspection.available is True
+    assert [item.video.id for item in inspection.selected] == [completed.id]
 
 
 @pytest.mark.asyncio
@@ -93,7 +194,7 @@ async def test_history_episode_availability_explains_incomplete_current_versions
     }
     assert episodes[1]["available"] is False
     assert "镜头 1" in episodes[1]["unavailable_reason"]
-    assert "当前视频" in episodes[1]["unavailable_reason"]
+    assert "已完成视频" in episodes[1]["unavailable_reason"]
     assert episodes[2]["available"] is False
     assert episodes[2]["unavailable_reason"] == "章节暂无分镜"
 

@@ -10,6 +10,10 @@
 from dataclasses import dataclass
 
 
+AUTO_STYLE_KEY = "auto"
+AUTO_STYLE_LABEL = "AI 识别风格"
+
+
 @dataclass(frozen=True)
 class StylePromptSet:
     key: str
@@ -267,5 +271,16 @@ def video_project_style_suffix(
 
 
 def list_styles() -> list[dict]:
-    """风格清单（后端唯一事实来源）：[{key, label}]。"""
-    return [{"key": style.key, "label": style.label} for style in STYLE_PROMPTS.values()]
+    """系统内置风格清单（后端唯一事实来源）。"""
+    return [
+        {"key": style.key, "label": style.label}
+        for style in STYLE_PROMPTS.values()
+    ]
+
+
+def list_remake_styles() -> list[dict]:
+    """重制工坊风格选项；自动识别不注入固定风格 Prompt。"""
+    return [
+        {"key": AUTO_STYLE_KEY, "label": AUTO_STYLE_LABEL},
+        *list_styles(),
+    ]

@@ -64,6 +64,7 @@ async def join_team_via_invite(user: User, token: str) -> dict:
         "team_id": invite.team_id,
         "team_name": invite.team.name,
         "role": membership.role,
+        "expires_at": invite.expires_at,
     }
 
 
