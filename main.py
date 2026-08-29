@@ -68,18 +68,27 @@ video_task_reconciler = VideoTaskReconciler(
 )
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
+async def _initialize_database_schema() -> None:
+    """Initialize storage while keeping legacy PostgreSQL installs bootable."""
     await Tortoise.init(config=tortoise_config)
+    # PostgreSQL emits column comments for existing tables during safe schema
+    # generation. Add fields referenced by the current models first, otherwise
+    # startup fails before the compatibility migrations can run.
+    include_compat_indexes = not settings.GENERATE_SCHEMAS
+    await ensure_remake_schema(include_indexes=include_compat_indexes)
+    await ensure_voice_reference_schema(include_indexes=include_compat_indexes)
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
-    await ensure_remake_schema()
     await ensure_usage_record_schema()
-    await ensure_voice_reference_schema()
     # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
     await ensure_shared_team_columns()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await _initialize_database_schema()
     await remake_upload_service.cleanup_expired()
     await backfill_last_frame_continuity()
     await ensure_media_library_seed_data()

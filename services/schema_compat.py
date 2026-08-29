@@ -115,7 +115,7 @@ async def ensure_novel_analysis_schema() -> None:
         await connection.execute_script("".join(statements))
 
 
-async def ensure_remake_schema() -> None:
+async def ensure_remake_schema(*, include_indexes: bool = True) -> None:
     """补齐重制项目共享字段；只做增量操作且允许重复启动。"""
     connection = Tortoise.get_connection("default")
     if settings.DATABASE_URL.startswith("sqlite"):
@@ -145,12 +145,12 @@ async def ensure_remake_schema() -> None:
         for name, definition in task_definitions.items():
             if name not in task_existing:
                 statements.append(f"ALTER TABLE ai_tasks ADD COLUMN {name} {definition};")
-        if "workflow_kind" not in novel_existing:
+        if include_indexes and "workflow_kind" not in novel_existing:
             statements.append(
                 "CREATE INDEX IF NOT EXISTS idx_novels_workflow_kind "
                 "ON novels(workflow_kind);"
             )
-        if "creation_idempotency_key" not in novel_existing:
+        if include_indexes and "creation_idempotency_key" not in novel_existing:
             statements.append(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uid_novels_creation_idempotency_key "
                 "ON novels(creation_idempotency_key);"
@@ -160,22 +160,29 @@ async def ensure_remake_schema() -> None:
         return
 
     if settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
-        await connection.execute_script(
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS workflow_kind VARCHAR(32) NOT NULL DEFAULT 'script';"
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS aspect_ratio VARCHAR(16);"
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS resolution VARCHAR(32);"
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS custom_style_prompt TEXT;"
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS creation_idempotency_key VARCHAR(64);"
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS creation_payload_hash VARCHAR(64);"
-            "ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS stage VARCHAR(32);"
-            "ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS progress INT NOT NULL DEFAULT 0;"
-            "CREATE INDEX IF NOT EXISTS idx_novels_workflow_kind ON novels(workflow_kind);"
-            "CREATE UNIQUE INDEX IF NOT EXISTS uid_novels_creation_idempotency_key "
-            "ON novels(creation_idempotency_key);"
-        )
+        statements = [
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS workflow_kind VARCHAR(32) NOT NULL DEFAULT 'script';",
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS aspect_ratio VARCHAR(16);",
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS resolution VARCHAR(32);",
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS custom_style_prompt TEXT;",
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS creation_idempotency_key VARCHAR(64);",
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS creation_payload_hash VARCHAR(64);",
+            "ALTER TABLE IF EXISTS ai_tasks ADD COLUMN IF NOT EXISTS stage VARCHAR(32);",
+            "ALTER TABLE IF EXISTS ai_tasks ADD COLUMN IF NOT EXISTS progress INT NOT NULL DEFAULT 0;",
+        ]
+        if include_indexes:
+            statements.append(
+                "DO $$ BEGIN "
+                "IF to_regclass('novels') IS NOT NULL THEN "
+                "CREATE INDEX IF NOT EXISTS idx_novels_workflow_kind ON novels(workflow_kind);"
+                "CREATE UNIQUE INDEX IF NOT EXISTS uid_novels_creation_idempotency_key "
+                "ON novels(creation_idempotency_key);"
+                "END IF; END $$;"
+            )
+        await connection.execute_script("".join(statements))
 
 
-async def ensure_voice_reference_schema() -> None:
+async def ensure_voice_reference_schema(*, include_indexes: bool = True) -> None:
     """Add reusable voice fields for both existing SQLite and PostgreSQL installs."""
     connection = Tortoise.get_connection("default")
     if settings.DATABASE_URL.startswith("sqlite"):
@@ -193,19 +200,38 @@ async def ensure_voice_reference_schema() -> None:
                 for name, definition in definitions.items()
                 if name not in existing
             ]
+            if include_indexes and "source" not in existing:
+                statements.append(
+                    "CREATE INDEX IF NOT EXISTS idx_audio_references_source "
+                    "ON audio_references(source);"
+                )
+            if include_indexes and "team_id" not in existing:
+                statements.append(
+                    "CREATE INDEX IF NOT EXISTS idx_audio_references_team_id "
+                    "ON audio_references(team_id);"
+                )
             if statements:
                 await connection.execute_script("".join(statements))
         return
     if settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
-        await connection.execute_script(
-            "ALTER TABLE novels ADD COLUMN IF NOT EXISTS narrator_audio_reference_id INT;"
-            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'system';"
-            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS duration DOUBLE PRECISION;"
-            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS team_id INT;"
-            "ALTER TABLE audio_references ADD COLUMN IF NOT EXISTS created_by INT;"
-            "CREATE INDEX IF NOT EXISTS idx_audio_references_source ON audio_references(source);"
-            "CREATE INDEX IF NOT EXISTS idx_audio_references_team_id ON audio_references(team_id);"
-        )
+        statements = [
+            "ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS narrator_audio_reference_id INT;",
+            "ALTER TABLE IF EXISTS audio_references ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'system';",
+            "ALTER TABLE IF EXISTS audio_references ADD COLUMN IF NOT EXISTS duration DOUBLE PRECISION;",
+            "ALTER TABLE IF EXISTS audio_references ADD COLUMN IF NOT EXISTS team_id INT;",
+            "ALTER TABLE IF EXISTS audio_references ADD COLUMN IF NOT EXISTS created_by INT;",
+        ]
+        if include_indexes:
+            statements.append(
+                "DO $$ BEGIN "
+                "IF to_regclass('audio_references') IS NOT NULL THEN "
+                "CREATE INDEX IF NOT EXISTS idx_audio_references_source "
+                "ON audio_references(source);"
+                "CREATE INDEX IF NOT EXISTS idx_audio_references_team_id "
+                "ON audio_references(team_id);"
+                "END IF; END $$;"
+            )
+        await connection.execute_script("".join(statements))
 
 
 async def ensure_shared_team_columns() -> None:
