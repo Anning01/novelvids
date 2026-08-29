@@ -5,11 +5,14 @@ from httpx import AsyncClient
 
 from controllers.video import _compose_video_prompt
 from prompts.styles import (
+    AUTO_STYLE_KEY,
+    AUTO_STYLE_LABEL,
     STYLE_KEYS,
     STYLE_PROMPTS,
     get_style,
     image_style_suffix,
     image_project_style_suffix,
+    list_remake_styles,
     list_styles,
     video_style_suffix,
     video_project_style_suffix,
@@ -78,6 +81,14 @@ def test_list_styles_shape():
     assert len(styles) == 14
     assert styles[0] == {"key": "realistic-general", "label": "写实通用"}
     assert all(set(item) == {"key", "label"} for item in styles)
+
+
+def test_remake_styles_prepend_ai_recognition_without_changing_builtin_registry():
+    styles = list_remake_styles()
+
+    assert len(styles) == 15
+    assert styles[0] == {"key": AUTO_STYLE_KEY, "label": AUTO_STYLE_LABEL}
+    assert styles[1:] == list_styles()
 
 
 def test_video_prompt_composition_appends_style():

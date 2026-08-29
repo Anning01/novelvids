@@ -103,11 +103,11 @@ class RemakeProjectService:
                 "REMAKE_SOURCE_MODE_MISMATCH",
                 "至少需要一个来源视频",
             )
-        if bool(payload.style_key) == bool(payload.custom_style_prompt and payload.custom_style_prompt.strip()):
+        if payload.style_key and payload.custom_style_prompt and payload.custom_style_prompt.strip():
             raise RemakeError(
                 422,
                 "REMAKE_PROJECT_CONFIG_INVALID",
-                "系统风格与自定义风格必须且只能选择一种",
+                "系统风格与自定义风格只能选择一种",
             )
         try:
             project_config = validate_project_config(

@@ -106,6 +106,10 @@ async def test_capabilities_are_backend_managed(client):
     }
     assert "9:16" in body["data"]["aspect_ratios"]
     assert "720p" in body["data"]["resolutions"]
+    assert body["data"]["styles"][0] == {
+        "key": "auto",
+        "label": "AI 识别风格",
+    }
     assert {"key": "realistic-general", "label": "写实通用"} in body["data"]["styles"]
     assert body["data"]["source_modes"]["single_upload"] is True
     assert body["data"]["source_modes"]["history"] is True

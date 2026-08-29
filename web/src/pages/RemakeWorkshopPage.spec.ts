@@ -27,7 +27,10 @@ const capabilities = {
   media: { extensions: ['mp4', 'mov'], max_bytes: 500 * 1024 * 1024, max_duration_seconds: 1200 },
   aspect_ratios: ['9:16', '16:9'],
   resolutions: ['720p', '1080p'],
-  styles: [{ key: 'realistic-general', label: '写实通用' }],
+  styles: [
+    { key: 'auto', label: 'AI 识别风格' },
+    { key: 'realistic-general', label: '写实通用' },
+  ],
   source_modes: { single_upload: true, folder_upload: false, history: false },
 }
 
@@ -82,7 +85,7 @@ describe('RemakeWorkshopPage', () => {
     expect(wrapper.get('[data-source-mode="folder_upload"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-source-mode="history"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('单视频不超过 500 MB，时长不超过 20 分钟')
-    expect(wrapper.text()).toContain('写实通用')
+    expect(wrapper.text()).toContain('AI 识别风格')
   })
 
   it('rejects an unsupported local file before making a request', async () => {
@@ -119,7 +122,7 @@ describe('RemakeWorkshopPage', () => {
       source_mode: 'single_upload',
       aspect_ratio: '9:16',
       resolution: '720p',
-      style_key: 'realistic-general',
+      style_key: null,
       custom_style_prompt: null,
       idempotency_key: expect.any(String),
       sources: [{ episode_number: 1, upload_token: '01916f1a-41aa-7000-8000-000000000001' }],

@@ -32,7 +32,7 @@ const capabilityError = ref('')
 const projectName = ref('')
 const aspectRatio = ref('')
 const resolution = ref('')
-const styleKey = ref('')
+const styleKey = ref('auto')
 const customStylePrompt = ref('')
 const selectedFile = ref<File | null>(null)
 const stagedUpload = ref<RemakeUpload | null>(null)
@@ -55,11 +55,14 @@ const uploadingFolder = ref(false)
 
 const customStyleSelected = computed(() => styleKey.value === 'custom')
 const visualStyleOptions = computed(() => [
-  ...(capabilities.value?.styles ?? []).map(style => ({
-    value: style.key,
-    label: style.label,
-    image: `/style-thumbnails/${style.key}.png`,
-  })),
+  { value: 'auto', label: 'AI 识别风格' },
+  ...(capabilities.value?.styles ?? [])
+    .filter(style => style.key !== 'auto')
+    .map(style => ({
+      value: style.key,
+      label: style.label,
+      image: `/style-thumbnails/${style.key}.png`,
+    })),
   { value: 'custom', label: '自定义风格', separator: true },
 ])
 const sourceReady = computed(() => {
@@ -125,7 +128,7 @@ function folderStateLabel(entry: FolderVideoEntry): string {
 function setDefaults(data: RemakeCapabilities) {
   aspectRatio.value = data.aspect_ratios.includes('9:16') ? '9:16' : (data.aspect_ratios[0] ?? '')
   resolution.value = data.resolutions.includes('720p') ? '720p' : (data.resolutions[0] ?? '')
-  styleKey.value = data.styles[0]?.key ?? 'custom'
+  styleKey.value = 'auto'
 }
 
 async function loadCapabilities() {
@@ -328,7 +331,7 @@ async function createProject() {
       source_mode: sourceMode.value,
       aspect_ratio: aspectRatio.value,
       resolution: resolution.value,
-      style_key: customStyleSelected.value ? null : styleKey.value,
+      style_key: ['auto', 'custom'].includes(styleKey.value) ? null : styleKey.value,
       custom_style_prompt: customStyleSelected.value ? customStylePrompt.value.trim() : null,
       idempotency_key: idempotencyKey.value,
       sources,

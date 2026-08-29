@@ -101,13 +101,13 @@ async def ready_upload(service: RemakeUploadService, filename: str = "demo.mp4")
     )
 
 
-def payload(upload_id, *, key=None, name="单视频重制"):
+def payload(upload_id, *, key=None, name="单视频重制", style_key="realistic-general"):
     return RemakeProjectCreate(
         name=name,
         source_mode="single_upload",
         aspect_ratio="9:16",
         resolution="720p",
-        style_key="realistic-general",
+        style_key=style_key,
         custom_style_prompt=None,
         idempotency_key=key or uuid4(),
         sources=[{"episode_number": 1, "upload_token": upload_id}],
@@ -169,6 +169,31 @@ async def test_single_upload_creation_is_atomic_and_creates_one_decomposition_ta
     assert task.request_params["ai_task_id"] == str(task.id)
     assert upload.status == "committed"
     assert (tmp_path / source.object_key).exists()
+
+
+@pytest.mark.parametrize("style_key", [None, "auto"])
+@pytest.mark.asyncio
+async def test_auto_style_creates_remake_without_fixed_style_override(
+    tmp_path,
+    style_key,
+):
+    upload_service = RemakeUploadService(
+        validator=FakeValidator(),
+        provider=LocalProvider(),
+        media_root=tmp_path,
+    )
+    upload = await ready_upload(upload_service)
+    service = RemakeProjectService(upload_service=upload_service)
+
+    result = await service.create(
+        payload(upload.id, style_key=style_key, name="AI 自动识别风格重制"),
+        team_id=3,
+        user_id=5,
+    )
+
+    novel = await Novel.get(id=result["novel_id"])
+    assert novel.style_key is None
+    assert novel.custom_style_prompt is None
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,7 @@ from exceptions.remake import RemakeError
 from models.ai_task import AiTask
 from models.novel import Novel
 from models.remake_source import RemakeSource
-from prompts.styles import list_styles
+from prompts.styles import list_remake_styles
 from schemas.remake import RemakeProjectCreate, RemakeSourceOut
 from services.project_config import project_aspect_ratios, project_resolutions
 from services.ai_task_executor import ai_task_executor
@@ -80,7 +80,7 @@ async def get_capabilities(_: AuthContext = Depends(get_auth_context)):
             },
             "aspect_ratios": list(project_aspect_ratios()),
             "resolutions": list(project_resolutions()),
-            "styles": list_styles(),
+            "styles": list_remake_styles(),
             "episode_patterns": list(EPISODE_PATTERN_EXAMPLES),
             "source_modes": {
                 "single_upload": True,
