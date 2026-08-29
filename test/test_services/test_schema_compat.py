@@ -182,3 +182,63 @@ async def test_remake_schema_adds_project_and_task_fields_once_across_repeated_s
     assert "ADD COLUMN stage VARCHAR(32)" in script
     assert "ADD COLUMN progress INT NOT NULL DEFAULT 0" in script
     assert "CREATE UNIQUE INDEX IF NOT EXISTS" in script
+
+
+@pytest.mark.asyncio
+async def test_postgres_remake_schema_is_safe_before_tables_are_created(monkeypatch):
+    connection = AsyncMock()
+    monkeypatch.setattr(
+        "services.schema_compat.Tortoise.get_connection",
+        lambda _: connection,
+    )
+    monkeypatch.setattr(
+        "services.schema_compat.settings.DATABASE_URL",
+        "postgresql://compat-test",
+    )
+
+    await ensure_remake_schema(include_indexes=False)
+
+    script = connection.execute_script.await_args.args[0]
+    assert "ALTER TABLE IF EXISTS novels" in script
+    assert "ALTER TABLE IF EXISTS ai_tasks" in script
+    assert "CREATE INDEX" not in script
+
+
+@pytest.mark.asyncio
+async def test_postgres_voice_schema_is_safe_before_tables_are_created(monkeypatch):
+    connection = AsyncMock()
+    monkeypatch.setattr(
+        "services.schema_compat.Tortoise.get_connection",
+        lambda _: connection,
+    )
+    monkeypatch.setattr(
+        "services.schema_compat.settings.DATABASE_URL",
+        "postgresql://compat-test",
+    )
+
+    await ensure_voice_reference_schema(include_indexes=False)
+
+    script = connection.execute_script.await_args.args[0]
+    assert "ALTER TABLE IF EXISTS novels" in script
+    assert "ALTER TABLE IF EXISTS audio_references" in script
+    assert "CREATE INDEX" not in script
+
+
+@pytest.mark.asyncio
+async def test_postgres_compat_indexes_are_guarded_by_table_existence(monkeypatch):
+    connection = AsyncMock()
+    monkeypatch.setattr(
+        "services.schema_compat.Tortoise.get_connection",
+        lambda _: connection,
+    )
+    monkeypatch.setattr(
+        "services.schema_compat.settings.DATABASE_URL",
+        "postgresql://compat-test",
+    )
+
+    await ensure_remake_schema()
+    await ensure_voice_reference_schema()
+
+    scripts = [call.args[0] for call in connection.execute_script.await_args_list]
+    assert "to_regclass('novels')" in scripts[0]
+    assert "to_regclass('audio_references')" in scripts[1]
