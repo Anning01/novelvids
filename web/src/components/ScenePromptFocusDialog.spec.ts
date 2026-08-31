@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import ScenePromptFocusDialog from './ScenePromptFocusDialog.vue'
 import type { ScenePromptMentionOption } from './ScenePromptEditor.vue'
@@ -14,6 +14,7 @@ const options: ScenePromptMentionOption[] = [{
 }]
 
 afterEach(() => {
+  vi.restoreAllMocks()
   document.body.style.overflow = ''
   document.body.innerHTML = ''
 })
@@ -91,6 +92,48 @@ describe('ScenePromptFocusDialog', () => {
     await nextTick()
 
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('also closes on Escape keyup when Chrome consumes the editor keydown', async () => {
+    const wrapper = mountDialog(true)
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('accepts the legacy Esc key value emitted by some Chrome input states', async () => {
+    const wrapper = mountDialog(true)
+
+    await wrapper.get('.scene-prompt-editor__input').trigger('keydown', { key: 'Esc' })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('exits when Chrome consumes Escape and only blurs the contenteditable to the page body', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    const wrapper = mountDialog(true)
+    await nextTick()
+    document.body.tabIndex = -1
+    document.body.focus()
+    await new Promise(resolve => window.setTimeout(resolve))
+
+    expect(document.activeElement).toBe(document.body)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('does not exit when a pointer interaction inside the dialog blurs the editor', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    const wrapper = mountDialog(true)
+    await nextTick()
+    await wrapper.get('[role="dialog"]').trigger('pointerdown')
+    document.body.tabIndex = -1
+    document.body.focus()
+    await new Promise(resolve => window.setTimeout(resolve))
+
+    expect(wrapper.emitted('close')).toBeUndefined()
   })
 
   it('exits focus mode with one Escape even when a nested media preview is open', async () => {

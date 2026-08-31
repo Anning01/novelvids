@@ -22,6 +22,8 @@ const emit = defineEmits<{
 const dialog = ref<HTMLElement | null>(null)
 let previousActiveElement: HTMLElement | null = null
 let previousBodyOverflow = ''
+let escapeCloseRequested = false
+let lastDialogPointerdownAt = 0
 
 function close() {
   emit('close')
@@ -40,7 +42,38 @@ function focusableElements() {
   ].join(','))].filter(element => element.getAttribute('aria-hidden') !== 'true')
 }
 
+function isEscapeKey(event: KeyboardEvent) {
+  return event.key === 'Escape' || event.key === 'Esc' || event.code === 'Escape' || event.keyCode === 27
+}
+
+function closeFromEscape(event: KeyboardEvent) {
+  if (!props.open || escapeCloseRequested) return
+  escapeCloseRequested = true
+  event.preventDefault()
+  event.stopPropagation()
+  close()
+}
+
+function handleDialogPointerdown() {
+  lastDialogPointerdownAt = performance.now()
+}
+
+function handleDialogFocusout() {
+  window.setTimeout(() => {
+    if (!props.open || escapeCloseRequested || !document.hasFocus()) return
+    if (dialog.value?.contains(document.activeElement)) return
+    if (performance.now() - lastDialogPointerdownAt < 250) return
+    if (document.activeElement !== document.body) return
+    escapeCloseRequested = true
+    close()
+  })
+}
+
 function handleKeydown(event: KeyboardEvent) {
+  if (isEscapeKey(event)) {
+    closeFromEscape(event)
+    return
+  }
   if (event.key !== 'Tab') return
   const elements = focusableElements()
   if (!elements.length) {
@@ -60,16 +93,25 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-function handleWindowKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || !props.open) return
-  event.preventDefault()
-  event.stopPropagation()
-  close()
+function handleWindowEscape(event: KeyboardEvent) {
+  if (isEscapeKey(event)) closeFromEscape(event)
+}
+
+function addEscapeListeners() {
+  window.addEventListener('keydown', handleWindowEscape, true)
+  window.addEventListener('keyup', handleWindowEscape, true)
+}
+
+function removeEscapeListeners() {
+  window.removeEventListener('keydown', handleWindowEscape, true)
+  window.removeEventListener('keyup', handleWindowEscape, true)
 }
 
 watch(() => props.open, async open => {
   if (open) {
-    window.addEventListener('keydown', handleWindowKeydown, true)
+    escapeCloseRequested = false
+    lastDialogPointerdownAt = 0
+    addEscapeListeners()
     previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
     previousBodyOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -77,7 +119,7 @@ watch(() => props.open, async open => {
     dialog.value?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus()
     return
   }
-  window.removeEventListener('keydown', handleWindowKeydown, true)
+  removeEscapeListeners()
   document.body.style.overflow = previousBodyOverflow
   await nextTick()
   previousActiveElement?.focus()
@@ -85,7 +127,7 @@ watch(() => props.open, async open => {
 }, { immediate: true })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleWindowKeydown, true)
+  removeEscapeListeners()
   document.body.style.overflow = previousBodyOverflow
   previousActiveElement?.focus()
 })
@@ -102,7 +144,9 @@ onBeforeUnmount(() => {
           aria-modal="true"
           aria-labelledby="scene-prompt-focus-title"
           tabindex="-1"
+          @focusout="handleDialogFocusout"
           @keydown="handleKeydown"
+          @pointerdown="handleDialogPointerdown"
         >
           <header class="scene-prompt-focus__header">
             <span class="scene-prompt-focus__icon"><Focus :size="19" /></span>
