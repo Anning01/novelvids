@@ -24,9 +24,11 @@ const props = withDefaults(defineProps<{
   options: ScenePromptMentionOption[]
   placeholder?: string
   embedded?: boolean
+  focusMode?: boolean
 }>(), {
   placeholder: '请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。',
   embedded: false,
+  focusMode: false,
 })
 
 const emit = defineEmits<{
@@ -41,6 +43,8 @@ const menuPosition = ref({ left: 0, top: 0 })
 const triggerTextNode = ref<Text | null>(null)
 const triggerStartOffset = ref(0)
 const previewOption = ref<ScenePromptMentionOption | null>(null)
+const hoverPreviewOption = ref<ScenePromptMentionOption | null>(null)
+const hoverPreviewPosition = ref({ left: 0, top: 0 })
 const durationAnchor = ref<HTMLElement | null>(null)
 const durationInput = ref<HTMLInputElement | null>(null)
 const durationEditorOpen = ref(false)
@@ -71,6 +75,8 @@ const groupedOptions = computed(() => {
 const activeOption = computed(() => filteredOptions.value[activeIndex.value] || null)
 const durationMentionOption = computed(() => filteredOptions.value.find(item => item.kind === 'duration') || null)
 const imagePreview = computed(() => previewOption.value?.kind !== 'video' ? previewOption.value : null)
+const hoverPreviewSource = computed(() => hoverPreviewOption.value?.previewUrl || hoverPreviewOption.value?.thumbnailUrl || '')
+const hoverPreviewStyle = computed(() => ({ left: `${hoverPreviewPosition.value.left}px`, top: `${hoverPreviewPosition.value.top}px` }))
 const menuStyle = computed(() => ({ left: `${menuPosition.value.left}px`, top: `${menuPosition.value.top}px` }))
 const durationStyle = computed(() => ({ left: `${durationPosition.value.left}px`, top: `${durationPosition.value.top}px` }))
 const durationNumber = computed(() => Number(durationValue.value))
@@ -185,6 +191,7 @@ function findNextMention(value: string, start: number) {
 
 function renderValue(value = props.modelValue) {
   if (!editor.value) return
+  closeHoverPreview()
   editor.value.querySelectorAll<HTMLElement>('.scene-prompt-editor__duration-icon, .scene-prompt-editor__audio-icon').forEach(host => render(null, host))
   const fragment = document.createDocumentFragment()
   let offset = 0
@@ -307,7 +314,65 @@ function selectMention(option: ScenePromptMentionOption) {
 }
 
 function openPreview(option: ScenePromptMentionOption) {
+  closeHoverPreview()
   if (option.previewUrl) previewOption.value = option
+}
+
+function closeHoverPreview() {
+  hoverPreviewOption.value = null
+}
+
+function placeHoverPreview(anchor: HTMLElement) {
+  const rect = anchor.getBoundingClientRect()
+  const width = Math.min(420, window.innerWidth - 24)
+  const height = Math.min(width * 9 / 16, window.innerHeight - 24)
+  const gap = 12
+  const left = Math.max(12, Math.min(
+    rect.left + rect.width / 2 - width / 2,
+    window.innerWidth - width - 12,
+  ))
+  const spaceAbove = rect.top - gap
+  const spaceBelow = window.innerHeight - rect.bottom - gap
+  const showAbove = spaceAbove >= height || spaceAbove >= spaceBelow
+  const preferredTop = showAbove ? rect.top - height - gap : rect.bottom + gap
+  const top = Math.max(12, Math.min(preferredTop, window.innerHeight - height - 12))
+  hoverPreviewPosition.value = { left, top }
+}
+
+function showHoverPreview(mention: HTMLElement) {
+  if (!props.focusMode) return
+  const option = props.options.find(item => item.id === mention.dataset.mentionId)
+  if (!option || option.kind === 'audio' || option.kind === 'duration' || !(option.previewUrl || option.thumbnailUrl)) return
+  placeHoverPreview(mention)
+  hoverPreviewOption.value = option
+}
+
+function mentionFromEvent(event: Event) {
+  const target = event.target
+  return target instanceof Element ? target.closest<HTMLElement>('[data-mention-id]') : null
+}
+
+function handleEditorPointerover(event: PointerEvent) {
+  const mention = mentionFromEvent(event)
+  if (!mention || (event.relatedTarget instanceof Node && mention.contains(event.relatedTarget))) return
+  showHoverPreview(mention)
+}
+
+function handleEditorPointerout(event: PointerEvent) {
+  const mention = mentionFromEvent(event)
+  if (!mention || (event.relatedTarget instanceof Node && mention.contains(event.relatedTarget))) return
+  if (hoverPreviewOption.value?.id === mention.dataset.mentionId) closeHoverPreview()
+}
+
+function handleEditorFocusin(event: FocusEvent) {
+  const mention = mentionFromEvent(event)
+  if (mention) showHoverPreview(mention)
+}
+
+function handleEditorFocusout(event: FocusEvent) {
+  const mention = mentionFromEvent(event)
+  if (!mention || (event.relatedTarget instanceof Node && mention.contains(event.relatedTarget))) return
+  if (hoverPreviewOption.value?.id === mention.dataset.mentionId) closeHoverPreview()
 }
 
 function syncAudioMentionState() {
@@ -467,12 +532,24 @@ function closePreview() {
   previewOption.value = null
 }
 
-function handleWindowKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && durationEditorOpen.value) {
+function consumeEscape() {
+  if (durationEditorOpen.value) {
     closeDurationEditor()
-    return
+    return true
   }
-  if (event.key === 'Escape' && previewOption.value) closePreview()
+  if (previewOption.value) {
+    closePreview()
+    return true
+  }
+  if (menuOpen.value) {
+    menuOpen.value = false
+    return true
+  }
+  return false
+}
+
+function handleWindowKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && consumeEscape()) event.preventDefault()
 }
 
 watch(() => props.modelValue, () => {
@@ -513,7 +590,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="scene-prompt-editor" :class="{ 'is-embedded': embedded }">
+  <section class="scene-prompt-editor" :class="{ 'is-embedded': embedded, 'is-focus-mode': focusMode }">
     <div
       ref="editor"
       class="scene-prompt-editor__input"
@@ -524,10 +601,31 @@ onBeforeUnmount(() => {
       :data-placeholder="placeholder"
       spellcheck="true"
       @input="handleInput"
+      @scroll.passive="closeHoverPreview"
       @pointerdown="handleEditorPointerdown"
+      @pointerover="handleEditorPointerover"
+      @pointerout="handleEditorPointerout"
       @click="handleEditorClick"
+      @focusin="handleEditorFocusin"
+      @focusout="handleEditorFocusout"
       @keydown="handleEditorKeydown"
     />
+
+    <Teleport to="body">
+      <Transition name="scene-prompt-hover-preview">
+        <aside
+          v-if="focusMode && hoverPreviewOption && hoverPreviewSource"
+          class="scene-prompt-hover-preview"
+          :class="`is-${hoverPreviewOption.kind}`"
+          :style="hoverPreviewStyle"
+          role="tooltip"
+          :aria-label="`${hoverPreviewOption.label}预览`"
+        >
+          <video v-if="hoverPreviewOption.kind === 'video'" :src="hoverPreviewSource" muted autoplay loop playsinline preload="metadata" />
+          <img v-else :src="hoverPreviewSource" :alt="hoverPreviewOption.label" />
+        </aside>
+      </Transition>
+    </Teleport>
 
     <Teleport to="body">
       <Transition name="scene-prompt-menu">
@@ -612,9 +710,12 @@ onBeforeUnmount(() => {
 .scene-prompt-editor:focus-within { border-color: color-mix(in srgb,var(--app-accent) 46%,var(--app-border)); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 9%,transparent),0 10px 28px rgb(17 24 39 / 4%); }
 .scene-prompt-editor.is-embedded { min-height: 320px; max-height: 600px; align-self: start; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .scene-prompt-editor.is-embedded:focus-within { border-color: transparent; box-shadow: none; }
+.scene-prompt-editor.is-focus-mode { width: 100%; height: 100%; min-height: 0; max-height: none; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.scene-prompt-editor.is-focus-mode:focus-within { border-color: transparent; box-shadow: none; }
 .scene-prompt-editor__input { min-width: 0; min-height: 420px; overflow: auto; padding: 1px 16px 20px; outline: 0; color: var(--app-text-secondary); background: var(--app-surface); font-size: 11px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: var(--app-accent); }
 .scene-prompt-editor.is-embedded .scene-prompt-editor__input { min-height: 320px; max-height: 600px; overflow-y: auto; background: transparent; scrollbar-width: none; }
 .scene-prompt-editor.is-embedded .scene-prompt-editor__input::-webkit-scrollbar { display: none; }
+.scene-prompt-editor.is-focus-mode .scene-prompt-editor__input { height: 100%; min-height: 0; max-height: none; padding: 24px 28px 40px; background: transparent; font-size: 14px; line-height: 2; scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
 .scene-prompt-editor__input:focus { background: color-mix(in srgb,var(--app-surface) 98%,var(--app-accent)); }
 .scene-prompt-editor__input[data-empty='true']::before { color: var(--app-text-muted); content: attr(data-placeholder); pointer-events: none; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention) { display: inline-flex; max-width: 220px; min-height: 24px; align-items: center; gap: 5px; margin: 0 2px; padding: 2px 7px 2px 3px; border-radius: 7px; color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 10px; font-weight: 650; line-height: 20px; vertical-align: middle; user-select: all; }
@@ -630,6 +731,10 @@ onBeforeUnmount(() => {
 .scene-prompt-editor__input :deep(.scene-prompt-editor__duration-icon),.scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { display: inline-grid; width: 14px; height: 14px; flex: 0 0 14px; place-items: center; color: currentColor; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { width: 18px; height: 18px; flex-basis: 18px; border-radius: 6px; color: var(--app-accent); background: color-mix(in srgb,var(--app-accent) 10%,transparent); transition: color .16s ease,background .16s ease,transform .16s ease; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio.is-playing .scene-prompt-editor__audio-icon) { color: #fff; background: var(--app-accent); transform: scale(.94); }
+.scene-prompt-hover-preview { position: fixed; z-index: 178; display: block; width: min(420px,calc(100vw - 24px)); aspect-ratio: 16/9; overflow: hidden; border: 0; border-radius: 16px; background: transparent; box-shadow: none; pointer-events: none; }
+.scene-prompt-hover-preview > img,.scene-prompt-hover-preview > video { display: block; width: 100%; height: 100%; border: 0; background: transparent; object-fit: cover; }
+.scene-prompt-hover-preview-enter-active,.scene-prompt-hover-preview-leave-active { transition: opacity .14s ease,transform .16s cubic-bezier(.2,.72,.2,1); transform-origin: center; }
+.scene-prompt-hover-preview-enter-from,.scene-prompt-hover-preview-leave-to { opacity: 0; transform: translateY(4px) scale(.985); }
 .scene-prompt-mentions { position: fixed; z-index: 170; display: grid; width: min(340px,calc(100vw - 24px)); max-height: 340px; grid-template-rows: auto minmax(0,1fr) auto; overflow: hidden; border-radius: 13px; color: var(--app-text-secondary); background: var(--app-surface-raised); box-shadow: var(--app-shadow), inset 0 0 0 1px var(--app-border); backdrop-filter: blur(16px); }
 .scene-prompt-mentions > header { display: flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 11px; border-bottom: 1px solid var(--app-border); }
 .scene-prompt-mentions > header svg { color: var(--app-accent); }
@@ -675,7 +780,8 @@ onBeforeUnmount(() => {
   .scene-prompt-video-preview { padding: 10px; }
   .scene-prompt-video-preview > section { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
 }
+@media (hover: none) { .scene-prompt-hover-preview { display: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .scene-prompt-menu-enter-active,.scene-prompt-menu-leave-active,.scene-prompt-preview-enter-active,.scene-prompt-preview-leave-active { transition-duration: .01ms !important; }
+  .scene-prompt-menu-enter-active,.scene-prompt-menu-leave-active,.scene-prompt-preview-enter-active,.scene-prompt-preview-leave-active,.scene-prompt-hover-preview-enter-active,.scene-prompt-hover-preview-leave-active { transition-duration: .01ms !important; }
 }
 </style>

@@ -69,6 +69,94 @@ describe('ScenePromptEditor', () => {
     expect(wrapper.find('.image-lightbox').exists()).toBe(true)
   })
 
+  it('previews referenced images and videos on hover in focus mode only', async () => {
+    const videoOption: ScenePromptMentionOption = {
+      id: 'video-5',
+      kind: 'video',
+      label: '走廊参考视频',
+      syntax: '@{视频#走廊参考视频}',
+      group: '参考视频',
+      previewUrl: '/media/hallway.mp4',
+      thumbnailUrl: '/media/hallway.mp4',
+    }
+    const wrapper = mount(ScenePromptEditor, {
+      props: {
+        modelValue: '@{断罪山脉} 转场至 @{视频#走廊参考视频}',
+        options: [...options, videoOption],
+        focusMode: true,
+      },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    await wrapper.get('[data-mention-id="scene-1"]').trigger('pointerover')
+    expect(wrapper.get('.scene-prompt-hover-preview img').attributes('src')).toBe('/media/mountain.png')
+    expect(wrapper.get('.scene-prompt-hover-preview').attributes('role')).toBe('tooltip')
+    expect(wrapper.find('.scene-prompt-hover-preview footer').exists()).toBe(false)
+    expect(wrapper.get('.scene-prompt-hover-preview').text()).toBe('')
+
+    await wrapper.get('[data-mention-id="scene-1"]').trigger('pointerout')
+    expect(wrapper.find('.scene-prompt-hover-preview').exists()).toBe(false)
+
+    await wrapper.get('[data-mention-id="video-5"]').trigger('pointerover')
+    const video = wrapper.get('.scene-prompt-hover-preview video')
+    expect(video.attributes('src')).toBe('/media/hallway.mp4')
+    expect(video.attributes('autoplay')).toBeDefined()
+    expect(video.attributes('loop')).toBeDefined()
+    expect((video.element as HTMLVideoElement).muted).toBe(true)
+  })
+
+  it('centers hover previews above or below the referenced token instead of beside it', async () => {
+    vi.stubGlobal('innerWidth', 1000)
+    vi.stubGlobal('innerHeight', 800)
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '@{断罪山脉}', options, focusMode: true },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+    const mention = wrapper.get<HTMLElement>('[data-mention-id="scene-1"]')
+    const rect = vi.spyOn(mention.element, 'getBoundingClientRect').mockReturnValue({
+      left: 450,
+      right: 550,
+      top: 500,
+      bottom: 520,
+      width: 100,
+      height: 20,
+      x: 450,
+      y: 500,
+      toJSON: () => ({}),
+    })
+
+    await mention.trigger('pointerover')
+
+    expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('left: 290px')
+    expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('top: 251.75px')
+
+    await mention.trigger('pointerout')
+    rect.mockReturnValue({
+      left: 450,
+      right: 550,
+      top: 40,
+      bottom: 60,
+      width: 100,
+      height: 20,
+      x: 450,
+      y: 40,
+      toJSON: () => ({}),
+    })
+    await mention.trigger('pointerover')
+    expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('left: 290px')
+    expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('top: 72px')
+  })
+
+  it('does not show hover previews outside focus mode', async () => {
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '@{断罪山脉}', options },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    await wrapper.get('[data-mention-id="scene-1"]').trigger('pointerover')
+    expect(wrapper.find('.scene-prompt-hover-preview').exists()).toBe(false)
+  })
+
   it('将音频引用渲染为可点击播放的音色标签', async () => {
     const play = vi.fn().mockResolvedValue(undefined)
     const pause = vi.fn()
