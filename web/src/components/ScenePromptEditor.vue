@@ -24,9 +24,11 @@ const props = withDefaults(defineProps<{
   options: ScenePromptMentionOption[]
   placeholder?: string
   embedded?: boolean
+  focusMode?: boolean
 }>(), {
   placeholder: '请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。',
   embedded: false,
+  focusMode: false,
 })
 
 const emit = defineEmits<{
@@ -513,7 +515,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="scene-prompt-editor" :class="{ 'is-embedded': embedded }">
+  <section class="scene-prompt-editor" :class="{ 'is-embedded': embedded, 'is-focus-mode': focusMode }">
     <div
       ref="editor"
       class="scene-prompt-editor__input"
@@ -612,9 +614,12 @@ onBeforeUnmount(() => {
 .scene-prompt-editor:focus-within { border-color: color-mix(in srgb,var(--app-accent) 46%,var(--app-border)); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 9%,transparent),0 10px 28px rgb(17 24 39 / 4%); }
 .scene-prompt-editor.is-embedded { min-height: 320px; max-height: 600px; align-self: start; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .scene-prompt-editor.is-embedded:focus-within { border-color: transparent; box-shadow: none; }
+.scene-prompt-editor.is-focus-mode { width: 100%; height: 100%; min-height: 0; max-height: none; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.scene-prompt-editor.is-focus-mode:focus-within { border-color: transparent; box-shadow: none; }
 .scene-prompt-editor__input { min-width: 0; min-height: 420px; overflow: auto; padding: 1px 16px 20px; outline: 0; color: var(--app-text-secondary); background: var(--app-surface); font-size: 11px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: var(--app-accent); }
 .scene-prompt-editor.is-embedded .scene-prompt-editor__input { min-height: 320px; max-height: 600px; overflow-y: auto; background: transparent; scrollbar-width: none; }
 .scene-prompt-editor.is-embedded .scene-prompt-editor__input::-webkit-scrollbar { display: none; }
+.scene-prompt-editor.is-focus-mode .scene-prompt-editor__input { height: 100%; min-height: 0; max-height: none; padding: 24px 28px 40px; background: transparent; font-size: 14px; line-height: 2; scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
 .scene-prompt-editor__input:focus { background: color-mix(in srgb,var(--app-surface) 98%,var(--app-accent)); }
 .scene-prompt-editor__input[data-empty='true']::before { color: var(--app-text-muted); content: attr(data-placeholder); pointer-events: none; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention) { display: inline-flex; max-width: 220px; min-height: 24px; align-items: center; gap: 5px; margin: 0 2px; padding: 2px 7px 2px 3px; border-radius: 7px; color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 10px; font-weight: 650; line-height: 20px; vertical-align: middle; user-select: all; }

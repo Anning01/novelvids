@@ -8,6 +8,7 @@ import {
   GripVertical,
   ImageIcon,
   LoaderCircle,
+  Maximize2,
   MonitorPlay,
   PanelsTopLeft,
   Plus,
@@ -27,6 +28,7 @@ import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
+import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
 import SceneReferenceMediaBar from '@/components/SceneReferenceMediaBar.vue'
 import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
 import ShortDramaBatchVideoDialog, { type BatchVideoGenerationRequest, type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
@@ -120,6 +122,7 @@ const refreshingVideoHistorySceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
 const videoGenerationErrors = ref<Record<number, string>>({})
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
+const focusedPromptSceneId = ref(0)
 const highlightedReferenceKey = ref('')
 const openAssetPickerKey = ref('')
 const assetPickerFocusIds = ref<Record<string, number>>({})
@@ -329,6 +332,10 @@ function draftFor(scene: Scene) {
   if (!sceneDrafts.value[scene.id]) sceneDrafts.value[scene.id] = makeSceneDraft(scene)
   return sceneDrafts.value[scene.id]
 }
+
+const focusedPromptScene = computed(() => scenes.value.find(scene => scene.id === focusedPromptSceneId.value) || null)
+const focusedPromptValue = computed(() => focusedPromptScene.value ? draftFor(focusedPromptScene.value).prompt : '')
+const focusedPromptOptions = computed(() => focusedPromptScene.value ? promptMentionOptions(focusedPromptScene.value) : [])
 
 function initializeSceneDrafts(items: Scene[]) {
   sceneDrafts.value = Object.fromEntries(items.map(scene => [scene.id, makeSceneDraft(scene)]))
@@ -1094,6 +1101,7 @@ async function fetchChapterScenes(chapterId: number) {
 }
 
 function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>>) {
+  focusedPromptSceneId.value = 0
   activeChapter.value = result.chapter
   assets.value = result.assets
   scenes.value = result.scenes
@@ -1290,6 +1298,7 @@ async function regenerateStoryboard() {
 
 async function loadChapter(chapterId: number) {
   const loadVersion = ++chapterLoadVersion
+  focusedPromptSceneId.value = 0
   activeChapterId.value = chapterId
   activeChapter.value = chapters.value.find(item => item.id === chapterId) ?? null
   scenes.value = []
@@ -1430,6 +1439,7 @@ function setupChapterToolbarObserver() {
 async function selectChapter(chapter: Chapter) {
   if (chapter.id === activeChapterId.value) return
   chapterDetailOpen.value = false
+  focusedPromptSceneId.value = 0
   await flushPendingSceneSaves()
   await router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   await loadChapter(chapter.id)
@@ -1463,6 +1473,19 @@ function updateSceneText(scene: Scene, field: 'description' | 'prompt', event: E
 function updateScenePrompt(scene: Scene, value: string) {
   draftFor(scene).prompt = value
   scheduleSceneSave(scene)
+}
+
+function openPromptFocus(scene: Scene) {
+  activeSceneId.value = scene.id
+  focusedPromptSceneId.value = scene.id
+}
+
+function closePromptFocus() {
+  focusedPromptSceneId.value = 0
+}
+
+function updateFocusedPrompt(value: string) {
+  if (focusedPromptScene.value) updateScenePrompt(focusedPromptScene.value, value)
 }
 
 function updateSceneDraft<K extends keyof SceneDraft>(scene: Scene, field: K, value: SceneDraft[K]) {
@@ -1588,6 +1611,7 @@ async function removeScene(scene: Scene) {
     tone: 'danger',
   })) return
   try {
+    if (focusedPromptSceneId.value === scene.id) closePromptFocus()
     await api.deleteScene(scene.id)
     scenes.value = scenes.value.filter(item => item.id !== scene.id)
     delete sceneDrafts.value[scene.id]
@@ -2009,7 +2033,18 @@ onBeforeUnmount(() => {
               </aside>
 
               <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
-                <header><div><span><strong>分镜视频生成</strong><small>组合角色、场景和动作，生成连续镜头</small></span></div></header>
+                <header>
+                  <div><span><strong>分镜视频生成</strong><small>组合角色、场景和动作，生成连续镜头</small></span></div>
+                  <AppButton
+                    variant="ghost"
+                    size="sm"
+                    icon-only
+                    class="prompt-focus-trigger"
+                    :aria-label="`放大编辑分镜 ${scene.sequence} 提示词`"
+                    title="专注编辑"
+                    @click="openPromptFocus(scene)"
+                  ><Maximize2 :size="16" /></AppButton>
+                </header>
                 <div v-if="draftFor(scene).videoGenerationMode === 'keyframes'" class="keyframe-inputs">
                   <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" alt="首帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>上传首帧</strong><small>视频开始画面</small></span><i>首帧</i></label>
                   <span>→</span>
@@ -2117,6 +2152,14 @@ onBeforeUnmount(() => {
       @close="closeAssetVoicePicker"
       @choose="selectAssetVoiceReference"
     />
+    <ScenePromptFocusDialog
+      :open="Boolean(focusedPromptScene)"
+      :scene-sequence="focusedPromptScene?.sequence || 0"
+      :model-value="focusedPromptValue"
+      :options="focusedPromptOptions"
+      @close="closePromptFocus"
+      @update:model-value="updateFocusedPrompt"
+    />
   </main>
 </template>
 
@@ -2216,6 +2259,8 @@ onBeforeUnmount(() => {
 .prompt-panel > header > div { display: flex; min-width: 0; align-items: center; gap: 10px; color: var(--app-text); }
 .prompt-panel > header span { display: grid; min-width: 0; gap: 3px; }
 .prompt-panel > header small { color: var(--app-text-muted); font-size: 9px; font-weight: 400; }
+.prompt-focus-trigger { color: var(--app-text-muted); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
+.prompt-focus-trigger:hover:not(:disabled) { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 24%,var(--app-border)); }
 .keyframe-inputs { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 10px; padding: 0 16px 14px; }
 .keyframe-inputs > span { color: #a0a5b2; font-size: 16px; }
 .keyframe-inputs label { position: relative; display: grid; min-height: 112px; overflow: hidden; place-items: center; border-radius: 12px; color: #858b9a; background: #f7f8fb; box-shadow: inset 0 0 0 1px #e8eaf1; cursor: pointer; }
