@@ -123,7 +123,6 @@ onBeforeUnmount(() => {
           <footer class="scene-prompt-focus__footer">
             <span>输入 <kbd>@</kbd> 可继续引用角色、场景、道具与素材</span>
             <span>{{ modelValue.length.toLocaleString() }} 字符 · 修改自动保存</span>
-            <AppButton type="button" variant="primary" size="sm" @click="close">完成编辑</AppButton>
           </footer>
         </section>
       </div>
@@ -143,7 +142,7 @@ onBeforeUnmount(() => {
 .scene-prompt-focus__body { min-height: 0; overflow: hidden; padding: 14px 18px; background: color-mix(in srgb,var(--app-surface-muted) 72%,var(--app-surface)); }
 .scene-prompt-focus__body :deep(.scene-prompt-editor) { border-radius: 15px; background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border),0 10px 30px rgb(22 27 45 / 4%); }
 .scene-prompt-focus__body :deep(.scene-prompt-editor:focus-within) { box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 48%,var(--app-border)),0 0 0 3px color-mix(in srgb,var(--app-accent) 8%,transparent); }
-.scene-prompt-focus__footer { display: grid; min-height: 66px; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 18px; padding: 10px 18px; border-top: 1px solid var(--app-border); color: var(--app-text-muted); background: var(--app-surface); font-size: 10px; }
+.scene-prompt-focus__footer { display: grid; min-height: 66px; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 18px; padding: 10px 18px; border-top: 1px solid var(--app-border); color: var(--app-text-muted); background: var(--app-surface); font-size: 10px; }
 .scene-prompt-focus__footer > span:first-child { color: var(--app-text-secondary); }
 .scene-prompt-focus__footer kbd { padding: 2px 5px; border-radius: 5px; color: var(--app-accent); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px var(--app-border); font: inherit; font-weight: 750; }
 .scene-prompt-focus-enter-active,.scene-prompt-focus-leave-active { transition: opacity .2s ease; }
@@ -159,8 +158,9 @@ onBeforeUnmount(() => {
   .scene-prompt-focus__header h2 { font-size: 16px; }
   .scene-prompt-focus__body { padding: 8px; }
   .scene-prompt-focus__body :deep(.scene-prompt-editor__input) { padding: 18px 16px 32px; font-size: 13px; }
-  .scene-prompt-focus__footer { min-height: 58px; grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding: 8px 10px; }
+  .scene-prompt-focus__footer { min-height: 58px; grid-template-columns: 1fr; gap: 10px; padding: 8px 10px; }
   .scene-prompt-focus__footer > span:first-child { display: none; }
+  .scene-prompt-focus__footer > span:last-child { justify-self: end; }
 }
 @media (prefers-reduced-motion: reduce) {
   .scene-prompt-focus-enter-active,.scene-prompt-focus-leave-active,.scene-prompt-focus-enter-active .scene-prompt-focus,.scene-prompt-focus-leave-active .scene-prompt-focus { transition-duration: .01ms; }

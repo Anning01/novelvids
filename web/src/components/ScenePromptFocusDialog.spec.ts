@@ -49,6 +49,7 @@ describe('ScenePromptFocusDialog', () => {
     const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
     expect(dialog.attributes('aria-modal')).toBe('true')
     expect(dialog.text()).toContain('分镜 3 · 专注编辑')
+    expect(wrapper.find('.scene-prompt-focus__footer button').exists()).toBe(false)
     expect(document.body.style.overflow).toBe('hidden')
     expect(document.activeElement).toBe(editor.element)
   })
