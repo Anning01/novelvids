@@ -20,7 +20,6 @@ const emit = defineEmits<{
 }>()
 
 const dialog = ref<HTMLElement | null>(null)
-const promptEditor = ref<InstanceType<typeof ScenePromptEditor> | null>(null)
 let previousActiveElement: HTMLElement | null = null
 let previousBodyOverflow = ''
 
@@ -65,7 +64,6 @@ function handleWindowKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !props.open) return
   event.preventDefault()
   event.stopPropagation()
-  if (promptEditor.value?.consumeEscape()) return
   close()
 }
 
@@ -118,7 +116,6 @@ onBeforeUnmount(() => {
 
           <main class="scene-prompt-focus__body">
             <ScenePromptEditor
-              ref="promptEditor"
               :model-value="modelValue"
               :options="options"
               :placeholder="placeholder"

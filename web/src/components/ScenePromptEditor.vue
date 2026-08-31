@@ -552,8 +552,6 @@ function handleWindowKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && consumeEscape()) event.preventDefault()
 }
 
-defineExpose({ consumeEscape })
-
 watch(() => props.modelValue, () => {
   if (editorValue() === props.modelValue) return
   renderValue()

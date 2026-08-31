@@ -93,15 +93,10 @@ describe('ScenePromptFocusDialog', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('uses the first Escape to close a nested media preview and the second to exit focus mode', async () => {
+  it('exits focus mode with one Escape even when a nested media preview is open', async () => {
     const wrapper = mountDialog(true)
     await wrapper.get('.scene-prompt-editor__mention').trigger('click')
     expect(wrapper.find('[aria-label="图片放大查看"]').exists()).toBe(true)
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    await nextTick()
-    expect(wrapper.emitted('close')).toBeUndefined()
-    expect(wrapper.find('[aria-label="图片放大查看"]').exists()).toBe(false)
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     await nextTick()
