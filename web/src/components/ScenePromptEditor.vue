@@ -43,6 +43,8 @@ const menuPosition = ref({ left: 0, top: 0 })
 const triggerTextNode = ref<Text | null>(null)
 const triggerStartOffset = ref(0)
 const previewOption = ref<ScenePromptMentionOption | null>(null)
+const hoverPreviewOption = ref<ScenePromptMentionOption | null>(null)
+const hoverPreviewPosition = ref({ left: 0, top: 0 })
 const durationAnchor = ref<HTMLElement | null>(null)
 const durationInput = ref<HTMLInputElement | null>(null)
 const durationEditorOpen = ref(false)
@@ -73,6 +75,8 @@ const groupedOptions = computed(() => {
 const activeOption = computed(() => filteredOptions.value[activeIndex.value] || null)
 const durationMentionOption = computed(() => filteredOptions.value.find(item => item.kind === 'duration') || null)
 const imagePreview = computed(() => previewOption.value?.kind !== 'video' ? previewOption.value : null)
+const hoverPreviewSource = computed(() => hoverPreviewOption.value?.previewUrl || hoverPreviewOption.value?.thumbnailUrl || '')
+const hoverPreviewStyle = computed(() => ({ left: `${hoverPreviewPosition.value.left}px`, top: `${hoverPreviewPosition.value.top}px` }))
 const menuStyle = computed(() => ({ left: `${menuPosition.value.left}px`, top: `${menuPosition.value.top}px` }))
 const durationStyle = computed(() => ({ left: `${durationPosition.value.left}px`, top: `${durationPosition.value.top}px` }))
 const durationNumber = computed(() => Number(durationValue.value))
@@ -187,6 +191,7 @@ function findNextMention(value: string, start: number) {
 
 function renderValue(value = props.modelValue) {
   if (!editor.value) return
+  closeHoverPreview()
   editor.value.querySelectorAll<HTMLElement>('.scene-prompt-editor__duration-icon, .scene-prompt-editor__audio-icon').forEach(host => render(null, host))
   const fragment = document.createDocumentFragment()
   let offset = 0
@@ -309,7 +314,64 @@ function selectMention(option: ScenePromptMentionOption) {
 }
 
 function openPreview(option: ScenePromptMentionOption) {
+  closeHoverPreview()
   if (option.previewUrl) previewOption.value = option
+}
+
+function closeHoverPreview() {
+  hoverPreviewOption.value = null
+}
+
+function placeHoverPreview(anchor: HTMLElement) {
+  const rect = anchor.getBoundingClientRect()
+  const width = Math.min(420, window.innerWidth - 24)
+  const height = Math.min(324, window.innerHeight - 24)
+  const gap = 12
+  const preferredLeft = rect.right + gap
+  const left = preferredLeft + width <= window.innerWidth - 12
+    ? preferredLeft
+    : rect.left - width - gap >= 12
+      ? rect.left - width - gap
+      : Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))
+  const preferredTop = rect.top + rect.height / 2 - height / 2
+  const top = Math.max(12, Math.min(preferredTop, window.innerHeight - height - 12))
+  hoverPreviewPosition.value = { left, top }
+}
+
+function showHoverPreview(mention: HTMLElement) {
+  if (!props.focusMode) return
+  const option = props.options.find(item => item.id === mention.dataset.mentionId)
+  if (!option || option.kind === 'audio' || option.kind === 'duration' || !(option.previewUrl || option.thumbnailUrl)) return
+  placeHoverPreview(mention)
+  hoverPreviewOption.value = option
+}
+
+function mentionFromEvent(event: Event) {
+  const target = event.target
+  return target instanceof Element ? target.closest<HTMLElement>('[data-mention-id]') : null
+}
+
+function handleEditorPointerover(event: PointerEvent) {
+  const mention = mentionFromEvent(event)
+  if (!mention || (event.relatedTarget instanceof Node && mention.contains(event.relatedTarget))) return
+  showHoverPreview(mention)
+}
+
+function handleEditorPointerout(event: PointerEvent) {
+  const mention = mentionFromEvent(event)
+  if (!mention || (event.relatedTarget instanceof Node && mention.contains(event.relatedTarget))) return
+  if (hoverPreviewOption.value?.id === mention.dataset.mentionId) closeHoverPreview()
+}
+
+function handleEditorFocusin(event: FocusEvent) {
+  const mention = mentionFromEvent(event)
+  if (mention) showHoverPreview(mention)
+}
+
+function handleEditorFocusout(event: FocusEvent) {
+  const mention = mentionFromEvent(event)
+  if (!mention || (event.relatedTarget instanceof Node && mention.contains(event.relatedTarget))) return
+  if (hoverPreviewOption.value?.id === mention.dataset.mentionId) closeHoverPreview()
 }
 
 function syncAudioMentionState() {
@@ -526,10 +588,32 @@ onBeforeUnmount(() => {
       :data-placeholder="placeholder"
       spellcheck="true"
       @input="handleInput"
+      @scroll.passive="closeHoverPreview"
       @pointerdown="handleEditorPointerdown"
+      @pointerover="handleEditorPointerover"
+      @pointerout="handleEditorPointerout"
       @click="handleEditorClick"
+      @focusin="handleEditorFocusin"
+      @focusout="handleEditorFocusout"
       @keydown="handleEditorKeydown"
     />
+
+    <Teleport to="body">
+      <Transition name="scene-prompt-hover-preview">
+        <aside
+          v-if="focusMode && hoverPreviewOption && hoverPreviewSource"
+          class="scene-prompt-hover-preview"
+          :class="`is-${hoverPreviewOption.kind}`"
+          :style="hoverPreviewStyle"
+          role="tooltip"
+          :aria-label="`${hoverPreviewOption.label}预览`"
+        >
+          <video v-if="hoverPreviewOption.kind === 'video'" :src="hoverPreviewSource" muted autoplay loop playsinline preload="metadata" />
+          <img v-else :src="hoverPreviewSource" :alt="hoverPreviewOption.label" />
+          <footer><component :is="hoverPreviewOption.kind === 'video' ? Film : ImageIcon" :size="14" /><strong>{{ hoverPreviewOption.label }}</strong><small>{{ hoverPreviewOption.kind === 'video' ? '视频预览' : '图片预览' }}</small></footer>
+        </aside>
+      </Transition>
+    </Teleport>
 
     <Teleport to="body">
       <Transition name="scene-prompt-menu">
@@ -635,6 +719,14 @@ onBeforeUnmount(() => {
 .scene-prompt-editor__input :deep(.scene-prompt-editor__duration-icon),.scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { display: inline-grid; width: 14px; height: 14px; flex: 0 0 14px; place-items: center; color: currentColor; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { width: 18px; height: 18px; flex-basis: 18px; border-radius: 6px; color: var(--app-accent); background: color-mix(in srgb,var(--app-accent) 10%,transparent); transition: color .16s ease,background .16s ease,transform .16s ease; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio.is-playing .scene-prompt-editor__audio-icon) { color: #fff; background: var(--app-accent); transform: scale(.94); }
+.scene-prompt-hover-preview { position: fixed; z-index: 178; display: grid; width: min(420px,calc(100vw - 24px)); grid-template-rows: minmax(0,280px) 44px; overflow: hidden; border: 1px solid var(--app-border); border-radius: 16px; color: var(--app-text); background: var(--app-surface-raised); box-shadow: 0 24px 70px rgb(12 16 28 / 28%); pointer-events: none; }
+.scene-prompt-hover-preview > img,.scene-prompt-hover-preview > video { display: block; width: 100%; height: 280px; background: #171a21; object-fit: contain; }
+.scene-prompt-hover-preview > footer { display: grid; min-width: 0; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 0 12px; border-top: 1px solid var(--app-border); background: var(--app-surface); }
+.scene-prompt-hover-preview > footer svg { color: var(--app-accent); }
+.scene-prompt-hover-preview > footer strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.scene-prompt-hover-preview > footer small { color: var(--app-text-muted); font-size: 9px; }
+.scene-prompt-hover-preview-enter-active,.scene-prompt-hover-preview-leave-active { transition: opacity .14s ease,transform .16s cubic-bezier(.2,.72,.2,1); transform-origin: center; }
+.scene-prompt-hover-preview-enter-from,.scene-prompt-hover-preview-leave-to { opacity: 0; transform: translateY(4px) scale(.985); }
 .scene-prompt-mentions { position: fixed; z-index: 170; display: grid; width: min(340px,calc(100vw - 24px)); max-height: 340px; grid-template-rows: auto minmax(0,1fr) auto; overflow: hidden; border-radius: 13px; color: var(--app-text-secondary); background: var(--app-surface-raised); box-shadow: var(--app-shadow), inset 0 0 0 1px var(--app-border); backdrop-filter: blur(16px); }
 .scene-prompt-mentions > header { display: flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 11px; border-bottom: 1px solid var(--app-border); }
 .scene-prompt-mentions > header svg { color: var(--app-accent); }
@@ -680,7 +772,8 @@ onBeforeUnmount(() => {
   .scene-prompt-video-preview { padding: 10px; }
   .scene-prompt-video-preview > section { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
 }
+@media (hover: none) { .scene-prompt-hover-preview { display: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .scene-prompt-menu-enter-active,.scene-prompt-menu-leave-active,.scene-prompt-preview-enter-active,.scene-prompt-preview-leave-active { transition-duration: .01ms !important; }
+  .scene-prompt-menu-enter-active,.scene-prompt-menu-leave-active,.scene-prompt-preview-enter-active,.scene-prompt-preview-leave-active,.scene-prompt-hover-preview-enter-active,.scene-prompt-hover-preview-leave-active { transition-duration: .01ms !important; }
 }
 </style>
