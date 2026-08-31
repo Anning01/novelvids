@@ -531,13 +531,27 @@ function closePreview() {
   previewOption.value = null
 }
 
-function handleWindowKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && durationEditorOpen.value) {
+function consumeEscape() {
+  if (durationEditorOpen.value) {
     closeDurationEditor()
-    return
+    return true
   }
-  if (event.key === 'Escape' && previewOption.value) closePreview()
+  if (previewOption.value) {
+    closePreview()
+    return true
+  }
+  if (menuOpen.value) {
+    menuOpen.value = false
+    return true
+  }
+  return false
 }
+
+function handleWindowKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && consumeEscape()) event.preventDefault()
+}
+
+defineExpose({ consumeEscape })
 
 watch(() => props.modelValue, () => {
   if (editorValue() === props.modelValue) return

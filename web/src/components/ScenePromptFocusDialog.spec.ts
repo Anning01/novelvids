@@ -10,6 +10,7 @@ const options: ScenePromptMentionOption[] = [{
   label: '林冲',
   syntax: '@{林冲}',
   group: '出镜角色',
+  previewUrl: '/media/linchong.png',
 }]
 
 afterEach(() => {
@@ -64,7 +65,7 @@ describe('ScenePromptFocusDialog', () => {
     expect(wrapper.get('.scene-prompt-focus__footer').text()).toContain('修改自动保存')
   })
 
-  it('closes with Escape, restores page scrolling and returns focus to the trigger', async () => {
+  it('closes with Escape from the editor, restores page scrolling and returns focus to the trigger', async () => {
     const trigger = document.createElement('button')
     document.body.append(trigger)
     trigger.focus()
@@ -72,12 +73,38 @@ describe('ScenePromptFocusDialog', () => {
     await wrapper.setProps({ open: true })
     await nextTick()
 
-    await wrapper.get('[role="dialog"]').trigger('keydown', { key: 'Escape' })
+    await wrapper.get('.scene-prompt-editor__input').trigger('keydown', { key: 'Escape' })
+    await nextTick()
     expect(wrapper.emitted('close')).toHaveLength(1)
 
     await wrapper.setProps({ open: false })
     await nextTick()
     expect(document.body.style.overflow).toBe('')
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it('closes with Escape even when focus has moved outside the dialog content', async () => {
+    const wrapper = mountDialog(true)
+    document.body.focus()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('uses the first Escape to close a nested media preview and the second to exit focus mode', async () => {
+    const wrapper = mountDialog(true)
+    await wrapper.get('.scene-prompt-editor__mention').trigger('click')
+    expect(wrapper.find('[aria-label="图片放大查看"]').exists()).toBe(true)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.find('[aria-label="图片放大查看"]').exists()).toBe(false)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 })

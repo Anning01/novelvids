@@ -20,6 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const dialog = ref<HTMLElement | null>(null)
+const promptEditor = ref<InstanceType<typeof ScenePromptEditor> | null>(null)
 let previousActiveElement: HTMLElement | null = null
 let previousBodyOverflow = ''
 
@@ -41,12 +42,6 @@ function focusableElements() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
-    if (event.defaultPrevented) return
-    event.preventDefault()
-    close()
-    return
-  }
   if (event.key !== 'Tab') return
   const elements = focusableElements()
   if (!elements.length) {
@@ -66,8 +61,17 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+function handleWindowKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !props.open) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (promptEditor.value?.consumeEscape()) return
+  close()
+}
+
 watch(() => props.open, async open => {
   if (open) {
+    window.addEventListener('keydown', handleWindowKeydown, true)
     previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
     previousBodyOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -75,6 +79,7 @@ watch(() => props.open, async open => {
     dialog.value?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus()
     return
   }
+  window.removeEventListener('keydown', handleWindowKeydown, true)
   document.body.style.overflow = previousBodyOverflow
   await nextTick()
   previousActiveElement?.focus()
@@ -82,6 +87,7 @@ watch(() => props.open, async open => {
 }, { immediate: true })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleWindowKeydown, true)
   document.body.style.overflow = previousBodyOverflow
   previousActiveElement?.focus()
 })
@@ -112,6 +118,7 @@ onBeforeUnmount(() => {
 
           <main class="scene-prompt-focus__body">
             <ScenePromptEditor
+              ref="promptEditor"
               :model-value="modelValue"
               :options="options"
               :placeholder="placeholder"
