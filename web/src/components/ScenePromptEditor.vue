@@ -325,7 +325,7 @@ function closeHoverPreview() {
 function placeHoverPreview(anchor: HTMLElement) {
   const rect = anchor.getBoundingClientRect()
   const width = Math.min(420, window.innerWidth - 24)
-  const height = Math.min(324, window.innerHeight - 24)
+  const height = Math.min(width * 9 / 16, window.innerHeight - 24)
   const gap = 12
   const left = Math.max(12, Math.min(
     rect.left + rect.width / 2 - width / 2,
@@ -623,7 +623,6 @@ onBeforeUnmount(() => {
         >
           <video v-if="hoverPreviewOption.kind === 'video'" :src="hoverPreviewSource" muted autoplay loop playsinline preload="metadata" />
           <img v-else :src="hoverPreviewSource" :alt="hoverPreviewOption.label" />
-          <footer><component :is="hoverPreviewOption.kind === 'video' ? Film : ImageIcon" :size="14" /><strong>{{ hoverPreviewOption.label }}</strong><small>{{ hoverPreviewOption.kind === 'video' ? '视频预览' : '图片预览' }}</small></footer>
         </aside>
       </Transition>
     </Teleport>
@@ -732,12 +731,8 @@ onBeforeUnmount(() => {
 .scene-prompt-editor__input :deep(.scene-prompt-editor__duration-icon),.scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { display: inline-grid; width: 14px; height: 14px; flex: 0 0 14px; place-items: center; color: currentColor; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__audio-icon) { width: 18px; height: 18px; flex-basis: 18px; border-radius: 6px; color: var(--app-accent); background: color-mix(in srgb,var(--app-accent) 10%,transparent); transition: color .16s ease,background .16s ease,transform .16s ease; }
 .scene-prompt-editor__input :deep(.scene-prompt-editor__mention.is-audio.is-playing .scene-prompt-editor__audio-icon) { color: #fff; background: var(--app-accent); transform: scale(.94); }
-.scene-prompt-hover-preview { position: fixed; z-index: 178; display: grid; width: min(420px,calc(100vw - 24px)); grid-template-rows: minmax(0,280px) 44px; overflow: hidden; border: 0; border-radius: 16px; color: var(--app-text); background: var(--app-surface-raised); box-shadow: 0 24px 70px rgb(12 16 28 / 28%); pointer-events: none; }
-.scene-prompt-hover-preview > img,.scene-prompt-hover-preview > video { display: block; width: 100%; height: 280px; background: #171a21; object-fit: contain; }
-.scene-prompt-hover-preview > footer { display: grid; min-width: 0; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 0 12px; border: 0; background: var(--app-surface); }
-.scene-prompt-hover-preview > footer svg { color: var(--app-accent); }
-.scene-prompt-hover-preview > footer strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.scene-prompt-hover-preview > footer small { color: var(--app-text-muted); font-size: 9px; }
+.scene-prompt-hover-preview { position: fixed; z-index: 178; display: block; width: min(420px,calc(100vw - 24px)); aspect-ratio: 16/9; overflow: hidden; border: 0; border-radius: 16px; background: transparent; box-shadow: none; pointer-events: none; }
+.scene-prompt-hover-preview > img,.scene-prompt-hover-preview > video { display: block; width: 100%; height: 100%; border: 0; background: transparent; object-fit: cover; }
 .scene-prompt-hover-preview-enter-active,.scene-prompt-hover-preview-leave-active { transition: opacity .14s ease,transform .16s cubic-bezier(.2,.72,.2,1); transform-origin: center; }
 .scene-prompt-hover-preview-enter-from,.scene-prompt-hover-preview-leave-to { opacity: 0; transform: translateY(4px) scale(.985); }
 .scene-prompt-mentions { position: fixed; z-index: 170; display: grid; width: min(340px,calc(100vw - 24px)); max-height: 340px; grid-template-rows: auto minmax(0,1fr) auto; overflow: hidden; border-radius: 13px; color: var(--app-text-secondary); background: var(--app-surface-raised); box-shadow: var(--app-shadow), inset 0 0 0 1px var(--app-border); backdrop-filter: blur(16px); }

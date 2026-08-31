@@ -91,6 +91,8 @@ describe('ScenePromptEditor', () => {
     await wrapper.get('[data-mention-id="scene-1"]').trigger('pointerover')
     expect(wrapper.get('.scene-prompt-hover-preview img').attributes('src')).toBe('/media/mountain.png')
     expect(wrapper.get('.scene-prompt-hover-preview').attributes('role')).toBe('tooltip')
+    expect(wrapper.find('.scene-prompt-hover-preview footer').exists()).toBe(false)
+    expect(wrapper.get('.scene-prompt-hover-preview').text()).toBe('')
 
     await wrapper.get('[data-mention-id="scene-1"]').trigger('pointerout')
     expect(wrapper.find('.scene-prompt-hover-preview').exists()).toBe(false)
@@ -126,7 +128,7 @@ describe('ScenePromptEditor', () => {
     await mention.trigger('pointerover')
 
     expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('left: 290px')
-    expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('top: 164px')
+    expect(wrapper.get('.scene-prompt-hover-preview').attributes('style')).toContain('top: 251.75px')
 
     await mention.trigger('pointerout')
     rect.mockReturnValue({
