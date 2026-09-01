@@ -28,6 +28,10 @@ function imageFor(variant: AssetVariant) {
   return variant.images?.[0] || ''
 }
 
+function thumbnailFor(variant: AssetVariant) {
+  return variant.image_thumbnails?.[0] || imageFor(variant)
+}
+
 function selectBase() {
   selectedVariantId.value = null
   editingId.value = null
@@ -153,7 +157,7 @@ watch([formName, formDescription, formChapters], () => {
     <div class="asset-variant-strip__rail">
       <button type="button" class="asset-variant-item is-base" :class="{ 'is-selected': selectedVariantId === null }" aria-label="切换到主形象" @click="selectBase">
         <span class="asset-variant-item__media">
-          <img v-if="asset.main_image || asset.angle_image_1" :src="asset.main_image || asset.angle_image_1" :alt="asset.canonical_name" />
+          <img v-if="asset.main_image || asset.angle_image_1" :src="asset.main_image_thumbnail || asset.angle_image_1_thumbnail || asset.main_image || asset.angle_image_1" :alt="asset.canonical_name" />
           <ImagePlus v-else :size="22" />
         </span>
         <strong>主形象</strong>
@@ -163,7 +167,7 @@ watch([formName, formDescription, formChapters], () => {
       <article v-for="variant in variants" v-else :key="variant.id" class="asset-variant-item" :class="{ 'is-current': currentVariantId === variant.id, 'is-selected': selectedVariantId === variant.id }">
         <button type="button" class="asset-variant-item__open" :aria-label="`切换到${variant.name}`" @click="selectVariant(variant)">
           <span class="asset-variant-item__media">
-            <img v-if="imageFor(variant)" :src="imageFor(variant)" :alt="variant.name" />
+          <img v-if="imageFor(variant)" :src="thumbnailFor(variant)" :alt="variant.name" />
             <WandSparkles v-else :size="22" />
             <small v-if="currentVariantId === variant.id"><Check :size="10" />本集</small>
           </span>

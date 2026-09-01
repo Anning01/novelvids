@@ -105,7 +105,8 @@ function mediaKindForNode(node: WorkbenchNode): MaterialMentionOption['mediaKind
 function previewUrlForNode(node: WorkbenchNode) {
   if (node.kind === 'asset') {
     const asset = node.data.asset as Asset | undefined
-    return asset ? assetSelectedImageCandidates(asset).at(0)?.url || '' : ''
+    const image = asset ? assetSelectedImageCandidates(asset).at(0) : undefined
+    return image?.previewUrl || image?.thumbnailUrl || image?.url || ''
   }
   if (node.kind === 'digital_human')
     return (node.data.resource as { image_url?: string } | undefined)?.image_url || ''
@@ -166,7 +167,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
       ...base,
       mentionKey: `${source.key}:image:${candidate.displayIndex}`,
       name: `${base.name}-图${candidate.displayIndex + 1}`,
-      previewUrl: candidate.url,
+      previewUrl: candidate.previewUrl || candidate.thumbnailUrl || candidate.url,
       hasImage: true,
       mediaKind: 'image' as const,
     }))

@@ -3,6 +3,7 @@ import type { NodeProps } from '@vue-flow/core'
 import { Droplet, LoaderCircle, Settings2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { api, mediaUrl } from '@/api'
+import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import { notice } from '@/shared/notice'
 import WatermarkSettingsDialog from '../components/WatermarkSettingsDialog.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
@@ -59,7 +60,7 @@ async function uploadWatermark(file: File) {
   <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'watermark', title: data.title || '新水印', status: 'watermark' }">
     <div class="workbench-watermark-node">
       <div class="workbench-watermark-node__preview" aria-label="水印视频预览">
-        <video v-if="videoUrl" :src="videoUrl" controls playsinline preload="metadata" aria-label="水印输入视频" />
+        <DeferredVideoPlayer v-if="videoUrl" :src="videoUrl" title="水印输入视频" />
         <div v-else class="workbench-media-placeholder">连接视频后预览</div>
         <img
           v-if="config.resourceUrl"

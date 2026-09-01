@@ -28,6 +28,7 @@ import { notice } from '@/shared/notice'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { buildChapterVideoTimeline, chapterHasCompletedVideo, type ChapterVideoTimelineItem } from '@/shared/chapterVideoTimeline'
+import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import { VirtualClipPlaybackClock } from '@/shared/virtualClipPlaybackClock'
 import type { Chapter, Novel, Scene, Video as VideoResult } from '@/types'
 
@@ -50,6 +51,7 @@ const activeSceneId = ref(0)
 const loading = ref(true)
 const loadError = ref('')
 const player = ref<HTMLVideoElement | null>(null)
+const loadedVideoId = ref(0)
 const stage = ref<HTMLElement | null>(null)
 const timelineScroll = ref<HTMLElement | null>(null)
 const playing = ref(false)
@@ -151,6 +153,7 @@ async function loadChapter(chapterId: number) {
     const requestedSceneId = Number(route.query.scene)
     const requested = items.find(item => item.scene.id === requestedSceneId)
     activeSceneId.value = (requested || items.find(item => item.state === 'completed') || items[0])?.scene.id || 0
+    loadedVideoId.value = 0
     clipCurrentTime.value = 0
   } catch (error) {
     if (version !== loadVersion) return
@@ -211,6 +214,11 @@ function startVirtualClipPlayback(startTime = clipCurrentTime.value) {
 }
 
 function startVideoPlayback(item: ChapterVideoTimelineItem, startTime: number, autoplay: boolean) {
+  if (item.video?.id && loadedVideoId.value !== item.video.id) {
+    loadedVideoId.value = item.video.id
+    void nextTick(() => startVideoPlayback(item, startTime, autoplay))
+    return
+  }
   const video = player.value
   if (!video || activeSceneId.value !== item.scene.id) return
   const prepare = () => {
@@ -226,12 +234,15 @@ function selectTimelineItem(item: ChapterVideoTimelineItem, autoplay = false, st
   player.value?.pause()
   playing.value = false
   const changed = activeSceneId.value !== item.scene.id
+  if (changed) loadedVideoId.value = 0
   activeSceneId.value = item.scene.id
   clipCurrentTime.value = Math.min(item.duration, Math.max(0, startTime))
   if (changed) void router.replace({ query: { ...route.query, chapter: String(activeChapter.value?.id || ''), scene: String(item.scene.id) } })
   void nextTick(() => {
     revealPlayhead()
-    if (item.video?.url) startVideoPlayback(item, clipCurrentTime.value, autoplay)
+    if (item.video?.url && (autoplay || loadedVideoId.value === item.video.id)) {
+      startVideoPlayback(item, clipCurrentTime.value, autoplay)
+    }
     else if (autoplay) startVirtualClipPlayback(clipCurrentTime.value)
   })
 }
@@ -259,7 +270,10 @@ function togglePlayback() {
     else startVirtualClipPlayback()
     return
   }
-  if (!player.value) return
+  if (!player.value) {
+    startVideoPlayback(item, clipCurrentTime.value, true)
+    return
+  }
   if (player.value.paused) void player.value.play().catch(() => { playing.value = false })
   else player.value.pause()
 }
@@ -404,7 +418,7 @@ onUnmounted(() => gapPlaybackClock.stop())
 
             <div ref="stage" class="video-stage" :class="{ 'has-video': Boolean(activeItem?.video?.url), 'is-blackout': Boolean(activeItem && !activeItem.video?.url) }">
               <video
-                v-if="activeItem?.video?.url"
+                v-if="activeItem?.video?.url && loadedVideoId === activeItem.video.id"
                 ref="player"
                 :key="activeItem.video.id"
                 :src="activeItem.video.url"
@@ -419,6 +433,22 @@ onUnmounted(() => gapPlaybackClock.stop())
                 @ended="advanceTimeline(true)"
                 @click="togglePlayback"
               />
+              <button
+                v-else-if="activeItem?.video?.url"
+                type="button"
+                class="video-stage-poster"
+                :aria-label="`播放${sceneLabel(activeItem)}`"
+                @click="togglePlayback"
+              >
+                <img
+                  v-if="videoCoverUrl(activeItem.video)"
+                  :src="videoCoverUrl(activeItem.video)"
+                  :alt="`${sceneLabel(activeItem)}视频封面`"
+                  decoding="async"
+                >
+                <Film v-else :size="38" />
+                <i><Play :size="24" fill="currentColor" /></i>
+              </button>
               <div v-else class="video-stage-blackout" role="img" :aria-label="activeItem ? `${sceneLabel(activeItem)}无视频，使用黑屏占位` : '黑屏占位'" />
 
               <div v-if="activeItem?.video?.url" class="video-stage-overlay">
@@ -476,7 +506,8 @@ onUnmounted(() => gapPlaybackClock.stop())
                     >
                       <span class="video-timeline-copy"><strong>{{ sceneLabel(item) }}</strong><small>{{ formatTime(item.duration) }}</small></span>
                       <span class="video-timeline-thumb">
-                        <video v-if="item.video?.url" :src="item.video.url" :poster="item.coverUrl || undefined" preload="metadata" muted playsinline />
+                        <img v-if="item.video?.url && item.coverUrl" :src="item.coverUrl" alt="" loading="lazy" decoding="async" />
+                        <template v-else-if="item.video?.url"><Film :size="23" /><em>点击播放</em></template>
                         <template v-else-if="item.state === 'failed'"><AlertTriangle :size="23" /><em>生成失败</em></template>
                         <template v-else-if="item.state === 'generating'"><LoaderCircle class="is-spinning" :size="23" /><em>生成中</em></template>
                         <template v-else><Film :size="23" /><em>待生成</em></template>
@@ -513,6 +544,10 @@ onUnmounted(() => gapPlaybackClock.stop())
 .video-stage-header small { overflow: hidden; color: var(--app-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .video-stage { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; background: #090a0d; }
 .video-stage video { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; cursor: pointer; }
+.video-stage-poster { position: relative; display: grid; width: 100%; height: 100%; min-height: 230px; place-items: center; overflow: hidden; padding: 0; border: 0; color: #fff; background: #11141b; cursor: pointer; }
+.video-stage-poster > img { width: 100%; height: 100%; object-fit: contain; }
+.video-stage-poster > i { position: absolute; display: grid; width: 60px; height: 60px; place-items: center; border: 1px solid rgb(255 255 255 / 45%); border-radius: 50%; background: rgb(26 29 38 / 72%); font-style: normal; backdrop-filter: blur(8px); }
+.video-stage-poster:hover > i,.video-stage-poster:focus-visible > i { background: rgb(83 78 236 / 90%); transform: scale(1.06); }
 .video-stage-blackout { width: 100%; height: 100%; min-height: 230px; background: #000; }
 .video-stage-overlay { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 7px; opacity: .24; transition: opacity .16s ease,transform .16s ease; transform: translateY(4px); }
 .video-stage:hover .video-stage-overlay,.video-stage:focus-within .video-stage-overlay { opacity: 1; transform: translateY(0); }
@@ -552,7 +587,7 @@ onUnmounted(() => gapPlaybackClock.stop())
 .video-timeline-copy strong { overflow: hidden; min-width: 0; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .video-timeline-copy small { color: var(--app-text-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
 .video-timeline-thumb { display: grid; overflow: hidden; place-items: center; border-radius: 8px; color: var(--app-text-muted); background: var(--app-surface-muted); }
-.video-timeline-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.video-timeline-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .video-timeline-thumb em { margin-top: -18px; font-size: 10px; font-style: normal; }
 .video-timeline-clip.is-failed .video-timeline-thumb { color: #df596c; background: color-mix(in srgb,#ef5c70 9%,var(--app-surface-muted)); }
 .video-timeline-clip.is-generating .video-timeline-thumb { color: var(--app-accent); }

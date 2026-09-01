@@ -17,6 +17,7 @@ from models.chapter import Chapter
 from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
+from services.cover_derivatives import ensure_image_derivatives
 from services.image_generation.capabilities import validate_selection
 from services.oss import normalize_media_url, oss
 from utils.crud import CRUDBase
@@ -52,6 +53,34 @@ def _normalize_asset_media(data: dict) -> dict:
 
 def _normalize_image_list(images: list[str]) -> list[str]:
     return [normalize_media_url(item) or item for item in images if item]
+
+
+def _asset_image_references(data: dict) -> list[str]:
+    references = [
+        value
+        for key in ("main_image", "angle_image_1", "angle_image_2")
+        if isinstance((value := data.get(key)), str) and value
+    ]
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        gallery = metadata.get("image_gallery")
+        if isinstance(gallery, list):
+            references.extend(
+                value for value in gallery if isinstance(value, str) and value
+            )
+    return list(dict.fromkeys(references))
+
+
+async def _ensure_asset_image_derivatives(references: list[str]) -> None:
+    for reference in references:
+        try:
+            await ensure_image_derivatives(reference)
+        except Exception as error:
+            logger.warning(
+                "asset image derivative failed: ref=%s error=%s",
+                reference[:120],
+                type(error).__name__,
+            )
 
 
 logger = logging.getLogger(__name__)
@@ -167,15 +196,25 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 int(data.get("last_updated_chapter") or 0),
                 chapter.number,
             )
-        return await super().create(data, **kwargs)
+        asset = await super().create(data, **kwargs)
+        await _ensure_asset_image_derivatives(_asset_image_references(data))
+        return asset
 
     async def update(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
         instance = await self.get(asset_id)
-        return await super().update(instance, _normalize_asset_media(obj_in.model_dump(exclude_unset=True)))
+        data = _normalize_asset_media(obj_in.model_dump(exclude_unset=True))
+        references = _asset_image_references(data)
+        asset = await super().update(instance, data)
+        await _ensure_asset_image_derivatives(references)
+        return asset
 
     async def patch(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
         instance = await self.get(asset_id)
-        return await super().patch(instance, _normalize_asset_media(obj_in.model_dump(exclude_unset=True)))
+        data = _normalize_asset_media(obj_in.model_dump(exclude_unset=True))
+        references = _asset_image_references(data)
+        asset = await super().patch(instance, data)
+        await _ensure_asset_image_derivatives(references)
+        return asset
 
     async def remove(self, asset_id: int) -> None:
         instance = await self.get(asset_id)
@@ -371,6 +410,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         )
         target.metadata = merged_metadata
         await target.save()
+        await _ensure_asset_image_derivatives(
+            [image for image, _asset in image_candidates]
+        )
         await target.fetch_related("variants")
 
         summary = [
@@ -401,7 +443,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         data = obj_in.model_dump(exclude_unset=True)
         if isinstance(data.get("images"), list):
             data["images"] = _normalize_image_list(data["images"])
-        return await AssetVariant.create(asset_id=asset_id, **data)
+        variant = await AssetVariant.create(asset_id=asset_id, **data)
+        await _ensure_asset_image_derivatives(list(variant.images or []))
+        return variant
 
     async def patch_variant(
         self,
@@ -417,6 +461,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             data["images"] = _normalize_image_list(data["images"])
         variant.update_from_dict(data)
         await variant.save()
+        if isinstance(data.get("images"), list):
+            await _ensure_asset_image_derivatives(data["images"])
         return variant
 
     async def assign_variant_to_chapter(
@@ -573,6 +619,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "image_gallery": image_gallery,
             "edited_generation_task_id": str(task.id),
         }
+        await _ensure_asset_image_derivatives([image_url])
         await asset.save(update_fields=["main_image", "metadata", "updated_at"])
         return asset
 
@@ -601,6 +648,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         )
         if not images:
             raise HTTPException(status_code=400, detail="该生成记录没有可恢复的图片")
+
+        await _ensure_asset_image_derivatives(images)
 
         metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
         asset.main_image = images[0]

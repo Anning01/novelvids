@@ -61,7 +61,8 @@ it('renders uploaded video and audio replacement controls', () => {
     durationSeconds: 1,
   })
 
-  expect(video.get('video').attributes('src')).toBe('/media/clip.mp4')
+  expect(video.find('video').exists()).toBe(false)
+  expect(video.find('button[aria-label="播放clip"]').exists()).toBe(true)
   expect(video.get('input[type="file"]').attributes('accept')).toBe('video/mp4,video/webm,video/quicktime')
   expect(audio.find('[data-audio-media]').exists()).toBe(true)
   expect(audio.get('input[type="file"]').attributes('accept')).toBe('audio/mpeg,audio/wav,audio/mp4,audio/webm')

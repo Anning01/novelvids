@@ -32,7 +32,8 @@ it('renders a playable immutable source with episode and media facts', () => {
     global: { stubs: { WorkbenchNodeFrame: { template: '<article><slot /></article>' } } },
   })
 
-  expect(wrapper.get('video').attributes()).toMatchObject({ src: '/media/remake/source.mp4', controls: '' })
+  expect(wrapper.find('video').exists()).toBe(false)
+  expect(wrapper.find('button[aria-label="播放第一集.mp4"]').exists()).toBe(true)
   expect(wrapper.text()).toContain('第一集.mp4')
   expect(wrapper.text()).toContain('01:05')
   expect(wrapper.text()).toContain('1920 × 1080')

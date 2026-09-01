@@ -41,7 +41,7 @@ class SecurityHeadersMiddleware:
                 if (
                     status in {200, 206}
                     and path.startswith("/media/")
-                    and "/derivatives/" in path
+                    and any(segment in path for segment in ("/derivatives/", "/posters/"))
                 ):
                     headers["Cache-Control"] = (
                         "public, max-age=31536000, immutable"

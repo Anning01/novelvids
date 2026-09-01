@@ -27,6 +27,9 @@ def test_derivative_references_are_deterministic_for_local_and_oss():
     assert cover_derivative_reference(
         "uploads/2/20260901/abc-cover.png", "preview"
     ) == "uploads/2/20260901/derivatives/abc-cover-preview.webp"
+    assert cover_derivative_reference(
+        "media/assets/legacy.png", "thumbnail"
+    ) == "/media/assets/derivatives/legacy-thumbnail.webp"
     assert cover_derivative_reference("https://external.example/cover.png", "thumbnail") is None
 
 

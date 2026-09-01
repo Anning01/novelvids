@@ -25,6 +25,7 @@ import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
+import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
@@ -38,6 +39,7 @@ import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistor
 import VideoGenerationErrorState from '@/components/VideoGenerationErrorState.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
+import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import { api, mediaUrl, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
@@ -2097,7 +2099,12 @@ onBeforeUnmount(() => {
                     @retry="generateVideo(scene)"
                     @locate-reference="locateProblemImageReference(scene, $event)"
                   />
-                  <video v-else-if="selectedVideoFor(scene)?.url" :src="selectedVideoFor(scene)?.url" controls playsinline />
+                  <DeferredVideoPlayer
+                    v-else-if="selectedVideoFor(scene)?.url"
+                    :src="selectedVideoFor(scene)?.url"
+                    :poster="videoCoverUrl(selectedVideoFor(scene)!)"
+                    :title="`分镜 ${scene.sequence} 视频预览`"
+                  />
                   <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>视频生成中</strong><span>完成后将在这里自动播放</span></div>
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>等待生成视频</strong><span>完善提示词后点击“生成视频”</span></div>
                 </div>
@@ -2281,7 +2288,7 @@ onBeforeUnmount(() => {
 .preview-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 0 15px; }
 .preview-panel > header svg { color: #9197a6; }
 .preview-stage { display: grid; min-height: 520px; overflow: hidden; place-items: center; background: #292e39; }
-.preview-stage video { width: 100%; height: 100%; object-fit: contain; }
+.preview-stage :deep(.deferred-video-player),.preview-stage video { width: 100%; height: 100%; object-fit: contain; }
 .preview-empty { display: grid; place-items: center; gap: 8px; color: #7f8798; text-align: center; }
 .preview-empty svg { color: #8e96a8; }
 .preview-empty strong { color: #c8ccd4; font-size: 12px; }

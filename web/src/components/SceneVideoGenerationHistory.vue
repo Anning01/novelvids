@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { LoaderCircle, RotateCcw, Sparkles, TriangleAlert, Video as VideoIcon, X } from 'lucide-vue-next'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
+import { videoPosterUrl } from '@/shared/mediaDerivatives'
 import { TaskStatusEnum } from '@/types'
 import type { Video } from '@/types'
 
@@ -96,7 +97,13 @@ function retryFailedRecord() {
         @click="selectVersion(record)"
       >
         <span class="video-history__thumb">
-          <video v-if="record.url" :src="record.url" muted playsinline preload="metadata" />
+          <img
+            v-if="videoPosterUrl(record, 'thumbnail')"
+            :src="videoPosterUrl(record, 'thumbnail')"
+            alt=""
+            loading="lazy"
+            decoding="async"
+          >
           <LoaderCircle v-else-if="isRunning(record)" :size="18" class="is-spinning" />
           <TriangleAlert v-else-if="isFailed(record)" :size="18" />
           <VideoIcon v-else :size="18" />
@@ -143,7 +150,7 @@ function retryFailedRecord() {
 .video-history__version:not(:disabled):hover .video-history__thumb { border-color: color-mix(in srgb,var(--app-accent,#5b5cf6) 55%,var(--app-border,#dfe3eb)); box-shadow: 0 2px 8px rgb(24 29 44 / 10%); }
 .video-history__version.is-current .video-history__thumb { border-color: var(--app-accent,#5b5cf6); box-shadow: 0 0 0 2px color-mix(in srgb,var(--app-accent,#5b5cf6) 14%,transparent); }
 .video-history__version.is-failed .video-history__thumb { color: #df6074; border-color: rgb(226 91 111 / 22%); background: rgb(226 91 111 / 7%); }
-.video-history__thumb video { width: 100%; height: 100%; object-fit: cover; }
+.video-history__thumb img { width: 100%; height: 100%; object-fit: cover; }
 .video-history__label { display: inline-flex; max-width: 72px; min-height: 18px; align-items: center; justify-content: center; gap: 2px; margin-top: -2px; padding: 3px 6px; overflow: hidden; border-radius: 0 0 6px 6px; color: var(--app-text-muted,#818796); background: var(--app-fill-subtle,#f1f2f6); font-size: 8px; font-weight: 650; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
 .video-history__version.is-current .video-history__label { color: #fff; background: var(--app-accent,#5b5cf6); }
 .video-history__version.is-failed .video-history__label { color: #cf5265; background: rgb(226 91 111 / 10%); }

@@ -18,6 +18,8 @@ export interface AssetWorkbenchConfig {
 export interface AssetImageCandidate {
   key: string
   url: string
+  thumbnailUrl?: string
+  previewUrl?: string
   isMain: boolean
   displayIndex: number
   label?: string
@@ -160,34 +162,57 @@ export function patchAssetWorkbenchConfig(
 }
 
 export function assetImageCandidates(asset: Asset): AssetImageCandidate[] {
-  const baseValues: Array<[AssetImageCandidate['key'], string | undefined, string?]> = asset.angle_image_1 || asset.angle_image_2
+  const baseValues: Array<[AssetImageCandidate['key'], string | undefined, string?, string?, string?]> = asset.angle_image_1 || asset.angle_image_2
     ? [
-        ['angle_image_1', asset.angle_image_1],
-        ['angle_image_2', asset.angle_image_2],
-        ['main_image', asset.main_image],
+        ['angle_image_1', asset.angle_image_1, undefined, asset.angle_image_1_thumbnail || undefined, asset.angle_image_1_preview || undefined],
+        ['angle_image_2', asset.angle_image_2, undefined, asset.angle_image_2_thumbnail || undefined, asset.angle_image_2_preview || undefined],
+        ['main_image', asset.main_image, undefined, asset.main_image_thumbnail || undefined, asset.main_image_preview || undefined],
       ]
-    : [['main_image', asset.main_image]]
-  const gallery = Array.isArray(recordValue(asset.metadata).image_gallery)
-    ? recordValue(asset.metadata).image_gallery as unknown[]
+    : [[
+        'main_image',
+        asset.main_image,
+        undefined,
+        asset.main_image_thumbnail || undefined,
+        asset.main_image_preview || undefined,
+      ]]
+  const metadata = recordValue(asset.metadata)
+  const gallery = Array.isArray(metadata.image_gallery)
+    ? metadata.image_gallery as unknown[]
     : []
-  const values: Array<[string, string | undefined, string?]> = [
+  const galleryThumbnails = Array.isArray(metadata.image_gallery_thumbnails)
+    ? metadata.image_gallery_thumbnails as unknown[]
+    : []
+  const galleryPreviews = Array.isArray(metadata.image_gallery_previews)
+    ? metadata.image_gallery_previews as unknown[]
+    : []
+  const values: Array<[string, string | undefined, string?, string?, string?]> = [
     ...baseValues,
     ...gallery.flatMap((url, index) => typeof url === 'string'
-      ? [[`gallery-${index}`, url, `生成图 ${index + 1}`] as [string, string, string]]
+      ? [[
+          `gallery-${index}`,
+          url,
+          `生成图 ${index + 1}`,
+          typeof galleryThumbnails[index] === 'string' ? galleryThumbnails[index] : undefined,
+          typeof galleryPreviews[index] === 'string' ? galleryPreviews[index] : undefined,
+        ] as [string, string, string, string?, string?]]
       : []),
-    ...(asset.variants || []).flatMap(variant => variant.images.map((url, index): [string, string, string] => [
+    ...(asset.variants || []).flatMap(variant => variant.images.map((url, index): [string, string, string, string?, string?] => [
       `variant-${variant.id}-${index}`,
       url,
       variant.name,
+      variant.image_thumbnails?.[index] || undefined,
+      variant.image_previews?.[index] || undefined,
     ])),
   ]
   const seen = new Set<string>()
-  return values.flatMap(([key, url, label]) => {
+  return values.flatMap(([key, url, label, thumbnailUrl, previewUrl]) => {
     if (!url || seen.has(url)) return []
     seen.add(url)
     return [{
       key,
       url,
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
+      ...(previewUrl ? { previewUrl } : {}),
       ...(label ? { label } : {}),
       isMain: url === asset.main_image,
       displayIndex: seen.size - 1,

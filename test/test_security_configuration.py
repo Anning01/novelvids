@@ -29,6 +29,10 @@ async def test_security_headers_apply_strict_app_and_docs_policies():
     async def derivative():
         return {"image": True}
 
+    @app.get("/media/videos/posters/7-thumbnail.webp")
+    async def poster():
+        return {"poster": True}
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
         normal = await client.get("/health")
         docs = await client.get("/docs")
@@ -38,6 +42,7 @@ async def test_security_headers_apply_strict_app_and_docs_policies():
         missing_image = await client.get(
             "/media/covers/derivatives/missing-thumbnail.webp"
         )
+        poster_image = await client.get("/media/videos/posters/7-thumbnail.webp")
 
     assert normal.headers["content-security-policy"] == "default-src 'self'"
     assert normal.headers["strict-transport-security"].startswith("max-age=")
@@ -49,6 +54,9 @@ async def test_security_headers_apply_strict_app_and_docs_policies():
     )
     assert missing_image.status_code == 404
     assert "cache-control" not in missing_image.headers
+    assert poster_image.headers["cache-control"] == (
+        "public, max-age=31536000, immutable"
+    )
 
 
 def test_client_ip_only_trusts_forwarded_headers_from_configured_proxy(monkeypatch):

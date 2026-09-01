@@ -3,7 +3,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from schemas._base import BaseResponse
-from services.oss import resolve_media_url
+from services.cover_derivatives import image_derivative_reference
+from services.oss import normalize_media_url, resolve_media_url
 
 
 class AssetVariantProperties(BaseModel):
@@ -38,8 +39,19 @@ class AssetVariantOut(AssetVariantProperties, BaseResponse):
     name: str
     chapter_numbers: list[int] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
+    image_thumbnails: list[str | None] = Field(default_factory=list)
+    image_previews: list[str | None] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.images = [resolve_media_url(u) for u in self.images or []]
+        stored = [normalize_media_url(image) for image in self.images or []]
+        self.images = [resolved for image in stored if (resolved := resolve_media_url(image))]
+        self.image_thumbnails = [
+            resolve_media_url(image_derivative_reference(image, "thumbnail"))
+            for image in stored
+        ]
+        self.image_previews = [
+            resolve_media_url(image_derivative_reference(image, "preview"))
+            for image in stored
+        ]
         return self

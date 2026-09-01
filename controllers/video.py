@@ -36,6 +36,7 @@ from services.video.reference_media import (
     verify_local_reference,
 )
 from services.video.last_frame import last_frame_service
+from services.video.poster import video_poster_reference, video_poster_service
 from prompts.video import (
     inject_last_frame_continuity_prompt,
     render_last_frame_continuity_instruction,
@@ -49,7 +50,35 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 logger = logging.getLogger(__name__)
 
 
-async def _download_video(remote_url: str, video_id: int) -> str:
+async def _ensure_video_posters(
+    video_url: str,
+    poster_id: int,
+) -> dict[str, str]:
+    """尽力为生成视频补齐海报；海报失败不影响视频结果交付。"""
+    if video_url.startswith("/media/"):
+        references = {
+            "poster_thumbnail_url": video_poster_reference(video_url, "thumbnail"),
+            "poster_url": video_poster_reference(video_url, "preview"),
+        }
+        local_paths = [
+            Path(settings.MEDIA_PATH) / str(reference).removeprefix("/media/")
+            for reference in references.values()
+            if reference
+        ]
+        if len(local_paths) == 2 and all(path.is_file() for path in local_paths):
+            return {key: str(value) for key, value in references.items()}
+    try:
+        return await video_poster_service.extract_and_store(video_url, poster_id)
+    except Exception as error:
+        logger.warning(
+            "Video poster generation skipped: poster_id=%s error=%s",
+            poster_id,
+            type(error).__name__,
+        )
+        return {}
+
+
+async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str, str]]:
     """将远程视频下载到本地 MEDIA_PATH/videos/ 目录，返回可访问的 /media/ 路径。"""
     video_dir = os.path.join(settings.MEDIA_PATH, "videos")
     os.makedirs(video_dir, exist_ok=True)
@@ -72,11 +101,22 @@ async def _download_video(remote_url: str, video_id: int) -> str:
         with open(local_path, "rb") as file:
             key = make_upload_key(None, f"videos/{filename}")
             await oss.put_bytes(key, file.read(), "video/mp4")
-        os.remove(local_path)
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
         media_url = key
+    posters: dict[str, str] = {}
+    try:
+        posters = await video_poster_service.extract_file_and_store(
+            Path(local_path),
+            media_url,
+            video_id,
+        )
+    except Exception as error:
+        logger.exception("Video poster extraction failed: video_id=%s", video_id)
+        posters["poster_extraction_error"] = type(error).__name__
+    if oss.enabled:
+        os.remove(local_path)
     logger.info("Video downloaded: video_id=%s -> %s", video_id, media_url)
-    return media_url
+    return media_url, posters
 
 
 async def _download_last_frame(remote_url: str, video_id: int) -> str:
@@ -529,7 +569,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
         remote_url = result.get("url")
         if remote_url:
             try:
-                media_url = await _download_video(remote_url, video.id)
+                downloaded = await _download_video(remote_url, video.id)
+                if isinstance(downloaded, tuple):
+                    media_url, posters = downloaded
+                    video.metadata = {**(video.metadata or {}), **posters}
+                    if "metadata" not in update_fields:
+                        update_fields.append("metadata")
+                else:  # 兼容测试替身和旧扩展实现
+                    media_url = downloaded
                 video.url = media_url
                 update_fields.append("url")
             except Exception as e:
@@ -846,11 +893,13 @@ class VideoController(CRUDBase[Video, dict, dict]):
         except RuntimeError as e:
             raise HTTPException(500, detail=str(e))
 
+        posters = await _ensure_video_posters(merged_url, chapter_id)
         return {
             "chapter_id": chapter_id,
             "merged_url": merged_url,
             "video_count": len(videos_to_merge),
-            "total_duration": round(total_duration, 1)
+            "total_duration": round(total_duration, 1),
+            **posters,
         }
 
     async def get_merged_video(self, chapter_id: int) -> dict | None:
@@ -883,11 +932,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 video_count += 1
                 total_duration += scene.duration or 0
 
+        merged_url = f"/media/videos/merged/{filename}"
+        posters = await _ensure_video_posters(merged_url, chapter_id)
         return {
             "chapter_id": chapter_id,
-            "merged_url": f"/media/videos/merged/{filename}",
+            "merged_url": merged_url,
             "video_count": video_count,
-            "total_duration": round(total_duration, 1)
+            "total_duration": round(total_duration, 1),
+            **posters,
         }
 
 

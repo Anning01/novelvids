@@ -5,8 +5,40 @@ from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from schemas._base import BaseResponse
 from schemas.asset_variant import AssetVariantOut
+from services.cover_derivatives import image_derivative_reference
 from utils.enums import AssetTypeEnum, ImageSourceEnum
-from services.oss import resolve_media_url
+from services.oss import normalize_media_url, resolve_media_url
+
+
+def _image_urls(
+    image: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """从持久化引用分别解析原图、缩略图和预览图地址。"""
+    stored = normalize_media_url(image)
+    return (
+        resolve_media_url(stored),
+        resolve_media_url(image_derivative_reference(stored, "thumbnail")),
+        resolve_media_url(image_derivative_reference(stored, "preview")),
+    )
+
+
+def _resolve_asset_metadata(metadata: Any) -> Any:
+    if not isinstance(metadata, dict):
+        return metadata
+    resolved = dict(metadata)
+    for key in ("image_gallery", "generation_reference_images"):
+        values = metadata.get(key)
+        if not isinstance(values, list):
+            continue
+        images = [_image_urls(value) for value in values if isinstance(value, str)]
+        resolved[key] = [original for original, _thumbnail, _preview in images if original]
+        resolved[f"{key}_thumbnails"] = [
+            thumbnail for _original, thumbnail, _preview in images
+        ]
+        resolved[f"{key}_previews"] = [
+            preview for _original, _thumbnail, preview in images
+        ]
+    return resolved
 
 
 # --- 核心业务属性 (Internal Mixins) ---
@@ -111,6 +143,8 @@ class AssetGenerationRecordOut(BaseModel):
     status:  int
     is_current: bool = False
     images: list[str] = Field(default_factory=list)
+    image_thumbnails: list[str | None] = Field(default_factory=list)
+    image_previews: list[str | None] = Field(default_factory=list)
     error_message: Optional[str] = None
     model: Optional[str] = None
     clarity: Optional[str] = None
@@ -121,7 +155,10 @@ class AssetGenerationRecordOut(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.images = [resolve_media_url(u) for u in self.images or []]
+        resolved = [_image_urls(image) for image in self.images or []]
+        self.images = [original for original, _thumbnail, _preview in resolved if original]
+        self.image_thumbnails = [thumbnail for _original, thumbnail, _preview in resolved]
+        self.image_previews = [preview for _original, _thumbnail, preview in resolved]
         return self
 
 
@@ -158,27 +195,31 @@ class AssetBriefOut(AssetProperties, BaseResponse):
     metadata: Optional[Any] = Field(None, description="资产编辑元数据")
 
     id: int = Field(..., description="小说/剧本ID")
+    main_image_thumbnail: Optional[str] = Field(None, description="三视主图缩略图")
+    main_image_preview: Optional[str] = Field(None, description="三视主图预览图")
+    angle_image_1_thumbnail: Optional[str] = Field(None, description="参考图1缩略图")
+    angle_image_1_preview: Optional[str] = Field(None, description="参考图1预览图")
+    angle_image_2_thumbnail: Optional[str] = Field(None, description="参考图2缩略图")
+    angle_image_2_preview: Optional[str] = Field(None, description="参考图2预览图")
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.main_image = resolve_media_url(self.main_image)
-        self.angle_image_1 = resolve_media_url(self.angle_image_1)
-        self.angle_image_2 = resolve_media_url(self.angle_image_2)
-        meta = getattr(self, "metadata", None)
-        if isinstance(meta, dict) and isinstance(meta.get("image_gallery"), list):
-            self.metadata = {
-                **meta,
-                "image_gallery": [
-                    resolve_media_url(u) for u in meta["image_gallery"]
-                ],
-            }
-        if isinstance(meta, dict) and isinstance(meta.get("generation_reference_images"), list):
-            self.metadata = {
-                **meta,
-                "generation_reference_images": [
-                    resolve_media_url(u) for u in meta["generation_reference_images"]
-                ],
-            }
+        (
+            self.main_image,
+            self.main_image_thumbnail,
+            self.main_image_preview,
+        ) = _image_urls(self.main_image)
+        (
+            self.angle_image_1,
+            self.angle_image_1_thumbnail,
+            self.angle_image_1_preview,
+        ) = _image_urls(self.angle_image_1)
+        (
+            self.angle_image_2,
+            self.angle_image_2_thumbnail,
+            self.angle_image_2_preview,
+        ) = _image_urls(self.angle_image_2)
+        self.metadata = _resolve_asset_metadata(getattr(self, "metadata", None))
         return self
 
 
@@ -190,27 +231,31 @@ class AssetOut(AssetFullProperties, BaseResponse):
     novel_id: int = Field(..., description="所属小说/剧本")
 
     id: int = Field(..., description="小说/剧本ID")
+    main_image_thumbnail: Optional[str] = Field(None, description="三视主图缩略图")
+    main_image_preview: Optional[str] = Field(None, description="三视主图预览图")
+    angle_image_1_thumbnail: Optional[str] = Field(None, description="参考图1缩略图")
+    angle_image_1_preview: Optional[str] = Field(None, description="参考图1预览图")
+    angle_image_2_thumbnail: Optional[str] = Field(None, description="参考图2缩略图")
+    angle_image_2_preview: Optional[str] = Field(None, description="参考图2预览图")
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.main_image = resolve_media_url(self.main_image)
-        self.angle_image_1 = resolve_media_url(self.angle_image_1)
-        self.angle_image_2 = resolve_media_url(self.angle_image_2)
-        meta = getattr(self, "metadata", None)
-        if isinstance(meta, dict) and isinstance(meta.get("image_gallery"), list):
-            self.metadata = {
-                **meta,
-                "image_gallery": [
-                    resolve_media_url(u) for u in meta["image_gallery"]
-                ],
-            }
-        if isinstance(meta, dict) and isinstance(meta.get("generation_reference_images"), list):
-            self.metadata = {
-                **meta,
-                "generation_reference_images": [
-                    resolve_media_url(u) for u in meta["generation_reference_images"]
-                ],
-            }
+        (
+            self.main_image,
+            self.main_image_thumbnail,
+            self.main_image_preview,
+        ) = _image_urls(self.main_image)
+        (
+            self.angle_image_1,
+            self.angle_image_1_thumbnail,
+            self.angle_image_1_preview,
+        ) = _image_urls(self.angle_image_1)
+        (
+            self.angle_image_2,
+            self.angle_image_2_thumbnail,
+            self.angle_image_2_preview,
+        ) = _image_urls(self.angle_image_2)
+        self.metadata = _resolve_asset_metadata(getattr(self, "metadata", None))
         return self
 
 

@@ -459,7 +459,7 @@ onBeforeUnmount(() => {
         <div v-else-if="filteredProjectAssets.length" class="project-asset-grid">
           <article v-for="item in filteredProjectAssets" :key="item.id" class="project-asset-card">
             <div class="project-asset-image">
-              <img v-if="item.main_image" :src="item.main_image" :alt="item.canonical_name" loading="lazy" />
+              <img v-if="item.main_image" :src="item.main_image_thumbnail || item.main_image" :alt="item.canonical_name" loading="lazy" decoding="async" />
               <component :is="projectCategory === 'character' ? UserRound : projectCategory === 'scene' ? ImageIcon : Box" v-else :size="30" />
             </div>
             <div><span>{{ selectedProject?.name }}</span><h2>{{ item.canonical_name }}</h2><p>{{ item.description || '暂无资产描述' }}</p><small v-if="item.source_chapters?.length">出现于第 {{ item.source_chapters.join('、') }} 集</small></div>

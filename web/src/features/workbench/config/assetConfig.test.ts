@@ -131,6 +131,21 @@ describe('asset workbench configuration', () => {
     ])
   })
 
+  it('keeps originals for generation while exposing lightweight displays', () => {
+    const asset = makeAsset({
+      main_image: '/media/main.png',
+      main_image_thumbnail: '/media/derivatives/main-thumbnail.webp',
+      main_image_preview: '/media/derivatives/main-preview.webp',
+    })
+
+    expect(assetImageCandidates(asset)[0]).toMatchObject({
+      url: '/media/main.png',
+      thumbnailUrl: '/media/derivatives/main-thumbnail.webp',
+      previewUrl: '/media/derivatives/main-preview.webp',
+    })
+    expect(assetSelectedImageCandidates(asset)[0]?.url).toBe('/media/main.png')
+  })
+
   it('preserves unrelated metadata when writing workbench settings', () => {
     const metadata = patchAssetWorkbenchConfig(
       { source: 'chapter' },

@@ -3,6 +3,7 @@ import type { NodeProps } from '@vue-flow/core'
 import { Upload, Video } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { notice } from '@/shared/notice'
+import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
@@ -45,7 +46,7 @@ function captureMetadata(event: Event) {
   <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'video_media', title, status: uploading ? '上传中' : 'ready' }">
     <div class="workbench-uploaded-media-node workbench-uploaded-video-node">
       <span class="workbench-uploaded-media-node__type"><Video :size="14" aria-hidden="true" />视频</span>
-      <video v-if="url" :src="url" controls playsinline preload="metadata" :aria-label="title" @loadedmetadata="captureMetadata" />
+      <DeferredVideoPlayer v-if="url" :src="url" :title="title" @loadedmetadata="captureMetadata" />
       <div v-else class="workbench-media-placeholder">视频不可用</div>
       <small v-if="duration">{{ duration }}</small>
       <label class="workbench-uploaded-media-node__replace" :class="{ 'is-disabled': uploading }">

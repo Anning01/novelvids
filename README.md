@@ -348,10 +348,10 @@ OSS_ACCESS_KEY_SECRET=
 项目封面会保留原图，并自动生成列表缩略图与详情预览图。升级已有环境后，执行一次幂等回填：
 
 ```bash
-uv run python scripts/backfill_cover_derivatives.py
+uv run python scripts/backfill_media_derivatives.py
 ```
 
-本地媒体会在原图旁生成 WebP 派生图；OSS 模式通过 `OSS_INTERNAL_ENDPOINT` 读写，并为派生图设置长期不可变缓存。可重复传入 `--novel-id` 仅处理指定项目。
+本地媒体会在原图旁生成 WebP 派生图；OSS 模式通过 `OSS_INTERNAL_ENDPOINT` 读写，并为派生图设置长期不可变缓存。该命令也会为设定资产图片生成缩略图，并为历史生成视频提取首帧海报。
 
 ### 视频任务自动收口
 

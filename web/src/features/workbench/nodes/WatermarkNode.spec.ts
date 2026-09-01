@@ -72,7 +72,8 @@ beforeEach(() => {
   }]
 })
 
-it('previews the connected video and watermark image', () => {
+it('previews the connected video and watermark image after activation', async () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
   const wrapper = mount(WatermarkNode, {
     props: {
       ...common,
@@ -85,9 +86,12 @@ it('previews the connected video and watermark image', () => {
     global: { stubs: { WorkbenchNodeFrame: frameStub, Teleport: true } },
   })
 
+  expect(wrapper.find('video').exists()).toBe(false)
+  await wrapper.get('button[aria-label="播放水印输入视频"]').trigger('click')
   expect(wrapper.get('video').attributes('src')).toBe('/media/input.mp4')
   expect(wrapper.get('img[alt="水印预览图"]').attributes('src')).toBe('/media/logo.png')
   expect(wrapper.get('[aria-label="当前服务未启用水印执行"]').attributes('disabled')).toBeDefined()
+  play.mockRestore()
 })
 
 it('opens reference-style settings and saves changes through the store', async () => {

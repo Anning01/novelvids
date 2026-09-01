@@ -208,7 +208,10 @@ const referenceEdges = computed(() => store.edges
 function assetReferencePreview(node: WorkbenchNode) {
   if (node.kind === 'asset') {
     const referenceAsset = node.data.asset as Asset | undefined
-    return referenceAsset ? assetSelectedImageCandidates(referenceAsset).at(0)?.url || '' : ''
+    const image = referenceAsset
+      ? assetSelectedImageCandidates(referenceAsset).at(0)
+      : undefined
+    return image?.previewUrl || image?.thumbnailUrl || image?.url || ''
   }
   if (node.kind === 'digital_human') return (node.data.resource as { image_url?: string } | undefined)?.image_url || ''
   return typeof node.data.url === 'string' ? node.data.url : ''
@@ -237,7 +240,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
       ...base,
       mentionKey: `${source.key}:image:${image.displayIndex}`,
       name: `${base.name}-图${image.displayIndex + 1}`,
-      previewUrl: image.url,
+      previewUrl: image.previewUrl || image.thumbnailUrl || image.url,
       hasImage: true,
     }))
   }),
@@ -703,10 +706,10 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             class="workbench-asset-image-stack-layer"
             :style="assetImageStackLayerStyle(image, layerIndex + 1)"
             aria-hidden="true"
-          ><img :src="image.url" alt="" draggable="false"></span>
+          ><img :src="image.thumbnailUrl || image.url" alt="" draggable="false"></span>
           <img
             class="workbench-uploaded-image-preview"
-            :src="asset.main_image"
+            :src="asset.main_image_thumbnail || asset.main_image"
             :alt="`${assetName}预览`"
             draggable="false"
             loading="lazy"
@@ -757,7 +760,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
               @keydown.enter.prevent="setMainImage(image.url)"
               @keydown.space.prevent="setMainImage(image.url)"
             >
-              <img :src="image.url" :alt="`${assetName}${imageRoleLabel(image)}`" draggable="false" loading="lazy" decoding="async" @load="captureGalleryImageSize(image, $event)">
+              <img :src="image.thumbnailUrl || image.url" :alt="`${assetName}${imageRoleLabel(image)}`" draggable="false" loading="lazy" decoding="async" @load="captureGalleryImageSize(image, $event)">
               <span class="workbench-asset-gallery__label">
                 <CheckCircle2 v-if="imageIsPrimary(image)" :size="13" aria-hidden="true" />
                 {{ imageRoleLabel(image) }}

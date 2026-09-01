@@ -3,6 +3,7 @@ import type { NodeProps } from '@vue-flow/core'
 import { FileVideo2, HardDrive, History } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { mediaUrl } from '@/api'
+import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import type { WorkbenchRemakeSource } from '@/types'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 
@@ -25,7 +26,7 @@ const sizeLabel = computed(() => {
 <template>
   <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'source_video', title: `来源视频 · 第 ${source.episode_number} 集`, status: 'ready', borderless_media: true }">
     <div class="workbench-remake-source">
-      <video :src="sourceUrl" controls preload="metadata" playsinline :aria-label="`播放 ${source.original_filename}`" />
+      <DeferredVideoPlayer :src="sourceUrl" :title="source.original_filename" />
       <div class="workbench-remake-source__body">
         <strong><FileVideo2 :size="15" aria-hidden="true" />{{ source.original_filename }}</strong>
         <dl>
