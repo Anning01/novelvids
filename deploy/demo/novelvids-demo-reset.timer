@@ -1,0 +1,11 @@
+[Unit]
+Description=Reset NovelVids public demo every day at China midnight
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+Unit=novelvids-demo-reset.service
+
+[Install]
+WantedBy=timers.target

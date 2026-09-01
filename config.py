@@ -6,6 +6,20 @@ import dotenv
 dotenv.load_dotenv()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name)
+    if raw is None:
+        return list(default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 class Settings:
     # 数据库配置
     DATABASE_URL: str = os.getenv(
@@ -16,12 +30,66 @@ class Settings:
     APP_NAME: str = "猫影短剧"
     APP_DESC: str = "基于第三方AI模型的短剧/小说生成平台"
     VERSION: str = "1.0.0"
-    DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
-    GENERATE_SCHEMAS: bool = os.getenv("GENERATE_SCHEMAS", "True").lower() == "true"
+    DEBUG: bool = _env_bool("DEBUG", True)
+    GENERATE_SCHEMAS: bool = _env_bool("GENERATE_SCHEMAS", True)
 
-    # CORS配置
-    ALLOWED_HOSTS: list = ["*"]
-    ALLOWED_ORIGINS: list = ["*"]
+    # HTTP 安全配置：开发态保持兼容，生产环境通过环境变量收紧。
+    API_DOCS_ENABLED: bool = _env_bool("API_DOCS_ENABLED", DEBUG)
+    SECURITY_HEADERS_ENABLED: bool = _env_bool(
+        "SECURITY_HEADERS_ENABLED", not DEBUG
+    )
+    EXPOSE_INTERNAL_ERRORS: bool = _env_bool("EXPOSE_INTERNAL_ERRORS", DEBUG)
+    ALLOWED_HOSTS: list[str] = _env_list("ALLOWED_HOSTS", ["*"])
+    ALLOWED_ORIGINS: list[str] = _env_list(
+        "ALLOWED_ORIGINS", ["*"] if DEBUG else []
+    )
+    CORS_ALLOW_CREDENTIALS: bool = _env_bool("CORS_ALLOW_CREDENTIALS", False)
+    CONTENT_SECURITY_POLICY: str = os.getenv(
+        "CONTENT_SECURITY_POLICY",
+        "default-src 'self'; base-uri 'self'; object-src 'none'; "
+        "frame-ancestors 'none'; form-action 'self'; "
+        "img-src 'self' data: blob: https:; media-src 'self' blob: https:; "
+        "font-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; "
+        "script-src 'self' https://challenges.cloudflare.com; "
+        "frame-src https://challenges.cloudflare.com; "
+        "connect-src 'self' https: wss:; worker-src 'self' blob:",
+    )
+    DOCS_CONTENT_SECURITY_POLICY: str = os.getenv(
+        "DOCS_CONTENT_SECURITY_POLICY",
+        "default-src 'self'; base-uri 'self'; object-src 'none'; "
+        "frame-ancestors 'none'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    )
+
+    # 仅信任由这些直连代理注入的客户端 IP 头，支持单 IP 或 CIDR。
+    TRUSTED_PROXY_NETWORKS: list[str] = _env_list(
+        "TRUSTED_PROXY_NETWORKS", ["127.0.0.1/32", "::1/128"]
+    )
+
+    # 登录限流：每 IP 的总尝试频率 + IP/用户名组合的失败窗口。
+    LOGIN_RATE_LIMIT_ENABLED: bool = _env_bool("LOGIN_RATE_LIMIT_ENABLED", True)
+    LOGIN_RATE_LIMIT_IP_ATTEMPTS: int = max(
+        1, int(os.getenv("LOGIN_RATE_LIMIT_IP_ATTEMPTS", "30"))
+    )
+    LOGIN_RATE_LIMIT_IP_WINDOW_SECONDS: int = max(
+        1, int(os.getenv("LOGIN_RATE_LIMIT_IP_WINDOW_SECONDS", "60"))
+    )
+    LOGIN_RATE_LIMIT_FAILURES: int = max(
+        1, int(os.getenv("LOGIN_RATE_LIMIT_FAILURES", "5"))
+    )
+    LOGIN_RATE_LIMIT_FAILURE_WINDOW_SECONDS: int = max(
+        1, int(os.getenv("LOGIN_RATE_LIMIT_FAILURE_WINDOW_SECONDS", "900"))
+    )
+    LOGIN_RATE_LIMIT_MAX_KEYS: int = max(
+        100, int(os.getenv("LOGIN_RATE_LIMIT_MAX_KEYS", "10000"))
+    )
+    MEDIA_LIBRARY_SEED_ENABLED: bool = _env_bool(
+        "MEDIA_LIBRARY_SEED_ENABLED", True
+    )
+    MODEL_CONFIG_SEED_ENABLED: bool = _env_bool(
+        "MODEL_CONFIG_SEED_ENABLED", True
+    )
 
     # 媒体文件目录
     MEDIA_PATH = os.getenv("MEDIA_PATH", "./media")
@@ -32,7 +100,7 @@ class Settings:
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
     # 登录与团队功能开关（默认关闭，与无鉴权版本行为一致）
-    AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "false").lower() == "true"
+    AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", False)
 
     # 会话有效期（小时）
     SESSION_TTL_HOURS: int = int(os.getenv("SESSION_TTL_HOURS", "168"))

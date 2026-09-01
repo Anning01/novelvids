@@ -119,6 +119,9 @@ async def clear_db():
     from models.digital_human import DigitalHuman
     from models.remake_source import RemakeSource
     from models.remake_upload import RemakeUpload
+    from services.security.login_throttle import login_throttle
+
+    await login_throttle.reset()
 
     await AudioReference.all().delete()
     await DigitalHuman.all().delete()

@@ -1,0 +1,8 @@
+[Unit]
+Description=Reset NovelVids public demo to its golden snapshot
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/novelvids-demo/reset-demo.sh

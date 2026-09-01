@@ -68,6 +68,7 @@ logs/
 
 # OS files
 .DS_Store
+demo_seed/
 Thumbs.db
 
 # Docker

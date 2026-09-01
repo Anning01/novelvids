@@ -1,0 +1,93 @@
+name: novelvids-demo
+
+services:
+  backend:
+    image: novelvids-demo-backend:current
+    init: true
+    environment:
+      DATABASE_URL: sqlite:///app/data/novelvids.db
+      MEDIA_PATH: /app/media
+      DEBUG: "false"
+      GENERATE_SCHEMAS: "true"
+      AUTH_ENABLED: "true"
+      API_DOCS_ENABLED: "true"
+      SECURITY_HEADERS_ENABLED: "true"
+      EXPOSE_INTERNAL_ERRORS: "false"
+      ALLOWED_HOSTS: demo.xiazq.com,localhost,127.0.0.1
+      ALLOWED_ORIGINS: https://demo.xiazq.com
+      CORS_ALLOW_CREDENTIALS: "false"
+      TRUSTED_PROXY_NETWORKS: 172.16.0.0/12
+      LOGIN_RATE_LIMIT_ENABLED: "true"
+      LOGIN_RATE_LIMIT_IP_ATTEMPTS: "20"
+      LOGIN_RATE_LIMIT_IP_WINDOW_SECONDS: "60"
+      LOGIN_RATE_LIMIT_FAILURES: "5"
+      LOGIN_RATE_LIMIT_FAILURE_WINDOW_SECONDS: "900"
+      MEDIA_LIBRARY_SEED_ENABLED: "false"
+      MODEL_CONFIG_SEED_ENABLED: "false"
+      OSS_PROVIDER: local
+      TZ: Asia/Shanghai
+    volumes:
+      - ./runtime/data:/app/data
+      - ./runtime/media:/app/media
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 1.5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/auth/status', timeout=3).read()
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - demo_internal
+
+  frontend:
+    image: novelvids-demo-frontend:current
+    init: true
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:18080:8080
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - demo_internal
+      - demo_loopback
+
+networks:
+  demo_internal:
+    internal: true
+  demo_loopback:
+    driver: bridge

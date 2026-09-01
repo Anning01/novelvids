@@ -1,0 +1,8 @@
+FROM nginx:1.27-alpine
+
+COPY nginx.demo.conf /etc/nginx/nginx.conf
+COPY dist /usr/share/nginx/html
+RUN chown -R nginx:nginx /usr/share/nginx/html
+
+USER nginx
+EXPOSE 8080

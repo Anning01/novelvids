@@ -4,12 +4,13 @@
 其余路由仅在 AUTH_ENABLED=true 时由 main.py 注册。
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.deps import extract_bearer_token, get_current_user
 from auth.schemas import ChangePasswordIn, LoginIn, LoginOut, MeOut, RegisterIn
 from auth.service import auth_service
 from config import settings
+from services.security.login_throttle import login_throttle
 from utils.response_format import ResponseSchema
 
 public_router = APIRouter()
@@ -28,8 +29,15 @@ async def register(data: RegisterIn):
 
 
 @router.post("/login", summary="账号密码登录", response_model=ResponseSchema[LoginOut])
-async def login(data: LoginIn):
-    return ResponseSchema(data=await auth_service.login(data))
+async def login(data: LoginIn, request: Request):
+    attempt = await login_throttle.before_attempt(request, data.username)
+    try:
+        result = await auth_service.login(data)
+    except HTTPException:
+        await login_throttle.record_failure(attempt)
+        raise
+    await login_throttle.record_success(attempt)
+    return ResponseSchema(data=result)
 
 
 @router.get("/me", summary="当前用户信息", response_model=ResponseSchema[MeOut])

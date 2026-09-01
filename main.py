@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from tortoise import Tortoise
 from tortoise.exceptions import (
     DoesNotExist,
@@ -42,6 +43,7 @@ from services.schema_compat import (
     ensure_usage_record_schema,
     ensure_voice_reference_schema,
 )
+from services.security.headers import SecurityHeadersMiddleware
 
 # 定义包含时区的配置字典
 # AUTH_ENABLED=true 时注册鉴权与团队相关模型；关闭时与无鉴权版本完全一致
@@ -91,8 +93,10 @@ async def lifespan(_: FastAPI):
     await _initialize_database_schema()
     await remake_upload_service.cleanup_expired()
     await backfill_last_frame_continuity()
-    await ensure_media_library_seed_data()
-    await ensure_model_config_seed_data()
+    if settings.MEDIA_LIBRARY_SEED_ENABLED:
+        await ensure_media_library_seed_data()
+    if settings.MODEL_CONFIG_SEED_ENABLED:
+        await ensure_model_config_seed_data()
     if settings.AUTH_ENABLED:
         from auth.bootstrap import ensure_super_admin
         from services.schema_compat import ensure_team_schema
@@ -109,15 +113,30 @@ async def lifespan(_: FastAPI):
         await Tortoise.close_connections()
 
 
-app = FastAPI(title=settings.APP_NAME, version=settings.VERSION, lifespan=lifespan)
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.VERSION,
+    lifespan=lifespan,
+    docs_url="/docs" if settings.API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if settings.API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if settings.API_DOCS_ENABLED else None,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+if settings.ALLOWED_HOSTS and "*" not in settings.ALLOWED_HOSTS:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+if settings.SECURITY_HEADERS_ENABLED:
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        content_security_policy=settings.CONTENT_SECURITY_POLICY,
+        docs_content_security_policy=settings.DOCS_CONTENT_SECURITY_POLICY,
+    )
 
 # 注册异常处理器
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
