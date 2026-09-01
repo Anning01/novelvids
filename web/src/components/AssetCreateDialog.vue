@@ -32,6 +32,7 @@ import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/
 import { notice } from '@/shared/notice'
 import { estimateImageCost } from '@/shared/modelPricing'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
+import { imageDerivativeUrl } from '@/shared/mediaDerivatives'
 import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetGenerationRecord, type AssetVariant, type AssetVariantDraft, type AudioReference, type DigitalHuman, type ImageGenerationModel } from '@/types'
 
 type AssetKind = 'character' | 'scene' | 'prop'
@@ -140,7 +141,6 @@ const restoringRecordId = ref('')
 const selectedVariant = ref<AssetVariant | null>(null)
 const variantDraft = ref<AssetVariantDraft | null>(null)
 const variantStripRef = ref<{ upsertVariant: (variant: AssetVariant) => void } | null>(null)
-const imageInfo = ref<Record<string, { dimensions: string; format: string }>>({})
 const lightboxImage = ref('')
 const lightboxAlt = ref('')
 const lightboxFormat = ref('')
@@ -164,6 +164,35 @@ const generatedImage = computed(() => variantDraft.value?.is_new
   : selectedVariant.value
     ? selectedVariant.value.images?.[0] || ''
     : promptSourceAsset.value?.main_image || props.asset?.main_image || '')
+function currentImageDerivative(kind: 'thumbnail' | 'preview') {
+  const original = generatedImage.value
+  if (!original) return ''
+  if (selectedVariant.value) {
+    const index = selectedVariant.value.images?.indexOf(original) ?? -1
+    const derivatives = kind === 'preview'
+      ? selectedVariant.value.image_previews
+      : selectedVariant.value.image_thumbnails
+    if (index >= 0 && derivatives?.[index]) return derivatives[index] || ''
+  }
+  for (const asset of [promptSourceAsset.value, props.asset]) {
+    if (!asset) continue
+    if (asset.main_image === original) {
+      const derivative = kind === 'preview'
+        ? asset.main_image_preview
+        : asset.main_image_thumbnail
+      if (derivative) return derivative
+    }
+  }
+  for (const record of generationHistory.value) {
+    const index = record.images.indexOf(original)
+    const derivatives = kind === 'preview'
+      ? record.image_previews
+      : record.image_thumbnails
+    if (index >= 0 && derivatives?.[index]) return derivatives[index] || ''
+  }
+  return imageDerivativeUrl(original, kind)
+}
+const generatedImagePreview = computed(() => currentImageDerivative('preview'))
 const currentImageName = computed(() => variantDraft.value?.name || selectedVariant.value?.name || name.value || props.asset?.canonical_name || config.value.label)
 const currentImageFormat = computed(() => {
   const historyFormat = generationHistory.value.find(record => record.images.includes(generatedImage.value))?.output_format
@@ -285,7 +314,6 @@ function reset() {
   restoringRecordId.value = ''
   selectedVariant.value = null
   variantDraft.value = null
-  imageInfo.value = {}
   lightboxImage.value = ''
   annotationOpen.value = false
   annotationSaving.value = false
@@ -444,27 +472,14 @@ function resolveImageFormat(url: string, hint?: string) {
   return extension?.toUpperCase().replace('JPG', 'JPEG') || 'IMAGE'
 }
 
-function recordImageInfo(url: string, event: Event, formatHint?: string) {
-  const image = event.currentTarget as HTMLImageElement
-  imageInfo.value[url] = {
-    dimensions: image.naturalWidth && image.naturalHeight
-      ? `${image.naturalWidth} × ${image.naturalHeight}`
-      : '',
-    format: resolveImageFormat(url, formatHint),
-  }
-}
-
 function imageInfoLabel(url: string, formatHint?: string) {
-  const loaded = imageInfo.value[url]
-  return [loaded?.dimensions, loaded?.format || resolveImageFormat(url, formatHint)]
-    .filter(Boolean)
-    .join(' / ')
+  return resolveImageFormat(url, formatHint)
 }
 
 function openImageLightbox(url: string, alt: string, formatHint?: string) {
   lightboxImage.value = url
   lightboxAlt.value = alt
-  lightboxFormat.value = imageInfo.value[url]?.format || resolveImageFormat(url, formatHint)
+  lightboxFormat.value = resolveImageFormat(url, formatHint)
 }
 
 function closeImageLightbox() {
@@ -731,7 +746,7 @@ async function loadProjectPage(page: number) {
       key: `project-${item.id}`,
       name: item.canonical_name,
       detail: item.description || '其他项目资产',
-      image: item.main_image || '',
+      image: item.main_image_thumbnail || item.main_image || '',
       source: 'project' as const,
       asset: item,
     })))
@@ -1223,7 +1238,7 @@ onUnmounted(() => {
             </header>
             <div v-if="generatedImage" class="asset-generated-preview__canvas">
               <button type="button" class="asset-generated-preview__viewer" :class="{ 'is-generating': generationBusy }" aria-label="放大查看当前图片" @click="openImageLightbox(generatedImage, `${currentImageName}的生成图片`, currentImageFormat)">
-                <img :src="generatedImage" :alt="`${currentImageName}的生成图片`" @load="recordImageInfo(generatedImage, $event, currentImageFormat)" />
+                <img :src="generatedImagePreview" :alt="`${currentImageName}的生成图片`" />
                 <span class="asset-generated-preview__zoom"><Maximize2 :size="15" />放大查看</span>
                 <span v-if="generationBusy" class="asset-generated-preview__overlay" aria-hidden="true">
                   <i><LoaderCircle :size="25" /></i>
@@ -1265,7 +1280,7 @@ onUnmounted(() => {
             <div v-else class="asset-generation-history__list">
               <article v-for="record in visibleGenerationHistory" :key="record.id" :class="`is-status-${record.status}`">
                 <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="`放大查看${formatHistoryTime(record.created_at)}的生成图片`" @click="openImageLightbox(record.images[0], `${name}的历史生成图片`, record.output_format)">
-                  <img :src="record.images[0]" :alt="`${name}的历史生成图片`" loading="lazy" @load="recordImageInfo(record.images[0], $event, record.output_format)" />
+                  <img :src="record.image_thumbnails?.[0] || imageDerivativeUrl(record.images[0])" :alt="`${name}的历史生成图片`" loading="lazy" decoding="async" />
                   <span>{{ imageInfoLabel(record.images[0], record.output_format) }}</span>
                 </button>
                 <span v-else class="asset-generation-history__placeholder"><LoaderCircle v-if="record.status === TaskStatusEnum.PROCESSING || record.status === TaskStatusEnum.PENDING || record.status === TaskStatusEnum.QUEUED" :size="18" /><ImagePlus v-else :size="18" /></span>
@@ -1352,7 +1367,7 @@ onUnmounted(() => {
               </header>
               <div class="asset-reference-input__grid">
                 <figure v-for="(image, index) in referenceImagePreviews" :key="image.key">
-                  <img :src="image.url" :alt="`图生图参考图片 ${index + 1}`" />
+                  <img :src="imageDerivativeUrl(image.url)" :alt="`图生图参考图片 ${index + 1}`" />
                   <AppButton type="button" variant="secondary" size="xs" icon-only :aria-label="`移除图生图参考图片 ${index + 1}`" @click="removeReferenceImage(index)"><X :size="13" /></AppButton>
                 </figure>
                 <label v-if="referenceImagePreviews.length < 10" class="asset-reference-input__add">
@@ -1379,7 +1394,7 @@ onUnmounted(() => {
             <div class="asset-library__grid" @scroll.passive="onLibraryScroll">
               <div v-if="loadingLibrary" class="asset-library__state">正在加载资产库…</div>
               <AppButton v-for="item in filteredLibraryItems" v-else :key="item.key" type="button" class="asset-library__card" :active="selectedLibraryKey === item.key" @click="selectedLibraryKey = item.key">
-                <img :src="item.image" alt="" loading="lazy" />
+                <img :src="imageDerivativeUrl(item.image)" alt="" loading="lazy" decoding="async" />
                 <span><strong>{{ item.name }}</strong><small>{{ item.detail }}</small></span>
                 <Check v-if="selectedLibraryKey === item.key" :size="16" />
               </AppButton>

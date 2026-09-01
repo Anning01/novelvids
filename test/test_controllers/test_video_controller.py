@@ -602,12 +602,19 @@ async def test_查询视频状态_已完成():
             "metadata": {"duration": 6.0},
         }
         mock_factory.return_value = mock_gen
-        mock_dl.return_value = f"./media/videos/{video.id}.mp4"
+        mock_dl.return_value = (
+            f"./media/videos/{video.id}.mp4",
+            {
+                "poster_thumbnail_url": f"/media/videos/posters/{video.id}-thumbnail.webp",
+                "poster_url": f"/media/videos/posters/{video.id}-preview.webp",
+            },
+        )
 
         result = await video_controller.query_status(video.id)
 
     assert result.status == TaskStatusEnum.completed.value
     assert result.url == f"./media/videos/{video.id}.mp4"
+    assert result.metadata["poster_url"].endswith("-preview.webp")
     mock_dl.assert_called_once_with("https://cdn.example.com/video.mp4", video.id)
     print(f"    查询已完成: url={result.url}")
 
@@ -1013,15 +1020,28 @@ async def test_章节合并按分镜顺序使用当前已有视频并跳过缺�
         "controllers.video.video_merger.merge_videos_from_storage",
         new_callable=AsyncMock,
         return_value="/media/videos/merged/chapter.mp4",
-    ) as merge:
+    ) as merge, patch(
+        "controllers.video.video_poster_service.extract_and_store",
+        new_callable=AsyncMock,
+        return_value={
+            "poster_url": "/media/videos/merged/posters/chapter-preview.webp",
+            "poster_thumbnail_url": "/media/videos/merged/posters/chapter-thumbnail.webp",
+        },
+    ) as posters:
         result = await video_controller.merge_chapter_videos(chapter.id)
 
     assert [video.id for video in merge.call_args.args[0]] == [selected.id, third.id]
     assert merge.call_args.args[1] == chapter.id
     assert merge.call_args.kwargs == {"team_id": 7}
+    posters.assert_awaited_once_with(
+        "/media/videos/merged/chapter.mp4",
+        chapter.id,
+    )
     assert result == {
         "chapter_id": chapter.id,
         "merged_url": "/media/videos/merged/chapter.mp4",
+        "poster_url": "/media/videos/merged/posters/chapter-preview.webp",
+        "poster_thumbnail_url": "/media/videos/merged/posters/chapter-thumbnail.webp",
         "video_count": 2,
         "total_duration": 10.0,
     }

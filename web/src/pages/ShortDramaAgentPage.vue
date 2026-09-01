@@ -26,6 +26,7 @@ import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
+import { fallbackImage } from '@/shared/mediaFallback'
 import {
   chapterDraftChanged,
   createChapterEditDraft,
@@ -52,6 +53,7 @@ interface AgentProjectMeta {
   fileName: string
   sourcePath?: string
   cover?: string
+  coverPreview?: string
   analysisTaskId?: string
 }
 
@@ -207,6 +209,7 @@ async function loadProject(): Promise<boolean> {
       style: settings.style || project.value.style,
       fileName: settings.sourceFile || project.value.fileName,
       cover: response.data.cover,
+      coverPreview: response.data.cover_preview || undefined,
     }
     return true
   } catch (error) {
@@ -399,6 +402,7 @@ async function saveEdits() {
       ...project.value,
       name: projectResponse.data.name,
       cover: projectResponse.data.cover,
+      coverPreview: projectResponse.data.cover_preview || undefined,
     }
     for (const response of chapterResponses) {
       const updated = response.data
@@ -479,7 +483,15 @@ onBeforeUnmount(() => {
       <section class="agent-content">
       <div class="analysis-hero">
         <div class="project-cover-art" aria-label="项目封面">
-          <img v-if="project.cover || analysisResult?.cover" :src="project.cover || analysisResult?.cover" :alt="`${displayedProjectName}封面`" />
+          <img
+            v-if="project.cover || analysisResult?.cover"
+            :src="project.coverPreview || project.cover || analysisResult?.cover"
+            :alt="`${displayedProjectName}封面`"
+            width="640"
+            height="960"
+            decoding="async"
+            @error="fallbackImage($event, project.cover || analysisResult?.cover)"
+          />
           <template v-else>
           <span class="cover-orbit orbit-one" />
           <span class="cover-orbit orbit-two" />

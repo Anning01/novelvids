@@ -12,12 +12,10 @@ import os
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import urlsplit
-
-import httpx
 
 from config import settings
 from services.oss import make_upload_key, oss
+from services.video.source import VideoSourceError, materialize_video_source
 
 
 logger = logging.getLogger(__name__)
@@ -65,30 +63,15 @@ class LastFrameService:
             return f"/media/video-references/{destination.name}"
 
     async def _materialize_video(self, video_ref: str, destination: Path) -> Path:
-        normalized_ref = oss.normalize_media_ref(video_ref)
-        if oss.enabled and normalized_ref and normalized_ref.startswith("uploads/"):
-            # OSS Provider 保证服务端读取走内网 endpoint。
-            await oss.download_to_file(normalized_ref, destination)
-            return destination
-
-        local_path = self._local_media_path(video_ref)
-        if local_path is not None:
-            return local_path
-
-        parsed = urlsplit(video_ref)
-        if parsed.scheme not in {"http", "https"}:
-            raise LastFrameExtractionError("视频文件不存在，无法提取尾帧")
-
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                async with client.stream("GET", video_ref) as response:
-                    response.raise_for_status()
-                    with destination.open("wb") as target:
-                        async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
-                            await asyncio.to_thread(target.write, chunk)
-        except httpx.HTTPError as exc:
-            raise LastFrameExtractionError("下载生成视频以提取尾帧失败") from exc
-        return destination
+            return await materialize_video_source(
+                video_ref,
+                destination,
+                media_root=Path(settings.MEDIA_PATH),
+                oss_provider=oss,
+            )
+        except VideoSourceError as exc:
+            raise LastFrameExtractionError(f"{exc}，无法提取尾帧") from exc
 
     @staticmethod
     def _local_media_path(video_ref: str) -> Path | None:

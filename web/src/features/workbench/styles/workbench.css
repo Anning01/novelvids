@@ -13,7 +13,9 @@
 }
 
 .workbench-remake-source video,
-.workbench-composer-node__result video {
+.workbench-composer-node__result video,
+.workbench-remake-source > .deferred-video-player,
+.workbench-composer-node__result > .deferred-video-player {
   display: block;
   width: 100%;
   max-height: 260px;
@@ -2155,6 +2157,9 @@
   max-height: none;
   object-fit: contain;
 }
+.viral-workbench-canvas .vue-flow__node-asset .workbench-uploaded-video-node > .deferred-video-player {
+  min-height: 170px;
+}
 .viral-workbench-canvas .vue-flow__node-source_video .workbench-media-node video {
   max-height: none;
   object-fit: contain;
@@ -4093,6 +4098,7 @@
   background: #121110;
 }
 .workbench-watermark-node__preview video,
+.workbench-watermark-node__preview > .deferred-video-player,
 .workbench-watermark-node__preview > .workbench-media-placeholder {
   width: 100%;
   min-height: 170px;

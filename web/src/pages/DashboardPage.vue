@@ -5,6 +5,7 @@ import { api } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { projectEntryRoute } from '@/shared/shortDramaProject'
+import { fallbackImage } from '@/shared/mediaFallback'
 import type { Novel } from '@/types'
 
 const novels = ref<Novel[]>([])
@@ -54,7 +55,17 @@ onMounted(load)
         class="project-card"
       >
         <div class="project-cover">
-          <img v-if="item.cover" :src="item.cover" :alt="item.name">
+          <img
+            v-if="item.cover"
+            :src="item.cover_thumbnail || item.cover"
+            :alt="item.name"
+            width="320"
+            height="480"
+            loading="lazy"
+            decoding="async"
+            fetchpriority="low"
+            @error="fallbackImage($event, item.cover)"
+          >
           <BookOpen v-else :size="34" />
         </div>
         <div>

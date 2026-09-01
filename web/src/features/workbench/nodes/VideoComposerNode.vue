@@ -3,6 +3,7 @@ import type { NodeProps } from '@vue-flow/core'
 import { ChevronDown, ChevronUp, Download, Film } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { mediaUrl } from '@/api'
+import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import type { VideoMergeResult } from '@/types'
 import {
   chapterComposerDisabledReason,
@@ -91,7 +92,7 @@ registerWorkbenchNodeRun(props.id, { enabled: canCompose, run: compose })
       <p v-if="disabledReason" class="workbench-composer-node__alert" role="alert">{{ disabledReason }}</p>
       <WorkbenchRunButton label="合成并预览" busy-label="正在合成…" :busy="busy" :disabled="Boolean(disabledReason)" @click="compose" />
       <section v-if="result?.merged_url" class="workbench-composer-node__result">
-        <video :src="mediaUrl(result.merged_url)" controls preload="metadata" aria-label="成片预览" />
+        <DeferredVideoPlayer :src="mediaUrl(result.merged_url)" :poster="mediaUrl(result.poster_url || '')" title="成片预览" />
         <a :href="mediaUrl(result.merged_url)" :download="`${draft.name || '章节成片'}.mp4`"><Download :size="14" aria-hidden="true" />下载成片</a>
       </section>
       <span class="workbench-composer-node__output"><Film :size="13" aria-hidden="true" />结果输出端口</span>

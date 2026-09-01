@@ -213,16 +213,16 @@ async def test_project_analysis_result_carries_billing_keys():
 
 @pytest.mark.asyncio
 async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
-    """OSS 启用时，生成的项目封面应上传 OSS 并返回签名公网 URL。"""
+    """OSS 启用时，同时上传原图和两个带长期缓存的 WebP 派生图。"""
     from services.oss import base as oss_base
 
     class FakeOss(oss_base.OSSProvider):
         name = "fake"
         enabled = True
-        uploaded = None
+        uploaded = []
 
-        async def put_bytes(self, key, data, content_type):
-            self.uploaded = (key, data, content_type)
+        async def put_bytes(self, key, data, content_type, *, cache_control=None):
+            self.uploaded.append((key, data, content_type, cache_control))
 
         def public_url(self, key):
             return f"https://cdn.example.com/{key}"
@@ -231,18 +231,35 @@ async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
     monkeypatch.setattr("services.oss.oss", fake)
 
     import base64
+    import cv2
+    import numpy as np
+
+    success, encoded = cv2.imencode(
+        ".png",
+        np.full((600, 400, 3), (40, 90, 180), dtype=np.uint8),
+    )
+    assert success
+    original = encoded.tobytes()
 
     image = SimpleNamespace(
         url=None,
-        b64_json=base64.b64encode(b"\x89PNG fake").decode(),
+        b64_json=base64.b64encode(original).decode(),
     )
     url = await _save_cover(image, 9)
 
-    assert fake.uploaded is not None
-    key, data, content_type = fake.uploaded
+    assert len(fake.uploaded) == 3
+    key, data, content_type, cache_control = fake.uploaded[0]
     assert key.startswith("uploads/0/")
     assert "novel-9-" in key
-    assert data == b"\x89PNG fake"
+    assert data == original
     assert content_type == "image/png"
+    assert cache_control is None
+    derivatives = fake.uploaded[1:]
+    assert {item[0].rsplit("-", 1)[-1] for item in derivatives} == {
+        "thumbnail.webp",
+        "preview.webp",
+    }
+    assert all(item[2] == "image/webp" for item in derivatives)
+    assert all(item[3] == "public, max-age=31536000, immutable" for item in derivatives)
     # OSS 媒体持久化对象键，响应序列化时再签发临时访问 URL。
     assert url == key

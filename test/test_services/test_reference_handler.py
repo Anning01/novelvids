@@ -2,6 +2,8 @@ import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import cv2
+import numpy as np
 import pytest
 
 from models.asset import Asset
@@ -109,6 +111,31 @@ async def test_参考图base64返回会落盘并更新资产(tmp_path, monkeypat
     assert saved_path.read_bytes() == png_bytes
     assert result["images"] == [f"/media/assets/{asset.id}.png"]
     assert asset.main_image == f"/media/assets/{asset.id}.png"
+
+
+@pytest.mark.asyncio
+async def test_有效参考图同时生成列表与预览派生图(tmp_path, monkeypatch):
+    asset = await _asset()
+    success, encoded = cv2.imencode(
+        ".png",
+        np.full((1200, 800, 3), (36, 92, 170), dtype=np.uint8),
+    )
+    assert success
+    generated = [SimpleNamespace(
+        url=None,
+        b64_json=base64.b64encode(encoded.tobytes()).decode("ascii"),
+    )]
+    monkeypatch.setattr("services.reference.handler.settings.MEDIA_PATH", str(tmp_path))
+
+    with patch(
+        "services.reference.handler.generate_for_sora_consistency",
+        new=AsyncMock(return_value=generated),
+    ):
+        await AssetReferenceHandler().execute(_request(asset))
+
+    derivative_dir = tmp_path / "assets" / "derivatives"
+    assert (derivative_dir / f"{asset.id}-thumbnail.webp").is_file()
+    assert (derivative_dir / f"{asset.id}-preview.webp").is_file()
 
 
 @pytest.mark.asyncio

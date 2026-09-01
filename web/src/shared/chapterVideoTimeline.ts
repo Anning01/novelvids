@@ -1,6 +1,6 @@
 import { TaskStatusEnum, type Scene, type Video } from '@/types'
 import { activeVideoIdForScene } from '@/features/workbench/graph/videoVersions'
-import { videoCoverUrl, videoDurationSeconds } from '@/features/workbench/graph/videoMedia'
+import { videoDurationSeconds, videoThumbnailUrl } from '@/features/workbench/graph/videoMedia'
 
 export type ChapterVideoState = 'completed' | 'generating' | 'failed' | 'pending'
 
@@ -54,7 +54,7 @@ export function buildChapterVideoTimeline(scenes: readonly Scene[], videosByScen
         video: completed,
         state,
         duration: Math.max(0, duration || scene.duration || 0),
-        coverUrl: completed ? videoCoverUrl(completed) : '',
+        coverUrl: completed ? videoThumbnailUrl(completed) : '',
         errorMessage: state === 'failed' ? videoErrorMessage(latest) : '',
       }
     })

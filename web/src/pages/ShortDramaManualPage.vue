@@ -729,7 +729,13 @@ onBeforeUnmount(() => {
                 <strong>正在生成参考图</strong>
                 <small>完成后将在这里自动显示</small>
               </div>
-              <img v-else-if="asset.main_image" :src="asset.main_image" :alt="asset.canonical_name" />
+              <img
+                v-else-if="asset.main_image"
+                :src="asset.main_image_thumbnail || asset.main_image"
+                :alt="asset.canonical_name"
+                loading="lazy"
+                decoding="async"
+              />
               <component v-else :is="activeTabConfig.icon" :size="30" />
               <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
               <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>

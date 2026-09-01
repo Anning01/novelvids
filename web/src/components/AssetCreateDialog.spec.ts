@@ -303,7 +303,7 @@ it('shows an existing generated image and closes quickly with Escape', async () 
   await flushPromises()
 
   const image = wrapper.get<HTMLImageElement>('.asset-generated-preview img')
-  expect(image.attributes('src')).toBe('/media/generated-character.png')
+  expect(image.attributes('src')).toBe('/media/derivatives/generated-character-preview.webp')
   expect(image.attributes('alt')).toBe('李火旺的生成图片')
 
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
@@ -342,9 +342,9 @@ it('keeps image annotation available for a selected variant and stores the resul
   })
   await flushPromises()
 
-  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/base.png')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/derivatives/base-preview.webp')
   await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
-  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/variant.png')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/derivatives/variant-preview.webp')
   expect(wrapper.get('.asset-generated-preview > header strong').text()).toContain('练气期')
   const editButton = wrapper.get('button[aria-label="编辑当前图片标注"]')
   await editButton.trigger('click')
@@ -360,7 +360,7 @@ it('keeps image annotation available for a selected variant and stores the resul
   })
   expect(api.recordAssetImageEdit).not.toHaveBeenCalled()
   expect(editor.props('open')).toBe(false)
-  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/assets/variant-annotated.png')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/assets/derivatives/variant-annotated-preview.webp')
 
   await wrapper.get('button[aria-label="切换到受伤状态"]').trigger('click')
   expect(wrapper.find('.asset-generated-preview img').exists()).toBe(false)
@@ -368,7 +368,7 @@ it('keeps image annotation available for a selected variant and stores the resul
   expect(wrapper.get('.asset-generated-preview > header span').text()).toBe('尚未生成')
 
   await wrapper.get('button[aria-label="切换到主形象"]').trigger('click')
-  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/base.png')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/derivatives/base-preview.webp')
 })
 
 it('uses application theme tokens for the preview edit action and annotation editor', () => {
@@ -715,12 +715,8 @@ it('renders as a right drawer and lists previous generation images', async () =>
 
   expect(assetDialogSource).toContain('right: 0')
   expect(assetDialogSource).toContain('translateX(100%)')
-  const currentImage = wrapper.get<HTMLImageElement>('.asset-generated-preview img')
-  Object.defineProperty(currentImage.element, 'naturalWidth', { configurable: true, value: 1920 })
-  Object.defineProperty(currentImage.element, 'naturalHeight', { configurable: true, value: 1080 })
-  await currentImage.trigger('load')
-  expect(wrapper.get('.asset-generated-preview > header span').text()).toBe('1920 × 1080 / PNG')
-  expect(wrapper.get<HTMLImageElement>('.asset-generation-history__list img').attributes('src')).toBe('/media/history.png')
+  expect(wrapper.get('.asset-generated-preview > header span').text()).toBe('PNG')
+  expect(wrapper.get<HTMLImageElement>('.asset-generation-history__list img').attributes('src')).toBe('/media/derivatives/history-thumbnail.webp')
   expect(wrapper.get('.asset-generation-history > header').text()).toContain('3 次')
   expect(wrapper.get('.asset-generation-history__list').text()).not.toContain('当前使用')
   expect(wrapper.get('.asset-generation-history__list').text()).toContain('gpt-image-2 / 3:2 / high / PNG')
@@ -746,14 +742,15 @@ it('renders as a right drawer and lists previous generation images', async () =>
   await flushPromises()
   expect(api.restoreAssetGeneration).toHaveBeenCalledWith(editedAsset.id, 'run-1')
   expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ main_image: '/media/history.png' })
-  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/history.png')
+  expect(wrapper.get<HTMLImageElement>('.asset-generated-preview img').attributes('src')).toBe('/media/derivatives/history-preview.webp')
   const visibleHistoryImages = wrapper.findAll<HTMLImageElement>('.asset-generation-history__list img').map(image => image.attributes('src'))
-  expect(visibleHistoryImages).toContain('/media/current.png')
-  expect(visibleHistoryImages).not.toContain('/media/history.png')
+  expect(visibleHistoryImages).toContain('/media/derivatives/current-thumbnail.webp')
+  expect(visibleHistoryImages).not.toContain('/media/derivatives/history-thumbnail.webp')
 
   await wrapper.get('.asset-generated-preview__viewer').trigger('click')
   await wrapper.vm.$nextTick()
   expect(wrapper.get('.image-lightbox').attributes('aria-label')).toBe('图片放大查看')
+  expect(wrapper.get<HTMLImageElement>('.image-lightbox img').attributes('src')).toBe('/media/history.png')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   await wrapper.vm.$nextTick()
   expect(wrapper.find('.image-lightbox').exists()).toBe(false)

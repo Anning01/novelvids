@@ -12,7 +12,12 @@ def _resolve_video_metadata(metadata: Any) -> None:
     """
     if not isinstance(metadata, dict):
         return
-    for key in ("first_frame_url", "last_frame_url"):
+    for key in (
+        "first_frame_url",
+        "last_frame_url",
+        "poster_url",
+        "poster_thumbnail_url",
+    ):
         raw = metadata.get(key)
         if isinstance(raw, str) and raw:
             metadata[key] = resolve_media_url(raw) or raw
@@ -138,5 +143,14 @@ class VideoMergeOut(BaseModel):
     """视频合并结果"""
     chapter_id: int = Field(..., description="章节ID")
     merged_url: str = Field(..., description="合并后的视频URL")
+    poster_url: Optional[str] = Field(None, description="成片预览海报")
+    poster_thumbnail_url: Optional[str] = Field(None, description="成片缩略海报")
     video_count: int = Field(..., description="合并的视频数量")
     total_duration: float = Field(..., description="视频总时长（秒）")
+
+    @model_validator(mode="after")
+    def _resolve_media(self):
+        self.merged_url = resolve_media_url(self.merged_url) or self.merged_url
+        self.poster_url = resolve_media_url(self.poster_url)
+        self.poster_thumbnail_url = resolve_media_url(self.poster_thumbnail_url)
+        return self

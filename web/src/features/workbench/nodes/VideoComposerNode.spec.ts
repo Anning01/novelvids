@@ -143,7 +143,13 @@ it('executes strict chapter composition and exposes the result download', async 
   }]
   vi.spyOn(store, 'composeChapter').mockImplementation(async () => {
     const composer = store.nodeByKey('composer-1')!
-    composer.data.result = { chapter_id: 1, merged_url: '/media/final.mp4', video_count: 1, total_duration: 4 }
+    composer.data.result = {
+      chapter_id: 1,
+      merged_url: '/media/final.mp4',
+      poster_url: '/media/posters/final-preview.webp',
+      video_count: 1,
+      total_duration: 4,
+    }
     return composer.data.result as never
   })
   const wrapper = mount(VideoComposerNode, {
@@ -163,5 +169,7 @@ it('executes strict chapter composition and exposes the result download', async 
   await wrapper.vm.$nextTick()
 
   expect(store.composeChapter).toHaveBeenCalledWith('composer-1')
+  expect(wrapper.find('video').exists()).toBe(false)
+  expect(wrapper.get('.deferred-video-player__poster img').attributes('src')).toBe('/media/posters/final-preview.webp')
   expect(wrapper.get('a[download]').attributes('href')).toBe('/media/final.mp4')
 })

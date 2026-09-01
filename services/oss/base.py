@@ -43,7 +43,14 @@ class OSSProvider(abc.ABC):
         """服务端读取对象（应走内网 endpoint）。"""
         raise NotImplementedError
 
-    async def put_bytes(self, key: str, data: bytes, content_type: str) -> None:
+    async def put_bytes(
+        self,
+        key: str,
+        data: bytes,
+        content_type: str,
+        *,
+        cache_control: str | None = None,
+    ) -> None:
         """服务端写入对象（应走内网 endpoint）。"""
         raise NotImplementedError
 

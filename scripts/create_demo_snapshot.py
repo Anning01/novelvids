@@ -18,7 +18,16 @@ import urllib.request
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import unquote, urlparse
+
+from services.cover_derivatives import (
+    local_media_path,
+    render_cover_derivatives,
+    write_local_cover_derivatives,
+)
+from services.video.poster import VideoPosterService, video_poster_reference
+from utils.enums import TaskStatusEnum
 
 
 SENSITIVE_KEY_PARTS = (
@@ -437,7 +446,108 @@ def _copy_media(
         shutil.copy2(source, destination)
         copied += 1
         copied_bytes += source.stat().st_size
-    return copied, copied_bytes
+    derivative_files, derivative_bytes = _generate_image_derivatives(
+        connection,
+        destination_root,
+    )
+    poster_files, poster_bytes = _generate_video_posters(
+        connection,
+        destination_root,
+    )
+    return (
+        copied + derivative_files + poster_files,
+        copied_bytes + derivative_bytes + poster_bytes,
+    )
+
+
+def _generate_image_derivatives(
+    connection: sqlite3.Connection,
+    destination_root: Path,
+) -> tuple[int, int]:
+    """为快照中的所有受管图片补齐派生图。"""
+    references, _remote = _referenced_media(connection)
+    files = total_bytes = 0
+    for relative in sorted(references):
+        if Path(relative).suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+            continue
+        source = destination_root / relative
+        if not source.is_file():
+            continue
+        try:
+            written = write_local_cover_derivatives(
+                destination_root,
+                f"/media/{relative}",
+                source.read_bytes(),
+                force=False,
+            )
+        except ValueError:
+            continue
+        for path in written.values():
+            files += 1
+            total_bytes += path.stat().st_size
+    return files, total_bytes
+
+
+def _generate_video_posters(
+    connection: sqlite3.Connection,
+    destination_root: Path,
+) -> tuple[int, int]:
+    """提取生成视频首帧海报，并把稳定引用写入快照中的视频元数据。"""
+    if "videos" not in _tables(connection):
+        return 0, 0
+    rows = connection.execute(
+        "SELECT id, url, metadata FROM videos "
+        "WHERE status = ? AND url IS NOT NULL AND url != ''",
+        (TaskStatusEnum.completed.value,),
+    ).fetchall()
+    files = total_bytes = 0
+    extractor = VideoPosterService()
+    for video_id, video_url, raw_metadata in rows:
+        relative = _local_media_path(str(video_url))
+        if not relative or Path(relative).suffix.lower() not in {
+            ".mp4",
+            ".mov",
+            ".webm",
+        }:
+            continue
+        source = destination_root / relative
+        if not source.is_file():
+            continue
+        with TemporaryDirectory(prefix=f"snapshot-poster-{video_id}-") as directory:
+            frame = Path(directory) / "poster.png"
+            try:
+                extractor._extract_with_ffmpeg(source, frame)
+                derivatives = render_cover_derivatives(frame.read_bytes())
+            except (OSError, ValueError, RuntimeError):
+                continue
+        poster_metadata: dict[str, str] = {}
+        for kind, data in derivatives.items():
+            reference = video_poster_reference(f"/media/{relative}", kind)
+            destination = local_media_path(destination_root, reference)
+            if destination is None:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+            files += 1
+            total_bytes += len(data)
+            poster_metadata[
+                "poster_thumbnail_url" if kind == "thumbnail" else "poster_url"
+            ] = str(reference)
+        try:
+            metadata = (
+                json.loads(raw_metadata)
+                if isinstance(raw_metadata, str)
+                else raw_metadata
+            )
+        except json.JSONDecodeError:
+            metadata = {}
+        metadata = metadata if isinstance(metadata, dict) else {}
+        connection.execute(
+            "UPDATE videos SET metadata = ? WHERE id = ?",
+            (json.dumps({**metadata, **poster_metadata}, ensure_ascii=False), video_id),
+        )
+    connection.commit()
+    return files, total_bytes
 
 
 def create_snapshot(

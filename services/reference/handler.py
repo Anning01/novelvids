@@ -4,6 +4,7 @@ import binascii
 import logging
 import os
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -13,6 +14,10 @@ from models.asset import Asset
 from models.asset_variant import AssetVariant
 from services.ai_task_executor import BaseTaskHandler
 from prompts.styles import image_project_style_suffix
+from services.cover_derivatives import (
+    ensure_image_derivatives,
+    write_local_cover_derivatives,
+)
 from services.image_inputs import resolve_reference_images
 from services.reference.generator import generate_for_sora_consistency
 from utils.enums import AssetTypeEnum, ImageSourceEnum
@@ -52,14 +57,36 @@ async def _store_asset_image(content: bytes, extension: str, asset_id: int, suff
     if oss.enabled:
         key = make_upload_key(None, f"asset-{asset_id}{suffix}{extension}")
         await oss.put_bytes(key, content, _content_type_for(extension))
+        try:
+            await ensure_image_derivatives(key, content, force=True)
+        except ValueError:
+            logger.warning(
+                "Generated asset image has no decodable thumbnail: asset_id=%s",
+                asset_id,
+            )
         # 落库存 key，读取时再由 resolve_media_url 重新签发临时 URL
         return key
     asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
     os.makedirs(asset_dir, exist_ok=True)
     filename = f"{asset_id}{suffix}{extension}"
-    with open(os.path.join(asset_dir, filename), "wb") as file:
-        file.write(content)
-    return f"/media/assets/{filename}"
+    destination = Path(asset_dir) / filename
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.write_bytes(content)
+    temporary.replace(destination)
+    reference = f"/media/assets/{filename}"
+    try:
+        write_local_cover_derivatives(
+            Path(settings.MEDIA_PATH),
+            reference,
+            content,
+            force=True,
+        )
+    except ValueError:
+        logger.warning(
+            "Generated asset image has no decodable thumbnail: asset_id=%s",
+            asset_id,
+        )
+    return reference
 
 
 def _content_type_for(extension: str) -> str:
@@ -86,9 +113,24 @@ def _save_base64_image(encoded: str, asset_id: int, suffix: str = "") -> str:
     asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
     os.makedirs(asset_dir, exist_ok=True)
     filename = f"{asset_id}{suffix}{extension}"
-    with open(os.path.join(asset_dir, filename), "wb") as file:
-        file.write(content)
-    return f"/media/assets/{filename}"
+    destination = Path(asset_dir) / filename
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.write_bytes(content)
+    temporary.replace(destination)
+    reference = f"/media/assets/{filename}"
+    try:
+        write_local_cover_derivatives(
+            Path(settings.MEDIA_PATH),
+            reference,
+            content,
+            force=True,
+        )
+    except ValueError:
+        logger.warning(
+            "Generated asset image has no decodable thumbnail: asset_id=%s",
+            asset_id,
+        )
+    return reference
 
 
 async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> str:
@@ -121,6 +163,10 @@ async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> s
             f.write(resp.content)
 
     media_url = f"/media/assets/{filename}"
+    try:
+        await ensure_image_derivatives(media_url, force=True)
+    except ValueError:
+        logger.warning("Generated asset image has no decodable thumbnail: asset_id=%s", asset_id)
     logger.info("Image downloaded: asset_id=%s -> %s", asset_id, media_url)
     return media_url
 

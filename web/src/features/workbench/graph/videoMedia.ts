@@ -1,4 +1,5 @@
 import type { Video } from '@/types'
+import { imageDerivativeUrl, videoPosterUrl } from '@/shared/mediaDerivatives'
 
 function metadata(video: Video) {
   return video.metadata || {}
@@ -24,7 +25,17 @@ function numberValue(video: Video, ...keys: string[]) {
 }
 
 export function videoCoverUrl(video: Video) {
-  return stringValue(video, 'cover_url', 'coverUrl', 'poster_url', 'posterUrl', 'first_frame_url', 'firstFrameUrl')
+  const poster = videoPosterUrl(video, 'preview')
+  if (poster) return poster
+  const fallback = stringValue(video, 'cover_url', 'coverUrl', 'first_frame_url', 'firstFrameUrl')
+  return imageDerivativeUrl(fallback, 'preview')
+}
+
+export function videoThumbnailUrl(video: Video) {
+  const poster = videoPosterUrl(video, 'thumbnail')
+  if (poster) return poster
+  const fallback = stringValue(video, 'cover_url', 'coverUrl', 'first_frame_url', 'firstFrameUrl')
+  return imageDerivativeUrl(fallback, 'thumbnail')
 }
 
 export function videoAspectRatio(video: Video) {

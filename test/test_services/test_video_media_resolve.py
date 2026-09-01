@@ -27,6 +27,8 @@ def test_video_out_resolves_metadata_media(monkeypatch):
     out = _video_out({
         "first_frame_url": "uploads/0/20260820/f.png",
         "last_frame_url": "uploads/0/20260820/e71e84865b40-last-frame-2.png",
+        "poster_url": "uploads/0/20260820/posters/x-preview.webp",
+        "poster_thumbnail_url": "uploads/0/20260820/posters/x-thumbnail.webp",
         "last_frame_reference": {
             "type": "image",
             "url": "uploads/0/20260820/e71e84865b40-last-frame-2.png",
@@ -43,6 +45,8 @@ def test_video_out_resolves_metadata_media(monkeypatch):
     assert out.metadata["last_frame_url"] == (
         "public://uploads/0/20260820/e71e84865b40-last-frame-2.png"
     )
+    assert out.metadata["poster_url"].endswith("x-preview.webp")
+    assert out.metadata["poster_thumbnail_url"].endswith("x-thumbnail.webp")
     assert out.metadata["last_frame_reference"]["url"] == (
         "public://uploads/0/20260820/e71e84865b40-last-frame-2.png"
     )
@@ -55,6 +59,8 @@ def test_video_out_resolves_metadata_media(monkeypatch):
         "uploads/0/20260820/x-video.mp4",
         "uploads/0/20260820/f.png",
         "uploads/0/20260820/e71e84865b40-last-frame-2.png",
+        "uploads/0/20260820/posters/x-preview.webp",
+        "uploads/0/20260820/posters/x-thumbnail.webp",
         "uploads/0/20260820/e71e84865b40-last-frame-2.png",
         "uploads/0/20260820/r.png",
     ]

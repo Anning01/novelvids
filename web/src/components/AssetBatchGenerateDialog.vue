@@ -190,7 +190,7 @@ watch(selectedModel, model => {
               @click="toggleAsset(asset)"
             >
               <span class="batch-checkbox"><Check v-if="selectedIds.includes(asset.id)" :size="13" /></span>
-              <span class="batch-thumb"><img v-if="asset.main_image" :src="asset.main_image" alt="" /><ImageIcon v-else :size="18" /></span>
+              <span class="batch-thumb"><img v-if="asset.main_image" :src="asset.main_image_thumbnail || asset.main_image" alt="" /><ImageIcon v-else :size="18" /></span>
               <span class="batch-copy"><strong>{{ asset.canonical_name }}</strong><small>{{ assetTypeLabel(asset.asset_type) }} · {{ asset.description || '尚未填写描述' }}</small></span>
               <AppBadge v-if="asset.main_image" class="batch-status" tone="warning" size="sm">已完成，不重复生成</AppBadge>
               <AppBadge v-else-if="generatingIds.has(asset.id)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>

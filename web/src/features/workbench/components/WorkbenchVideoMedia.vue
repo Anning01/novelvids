@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue';
 import { parseMediaAspectRatio } from '../graph/mediaAspectRatio';
 import WorkbenchMediaResultState from './WorkbenchMediaResultState.vue';
 
@@ -60,7 +61,15 @@ function captureVideoRatio(event: Event) {
 
 <template>
   <div class="workbench-video-media workbench-video-result" :class="ratioClass">
-    <video v-if="src" :src="src" :poster="poster || undefined" :style="mediaStyle" controls playsinline preload="metadata" draggable="false" :aria-label="title" @loadedmetadata="captureVideoRatio" />
+    <DeferredVideoPlayer
+      v-if="src"
+      :src="src"
+      :poster="poster"
+      :title="title"
+      :aspect-ratio="mediaStyle.aspectRatio"
+      draggable="false"
+      @loadedmetadata="captureVideoRatio"
+    />
     <WorkbenchMediaResultState
       v-else
       :running="running"
