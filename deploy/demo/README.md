@@ -28,7 +28,7 @@ uv run python scripts/create_demo_snapshot.py \
   --vendor-remote
 ```
 
-脚本使用 SQLite backup API，不写源库；遇到未知项目、缺失文件、路径越界、不受支持的远程媒体或外键错误会拒绝产出。
+脚本使用 SQLite backup API，不写源库；遇到未知项目、缺失文件、路径越界、不受支持的远程媒体或外键错误会拒绝产出。黄金快照会同时生成项目封面的列表缩略图与详情预览图，因此每天重置后仍使用轻量封面。
 
 ## 2. 构建与上传
 

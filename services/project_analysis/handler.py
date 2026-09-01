@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 import os
@@ -24,6 +25,11 @@ from prompts.extraction import (
 from prompts.reference import render_default_asset_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
+from services.cover_derivatives import (
+    cover_derivative_reference,
+    render_cover_derivatives,
+    write_local_cover_derivatives,
+)
 from services.image_generation import generate_images
 from services.image_generation.capabilities import validate_selection
 from services.llm.json_output import create_json_completion, completion_usage
@@ -139,20 +145,38 @@ async def _save_cover(image: Any, novel_id: int) -> str:
         raise ValueError("生图模型未返回可用的封面图片")
 
     filename = f"novel-{novel_id}-{uuid4().hex}{suffix}"
-
     from services.oss import make_upload_key, oss
 
     if oss.enabled:
+        derivatives = await asyncio.to_thread(render_cover_derivatives, image_bytes)
         key = make_upload_key(None, filename)
         await oss.put_bytes(key, image_bytes, _cover_content_type(suffix))
+        for kind, derivative_bytes in derivatives.items():
+            derivative_key = cover_derivative_reference(key, kind)
+            if derivative_key:
+                await oss.put_bytes(
+                    derivative_key,
+                    derivative_bytes,
+                    "image/webp",
+                    cache_control="public, max-age=31536000, immutable",
+                )
         # 落库存 key，读取时再由 resolve_media_url 重新签发临时 URL
         return key
 
     cover_dir = Path(settings.MEDIA_PATH) / "covers"
     cover_dir.mkdir(parents=True, exist_ok=True)
     local_path = cover_dir / filename
-    local_path.write_bytes(image_bytes)
-    return f"/media/covers/{filename}"
+    temporary = local_path.with_suffix(local_path.suffix + ".tmp")
+    temporary.write_bytes(image_bytes)
+    temporary.replace(local_path)
+    reference = f"/media/covers/{filename}"
+    await asyncio.to_thread(
+        write_local_cover_derivatives,
+        Path(settings.MEDIA_PATH),
+        reference,
+        image_bytes,
+    )
+    return reference
 
 
 def _cover_content_type(extension: str) -> str:

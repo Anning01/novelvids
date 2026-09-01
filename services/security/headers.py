@@ -37,6 +37,15 @@ class SecurityHeadersMiddleware:
                 headers["Cross-Origin-Opener-Policy"] = "same-origin"
                 headers["X-Frame-Options"] = "DENY"
                 headers["Content-Security-Policy"] = self._policy_for(path)
+                status = int(message.get("status", 0))
+                if (
+                    status in {200, 206}
+                    and path.startswith("/media/")
+                    and "/derivatives/" in path
+                ):
+                    headers["Cache-Control"] = (
+                        "public, max-age=31536000, immutable"
+                    )
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

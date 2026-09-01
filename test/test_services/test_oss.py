@@ -53,6 +53,53 @@ def test_aliyun_authorization_is_v1_format():
     assert provider._internal_url("k.txt") == "https://b.i/k.txt"
 
 
+@pytest.mark.asyncio
+async def test_aliyun_put_bytes_persists_cache_control(monkeypatch):
+    request: dict = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *, timeout):
+            request["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def put(self, url, *, content, headers):
+            request.update(url=url, content=content, headers=headers)
+            return FakeResponse()
+
+    monkeypatch.setattr("services.oss.aliyun.httpx.AsyncClient", FakeClient)
+    provider = AliyunProvider(
+        bucket="b",
+        endpoint="oss-cn-beijing.aliyuncs.com",
+        internal_endpoint="oss-cn-beijing-internal.aliyuncs.com",
+        public_base="https://cdn.example.com",
+        access_key_id="ak",
+        access_key_secret="sk",
+    )
+
+    await provider.put_bytes(
+        "uploads/1/derivatives/cover-thumbnail.webp",
+        b"webp",
+        "image/webp",
+        cache_control="public, max-age=31536000, immutable",
+    )
+
+    assert request["url"].startswith("https://b.oss-cn-beijing-internal")
+    assert request["content"] == b"webp"
+    assert request["headers"]["Content-Type"] == "image/webp"
+    assert request["headers"]["Cache-Control"] == (
+        "public, max-age=31536000, immutable"
+    )
+
+
 def test_public_url_is_public_read_no_signature():
     provider = AliyunProvider(
         bucket="b",

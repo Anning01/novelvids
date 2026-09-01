@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 
 from scripts.create_demo_snapshot import _rewrite_remote_references, create_snapshot
@@ -110,6 +112,39 @@ def test_snapshot_keeps_only_selected_projects_and_media(tmp_path: Path):
         assert connection.execute("SELECT COUNT(*) FROM ai_model_configs").fetchone()[0] == 0
         metadata = connection.execute("SELECT metadata FROM assets").fetchone()[0]
         assert "sk-secret-value" not in metadata
+
+
+def test_snapshot_generates_cover_derivatives_for_daily_restore(tmp_path: Path):
+    source_db = tmp_path / "source.db"
+    source_media = tmp_path / "source-media"
+    output = tmp_path / "snapshot"
+    (source_media / "assets").mkdir(parents=True)
+    image = np.full((600, 400, 3), (30, 90, 160), dtype=np.uint8)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+    original = encoded.tobytes()
+    (source_media / "assets/keep.png").write_bytes(original)
+    (source_media / "assets/drop.png").write_bytes(b"drop")
+    _source_database(source_db)
+
+    result = create_snapshot(
+        source_db,
+        source_media,
+        output,
+        [1],
+        "demo",
+        "public-demo-password",
+        "演示团队",
+    )
+
+    thumbnail = output / "media/assets/derivatives/keep-thumbnail.webp"
+    preview = output / "media/assets/derivatives/keep-preview.webp"
+    assert thumbnail.is_file()
+    assert preview.is_file()
+    assert result["media_files"] == 3
+    assert result["media_bytes"] == (
+        len(original) + thumbnail.stat().st_size + preview.stat().st_size
+    )
 
 
 def test_snapshot_rejects_unknown_project(tmp_path: Path):

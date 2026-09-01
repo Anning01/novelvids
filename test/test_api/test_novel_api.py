@@ -83,7 +83,11 @@ async def test_api_create_novel_rejects_conflicting_or_invalid_project_defaults(
 @pytest.mark.asyncio
 async def test_api_get_novel_list(client: AsyncClient):
     """Test getting novel list."""
-    await Novel.create(name="List Novel 1", author="Author 1")
+    await Novel.create(
+        name="List Novel 1",
+        author="Author 1",
+        cover="/media/covers/novel-1-abc.png",
+    )
     await Novel.create(name="List Novel 2", author="Author 2")
 
     response = await client.get("/api/novel")
@@ -92,6 +96,14 @@ async def test_api_get_novel_list(client: AsyncClient):
     items = data["items"]
     assert len(items) >= 2
     assert data["pagination"]["total"] >= 2
+    first = next(item for item in items if item["name"] == "List Novel 1")
+    assert first["cover"] == "/media/covers/novel-1-abc.png"
+    assert first["cover_thumbnail"] == (
+        "/media/covers/derivatives/novel-1-abc-thumbnail.webp"
+    )
+    assert first["cover_preview"] == (
+        "/media/covers/derivatives/novel-1-abc-preview.webp"
+    )
 
 @pytest.mark.asyncio
 async def test_api_get_novel_detail(client: AsyncClient):
@@ -279,3 +291,5 @@ async def test_api_novel_meta_excludes_content(client: AsyncClient):
     assert data["content_length"] == len("第一章 开端" * 100)
     assert data["name"] == "元信息项目"
     assert data["total_chapters"] == 0
+    assert data["cover_thumbnail"] is None
+    assert data["cover_preview"] is None

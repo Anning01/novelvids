@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from services.cover_derivatives import write_local_cover_derivatives
+
 
 SENSITIVE_KEY_PARTS = (
     "api_key",
@@ -437,7 +439,47 @@ def _copy_media(
         shutil.copy2(source, destination)
         copied += 1
         copied_bytes += source.stat().st_size
-    return copied, copied_bytes
+    derivative_files, derivative_bytes = _generate_cover_derivatives(
+        connection,
+        destination_root,
+    )
+    return copied + derivative_files, copied_bytes + derivative_bytes
+
+
+def _generate_cover_derivatives(
+    connection: sqlite3.Connection,
+    destination_root: Path,
+) -> tuple[int, int]:
+    """为快照中的有效本地封面补齐派生图；无效历史封面保持兼容跳过。"""
+    if "novels" not in _tables(connection):
+        return 0, 0
+    covers = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT cover FROM novels WHERE cover IS NOT NULL AND cover != ''"
+        )
+    }
+    files = total_bytes = 0
+    for cover in sorted(covers):
+        relative = _local_media_path(cover)
+        if not relative:
+            continue
+        source = destination_root / relative
+        if not source.is_file():
+            continue
+        try:
+            written = write_local_cover_derivatives(
+                destination_root,
+                f"/media/{relative}",
+                source.read_bytes(),
+                force=False,
+            )
+        except ValueError:
+            continue
+        for path in written.values():
+            files += 1
+            total_bytes += path.stat().st_size
+    return files, total_bytes
 
 
 def create_snapshot(

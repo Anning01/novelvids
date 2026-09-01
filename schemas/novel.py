@@ -1,7 +1,17 @@
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Literal, Optional
 from schemas._base import BaseResponse
-from services.oss import resolve_media_url
+from services.cover_derivatives import cover_derivative_reference
+from services.oss import normalize_media_url, resolve_media_url
+
+
+def _cover_urls(cover: str | None) -> tuple[str | None, str | None, str | None]:
+    stored = normalize_media_url(cover)
+    return (
+        resolve_media_url(stored),
+        resolve_media_url(cover_derivative_reference(stored, "thumbnail")),
+        resolve_media_url(cover_derivative_reference(stored, "preview")),
+    )
 
 
 # --- 核心业务属性 (Internal Mixins) ---
@@ -100,10 +110,12 @@ class NovelMetaOut(NovelProperties, BaseResponse):
     storyboard_strategy: Optional[str] = Field(None, description="分镜策略 key", max_length=120)
     storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")
     content_length: int = Field(0, description="书稿正文字符数（校验拆分质量用）")
+    cover_thumbnail: Optional[str] = Field(None, description="项目列表封面缩略图")
+    cover_preview: Optional[str] = Field(None, description="项目详情封面预览图")
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.cover = resolve_media_url(self.cover)
+        self.cover, self.cover_thumbnail, self.cover_preview = _cover_urls(self.cover)
         return self
 
 
@@ -115,10 +127,12 @@ class NovelBriefOut(NovelProperties, BaseResponse):
 
     id: int = Field(..., description="小说/剧本ID")
     workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")
+    cover_thumbnail: Optional[str] = Field(None, description="项目列表封面缩略图")
+    cover_preview: Optional[str] = Field(None, description="项目详情封面预览图")
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.cover = resolve_media_url(self.cover)
+        self.cover, self.cover_thumbnail, self.cover_preview = _cover_urls(self.cover)
         return self
 
 
@@ -130,8 +144,10 @@ class NovelOut(NovelFullProperties, BaseResponse):
 
     id: int = Field(..., description="小说/剧本ID")
     workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")
+    cover_thumbnail: Optional[str] = Field(None, description="项目列表封面缩略图")
+    cover_preview: Optional[str] = Field(None, description="项目详情封面预览图")
 
     @model_validator(mode="after")
     def _resolve_media(self):
-        self.cover = resolve_media_url(self.cover)
+        self.cover, self.cover_thumbnail, self.cover_preview = _cover_urls(self.cover)
         return self

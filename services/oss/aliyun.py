@@ -169,17 +169,27 @@ class AliyunProvider(OSSProvider):
                     async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                         await asyncio.to_thread(target.write, chunk)
 
-    async def put_bytes(self, key: str, data: bytes, content_type: str) -> None:
+    async def put_bytes(
+        self,
+        key: str,
+        data: bytes,
+        content_type: str,
+        *,
+        cache_control: str | None = None,
+    ) -> None:
         date, authorization = self._authorization("PUT", key, content_type)
+        headers = {
+            "Date": date,
+            "Authorization": authorization,
+            "Content-Type": content_type,
+        }
+        if cache_control:
+            headers["Cache-Control"] = cache_control
         async with httpx.AsyncClient(timeout=300) as client:
             response = await client.put(
                 self._internal_url(key),
                 content=data,
-                headers={
-                    "Date": date,
-                    "Authorization": authorization,
-                    "Content-Type": content_type,
-                },
+                headers=headers,
             )
             response.raise_for_status()
 
