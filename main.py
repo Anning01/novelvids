@@ -23,6 +23,7 @@ from exceptions.handlers import (
 )
 from exceptions.remake import RemakeError, remake_exception_handler
 from services.ai_task_executor import ai_task_executor
+from services.media_types import register_media_mime_types
 from services.extraction.handler import ExtractionTaskHandler
 from services.reference.handler import AssetReferenceHandler
 from services.project_analysis.handler import ProjectAnalysisTaskHandler
@@ -177,6 +178,7 @@ ai_task_executor.register(
 
 
 # 为媒体（图像、视频、音频）安装静态文件
+register_media_mime_types()
 media_path = Path(settings.MEDIA_PATH)
 media_path.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
