@@ -12,6 +12,18 @@
 | `SUPER_ADMIN_PASSWORD` | 空 | 超管初始密码（**首次登录后立即在界面修改**；留空则不自动创建） |
 | `WECHAT_MP_APP_ID / WECHAT_MP_APP_SECRET / WECHAT_MP_TOKEN / WECHAT_MP_AES_KEY` | 空 | 二期：微信公众号扫码登录（见 §5），当前未启用 |
 
+通用 HTTP 安全变量：
+
+| 变量 | 生产建议 | 说明 |
+|---|---|---|
+| `API_DOCS_ENABLED` | `false` | 控制 Swagger、ReDoc 与 OpenAPI；可信演示站可单独开启 |
+| `SECURITY_HEADERS_ENABLED` | `true` | HSTS、CSP、禁止嗅探/嵌入、权限策略等响应头 |
+| `EXPOSE_INTERNAL_ERRORS` | `false` | 关闭后客户端和生产日志不回显异常正文，避免供应商密钥或响应泄漏 |
+| `ALLOWED_HOSTS` | 实际域名 | 逗号分隔的 Host 白名单；生产环境不要使用 `*` |
+| `ALLOWED_ORIGINS` | 实际前端源 | 逗号分隔的 CORS 白名单；同源部署只需本站地址 |
+| `TRUSTED_PROXY_NETWORKS` | 直连代理 CIDR | 仅这些代理可提供 `CF-Connecting-IP` / `X-Forwarded-For` |
+| `LOGIN_RATE_LIMIT_*` | 保持默认或更严 | 应用层登录总尝试与失败窗口；边缘 WAF 仍应作为第一层 |
+
 ## 2. Docker 部署
 
 ### 开源体验（默认，零配置）
@@ -61,7 +73,7 @@ VITE_API_BASE=https://api.example.com npm run build
 ```
 
 - 不填 `VITE_API_BASE`：前端沿用相对路径 `/api`、`/media`，此时**静态服务器必须代理这两个路径**到后端（见下方 nginx 片段）。
-- 填了 `VITE_API_BASE`：API 请求直连后端域名（后端 CORS 已放开），上传等场景构造的 `/media` 地址也会自动带上后端域名；历史数据里后端返回的相对 `/media` 路径仍建议在静态服务器加 `/media` 代理兜底。
+- 填了 `VITE_API_BASE`：API 请求直连后端域名（需把前端源加入 `ALLOWED_ORIGINS`），上传等场景构造的 `/media` 地址也会自动带上后端域名；历史数据里后端返回的相对 `/media` 路径仍建议在静态服务器加 `/media` 代理兜底。
 
 ```nginx
 # 静态服务器的 nginx（方式二必配 /media 代理兜底；未填 VITE_API_BASE 时 /api 也需代理）
@@ -207,3 +219,7 @@ cd web && npm run test && npm run typecheck && npm run build
 ```
 
 CI 建议两条流水线分别执行上述两态后端回归。
+
+## 7. 公共演示环境
+
+仓库的 `deploy/demo/` 提供独立演示容器、非 root 运行、只读根文件系统、资源限制和每日原子重置模板；`scripts/create_demo_snapshot.py` 可从 SQLite 按项目白名单制作脱敏快照。演示数据不得直接复制生产账号、会话、账单或模型配置，详见 [deploy/demo/README.md](../deploy/demo/README.md)。

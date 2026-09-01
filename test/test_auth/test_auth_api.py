@@ -72,6 +72,57 @@ async def test_login_unknown_user(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_login_rate_limit_returns_http_429_and_retry_after(
+    client: AsyncClient, monkeypatch
+):
+    from services.security.login_throttle import login_throttle
+
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_ENABLED", True)
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_IP_ATTEMPTS", 100)
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_FAILURES", 2)
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_FAILURE_WINDOW_SECONDS", 60)
+    await login_throttle.reset()
+
+    await _create_user()
+    for _ in range(2):
+        response = await client.post(
+            "/api/auth/login",
+            json={"username": "alice", "password": "wrong-password"},
+        )
+        assert response.status_code == 200
+        assert response.json()["code"] == 401
+
+    limited = await client.post(
+        "/api/auth/login",
+        json={"username": "alice", "password": "wrong-password"},
+    )
+    assert limited.status_code == 429
+    assert limited.json()["code"] == 429
+    assert int(limited.headers["Retry-After"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_successful_login_clears_principal_failure_window(
+    client: AsyncClient, monkeypatch
+):
+    from services.security.login_throttle import login_throttle
+
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_ENABLED", True)
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_IP_ATTEMPTS", 100)
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_FAILURES", 2)
+    await login_throttle.reset()
+
+    await _create_user()
+    wrong = await _login(client, "alice", "wrong-password")
+    assert wrong["code"] == 401
+    success = await _login(client, "alice", "password123")
+    assert success["code"] == 0
+    wrong_again = await _login(client, "alice", "wrong-password")
+    assert wrong_again["code"] == 401
+
+
+
+@pytest.mark.asyncio
 async def test_disabled_user_cannot_login(client: AsyncClient):
     await _create_user()
     await User.filter(username="alice").update(status=0)
