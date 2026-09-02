@@ -98,8 +98,10 @@ async def get_asset_list(
 )
 async def preview_asset_reference_prompt(
     payload: AssetReferencePromptPreview,
-    _: AuthContext = _EDITOR,
+    _: AuthContext = Depends(get_auth_context),
 ):
+    # 该接口只对输入内容做确定性模板渲染，不写库、不调用模型、也不产生费用。
+    # 因此前端查看者也应能读取最终 Prompt，不能套用资产编辑权限。
     prompt_language = await general_config_controller.get_prompt_language()
     data = payload.model_dump()
     data["type"] = payload.asset_type.name

@@ -55,6 +55,9 @@ const character: Asset = {
   novel_id: 8,
   asset_type: AssetTypeEnum.PERSON,
   canonical_name: '总工程师',
+  main_image: '/media/assets/chief.png',
+  main_image_thumbnail: '/media/assets/derivatives/chief-thumbnail.webp',
+  main_image_preview: '/media/assets/derivatives/chief-preview.webp',
   metadata: { voice: '儒雅逸辰', voice_reference_id: 1 },
   variants: [variant],
   created_at: '',
@@ -171,6 +174,17 @@ describe('分镜角色音色选择', () => {
       message: 'ok',
       data: { items: [currentVoice], pagination: { total: 1, page: 1, page_size: 24, pages: 1 } },
     })
+  })
+
+  it('分镜侧栏使用缩略图而不是直接加载资产原图', async () => {
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(bootstrap(null) as never)
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    const thumbnail = wrapper.get<HTMLImageElement>('.selected-asset-row .asset-thumb img')
+    expect(thumbnail.attributes('src')).toBe('/media/assets/derivatives/chief-thumbnail.webp')
+    expect(thumbnail.attributes('loading')).toBe('lazy')
+    expect(thumbnail.attributes('decoding')).toBe('async')
   })
 
   it('点击当前衍生形态的音色后打开项目音频库，并立即保存到该形态', async () => {

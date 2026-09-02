@@ -106,6 +106,9 @@ class NovelMetaOut(NovelProperties, BaseResponse):
     id: int
     workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")
     tags: Optional[list[str]] = Field(None, description="项目标签")
+    story_outline: Optional[str] = Field(None, description="故事大纲")
+    project_type: Optional[str] = Field(None, description="项目设定类型", max_length=120)
+    project_setting: Optional[str] = Field(None, description="项目设定说明")
     style_key: Optional[str] = Field(None, description="视觉风格 key", max_length=64)
     storyboard_strategy: Optional[str] = Field(None, description="分镜策略 key", max_length=120)
     storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")

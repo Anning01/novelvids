@@ -87,14 +87,28 @@ function assetThumbnail(asset: Asset) {
   if (props.selectedAssetIds.includes(asset.id)) {
     const variantId = props.selectedVariantIds[asset.id]
     const selectedVariant = asset.variants?.find(variant => variant.id === variantId)
-    if (selectedVariant?.images[0]) return selectedVariant.images[0]
+    if (selectedVariant?.images[0]) {
+      return selectedVariant.image_thumbnails?.[0] || selectedVariant.images[0]
+    }
   }
-  return asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
+  return asset.main_image_thumbnail
+    || asset.angle_image_1_thumbnail
+    || asset.angle_image_2_thumbnail
+    || asset.main_image
+    || asset.angle_image_1
+    || asset.angle_image_2
+    || ''
 }
 
 function variantThumbnail(asset: Asset, variant?: AssetVariant) {
-  if (variant) return variant.images[0] || ''
-  return asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
+  if (variant) return variant.image_thumbnails?.[0] || variant.images[0] || ''
+  return asset.main_image_thumbnail
+    || asset.angle_image_1_thumbnail
+    || asset.angle_image_2_thumbnail
+    || asset.main_image
+    || asset.angle_image_1
+    || asset.angle_image_2
+    || ''
 }
 
 function variantIsAvailable(variant: AssetVariant) {
@@ -216,7 +230,7 @@ onBeforeUnmount(() => {
               :class="{ 'is-active': activeAsset?.id === asset.id, 'is-selected': selectedAssetIds.includes(asset.id) }"
               @click="selectAsset(asset.id)"
             >
-              <span class="scene-asset-variant-picker__thumb"><img v-if="assetThumbnail(asset)" :src="assetThumbnail(asset)" alt=""><ImageIcon v-else :size="16" /></span>
+              <span class="scene-asset-variant-picker__thumb"><img v-if="assetThumbnail(asset)" :src="assetThumbnail(asset)" alt="" loading="lazy" decoding="async"><ImageIcon v-else :size="16" /></span>
               <span><strong>{{ asset.canonical_name }}</strong><small v-if="asset.variants?.length">{{ asset.variants.length }} 个衍生状态</small><small v-else>仅基础形态</small></span>
               <Check v-if="selectedAssetIds.includes(asset.id)" class="scene-asset-variant-picker__selected-mark" :size="14" />
               <ChevronRight v-else :size="15" />
@@ -229,7 +243,7 @@ onBeforeUnmount(() => {
               :class="{ 'is-selected': isSelected(activeAsset.id, null) }"
               @click="selectVariant(activeAsset.id, null)"
             >
-              <span class="scene-asset-variant-picker__thumb"><img v-if="variantThumbnail(activeAsset)" :src="variantThumbnail(activeAsset)" alt=""><ImageIcon v-else :size="16" /></span>
+              <span class="scene-asset-variant-picker__thumb"><img v-if="variantThumbnail(activeAsset)" :src="variantThumbnail(activeAsset)" alt="" loading="lazy" decoding="async"><ImageIcon v-else :size="16" /></span>
               <span><strong>{{ activeAsset.canonical_name }}</strong><small>基础形态</small></span>
               <span class="scene-asset-variant-picker__check"><Check v-if="isSelected(activeAsset.id, null)" :size="14" /></span>
             </button>
@@ -242,7 +256,7 @@ onBeforeUnmount(() => {
               :class="{ 'is-selected': isSelected(activeAsset.id, variant.id), 'is-unavailable': !variantIsAvailable(variant) }"
               @click="selectVariant(activeAsset.id, variant.id)"
             >
-              <span class="scene-asset-variant-picker__thumb" :class="{ 'is-empty': !variantIsAvailable(variant) }"><img v-if="variantThumbnail(activeAsset, variant)" :src="variantThumbnail(activeAsset, variant)" alt=""></span>
+              <span class="scene-asset-variant-picker__thumb" :class="{ 'is-empty': !variantIsAvailable(variant) }"><img v-if="variantThumbnail(activeAsset, variant)" :src="variantThumbnail(activeAsset, variant)" alt="" loading="lazy" decoding="async"></span>
               <span><strong>{{ activeAsset.canonical_name }} · {{ variant.name }}</strong><small>{{ variantIsAvailable(variant) ? (variant.description || '衍生形态') : '尚未生成' }}</small></span>
               <span class="scene-asset-variant-picker__check"><Check v-if="variantIsAvailable(variant) && isSelected(activeAsset.id, variant.id)" :size="14" /></span>
             </button>

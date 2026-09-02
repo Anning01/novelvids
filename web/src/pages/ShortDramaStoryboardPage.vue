@@ -809,6 +809,24 @@ function selectedAssetImage(scene: Scene, asset: Asset) {
   return asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
 }
 
+function selectedAssetThumbnail(scene: Scene, asset: Asset) {
+  const variant = selectedVariantFor(scene, asset)
+  if (variant) return variant.image_thumbnails?.[0] || variant.images[0] || ''
+  return asset.main_image_thumbnail
+    || asset.angle_image_1_thumbnail
+    || asset.angle_image_2_thumbnail
+    || selectedAssetImage(scene, asset)
+}
+
+function selectedAssetPreview(scene: Scene, asset: Asset) {
+  const variant = selectedVariantFor(scene, asset)
+  if (variant) return variant.image_previews?.[0] || variant.images[0] || ''
+  return asset.main_image_preview
+    || asset.angle_image_1_preview
+    || asset.angle_image_2_preview
+    || selectedAssetImage(scene, asset)
+}
+
 function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
   if (variant) return [...new Set(variant.images.filter(Boolean))]
@@ -905,8 +923,8 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     label: selectedAssetLabel(scene, asset),
     syntax: `@{${asset.canonical_name}}`,
     group: asset.asset_type === AssetTypeEnum.PERSON ? '角色' : asset.asset_type === AssetTypeEnum.SCENE ? '场景' : '道具',
-    previewUrl: selectedAssetImage(scene, asset) || undefined,
-    thumbnailUrl: selectedAssetImage(scene, asset) || undefined,
+    previewUrl: selectedAssetPreview(scene, asset) || undefined,
+    thumbnailUrl: selectedAssetThumbnail(scene, asset) || undefined,
     description: asset.description || asset.canonical_name,
     aliases: asset.aliases || [],
   })))
@@ -1984,7 +2002,7 @@ onBeforeUnmount(() => {
                         class="asset-thumb"
                         :class="{ 'is-reference-highlighted': highlightedReferenceKey === `asset:${scene.id}:${asset.id}` }"
                         :data-reference-asset-id="asset.id"
-                      ><img v-if="selectedAssetImage(scene, asset)" :src="selectedAssetImage(scene, asset)" :alt="selectedAssetLabel(scene, asset)" /><component v-else :is="group.icon" :size="16" /></span>
+                      ><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" /><component v-else :is="group.icon" :size="16" /></span>
                       <AppButton
                         :id="assetRowPickerAnchorId(scene, asset)"
                         variant="soft"
