@@ -6,10 +6,12 @@ import numpy as np
 import pytest
 
 from scripts.create_demo_snapshot import (
+    DEMO_MODEL_BASE_URL,
     _generate_video_posters,
     _rewrite_remote_references,
     create_snapshot,
 )
+from utils.enums import ImageModelTypeEnum, VideoGenerationModelTypeEnum
 
 
 SCHEMA = """
@@ -45,7 +47,14 @@ CREATE TABLE ai_tasks (
   status INT, request_params JSON, response_data JSON, error_message TEXT,
   stage TEXT, progress INT, started_at TEXT, finished_at TEXT
 );
-CREATE TABLE ai_model_configs (id INTEGER PRIMARY KEY, api_key TEXT);
+CREATE TABLE ai_model_configs (
+  id INTEGER PRIMARY KEY, created_at TEXT, updated_at TEXT, task_type INT,
+  task_types JSON, name TEXT, base_url TEXT, api_key TEXT, model TEXT,
+  api_protocol TEXT, image_model_type TEXT, video_model_type TEXT,
+  is_active INT, concurrency INT, supports_json_output INT,
+  max_context_characters INT, thinking TEXT, max_tokens INT, pricing JSON,
+  scope TEXT, team_id INT
+);
 CREATE TABLE user_sessions (id INTEGER PRIMARY KEY);
 CREATE TABLE team_invites (id INTEGER PRIMARY KEY);
 CREATE TABLE model_usage_records (id INTEGER PRIMARY KEY);
@@ -81,7 +90,9 @@ def _source_database(path: Path) -> None:
         connection.execute(
             "INSERT INTO team_members VALUES (9,'x','x','admin',1,5,NULL,9,9)"
         )
-        connection.execute("INSERT INTO ai_model_configs VALUES (1,'sk-private')")
+        connection.execute(
+            "INSERT INTO ai_model_configs (id,api_key) VALUES (1,'sk-private')"
+        )
         connection.execute(
             "INSERT INTO ai_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
@@ -142,7 +153,22 @@ def test_snapshot_keeps_only_selected_projects_and_media(tmp_path: Path):
         assert connection.execute(
             "SELECT role,cost_limit FROM team_members"
         ).fetchone() == ("viewer", 0)
-        assert connection.execute("SELECT COUNT(*) FROM ai_model_configs").fetchone()[0] == 0
+        models = connection.execute(
+            """
+            SELECT name,base_url,api_key,is_active,image_model_type,video_model_type
+            FROM ai_model_configs ORDER BY id
+            """
+        ).fetchall()
+        assert len(models) == len(ImageModelTypeEnum) + len(VideoGenerationModelTypeEnum)
+        assert all(row[1] == DEMO_MODEL_BASE_URL for row in models)
+        assert all(row[2] == "" for row in models)
+        assert all(row[3] == 1 for row in models)
+        assert {row[4] for row in models if row[4]} == {
+            model_type.value for model_type in ImageModelTypeEnum
+        }
+        assert {row[5] for row in models if row[5]} == {
+            model_type.value for model_type in VideoGenerationModelTypeEnum
+        }
         task = connection.execute(
             "SELECT id,request_params,response_data FROM ai_tasks"
         ).fetchone()

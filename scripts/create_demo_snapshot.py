@@ -2,7 +2,8 @@
 """从本地 SQLite 安全制作可每日恢复的只读演示快照。
 
 脚本只接受显式项目 ID，使用 SQLite backup API 获取一致性副本，再移除账号、
-会话、账单、模型配置和未选项目。媒体目录仅复制保留数据实际引用的本地文件。
+会话、账单、真实模型配置和未选项目。演示库只重建无密钥、不可调用的模型能力
+目录，媒体目录仅复制保留数据实际引用的本地文件。
 """
 
 from __future__ import annotations
@@ -27,7 +28,13 @@ from services.cover_derivatives import (
     write_local_cover_derivatives,
 )
 from services.video.poster import VideoPosterService, video_poster_reference
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import (
+    AiTaskTypeEnum,
+    ImageModelTypeEnum,
+    TaskStatusEnum,
+    VideoGenerationModelTypeEnum,
+)
+from utils.image_protocol import ImageApiProtocol
 
 
 SENSITIVE_KEY_PARTS = (
@@ -56,6 +63,7 @@ CONTENT_TYPE_EXTENSIONS = {
     "video/quicktime": ".mov",
 }
 ALLOWED_MEDIA_EXTENSIONS = set(CONTENT_TYPE_EXTENSIONS.values())
+DEMO_MODEL_BASE_URL = "disabled://demo-model-catalog"
 
 
 def _hash_password(password: str) -> str:
@@ -79,6 +87,91 @@ def _delete_all(connection: sqlite3.Connection, tables: Iterable[str]) -> None:
     for table in tables:
         if table in existing:
             connection.execute(f'DELETE FROM "{table}"')
+
+
+def _insert_demo_supported_models(
+    connection: sqlite3.Connection,
+    now: str,
+) -> None:
+    """重建仅供查看的模型能力目录，不复制任何线上配置或密钥。
+
+    目录项保持 ``is_active``，让现有生图/视频选择器可以展示并切换能力参数；
+    演示账号仍是 viewer 且额度为零，所有生成接口由 RBAC 拒绝。即使权限边界
+    被错误放宽，空密钥与禁用协议地址也会使外部调用失败关闭。
+    """
+    if "ai_model_configs" not in _tables(connection):
+        return
+
+    image_protocols = {
+        ImageModelTypeEnum.gpt_image_2: ImageApiProtocol.openai_compatible.value,
+    }
+    video_protocols = {
+        VideoGenerationModelTypeEnum.minimax_h3: ImageApiProtocol.minimax.value,
+        VideoGenerationModelTypeEnum.wan_3: ImageApiProtocol.dashscope.value,
+    }
+    specs: list[dict[str, object]] = []
+    for model_type in ImageModelTypeEnum:
+        specs.append(
+            {
+                "task_type": AiTaskTypeEnum.reference_image.value,
+                "task_types": json.dumps([AiTaskTypeEnum.reference_image.value]),
+                "name": model_type.nickname,
+                "model": model_type.value,
+                "api_protocol": image_protocols.get(
+                    model_type,
+                    ImageApiProtocol.volcengine_ark.value,
+                ),
+                "image_model_type": model_type.value,
+                "video_model_type": None,
+            }
+        )
+    for model_type in VideoGenerationModelTypeEnum:
+        specs.append(
+            {
+                "task_type": AiTaskTypeEnum.video.value,
+                "task_types": json.dumps([AiTaskTypeEnum.video.value]),
+                "name": model_type.nickname,
+                "model": model_type.value,
+                "api_protocol": video_protocols.get(
+                    model_type,
+                    ImageApiProtocol.volcengine_ark.value,
+                ),
+                "image_model_type": None,
+                "video_model_type": model_type.value,
+            }
+        )
+
+    table_columns = {
+        str(row[1])
+        for row in connection.execute('PRAGMA table_info("ai_model_configs")')
+    }
+    common = {
+        "created_at": now,
+        "updated_at": now,
+        "base_url": DEMO_MODEL_BASE_URL,
+        "api_key": "",
+        "is_active": 1,
+        "concurrency": 1,
+        "supports_json_output": 0,
+        "max_context_characters": None,
+        "thinking": None,
+        "max_tokens": None,
+        "pricing": None,
+        "scope": "official",
+        "team_id": None,
+    }
+    required = {"task_type", "name", "api_key", "model", "is_active"}
+    if not required.issubset(table_columns):
+        raise RuntimeError("演示快照的 ai_model_configs 表结构不完整")
+    for spec in specs:
+        record = {**common, **spec}
+        columns = [column for column in record if column in table_columns]
+        placeholders = ",".join("?" for _ in columns)
+        quoted_columns = ",".join(f'"{column}"' for column in columns)
+        connection.execute(
+            f'INSERT INTO "ai_model_configs" ({quoted_columns}) VALUES ({placeholders})',
+            [record[column] for column in columns],
+        )
 
 
 def _retain_project_analysis_tasks(
@@ -249,6 +342,7 @@ def _prune_database(
 
     _delete_all(connection, ("team_members", "users", "teams"))
     now = datetime.now(timezone.utc).isoformat()
+    _insert_demo_supported_models(connection, now)
     connection.execute(
         """
         INSERT INTO users (
