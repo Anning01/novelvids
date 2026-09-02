@@ -5,7 +5,8 @@
 ## 安全边界
 
 - 演示数据库只保留显式项目白名单，并重建为单一查看者、零团队余额、零个人额度。
-- 原账号、会话、邀请、账单、供应商任务 ID、模型配置和非展示 AI 任务全部移除。
+- 原账号、会话、邀请、账单、供应商任务 ID、真实模型配置和非展示 AI 任务全部移除；
+  快照仅重建无密钥、不可调用的支持模型目录，供查看者在工作台浏览全部模型能力。
 - 每个入选项目仅保留最新一条已完成的项目分析展示结果；任务请求参数缩减为
   `novel_id`，其余 AI 任务、错误和执行阶段全部移除。
 - 媒体只复制保留项目实际引用的文件；远程 HTTPS 媒体可在导出时本地化，运行时固定 `OSS_PROVIDER=local`。
@@ -18,7 +19,7 @@
 在仓库根目录执行，项目 ID 必须逐个显式选择：
 
 ```bash
-uv run python scripts/create_demo_snapshot.py \
+uv run python -m scripts.create_demo_snapshot \
   --source-db data/novelvids.db \
   --source-media media \
   --output-dir demo_seed \
@@ -72,6 +73,8 @@ npm run build
 - 公网仅由受控反向代理接入，Compose 端口保持 `127.0.0.1:18080`；若启用边缘 WAF，再将源站限制为该供应商的回源地址。
 - `demo` 登录后 `/api/auth/me` 的角色必须是 `viewer`，余额和限额都为 0。
 - 项目列表、设定、分镜和媒体均可读；项目创建和模型配置接口返回业务码 403。
+- 生图与视频模型下拉框应覆盖后台枚举中的全部支持类型；目录项密钥为空、地址固定为
+  `disabled://demo-model-catalog`，切换模型只用于查看比例、分辨率与多模态能力差异。
 - `/docs` 与 `/openapi.json` 在演示站可用；商业站不可用。
 - 容器内没有 `.env`、模型 Key 或 OSS 凭据，数据库中不存在 HTTP/OSS 媒体引用。
 - 手工修改演示密码或数据后执行重置，确认恢复黄金状态。
