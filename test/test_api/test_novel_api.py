@@ -280,7 +280,14 @@ async def test_api_novel_meta_excludes_content(client: AsyncClient):
     """元信息接口不返回书稿正文，但给出正文字符数用于拆分校验。"""
     created = await client.post(
         "/api/novel",
-        json={"name": "元信息项目", "author": "x", "content": "第一章 开端" * 100},
+        json={
+            "name": "元信息项目",
+            "author": "x",
+            "content": "第一章 开端" * 100,
+            "story_outline": "可供查看者预览的故事大纲",
+            "project_type": "都市短剧",
+            "project_setting": "现实主义世界观",
+        },
     )
     novel_id = created.json()["data"]["id"]
 
@@ -291,5 +298,8 @@ async def test_api_novel_meta_excludes_content(client: AsyncClient):
     assert data["content_length"] == len("第一章 开端" * 100)
     assert data["name"] == "元信息项目"
     assert data["total_chapters"] == 0
+    assert data["story_outline"] == "可供查看者预览的故事大纲"
+    assert data["project_type"] == "都市短剧"
+    assert data["project_setting"] == "现实主义世界观"
     assert data["cover_thumbnail"] is None
     assert data["cover_preview"] is None

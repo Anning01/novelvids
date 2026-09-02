@@ -27,7 +27,7 @@ from services.cover_derivatives import (
     write_local_cover_derivatives,
 )
 from services.video.poster import VideoPosterService, video_poster_reference
-from utils.enums import TaskStatusEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 SENSITIVE_KEY_PARTS = (
@@ -79,6 +79,80 @@ def _delete_all(connection: sqlite3.Connection, tables: Iterable[str]) -> None:
     for table in tables:
         if table in existing:
             connection.execute(f'DELETE FROM "{table}"')
+
+
+def _retain_project_analysis_tasks(
+    connection: sqlite3.Connection,
+    project_ids: list[int],
+) -> None:
+    """仅保留每个演示项目最新的已完成分析结果，并移除全部调用参数。
+
+    项目分析响应是剧本页的只读展示数据；请求参数可能包含模型配置或密钥，
+    所以快照只保留 ``novel_id``，其余 AI 任务仍全部删除。
+    """
+    if "ai_tasks" not in _tables(connection):
+        return
+    columns = {
+        str(row[1]) for row in connection.execute('PRAGMA table_info("ai_tasks")')
+    }
+    required = {
+        "id",
+        "task_type",
+        "status",
+        "request_params",
+        "response_data",
+        "created_at",
+    }
+    if not required.issubset(columns):
+        connection.execute('DELETE FROM "ai_tasks"')
+        return
+
+    selected_projects = set(project_ids)
+    retained: dict[int, str] = {}
+    rows = connection.execute(
+        """
+        SELECT id, request_params
+        FROM ai_tasks
+        WHERE task_type=? AND status=? AND response_data IS NOT NULL
+        ORDER BY created_at DESC
+        """,
+        (
+            AiTaskTypeEnum.project_analysis.value,
+            TaskStatusEnum.completed.value,
+        ),
+    ).fetchall()
+    for task_id, raw_params in rows:
+        try:
+            params = json.loads(raw_params) if isinstance(raw_params, str) else raw_params
+            novel_id = int(params.get("novel_id")) if isinstance(params, dict) else 0
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if novel_id in selected_projects and novel_id not in retained:
+            retained[novel_id] = str(task_id)
+
+    retained_ids = list(retained.values())
+    if retained_ids:
+        placeholders = ",".join("?" for _ in retained_ids)
+        connection.execute(
+            f'DELETE FROM "ai_tasks" WHERE id NOT IN ({placeholders})',
+            retained_ids,
+        )
+        for novel_id, task_id in retained.items():
+            assignments = ["request_params=?"]
+            values: list[object] = [
+                json.dumps({"novel_id": novel_id}, separators=(",", ":")),
+            ]
+            for column, value in (("error_message", None), ("stage", None), ("progress", 100)):
+                if column in columns:
+                    assignments.append(f'"{column}"=?')
+                    values.append(value)
+            values.append(task_id)
+            connection.execute(
+                f'UPDATE "ai_tasks" SET {", ".join(assignments)} WHERE id=?',
+                values,
+            )
+    else:
+        connection.execute('DELETE FROM "ai_tasks"')
 
 
 def _scrub_json(value):
@@ -155,10 +229,10 @@ def _prune_database(
         f"DELETE FROM novels WHERE id NOT IN ({placeholders})", project_ids
     )
 
+    _retain_project_analysis_tasks(connection, project_ids)
     _delete_all(
         connection,
         (
-            "ai_tasks",
             "remake_uploads",
             "model_usage_records",
             "balance_transactions",

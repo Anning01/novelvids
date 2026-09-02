@@ -11,6 +11,7 @@ const assets: Asset[] = [
     canonical_name: '艾伦',
     aliases: ['团长'],
     main_image: '/media/eren-base.png',
+    main_image_thumbnail: '/media/derivatives/eren-base-thumbnail.webp',
     variants: [
       {
         id: 11,
@@ -18,6 +19,7 @@ const assets: Asset[] = [
         name: '日常便装与义肢',
         description: '受伤后的便装形态',
         images: ['/media/eren-injured.png'],
+        image_thumbnails: ['/media/derivatives/eren-injured-thumbnail.webp'],
         created_at: '',
         updated_at: '',
       },
@@ -99,7 +101,8 @@ describe('SceneAssetVariantPicker', () => {
 
     const subjectThumbnail = wrapper.get('.scene-asset-variant-picker nav img')
     const [baseButton, derivedButton] = wrapper.findAll('.scene-asset-variant-picker__variants button')
-    expect(subjectThumbnail.attributes('src')).toBe('/media/eren-injured.png')
+    expect(subjectThumbnail.attributes('src')).toBe('/media/derivatives/eren-injured-thumbnail.webp')
+    expect(baseButton!.get('img').attributes('src')).toBe('/media/derivatives/eren-base-thumbnail.webp')
     expect(baseButton!.classes()).not.toContain('is-selected')
     expect(derivedButton!.classes()).toContain('is-selected')
     expect(derivedButton!.find('.scene-asset-variant-picker__check svg').exists()).toBe(true)

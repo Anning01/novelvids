@@ -1,9 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import ShortDramaAgentPage from './ShortDramaAgentPage.vue'
+import { useAuthStore } from '@/features/auth/authStore'
 
 const push = vi.fn()
 const replace = vi.fn()
@@ -13,19 +15,25 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push, replace, back: vi.fn() }),
 }))
 
-vi.mock('@/api', () => ({
-  api: {
-    configs: vi.fn(),
-    novel: vi.fn(),
-    novelMeta: vi.fn(),
-    novelAnalysis: vi.fn(),
-    chapters: vi.fn(),
-    chaptersPage: vi.fn(),
-    chapter: vi.fn(),
-    assets: vi.fn(),
-    storyboardStrategies: vi.fn(),
-  },
-}))
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>()
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      configs: vi.fn(),
+      novel: vi.fn(),
+      novelMeta: vi.fn(),
+      novelAnalysis: vi.fn(),
+      chapters: vi.fn(),
+      chaptersPage: vi.fn(),
+      chapter: vi.fn(),
+      assets: vi.fn(),
+      storyboardStrategies: vi.fn(),
+      analyzeNovel: vi.fn(),
+    },
+  }
+})
 
 const chapter = {
   id: 2162,
@@ -37,7 +45,12 @@ const chapter = {
   updated_at: '2026-08-06T00:00:00.000Z',
 }
 
+let pinia: ReturnType<typeof createPinia>
+
 beforeEach(() => {
+  pinia = createPinia()
+  setActivePinia(pinia)
+  vi.clearAllMocks()
   vi.mocked(api.configs).mockResolvedValue({
     code: 0,
     message: 'ok',
@@ -129,6 +142,7 @@ beforeEach(() => {
 it('shows extracted person assets in the selected chapter footer instead of stale analysis characters', async () => {
   const wrapper = mount(ShortDramaAgentPage, {
     global: {
+      plugins: [pinia],
       components: { AppButton },
       stubs: { RouterLink: { template: '<a><slot /></a>' } },
     },
@@ -144,4 +158,33 @@ it('shows extracted person assets in the selected chapter footer instead of stal
   expect(editButton).toBeTruthy()
   await editButton?.trigger('click')
   expect(wrapper.get('button[aria-label="分镜策略"]').text()).toContain('旁白叙事')
+})
+
+it('查看者在分析任务缺失时直接预览已上传章节且不会触发模型调用', async () => {
+  vi.mocked(api.novelAnalysis).mockResolvedValue({ code: 0, message: 'ok', data: null })
+  const auth = useAuthStore(pinia)
+  auth.$patch({
+    enabled: true,
+    ready: true,
+    token: 'viewer-token',
+    user: { id: 4, username: 'viewer', nickname: '', avatar_url: '', is_super_admin: false },
+    memberships: [{ team_id: 1, team_name: '演示团队', role: 'viewer', cost_limit: 0, team_balance: 0 }],
+    activeTeamId: 1,
+  })
+
+  const wrapper = mount(ShortDramaAgentPage, {
+    global: {
+      plugins: [pinia],
+      components: { AppButton },
+      stubs: { RouterLink: { template: '<a><slot /></a>' } },
+    },
+  })
+  await flushPromises()
+
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
+  expect(api.chaptersPage).toHaveBeenCalledWith(9, 1, 30)
+  expect(wrapper.text()).toContain('剧本已载入')
+  expect(wrapper.text()).toContain('宫平与运在雨中前行。')
+  expect(wrapper.text()).not.toContain('重新分析')
+  expect(wrapper.text()).not.toContain('开始分析')
 })

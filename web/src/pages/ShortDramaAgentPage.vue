@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
+import { useAuthStore } from '@/features/auth/authStore'
 import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
@@ -93,6 +94,7 @@ function readProjectMeta(): AgentProjectMeta {
 
 const project = ref(readProjectMeta())
 const novel = ref<Novel | null>(null)
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
@@ -171,6 +173,17 @@ const selectedEpisodeCharacters = computed(() => {
     .map(asset => asset.canonical_name)
     .join('、') || '暂无当前章节角色'
 })
+const canEdit = computed(() => (
+  auth.enabled !== true
+  || auth.role === 'admin'
+  || auth.role === 'creator'
+  || auth.role === 'super'
+))
+const hasScriptPreview = computed(() => Boolean(
+  analysisResult.value
+  || chaptersTotal.value
+  || novel.value?.total_chapters
+))
 const analysisRunning = computed(() => {
   const status = analysisTask.value?.status
   return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
@@ -179,6 +192,7 @@ const analysisStatus = computed(() => {
   if (startingAnalysis.value || analysisRunning.value) return 'AI 正在理解书稿并生成封面'
   if (analysisTask.value?.status === TaskStatusEnum.FAILED) return '分析失败'
   if (analysisResult.value) return '剧本分析完成'
+  if (hasScriptPreview.value) return '剧本已载入'
   return '准备分析'
 })
 const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', '#8d73db']
@@ -290,7 +304,7 @@ async function pollAnalysis(taskId: string) {
 }
 
 async function startAnalysis() {
-  if (startingAnalysis.value || analysisRunning.value) return
+  if (!canEdit.value || startingAnalysis.value || analysisRunning.value) return
   startingAnalysis.value = true
   try {
     const response = await api.analyzeNovel(projectId.value)
@@ -309,7 +323,8 @@ async function loadAnalysis() {
     const response = await api.novelAnalysis(projectId.value)
     analysisTask.value = response.data
     if (!response.data) {
-      await startAnalysis()
+      await loadChapters()
+      if (canEdit.value) await startAnalysis()
     } else if (analysisRunning.value) {
       await pollAnalysis(response.data.id)
     } else if (response.data.status === TaskStatusEnum.COMPLETED) {
@@ -526,13 +541,13 @@ onBeforeUnmount(() => {
             <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />保存修改</AppButton>
           </template>
           <template v-else>
-            <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />重新分析</AppButton>
-            <AppButton v-if="analysisResult" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />编辑内容</AppButton>
+            <AppButton v-if="canEdit" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />重新分析</AppButton>
+            <AppButton v-if="canEdit && analysisResult" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />编辑内容</AppButton>
           </template>
         </div>
       </div>
 
-      <section v-if="!analysisResult" class="analysis-progress-card" :class="{ 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED }">
+      <section v-if="!hasScriptPreview" class="analysis-progress-card" :class="{ 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED }">
         <span><RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="25" /><FileText v-else :size="25" /></span>
         <div>
           <h2>{{ analysisStatus }}</h2>
@@ -540,10 +555,10 @@ onBeforeUnmount(() => {
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || '模型调用失败，请检查模型配置后重试。' }}</p>
           <p v-else>开始分析后，结果会自动保存在当前项目中。</p>
         </div>
-        <AppButton v-if="!analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" @click="startAnalysis">开始分析</AppButton>
+        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" @click="startAnalysis">开始分析</AppButton>
       </section>
 
-      <template v-if="analysisResult">
+      <template v-if="hasScriptPreview">
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>项目设定</h2></div></header>
         <div class="profile-grid">

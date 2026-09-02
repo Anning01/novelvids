@@ -40,7 +40,11 @@ CREATE TABLE team_members (
   id INTEGER PRIMARY KEY, created_at TEXT, updated_at TEXT, role TEXT, status INT,
   total_cost NUMERIC, cost_limit NUMERIC, team_id INT, user_id INT
 );
-CREATE TABLE ai_tasks (id TEXT PRIMARY KEY);
+CREATE TABLE ai_tasks (
+  id TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT, task_type INT,
+  status INT, request_params JSON, response_data JSON, error_message TEXT,
+  stage TEXT, progress INT, started_at TEXT, finished_at TEXT
+);
 CREATE TABLE ai_model_configs (id INTEGER PRIMARY KEY, api_key TEXT);
 CREATE TABLE user_sessions (id INTEGER PRIMARY KEY);
 CREATE TABLE team_invites (id INTEGER PRIMARY KEY);
@@ -78,6 +82,31 @@ def _source_database(path: Path) -> None:
             "INSERT INTO team_members VALUES (9,'x','x','admin',1,5,NULL,9,9)"
         )
         connection.execute("INSERT INTO ai_model_configs VALUES (1,'sk-private')")
+        connection.execute(
+            "INSERT INTO ai_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "analysis-keep", "2026-01-02", "2026-01-02", 5, 3,
+                '{"novel_id":1,"api_key":"sk-private-analysis-key"}',
+                '{"book_types":["都市"],"token":"sk-response-secret-key"}',
+                None, None, 100, "2026-01-02", "2026-01-02",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO ai_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "analysis-drop", "2026-01-02", "2026-01-02", 5, 3,
+                '{"novel_id":2}', '{"book_types":["仙侠"]}',
+                None, None, 100, "2026-01-02", "2026-01-02",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO ai_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "generation-drop", "2026-01-03", "2026-01-03", 2, 3,
+                '{"novel_id":1}', '{"images":["/media/private.png"]}',
+                None, None, 100, "2026-01-03", "2026-01-03",
+            ),
+        )
 
 
 def test_snapshot_keeps_only_selected_projects_and_media(tmp_path: Path):
@@ -114,6 +143,13 @@ def test_snapshot_keeps_only_selected_projects_and_media(tmp_path: Path):
             "SELECT role,cost_limit FROM team_members"
         ).fetchone() == ("viewer", 0)
         assert connection.execute("SELECT COUNT(*) FROM ai_model_configs").fetchone()[0] == 0
+        task = connection.execute(
+            "SELECT id,request_params,response_data FROM ai_tasks"
+        ).fetchone()
+        assert task[0] == "analysis-keep"
+        assert task[1] == '{"novel_id":1}'
+        assert "都市" in task[2]
+        assert "sk-response-secret-key" not in task[2]
         metadata = connection.execute("SELECT metadata FROM assets").fetchone()[0]
         assert "sk-secret-value" not in metadata
 

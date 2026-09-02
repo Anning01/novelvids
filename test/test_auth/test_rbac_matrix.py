@@ -142,6 +142,26 @@ async def test_viewer_cannot_read_billing_records(client, rbac_world):
     assert response.json()["code"] == 403
 
 
+@pytest.mark.asyncio
+async def test_viewer_can_preview_reference_prompt_without_model_call(client, rbac_world):
+    token = rbac_world["tokens"]["rbac_viewer"]
+    response = await client.post(
+        "/api/asset/reference-prompt/preview",
+        headers=_auth(token),
+        json={
+            "asset_type": 1,
+            "canonical_name": "演示角色",
+            "base_traits": "黑色短发，白色衬衫",
+            "description": "只读预览",
+            "metadata": {},
+            "aspect_ratio": "16:9",
+        },
+    )
+
+    assert response.json()["code"] == 0
+    assert "黑色短发，白色衬衫" in response.json()["data"]["prompt"]
+
+
 # ---------------------------------------------------------------- 写权限矩阵
 
 @pytest.mark.asyncio
