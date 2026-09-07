@@ -462,12 +462,6 @@ cd web && npm run typecheck && npm run build
 
 > 需要商用授权？请联系作者 📫 Email: anningforchina@gmail.com 洽谈。
 
----
-
-<p align="center">
-  <sub>Built with passion by <a href="https://github.com/Anning01">Anning</a></sub>
-</p>
-
 ## Star 增长
 
 <!-- star-growth-card:start -->
@@ -477,3 +471,9 @@ cd web && npm run typecheck && npm run build
   </a>
 </p>
 <!-- star-growth-card:end -->
+
+---
+
+<p align="center">
+  <sub>Built with passion by <a href="https://github.com/Anning01">Anning</a></sub>
+</p>
