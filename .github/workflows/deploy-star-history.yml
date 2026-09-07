@@ -1,0 +1,57 @@
+name: Deploy Star Growth Card
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - deploy/star-history-worker/**
+      - .github/workflows/deploy-star-history.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-star-growth-card
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Test card renderer
+        working-directory: deploy/star-history-worker
+        run: node --test test/index.test.mjs
+
+      - name: Deploy card Worker
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: deploy/star-history-worker
+          secrets: |
+            GITHUB_TOKEN
+        env:
+          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_GITHUB_TOKEN }}
+
+      - name: Put deployment URL in README
+        env:
+          STAR_CARD_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: node deploy/star-history-worker/scripts/update-readme.mjs
+
+      - name: Commit README card URL
+        run: |
+          if git diff --quiet -- README.md; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs(readme): 嵌入 Star 增长曲线"
+          git push

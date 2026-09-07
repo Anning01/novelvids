@@ -54,6 +54,12 @@
 
 演示站与商业环境完全隔离，使用独立数据库和本地媒体副本，并启用应用与反向代理双层登录限流、安全响应头、可信代理校验和每日原子还原。请勿在演示站上传隐私或生产数据。
 
+## Star 增长
+
+<!-- star-growth-card:start -->
+> 配置 Cloudflare 与 GitHub Secrets 并首次运行 `Deploy Star Growth Card` 后，这里会自动显示实时增长曲线。
+<!-- star-growth-card:end -->
+
 ## 成品视频示例
 
 一段由猫影短剧从小说自动生成的短剧成品片段：

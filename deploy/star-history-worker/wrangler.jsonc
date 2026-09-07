@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "novelvids-star-history",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "GITHUB_REPOSITORY": "Anning01/novelvids",
+    "CARD_TITLE": "猫影短剧"
+  }
+}

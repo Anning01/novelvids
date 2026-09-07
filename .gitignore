@@ -81,7 +81,10 @@ temp/
 # AI
 .claude
 .serena
-.github
+.github/*
+!.github/workflows/
+.github/workflows/*
+!.github/workflows/deploy-star-history.yml
 .ruff_cache
 
 media
