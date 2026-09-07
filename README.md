@@ -57,7 +57,11 @@
 ## Star 增长
 
 <!-- star-growth-card:start -->
-> 配置 Cloudflare 与 GitHub Secrets 并首次运行 `Deploy Star Growth Card` 后，这里会自动显示实时增长曲线。
+<p align="center">
+  <a href="https://github.com/Anning01/novelvids/stargazers">
+    <img src="https://novelvids-star-history.864399407.workers.dev/card.svg" width="920" alt="猫影短剧 GitHub Star 增长曲线">
+  </a>
+</p>
 <!-- star-growth-card:end -->
 
 ## 成品视频示例
