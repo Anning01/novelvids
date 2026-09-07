@@ -54,16 +54,6 @@
 
 演示站与商业环境完全隔离，使用独立数据库和本地媒体副本，并启用应用与反向代理双层登录限流、安全响应头、可信代理校验和每日原子还原。请勿在演示站上传隐私或生产数据。
 
-## Star 增长
-
-<!-- star-growth-card:start -->
-<p align="center">
-  <a href="https://github.com/Anning01/novelvids/stargazers">
-    <img src="https://novelvids-star-history.864399407.workers.dev/card.svg" width="920" alt="猫影短剧 GitHub Star 增长曲线">
-  </a>
-</p>
-<!-- star-growth-card:end -->
-
 ## 成品视频示例
 
 一段由猫影短剧从小说自动生成的短剧成品片段：
@@ -477,3 +467,13 @@ cd web && npm run typecheck && npm run build
 <p align="center">
   <sub>Built with passion by <a href="https://github.com/Anning01">Anning</a></sub>
 </p>
+
+## Star 增长
+
+<!-- star-growth-card:start -->
+<p align="center">
+  <a href="https://github.com/Anning01/novelvids/stargazers">
+    <img src="https://novelvids-star-history.864399407.workers.dev/card.svg" width="920" alt="猫影短剧 GitHub Star 增长曲线">
+  </a>
+</p>
+<!-- star-growth-card:end -->
