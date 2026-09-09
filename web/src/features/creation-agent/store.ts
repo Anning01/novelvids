@@ -76,7 +76,12 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     const attempt = subscriptionAttempt
     // A fresh AG-UI client needs RUN_STARTED/message-start events to reconstruct its state.
     // Replaying stored events is read-only and does not re-execute the model or its tools.
-    const handle = markRaw(await runSubscription(id, taskId))
+    let handle: HttpAgent
+    try { handle = markRaw(await runSubscription(id, taskId)) }
+    catch {
+      if (revision === epoch && attempt === subscriptionAttempt) error.value = '连接中断，可重新连接查看结果'
+      return
+    }
     if (revision !== epoch || attempt !== subscriptionAttempt) { handle.abortRun(); return }
     subscription = handle
     streamConnected.value = true
@@ -121,6 +126,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     statusText.value = ''
     observed.clear()
     const revision = epoch
+    loading.value = true
     try {
       await history()
       if (revision !== epoch) return
@@ -134,7 +140,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       }
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : '无法恢复当前对话'
-    }
+    } finally { if (revision === epoch) loading.value = false }
   }
 
   async function open(novelId: number) {
@@ -144,6 +150,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     const revision = epoch
     if (identity !== nextIdentity || projectId.value !== novelId) {
       conversationId.value = null; currentRun.value = null; messages.value = []; pendingRequest = null
+      capabilities.value = null; conversations.value = []; nextBefore.value = null
       statusText.value = ''
       observed.clear(); latestChanges.value = []
     }
@@ -160,7 +167,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       if (selected) await selectConversation(selected.id)
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : '加载助手失败'
-    } finally { if (projectId.value === novelId) loading.value = false }
+    } finally { if (revision === epoch) loading.value = false }
   }
 
   async function newConversation() {
@@ -193,13 +200,30 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       const response = await agentApi.submit(id, body)
       if (revision !== epoch) return false
       pendingRequest = null
-      await history()
+      applySnapshot(response.data)
+      // A history read failure cannot turn an accepted (possibly billable) run into a failed submission.
+      try { await history() }
+      catch {
+        if (revision !== epoch) return true
+        const localId = -Date.now()
+        messages.value.push(
+          { id: localId, role: 'user', content: frozenInput.message, task_id: response.data.task_id, status: response.data.status, changes: [], usage: {}, created_at: new Date().toISOString() },
+          { id: localId - 1, role: 'assistant', content: response.data.content, task_id: response.data.task_id, status: response.data.status, changes: response.data.changes, usage: response.data.usage, created_at: new Date().toISOString() },
+        )
+        error.value = '要求已提交，对话记录暂时未同步。可重新连接核对结果。'
+      }
       if (revision !== epoch) return false
       applySnapshot(response.data)
       const conversation = conversations.value.find(item => item.id === id)
-      if (conversation) conversation.active_task_id = response.data.task_id
-      statusText.value = '正在处理你的创作要求'
-      void follow(response.data.task_id)
+      if (conversation) {
+        conversation.active_task_id = response.data.task_id
+        conversation.updated_at = new Date().toISOString()
+        if (!conversation.title || conversation.title === '新会话') conversation.title = frozenInput.message.replace(/\s+/g, ' ').slice(0, 40)
+      }
+      if (isAgentRunning(response.data.status)) {
+        statusText.value = '正在处理你的创作要求'
+        void follow(response.data.task_id)
+      }
       return true
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : '提交失败，请重试以核对结果'

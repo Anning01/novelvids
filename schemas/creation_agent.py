@@ -18,10 +18,10 @@ class AgentConfiguration(BaseModel):
     tool_calls_limit: int = Field(8, ge=1, le=100)
     max_targets: int = Field(8, ge=1, le=100)
     timeout_seconds: int = Field(180, ge=10, le=900)
-    max_context_characters: int = Field(28000, ge=2000, le=200000)
+    max_context_characters: int = Field(64000, ge=2000, le=200000)
     history_runs: int = Field(6, ge=1, le=30)
-    max_output_tokens: int = Field(3000, ge=256, le=16000)
-    total_tokens_limit: int = Field(30000, ge=1000, le=500000)
+    max_output_tokens: int = Field(8000, ge=256, le=16000)
+    total_tokens_limit: int = Field(100000, ge=1000, le=500000)
 
 
 class AgentTarget(BaseModel):
@@ -73,6 +73,7 @@ class AgentConversationOut(BaseModel):
     active_task_id: UUID | None
     created_at: datetime
     updated_at: datetime
+    title: str = "新会话"
 
 
 class PromptChangeItemOut(BaseModel):
@@ -80,6 +81,7 @@ class PromptChangeItemOut(BaseModel):
     kind: Literal["asset", "variant", "scene"]
     target_id: int
     asset_id: int | None = None
+    target_label: str | None = None
     constraint_ids: list[int] = Field(default_factory=list)
     before: dict
     after: dict

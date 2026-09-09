@@ -3,11 +3,12 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+from tortoise.functions import Min
 
 from auth.deps import AuthContext, ensure_novel_access, require_roles
 from models.ai_task import AiTask
 from models.creation_agent import AgentConversation, AgentMessage, PromptChange, AgentSettings
-from schemas.creation_agent import AgentConfiguration, AgentRunOut, AgentRunRequest, PromptStatusRequest
+from schemas.creation_agent import AgentConfiguration, AgentConversationOut, AgentRunOut, AgentRunRequest, PromptStatusRequest
 from services.creation_agent.memory import creation_memory
 from services.creation_agent.handler import authorize_run
 from services.creation_agent.sessions import ACTIVE_STATUSES, agent_sessions, agent_configuration, agent_models
@@ -46,7 +47,14 @@ class CreationAgentController:
 
     async def conversations(self, novel_id: int, ctx: AuthContext):
         await ensure_novel_access(novel_id, ctx)
-        return await AgentConversation.filter(novel_id=novel_id, created_by=ctx.user.id if ctx.user else None).order_by('-updated_at').limit(30)
+        rows = await AgentConversation.filter(novel_id=novel_id, created_by=ctx.user.id if ctx.user else None).order_by('-updated_at').limit(30)
+        if not rows:
+            return []
+        first_messages = await AgentMessage.filter(conversation_id__in=[row.id for row in rows], role='user').annotate(
+            first_id=Min('id')).group_by('conversation_id').values('first_id')
+        messages = await AgentMessage.filter(id__in=[item['first_id'] for item in first_messages]).values('conversation_id', 'content')
+        titles = {item['conversation_id']: ' '.join(item['content'].split())[:40] for item in messages}
+        return [AgentConversationOut.model_validate(row).model_copy(update={'title': titles.get(row.id) or '新会话'}) for row in rows]
 
     async def create(self, novel_id: int, ctx: AuthContext):
         return await agent_sessions.create(novel_id, ctx)

@@ -1,3 +1,4 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { parse } from '@vue/compiler-sfc'
@@ -18,6 +19,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/api', () => ({
+  getAuthToken: () => null, getActiveTeamId: () => null,
   api: {
     novel: vi.fn(),
     novelMeta: vi.fn(),
@@ -46,6 +48,7 @@ const chapter = {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   delete routeQuery.asset
   delete routeQuery.variant

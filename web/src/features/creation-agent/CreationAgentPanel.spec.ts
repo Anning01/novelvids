@@ -7,16 +7,19 @@ import { agentApi } from './api'
 import { api } from '@/api'
 import { useCreationAgentStore } from './store'
 
-const { push } = vi.hoisted(() => ({ push: vi.fn() }))
+const { push, scrollToBottom } = vi.hoisted(() => ({ push: vi.fn(), scrollToBottom: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('./api', () => ({ agentApi: { promptStatus: vi.fn(), capabilities: vi.fn(), conversations: vi.fn(), history: vi.fn() }, runSubscription: vi.fn() }))
 vi.mock('@/api', () => ({ api: { assets: vi.fn(), scenes: vi.fn() }, getAuthToken: () => null, getActiveTeamId: () => null }))
 vi.mock('vue-element-plus-x', () => ({
-  XSender: defineComponent({ name: 'XSender', props: ['disabled', 'loading'], emits: ['submit', 'cancel'],
-    setup(_, { expose }) { expose({ getModelValue: () => ({ text: '灯光柔和一点' }), clear: vi.fn(), senderState: { isEmpty: false } }) },
-    template: '<div><button data-testid="sender" :disabled="disabled" @click="$emit(\'submit\')">发送</button><slot name="footer" /></div>' }),
-  BubbleList: defineComponent({ props: ['list'], template: '<div><div v-for="item in list" :key="item.id"><slot name="content" :item="item"/><slot name="footer" :item="item"/></div></div>' }),
+  BubbleList: defineComponent({ props: ['list'], setup(_, { expose }) { expose({ scrollToBottom }) }, template: '<div><div v-for="item in list" :key="item.id"><slot name="content" :item="item"/><slot name="footer" :item="item"/></div></div>' }),
 }))
+
+vi.mock('./AgentComposer.vue', () => ({ default: defineComponent({
+  setup(_, { expose }) { expose({ focus: vi.fn() }) },
+  name: 'AgentComposer', props: ['modelValue', 'modelId', 'models', 'disabled', 'busy'], emits: ['submit', 'update:modelValue', 'update:modelId'],
+  template: `<div><button data-testid="sender" :disabled="disabled || busy" @click="$emit('submit', modelValue || '灯光柔和一点')">发送</button><textarea aria-label="创作要求" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)"/><select aria-label="助手模型" :value="modelId" @change="$emit('update:modelId', $event.target.value)"><option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select></div>`,
+}) }))
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -101,7 +104,8 @@ describe('creation assistant panel', () => {
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [createPinia()] } })
     await flushPromises()
     expect(wrapper.text()).toContain('尚未启用')
-    expect(wrapper.get('[data-testid="sender"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="sender"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="助手连接状态"]').exists()).toBe(true)
     await wrapper.get('[aria-label="关闭创作助手"]').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
@@ -131,7 +135,7 @@ it('locates a variant through its parent asset even when the catalog does not co
       changes: [{ kind: 'variant', target_id: 31, asset_id: 8, before: {}, after: { base_traits: '雨衣' }, after_version: 'v1' }] }] }]
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === '查看差异')!.trigger('click')
-  await wrapper.findAll('button').find(button => button.text().includes('图片设定 #31'))!.trigger('click')
+  await wrapper.findAll('button').find(button => button.text().includes('查看图片设定'))!.trigger('click')
   expect(push).toHaveBeenCalledWith({ path: '/create/short-drama/manual/7', query: { chapter: 3, asset: 8, variant: 31 } })
   wrapper.unmount()
 })
@@ -184,5 +188,93 @@ it('does not show status returned for a previous chapter after switching chapter
   resolveOld({ code: 0, message: '', data: [{ kind: 'scene', id: 9, pending_constraints: [{ id: 1, content: '前章旧状态' }] }] })
   await flushPromises()
   expect(wrapper.text()).not.toContain('需核对新约束')
+  wrapper.unmount()
+})
+
+it('preserves draft and model choice after closing and reopening the assistant', async () => {
+  vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: {
+    enabled: true, can_write: true, max_targets: 2, models: [{ id: 1, name: '默认模型', model: 'first' }, { id: 2, name: '所选模型', model: 'second' }],
+  } })
+  const pinia = createPinia()
+  const settings = { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } }
+  const first = mount(CreationAgentPanel, settings)
+  await flushPromises()
+  await first.get('[aria-label="创作要求"]').setValue('先保留草稿，不要发送')
+  await first.get('[aria-label="助手模型"]').setValue('2')
+  first.unmount()
+  const reopened = mount(CreationAgentPanel, settings)
+  await flushPromises()
+  expect(reopened.get<HTMLTextAreaElement>('[aria-label="创作要求"]').element.value).toBe('先保留草稿，不要发送')
+  expect(reopened.get<HTMLSelectElement>('[aria-label="助手模型"]').element.value).toBe('2')
+  await reopened.setProps({ chapterId: 4 })
+  await flushPromises()
+  expect(reopened.get<HTMLTextAreaElement>('[aria-label="创作要求"]').element.value).toBe('先保留草稿，不要发送')
+  expect(reopened.get<HTMLSelectElement>('[aria-label="助手模型"]').element.value).toBe('2')
+  reopened.unmount()
+})
+
+it('sends an explicit page selection even beyond the first catalog page', async () => {
+  const { useCreationAgentWorkspace } = await import('./workspace')
+  const pinia = createPinia()
+  const workspace = useCreationAgentWorkspace(pinia)
+  workspace.editTargets(7, 3, [{ target: { kind: 'asset', id: 999 }, label: '远页角色' }])
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  expect(wrapper.get('[aria-label="已选修改对象"]').text()).toContain('远页角色')
+  expect(agentApi.promptStatus).toHaveBeenLastCalledWith(7, 3, expect.arrayContaining([{ kind: 'asset', id: 999 }]))
+  const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
+  await wrapper.get('[data-testid="sender"]').trigger('click')
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ targets: [{ kind: 'asset', id: 999 }] }))
+  workspace.editTargets(7, 3, [{ target: { kind: 'scene', id: 1000 }, label: '另一个分镜' }])
+  await flushPromises()
+  expect(agentApi.promptStatus).toHaveBeenLastCalledWith(7, 3, expect.arrayContaining([{ kind: 'scene', id: 1000 }]))
+  await wrapper.get('[data-testid="sender"]').trigger('click')
+  expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ targets: [{ kind: 'scene', id: 1000 }] }))
+  wrapper.unmount()
+})
+
+it('filters the object picker without losing selected targets', async () => {
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3, selectedTargets: [{ kind: 'scene', id: 9 }] }, global: { plugins: [createPinia()] } })
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text().includes('修改范围'))!.trigger('click')
+  await wrapper.get('[aria-label="搜索修改对象"]').setValue('不存在的角色')
+  expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+  expect(wrapper.text()).toContain('已选 1 个对象')
+  await wrapper.get('[aria-label="搜索修改对象"]').setValue('车站')
+  expect(wrapper.get<HTMLInputElement>('input[type="checkbox"]').element.checked).toBe(true)
+  wrapper.unmount()
+})
+
+it('keeps failed rounds visible and restores the request for editing without resubmission', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.messages = [
+    { id: 1, role: 'user', content: '保留人物，调柔灯光', task_id: 'failed', status: 4, changes: [], usage: {}, created_at: '' },
+    { id: 2, role: 'assistant', content: '', task_id: 'failed', status: 4, changes: [], usage: {}, created_at: '' },
+  ]
+  store.currentRun = { task_id: 'failed', conversation_id: 1, status: 4, content: '', error_message: '模型输出达到上限', changes: [], usage: {}, event_count: 1 }
+  store.error = '模型输出达到上限'
+  await flushPromises()
+  const send = vi.spyOn(store, 'send')
+  expect(wrapper.text()).toContain('本轮未完成，尚未保存修改')
+  await wrapper.findAll('button').find(button => button.text() === '编辑后重试')!.trigger('click')
+  expect(wrapper.get<HTMLTextAreaElement>('[aria-label="创作要求"]').element.value).toBe('保留人物，调柔灯光')
+  expect(send).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('opens restored history at the latest message', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.loading = true
+  await flushPromises()
+  store.messages = [{ id: 1, role: 'assistant', content: '最新修改已完成', task_id: 'done', status: 3, changes: [], usage: {}, created_at: '' }]
+  store.loading = false
+  await flushPromises()
+  expect(scrollToBottom).toHaveBeenCalledWith(false)
   wrapper.unmount()
 })

@@ -28,7 +28,8 @@ from services.extraction.context import (
 )
 from services.extraction.extractor import AssetExtractionResult, AssetExtractor, Person
 from services.extraction.messages import ExtractionMessageBuilder
-from services.project_analysis.handler import BookAnalysis, _cover_prompt
+from services.project_analysis.handler import BookAnalysis
+from prompts.project_analysis import render_cover_prompt
 from services.reference.generator import build_sora_compatible_prompt
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum
 
@@ -399,8 +400,8 @@ def test_project_cover_prompt_supports_both_languages():
         key_characters=[],
     )
 
-    assert _cover_prompt(novel, analysis, "zh").startswith("为小说")
-    assert _cover_prompt(novel, analysis, "en").startswith("Create a vertical")
+    assert render_cover_prompt(name=novel.name, book_types=analysis.book_types, story_outline=analysis.story_outline, prompt_language="zh").startswith("为小说")
+    assert render_cover_prompt(name=novel.name, book_types=analysis.book_types, story_outline=analysis.story_outline, prompt_language="en").startswith("Create a vertical")
 
 
 @pytest.mark.asyncio

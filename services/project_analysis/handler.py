@@ -19,10 +19,10 @@ from models.chapter import Chapter
 from models.novel import Novel
 from prompts.extraction import (
     SINGLE_CHARACTER_TRAIT_LABELS,
-    SINGLE_CHARACTER_VISUAL_RULES,
     ensure_ordered_trait_labels,
 )
 from prompts.reference import render_default_asset_prompt
+from prompts.project_analysis import render_analysis_messages, render_cover_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
 from services.cover_derivatives import (
@@ -34,7 +34,7 @@ from services.image_generation import generate_images
 from services.image_generation.capabilities import validate_selection
 from services.llm.json_output import create_json_completion, completion_usage
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum, ImageSourceEnum
-from utils.prompt_language import normalize_prompt_language, prompt_language_name
+from utils.prompt_language import normalize_prompt_language
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +63,6 @@ class BookAnalysis(BaseModel):
     book_types: list[str] = Field(description="3 至 6 个准确、简短的中文题材或类型标签")
     story_outline: str = Field(description="完整故事大纲，包含主线冲突、关键转折和结局走向")
     key_characters: list[KeyCharacter] = Field(description="推动主线的关键人物，通常为 3 至 10 位")
-
-
-ANALYSIS_SYSTEM_PROMPT = """你是一名资深影视开发编辑。请严格依据给定书稿完成结构化分析，不要虚构书稿中不存在的剧情事实；人物必填视觉字段缺失时，按后述视觉规则结合小说语境进行克制、一致的设计推断。
-类型标签应简洁准确；故事大纲应覆盖开端、主要冲突、关键转折和结局走向；关键人物只保留真正推动主线的人物。
-人物的 chapter_numbers 必须使用材料中给出的章节序号。base_traits 必须使用任务指定的提示词语言，描述可见且相对稳定的外貌、服装和气质，便于后续生图。"""
 
 
 def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
@@ -110,19 +105,6 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
         blocks.append(block)
         used += len(block)
     return "\n\n".join(blocks)
-
-
-def _cover_prompt(novel: Novel, analysis: BookAnalysis, prompt_language: str = "en") -> str:
-    types = "、".join(analysis.book_types)
-    if normalize_prompt_language(prompt_language) == "en":
-        return f"""Create a vertical cinematic short-drama cover key visual for the novel "{novel.name}".
-Genres: {types}.
-Story outline: {analysis.story_outline}
-Requirements: center the story's core conflict and atmosphere with cinematic composition and lighting; use a clear visual focal point suitable for a 2:3 vertical cover; do not include any text, title, subtitle, logo, watermark, or border; avoid distorted faces and extra limbs. Output at approximately 1K resolution."""
-    return f"""为小说《{novel.name}》创作一张竖版影视短剧封面主视觉。
-题材：{types}。
-故事大纲：{analysis.story_outline}
-要求：以故事核心冲突和氛围为主体，电影级构图与光影，视觉焦点明确，适合 2:3 竖版封面；画面中不要出现任何文字、标题、字幕、Logo、水印或边框；避免人物面部畸变和多余肢体。按当前模型默认清晰度输出。"""
 
 
 async def _save_cover(image: Any, novel_id: int) -> str:
@@ -257,31 +239,13 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             AiTaskTypeEnum.extraction.value,
             team_id=request_params.get("team_id"),
         )
-        image_config = await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.reference_image.value,
-            team_id=request_params.get("team_id"),
-        )
 
         material = _build_analysis_material(novel, chapters)
         llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
         analysis, completion = await create_json_completion(
             llm_client,
             model=llm_config.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"{ANALYSIS_SYSTEM_PROMPT}\n"
-                        f"本任务的提示词语言是{prompt_language_name(prompt_language)}；"
-                        "base_traits 必须严格使用该语言。\n\n"
-                        f"{SINGLE_CHARACTER_VISUAL_RULES.format(prompt_language_name=prompt_language_name(prompt_language))}"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"书名：《{novel.name}》\n共 {len(chapters)} 章。\n\n以下是书稿材料：\n{material}",
-                },
-            ],
+            messages=render_analysis_messages(name=novel.name, chapter_count=len(chapters), material=material, prompt_language=prompt_language),
             response_model=BookAnalysis,
             supports_json_output=llm_config.supports_json_output,
         )
@@ -294,50 +258,43 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             prompt_language,
         )
 
-        cover_selection = validate_selection(
-            image_config.image_model_type,
-            clarity=None,
-            aspect_ratio="2:3",
-            output_format="png",
-            generation_count=1,
-        )
-
-        images = await generate_images(
-            base_url=image_config.base_url,
-            api_key=image_config.api_key,
-            model=image_config.model,
-            prompt=_cover_prompt(novel, analysis, prompt_language),
-            api_protocol=image_config.api_protocol,
-            resolution=cover_selection.provider_size,
-            aspect_ratio=cover_selection.aspect_ratio,
-            output_format=cover_selection.output_format,
-            quality=cover_selection.provider_quality,
-            count=1,
-        )
-        cover = await _save_cover(images[0], novel_id)
-
-        novel.cover = cover
+        # Save the useful story result before the optional cover request.
         novel.total_chapters = len(chapters)
         novel.tags = analysis.book_types
         novel.story_outline = analysis.story_outline
-        await novel.save(
-            update_fields=[
-                "cover",
-                "total_chapters",
-                "tags",
-                "story_outline",
-                "updated_at",
-            ]
-        )
-
-        return {
+        await novel.save(update_fields=["total_chapters", "tags", "story_outline", "updated_at"])
+        result = {
             **analysis.model_dump(),
             "chapter_count": len(chapters),
-            "cover": cover,
+            "cover": novel.cover,
             "token_usage": token_usage,
             "llm_config_id": llm_config.id,
             "llm_model": llm_config.model,
-            "image_usage": {"image_count": 1, "clarity": cover_selection.clarity},
-            "image_config_id": image_config.id,
-            "image_model": image_config.model,
         }
+        try:
+            image_config = await ai_model_config_controller.get_active(
+                AiTaskTypeEnum.reference_image.value, team_id=request_params.get("team_id"),
+            )
+            cover_selection = validate_selection(
+                image_config.image_model_type, clarity=None, aspect_ratio="2:3",
+                output_format="png", generation_count=1,
+            )
+            images = await generate_images(
+                base_url=image_config.base_url, api_key=image_config.api_key, model=image_config.model,
+                prompt=render_cover_prompt(name=novel.name, book_types=analysis.book_types,
+                                           story_outline=analysis.story_outline, prompt_language=prompt_language),
+                api_protocol=image_config.api_protocol, resolution=cover_selection.provider_size,
+                aspect_ratio=cover_selection.aspect_ratio, output_format=cover_selection.output_format,
+                quality=cover_selection.provider_quality, count=1,
+            )
+            # Preserve actual provider usage even if saving a returned image subsequently fails.
+            result.update(image_usage={"image_count": len(images), "clarity": cover_selection.clarity},
+                          image_config_id=image_config.id, image_model=image_config.model)
+            cover = await _save_cover(images[0], novel_id)
+            novel.cover = cover
+            await novel.save(update_fields=["cover", "updated_at"])
+            result["cover"] = cover
+        except Exception as error:
+            logger.warning("Optional project cover failed: %s", type(error).__name__)
+            result["cover_warning"] = "故事分析已完成，封面暂未生成。可以继续提取资产和制作分镜；请在模型设置中检查图片服务后再试。"
+        return result

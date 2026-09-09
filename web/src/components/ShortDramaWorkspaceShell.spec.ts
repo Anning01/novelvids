@@ -1,7 +1,15 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ShortDramaWorkspaceShell from './ShortDramaWorkspaceShell.vue'
+import { api } from '@/api'
 
+vi.mock('@/api', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/api')>()
+  return { ...actual, api: { ...actual.api, visualStyles: vi.fn().mockResolvedValue({ data: [{ key: 'realistic-general', label: '写实通用' }] }) } }
+})
+
+beforeEach(() => setActivePinia(createPinia()))
 const routerPush = vi.fn()
 
 vi.mock('vue-router', () => ({
@@ -22,6 +30,20 @@ const baseProps = {
 }
 
 describe('ShortDramaWorkspaceShell', () => {
+  it('displays the backend visual-style label and preserves custom names when lookup fails', async () => {
+    const wrapper = mount(ShortDramaWorkspaceShell, { props: { ...baseProps, styleName: 'realistic-general' } })
+    await flushPromises()
+    expect(wrapper.get('.short-drama-project-meta').text()).toContain('写实通用')
+    expect(wrapper.get('.short-drama-project-meta').text()).not.toContain('realistic-general')
+    await wrapper.setProps({ styleName: '低饱和胶片质感' })
+    expect(wrapper.get('.short-drama-project-meta').text()).toContain('低饱和胶片质感')
+    wrapper.unmount()
+    vi.mocked(api.visualStyles).mockRejectedValueOnce(new Error('offline'))
+    const reopened = mount(ShortDramaWorkspaceShell, { props: baseProps })
+    await flushPromises()
+    expect(reopened.get('.short-drama-project-meta').text()).toContain('写实')
+    reopened.unmount()
+  })
   it('keeps the video phase locked until the current episode has a playable result', async () => {
     routerPush.mockClear()
     const wrapper = mount(ShortDramaWorkspaceShell, { props: baseProps })
@@ -84,4 +106,20 @@ describe('ShortDramaWorkspaceShell', () => {
     expect(wrapper.find('aside[aria-label="创作助手"]').exists()).toBe(false)
     wrapper.unmount()
   })
+})
+
+it('keeps an open assistant across production page remounts with explicit target context', async () => {
+  const pinia = createPinia()
+  const settings = { props: baseProps, global: { plugins: [pinia], stubs: {
+    CreationAgentPanel: { template: '<aside aria-label="创作助手" />' },
+  } } }
+  const first = mount(ShortDramaWorkspaceShell, settings)
+  first.vm.editWithAssistant([{ target: { kind: 'asset', id: 42 }, label: '林夏' }])
+  await first.vm.$nextTick()
+  expect(first.find('[aria-label="创作助手"]').exists()).toBe(true)
+  first.unmount()
+  const second = mount(ShortDramaWorkspaceShell, { ...settings, props: { ...baseProps, activePhase: 'storyboard' } })
+  expect(second.classes()).toContain('has-assistant')
+  expect(second.find('[aria-label="创作助手"]').exists()).toBe(true)
+  second.unmount()
 })

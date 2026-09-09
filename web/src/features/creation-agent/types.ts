@@ -11,6 +11,7 @@ export interface AgentChangeItem {
   kind: AgentTarget['kind']
   target_id: number
   asset_id?: number | null
+  target_label?: string | null
   before: Record<string, unknown>
   after: Record<string, unknown>
   after_version: string
@@ -30,6 +31,7 @@ export interface AgentConversation {
   active_task_id: string | null
   created_at: string
   updated_at: string
+  title?: string
 }
 
 export interface AgentMessage {

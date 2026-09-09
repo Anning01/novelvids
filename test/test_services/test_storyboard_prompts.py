@@ -21,6 +21,15 @@ from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
 
 
+def test_saved_creative_rules_are_scoped_facts_in_generation_messages():
+    rules = [{'content': '林夏保持灰色风衣', 'scope': {'kind': 'project', 'asset_id': 8}}]
+    messages = build_storyboard_messages('清晨，林夏走进咖啡馆。', [_entity()], creative_constraints=rules)
+    assert '林夏保持灰色风衣' not in messages[0]['content']
+    assert '林夏保持灰色风衣' in messages[-1]['content']
+    assert 'asset_id' in messages[-1]['content']
+    assert '作用范围' in messages[0]['content']
+
+
 def _entity() -> SceneEntity:
     return SceneEntity(
         name="郊区小楼",

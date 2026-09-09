@@ -27,6 +27,21 @@ beforeEach(() => {
 })
 
 describe('creation assistant store', () => {
+  it('keeps an accepted run visible when loading message history fails', async () => {
+    const store = useCreationAgentStore()
+    await store.open(7)
+    vi.mocked(agentApi.submit).mockResolvedValue({ code: 0, message: '', data: { ...run, status: 2 } })
+    vi.mocked(agentApi.history).mockRejectedValue(new Error('历史连接中断'))
+    vi.mocked(runSubscription).mockRejectedValue(new Error('流连接中断'))
+    expect(await store.send(input)).toBe(true)
+    expect(store.currentRun?.task_id).toBe('run-1')
+    expect(store.busy).toBe(true)
+    expect(store.messages.find(message => message.role === 'user')?.content).toBe(input.message)
+    expect(await store.send(input)).toBe(false)
+    expect(agentApi.submit).toHaveBeenCalledOnce()
+    expect(store.error).toContain('重新连接')
+  })
+
   it('restores the latest failed run and its saved changes after reopening', async () => {
     const change = { id: 13, task_id: 'run-1', changes: [], reverted_at: null, created_at: '' }
     vi.mocked(agentApi.history).mockResolvedValue({ code: 0, message: '', data: { items: [

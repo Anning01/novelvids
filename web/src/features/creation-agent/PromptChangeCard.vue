@@ -20,7 +20,7 @@ function text(value: Record<string, unknown>) {
     </div>
     <div v-if="expanded" class="prompt-change-card__details">
       <div v-for="target in change.changes" :key="`${target.kind}-${target.target_id}`">
-        <AppButton size="xs" @click="emit('locate', target)"><LocateFixed :size="13" />{{ target.kind === 'scene' ? '分镜' : '图片设定' }} #{{ target.target_id }}</AppButton>
+        <AppButton size="xs" @click="emit('locate', target)"><LocateFixed :size="13" />{{ target.target_label || (target.kind === 'scene' ? '查看分镜' : '查看图片设定') }}</AppButton>
         <label>修改前</label><pre>{{ text(target.before) || '空提示词' }}</pre>
         <label>修改后</label><pre>{{ text(target.after) }}</pre>
       </div>

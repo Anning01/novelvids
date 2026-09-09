@@ -15,6 +15,22 @@ from services.creation_agent.sessions import agent_sessions
 
 
 class CreationMemory:
+    async def for_generation(self, chapter: Chapter, assets: list[Asset]) -> list[dict]:
+        """Carry chapter/project rules into new scenes, never old scene-only edits."""
+        asset_names = {asset.id: asset.canonical_name for asset in assets}
+        constraints = await CreationConstraint.filter(novel_id=chapter.novel_id, superseded_by_id=None).order_by('id')
+        result = []
+        for constraint in constraints:
+            scope = CreationConstraintScope.model_validate(constraint.scope)
+            if scope.asset_id and scope.asset_id not in asset_names:
+                continue
+            if (scope.kind == 'project'
+                or scope.kind == 'chapter' and scope.chapter_id == chapter.id
+                or scope.kind == 'range' and scope.start_chapter <= chapter.number <= scope.end_chapter):
+                result.append({'content': constraint.content, 'scope': constraint.scope,
+                               'asset_name': asset_names.get(scope.asset_id)})
+        return result
+
     async def validate(self, source: AgentMessage, proposals: list[CreationConstraintProposal]) -> None:
         await source.fetch_related("conversation")
         novel_id = source.conversation.novel_id

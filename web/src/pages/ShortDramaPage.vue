@@ -16,6 +16,7 @@ import {
   UserRound,
   X,
 } from 'lucide-vue-next'
+import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import CreationConfigBar from '@/components/CreationConfigBar.vue'
 import CreationEntryShell from '@/components/CreationEntryShell.vue'
@@ -58,6 +59,12 @@ const storyboardStrategies = ref<StoryboardStrategy[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 const router = useRouter()
 const selectedFile = ref<File | null>(null)
+const sourceMode = ref<'file' | 'text'>('file')
+const storyText = ref('')
+const storyTitle = ref('')
+const createProgress = ref('')
+const createError = ref('')
+const importedProjectId = ref<number | null>(null)
 const dragging = ref(false)
 const mode = ref<CreationMode>('agent')
 const aspectRatio = ref('9:16')
@@ -136,7 +143,7 @@ function validateFile(file: File) {
 }
 
 function setFile(file?: File) {
-  if (!file || !validateFile(file)) return
+  if (creating.value || !file || !validateFile(file)) return
   selectedFile.value = file
 }
 
@@ -156,21 +163,26 @@ function removeFile(event: MouseEvent) {
 }
 
 async function createProject() {
-  if (isAgentMode.value && !selectedFile.value) {
-    notice.info('请先上传剧本文件')
+  if (creating.value) return
+  if (importedProjectId.value) { await resumeImport(); return }
+  createError.value = ''
+  if (isAgentMode.value && (sourceMode.value === 'file' ? !selectedFile.value : !storyText.value.trim())) {
+    notice.info(sourceMode.value === 'file' ? '请先上传剧本文件' : '请先粘贴小说或剧本正文')
     return
   }
   if (styleId.value === 'custom' && !customPrompt.value.trim()) {
-    notice.info('请填写自定义风格 Prompt')
+    notice.info('请填写自定义画面风格')
     return
   }
   const modeLabel = mode.value === 'agent' ? 'Agent 模式' : '人工模式'
-  if (isAgentMode.value && selectedFile.value) {
-    const projectName = selectedFile.value.name.replace(/\.[^.]+$/, '') || '未命名短剧'
+  if (isAgentMode.value) {
+    const projectName = sourceMode.value === 'text' ? storyTitle.value.trim() || '未命名短剧' : selectedFile.value!.name.replace(/\.[^.]+$/, '') || '未命名短剧'
     creating.value = true
     try {
-      const uploaded = await api.upload(selectedFile.value)
-      const description = `${modeLabel} · 源剧本：${uploaded.filename}`
+      createProgress.value = sourceMode.value === 'file' ? '正在上传并读取书稿…' : '正在保存小说正文…'
+      const uploaded = sourceMode.value === 'file' ? await api.upload(selectedFile.value!) : null
+      const sourceName = uploaded?.filename || `${projectName}.txt`
+      const description = `${modeLabel} · 源剧本：${sourceName}`
       const createPayload: Parameters<typeof api.createNovel>[0] = {
         name: projectName,
         author: 'Agent 创建',
@@ -182,27 +194,27 @@ async function createProject() {
         storyboard_strategy: storyboardStrategy.value,
         storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
       }
-      if (uploaded.key) {
+      if (uploaded?.key) {
         // OSS 直传：只回传 key，由服务端经内网读取并解析正文，不再把整份书稿传给浏览器。
         createPayload.source_key = uploaded.key
-        createPayload.source_filename = selectedFile.value.name
-      } else {
+        createPayload.source_filename = selectedFile.value!.name
+      } else if (uploaded) {
         const textContent = uploaded.text_content?.trim() || ''
         if (!textContent) throw new Error('未能从文件中读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试')
         if (uploaded.chapter_validation && !uploaded.chapter_validation.valid) {
           throw new Error(uploaded.chapter_validation.message)
         }
         createPayload.content = textContent
+      } else {
+        createPayload.content = storyText.value.trim()
       }
+      createProgress.value = '正在创建项目…'
       const response = await api.createNovel(createPayload)
+      importedProjectId.value = response.data.id
       let chapterCount = 0
-      try {
-        const splitResult = await api.splitNovel(response.data.id)
-        chapterCount = splitResult.data.total_chapters || 0
-      } catch (error) {
-        await api.deleteNovel(response.data.id).catch(() => undefined)
-        throw error
-      }
+      createProgress.value = '正在识别章节，请稍候…'
+      const splitResult = await api.splitNovel(response.data.id)
+      chapterCount = splitResult.data.total_chapters || 0
       sessionStorage.setItem('short-drama-agent-project', JSON.stringify({
         projectId: response.data.id,
         name: response.data.name,
@@ -211,13 +223,14 @@ async function createProject() {
         style: selectedStyle.value.label,
         styleKey: styleId.value,
         storyboardStrategy: storyboardStrategy.value,
-        fileName: selectedFile.value.name,
-        sourcePath: uploaded.file_path,
+        fileName: sourceName,
+        sourcePath: uploaded?.file_path,
       }))
       notice.success(chapterCount ? `书稿已成功拆分为 ${chapterCount} 章，正在进入 Agent 工作区` : '书稿已上传并完成章节拆分，正在进入 Agent 工作区')
       await router.push({ name: 'short-drama-agent', params: { projectId: response.data.id } })
     } catch (error) {
-      notice.error((error as Error).message)
+      createError.value = error instanceof Error ? error.message : '创建失败，请重试'
+      notice.error(createError.value)
     } finally {
       creating.value = false
     }
@@ -254,18 +267,43 @@ async function createProject() {
     creating.value = false
   }
 }
+
+async function resumeImport() {
+  const projectId = importedProjectId.value
+  if (!projectId || creating.value) return
+  creating.value = true
+  createError.value = ''
+  createProgress.value = '正在恢复已保存项目…'
+  try {
+    // A lost response may hide a successful split. Inspect the same project
+    // before retrying so neither the book nor its chapters are duplicated.
+    const chapters = await api.chaptersPage(projectId, 1, 1)
+    if (!chapters.data.pagination.total) {
+      createProgress.value = '正在继续识别章节…'
+      await api.splitNovel(projectId)
+    }
+    await router.push({ name: 'short-drama-agent', params: { projectId } })
+  } catch (error) {
+    createError.value = error instanceof Error ? error.message : '暂时无法继续识别，请重试'
+  } finally { creating.value = false }
+}
 </script>
 
 <template>
   <CreationEntryShell
     eyebrow="AI SHORT DRAMA"
-    :description="isAgentMode ? '上传完整故事，让 Agent 自动完成内容理解与制作规划。' : '从空白项目开始，手动掌控角色、场景、分镜和镜头细节。'"
+    :description="isAgentMode ? '上传或粘贴故事，逐章提取资产、生成分镜，和助手一起完善画面。' : '从空白项目开始，手动掌控角色、场景、分镜和镜头细节。'"
   >
     <template #title>翻开剧本，创作<span class="creation-entry-accent">精品短剧</span></template>
-      <form class="short-drama-form" @submit.prevent="createProject">
+      <form class="short-drama-form" :aria-busy="creating" @submit.prevent="createProject">
+        <nav v-if="isAgentMode" class="story-source-tabs" aria-label="正文导入方式">
+          <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'file'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'file'"><UploadCloud :size="15" />上传文件</AppButton>
+          <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'text'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'text'"><PencilLine :size="15" />粘贴正文</AppButton>
+        </nav>
         <Transition name="mode-panel" mode="out-in">
           <AppButton
-            v-if="isAgentMode"
+            v-if="isAgentMode && sourceMode === 'file'"
+            :disabled="creating || Boolean(importedProjectId)"
             key="agent-upload"
             type="button"
             variant="ghost"
@@ -292,6 +330,11 @@ async function createProject() {
             </template>
           </AppButton>
 
+          <section v-else-if="isAgentMode" key="agent-text" class="story-text-source">
+            <label for="story-title">项目名称</label><input id="story-title" v-model="storyTitle" :disabled="creating || Boolean(importedProjectId)" maxlength="80" placeholder="给这个故事起个名字" />
+            <label for="story-content">小说或剧本正文</label><textarea id="story-content" v-model="storyText" :disabled="creating || Boolean(importedProjectId)" rows="9" maxlength="2000000" placeholder="将正文粘贴到这里，保留“第一章”“第二章”等章节标题，便于逐章创作。" />
+            <small>{{ storyText.length.toLocaleString() }} 字 · 长篇小说建议使用文件导入</small>
+          </section>
           <section v-else key="manual-start" class="manual-mode-card" aria-labelledby="manual-mode-title">
             <span class="manual-mode-icon"><PencilLine :size="25" /></span>
             <div class="manual-mode-copy">
@@ -309,10 +352,10 @@ async function createProject() {
 
         <CreationConfigBar modes-label="创作模式">
           <template #modes>
-            <AppButton type="button" variant="soft" size="sm" :active="mode === 'agent'" @click="mode = 'agent'">
+            <AppButton type="button" variant="soft" size="sm" :disabled="creating || Boolean(importedProjectId)" :active="mode === 'agent'" @click="mode = 'agent'">
               <Bot :size="15" />Agent 模式
             </AppButton>
-            <AppButton type="button" variant="soft" size="sm" :active="mode === 'manual'" @click="mode = 'manual'">
+            <AppButton type="button" variant="soft" size="sm" :disabled="creating || Boolean(importedProjectId)" :active="mode === 'manual'" @click="mode = 'manual'">
               <UserRound :size="15" />人工模式
             </AppButton>
           </template>
@@ -324,18 +367,19 @@ async function createProject() {
             menu-label="分镜策略"
             :menu-width="220"
             :options="storyboardStrategyOptions"
-            :disabled="!storyboardStrategyOptions.length"
+            :disabled="creating || Boolean(importedProjectId) || !storyboardStrategyOptions.length"
           >
             <template #leading><Clapperboard :size="15" /></template>
           </AppSelect>
-          <AppSelect v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="aspectRatios">
+          <AppSelect :disabled="creating || Boolean(importedProjectId)" v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="aspectRatios">
             <template #leading><Film :size="15" /></template>
           </AppSelect>
-          <AppSelect v-model="resolution" class="format-select" ariaLabel="分辨率" :options="resolutions">
+          <AppSelect :disabled="creating || Boolean(importedProjectId)" v-model="resolution" class="format-select" ariaLabel="分辨率" :options="resolutions">
             <template #leading><Monitor :size="15" /></template>
           </AppSelect>
           <AppSelect
             v-model="styleId"
+            :disabled="creating || Boolean(importedProjectId)"
             class="style-select"
             ariaLabel="视觉风格"
             menu-label="风格"
@@ -356,10 +400,11 @@ async function createProject() {
         </CreationConfigBar>
 
         <div v-if="styleId === 'custom'" class="custom-prompt-panel">
-          <label for="custom-style-prompt">自定义风格 Prompt</label>
+          <label for="custom-style-prompt">自定义画面风格</label>
           <textarea
             id="custom-style-prompt"
             v-model="customPrompt"
+            :disabled="creating || Boolean(importedProjectId)"
             maxlength="2000"
             rows="4"
             placeholder="描述画面质感、色彩、人物造型、灯光和镜头语言，例如：东方电影感，低饱和青绿色调，自然光，细腻皮肤质感……"
@@ -367,11 +412,13 @@ async function createProject() {
           <small>{{ customPrompt.length }} / 2000</small>
         </div>
 
+        <p v-if="createError" class="story-import-error" role="alert">{{ createError }}。{{ importedProjectId ? '书稿和项目已保存，可以继续识别章节。' : '正文和选择已保留，可以调整后重试。' }}</p>
+        <p v-if="isAgentMode" class="story-import-guide">导入正文 → 理解故事 → 提取本章资产 → 生成分镜 → 对话调整画面</p>
         <AppButton class="create-short-drama" variant="primary" size="lg" block type="submit" :loading="creating">
           <span>
             <Sparkles v-if="!creating && isAgentMode" :size="18" />
             <PencilLine v-else-if="!creating" :size="18" />
-            {{ creating ? '正在创建项目…' : isAgentMode ? '创建 Agent 短剧项目' : '创建人工短剧项目' }}
+            {{ creating ? createProgress || '正在创建项目…' : importedProjectId ? '继续识别章节' : isAgentMode ? '创建 Agent 短剧项目' : '创建人工短剧项目' }}
           </span>
           <ArrowRight class="create-arrow" :size="18" />
         </AppButton>
@@ -380,6 +427,15 @@ async function createProject() {
 </template>
 
 <style scoped>
+.story-source-tabs { display: flex; gap: 8px; padding-bottom: 12px; }
+.story-text-source { display: grid; gap: 8px; padding: 20px; border: 1px solid var(--app-border); border-radius: 16px; background: var(--app-surface); }
+.story-text-source label { color: var(--app-text-secondary); font-size: 12px; font-weight: 600; }
+.story-text-source input,.story-text-source textarea { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--app-border); border-radius: 9px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; font-size: 13px; line-height: 1.8; }
+.story-text-source textarea { resize: vertical; min-height: 180px; }
+.story-text-source small,.story-import-guide { color: var(--app-text-muted); font-size: 11px; line-height: 1.7; }
+.story-import-guide { margin: 16px 0 0; text-align: center; }
+.story-import-error { padding: 12px; border: 1px solid var(--app-border); border-radius: 10px; color: var(--app-danger, #b65361); font-size: 13px; line-height: 1.7; }
+
 .short-drama-form {
   display: grid;
 }

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BookOpenText,
+  Bot,
   Boxes,
   Check,
   Clapperboard,
@@ -20,11 +21,13 @@ import {
 import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
+import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
+import { fallbackImage } from '@/shared/mediaFallback'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type Chapter } from '@/types'
 
@@ -60,6 +63,7 @@ function readProjectMeta(): ManualProjectMeta {
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
+const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 const selectedChapterId = computed(() => Number(route.query.chapter))
 const project = ref(readProjectMeta())
 const chapters = ref<Chapter[]>([])
@@ -658,6 +662,7 @@ onBeforeUnmount(() => {
 <template>
   <main class="manual-page">
     <ShortDramaWorkspaceShell
+      ref="workspaceShell"
       :project-id="projectId"
       :project-name="project.name"
       :aspect-ratio="project.aspectRatio"
@@ -667,7 +672,7 @@ onBeforeUnmount(() => {
       :creation-mode="project.creationMode"
       :chapters="chapters"
       :active-chapter-id="selectedChapter?.id || 0"
-      :agent-targets="editingAsset ? [{ kind: 'asset', id: editingAsset.id }] : []"
+      :agent-targets="editingVariantId ? [{ kind: 'variant', id: editingVariantId }] : editingAsset ? [{ kind: 'asset', id: editingAsset.id }] : []"
       @select-chapter="selectChapter"
       @prompts-changed="refreshAgentChanges"
     >
@@ -736,7 +741,6 @@ onBeforeUnmount(() => {
         <div>
           <strong>第 {{ selectedChapter?.number || '-' }} 章资产提取 · {{ extractionStatusText }}</strong>
           <p>{{ extractionStatusMessage }}</p>
-          <small v-if="extractionTask">任务 ID：{{ extractionTask.id }}</small>
         </div>
       </div>
 
@@ -744,8 +748,9 @@ onBeforeUnmount(() => {
       <div v-else-if="!visibleAssets.length" class="workspace-state empty-state">
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
         <strong>暂无{{ activeTabConfig.label }}</strong>
-        <p>添加第一个{{ activeTabConfig.label }}，开始搭建你的短剧世界。</p>
-        <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
+        <p>{{ project.creationMode === 'agent' ? '从本章正文提取角色、场景与道具，再和助手一起完善画面。' : `添加第一个${activeTabConfig.label}，开始搭建你的短剧世界。` }}</p>
+        <AppButton v-if="project.creationMode === 'agent'" type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />提取本章资产</AppButton>
+        <AppButton v-else type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
         <article
@@ -780,16 +785,21 @@ onBeforeUnmount(() => {
                 :alt="asset.canonical_name"
                 loading="lazy"
                 decoding="async"
+                @error="fallbackImage($event, asset.main_image)"
               />
               <component v-else :is="activeTabConfig.icon" :size="30" />
               <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
               <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>
               <div v-if="!generatingAssetIds.has(asset.id)" class="asset-card-info">
-                <strong>{{ truncateText(asset.canonical_name, 16) }}</strong>
+                <strong v-if="asset.main_image">{{ truncateText(asset.canonical_name, 16) }}</strong>
                 <p>{{ truncateText(asset.description || `尚未填写${activeTabConfig.label}描述`, 32) }}</p>
               </div>
             </div>
           </button>
+          <div class="asset-assistant-action">
+            <span :title="asset.canonical_name">{{ asset.canonical_name }}</span>
+            <AppButton variant="soft" size="xs" :aria-label="`用助手修改${asset.canonical_name}`" @click="workspaceShell?.editWithAssistant([{ target: { kind: 'asset', id: asset.id }, label: asset.canonical_name }])"><Bot :size="14" />用助手修改</AppButton>
+          </div>
           <div class="asset-card-actions" aria-label="资产操作">
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="编辑" title="编辑" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click="openAssetDialog(asset)"><Pencil :size="14" /></AppButton>
             <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="本地上传" title="本地上传" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`为${asset.canonical_name}本地上传图片`" @click="openAssetDialog(asset, 'upload')"><Upload :size="14" /></AppButton>
@@ -820,9 +830,12 @@ onBeforeUnmount(() => {
       </aside>
     </Transition>
 
-    <AppButton class="manual-next-step" type="button" variant="dark" size="lg" @click="goToStoryboard">
-      <Clapperboard :size="17" />已确认，进入下一步
-    </AppButton>
+    <div class="manual-stage-footer">
+      <span>确认人物与场景设定后，继续制作本章分镜</span>
+      <AppButton class="manual-next-step" type="button" variant="dark" size="lg" @click="goToStoryboard">
+        <Clapperboard :size="17" />前往分镜制作
+      </AppButton>
+    </div>
 
     <AssetCreateDialog
       :open="showAssetDialog"
@@ -857,14 +870,14 @@ onBeforeUnmount(() => {
 .project-name-line strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .project-name-line button { display: grid; place-items: center; color: #8a91a1; background: transparent; }
 .project-name-line input { width: min(320px,45vw); height: 30px; padding: 0 9px; border: 1px solid #6b6df6; border-radius: 7px; outline: none; font: inherit; }
-.manual-workspace { padding: 28px 44px 120px; }
-.asset-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 50px; }
-.asset-toolbar nav { display: flex; align-items: center; gap: 26px; }
+.manual-workspace { padding: 24px 32px 32px; min-height: calc(100dvh - var(--short-drama-header-height,72px) - 80px); }
+.asset-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; min-height: 50px; }
+.asset-toolbar nav { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .asset-toolbar nav button { position: relative; display: flex; align-items: center; gap: 7px; height: 42px; color: #6f7686; background: transparent; font-size: 15px; font-weight: 700; }
 .asset-toolbar nav button::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; border-radius: 2px; background: #6668f6; content: ''; opacity: 0; transform: scaleX(.6); transition: .18s ease; }
 .asset-toolbar nav button.is-active { color: #5d5ff5; }
 .asset-toolbar nav button.is-active::after { opacity: 1; transform: scaleX(1); }
-.asset-summary { display: flex; align-items: center; gap: 14px; color: #858c9b; font-size: 12px; }
+.asset-summary { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 10px; color: #858c9b; font-size: 12px; }
 .asset-summary span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .asset-summary .chapter-context { color: #5d5ff5; font-weight: 700; }
 .asset-scope-switch { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid #e1e3ec; border-radius: 10px; background: #f4f5f9; }
@@ -947,7 +960,15 @@ onBeforeUnmount(() => {
 .asset-merge-ready p { margin: 3px 0 0; color: var(--app-text-muted); font-size: 10px; line-height: 1.45; }
 .merge-ready-enter-active,.merge-ready-leave-active { transition: opacity .16s ease,transform .16s ease; }
 .merge-ready-enter-from,.merge-ready-leave-to { opacity: 0; transform: translateY(-7px); }
-.manual-next-step { position: fixed; bottom: 22px; left: 50%; z-index: 18; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 22px; color: #fff; border-radius: 15px; background: #23252c; box-shadow: 0 10px 28px rgba(21,23,31,.2); transform: translateX(-50%); }
+.manual-stage-footer { position: sticky; bottom: 0; z-index: 18; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px; padding: 14px 28px; border-top: 1px solid var(--app-border); background: var(--app-surface-raised); }
+.manual-stage-footer > span { margin-right: auto; color: var(--app-text-secondary); font-size: 12px; }
+.manual-next-step { display: flex; align-items: center; gap: 8px; border-radius: 12px; }
+.asset-assistant-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; background: var(--app-surface); cursor: default; }
+.asset-assistant-action > span { min-width: 0; overflow: hidden; color: var(--app-text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.asset-assistant-action > button { flex-shrink: 0; }
+@container creation-workspace (max-width: 1100px) { .manual-workspace { padding: 20px; }.asset-toolbar { gap: 12px; }.asset-summary { width: 100%; }.asset-grid { grid-template-columns: repeat(auto-fill,minmax(min(220px,100%),1fr)); } }
+@container creation-workspace (max-width: 520px) { .manual-workspace { padding: 14px; }.asset-summary > i { display: none; }.manual-stage-footer { padding: 12px 14px; }.manual-stage-footer > span { display: none; }.asset-toolbar nav { gap: 10px; } }
+
 .is-spinning { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes generation-shimmer { 55%,100% { transform: translateX(100%); } }

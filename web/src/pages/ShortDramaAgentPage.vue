@@ -72,7 +72,8 @@ interface ProjectAnalysisResult {
   story_outline: string
   key_characters: KeyCharacter[]
   chapter_count: number
-  cover: string
+  cover: string | null
+  cover_warning?: string
 }
 
 const fallbackProject: AgentProjectMeta = {
@@ -101,6 +102,7 @@ const projectId = computed(() => Number(route.params.projectId))
 const activeEpisode = ref(1)
 const showingAllCharacters = ref(false)
 const analysisTask = ref<AiTask | null>(null)
+const analysisError = ref('')
 const {
   chapters,
   total: chaptersTotal,
@@ -108,6 +110,7 @@ const {
   hasMore: chaptersHasMore,
   loadMore: loadMoreChapters,
   reset: resetChapters,
+  ensureChapter,
 } = usePagedChapters(() => projectId.value)
 const chapterDetails = ref<Record<number, Chapter>>({})
 const chapterAssets = ref<Record<number, Asset[]>>({})
@@ -189,7 +192,7 @@ const analysisRunning = computed(() => {
   return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
 })
 const analysisStatus = computed(() => {
-  if (startingAnalysis.value || analysisRunning.value) return 'AI 正在理解书稿并生成封面'
+  if (startingAnalysis.value || analysisRunning.value) return '正在理解故事并准备封面'
   if (analysisTask.value?.status === TaskStatusEnum.FAILED) return '分析失败'
   if (analysisResult.value) return '剧本分析完成'
   if (hasScriptPreview.value) return '剧本已载入'
@@ -246,7 +249,7 @@ async function loadChapters() {
     resetChapters()
     await loadMoreChapters()
     const requestedChapterId = Number(route.query.chapter)
-    const requestedChapter = chapters.value.find(item => item.id === requestedChapterId)
+    const requestedChapter = await ensureChapter(requestedChapterId)
     if (requestedChapter) {
       activeEpisode.value = requestedChapter.number
     } else if (chapters.value.length && !chapters.value.some(item => item.number === activeEpisode.value)) {
@@ -299,6 +302,7 @@ async function pollAnalysis(taskId: string) {
       await Promise.all([loadProject(), loadChapters()])
     }
   } catch (error) {
+    analysisError.value = '进度连接中断，可以重新连接。后台任务会继续处理。'
     notice.error((error as Error).message)
   }
 }
@@ -306,12 +310,14 @@ async function pollAnalysis(taskId: string) {
 async function startAnalysis() {
   if (!canEdit.value || startingAnalysis.value || analysisRunning.value) return
   startingAnalysis.value = true
+  analysisError.value = ''
   try {
     const response = await api.analyzeNovel(projectId.value)
     analysisTask.value = response.data
     notice.success('AI 已开始提取类型、大纲和关键人物，并生成 1K 封面')
     await pollAnalysis(response.data.id)
   } catch (error) {
+    analysisError.value = error instanceof Error ? error.message : '分析未能开始，请重试'
     notice.error((error as Error).message)
   } finally {
     startingAnalysis.value = false
@@ -320,17 +326,17 @@ async function startAnalysis() {
 
 async function loadAnalysis() {
   try {
+    analysisError.value = ''
+    await loadChapters()
     const response = await api.novelAnalysis(projectId.value)
     analysisTask.value = response.data
     if (!response.data) {
-      await loadChapters()
       if (canEdit.value) await startAnalysis()
     } else if (analysisRunning.value) {
       await pollAnalysis(response.data.id)
-    } else if (response.data.status === TaskStatusEnum.COMPLETED) {
-      await loadChapters()
     }
   } catch (error) {
+    analysisError.value = error instanceof Error ? error.message : '无法读取分析进度'
     notice.error((error as Error).message)
   }
 }
@@ -493,14 +499,19 @@ onBeforeUnmount(() => {
       active-phase="script"
       creation-mode="agent"
       :show-episode-rail="false"
+      :chapters="chapters"
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
     >
       <section class="agent-content">
+      <section class="creation-stage-guide" aria-label="当前创作步骤">
+        <div><strong>第一步 · 理解故事</strong><p>查看本章正文和故事设定，再提取角色、场景与道具。之后可以在助手里用日常语言调整画面。</p></div>
+        <AppButton variant="soft" size="sm" :disabled="!selectedEpisodeBrief" @click="continueToSettings">前往资产提取<ArrowRight :size="15" /></AppButton>
+      </section>
       <div class="analysis-hero">
         <div class="project-cover-art" aria-label="项目封面">
           <img
             v-if="project.cover || analysisResult?.cover"
-            :src="project.coverPreview || project.cover || analysisResult?.cover"
+            :src="project.coverPreview || project.cover || analysisResult?.cover || undefined"
             :alt="`${displayedProjectName}封面`"
             width="640"
             height="960"
@@ -547,17 +558,20 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section v-if="!hasScriptPreview" class="analysis-progress-card" :class="{ 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED }">
+      <section v-if="!hasScriptPreview || analysisRunning || startingAnalysis || analysisError || analysisTask?.status === TaskStatusEnum.FAILED" class="analysis-progress-card" :class="{ 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED || analysisError }" role="status">
         <span><RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="25" /><FileText v-else :size="25" /></span>
         <div>
           <h2>{{ analysisStatus }}</h2>
-          <p v-if="analysisRunning || startingAnalysis">正在分割章节、提取书籍类型与故事大纲、识别关键人物，随后生成 1K 封面。请稍候，这通常需要几分钟。</p>
+          <p v-if="analysisError">{{ analysisError }}</p>
+          <p v-else-if="analysisRunning || startingAnalysis">正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。</p>
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || '模型调用失败，请检查模型配置后重试。' }}</p>
           <p v-else>开始分析后，结果会自动保存在当前项目中。</p>
         </div>
         <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" @click="startAnalysis">开始分析</AppButton>
+        <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">重新连接</AppButton>
       </section>
 
+      <p v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status">{{ analysisResult.cover_warning }}</p>
       <template v-if="hasScriptPreview">
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>项目设定</h2></div></header>
@@ -663,6 +677,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
+.creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 24px; padding: 18px 20px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }
+.creation-stage-guide > div { flex: 1 1 240px; }
+.creation-stage-guide strong { font-size: 14px; }
+.creation-stage-guide p { margin: 6px 0 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
+@container creation-workspace (max-width: 800px) { .agent-content { padding: 20px 18px; }.analysis-hero { gap: 18px; }.profile-grid { grid-template-columns: 1fr; } }
+
 .agent-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f9fafc; }
 .analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
 .analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }

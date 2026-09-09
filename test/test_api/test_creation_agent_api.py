@@ -119,3 +119,19 @@ async def test_disconnect_from_events_does_not_cancel_or_execute_background_run(
     assert [chunk async for chunk in response.body_iterator] == []
     await task.refresh_from_db()
     assert received and task.status == TaskStatusEnum.pending.value
+
+
+@pytest.mark.asyncio
+async def test_conversation_title_uses_first_request_and_legacy_empty_sessions_still_load(client):
+    conversation, request, _ = await session_fixture()
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    task.status = TaskStatusEnum.completed.value
+    await task.save()
+    second = request.model_copy(update={'request_id': uuid4(), 'message': '第二次修改不要覆盖会话标题'})
+    await agent_sessions.submit(conversation, second, AuthContext())
+    empty = await agent_sessions.create(conversation.novel_id, AuthContext())
+    response = await client.get('/api/creation-agent/conversations', params={'novel_id': conversation.novel_id})
+    assert response.json()['code'] == 0
+    titles = {row['id']: row['title'] for row in response.json()['data']}
+    assert titles[conversation.id] == request.message
+    assert titles[empty.id] == '新会话'

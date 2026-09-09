@@ -25,6 +25,26 @@ async def memory_fixture():
 
 
 @pytest.mark.asyncio
+async def test_new_scene_generation_reuses_project_rules_without_old_scene_or_other_chapter_rules():
+    from models.asset import Asset
+    conversation, request, source, chapters, _ = await memory_fixture()
+    person = await Asset.create(novel_id=conversation.novel_id, canonical_name='林夏', asset_type=1)
+    scopes = [
+        ('人物外貌', {'kind': 'project', 'asset_id': person.id}),
+        ('第三章绷带', {'kind': 'range', 'start_chapter': 3, 'end_chapter': 4}),
+        ('第二章晨光', {'kind': 'chapter', 'chapter_id': chapters[0].id}),
+        ('上一镜头暖光', {'kind': 'targets', 'targets': [request.targets[0].model_dump()]}),
+    ]
+    for index, (content, scope) in enumerate(scopes):
+        await CreationConstraint.create(novel_id=conversation.novel_id, source_message=source,
+            fingerprint=f'generation-{index}', content=content, source_quote='合成约束', scope=scope)
+    second = await creation_memory.for_generation(chapters[0], [person])
+    assert [rule['content'] for rule in second] == ['人物外貌', '第二章晨光']
+    assert second[0]['asset_name'] == '林夏'
+    assert [rule['content'] for rule in await creation_memory.for_generation(chapters[1], [])] == ['第三章绷带']
+
+
+@pytest.mark.asyncio
 async def test_scoped_memory_does_not_leak_backward_or_to_unrelated_targets():
     conversation, request, source, chapters, scenes = await memory_fixture()
     proposals = [CreationConstraintProposal(content='本场戏保持暖光', source_quote='这场戏都用暖光',

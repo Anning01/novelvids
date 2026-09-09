@@ -38,8 +38,10 @@ class RecordedAgentModel(WrapperModel):
         await self._checkpoint()
         return call, time.monotonic()
 
-    async def _finish(self, call, started, usage, completed):
+    async def _finish(self, call, started, usage, completed, finish_reason=None):
         call.update(status="completed" if completed else "failed", duration_seconds=round(time.monotonic() - started, 3))
+        if finish_reason is not None:
+            call['finish_reason'] = finish_reason
         if usage is not None:
             call["usage"] = dataclasses.asdict(usage)
             call["usage_reported"] = bool(usage.input_tokens or usage.output_tokens)
@@ -63,7 +65,8 @@ class RecordedAgentModel(WrapperModel):
             response = await self.wrapped.request(messages, model_settings, model_request_parameters)
             return response
         finally:
-            await self._finish(call, started, response.usage if response else None, response is not None)
+            await self._finish(call, started, response.usage if response else None, response is not None,
+                               response.finish_reason if response else None)
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
@@ -75,4 +78,5 @@ class RecordedAgentModel(WrapperModel):
                 yield response
             completed = True
         finally:
-            await self._finish(call, started, response.usage() if response else None, completed)
+            await self._finish(call, started, response.usage() if response else None, completed,
+                               response.finish_reason if response else None)

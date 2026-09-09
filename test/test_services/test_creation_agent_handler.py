@@ -16,6 +16,13 @@ from test.test_services.test_creation_agent_sessions import session_fixture
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
+def test_truncated_output_stays_actionable_after_a_failed_automatic_retry():
+    from services.creation_agent.handler import public_run_error
+    calls = [{'status': 'completed', 'finish_reason': 'length'}, {'status': 'failed'}]
+    assert '输出达到上限' in public_run_error('secret provider payload', calls)
+    assert '上下文额度' in public_run_error('上下文超过配置上限', calls)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('with_constraint', [False, True])
 async def test_handler_persists_events_history_and_usage_without_exposing_private_text(monkeypatch, with_constraint):
@@ -89,6 +96,40 @@ async def test_model_error_is_redacted_and_recorded_as_missing_usage(monkeypatch
     assert assistant.usage['missing_usage'] is True
     assert 'secret-provider-payload' not in str(assistant.events)
     assert 'secret-provider-payload' not in task.error_message
+
+
+@pytest.mark.asyncio
+async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkeypatch):
+    import httpx
+    from openai import AsyncOpenAI
+
+    conversation, request, _ = await session_fixture()
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+
+    def transport(outgoing):
+        payload = json.loads(outgoing.content)
+        envelope = {'id': 'truncated', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model'}
+        chunks = [
+            {**envelope, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'reasoning_content': 'synthetic-reasoning'}, 'finish_reason': None}]},
+            {**envelope, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'length'}]},
+            {**envelope, 'choices': [], 'usage': {'prompt_tokens': 100, 'completion_tokens': payload['max_tokens'], 'total_tokens': 100 + payload['max_tokens']}},
+        ]
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=''.join(
+            'data: ' + json.dumps(chunk) + '\n\n' for chunk in chunks) + 'data: [DONE]\n\n')
+
+    monkeypatch.setattr('services.creation_agent.handler.AsyncOpenAI', lambda **kwargs: AsyncOpenAI(
+        **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))))
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
+    await executor.run(task)
+    await task.refresh_from_db()
+    assistant = await AgentMessage.get(task=task, role='assistant')
+    assert task.status == TaskStatusEnum.failed.value
+    assert '输出达到上限' in task.error_message
+    assert 'synthetic-reasoning' not in task.error_message
+    assert assistant.usage['calls'][-1]['finish_reason'] == 'length'
+    assert assistant.usage['missing_usage'] is False
+    assert await PromptChange.filter(task=task).count() == 0
 
 
 @pytest.mark.asyncio
@@ -222,6 +263,7 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
     assert assistant.usage['missing_usage'] is False
     assert assistant.content == '已调暖灯光。'
     assert 'synthetic-reasoning' not in assistant.content
+    assert not any(event['type'].startswith('THINKING') for event in assistant.events)
     if reasoning:
         assert all(call['usage']['details']['reasoning_tokens'] == 7 for call in assistant.usage['calls'])
 
@@ -273,6 +315,8 @@ async def test_agent_can_read_bounded_middle_of_current_chapter_and_correct_inva
     conversation, request, _ = await session_fixture()
     await Chapter.filter(id=request.chapter_id).update(content='甲' * 15000 + '她的左手受伤，仍穿灰色风衣。' + '乙' * 15000)
     task = await agent_sessions.submit(conversation, request, AuthContext())
+    task.request_params['agent_configuration']['max_context_characters'] = 28000
+    await task.save(update_fields=['request_params'])
     calls = 0
 
     async def model(messages, info):

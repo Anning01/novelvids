@@ -263,3 +263,44 @@ async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
     assert all(item[3] == "public, max-age=31536000, immutable" for item in derivatives)
     # OSS 媒体持久化对象键，响应序列化时再签发临时访问 URL。
     assert url == key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['missing_config', 'provider', 'save'])
+async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_usage(failure):
+    novel = await Novel.create(name='可继续制作', content='第一章 归来\n林舟走回故乡。', cover='/media/existing.png')
+    llm = await AiModelConfig.create(task_type=5, name='llm', model='test-llm', api_key='test-key', base_url='https://example.invalid', is_active=True)
+    if failure != 'missing_config':
+        await AiModelConfig.create(task_type=2, name='image', model='test-image', api_key='test-key', base_url='https://example.invalid', api_protocol='volcengine_ark', image_model_type='seedream_5_pro', is_active=True)
+    analysis = BookAnalysis(book_types=['归乡'], story_outline='林舟返回故乡。', key_characters=[
+        KeyCharacter(name='林舟', role='主角', description='归来的青年', base_traits=STRUCTURED_PERSON_TRAITS, chapter_numbers=[1]),
+    ])
+    generate = AsyncMock(side_effect=RuntimeError('provider rejects request')) if failure == 'provider' else AsyncMock(return_value=[SimpleNamespace(url='https://example.invalid/cover.png')])
+    save = AsyncMock(side_effect=OSError('storage unavailable'))
+    with patch('services.project_analysis.handler.AsyncOpenAI', return_value=FakeLlmClientWithUsage(analysis)), patch('services.project_analysis.handler.generate_images', generate), patch('services.project_analysis.handler._save_cover', save):
+        result = await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id})
+    await novel.refresh_from_db()
+    assert result['story_outline'] == novel.story_outline == analysis.story_outline
+    assert result['cover'] == novel.cover == '/media/existing.png'
+    assert '可以继续' in result['cover_warning']
+    assert result['token_usage']['prompt_tokens'] == 200
+    assert result['llm_config_id'] == llm.id
+    assert await Asset.filter(novel_id=novel.id, canonical_name='林舟').exists()
+    if failure == 'save':
+        assert result['image_usage']['image_count'] == 1
+    else:
+        assert 'image_usage' not in result
+        save.assert_not_awaited()
+    if failure == 'missing_config':
+        generate.assert_not_awaited()
+
+
+def test_project_analysis_templates_preserve_material_and_requested_language():
+    from prompts.project_analysis import render_analysis_messages
+    for language, label in [('zh', '中文'), ('en', '英文')]:
+        messages = render_analysis_messages(name='雨夜来信', chapter_count=2, material='第一章 车站\n第二章 咖啡馆', prompt_language=language)
+        assert [message['role'] for message in messages] == ['system', 'user']
+        assert label in messages[0]['content']
+        assert 'base_traits 必须严格使用该语言' in messages[0]['content']
+        assert '共 2 章' in messages[1]['content']
+        assert '第一章 车站\n第二章 咖啡馆' in messages[1]['content']

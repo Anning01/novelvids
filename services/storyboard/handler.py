@@ -13,6 +13,8 @@ from prompts.storyboard import (
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
+from services.storyboard.entities import visual_entity_description
+from services.creation_agent.memory import creation_memory
 from schemas.scene import SceneEntity
 from utils.enums import AssetTypeEnum
 from utils.prompt_language import normalize_prompt_language
@@ -54,7 +56,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             SceneEntity(
                 name=asset.canonical_name,
                 aliases=asset.aliases or [],
-                description=asset.description or asset.base_traits or "",
+                description=visual_entity_description(asset.description, asset.base_traits),
                 asset_type=AssetTypeEnum(asset.asset_type).nickname,
                 asset_id=asset.id,
             )
@@ -64,6 +66,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         ]
 
         # 3. 调用 OpenAI API 生成分镜
+        creative_constraints = await creation_memory.for_generation(chapter, assets)
         start_time = time.time()
 
         try:
@@ -80,6 +83,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 thinking=thinking,
                 max_tokens=max_tokens,
                 storyboard_strategy=strategy.key,
+                creative_constraints=creative_constraints,
             )
 
             end_time = time.time()

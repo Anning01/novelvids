@@ -14,6 +14,7 @@ const route = useRoute()
 const auth = useAuthStore()
 const { resolvedTheme } = useAppThemeController()
 const isFullscreen = computed(() => route.meta.fullscreen === true)
+const hasWorkspaceThemeControl = computed(() => /^\/create\/short-drama\/(agent|manual|storyboard|video)\//.test(route.path))
 const isWorkflowSurface = computed(() => isWorkflowThemeSurface({
   name: route.name,
   path: route.path,
@@ -140,7 +141,7 @@ function handleTeamSwitch(event: Event) {
       <AppThemeToggle v-if="!isWorkflowSurface" placement="sidebar" />
     </aside>
     <section class="app-content" :class="{ 'is-fullscreen': isFullscreen }"><RouterView /></section>
-    <AppThemeToggle v-if="isFullscreen && !isWorkflowSurface" />
+    <AppThemeToggle v-if="isFullscreen && !isWorkflowSurface && !hasWorkspaceThemeControl" />
     <AppConfirmDialog :dark="confirmDialogDark" />
     <TransitionGroup name="notice" tag="div" class="notice-stack" aria-live="polite"><AppNotice v-for="item in notice.state.notices" :key="item.id" :item="item" /></TransitionGroup>
   </div>

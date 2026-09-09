@@ -4,7 +4,10 @@ import { expect, it } from 'vitest'
 const source = readFileSync('src/pages/ShortDramaStoryboardPage.vue', 'utf8')
 
 it('keeps the current chapter toolbar below the shared fixed header while scenes scroll', () => {
-  expect(source).toContain('.chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px);')
+  const toolbarStyle = source.match(/\.chapter-toolbar \{([^}]+)\}/)?.[1] || ''
+  expect(toolbarStyle).toContain('position: sticky;')
+  expect(toolbarStyle).toContain('top: var(--short-drama-header-height,72px);')
+  expect(toolbarStyle).toContain('flex-wrap: wrap;')
   expect(source).toContain('scroll-margin-top: calc(var(--short-drama-header-height,72px) + 116px)')
   expect(source).toContain("document.querySelector<HTMLElement>('.app-content')")
   expect(source).toContain('if (programmaticSceneId)')

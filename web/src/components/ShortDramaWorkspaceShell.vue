@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, BookOpenText, Clapperboard, Film, Settings2, Video, Bot } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import AppThemeToggle from '@/components/AppThemeToggle.vue'
+import { useCreationAgentWorkspace, type AgentTargetOption } from '@/features/creation-agent/workspace'
 import ShortDramaEpisodeRail from '@/components/ShortDramaEpisodeRail.vue'
-import type { Chapter } from '@/types'
+import { api } from '@/api'
+import type { Chapter, VisualStyleItem } from '@/types'
 import type { AgentChange, AgentTarget } from '@/features/creation-agent/types'
 
 const CreationAgentPanel = defineAsyncComponent(() => import('@/features/creation-agent/CreationAgentPanel.vue'))
-const assistantOpen = ref(false)
+const assistant = useCreationAgentWorkspace()
+const assistantOpen = computed({ get: () => assistant.isOpen, set: value => { assistant.isOpen = value } })
 const assistantButton = ref<InstanceType<typeof AppButton> | null>(null)
 
 export type ShortDramaPhase = 'script' | 'settings' | 'storyboard' | 'video'
@@ -45,6 +49,14 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const router = useRouter()
+watch(() => props.projectId, id => assistant.enterProject(id), { immediate: true })
+const activeChapter = computed(() => props.chapters.find(chapter => chapter.id === props.activeChapterId))
+const visualStyles = ref<VisualStyleItem[]>([])
+const displayedStyle = computed(() => visualStyles.value.find(style => style.key === props.styleName)?.label ?? props.styleName)
+onMounted(async () => {
+  try { visualStyles.value = (await api.visualStyles()).data }
+  catch { /* Keep the project's saved style visible while settings are unavailable. */ }
+})
 const phases = computed(() => [
   ...(props.creationMode === 'agent' ? [{ key: 'script' as const, label: '剧本', icon: BookOpenText }] : []),
   { key: 'settings' as const, label: '设定', icon: Settings2 },
@@ -74,6 +86,11 @@ async function closeAssistant() {
   await nextTick()
   assistantButton.value?.$el?.focus()
 }
+
+function editWithAssistant(targets: AgentTargetOption[]) {
+  assistant.editTargets(props.projectId, props.activeChapterId || Number(route.query.chapter) || 0, targets)
+}
+defineExpose({ editWithAssistant })
 </script>
 
 <template>
@@ -97,7 +114,7 @@ async function closeAssistant() {
         <div class="short-drama-project-copy">
           <div class="short-drama-project-name"><slot name="project-name"><strong>{{ projectName }}</strong></slot></div>
           <slot v-if="showProjectMeta" name="project-meta">
-            <span class="short-drama-project-meta"><Film :size="13" />{{ aspectRatio }}<i />{{ resolution }}<i />{{ styleName }}</span>
+            <span class="short-drama-project-meta"><Film :size="13" />{{ aspectRatio }}<i />{{ resolution }}<i />{{ displayedStyle }}</span>
           </slot>
         </div>
       </div>
@@ -120,6 +137,7 @@ async function closeAssistant() {
 
       <div class="short-drama-header-end"><slot name="header-end" />
         <AppButton v-if="projectId > 0" ref="assistantButton" size="sm" :active="assistantOpen" :aria-expanded="assistantOpen" @click="assistantOpen = !assistantOpen"><Bot :size="16" />创作助手</AppButton>
+        <AppThemeToggle v-if="!immersive" placement="inline" />
       </div>
     </header>
 
@@ -132,7 +150,7 @@ async function closeAssistant() {
 
     <div class="short-drama-workspace-content">
       <div class="short-drama-workspace-body"><slot /></div>
-      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" />
+      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :chapter-label="activeChapter ? `第 ${activeChapter.number} 章 · ${activeChapter.name}` : '当前项目'" :phase="activePhase" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" />
     </div>
   </div>
 </template>
@@ -154,7 +172,7 @@ async function closeAssistant() {
   z-index: 30;
   display: grid;
   min-height: var(--short-drama-header-height);
-  grid-template-columns: minmax(270px,1fr) auto minmax(270px,1fr);
+  grid-template-columns: minmax(0,1fr) auto minmax(0,1fr);
   align-items: center;
   padding: 8px 28px;
   color: var(--app-text);
@@ -169,6 +187,7 @@ async function closeAssistant() {
 .short-drama-project-copy { display: grid; min-width: 0; gap: 3px; overflow: hidden; }
 .short-drama-project-name { display: flex; min-width: 0; min-height: 24px; align-items: center; }
 .short-drama-project-name :slotted(strong) { overflow: hidden; max-width: 360px; color: var(--app-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.short-drama-project-name > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .short-drama-project-meta { display: flex; align-items: center; gap: 7px; color: var(--app-text-muted); font-size: 11px; white-space: nowrap; }
 .short-drama-project-meta i { width: 1px; height: 10px; background: var(--app-border-strong); }
 
@@ -177,7 +196,7 @@ async function closeAssistant() {
 .short-drama-phase-nav :deep(.app-button) { width: 72px; min-height: 54px; flex-direction: column; gap: 4px; color: var(--app-text-muted); border: 1px solid transparent; border-radius: 17px; background: transparent; font-size: 11px; }
 .short-drama-phase-nav :deep(.app-button:hover:not(:disabled)) { color: var(--app-text-secondary); background: var(--app-surface-hover); }
 .short-drama-phase-nav :deep(.app-button.is-active) { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: 0 8px 22px color-mix(in srgb, var(--app-accent) 12%, transparent); }
-.short-drama-header-end { grid-column: 3; display: flex; justify-self: end; align-items: center; }
+.short-drama-header-end { grid-column: 3; display: flex; min-width: 0; justify-self: end; align-items: center; gap: 6px; }
 
 .short-drama-workspace-shell :deep(.episode-rail) { --short-drama-episode-rail-top: var(--short-drama-header-height); }
 .short-drama-workspace-content { display: flex; align-items: flex-start; min-width: 0; padding-top: var(--short-drama-header-height); }
@@ -207,6 +226,11 @@ async function closeAssistant() {
 }
 
 @media (max-width: 520px) {
+  .short-drama-workspace-shell:not(.is-immersive) { --short-drama-header-height: 170px; }
+  .short-drama-workspace-shell:not(.is-immersive) .short-drama-workspace-header { grid-template-rows: auto auto auto; }
+  .short-drama-workspace-shell:not(.is-immersive) .short-drama-project-identity { grid-column: 1 / -1; grid-row: 1; }
+  .short-drama-workspace-shell:not(.is-immersive) .short-drama-header-end { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
+  .short-drama-workspace-shell:not(.is-immersive) .short-drama-phase-nav { grid-row: 3; }
   .short-drama-phase-nav :deep(.app-button) { width: 52px; }
   .short-drama-phase-line { width: 7px; }
 }

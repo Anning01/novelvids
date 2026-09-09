@@ -76,7 +76,21 @@ def chapter_context(chapter: Chapter | None, character_budget: int, offset: int 
     return {"id": chapter.id, "number": chapter.number, "name": chapter.name,
             "content_excerpt": content, "content_truncated": truncated,
             "content_characters": total, "content_offset": 0,
-            "content_next_offset": character_budget // 2 if truncated else None}
+                "content_next_offset": character_budget // 2 if truncated else None}
+
+
+def public_run_error(message: str, calls: list[dict]) -> str:
+    """Return actionable fixed copy without disclosing a provider's error payload."""
+    if '上下文超过配置上限' in message:
+        return '当前内容超过助手的上下文额度。请减少选中的对象，或在助手设置提高上下文额度后重试。'
+    if '本轮模型调用次数已达到配置上限' in message or 'request_limit' in message:
+        return '本轮处理次数已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。'
+    if '本轮 token 消耗已达到配置上限' in message or 'total_tokens_limit' in message:
+        return '本轮用量已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。'
+    last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason')), None)
+    if last_finish == 'length':
+        return '模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'
+    return '创作助手执行失败。请查看已保存的修改，确认模型可用后重试。'
 
 
 class CreationAgentTaskHandler(BaseTaskHandler):
@@ -137,7 +151,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         buffer = []
         content = ""
         last_flush = time.monotonic()
-        error = False
+        error = ''
 
         async def flush():
             nonlocal last_flush
@@ -171,9 +185,13 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             ):
                 item = event.model_dump(mode="json", by_alias=True, exclude_none=True)
                 kind = item["type"]
+                if kind.startswith('THINKING'):
+                    # Provider reasoning stays in native model history; the UI
+                    # needs progress and results, not thousands of reasoning chunks.
+                    continue
                 if kind == "RUN_ERROR":
-                    error = True
-                    item["message"] = "创作助手执行失败，请检查运行状态后重试"
+                    error = public_run_error(item.get('message', ''), recorded_model.calls)
+                    item["message"] = error
                 if kind == "TEXT_MESSAGE_START":
                     # AG-UI emits one text message per model response. Persist
                     # the latest message just as HttpAgent's textMessageBuffer
@@ -190,7 +208,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                 if time.monotonic() - last_flush >= 0.2 or kind not in {"TEXT_MESSAGE_CONTENT", "TOOL_CALL_ARGS"}:
                     await flush()
             if error:
-                raise ValueError("创作助手执行失败，请检查模型配置、上下文预算或目标状态后重试")
+                raise ValueError(error)
             return {"conversation_id": conversation.id,
                     "change_ids": await PromptChange.filter(task_id=task_id).values_list("id", flat=True),
                     "token_usage": assistant.usage}

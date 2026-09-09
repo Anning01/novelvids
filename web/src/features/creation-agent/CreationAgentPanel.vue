@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { BubbleList, XSender } from 'vue-element-plus-x'
-import { Bot, History, Plus, RefreshCw, Sparkles, X, ArrowUp, Square } from 'lucide-vue-next'
+import { BubbleList } from 'vue-element-plus-x'
+import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList'
+import { Bot, History, Plus, RefreshCw, X, Search, ChevronDown, BookOpenText } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -10,17 +11,31 @@ import { notice } from '@/shared/notice'
 import { useCreationAgentStore } from './store'
 import { agentApi } from './api'
 import PromptChangeCard from './PromptChangeCard.vue'
+import AgentComposer from './AgentComposer.vue'
+import AgentSetupState from './AgentSetupState.vue'
+import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
 import type { AgentChange, AgentChangeItem, AgentTarget, PromptTargetStatus } from './types'
 
-const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean }>()
+const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; phase?: 'script' | 'settings' | 'storyboard' | 'video' }>()
 const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]] }>()
 const store = useCreationAgentStore()
 const router = useRouter()
-const panel = ref<HTMLElement | null>(null)
-const sender = ref<InstanceType<typeof XSender> | null>(null)
-const modelId = ref('')
-const selected = ref<string[]>([])
-const scopeEdited = ref(false)
+const workspace = useCreationAgentWorkspace()
+workspace.enterProject(props.projectId)
+const composer = ref<InstanceType<typeof AgentComposer> | null>(null)
+const messageList = ref<BubbleListInstance | null>(null)
+const modelId = computed({ get: () => workspace.modelId, set: value => { workspace.modelId = value } })
+const draftKey = computed(() => store.conversationId ? `conversation:${store.conversationId}` : 'new')
+const draft = computed({ get: () => workspace.drafts[draftKey.value] ?? '', set: value => { workspace.drafts[draftKey.value] = value } })
+const selected = computed({
+  get: () => workspace.selection.map(option => targetKey(option.target)),
+  set: keys => workspace.select(keys.flatMap(key => {
+    const option = allOptions.value.find(item => item.key === key)
+    return option ? [option] : []
+  })),
+})
+const search = ref('')
+const kindFilter = ref<'all' | 'scene' | 'image'>('all')
 const options = ref<{ key: string; target: AgentTarget; label: string }[]>([])
 const pickerOpen = ref(false)
 const catalogLoading = ref(false)
@@ -30,12 +45,39 @@ const hasMoreScenes = ref(false)
 const operationBusy = ref(false)
 const pendingConstraints = ref<Record<string, PromptTargetStatus['pending_constraints']>>({})
 const statusError = ref('')
-const pendingCount = computed(() => options.value.filter(option => pendingConstraints.value[option.key]?.length).length)
+const pendingCount = computed(() => allOptions.value.filter(option => pendingConstraints.value[option.key]?.length).length)
 let catalogEpoch = 0
 let statusEpoch = 0
-let senderObserver: MutationObserver | null = null
 const writable = computed(() => store.capabilities?.enabled && store.capabilities.can_write)
-const targets = computed(() => options.value.filter(option => selected.value.includes(option.key)).map(option => option.target))
+const ready = computed(() => writable.value && Boolean(store.capabilities?.models.length))
+const failedRequest = computed(() => store.currentRun?.status === 4
+  ? store.messages.find(message => message.role === 'user' && message.task_id === store.currentRun?.task_id)?.content : undefined)
+const targets = computed(() => workspace.selection.map(option => option.target))
+const allOptions = computed(() => [...new Map([
+  ...workspace.selection.map(option => ({ ...option, key: targetKey(option.target) })), ...options.value,
+].map(option => [option.key, option])).values()])
+const filteredOptions = computed(() => allOptions.value.filter(option =>
+  (kindFilter.value === 'all' || (kindFilter.value === 'scene' ? option.target.kind === 'scene' : option.target.kind !== 'scene'))
+  && option.label.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
+const suggestions = computed(() => targets.value.length ? [
+  '光线更柔和，保留人物外貌和服装。',
+  '画面更有电影感，每个分镜独立完整描述。',
+] : ['先聊聊这个故事适合怎样的画面风格。', '帮我梳理人物与场景需要保持一致的设定。'])
+const welcomeHint = computed(() => targets.value.length ? '说出你的想法，助手会直接调整选中的提示词。'
+  : props.phase === 'script' ? '先聊风格和人物设定。确认故事后，在设定页提取本章资产，就可以开始调整画面。'
+    : props.phase === 'storyboard' ? '点击分镜上的“用助手修改”，或从上方选择多个分镜，一起调整。'
+      : '可以先聊风格和人物设定；要修改画面，点击页面上的“用助手修改”。')
+
+function applyDefaults() {
+  if (workspace.scopeEdited || store.busy) return
+  workspace.select((props.selectedTargets ?? []).map(target => options.value.find(option => option.key === targetKey(target))
+    ?? { target, label: target.kind === 'scene' ? '当前分镜' : '当前图片设定' }), false)
+}
+
+function selectSuggestion(text: string) { draft.value = text; void nextTick(() => composer.value?.focus()) }
+function removeTarget(option: AgentTargetOption) {
+  if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
+}
 const bubbles = computed(() => store.messages.map(message => ({ ...message,
   placement: message.role === 'user' ? 'end' as const : 'start' as const,
   variant: message.role === 'user' ? 'filled' as const : 'borderless' as const,
@@ -64,10 +106,7 @@ async function loadTargets(more = false) {
     catalogPage.value = page
     hasMoreAssets.value = page < (assets?.data.pagination.pages ?? 0)
     hasMoreScenes.value = page < (scenes?.data.pagination.pages ?? 0)
-    if (!more) {
-      selected.value = (props.selectedTargets ?? []).map(target => `${target.kind}:${target.id}`)
-      scopeEdited.value = false
-    }
+    if (!more) applyDefaults()
     await refreshTargetStatus()
   } catch (error) { notice.error(error instanceof Error ? error.message : '无法加载当前对象') }
   finally { if (epoch === catalogEpoch) catalogLoading.value = false }
@@ -77,7 +116,7 @@ async function refreshTargetStatus() {
   const epoch = ++statusEpoch
   const projectId = props.projectId
   const chapterId = props.chapterId
-  const currentTargets = options.value.map(option => option.target)
+  const currentTargets = allOptions.value.map(option => option.target)
   if (!currentTargets.length) { pendingConstraints.value = {}; return }
   const batches = []
   for (let index = 0; index < currentTargets.length; index += 100) batches.push(currentTargets.slice(index, index + 100))
@@ -91,21 +130,40 @@ async function refreshTargetStatus() {
   }
 }
 
-watch(() => [props.projectId, props.chapterId], async () => {
-  await Promise.all([store.open(props.projectId), loadTargets()])
-  modelId.value = String(store.capabilities?.models[0]?.id ?? '')
+watch(() => props.projectId, id => { workspace.enterProject(id); void store.open(id) }, { immediate: true })
+watch(() => [props.projectId, props.chapterId], () => {
+  workspace.enterChapter(props.chapterId)
+  search.value = ''
+  void loadTargets()
 }, { immediate: true })
-watch(() => (props.selectedTargets ?? []).map(target => `${target.kind}:${target.id}`).join('|'), () => {
-  if (!scopeEdited.value && !store.busy && props.selectedTargets?.length) selected.value = props.selectedTargets.map(target => `${target.kind}:${target.id}`)
+watch(() => store.capabilities?.models, models => {
+  if (!models?.some(model => String(model.id) === modelId.value)) modelId.value = String(models?.[0]?.id ?? '')
+})
+watch(() => (props.selectedTargets ?? []).map(targetKey).join('|'), applyDefaults)
+watch(() => [ready.value, store.loading], () => {
+  if (ready.value && !store.loading) void nextTick(() => { composer.value?.focus(); messageList.value?.scrollToBottom(false) })
+})
+watch(() => workspace.focusRevision, () => { pickerOpen.value = false; void refreshTargetStatus(); void nextTick(() => composer.value?.focus()) })
+watch(() => store.conversationId, (id, previous) => {
+  if (id && !previous && store.submitting && workspace.drafts.new) {
+    workspace.drafts[`conversation:${id}`] = workspace.drafts.new
+    workspace.drafts.new = ''
+  }
 })
 watch(() => store.changesRevision, () => emit('changed', store.latestChanges))
 watch(() => [store.busy, store.changesRevision], () => { if (!store.busy) void refreshTargetStatus() })
 watch(pickerOpen, open => { if (open) void refreshTargetStatus() })
 
-async function send() {
-  const text = sender.value?.getModelValue().text.trim()
-  if (!text || !writable.value || store.busy) return
-  if (await store.send({ message: text, chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null, targets: targets.value })) sender.value?.clear()
+async function send(text: string) {
+  if (!text.trim() || !ready.value || store.busy) return
+  const key = draftKey.value
+  if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null, targets: targets.value })) {
+    workspace.drafts[key] = ''
+    // The first accepted request creates a conversation with its own draft slot.
+    workspace.drafts[draftKey.value] = ''
+    await nextTick()
+    messageList.value?.scrollToBottom(false)
+  }
 }
 
 async function operation(action: () => Promise<unknown>) {
@@ -114,7 +172,12 @@ async function operation(action: () => Promise<unknown>) {
   finally { operationBusy.value = false }
 }
 
-function conversationLabel(conversation: { id: number; updated_at: string }) {
+function editFailedRequest() {
+  if (failedRequest.value) selectSuggestion(failedRequest.value)
+}
+
+function conversationLabel(conversation: { id: number; updated_at: string; title?: string }) {
+  if (conversation.title) return conversation.title
   if (!conversation.updated_at) return `对话 ${conversation.id}`
   const updatedAt = new Date(conversation.updated_at)
   if (Number.isNaN(updatedAt.getTime())) return `对话 ${conversation.id}`
@@ -139,27 +202,12 @@ async function locate(target: AgentChangeItem) {
   }
 }
 
-onBeforeUnmount(() => { catalogEpoch += 1; statusEpoch += 1; senderObserver?.disconnect(); window.removeEventListener('focus', refreshTargetStatus); store.disconnect() })
-onMounted(async () => {
-  window.addEventListener('focus', refreshTargetStatus)
-  await nextTick()
-  // XSender mounts its editor asynchronously and currently exposes no ARIA input props.
-  function labelEditor() {
-    const editor = panel.value?.querySelector('[contenteditable="true"]')
-    if (!editor) return
-    editor.setAttribute('role', 'textbox')
-    editor.setAttribute('aria-label', '创作要求')
-    editor.setAttribute('aria-multiline', 'true')
-    senderObserver?.disconnect()
-  }
-  senderObserver = new MutationObserver(labelEditor)
-  if (panel.value) senderObserver.observe(panel.value, { childList: true, subtree: true, attributes: true, attributeFilter: ['contenteditable'] })
-  labelEditor()
-})
+onBeforeUnmount(() => { catalogEpoch += 1; statusEpoch += 1; window.removeEventListener('focus', refreshTargetStatus); store.disconnect() })
+onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 </script>
 
 <template>
-  <aside ref="panel" class="creation-agent-panel" :class="{ 'is-workflow': workflow }" aria-label="创作助手" @keydown.esc.stop="close">
+  <aside class="creation-agent-panel" :class="{ 'is-workflow': workflow }" aria-label="创作助手" @keydown.esc.stop="close">
     <header>
       <div><Bot :size="18" /><strong>创作助手</strong></div>
       <AppButton size="sm" icon-only aria-label="关闭创作助手" @click="close"><X :size="18" /></AppButton>
@@ -168,77 +216,72 @@ onMounted(async () => {
       <label class="creation-agent-panel__conversation-select">
         <History :size="15" aria-hidden="true" />
         <span>对话记录</span>
-        <select aria-label="对话记录" :value="store.conversationId || ''" :disabled="store.busy || !store.conversations.length" @change="operation(() => store.selectConversation(Number(($event.target as HTMLSelectElement).value)))">
+        <select aria-label="对话记录" :value="store.conversationId || ''" :disabled="store.busy || store.loading || operationBusy || !store.conversations.length" @change="operation(() => store.selectConversation(Number(($event.target as HTMLSelectElement).value)))">
           <option v-if="!store.conversations.length" value="">暂无记录</option>
           <option v-for="conversation in store.conversations" :key="conversation.id" :value="conversation.id">{{ conversationLabel(conversation) }}</option>
         </select>
       </label>
-      <AppButton size="sm" variant="soft" aria-label="新建对话" :disabled="store.busy || operationBusy" @click="operation(store.newConversation)"><Plus :size="15" />新会话</AppButton>
+      <AppButton size="sm" variant="soft" aria-label="新建对话" :disabled="store.busy || operationBusy || store.loading || !ready" @click="operation(store.newConversation)"><Plus :size="15" />新会话</AppButton>
     </div>
-    <div class="creation-agent-panel__scope">
-      <AppButton size="xs" :aria-expanded="pickerOpen" @click="pickerOpen = !pickerOpen">{{ targets.length ? `修改范围：已选 ${targets.length} 个对象` : '选择需要修改的对象' }}</AppButton>
+    <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || '当前章节' }}</span></div>
+    <div v-if="!store.loading && store.capabilities" class="creation-agent-panel__scope">
+      <AppButton size="xs" :aria-expanded="pickerOpen" @click="pickerOpen = !pickerOpen"><ChevronDown :size="13" />{{ targets.length ? `修改范围：已选 ${targets.length} 个对象` : '选择需要修改的对象' }}</AppButton>
       <span>仅图片与分镜提示词</span>
+    </div>
+    <div v-if="targets.length && !pickerOpen" class="creation-agent-panel__selected" aria-label="已选修改对象">
+      <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label }}</span><button type="button" :disabled="store.busy" :aria-label="`移除${option.label}`" @click="removeTarget(option)"><X :size="12" /></button></span>
     </div>
     <p v-if="pendingCount" class="creation-agent-panel__constraint-notice" role="status">当前可选对象中有 {{ pendingCount }} 个需核对新约束，历史提示词尚未自动更新。<AppButton size="xs" @click="pickerOpen = true">查看对象</AppButton></p>
     <p v-if="statusError" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
     <div v-if="pickerOpen" class="creation-agent-panel__picker" aria-label="修改对象">
+      <div class="creation-agent-panel__search"><Search :size="14" /><input v-model="search" type="search" aria-label="搜索修改对象" placeholder="搜索角色、场景或分镜" /></div>
+      <nav class="creation-agent-panel__filters" aria-label="对象类型">
+        <AppButton size="xs" :active="kindFilter === 'all'" @click="kindFilter = 'all'">全部</AppButton>
+        <AppButton size="xs" :active="kindFilter === 'image'" @click="kindFilter = 'image'">图片设定</AppButton>
+        <AppButton size="xs" :active="kindFilter === 'scene'" @click="kindFilter = 'scene'">分镜</AppButton>
+        <span>最多 {{ store.capabilities?.max_targets || 1 }} 个</span>
+      </nav>
+      <AppButton size="xs" :loading="catalogLoading" @click="loadTargets()"><RefreshCw :size="12" />刷新对象</AppButton>
       <p v-if="catalogLoading">正在加载…</p>
-      <label v-for="option in options" :key="option.key">
-        <input v-model="selected" type="checkbox" :value="option.key" :disabled="store.busy || (!selected.includes(option.key) && selected.length >= (store.capabilities?.max_targets || 1))" @change="scopeEdited = true" />
+      <label v-for="option in filteredOptions" :key="option.key">
+        <input v-model="selected" type="checkbox" :value="option.key" :disabled="store.busy || (!selected.includes(option.key) && selected.length >= (store.capabilities?.max_targets || 1))" />
         <span>{{ option.label }} <AppBadge v-if="pendingConstraints[option.key]?.length" tone="warning" size="sm">待核对约束</AppBadge>
           <small v-for="rule in pendingConstraints[option.key]" :key="rule.id" class="creation-agent-panel__pending-rule">{{ rule.content }}</small>
         </span>
       </label>
-      <p v-if="!catalogLoading && !options.length">当前章节还没有可修改的对象。</p>
+      <p v-if="!catalogLoading && !filteredOptions.length">{{ search ? '没有匹配对象，可加载更多或从页面点击“用助手修改”。' : '当前章节还没有可修改的对象。先提取资产或生成分镜。' }}</p>
       <AppButton v-if="hasMoreAssets || hasMoreScenes" size="xs" :loading="catalogLoading" @click="loadTargets(true)">加载更多对象</AppButton>
     </div>
-    <p v-if="store.loading" class="creation-agent-panel__hint">正在恢复对话…</p>
-    <p v-else-if="!store.capabilities?.enabled" class="creation-agent-panel__hint">创作助手尚未启用，请联系管理员。</p>
-    <p v-else-if="!store.capabilities.can_write" class="creation-agent-panel__hint">当前账号可以查看自己的对话，修改需要创作者权限。</p>
-    <div v-if="!store.messages.length && !store.loading" class="creation-agent-panel__welcome">
-      <Bot :size="30" />
-      <strong>说出你希望的画面</strong>
-      <p>例如：“这几个镜头的光线更柔和，人物外貌保持一致。”</p>
-      <span>你可以查看每次改动，也可以撤销。</span>
+    <AgentSetupState v-if="store.loading || !ready" :capabilities="store.capabilities" :loading="store.loading" :error="store.error" @retry="store.open(projectId)" />
+    <div v-else-if="!store.messages.length" class="creation-agent-panel__welcome">
+      <span class="creation-agent-panel__welcome-icon"><Bot :size="27" /></span>
+      <strong>{{ targets.length ? '想让画面怎样变化？' : '一起把故事变成画面' }}</strong>
+      <p>{{ welcomeHint }}</p>
+      <button v-for="suggestion in suggestions" :key="suggestion" type="button" class="creation-agent-panel__suggestion" @click="selectSuggestion(suggestion)">{{ suggestion }}</button>
+      <span>每次修改都有记录，随时查看或撤销。</span>
     </div>
     <AppButton v-if="store.nextBefore" size="xs" @click="operation(() => store.history(store.nextBefore || undefined))">查看更早的消息</AppButton>
-    <BubbleList v-if="store.messages.length" class="creation-agent-panel__messages" :list="bubbles" :auto-scroll="true" :show-back-button="true" max-height="100%">
+    <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }"><div class="creation-agent-panel__message">{{ item.content }}</div></template>
       <template #footer="{ item }">
+        <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? '本轮已停止' : '本轮未完成' }}{{ item.changes.length ? '，已保存的修改见下方记录' : '，尚未保存修改' }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
       </template>
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? `${unreadCount} 条新消息` : '回到最新' }}</AppButton></template>
     </BubbleList>
-    <footer>
+    <footer v-if="ready && !store.loading">
       <div v-if="store.statusText" class="creation-agent-panel__status" role="status">{{ store.statusText }}</div>
-      <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}</p>
+      <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">编辑后重试</AppButton><AppButton size="xs" @click="router.push('/settings')">查看设置</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">重新连接</AppButton></p>
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />重新连接</AppButton>
-      <XSender ref="sender" placeholder="描述你希望调整的画面…" :max-length="8000" :disabled="!writable || !modelId || store.submitting" :loading="store.busy" submit-type="enter" :auto-focus="true" :tip-config="false" @submit="send" @cancel="operation(store.stop)">
-        <template #action-list>
-          <AppButton v-if="store.busy" size="sm" icon-only aria-label="停止创作助手" @click="operation(store.stop)"><Square :size="15" /></AppButton>
-          <AppButton v-else size="sm" variant="soft" icon-only aria-label="发送创作要求" :disabled="!writable || !modelId || sender?.senderState.isEmpty" @click="send"><ArrowUp :size="17" /></AppButton>
-        </template>
-        <template #footer>
-          <div class="creation-agent-panel__composer-tools">
-            <label class="creation-agent-panel__model-select">
-              <Sparkles :size="13" aria-hidden="true" />
-              <span>模型</span>
-              <select v-model="modelId" aria-label="助手模型" :disabled="store.busy">
-                <option v-if="!store.capabilities?.models.length" value="">尚无可用模型</option>
-                <option v-for="model in store.capabilities?.models" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
-              </select>
-            </label>
-            <span class="creation-agent-panel__send-hint">Enter 发送</span>
-          </div>
-        </template>
-      </XSender>
+      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)" />
     </footer>
   </aside>
 </template>
 
 <style scoped>
 .creation-agent-panel { --el-color-primary: var(--app-accent); --el-bg-color: var(--app-surface); --el-bg-color-overlay: var(--app-surface); --el-fill-color: var(--app-surface-muted); --el-fill-color-light: var(--app-surface-muted); --el-fill-color-blank: var(--app-surface); --el-text-color-primary: var(--app-text); --el-text-color-regular: var(--app-text-secondary); --el-border-color: var(--app-border); --el-border-color-light: var(--app-border); --el-border-radius-base: 10px; --el-font-size-base: 13px; --el-font-line-height-primary: 1.65; position: sticky; top: var(--short-drama-header-height, 72px); flex: 0 0 var(--short-drama-assistant-width, 420px); width: var(--short-drama-assistant-width, 420px); min-width: 0; height: calc(100dvh - var(--short-drama-header-height, 72px)); display: flex; flex-direction: column; border-left: 1px solid var(--app-border); color: var(--app-text); background: var(--app-surface); overflow: hidden; font-size: 13px; }
+.creation-agent-panel > header,.creation-agent-panel__toolbar,.creation-agent-panel__scope,.creation-agent-panel__context,.creation-agent-panel__selected,.creation-agent-panel > footer { flex-shrink: 0; }
 .creation-agent-panel header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--app-border); }
 .creation-agent-panel header > div { display: flex; align-items: center; gap: 8px; }
 .creation-agent-panel__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
@@ -250,27 +293,33 @@ onMounted(async () => {
 .creation-agent-panel__scope > span { color: var(--app-text-secondary); font-size: 11px; }
 .creation-agent-panel__constraint-notice { margin: 4px 12px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
 .creation-agent-panel__pending-rule { display: block; margin-top: 3px; color: var(--app-text-secondary); line-height: 1.5; }
-.creation-agent-panel__picker { max-height: 180px; overflow: auto; flex-shrink: 0; margin: 0 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 10px; }
+.creation-agent-panel__picker { max-height: min(300px, 38dvh); overflow: auto; flex-shrink: 0; margin: 0 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 10px; }
 .creation-agent-panel__picker label { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
 .creation-agent-panel__picker input { accent-color: var(--app-accent); }
 .creation-agent-panel__hint { padding: 10px 16px; color: var(--app-text-secondary); }
-.creation-agent-panel__welcome { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 28px; gap: 12px; }
-.creation-agent-panel__welcome > svg { color: var(--app-accent); }
+.creation-agent-panel__welcome { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: flex-start; justify-content: safe center; padding: 24px; gap: 14px; }
+.creation-agent-panel__welcome-icon { flex-shrink: 0; display: grid; width: 48px; height: 48px; place-items: center; color: var(--app-accent); border-radius: 15px; background: var(--app-accent-soft); }
+.creation-agent-panel__welcome > strong { font-size: 17px; }
+.creation-agent-panel__suggestion { width: 100%; padding: 12px; text-align: left; color: var(--app-text-secondary); border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface); font: inherit; line-height: 1.6; cursor: pointer; }
+.creation-agent-panel__suggestion:hover { color: var(--app-accent); background: var(--app-accent-soft); border-color: var(--app-accent); }
+.creation-agent-panel__context { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 10px 14px 2px; color: var(--app-text-muted); font-size: 11px; }
+.creation-agent-panel__context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 5px; max-height: 82px; overflow: auto; padding: 2px 14px 8px; }
+.creation-agent-panel__selected > span { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; overflow-wrap: anywhere; }
+.creation-agent-panel__selected-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creation-agent-panel__selected button { flex: none; display: grid; place-items: center; min-width: 22px; min-height: 22px; color: inherit; background: transparent; cursor: pointer; }
+.creation-agent-panel__search { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text-muted); }
+.creation-agent-panel__search input { width: 100%; min-width: 0; padding: 0; color: var(--app-text); background: transparent; border: 0; font: inherit; outline: none; }
+.creation-agent-panel__search:focus-within { border-color: var(--app-accent); }
+.creation-agent-panel__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-block: 8px; }
+.creation-agent-panel__filters > span { margin-left: auto; color: var(--app-text-muted); font-size: 11px; }
 .creation-agent-panel__welcome p { color: var(--app-text-secondary); line-height: 1.8; margin: 0; }
 .creation-agent-panel__welcome span { font-size: 12px; color: var(--app-text-secondary); }
 .creation-agent-panel__messages { flex: 1; min-height: 0; padding: 10px 14px; overflow: auto; }
 .creation-agent-panel__message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .creation-agent-panel footer { padding: 12px; border-top: 1px solid var(--app-border); margin-top: auto; background: color-mix(in srgb,var(--app-surface) 96%,var(--app-accent)); }
-.creation-agent-panel footer :deep(.elx-x-sender) { overflow: hidden; border: 1px solid var(--app-border); border-radius: 15px; background: var(--app-surface); box-shadow: 0 4px 16px rgb(35 39 55 / 7%); }
-.creation-agent-panel footer :deep(.elx-x-sender:focus-within) { border-color: color-mix(in srgb,var(--app-accent) 52%,var(--app-border)); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 12%,transparent),0 5px 18px rgb(35 39 55 / 8%); }
-.creation-agent-panel footer :deep(.elx-x-sender::after) { display: none; }
-.creation-agent-panel footer :deep(.elx-x-sender__footer) { border-top-color: color-mix(in srgb,var(--app-border) 75%,transparent); }
-.creation-agent-panel__composer-tools { display: flex; min-width: 0; min-height: 38px; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 56px 5px 9px; }
-.creation-agent-panel__model-select { display: inline-flex; min-width: 0; max-width: 190px; height: 28px; align-items: center; gap: 5px; padding: 0 7px; border-radius: 8px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 10px; }
-.creation-agent-panel__model-select > span { color: var(--app-text-muted); }
-.creation-agent-panel__model-select select { width: auto; max-width: 130px; height: 26px; border: 0; padding: 0 3px; color: var(--app-text-secondary); background: transparent; font-size: 11px; font-weight: 620; }
-.creation-agent-panel__send-hint { flex: 0 0 auto; color: var(--app-text-muted); font-size: 10px; white-space: nowrap; }
 .creation-agent-panel__status { color: var(--app-text-secondary); margin-bottom: 8px; font-size: 12px; }
+.creation-agent-panel__round-status { color: var(--app-text-secondary); margin: 6px 0; font-size: 11px; }
 .creation-agent-panel__error { color: var(--app-text); border-left: 3px solid var(--app-accent); padding-left: 8px; font-size: 12px; }
 .creation-agent-panel :deep(.elx-bubble__avatar-placeholder) { display: none; }
 .creation-agent-panel :deep(.elx-bubble__content--filled) { background: var(--app-accent-soft); }

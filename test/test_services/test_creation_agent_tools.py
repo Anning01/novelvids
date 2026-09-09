@@ -35,6 +35,8 @@ async def test_image_and_variant_updates_are_recorded_idempotently_and_undoable(
     repeated = await service.update_image_prompt(edits, tool_call_id="image-1")
     assert repeated.id == change.id
     assert change.changes[1]['asset_id'] == asset.id
+    assert change.changes[0]['target_label'] == asset.canonical_name
+    assert change.changes[1]['target_label'] == f'{asset.canonical_name} · {variant.name}'
     assert await PromptChange.all().count() == 1
     await asset.refresh_from_db(); await variant.refresh_from_db()
     assert asset.base_traits == '灰色风衣，柔和光线'
@@ -92,6 +94,7 @@ async def test_scene_edit_uses_shared_preparation_and_preserves_metadata():
     ], tool_call_id='scene-1')
     await scene.refresh_from_db()
     assert '暖光从左侧照入' in scene.prompt
+    assert change.changes[0]['target_label'] == '第 1 章 · 分镜 5'
     assert scene.sequence == 5 and scene.duration == 6 and scene.metadata == {"keep": "metadata"}
     await service.undo(change.id)
     await scene.refresh_from_db()
@@ -109,6 +112,21 @@ async def test_undo_does_not_overwrite_later_edits():
         await service.undo(change.id)
     await asset.refresh_from_db()
     assert asset.base_traits == '后续手工修改'
+
+
+@pytest.mark.asyncio
+async def test_undo_preserves_later_non_prompt_changes():
+    service, scene, _, _, _ = await setup_service()
+    change = await service.update_storyboard_prompt([
+        StoryboardPromptEdit(scene_id=scene.id, expected_version=prompt_version(scene), legacy_prompt='空站台，柔和暖光。'),
+    ], tool_call_id='undo-after-metadata')
+    await scene.refresh_from_db()
+    scene.metadata = {'video_resolution': '1080p'}
+    await scene.save()
+    await service.undo(change.id)
+    await scene.refresh_from_db()
+    assert scene.prompt == '空站台'
+    assert scene.metadata == {'video_resolution': '1080p'}
 
 
 @pytest.mark.asyncio
@@ -193,6 +211,18 @@ async def test_context_uses_same_selected_visual_variant_as_video_generation():
     assert current['entities'][0]['description'] == '雨夜风衣'
     assert f'女主#{variant.name}' in current['entities'][0]['aliases']
     assert current['version'] == prompt_version(scene)
+
+
+@pytest.mark.asyncio
+async def test_scene_context_includes_visual_traits_even_when_story_description_exists():
+    service, scene, asset, variant, _ = await setup_service()
+    await scene.assets.add(asset)
+    variant.description = '故事中的来访者'
+    await variant.save()
+    targets = await service.read_targets(for_model=True)
+    current = next(target for target in targets if target['kind'] == 'scene')
+    assert '雨夜风衣' in current['entities'][0]['description']
+    assert '故事中的来访者' in current['entities'][0]['description']
 
 
 @pytest.mark.asyncio

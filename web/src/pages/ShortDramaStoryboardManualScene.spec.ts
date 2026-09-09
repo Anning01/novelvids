@@ -26,6 +26,8 @@ vi.mock('@/api', async (importOriginal) => {
       generalConfig: vi.fn(),
       generationCapabilities: vi.fn(),
       imageGenerationModels: vi.fn(),
+      task: vi.fn(),
+      generateScenes: vi.fn(),
     },
   }
 })
@@ -56,6 +58,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    sessionStorage.clear()
     vi.mocked(api.novelMeta).mockResolvedValue({
       code: 0, message: 'ok',
       data: { id: 9, name: '新项目', author: '人工创建', description: '人工模式 · 9:16 · 720p · 写实通用', total_chapters: 0, content_length: 0, created_at: '', updated_at: '' },
@@ -84,5 +87,41 @@ describe('人工模式无章节时创建第一个分镜', () => {
     expect(api.createChapter).toHaveBeenCalledWith(expect.objectContaining({ novel_id: 9, number: 1, name: '第一章' }))
     expect(api.createScene).toHaveBeenCalledWith(expect.objectContaining({ chapter_id: 1, sequence: 1 }))
     expect(wrapper.findAll('.shot-editor').length).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  async function mountAgentWithTask() {
+    vi.mocked(api.novelMeta).mockResolvedValue({ data: { id: 9, name: '测试故事', author: 'Agent 创建' } } as never)
+    vi.mocked(api.chapters).mockResolvedValue({ data: { items: [chapter], pagination: { page: 1, pages: 1 } } } as never)
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, assets: [], scenes: [], videos: {} } } as never)
+    sessionStorage.setItem('novelvids_storyboard_tasks_9', JSON.stringify({ 1: 'existing-task' }))
+    const wrapper = await mountPage()
+    await flushPromises()
+    return wrapper
+  }
+
+  it('网络中断保留已提交任务，重新连接只读取同一任务', async () => {
+    vi.mocked(api.task).mockRejectedValueOnce(new Error('网络连接中断'))
+    const wrapper = await mountAgentWithTask()
+    expect(JSON.parse(sessionStorage.getItem('novelvids_storyboard_tasks_9')!)).toEqual({ 1: 'existing-task' })
+    vi.mocked(api.task).mockResolvedValue({ data: { id: 'existing-task', status: 3 } } as never)
+    await wrapper.findAll('button').find(button => button.text() === '重新连接')!.trigger('click')
+    await flushPromises()
+    expect(api.task).toHaveBeenLastCalledWith('existing-task')
+    expect(api.generateScenes).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('novelvids_storyboard_tasks_9')!)).toEqual({})
+    wrapper.unmount()
+  })
+
+  it('任务失败后的重试仍检查项目分析状态，失败时提供返回剧本入口', async () => {
+    vi.mocked(api.task).mockResolvedValue({ data: { id: 'existing-task', status: 4, error_message: '分镜生成失败' } } as never)
+    const wrapper = await mountAgentWithTask()
+    vi.mocked(api.novelAnalysis).mockResolvedValue({ data: { status: 4, error_message: '项目分析失败' } } as never)
+    await wrapper.findAll('button').find(button => button.text() === '重试')!.trigger('click')
+    await flushPromises()
+    expect(api.generateScenes).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('项目分析失败')
+    expect(wrapper.findAll('button').some(button => button.text() === '返回剧本')).toBe(true)
+    wrapper.unmount()
   })
 })

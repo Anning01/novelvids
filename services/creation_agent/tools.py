@@ -19,6 +19,7 @@ from schemas.creation_agent import ImagePromptEdit, StoryboardPromptEdit
 from schemas.scene import SceneEntity
 from services.creation_agent.prompt_edits import prepare_storyboard_edit, validate_image_prompt_edit, current_storyboard_structure
 from services.storyboard.strategies import storyboard_strategy_factory
+from services.storyboard.entities import visual_entity_description
 from utils.enums import TaskStatusEnum, AssetTypeEnum
 
 
@@ -88,7 +89,7 @@ class PromptEditService:
                 aliases.append(f"{name}#{variant.name}")
             entities.append(SceneEntity(
                 asset_id=asset.id, name=name, aliases=aliases,
-                description=source.description or source.base_traits or "",
+                description=visual_entity_description(source.description, source.base_traits),
                 asset_type=AssetTypeEnum(asset.asset_type).nickname,
             ))
         return entities
@@ -180,7 +181,15 @@ class PromptEditService:
                         values = {"base_traits": edit.prompt}
                     before = {field: getattr(target, field) for field in values}
                     version = await self._write(target, values, connection)
+                    if isinstance(target, Scene):
+                        label = f"第 {target.chapter.number} 章 · 分镜 {target.sequence}"
+                    elif isinstance(target, AssetVariant):
+                        parent = await Asset.get(id=target.asset_id).using_db(connection)
+                        label = f"{parent.canonical_name} · {target.name}"
+                    else:
+                        label = target.canonical_name
                     changes.append({"kind": kind, "target_id": target_id,
+                                    "target_label": label,
                                     **({"asset_id": target.asset_id} if isinstance(target, AssetVariant) else {}),
                                     "constraint_ids": [rule['id'] for rule in constraints
                                                        if {"kind": kind, "id": target_id} in rule['applies_to']],
@@ -224,7 +233,9 @@ class PromptEditService:
                 return change
             for item in change.changes:
                 target = await self._target(item["kind"], item["target_id"], connection)
-                if prompt_version(target) != item["after_version"]:
+                # Only these prompt fields are reverted. A later video setting
+                # changes updated_at too, but must not invalidate an unchanged prompt.
+                if any(getattr(target, field) != value for field, value in item['after'].items()):
                     raise PromptEditConflict("该目标已有后续修改，不能直接撤销覆盖")
                 await self._write(target, item["before"], connection)
             change.reverted_at = datetime.now(timezone.utc)
