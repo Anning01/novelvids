@@ -2,7 +2,7 @@ import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, Ass
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
-const API_BASE = ((import.meta.env.VITE_API_BASE ?? '') as string).replace(/\/+$/, '') + '/api'
+export const API_BASE = ((import.meta.env.VITE_API_BASE ?? '') as string).replace(/\/+$/, '') + '/api'
 const BASE = API_BASE
 
 /** 媒体地址解析：设置了 VITE_API_BASE 时，把后端返回的相对 /media 路径前缀为后端域名。 */
@@ -45,7 +45,7 @@ export function setActiveTeamId(teamId: number | null): void {
 }
 
 /** 鉴权请求头（不含 Content-Type）：JSON 请求额外补 Content-Type，FormData 上传不设。 */
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = getAuthToken()
   if (token) headers.Authorization = `Bearer ${token}`
@@ -54,7 +54,7 @@ function authHeaders(): Record<string, string> {
   return headers
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
   const response = await fetch(BASE + url, { headers, ...options })
   const payload = await response.json()
@@ -273,13 +273,13 @@ export const api = {
   restoreAssetGeneration: (assetId: number, taskId: string) => request<SingleResponse<Asset>>(`/asset/${assetId}/generation-history/${taskId}/restore`, { method: 'POST' }),
   assetLibrary: (assetType: number, page = 1, pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, page, page_size: pageSize, sort: '-id' })}`),
   createAsset: (data: Partial<Asset> & { novel_id: number; chapter_id?: number; asset_type: number; canonical_name: string }) => request<SingleResponse<Asset>>('/asset', { method: 'POST', body: JSON.stringify(data) }),
-  updateAsset: (id: number, data: Partial<Asset>) => request<SingleResponse<Asset>>(`/asset/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  updateAsset: (id: number, data: Partial<Asset>, expectedPrompt?: string | null) => request<SingleResponse<Asset>>(`/asset/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteAsset: (id: number) => request<SingleResponse<null>>(`/asset/${id}`, { method: 'DELETE' }),
   mergeAssets: (sourceAssetId: number, targetAssetId: number) => request<SingleResponse<AssetMergeResult>>('/asset/merge', { method: 'POST', body: JSON.stringify({ source_asset_id: sourceAssetId, target_asset_id: targetAssetId }) }),
   reuseAsset: (assetId: number, chapterId: number) => request<SingleResponse<Asset>>(`/asset/${assetId}/chapters/${chapterId}`, { method: 'POST' }),
   assetVariants: (assetId: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants`),
   createAssetVariant: (assetId: number, data: Partial<AssetVariant> & { name: string }) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants`, { method: 'POST', body: JSON.stringify(data) }),
-  updateAssetVariant: (assetId: number, variantId: number, data: Partial<AssetVariant>) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants/${variantId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  updateAssetVariant: (assetId: number, variantId: number, data: Partial<AssetVariant>, expectedPrompt?: string | null) => request<SingleResponse<AssetVariant>>(`/asset/${assetId}/variants/${variantId}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   assignAssetVariantToChapter: (assetId: number, variantId: number, chapterNumber: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants/${variantId}/chapter`, { method: 'POST', body: JSON.stringify({ chapter_number: chapterNumber }) }),
   deleteAssetVariant: (assetId: number, variantId: number) => request<SingleResponse<null>>(`/asset/${assetId}/variants/${variantId}`, { method: 'DELETE' }),
   generateAsset: (id: number, variantId?: number, referenceImages: string[] = []) => request<SingleResponse<AiTask>>(`/asset/reference/${id}`, {
@@ -287,11 +287,11 @@ export const api = {
     body: JSON.stringify({ variant_id: variantId, reference_images: referenceImages }),
   }),
   activeAssetGenerations: (novelId: number) => request<SingleResponse<AssetActiveGeneration[]>>(`/asset/active-generations${qs({ novel_id: novelId })}`),
-  scenes: (chapterId: number) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page: 1, page_size: 100, sort: 'sequence' })}`),
+  scenes: (chapterId: number, page = 1) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),
   createScene: (data: Partial<Scene> & { chapter_id: number; sequence: number; prompt: string }) => request<SingleResponse<Scene>>('/scene/', { method: 'POST', body: JSON.stringify(data) }),
   insertSceneAfter: (sceneId: number) => request<SingleResponse<Scene>>(`/scene/${sceneId}/insert-after`, { method: 'POST' }),
-  updateScene: (id: number, data: Partial<Scene>) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
   generateScenes: (chapterId: number) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
   storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),

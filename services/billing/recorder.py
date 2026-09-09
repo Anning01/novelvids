@@ -89,8 +89,9 @@ class BillingRecorder:
         ai_task_id=None,
         team_id=None,
         user_id=None,
+        config_snapshot: AiModelConfig | None = None,
     ) -> ModelUsageRecord | None:
-        config = await self._config(model_config_id)
+        config = config_snapshot or await self._config(model_config_id)
         usage = normalize_token_usage(token_usage)
         cost = compute_text_cost(token_usage, config.pricing if config else None)
         return await self._create(
@@ -219,6 +220,9 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
         duration = _task_duration_seconds(task)
         team_id = request_params.get("team_id")
         user_id = request_params.get("user_id")
+        if task_type == AiTaskTypeEnum.creation_agent.value:
+            await _record_creation_agent_usage(task, team_id=team_id, user_id=user_id)
+            return
         if task_type == AiTaskTypeEnum.reference_image.value:
             res = result or {}
             record = await billing_recorder.record_image(
@@ -308,6 +312,39 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
         await _consume_team_balance(record, team_id, user_id=user_id)
     except Exception:
         logger.exception("billing record failed for task %s", getattr(task, "id", None))
+
+
+async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:
+    """Claim a private run ledger once, using the existing text price/charge path."""
+    from tortoise.transactions import in_transaction
+    from models.creation_agent import AgentMessage
+
+    async with in_transaction() as connection:
+        message = await AgentMessage.filter(task_id=task.id, role="assistant").using_db(connection).select_for_update().first()
+        if message is None or message.billing_record_id is not None or not message.usage.get("calls"):
+            return
+        existing = await ModelUsageRecord.filter(ai_task_id=task.id, billing_type="text").using_db(connection).first()
+        if existing is not None:
+            await AgentMessage.filter(id=message.id).using_db(connection).update(billing_record_id=existing.id)
+            return
+        claimed = await AgentMessage.filter(id=message.id, billing_record_id=None).using_db(connection).update(billing_record_id=-1)
+        if not claimed:
+            return
+        snapshot = AiModelConfig(**message.model_snapshot)
+        record = await billing_recorder.record_text(
+            novel_id=task.request_params["novel_id"], task_type=task.task_type,
+            model_config_id=task.request_params["model_config_id"], config_snapshot=snapshot,
+            token_usage=message.usage, status=task.status, ai_task_id=task.id,
+            duration_seconds=_task_duration_seconds(task), team_id=team_id, user_id=user_id,
+        )
+        if record is None:
+            await AgentMessage.filter(id=message.id, billing_record_id=-1).using_db(connection).update(billing_record_id=None)
+            raise RuntimeError("创作助手用量记录失败")
+        record.usage = {**record.usage, "requests": message.usage["requests"],
+                        "missing_usage": message.usage["missing_usage"]}
+        await record.save(using_db=connection, update_fields=["usage"])
+        await _consume_team_balance(record, team_id, user_id=user_id)
+        await AgentMessage.filter(id=message.id).using_db(connection).update(billing_record_id=record.id)
 
 
 async def _consume_team_balance(record, team_id, user_id=None) -> None:

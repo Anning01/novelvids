@@ -34,23 +34,35 @@ class VideoGeneratorFactory:
     ):
         self._registry = dict(registry)
 
-    def create(self, config: AiModelConfig) -> BaseVideoGenerator:
-        capabilities_for(config.video_model_type)
+    @property
+    def registered_model_types(self) -> frozenset[VideoGenerationModelTypeEnum]:
+        """返回已经可由 Factory 创建生成器的模型类型。"""
+        return frozenset(self._registry)
+
+    def validate_model_type(
+        self,
+        model_type: str | VideoGenerationModelTypeEnum | None,
+    ) -> None:
+        """确保后台可选模型已注册具体请求适配器。"""
         try:
-            model_type = VideoGenerationModelTypeEnum(config.video_model_type)
-            spec = self._registry[model_type]
+            normalized = VideoGenerationModelTypeEnum(model_type)
+            self._registry[normalized]
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="该视频模型尚未配置请求适配器") from exc
+
+    def create(self, config: AiModelConfig) -> BaseVideoGenerator:
+        capabilities_for(config.video_model_type)
+        self.validate_model_type(config.video_model_type)
+        model_type = VideoGenerationModelTypeEnum(config.video_model_type)
+        spec = self._registry[model_type]
         return spec.builder(config)
 
     def record_model_type(
         self,
         model_type: str | VideoGenerationModelTypeEnum,
     ) -> VideoModelTypeEnum:
-        try:
-            return self._registry[VideoGenerationModelTypeEnum(model_type)].record_model_type
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="该视频模型尚未配置记录类型") from exc
+        self.validate_model_type(model_type)
+        return self._registry[VideoGenerationModelTypeEnum(model_type)].record_model_type
 
 
 video_generator_factory = VideoGeneratorFactory({

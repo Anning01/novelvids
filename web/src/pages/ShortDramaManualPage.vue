@@ -21,6 +21,7 @@ import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
@@ -71,6 +72,7 @@ const nameDraft = ref('')
 const loading = ref(true)
 const showAssetDialog = ref(false)
 const editingAsset = ref<Asset | null>(null)
+const editingVariantId = ref<number>()
 const assetDrawerMode = ref<'ai' | 'library' | 'upload'>('ai')
 const showBatchDialog = ref(false)
 const batchGenerating = ref(false)
@@ -251,6 +253,18 @@ async function refreshAssets() {
   }
 }
 
+async function refreshAgentChanges(changes: AgentChange[]) {
+  const targets = changes.flatMap(change => change.changes)
+  const changedAssets = targets.filter(target => target.kind === 'asset').map(target => target.target_id)
+  const changedVariants = new Set(targets.filter(target => target.kind === 'variant').map(target => target.target_id))
+  const ids = new Set([...changedAssets, ...assets.value.filter(asset => asset.variants?.some(variant => changedVariants.has(variant.id))).map(asset => asset.id)])
+  try {
+    const updated = await Promise.all([...ids].map(async id => (await api.asset(id)).data))
+    assets.value = assets.value.map(asset => updated.find(item => item.id === asset.id) || asset)
+    if (editingAsset.value && ids.has(editingAsset.value.id)) notice.info('助手已保存新的提示词。当前编辑草稿已保留，重新打开设定可查看最新内容。')
+  } catch (error) { notice.error((error as Error).message) }
+}
+
 async function setAssetScope(nextScope: AssetScope) {
   if (nextScope === assetScope.value) return
   const previousScope = assetScope.value
@@ -342,6 +356,7 @@ async function saveName() {
 
 function openAssetDialog(asset?: Asset, initialMode: 'ai' | 'library' | 'upload' = 'ai') {
   editingAsset.value = asset || null
+  editingVariantId.value = undefined
   assetDrawerMode.value = initialMode
   showAssetDialog.value = true
 }
@@ -349,7 +364,35 @@ function openAssetDialog(asset?: Asset, initialMode: 'ai' | 'library' | 'upload'
 function closeAssetDialog() {
   showAssetDialog.value = false
   editingAsset.value = null
+  editingVariantId.value = undefined
+  if (route.query.asset) {
+    const { asset: _asset, variant: _variant, ...query } = route.query
+    void router.replace({ query })
+  }
 }
+
+watch(() => [loading.value, route.query.asset, route.query.variant, projectId.value], async (_, __, onCleanup) => {
+  const assetId = Number(route.query.asset)
+  if (loading.value || !Number.isSafeInteger(assetId) || assetId <= 0) return
+  if (showAssetDialog.value) {
+    notice.info('请先关闭当前设定，再定位修改结果；当前草稿已保留。')
+    return
+  }
+  let stale = false
+  onCleanup(() => { stale = true })
+  try {
+    const asset = (await api.asset(assetId)).data
+    if (stale || !pageAlive) return
+    if (asset.novel_id !== projectId.value) throw new Error('该资产不属于当前项目')
+    const variantId = Number(route.query.variant) || undefined
+    if (variantId && !asset.variants?.some(variant => variant.id === variantId)) throw new Error('该衍生形象已不存在')
+    activeTab.value = tabs.find(tab => tab.type === asset.asset_type)?.value ?? 'character'
+    openAssetDialog(asset)
+    editingVariantId.value = variantId
+  } catch (error) {
+    if (!stale) notice.error(error instanceof Error ? error.message : '无法定位资产')
+  }
+})
 
 function addCreatedAsset(asset: Asset) {
   assets.value.unshift(asset)
@@ -624,7 +667,9 @@ onBeforeUnmount(() => {
       :creation-mode="project.creationMode"
       :chapters="chapters"
       :active-chapter-id="selectedChapter?.id || 0"
+      :agent-targets="editingAsset ? [{ kind: 'asset', id: editingAsset.id }] : []"
       @select-chapter="selectChapter"
+      @prompts-changed="refreshAgentChanges"
     >
       <template #project-name>
         <div class="project-name-line">
@@ -784,6 +829,7 @@ onBeforeUnmount(() => {
       :kind="activeTab"
       :novel-id="projectId"
       :asset="editingAsset"
+      :initial-variant-id="editingVariantId"
       :chapter-number="selectedChapter?.number"
       :episode-numbers="chapters.map(item => item.number)"
       :initial-mode="assetDrawerMode"

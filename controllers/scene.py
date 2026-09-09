@@ -10,6 +10,7 @@ from controllers.config import ai_model_config_controller
 from services.ai_task_executor import ai_task_executor
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.oss import normalize_media_url
+from services.prompt_revision import apply_prompt_precondition
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
 from tortoise.transactions import in_transaction
@@ -59,26 +60,28 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         统一处理 update 和 patch 的内部逻辑
         method: 'update' | 'patch'
         """
-        instance = await self.get(scene_id)
-        
-        data = obj_in.model_dump(exclude_unset=True)
-        asset_ids = data.pop("asset_ids", None)
-        if isinstance(data.get("metadata"), dict):
-            data["metadata"] = _normalize_scene_metadata(data["metadata"])
+        async with in_transaction():
+            instance = await self.get(scene_id)
 
-        if method == "patch":
-            instance = await super().patch(instance, data)
-        else:
-            instance = await super().update(instance, data)
+            data = obj_in.model_dump(exclude_unset=True)
+            asset_ids = data.pop("asset_ids", None)
+            if isinstance(data.get("metadata"), dict):
+                data["metadata"] = _normalize_scene_metadata(data["metadata"])
 
-        if asset_ids is not None:
-            await instance.assets.clear()
-            if asset_ids:
-                await instance.assets.add(*await Asset.filter(id__in=asset_ids))
-            
-        # 使用 fetch_related 填充已有的实例，避免重复执行 SELECT ... WHERE id = ...
-        await instance.fetch_related("assets")
-        return instance
+            if not await apply_prompt_precondition(instance, data, "prompt"):
+                if method == "patch":
+                    instance = await super().patch(instance, data)
+                else:
+                    instance = await super().update(instance, data)
+
+            if asset_ids is not None:
+                await instance.assets.clear()
+                if asset_ids:
+                    await instance.assets.add(*await Asset.filter(id__in=asset_ids))
+
+            # 使用 fetch_related 填充已有的实例，避免重复执行 SELECT ... WHERE id = ...
+            await instance.fetch_related("assets")
+            return instance
 
     async def update(self, scene_id: int, obj_in: SceneUpdate) -> Scene:
         return await self._perform_update(scene_id, obj_in, "update")

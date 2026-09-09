@@ -501,7 +501,7 @@ it('uploads an image-to-image reference and sends it with storyboard asset gener
     metadata: expect.objectContaining({
       generation_reference_images: ['uploads/9/reference.png'],
     }),
-  }))
+  }), assetWithImage.base_traits)
   expect(api.generateAsset).toHaveBeenCalledWith(
     assetWithImage.id,
     undefined,
@@ -644,7 +644,7 @@ it('switches and persists an independent JSON form version for each derived stat
         base_traits: '练气后期的新提示词',
       }),
     }),
-  }))
+  }), '练气期白衣形态提示词')
   expect(api.updateAsset).not.toHaveBeenCalled()
 })
 
@@ -866,4 +866,19 @@ it('保存标注图时只向服务端传 key（OSS 直传），避免签名 URL 
     source_image_url: '/media/assets/current.png',
     output_format: 'png',
   })
+})
+
+it('opens the requested variant with its own prompt without requiring a manual selection', async () => {
+  const variant: AssetVariant = { id: 31, asset_id: 7, name: '雨衣形态', base_traits: '独立的蓝色雨衣设定', images: [], created_at: '', updated_at: '' }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: '', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: '', data: editedAsset })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: '', data: [variant] })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: '', data: { prompt: '', prompt_language: 'zh' } })
+  const wrapper = mount(AssetCreateDialog, { props: { open: true, kind: 'character', novelId: 9, asset: editedAsset, initialVariantId: 31 }, global: { stubs: { Teleport: true } } })
+  await flushPromises()
+  expect(wrapper.get<HTMLTextAreaElement>('textarea[rows="8"]').element.value).toBe(variant.base_traits)
+  expect(wrapper.get('.asset-variant-item.is-selected').text()).toContain('雨衣形态')
+  wrapper.unmount()
 })

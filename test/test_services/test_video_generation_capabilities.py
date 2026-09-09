@@ -7,12 +7,18 @@ from fastapi import HTTPException
 from models.config import AiModelConfig
 from schemas.config import VideoGenerationCapabilitiesOut
 from services.video import get_generator, get_record_model_type
-from services.video.capabilities import capabilities_for, validate_selection
+from services.video.capabilities import CAPABILITIES, capabilities_for, validate_selection
 from services.video.content import prepare_video_content
+from services.video.factory import video_generator_factory
 from services.video.minimax import MiniMaxGenerationError, MiniMaxH3Generator
 from services.video.seedance import SeedanceGenerationError, SeedanceGenerator
 from services.video.wan import Wan3Generator
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
+from utils.enums import (
+    AiTaskTypeEnum,
+    TaskStatusEnum,
+    VideoGenerationModelTypeEnum,
+    VideoModelTypeEnum,
+)
 
 
 def test_video_capabilities_public_contract_matches_response_schema():
@@ -149,20 +155,34 @@ async def _wan_config(
     )
 
 
-@pytest.mark.asyncio
-async def test_video_factory_selects_adapter_from_configured_model_type():
-    seedance = await _video_config("seedance_2")
-    minimax = await _minimax_config()
-    wan = await _wan_config()
+def test_every_video_model_type_has_capabilities_and_factory_registration():
+    supported = frozenset(VideoGenerationModelTypeEnum)
 
-    seedance_generator = get_generator(seedance)
-    minimax_generator = get_generator(minimax)
-    assert isinstance(seedance_generator, SeedanceGenerator)
-    assert get_record_model_type(seedance) == VideoModelTypeEnum.seedance
-    assert isinstance(minimax_generator, MiniMaxH3Generator)
-    assert get_record_model_type(minimax) == VideoModelTypeEnum.minimax
-    assert isinstance(get_generator(wan), Wan3Generator)
-    assert get_record_model_type(wan) == VideoModelTypeEnum.wan
+    assert frozenset(CAPABILITIES) == supported
+    assert video_generator_factory.registered_model_types == supported
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model_type", "generator_type", "record_model_type"),
+    [
+        ("seedance_2", SeedanceGenerator, VideoModelTypeEnum.seedance),
+        ("seedance_2_fast", SeedanceGenerator, VideoModelTypeEnum.seedance),
+        ("seedance_2_mini", SeedanceGenerator, VideoModelTypeEnum.seedance),
+        ("seedance_2_5", SeedanceGenerator, VideoModelTypeEnum.seedance),
+        ("minimax_h3", MiniMaxH3Generator, VideoModelTypeEnum.minimax),
+        ("wan_3", Wan3Generator, VideoModelTypeEnum.wan),
+    ],
+)
+async def test_video_factory_selects_adapter_for_every_model_type(
+    model_type,
+    generator_type,
+    record_model_type,
+):
+    config = await _video_config(model_type)
+
+    assert isinstance(get_generator(config), generator_type)
+    assert get_record_model_type(config) == record_model_type
 
 
 @pytest.mark.asyncio
@@ -620,18 +640,34 @@ async def test_seedance_reference_uploads_are_appended_with_official_roles(monke
 
 
 @pytest.mark.asyncio
-async def test_seedance_keyframes_and_query_nested_video_url(monkeypatch):
-    config = await _video_config("seedance_2")
+@pytest.mark.parametrize(
+    ("model_type", "resolution", "expects_output_format"),
+    [
+        ("seedance_2", "1080p", False),
+        ("seedance_2_fast", "720p", False),
+        ("seedance_2_mini", "720p", False),
+        ("seedance_2_5", "1080p", True),
+    ],
+)
+async def test_every_seedance_model_submits_keyframes_through_factory_and_queries_result(
+    monkeypatch,
+    model_type,
+    resolution,
+    expects_output_format,
+):
+    config = await _video_config(model_type)
     requests: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "POST":
             payload = json.loads(request.content)
+            assert payload["model"] == f"configured-{model_type}-endpoint"
             assert payload["content"][1]["role"] == "first_frame"
             assert payload["content"][2]["role"] == "last_frame"
-            assert "output_format" not in payload
-            return httpx.Response(200, json={"id": "keyframe-task"})
+            assert payload["resolution"] == resolution
+            assert ("output_format" in payload) is expects_output_format
+            return httpx.Response(200, json={"id": f"{model_type}-keyframe-task"})
         return httpx.Response(
             200,
             json={
@@ -650,18 +686,19 @@ async def test_seedance_keyframes_and_query_nested_video_url(monkeypatch):
         return real_client(*args, **kwargs)
 
     monkeypatch.setattr("services.video.seedance.httpx.AsyncClient", client_factory)
-    generator = SeedanceGenerator(config)
+    generator = get_generator(config)
     task_id = await generator.submit(
         prompt="镜头缓慢推进",
         duration=6,
         aspect_ratio="adaptive",
-        resolution="1080p",
+        resolution=resolution,
         generation_mode="keyframes",
         first_frame_url="https://cdn.example.com/first.png",
         last_frame_url="https://cdn.example.com/last.png",
     )
     result = await generator.query(task_id)
 
+    assert task_id == f"{model_type}-keyframe-task"
     assert len(requests) == 2
     assert result["status"] == TaskStatusEnum.completed
     assert result["url"] == "https://cdn.example.com/result.mp4"

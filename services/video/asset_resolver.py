@@ -79,14 +79,9 @@ async def resolve_assets(
     subjects: list[dict[str, Any]] = []
     explicit_variant_ids = selected_variant_ids or {}
     for matched, mentioned_variant_name in requested_assets:
-        variants = list(matched.variants)
         if matched.id in explicit_variant_ids:
             selected_variant_id = explicit_variant_ids[matched.id]
-            variant = (
-                _find_variant_by_id(selected_variant_id, variants)
-                if selected_variant_id is not None
-                else None
-            )
+            variant = select_asset_variant(matched, chapter_number, explicit_variant_ids, mentioned_variant_name)
             if selected_variant_id is not None and variant is None:
                 logger.warning(
                     "resolve_assets: selected variant %s does not belong to asset_id=%s; using base asset",
@@ -94,11 +89,7 @@ async def resolve_assets(
                     matched.id,
                 )
         else:
-            variant = (
-                _find_variant(mentioned_variant_name, variants)
-                if mentioned_variant_name
-                else _find_chapter_variant(chapter_number, variants)
-            )
+            variant = select_asset_variant(matched, chapter_number, explicit_variant_ids, mentioned_variant_name)
         images = _collect_images(matched, variant)
         logger.info(
             "resolve_assets: asset_id=%s variant_id=%s images=%d (main=%s, a1=%s, a2=%s)",
@@ -180,6 +171,22 @@ def _extract_asset_mentions(
         (asset, variant_name)
         for _, (asset, variant_name, _) in sorted(occurrences.items())
     ]
+
+
+def select_asset_variant(
+    asset: Asset,
+    chapter_number: int | None,
+    selected_variant_ids: Mapping[int, int | None],
+    mentioned_variant_name: str = "",
+) -> AssetVariant | None:
+    """Shared visual-version precedence for prompt context and media generation."""
+    variants = list(asset.variants)
+    if asset.id in selected_variant_ids:
+        variant_id = selected_variant_ids[asset.id]
+        return _find_variant_by_id(variant_id, variants) if variant_id is not None else None
+    if mentioned_variant_name:
+        return _find_variant(mentioned_variant_name, variants)
+    return _find_chapter_variant(chapter_number, variants)
 
 
 def _find_variant(name: str, variants: list[AssetVariant]) -> AssetVariant | None:

@@ -36,6 +36,7 @@ class AiModelConfigProperties(BaseModel):
         False,
         description="是否支持 response_format=json_object",
     )
+    supports_tool_calls: bool = Field(False, description="是否支持多轮工具调用")
     max_context_characters: Optional[int] = Field(
         None,
         description="四层业务消息允许的最大总字符数",

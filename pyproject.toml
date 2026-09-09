@@ -10,6 +10,7 @@ dependencies = [
     "fields>=5.0.0",
     "openai>=2.17.0",
     "optional>=0.0.1",
+    "pydantic-ai-slim[ag-ui,openai]==1.66.0",
     "pypdf>=6.1.1",
     "python-docx>=1.2.0",
     "python-multipart>=0.0.22",
@@ -27,6 +28,7 @@ testpaths = [
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 markers = [
     "real_llm: 需要真实 LLM API 的测试（需配置 test/.test.env）",
 ]

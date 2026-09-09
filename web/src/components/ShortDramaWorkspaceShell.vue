@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, BookOpenText, Clapperboard, Film, Settings2, Video } from 'lucide-vue-next'
+import { ArrowLeft, BookOpenText, Clapperboard, Film, Settings2, Video, Bot } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import ShortDramaEpisodeRail from '@/components/ShortDramaEpisodeRail.vue'
 import type { Chapter } from '@/types'
+import type { AgentChange, AgentTarget } from '@/features/creation-agent/types'
+
+const CreationAgentPanel = defineAsyncComponent(() => import('@/features/creation-agent/CreationAgentPanel.vue'))
+const assistantOpen = ref(false)
+const assistantButton = ref<InstanceType<typeof AppButton> | null>(null)
 
 export type ShortDramaPhase = 'script' | 'settings' | 'storyboard' | 'video'
 
@@ -22,6 +27,7 @@ const props = withDefaults(defineProps<{
   showProjectMeta?: boolean
   videoEnabled?: boolean
   immersive?: boolean
+  agentTargets?: AgentTarget[]
 }>(), {
   creationMode: 'agent',
   chapters: () => [],
@@ -34,6 +40,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   selectChapter: [chapter: Chapter]
+  promptsChanged: [changes: AgentChange[]]
 }>()
 
 const route = useRoute()
@@ -61,12 +68,18 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
     query: chapter > 0 ? { chapter: String(chapter) } : undefined,
   })
 }
+
+async function closeAssistant() {
+  assistantOpen.value = false
+  await nextTick()
+  assistantButton.value?.$el?.focus()
+}
 </script>
 
 <template>
   <div
     class="short-drama-workspace-shell"
-    :class="{ 'has-episode-rail': hasEpisodeRail, 'is-immersive': immersive }"
+    :class="{ 'has-episode-rail': hasEpisodeRail, 'is-immersive': immersive, 'has-assistant': assistantOpen }"
   >
     <header class="short-drama-workspace-header">
       <div class="short-drama-project-identity">
@@ -105,7 +118,9 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
         </template>
       </nav>
 
-      <div class="short-drama-header-end"><slot name="header-end" /></div>
+      <div class="short-drama-header-end"><slot name="header-end" />
+        <AppButton v-if="projectId > 0" ref="assistantButton" size="sm" :active="assistantOpen" :aria-expanded="assistantOpen" @click="assistantOpen = !assistantOpen"><Bot :size="16" />创作助手</AppButton>
+      </div>
     </header>
 
     <ShortDramaEpisodeRail
@@ -115,13 +130,18 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
       @select="emit('selectChapter', $event)"
     />
 
-    <div class="short-drama-workspace-body"><slot /></div>
+    <div class="short-drama-workspace-content">
+      <div class="short-drama-workspace-body"><slot /></div>
+      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" />
+    </div>
   </div>
 </template>
 
 <style scoped>
+.short-drama-header-end { color: var(--app-text); }
 .short-drama-workspace-shell {
   --short-drama-header-height: 72px;
+  --short-drama-assistant-width: clamp(320px, 30vw, 420px);
   min-width: 0;
   min-height: 100vh;
 }
@@ -146,10 +166,10 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
 
 .short-drama-project-identity { display: flex; min-width: 0; align-items: center; gap: 13px; }
 .short-drama-back { color: var(--app-text-secondary); }
-.short-drama-project-copy { display: grid; min-width: 0; gap: 3px; }
+.short-drama-project-copy { display: grid; min-width: 0; gap: 3px; overflow: hidden; }
 .short-drama-project-name { display: flex; min-width: 0; min-height: 24px; align-items: center; }
 .short-drama-project-name :slotted(strong) { overflow: hidden; max-width: 360px; color: var(--app-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.short-drama-project-meta { display: flex; align-items: center; gap: 7px; color: var(--app-text-muted); font-size: 11px; }
+.short-drama-project-meta { display: flex; align-items: center; gap: 7px; color: var(--app-text-muted); font-size: 11px; white-space: nowrap; }
 .short-drama-project-meta i { width: 1px; height: 10px; background: var(--app-border-strong); }
 
 .short-drama-phase-nav { grid-column: 2; display: flex; align-items: center; }
@@ -160,20 +180,24 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
 .short-drama-header-end { grid-column: 3; display: flex; justify-self: end; align-items: center; }
 
 .short-drama-workspace-shell :deep(.episode-rail) { --short-drama-episode-rail-top: var(--short-drama-header-height); }
-.short-drama-workspace-body { min-width: 0; min-height: 100vh; padding-top: var(--short-drama-header-height); }
-.has-episode-rail > .short-drama-workspace-body { margin-left: 48px; }
+.short-drama-workspace-content { display: flex; align-items: flex-start; min-width: 0; padding-top: var(--short-drama-header-height); }
+.short-drama-workspace-body { flex: 1 1 0; min-width: 0; min-height: calc(100vh - var(--short-drama-header-height)); container: creation-workspace / inline-size; }
+.has-episode-rail .short-drama-workspace-content { margin-left: 48px; }
 
 .is-immersive { height: 100vh; overflow: hidden; }
 .is-immersive .short-drama-workspace-header { right: 0; min-height: 0; padding: 14px 18px; border: 0; pointer-events: none; background: transparent; box-shadow: none; backdrop-filter: none; }
 .is-immersive .short-drama-project-identity { pointer-events: none; }
 .is-immersive .short-drama-project-identity > *,.is-immersive .short-drama-header-end { pointer-events: auto; }
 .is-immersive :deep(.workbench-toolbar) { z-index: 40; }
-.is-immersive .short-drama-workspace-body { height: 100vh; min-height: 0; padding-top: 0; }
+.is-immersive .short-drama-workspace-content { height: 100vh; padding-top: 0; }
+.is-immersive .short-drama-workspace-body { height: 100vh; min-height: 0; }
+.is-immersive.has-assistant .short-drama-workspace-header { right: var(--short-drama-assistant-width); }
+.is-immersive :deep(.creation-agent-panel) { top: 0; height: 100dvh; }
 .is-immersive .short-drama-back { color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631,0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
 
 @media (max-width: 900px) {
   .short-drama-workspace-shell { --short-drama-header-height: 124px; }
-  .short-drama-workspace-header { grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 8px; padding: 10px 14px; }
+  .short-drama-workspace-header { grid-template-columns: minmax(0,1fr) auto; grid-template-rows: auto auto; gap: 8px; padding: 10px 14px; }
   .short-drama-phase-nav { grid-column: 1 / -1; grid-row: 2; justify-content: center; }
   .short-drama-header-end { grid-column: 2; grid-row: 1; }
   .short-drama-phase-nav :deep(.app-button) { width: 60px; min-height: 46px; }
@@ -185,5 +209,14 @@ function selectPhase(phase: ShortDramaPhase, disabled = false) {
 @media (max-width: 520px) {
   .short-drama-phase-nav :deep(.app-button) { width: 52px; }
   .short-drama-phase-line { width: 7px; }
+}
+
+@media (max-width: 760px) {
+  .has-assistant .short-drama-workspace-body { display: none; }
+  .has-assistant .short-drama-workspace-content { margin-left: 0; }
+  .has-assistant :deep(.episode-rail) { display: none; }
+  .is-immersive.has-assistant .short-drama-workspace-header { right: 0; }
+  .is-immersive.has-assistant .short-drama-workspace-content { padding-top: 72px; }
+  .is-immersive :deep(.creation-agent-panel) { height: calc(100dvh - 72px); }
 }
 </style>

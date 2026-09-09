@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from typing import Any, Literal, Optional
+from math import isclose
 from schemas._base import BaseResponse
 from services.oss import resolve_media_url
 from utils.enums import AssetTypeEnum, TaskStatusEnum
@@ -33,6 +34,29 @@ class AssetSimple(BaseModel):
     description: Optional[str] = Field(None, description="详细描述")
     base_traits: Optional[str] = Field(None, description="固有特征（语言由通用配置决定，用于 prompt）")
     is_global: Optional[bool] = Field(None, description="是否全局资产")
+
+
+class ScenePromptSegment(BaseModel):
+    """一次生成请求内的小镜头；编号和起止时间由渲染器产生。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    duration: float = Field(gt=0, le=30, allow_inf_nan=False)
+    description: str = Field(min_length=1)
+    shot_size_and_camera: str = Field(min_length=1)
+    visual_prose: str = Field(min_length=1)
+    actions: list[str] = Field(min_length=1)
+    camera_movement: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def reject_model_owned_numbering_and_shorthand(self):
+        import re
+        text = "\n".join((self.description, self.visual_prose, *self.actions))
+        if re.search(r"镜头\s*[0-9一二三四五六七八九十]+", text):
+            raise ValueError("内部小镜头不能自行填写编号，编号由渲染器产生")
+        if re.search(r"(?:外貌|服装|衣着|人物描述|环境描述|设定)\s*(?:同上|同前|照旧)", text):
+            raise ValueError("内部小镜头必须写明当前可见状态，不能依赖同上")
+        return self
 
 
 class SoraScenePromptConfig(BaseModel):
@@ -141,6 +165,11 @@ class SoraScenePromptConfig(BaseModel):
         description="允许使用的克制效果；无特殊效果时明确写自然光写实拍摄",
     )
 
+    segments: list[ScenePromptSegment] = Field(
+        default_factory=list,
+        description="当前一次生成请求内的小镜头；只有明确需要内部切镜时填写，编号自动从1开始",
+    )
+
     @field_validator("duration")
     @classmethod
     def validate_duration(cls, value: str) -> str:
@@ -153,6 +182,16 @@ class SoraScenePromptConfig(BaseModel):
             raise ValueError("duration 必须在 1-30 秒之间")
         normalized = str(int(seconds)) if seconds.is_integer() else str(seconds)
         return f"{normalized}s"
+
+    @model_validator(mode="after")
+    def validate_segment_duration(self):
+        if self.segments and not isclose(
+            sum(segment.duration for segment in self.segments),
+            float(self.duration.removesuffix("s")),
+            abs_tol=0.001,
+        ):
+            raise ValueError("内部小镜头时长之和必须等于当前生成请求总时长")
+        return self
 
 class Storyboard(BaseModel):
     """完整的故事板，包含多个分镜"""
@@ -207,7 +246,7 @@ class SceneCreate(SceneFullProperties):
 
 class SceneUpdate(SceneCreate):
     """全量更新"""
-    pass
+    expected_prompt: Optional[str] = None
 
 
 class ScenePatch(SceneFullProperties):
@@ -215,6 +254,7 @@ class ScenePatch(SceneFullProperties):
     chapter_id: Optional[int] = Field(None, description="所属章节")
     sequence: Optional[int] = Field(None, description="分镜序列号")
     prompt: Optional[str] = Field(None, description="提示词配置")
+    expected_prompt: Optional[str] = Field(None, description="编辑器读取到的原提示词，用于防止覆盖并发修改")
 
 
 

@@ -157,6 +157,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             }
 
             # 解析 duration 为浮点数
+            if shot.segments:
+                prompt_params["segments"] = [segment.model_dump() for segment in shot.segments]
             duration_value = float(shot.duration.replace("s", ""))
 
             # 构建 metadata，包含 API 元数据

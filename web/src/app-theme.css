@@ -16,7 +16,9 @@
   --creation-bg-image: url('/background-light.png');
 }
 
-:root[data-app-theme='dark'] {
+:root[data-app-theme='dark'],
+.creation-agent-panel.is-workflow,
+.short-drama-workspace-shell.is-immersive .short-drama-header-end {
   color-scheme: dark;
   --app-canvas: #151412;
   --app-surface: #211e1b;

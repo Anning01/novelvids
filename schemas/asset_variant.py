@@ -24,7 +24,7 @@ class AssetVariantCreate(AssetVariantProperties):
 
 
 class AssetVariantPatch(AssetVariantProperties):
-    pass
+    expected_prompt: Optional[str] = None
 
 
 class AssetVariantChapterAssignment(BaseModel):

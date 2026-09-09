@@ -5,6 +5,21 @@ from tortoise import Tortoise
 from config import settings
 
 
+async def ensure_creation_agent_schema() -> None:
+    """Add the opt-in tool capability before safe schema generation on old installs."""
+    connection = Tortoise.get_connection("default")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        columns = await connection.execute_query_dict("PRAGMA table_info(ai_model_configs)")
+        if columns and "supports_tool_calls" not in {str(column["name"]) for column in columns}:
+            await connection.execute_script(
+                "ALTER TABLE ai_model_configs ADD COLUMN supports_tool_calls INT NOT NULL DEFAULT 0;"
+            )
+    elif settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
+        await connection.execute_script(
+            "ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS supports_tool_calls BOOL NOT NULL DEFAULT FALSE;"
+        )
+
+
 async def ensure_ai_model_config_schema() -> None:
     """为已有 SQLite 数据库补齐模型能力与协议字段。"""
     if not settings.DATABASE_URL.startswith("sqlite"):

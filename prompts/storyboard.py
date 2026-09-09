@@ -48,6 +48,15 @@ class StoryboardShot(Protocol):
     allowed_effects: list[str]
 
 
+class StoryboardSegment(Protocol):
+    duration: float
+    description: str
+    shot_size_and_camera: str
+    visual_prose: str
+    actions: list[str]
+    camera_movement: str
+
+
 STORYBOARD_LANGUAGE_INSTRUCTIONS = {
     "zh": (
         "所有描述性输出字段、镜头标题、视觉描述、动作、镜头说明和声音说明都必须"
@@ -255,6 +264,11 @@ def _normalize_asset_reference_text(
     return normalized
 
 
+def normalize_storyboard_reference_text(text: str, entities: Sequence[StoryboardEntity]) -> str:
+    """Use the shared name/alias rules for free-text and structured prompts alike."""
+    return _normalize_asset_reference_text(text, _asset_reference_candidates(entities))
+
+
 def normalized_storyboard_reference_fields(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
@@ -383,6 +397,8 @@ def _shot_search_text(shot: StoryboardShot) -> str:
             for value in getattr(shot, field_name)
         ),
     ]
+    for segment in getattr(shot, "segments", ()):
+        values.extend((segment.description, segment.visual_prose, *segment.actions))
     return "\n".join(str(value) for value in values)
 
 
@@ -474,6 +490,24 @@ def _format_primary_generation_instruction(shot: StoryboardShot) -> str:
     )
 
 
+def _format_prompt_segments(segments: Sequence[StoryboardSegment]) -> list[str]:
+    """Render locally numbered segments; never inherit the chapter sequence."""
+    parts: list[str] = []
+    elapsed = 0.0
+    for index, segment in enumerate(segments, start=1):
+        end = elapsed + segment.duration
+        parts.extend((
+            f"【镜头{index} · {_duration_token(segment.duration)} · "
+            f"{segment.shot_size_and_camera} · {segment.description}】",
+            f"时间范围：{elapsed:g}s-{end:g}s",
+            f"初始画面：{segment.visual_prose}",
+            f"运镜：{segment.camera_movement}",
+            *segment.actions,
+        ))
+        elapsed = end
+    return parts
+
+
 def format_storyboard_prompt(
     shot: StoryboardShot,
     prompt_language: str = "zh",
@@ -494,6 +528,25 @@ def format_storyboard_prompt(
             shot_body_parts.append("【人物台词】")
         shot_body_parts.append(dialogue)
     shot_body_parts.append(f"环境音：{shot.sound_design}")
+
+    segments = getattr(shot, "segments", ())
+    if segments:
+        details = [
+            _format_primary_generation_instruction(shot),
+            *_format_prompt_segments(segments),
+            *(["【旁白 / 内心 OS】", narration] if narration else []),
+            *(["【人物台词】", dialogue] if dialogue else []),
+            f"环境音：{shot.sound_design}",
+        ]
+    else:
+        # Scene.sequence 仅用于章节排序；独立请求始终从镜头1开始。
+        details = [
+            f"【镜头1 · {duration_token} · "
+            f"{shot.shot_size_and_camera} · {shot.description}】",
+            _format_primary_generation_instruction(shot),
+            "【详细执行】",
+            *shot_body_parts,
+        ]
 
     prompt = "\n".join(
         (
@@ -519,15 +572,7 @@ def format_storyboard_prompt(
             f"空间关系：{shot.spatial_relationships}",
             "",
             "【镜头描述】",
-            (
-                # 每条 Scene 都会作为一次独立视频任务提交；章节序号只用于数据库排序，
-                # 不应泄漏到任务内部。对视频模型而言，当前 Prompt 永远是“镜头1”。
-                f"【镜头1 · {duration_token} · "
-                f"{shot.shot_size_and_camera} · {shot.description}】"
-            ),
-            _format_primary_generation_instruction(shot),
-            "【详细执行】",
-            *shot_body_parts,
+            *details,
             "",
             "【转场方式】",
             shot.transition,

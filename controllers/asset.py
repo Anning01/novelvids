@@ -18,6 +18,7 @@ from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
 from services.cover_derivatives import ensure_image_derivatives
+from services.prompt_revision import apply_prompt_precondition
 from services.image_generation.capabilities import validate_selection
 from services.oss import normalize_media_url, oss
 from utils.crud import CRUDBase
@@ -141,6 +142,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         """
         if base_query is None:
             base_query = self.model.all()
+        # Load variants for the paginated asset set without one request per asset.
+        base_query = base_query.prefetch_related("variants")
 
         # 处理 chapter_id 过滤（Python 端过滤 JSON 数组，兼容 SQLite）
         # 前端传参: /api/asset?chapter_id=3
@@ -204,7 +207,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         instance = await self.get(asset_id)
         data = _normalize_asset_media(obj_in.model_dump(exclude_unset=True))
         references = _asset_image_references(data)
-        asset = await super().update(instance, data)
+        asset = instance
+        if not await apply_prompt_precondition(instance, data, "base_traits"):
+            asset = await super().update(instance, data)
         await _ensure_asset_image_derivatives(references)
         return asset
 
@@ -212,7 +217,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         instance = await self.get(asset_id)
         data = _normalize_asset_media(obj_in.model_dump(exclude_unset=True))
         references = _asset_image_references(data)
-        asset = await super().patch(instance, data)
+        asset = instance
+        if not await apply_prompt_precondition(instance, data, "base_traits"):
+            asset = await super().patch(instance, data)
         await _ensure_asset_image_derivatives(references)
         return asset
 
@@ -459,8 +466,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         data = obj_in.model_dump(exclude_unset=True)
         if isinstance(data.get("images"), list):
             data["images"] = _normalize_image_list(data["images"])
-        variant.update_from_dict(data)
-        await variant.save()
+        if not await apply_prompt_precondition(variant, data, "base_traits"):
+            variant.update_from_dict(data)
+            await variant.save()
         if isinstance(data.get("images"), list):
             await _ensure_asset_image_derivatives(data["images"])
         return variant

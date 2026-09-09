@@ -35,11 +35,13 @@ import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vu
 import ShortDramaBatchVideoDialog, { type BatchVideoGenerationRequest, type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
 import ShortDramaSceneStatusRail from '@/components/ShortDramaSceneStatusRail.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import type { AgentChange, AgentTarget } from '@/features/creation-agent/types'
 import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistory.vue'
 import VideoGenerationErrorState from '@/components/VideoGenerationErrorState.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
+import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
 import { api, mediaUrl, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
@@ -69,6 +71,7 @@ interface ProjectView extends Novel {
 interface SceneDraft {
   description: string
   prompt: string
+  basePrompt: string | null
   duration: number
   selectedAssetIds: number[]
   selectedVariantIds: Record<number, number | null>
@@ -177,6 +180,49 @@ const sceneSaveQueues = new Map<number, Promise<void>>()
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
+const workbenchStore = useWorkbenchStore()
+const assistantTargets = computed<AgentTarget[]>(() => {
+  if (workspaceView.value === 'workflow') {
+    const targets: AgentTarget[] = []
+    for (const key of workbenchStore.selectedNodeKeys) {
+      const node = workbenchStore.nodeByKey(key)
+      if (node?.kind === 'shot') targets.push({ kind: 'scene', id: node.id })
+      else if (node?.kind === 'asset') targets.push({ kind: 'asset', id: node.id })
+    }
+    return targets
+  }
+  return activeSceneId.value ? [{ kind: 'scene', id: activeSceneId.value }] : []
+})
+
+async function refreshAgentChanges(changes: AgentChange[]) {
+  const targets = changes.flatMap(change => change.changes)
+  try {
+    for (const id of new Set(targets.filter(target => target.kind === 'scene').map(target => target.target_id))) {
+      const current = scenes.value.find(scene => scene.id === id)
+      if (!current) continue
+      const updated = (await api.scene(id)).data
+      const draft = sceneDrafts.value[id]
+      if (draft && draft.prompt !== (current.prompt || '')) {
+        const timer = sceneAutoSaveTimers.get(id)
+        if (timer) clearTimeout(timer)
+        sceneAutoSaveTimers.delete(id)
+        notice.info(`镜头 ${current.sequence} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。`)
+      } else if (draft) { draft.prompt = updated.prompt || ''; draft.basePrompt = updated.prompt ?? null }
+      scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
+    }
+    const variantIds = new Set(targets.filter(target => target.kind === 'variant').map(target => target.target_id))
+    const assetIds = new Set([...targets.filter(target => target.kind === 'asset').map(target => target.target_id),
+      ...assets.value.filter(asset => asset.variants?.some(variant => variantIds.has(variant.id))).map(asset => asset.id)])
+    for (const id of assetIds) {
+      const updated = (await api.asset(id)).data
+      assets.value = assets.value.map(asset => asset.id === id ? updated : asset)
+    }
+    if (workspaceView.value === 'workflow') {
+      const conflicts = await workbenchStore.refreshAgentPrompts(targets)
+      if (conflicts?.length) notice.info(`助手修改已保存；${conflicts.join('、')} 正在编辑，本地草稿已保留。`)
+    }
+  } catch (error) { notice.error((error as Error).message) }
+}
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
 const waitingAnalysis = ref(false)
 const creatingManualScene = ref(false)
@@ -280,6 +326,7 @@ function makeSceneDraft(scene: Scene): SceneDraft {
   return {
     description: scene.description || '',
     prompt: scene.prompt || '',
+    basePrompt: scene.prompt ?? null,
     duration: scene.duration || 6,
     selectedAssetIds: [...new Set(linkedAssetIds)],
     selectedVariantIds: readSelectedVariantIds(metadata.asset_variant_ids),
@@ -1545,7 +1592,8 @@ async function saveScene(
           video_aspect_ratio: sceneAspectRatio(currentScene, model),
           return_last_frame: draft.returnLastFrame,
         },
-      })).data
+      }, draft.basePrompt)).data
+      draft.basePrompt = updated.prompt ?? null
       scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
       if (showNotice) notice.success('分镜已保存')
     } catch (error) {
@@ -1921,7 +1969,9 @@ onBeforeUnmount(() => {
       :show-episode-rail="workspaceView === 'storyboard'"
       :show-project-meta="workspaceView === 'storyboard'"
       :immersive="workspaceView === 'workflow'"
+      :agent-targets="assistantTargets"
       @select-chapter="selectChapter"
+      @prompts-changed="refreshAgentChanges"
     >
       <template v-if="workspaceView === 'workflow' && activeChapter" #project-name>
         <WorkbenchCanvasIdentity :name="stripChapterOrdinal(activeChapter.name) || '未命名'" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
@@ -2240,7 +2290,7 @@ onBeforeUnmount(() => {
 .shot-editor-header strong { font-size: 12px; }
 .shot-editor-header small { padding: 3px 5px; border-radius: 5px; color: #7476df; background: #efefff; font-size: 8px; }
 .drag-mark { color: #9ba0ae; font-size: 17px; }
-.shot-editor-grid { display: grid; min-height: 630px; grid-template-columns: 410px minmax(600px,3fr) minmax(520px,2fr); gap: 12px; padding: 12px; background: #f8f9fc; }
+.shot-editor-grid { display: grid; min-height: 630px; grid-template-columns: minmax(230px,1fr) minmax(320px,2fr) minmax(260px,1fr); gap: 12px; padding: 12px; background: #f8f9fc; }
 .shot-info-panel,.prompt-panel,.preview-panel { min-width: 0; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 1px #e7e9f0; }
 .shot-info-panel { display: grid; align-content: start; gap: 16px; padding: 16px; overflow-y: auto; scrollbar-width: none; }
 .shot-info-panel::-webkit-scrollbar { display: none; }
@@ -2313,9 +2363,9 @@ onBeforeUnmount(() => {
 .preview-empty span { font-size: 9px; }
 .preview-empty.is-running svg { color: #8587ff; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@media (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; overflow-x: auto; padding-bottom: 4px; }.chapter-model-select { width: min(300px,70vw); min-width: min(300px,70vw); }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
-@media (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
+@container creation-workspace (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
+@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; overflow-x: auto; padding-bottom: 4px; }.chapter-model-select { width: min(300px,70vw); min-width: min(300px,70vw); }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@container creation-workspace (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 .scene-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 </style>

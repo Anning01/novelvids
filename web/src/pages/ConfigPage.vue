@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import {
   Bot,
   Check,
@@ -29,6 +29,8 @@ import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
 
+const AgentSettingsPanel = defineAsyncComponent(() => import('@/features/creation-agent/AgentSettingsPanel.vue'))
+
 type ModelCategoryId = 'llm' | 'image' | 'video'
 type SettingsSection = 'models' | 'general'
 
@@ -47,7 +49,7 @@ const categories: ModelCategory[] = [
     label: 'LLM 大模型',
     eyebrow: 'LANGUAGE',
     description: '负责剧本理解、人物提取、分镜文本生成与来源视频拆解。',
-    taskTypes: [1, 3, 5, 6],
+    taskTypes: [1, 3, 5, 6, 7],
     icon: Bot,
   },
   {
@@ -102,7 +104,7 @@ const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_json_output: false, supports_tool_calls: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' })
 
 function configTaskTypes(item: AiModelConfig) {
   return item.task_types?.length ? item.task_types : [item.task_type]
@@ -113,7 +115,7 @@ const isEditing = computed(() => editingConfigId.value !== null)
 const selectedConfigs = computed(() => configs.value.filter(item => configTaskTypes(item).some(value => selectedCategory.value.taskTypes.includes(value))))
 const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value => ({
   value: String(value),
-  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析', 6: '重制' }[value] ?? `任务 ${value}`),
+  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析', 6: '重制', 7: '创作助手' }[value] ?? `任务 ${value}`),
 })))
 
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
@@ -163,7 +165,7 @@ function activeCount(category: ModelCategory) {
 }
 
 function taskLabel(value: number) {
-  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成', 5: '项目分析', 6: '重制' }[value] ?? `任务 ${value}`)
+  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成', 5: '项目分析', 6: '重制', 7: '创作助手' }[value] ?? `任务 ${value}`)
 }
 
 function protocolLabel(value: ImageApiProtocol) {
@@ -242,7 +244,7 @@ function changeSettingsSection(value: string) {
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
+  form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, supports_tool_calls: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
   textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
   tierPrices.value = category.id === 'llm'
     ? {}
@@ -274,6 +276,7 @@ function openEdit(item: AiModelConfig) {
     video_model_type: item.video_model_type || '',
     concurrency: item.concurrency,
     supports_json_output: item.supports_json_output ?? false,
+    supports_tool_calls: item.supports_tool_calls ?? false,
     max_context_characters: item.max_context_characters ?? '',
     thinking: item.thinking ?? '',
     max_tokens: item.max_tokens ?? '',
@@ -577,6 +580,7 @@ onMounted(load)
           </AppButton>
         </footer>
       </article>
+      <AgentSettingsPanel v-if="auth.enabled === false || auth.isSuperAdmin" />
     </section>
 
     <div v-if="showCreate" class="model-modal-backdrop" @click.self="showCreate = false">
@@ -676,6 +680,10 @@ onMounted(load)
           </label>
         </div>
 
+        <label v-if="selectedCategoryId === 'llm'" class="model-toggle">
+          <input v-model="form.supports_tool_calls" type="checkbox" role="switch" aria-label="多轮工具调用" />
+          <span>支持多轮工具调用（创作助手必需）</span>
+        </label>
         <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
           <span class="pricing-title">费用设置（元 / 百万 token）</span>
           <div class="pricing-grid">

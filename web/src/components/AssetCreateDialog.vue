@@ -68,7 +68,7 @@ type AssetEditorFormSnapshot = {
 
 const VARIANT_EDITOR_FORM_KEY = 'editor_form'
 
-const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode }>(), {
+const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode; initialVariantId?: number }>(), {
   episodeNumbers: () => [],
   initialMode: 'ai',
 })
@@ -977,10 +977,10 @@ async function persistEdits() {
   }
   autoSaving.value = true
   try {
-    const response = await api.updateAsset(props.asset.id, payload)
+    const response = await api.updateAsset(props.asset.id, payload, (promptSourceAsset.value || props.asset).base_traits ?? null)
     promptSourceAsset.value = response.data
-  } catch {
-    // 自动保存静默失败，不打断用户
+  } catch (error) {
+    notice.error((error as Error).message || '自动保存失败，草稿已保留')
   } finally {
     autoSaving.value = false
   }
@@ -1045,7 +1045,7 @@ async function submit(regenerate = false) {
         metadata,
       }
       const updated = variant
-        ? (await api.updateAssetVariant(props.asset.id, variant.id, variantPayload)).data
+        ? (await api.updateAssetVariant(props.asset.id, variant.id, variantPayload, variant.base_traits ?? null)).data
         : (await api.createAssetVariant(props.asset.id, variantPayload)).data
       selectedVariant.value = updated
       variantDraft.value = {
@@ -1125,7 +1125,7 @@ async function submit(regenerate = false) {
       is_global: false,
     }
     const response = props.asset
-      ? await api.updateAsset(props.asset.id, payload)
+      ? await api.updateAsset(props.asset.id, payload, (promptSourceAsset.value || props.asset).base_traits ?? null)
       : await api.createAsset({ ...payload, novel_id: props.novelId } as Partial<Asset> & { novel_id: number; asset_type: number; canonical_name: string })
 
     if (props.asset) {
@@ -1335,6 +1335,7 @@ onUnmounted(() => {
             v-if="isEditing && asset"
             ref="variantStripRef"
             :asset="asset"
+            :initial-variant-id="initialVariantId"
             :draft="variantDraft"
             :chapter-number="chapterNumber"
             :episode-numbers="episodeNumbers"

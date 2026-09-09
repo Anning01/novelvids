@@ -61,4 +61,27 @@ describe('ShortDramaWorkspaceShell', () => {
     expect(wrapper.find('.short-drama-project-identity').exists()).toBe(true)
     expect(wrapper.get('.workbench-toolbar').text()).toBe('画布工具栏')
   })
+
+  it('loads one shared assistant panel and restores focus when it closes', async () => {
+    const wrapper = mount(ShortDramaWorkspaceShell, {
+      props: baseProps,
+      attachTo: document.body,
+      slots: { default: '<textarea aria-label="未保存草稿">保留草稿</textarea>' },
+      global: { stubs: { CreationAgentPanel: { emits: ['close'], template: '<aside aria-label="创作助手"><button @click="$emit(\'close\')">关闭创作助手</button></aside>' } } },
+    })
+    const trigger = wrapper.get('button[aria-expanded="false"]')
+    const draft = wrapper.get('textarea').element
+    await trigger.trigger('click')
+    expect(wrapper.classes()).toContain('has-assistant')
+    const content = wrapper.get('.short-drama-workspace-content')
+    expect(content.get('.short-drama-workspace-body').element.parentElement).toBe(content.element)
+    expect(content.get('aside').element.parentElement).toBe(content.element)
+    await wrapper.get('aside[aria-label="创作助手"] button').trigger('click')
+    expect(wrapper.classes()).not.toContain('has-assistant')
+    expect(wrapper.get('textarea').element).toBe(draft)
+    expect((draft as HTMLTextAreaElement).value).toBe('保留草稿')
+    expect(document.activeElement).toBe(trigger.element)
+    expect(wrapper.find('aside[aria-label="创作助手"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

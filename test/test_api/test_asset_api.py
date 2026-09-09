@@ -67,6 +67,24 @@ async def test_api_get_asset_list(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_asset_list_includes_existing_variants_for_target_selection(client: AsyncClient):
+    from models.asset_variant import AssetVariant
+
+    novel = await Novel.create(name="Variant target catalog")
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name="女主")
+    variant = await AssetVariant.create(asset=asset, name="雨夜风衣", base_traits="黑色短发，深灰风衣", chapter_numbers=[1])
+    other = await Asset.create(novel=novel, asset_type=2, canonical_name="站台")
+    response = await client.get('/api/asset', params={'novel_id': novel.id})
+    assert response.json()['code'] == 0
+    items = {item['id']: item for item in response.json()['data']['items']}
+    assert items[asset.id]['variants'][0]['id'] == variant.id
+    assert items[asset.id]['variants'][0]['asset_id'] == asset.id
+    assert items[asset.id]['variants'][0]['name'] == '雨夜风衣'
+    assert items[asset.id]['variants'][0]['base_traits'] == '黑色短发，深灰风衣'
+    assert items[other.id]['variants'] == []
+
+
+@pytest.mark.asyncio
 async def test_api_get_asset_detail(client: AsyncClient):
     """获取资产详情。"""
     novel = await Novel.create(name="Detail Asset Novel", author="Author")

@@ -12,6 +12,7 @@ from services.video.capabilities import (
     capabilities_for as video_capabilities_for,
     validate_protocol as validate_video_protocol,
 )
+from services.video.factory import video_generator_factory
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, ImageModelTypeEnum, VideoGenerationModelTypeEnum
 
@@ -135,6 +136,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             protocol = instance.api_protocol
         video_capabilities_for(model_type)
         validate_video_protocol(model_type, str(protocol))
+        video_generator_factory.validate_model_type(model_type)
 
     @staticmethod
     def _validate_pricing(data: dict, instance: AiModelConfig | None = None) -> None:

@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -48,7 +49,7 @@ async function mountPage() {
   await router.isReady()
   return mount(ShortDramaStoryboardPage, {
     global: {
-      plugins: [router],
+      plugins: [router, createPinia()],
       components: { AppButton },
       stubs: {
         Teleport: true,
