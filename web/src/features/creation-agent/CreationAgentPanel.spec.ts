@@ -11,6 +11,7 @@ const { push, scrollToBottom } = vi.hoisted(() => ({ push: vi.fn(), scrollToBott
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('./api', () => ({ agentApi: { promptStatus: vi.fn(), capabilities: vi.fn(), conversations: vi.fn(), history: vi.fn() }, runSubscription: vi.fn() }))
 vi.mock('@/api', () => ({ api: { assets: vi.fn(), scenes: vi.fn() }, getAuthToken: () => null, getActiveTeamId: () => null }))
+vi.mock('element-plus', () => ({ ElPopover: defineComponent({ props: ['visible'], emits: ['update:visible'], template: `<div><div @click="$emit('update:visible', !visible)"><slot name="reference" /></div><slot v-if="visible" /></div>` }) }))
 vi.mock('vue-element-plus-x', () => ({
   BubbleList: defineComponent({ props: ['list'], setup(_, { expose }) { expose({ scrollToBottom }) }, template: '<div><div v-for="item in list" :key="item.id"><slot name="content" :item="item"/><slot name="footer" :item="item"/></div></div>' }),
 }))
@@ -18,7 +19,7 @@ vi.mock('vue-element-plus-x', () => ({
 vi.mock('./AgentComposer.vue', () => ({ default: defineComponent({
   setup(_, { expose }) { expose({ focus: vi.fn() }) },
   name: 'AgentComposer', props: ['modelValue', 'modelId', 'models', 'disabled', 'busy'], emits: ['submit', 'update:modelValue', 'update:modelId'],
-  template: `<div><button data-testid="sender" :disabled="disabled || busy" @click="$emit('submit', modelValue || '灯光柔和一点')">发送</button><textarea aria-label="创作要求" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)"/><select aria-label="助手模型" :value="modelId" @change="$emit('update:modelId', $event.target.value)"><option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select></div>`,
+  template: `<div><slot name="context"/><slot name="tools"/><button data-testid="sender" :disabled="disabled || busy" @click="$emit('submit', modelValue || '灯光柔和一点')">发送</button><textarea aria-label="创作要求" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)"/><select aria-label="助手模型" :value="modelId" @change="$emit('update:modelId', $event.target.value)"><option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select></div>`,
 }) }))
 
 beforeEach(() => {
@@ -57,10 +58,10 @@ describe('creation assistant panel', () => {
     const pinia = createPinia()
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3, selectedTargets: [{ kind: 'scene', id: 9 }] }, global: { plugins: [pinia] } })
     await flushPromises()
-    await wrapper.findAll('button').find(button => button.text().includes('修改范围'))!.trigger('click')
+    await wrapper.get('button[aria-label="选择修改对象"]').trigger('click')
     await wrapper.get('input[value="scene:9"]').setValue(false)
     await wrapper.setProps({ selectedTargets: [{ kind: 'scene', id: 9 }] })
-    expect(wrapper.text()).toContain('选择需要修改的对象')
+    expect(wrapper.text()).toContain('添加对象')
     expect((wrapper.get('input[value="scene:9"]').element as HTMLInputElement).checked).toBe(false)
     await wrapper.get('input[value="scene:9"]').setValue(true)
     await wrapper.setProps({ selectedTargets: [{ kind: 'scene', id: 10 }] })
@@ -79,7 +80,7 @@ describe('creation assistant panel', () => {
     const pinia = createPinia()
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
     await flushPromises()
-    await wrapper.findAll('button').find(button => button.text() === '选择需要修改的对象')!.trigger('click')
+    await wrapper.get('button[aria-label="选择修改对象"]').trigger('click')
     expect(wrapper.text()).toContain('女主 · 雨夜风衣')
     await wrapper.get('input[value="variant:701"]').setValue(true)
     const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
@@ -92,7 +93,7 @@ describe('creation assistant panel', () => {
     const pinia = createPinia()
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3, selectedTargets: [{ kind: 'scene', id: 9 }] }, global: { plugins: [pinia] } })
     await flushPromises()
-    expect(wrapper.text()).toContain('已选 1 个对象')
+    expect(wrapper.text()).toContain('修改对象 · 1')
     const store = useCreationAgentStore(pinia)
     const send = vi.spyOn(store, 'send').mockResolvedValue(true)
     await wrapper.get('[data-testid="sender"]').trigger('click')
@@ -163,9 +164,8 @@ it('shows scoped pending rules without sending a request or changing selection',
   const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
   await flushPromises()
   const send = vi.spyOn(useCreationAgentStore(pinia), 'send')
-  expect(wrapper.text()).toContain('有 1 个需核对新约束')
-  expect(wrapper.text()).toContain('历史提示词尚未自动更新')
-  await wrapper.findAll('button').find(button => button.text() === '查看对象')!.trigger('click')
+  expect(wrapper.text()).toContain('1 个对象有新设定待核对')
+  await wrapper.findAll('button').find(button => button.text().includes('新设定待核对'))!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('待核对约束')
   expect(wrapper.text()).toContain('当前场景使用柔和暖光')
@@ -187,7 +187,7 @@ it('does not show status returned for a previous chapter after switching chapter
   await flushPromises()
   resolveOld({ code: 0, message: '', data: [{ kind: 'scene', id: 9, pending_constraints: [{ id: 1, content: '前章旧状态' }] }] })
   await flushPromises()
-  expect(wrapper.text()).not.toContain('需核对新约束')
+  expect(wrapper.text()).not.toContain('新设定待核对')
   wrapper.unmount()
 })
 
@@ -236,10 +236,10 @@ it('sends an explicit page selection even beyond the first catalog page', async 
 it('filters the object picker without losing selected targets', async () => {
   const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3, selectedTargets: [{ kind: 'scene', id: 9 }] }, global: { plugins: [createPinia()] } })
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text().includes('修改范围'))!.trigger('click')
+  await wrapper.get('button[aria-label="选择修改对象"]').trigger('click')
   await wrapper.get('[aria-label="搜索修改对象"]').setValue('不存在的角色')
   expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
-  expect(wrapper.text()).toContain('已选 1 个对象')
+  expect(wrapper.text()).toContain('修改对象 · 1')
   await wrapper.get('[aria-label="搜索修改对象"]').setValue('车站')
   expect(wrapper.get<HTMLInputElement>('input[type="checkbox"]').element.checked).toBe(true)
   wrapper.unmount()

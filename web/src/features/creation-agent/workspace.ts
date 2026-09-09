@@ -6,6 +6,7 @@ import type { AgentTarget } from './types'
 export interface AgentTargetOption {
   target: AgentTarget
   label: string
+  assetType?: number
 }
 
 export const targetKey = (target: AgentTarget) => `${target.kind}:${target.id}`

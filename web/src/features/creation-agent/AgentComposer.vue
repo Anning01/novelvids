@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { XSender } from 'vue-element-plus-x'
-import { ArrowUp, Sparkles, Square } from 'lucide-vue-next'
+import { ArrowUp, ChevronDown, Square } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import type { AgentCapabilities } from './types'
 
@@ -51,7 +51,7 @@ function submit() {
   if (canSend.value) emit('submit', props.modelValue.trim())
 }
 
-function focus() { sender.value?.focus('end') }
+function focus() { sender.value?.focus('last') }
 defineExpose({ focus })
 watch(() => props.modelValue, restore)
 
@@ -77,21 +77,21 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
 
 <template>
   <div ref="root" class="agent-composer">
-    <XSender ref="sender" placeholder="描述你希望调整的画面…" :max-length="8000" :disabled="disabled || submitting" :loading="busy" submit-type="enter" :auto-focus="false" :tip-config="false" @change="changed" @submit="submit" @cancel="emit('stop')">
-      <template #action-list>
-        <AppButton v-if="busy" size="sm" icon-only aria-label="停止创作助手" @click="emit('stop')"><Square :size="15" /></AppButton>
-        <AppButton v-else size="sm" variant="primary" icon-only aria-label="发送创作要求" :disabled="!canSend" @click="submit"><ArrowUp :size="17" /></AppButton>
-      </template>
+    <slot name="context" />
+    <XSender ref="sender" placeholder="说说你想怎么改…" :max-length="8000" :disabled="disabled || submitting" :loading="busy" submit-type="enter" :auto-focus="false" :tip-config="false" @change="changed" @submit="submit" @cancel="emit('stop')">
+      <template #action-list><span /></template>
       <template #footer>
         <div class="agent-composer__tools">
-          <label class="agent-composer__model">
-            <Sparkles :size="13" aria-hidden="true" />
-            <select :value="modelId" aria-label="助手模型" :disabled="busy || submitting" @change="emit('update:modelId', ($event.target as HTMLSelectElement).value)">
-              <option v-if="!models.length" value="">尚无可用模型</option>
-              <option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
-            </select>
-          </label>
-          <span title="Enter 发送，Shift + Enter 换行">Enter 发送 · ⇧ 换行</span>
+          <div class="agent-composer__choices"><slot name="tools" />
+            <label class="agent-composer__model">
+              <select :value="modelId" aria-label="助手模型" :disabled="busy || submitting" @change="emit('update:modelId', ($event.target as HTMLSelectElement).value)">
+                <option v-if="!models.length" value="">尚无可用模型</option>
+                <option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
+              </select><ChevronDown :size="13" aria-hidden="true" />
+            </label>
+          </div>
+          <AppButton v-if="busy" class="agent-composer__send" size="sm" variant="soft" icon-only aria-label="停止创作助手" @click="emit('stop')"><Square :size="14" /></AppButton>
+          <AppButton v-else class="agent-composer__send" size="sm" variant="primary" icon-only aria-label="发送创作要求" :disabled="!canSend" @click="submit"><ArrowUp :size="18" /></AppButton>
         </div>
       </template>
     </XSender>
@@ -99,13 +99,20 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
 </template>
 
 <style scoped>
-.agent-composer :deep(.elx-x-sender) { overflow: hidden; border: 1px solid var(--app-border); border-radius: 16px; background: var(--app-surface); box-shadow: 0 4px 16px rgb(35 39 55 / 6%); }
-.agent-composer :deep(.elx-x-sender:focus-within) { border-color: color-mix(in srgb,var(--app-accent) 52%,var(--app-border)); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
+.agent-composer { min-width: 0; border: 1px solid var(--app-border-strong, var(--app-border)); border-radius: 16px; background: var(--app-surface); box-shadow: 0 3px 12px rgb(0 0 0 / 4%); transition: border-color .15s; }
+.agent-composer:focus-within { border-color: color-mix(in srgb, var(--app-accent) 55%, var(--app-border)); }
+.agent-composer :deep(.elx-x-sender) { border: 0; border-radius: inherit; background: transparent; box-shadow: none; }
 .agent-composer :deep(.elx-x-sender::after) { display: none; }
-.agent-composer :deep(.elx-x-sender__footer) { border-top-color: var(--app-border); }
-.agent-composer :deep([contenteditable]) { color: var(--app-text); min-height: 48px; max-height: 160px; overflow-y: auto; font-size: 13px; font-weight: 400; line-height: 1.7; }
-.agent-composer__tools { display: flex; min-width: 0; min-height: 38px; align-items: center; justify-content: space-between; gap: 6px; padding: 5px 10px; }
-.agent-composer__model { display: flex; min-width: 0; max-width: 55%; align-items: center; gap: 5px; padding: 0 6px; border-radius: 7px; color: var(--app-text-secondary); background: var(--app-surface-muted); }
-.agent-composer__model select { min-width: 0; max-width: 100%; height: 27px; border: 0; color: inherit; background: transparent; font: inherit; font-size: 11px; text-overflow: ellipsis; }
-.agent-composer__tools > span { color: var(--app-text-muted); font-size: 10px; white-space: nowrap; }
+.agent-composer :deep(.elx-x-sender__content) { padding: 4px 6px 0; }
+.agent-composer :deep(.elx-x-sender__action-list) { display: none; }
+.agent-composer :deep(.elx-x-sender__footer) { border: 0; }
+.agent-composer :deep([contenteditable]) { color: var(--app-text); min-height: 68px; max-height: 180px; overflow-y: auto; font-size: 14px; font-weight: 400; line-height: 1.7; }
+.agent-composer :deep(.chat-placeholder-wrap) { color: var(--app-text-muted) !important; font-weight: 400 !important; font-size: 14px; }
+.agent-composer__tools { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 10px 10px; }
+.agent-composer__choices { display: flex; min-width: 0; align-items: center; gap: 2px; }
+.agent-composer__model { display: flex; min-width: 0; align-items: center; gap: 3px; padding: 0 7px; color: var(--app-text-secondary); border-radius: 8px; }
+.agent-composer__model:hover { background: var(--app-surface-hover); }.agent-composer__model:focus-within { outline: 2px solid var(--app-accent); }
+.agent-composer__model select { appearance: none; min-width: 0; max-width: 125px; height: 34px; padding: 0; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 12px; text-overflow: ellipsis; cursor: pointer; }
+.agent-composer__model svg { flex-shrink: 0; pointer-events: none; }
+.agent-composer__send { border-radius: 50%; box-shadow: none; }
 </style>

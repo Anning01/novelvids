@@ -3,15 +3,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BubbleList } from 'vue-element-plus-x'
 import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList'
-import { Bot, History, Plus, RefreshCw, X, Search, ChevronDown, BookOpenText } from 'lucide-vue-next'
+import { Bot, History, Plus, RefreshCw, X, BookOpenText } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
-import AppBadge from '@/components/AppBadge.vue'
 import { notice } from '@/shared/notice'
 import { useCreationAgentStore } from './store'
 import { agentApi } from './api'
 import PromptChangeCard from './PromptChangeCard.vue'
 import AgentComposer from './AgentComposer.vue'
+import AgentTargetPicker from './AgentTargetPicker.vue'
 import AgentSetupState from './AgentSetupState.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
 import type { AgentChange, AgentChangeItem, AgentTarget, PromptTargetStatus } from './types'
@@ -34,9 +34,7 @@ const selected = computed({
     return option ? [option] : []
   })),
 })
-const search = ref('')
-const kindFilter = ref<'all' | 'scene' | 'image'>('all')
-const options = ref<{ key: string; target: AgentTarget; label: string }[]>([])
+const options = ref<(AgentTargetOption & { key: string })[]>([])
 const pickerOpen = ref(false)
 const catalogLoading = ref(false)
 const catalogPage = ref(1)
@@ -56,16 +54,13 @@ const targets = computed(() => workspace.selection.map(option => option.target))
 const allOptions = computed(() => [...new Map([
   ...workspace.selection.map(option => ({ ...option, key: targetKey(option.target) })), ...options.value,
 ].map(option => [option.key, option])).values()])
-const filteredOptions = computed(() => allOptions.value.filter(option =>
-  (kindFilter.value === 'all' || (kindFilter.value === 'scene' ? option.target.kind === 'scene' : option.target.kind !== 'scene'))
-  && option.label.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
 const suggestions = computed(() => targets.value.length ? [
   '光线更柔和，保留人物外貌和服装。',
   '画面更有电影感，每个分镜独立完整描述。',
 ] : ['先聊聊这个故事适合怎样的画面风格。', '帮我梳理人物与场景需要保持一致的设定。'])
 const welcomeHint = computed(() => targets.value.length ? '说出你的想法，助手会直接调整选中的提示词。'
   : props.phase === 'script' ? '先聊风格和人物设定。确认故事后，在设定页提取本章资产，就可以开始调整画面。'
-    : props.phase === 'storyboard' ? '点击分镜上的“用助手修改”，或从上方选择多个分镜，一起调整。'
+    : props.phase === 'storyboard' ? '点击分镜上的“用助手修改”，或在输入框旁添加多个对象，一起调整。'
       : '可以先聊风格和人物设定；要修改画面，点击页面上的“用助手修改”。')
 
 function applyDefaults() {
@@ -96,8 +91,8 @@ async function loadTargets(more = false) {
     ])
     if (epoch !== catalogEpoch) return
     const assetOptions = (assets?.data.items ?? []).flatMap(asset => [
-      { key: `asset:${asset.id}`, target: { kind: 'asset' as const, id: asset.id }, label: asset.canonical_name },
-      ...(asset.variants ?? []).map(variant => ({ key: `variant:${variant.id}`, target: { kind: 'variant' as const, id: variant.id }, label: `${asset.canonical_name} · ${variant.name}` })),
+      { key: `asset:${asset.id}`, target: { kind: 'asset' as const, id: asset.id }, label: asset.canonical_name, assetType: asset.asset_type },
+      ...(asset.variants ?? []).map(variant => ({ key: `variant:${variant.id}`, target: { kind: 'variant' as const, id: variant.id }, label: `${asset.canonical_name} · ${variant.name}`, assetType: asset.asset_type })),
     ])
     const addedOptions = [
       ...(scenes?.data.items ?? []).map(scene => ({ key: `scene:${scene.id}`, target: { kind: 'scene' as const, id: scene.id }, label: `镜头 ${scene.sequence} · ${scene.description || '未命名'}` })), ...assetOptions,
@@ -133,7 +128,6 @@ async function refreshTargetStatus() {
 watch(() => props.projectId, id => { workspace.enterProject(id); void store.open(id) }, { immediate: true })
 watch(() => [props.projectId, props.chapterId], () => {
   workspace.enterChapter(props.chapterId)
-  search.value = ''
   void loadTargets()
 }, { immediate: true })
 watch(() => store.capabilities?.models, models => {
@@ -141,7 +135,7 @@ watch(() => store.capabilities?.models, models => {
 })
 watch(() => (props.selectedTargets ?? []).map(targetKey).join('|'), applyDefaults)
 watch(() => [ready.value, store.loading], () => {
-  if (ready.value && !store.loading) void nextTick(() => { composer.value?.focus(); messageList.value?.scrollToBottom(false) })
+  if (ready.value && !store.loading) void nextTick(() => { messageList.value?.scrollToBottom(false) })
 })
 watch(() => workspace.focusRevision, () => { pickerOpen.value = false; void refreshTargetStatus(); void nextTick(() => composer.value?.focus()) })
 watch(() => store.conversationId, (id, previous) => {
@@ -224,34 +218,6 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
       <AppButton size="sm" variant="soft" aria-label="新建对话" :disabled="store.busy || operationBusy || store.loading || !ready" @click="operation(store.newConversation)"><Plus :size="15" />新会话</AppButton>
     </div>
     <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || '当前章节' }}</span></div>
-    <div v-if="!store.loading && store.capabilities" class="creation-agent-panel__scope">
-      <AppButton size="xs" :aria-expanded="pickerOpen" @click="pickerOpen = !pickerOpen"><ChevronDown :size="13" />{{ targets.length ? `修改范围：已选 ${targets.length} 个对象` : '选择需要修改的对象' }}</AppButton>
-      <span>仅图片与分镜提示词</span>
-    </div>
-    <div v-if="targets.length && !pickerOpen" class="creation-agent-panel__selected" aria-label="已选修改对象">
-      <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label }}</span><button type="button" :disabled="store.busy" :aria-label="`移除${option.label}`" @click="removeTarget(option)"><X :size="12" /></button></span>
-    </div>
-    <p v-if="pendingCount" class="creation-agent-panel__constraint-notice" role="status">当前可选对象中有 {{ pendingCount }} 个需核对新约束，历史提示词尚未自动更新。<AppButton size="xs" @click="pickerOpen = true">查看对象</AppButton></p>
-    <p v-if="statusError" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
-    <div v-if="pickerOpen" class="creation-agent-panel__picker" aria-label="修改对象">
-      <div class="creation-agent-panel__search"><Search :size="14" /><input v-model="search" type="search" aria-label="搜索修改对象" placeholder="搜索角色、场景或分镜" /></div>
-      <nav class="creation-agent-panel__filters" aria-label="对象类型">
-        <AppButton size="xs" :active="kindFilter === 'all'" @click="kindFilter = 'all'">全部</AppButton>
-        <AppButton size="xs" :active="kindFilter === 'image'" @click="kindFilter = 'image'">图片设定</AppButton>
-        <AppButton size="xs" :active="kindFilter === 'scene'" @click="kindFilter = 'scene'">分镜</AppButton>
-        <span>最多 {{ store.capabilities?.max_targets || 1 }} 个</span>
-      </nav>
-      <AppButton size="xs" :loading="catalogLoading" @click="loadTargets()"><RefreshCw :size="12" />刷新对象</AppButton>
-      <p v-if="catalogLoading">正在加载…</p>
-      <label v-for="option in filteredOptions" :key="option.key">
-        <input v-model="selected" type="checkbox" :value="option.key" :disabled="store.busy || (!selected.includes(option.key) && selected.length >= (store.capabilities?.max_targets || 1))" />
-        <span>{{ option.label }} <AppBadge v-if="pendingConstraints[option.key]?.length" tone="warning" size="sm">待核对约束</AppBadge>
-          <small v-for="rule in pendingConstraints[option.key]" :key="rule.id" class="creation-agent-panel__pending-rule">{{ rule.content }}</small>
-        </span>
-      </label>
-      <p v-if="!catalogLoading && !filteredOptions.length">{{ search ? '没有匹配对象，可加载更多或从页面点击“用助手修改”。' : '当前章节还没有可修改的对象。先提取资产或生成分镜。' }}</p>
-      <AppButton v-if="hasMoreAssets || hasMoreScenes" size="xs" :loading="catalogLoading" @click="loadTargets(true)">加载更多对象</AppButton>
-    </div>
     <AgentSetupState v-if="store.loading || !ready" :capabilities="store.capabilities" :loading="store.loading" :error="store.error" @retry="store.open(projectId)" />
     <div v-else-if="!store.messages.length" class="creation-agent-panel__welcome">
       <span class="creation-agent-panel__welcome-icon"><Bot :size="27" /></span>
@@ -274,7 +240,19 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
       <div v-if="store.statusText" class="creation-agent-panel__status" role="status">{{ store.statusText }}</div>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">编辑后重试</AppButton><AppButton size="xs" @click="router.push('/settings')">查看设置</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">重新连接</AppButton></p>
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />重新连接</AppButton>
-      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)" />
+      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice" role="status"><button type="button" @click="pickerOpen = true">{{ pendingCount }} 个对象有新设定待核对 <span>查看</span></button></p>
+      <p v-if="statusError" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
+      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
+        <template #context>
+          <div v-if="targets.length" class="creation-agent-panel__selected" aria-label="已选修改对象">
+            <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label.replace(/@\{([^{}]+)\}/g, '$1') }}</span><button type="button" :disabled="store.busy" :aria-label="`移除${option.label}`" @click="removeTarget(option)"><X :size="12" /></button></span>
+          </div>
+        </template>
+        <template #tools>
+          <AgentTargetPicker v-model="selected" v-model:open="pickerOpen" :options="allOptions" :limit="store.capabilities?.max_targets || 1" :loading="catalogLoading" :has-more="hasMoreAssets || hasMoreScenes" :disabled="store.busy" :pending="pendingConstraints" @refresh="loadTargets()" @more="loadTargets(true)" @done="nextTick(() => composer?.focus())" />
+        </template>
+      </AgentComposer>
+      <p class="creation-agent-panel__boundary">仅调整图片与分镜提示词 · Enter 发送，Shift + Enter 换行</p>
     </footer>
   </aside>
 </template>
@@ -289,13 +267,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 .creation-agent-panel__conversation-select > span { white-space: nowrap; font-size: 11px; }
 .creation-agent-panel select { min-width: 0; color: var(--app-text-secondary); background: var(--app-surface); border: 1px solid var(--app-border); border-radius: 8px; padding: 6px; font: inherit; }
 .creation-agent-panel__conversation-select select { width: 100%; border: 0; padding-inline: 2px; background: transparent; text-overflow: ellipsis; }
-.creation-agent-panel__scope { padding: 6px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.creation-agent-panel__scope > span { color: var(--app-text-secondary); font-size: 11px; }
-.creation-agent-panel__constraint-notice { margin: 4px 12px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
-.creation-agent-panel__pending-rule { display: block; margin-top: 3px; color: var(--app-text-secondary); line-height: 1.5; }
-.creation-agent-panel__picker { max-height: min(300px, 38dvh); overflow: auto; flex-shrink: 0; margin: 0 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 10px; }
-.creation-agent-panel__picker label { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
-.creation-agent-panel__picker input { accent-color: var(--app-accent); }
+.creation-agent-panel__constraint-notice { margin: 0 2px 8px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
 .creation-agent-panel__hint { padding: 10px 16px; color: var(--app-text-secondary); }
 .creation-agent-panel__welcome { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: flex-start; justify-content: safe center; padding: 24px; gap: 14px; }
 .creation-agent-panel__welcome-icon { flex-shrink: 0; display: grid; width: 48px; height: 48px; place-items: center; color: var(--app-accent); border-radius: 15px; background: var(--app-accent-soft); }
@@ -304,21 +276,18 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 .creation-agent-panel__suggestion:hover { color: var(--app-accent); background: var(--app-accent-soft); border-color: var(--app-accent); }
 .creation-agent-panel__context { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 10px 14px 2px; color: var(--app-text-muted); font-size: 11px; }
 .creation-agent-panel__context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 5px; max-height: 82px; overflow: auto; padding: 2px 14px 8px; }
+.creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 5px; max-height: 88px; overflow: auto; padding: 10px 12px 0; }
 .creation-agent-panel__selected > span { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; overflow-wrap: anywhere; }
 .creation-agent-panel__selected-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creation-agent-panel__selected button { flex: none; display: grid; place-items: center; min-width: 22px; min-height: 22px; color: inherit; background: transparent; cursor: pointer; }
-.creation-agent-panel__search { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text-muted); }
-.creation-agent-panel__search input { width: 100%; min-width: 0; padding: 0; color: var(--app-text); background: transparent; border: 0; font: inherit; outline: none; }
-.creation-agent-panel__search:focus-within { border-color: var(--app-accent); }
-.creation-agent-panel__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-block: 8px; }
-.creation-agent-panel__filters > span { margin-left: auto; color: var(--app-text-muted); font-size: 11px; }
 .creation-agent-panel__welcome p { color: var(--app-text-secondary); line-height: 1.8; margin: 0; }
 .creation-agent-panel__welcome span { font-size: 12px; color: var(--app-text-secondary); }
 .creation-agent-panel__messages { flex: 1; min-height: 0; padding: 10px 14px; overflow: auto; }
 .creation-agent-panel__message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .creation-agent-panel footer { padding: 12px; border-top: 1px solid var(--app-border); margin-top: auto; background: color-mix(in srgb,var(--app-surface) 96%,var(--app-accent)); }
 .creation-agent-panel__status { color: var(--app-text-secondary); margin-bottom: 8px; font-size: 12px; }
+.creation-agent-panel__constraint-notice button { color: inherit; background: transparent; font: inherit; cursor: pointer; }.creation-agent-panel__constraint-notice button span { color: var(--app-accent); margin-left: 6px; }
+.creation-agent-panel__boundary { margin: 9px 0 0; text-align: center; font-size: 10px; color: var(--app-text-muted); }
 .creation-agent-panel__round-status { color: var(--app-text-secondary); margin: 6px 0; font-size: 11px; }
 .creation-agent-panel__error { color: var(--app-text); border-left: 3px solid var(--app-accent); padding-left: 8px; font-size: 12px; }
 .creation-agent-panel :deep(.elx-bubble__avatar-placeholder) { display: none; }
