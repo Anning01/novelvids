@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Boxes,
@@ -195,12 +195,46 @@ const assistantTargets = computed<AgentTarget[]>(() => {
     }
     return targets
   }
-  return activeSceneId.value ? [{ kind: 'scene', id: activeSceneId.value }] : []
+  return []
 })
 
 async function refreshAgentChanges(changes: AgentChange[]) {
   const targets = changes.flatMap(change => change.changes)
   try {
+    if (targets.some(target => target.operation)) {
+      const chapterId = activeChapterId.value
+      const version = chapterLoadVersion
+      const result = await fetchChapterScenes(chapterId)
+      if (chapterId !== activeChapterId.value || version !== chapterLoadVersion) return
+      const previous = new Map(scenes.value.map(scene => [scene.id, scene]))
+      const changedIds = new Set(targets.filter(target => target.kind === 'scene').map(target => target.target_id))
+      const conflicts: string[] = []
+      for (const scene of result.scenes) {
+        const old = previous.get(scene.id)
+        const draft = sceneDrafts.value[scene.id]
+        if (draft && (!old || JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(old)))) {
+          if (changedIds.has(scene.id)) {
+            const timer = sceneAutoSaveTimers.get(scene.id)
+            if (timer) clearTimeout(timer)
+            sceneAutoSaveTimers.delete(scene.id)
+            conflicts.push(`分镜 ${scene.sequence}`)
+          }
+        } else sceneDrafts.value[scene.id] = makeSceneDraft(scene)
+      }
+      for (const old of previous.values()) {
+        if (result.scenes.some(scene => scene.id === old.id)) continue
+        const timer = sceneAutoSaveTimers.get(old.id)
+        if (timer) clearTimeout(timer)
+        sceneAutoSaveTimers.delete(old.id)
+        // Retain orphaned drafts for a subsequent restore; never autosave them.
+      }
+      assets.value = result.assets; scenes.value = result.scenes; videos.value = result.videos
+      if (!scenes.value.some(scene => scene.id === activeSceneId.value)) activeSceneId.value = scenes.value[0]?.id || 0
+      if (conflicts.length) notice.info(`${conflicts.join('、')} 的调整已保存，本地编辑草稿已保留，请核对后再保存。`)
+      if (workspaceView.value === 'workflow') await workbenchStore.refreshAgentObjects()
+      void nextTick(setupSceneTracking)
+      return
+    }
     for (const id of new Set(targets.filter(target => target.kind === 'scene').map(target => target.target_id))) {
       const current = scenes.value.find(scene => scene.id === id)
       if (!current) continue
@@ -1512,6 +1546,21 @@ function selectSceneById(sceneId: number) {
   if (scene) selectScene(scene)
 }
 
+// Result cards can change only the query while Vue keeps this page mounted.
+// Wait for the storyboard view to render before revealing its target.
+watch(() => [route.query.scene, route.query.chapter, workspaceView.value], async () => {
+  const chapterId = Number(route.query.chapter)
+  if (chapterId && chapterId !== activeChapterId.value && chapters.value.some(item => item.id === chapterId)) {
+    await flushPendingSceneSaves()
+    if (chapterId !== activeChapterId.value) await loadChapter(chapterId)
+  }
+  await nextTick()
+  if (workspaceView.value === 'storyboard' && !loading.value) {
+    setupSceneTracking()
+    selectSceneById(Number(route.query.scene))
+  }
+}, { flush: 'post' })
+
 function setupChapterToolbarObserver() {
   chapterToolbarObserver?.disconnect()
   const toolbar = document.querySelector<HTMLElement>('.chapter-toolbar')
@@ -1531,8 +1580,8 @@ async function selectChapter(chapter: Chapter) {
   chapterDetailOpen.value = false
   focusedPromptSceneId.value = 0
   await flushPendingSceneSaves()
-  await router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   await loadChapter(chapter.id)
+  await router.replace({ query: { ...route.query, chapter: String(chapter.id), scene: undefined } })
 }
 
 function setupSceneTracking() {

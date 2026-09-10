@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from models.video import Video
-from utils.enums import TaskStatusEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ class VideoTaskReconciler:
                 continue
 
     async def reconcile_once(self) -> int:
+        await self._expire_incomplete_submissions()
         candidates = await Video.filter(
             status__in=_ACTIVE_STATUSES,
             external_task_id__not_isnull=True,
@@ -96,6 +97,24 @@ class VideoTaskReconciler:
             else:
                 await self._record_attempt(candidate.id)
         return len(candidates)
+
+    async def _expire_incomplete_submissions(self) -> None:
+        # Reuse the task system's submission deadline. A crashed HTTP worker
+        # must not leave a scene permanently locked by a reservation without ID.
+        # Never resubmit: the provider may have accepted the original request.
+        from services.ai_task_executor import TASK_TIMEOUT
+
+        deadline = datetime.now(timezone.utc) - timedelta(seconds=TASK_TIMEOUT[AiTaskTypeEnum.video])
+        candidates = await Video.filter(status__in=_ACTIVE_STATUSES, external_task_id__isnull=True,
+                                        created_at__lt=deadline).limit(self._batch_size)
+        for video in candidates:
+            if not (video.metadata or {}).get('submission_pending'):
+                continue
+            metadata = {key: value for key, value in video.metadata.items() if key != 'submission_pending'}
+            metadata['error'] = '视频提交结果待核对，请先检查供应商任务记录；系统不会自动重新提交。'
+            metadata['submission_uncertain'] = True
+            await Video.filter(id=video.id, status__in=_ACTIVE_STATUSES, external_task_id__isnull=True).update(
+                status=TaskStatusEnum.failed.value, metadata=metadata, updated_at=datetime.now(timezone.utc))
 
     @staticmethod
     async def _record_attempt(video_id: int, error_type: str | None = None) -> None:

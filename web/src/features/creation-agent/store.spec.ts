@@ -27,6 +27,19 @@ beforeEach(() => {
 })
 
 describe('creation assistant store', () => {
+  it('updates the original result card when conversational undo returns its receipt', async () => {
+    const store = useCreationAgentStore()
+    await store.open(7)
+    const change = { id: 16, task_id: 'old-run', changes: [], reverted_at: null, created_at: '' }
+    store.messages = [{ id: 1, role: 'assistant', task_id: 'old-run', content: '已移除', status: 3,
+      changes: [change], usage: {}, created_at: '' }]
+    const restored = { ...change, reverted_at: '2026-09-10T12:00:00Z' }
+    vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { ...run, changes: [restored] } })
+    await store.follow(run.task_id)
+    expect(store.messages[0]?.changes[0]?.reverted_at).toBe(restored.reverted_at)
+    expect(store.latestChanges).toEqual([restored])
+  })
+
   it('keeps an accepted run visible when loading message history fails', async () => {
     const store = useCreationAgentStore()
     await store.open(7)

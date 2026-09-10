@@ -66,6 +66,29 @@ async def test_scoped_memory_does_not_leak_backward_or_to_unrelated_targets():
 
 
 @pytest.mark.asyncio
+async def test_discovered_settings_use_their_story_chapters_not_the_open_page():
+    from models.asset import Asset
+    from models.asset_variant import AssetVariant
+
+    conversation, request, source, chapters, scenes = await memory_fixture()
+    person = await Asset.create(novel_id=conversation.novel_id, canonical_name='林夏', asset_type=1, source_chapters=[2, 3], is_global=False)
+    variant = await AssetVariant.create(asset=person, name='绷带', chapter_numbers=[3])
+    await scenes[1].assets.add(person)
+    for chapter in chapters:
+        await CreationConstraint.create(novel_id=conversation.novel_id, source_message=source,
+            fingerprint=f'chapter-{chapter.id}', content=f'第{chapter.number}章规则', source_quote='合成约束',
+            scope={'kind': 'chapter', 'chapter_id': chapter.id})
+    targets = [{'kind': 'asset', 'id': person.id}, {'kind': 'variant', 'id': variant.id}]
+    # The user is viewing chapter one while discovering a chapter-three variant.
+    rules = await creation_memory.applicable(conversation.novel_id, request.model_copy(update={'targets': []}))
+    assert rules == []
+    queried = AgentRunRequest(request_id=uuid4(), message='查看该形态', chapter_id=request.chapter_id, targets=targets)
+    rules = await creation_memory.applicable(conversation.novel_id, queried)
+    assert [(rule['content'], rule['applies_to']) for rule in rules] == [
+        ('第2章规则', [targets[0]]), ('第3章规则', targets)]
+
+
+@pytest.mark.asyncio
 async def test_unquoted_inference_and_foreign_scope_are_rejected():
     conversation, request, source, _, _ = await memory_fixture()
     with pytest.raises(ValueError, match='用户明确表达'):

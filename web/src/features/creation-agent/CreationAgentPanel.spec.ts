@@ -32,6 +32,19 @@ beforeEach(() => {
 })
 
 describe('creation assistant panel', () => {
+  it('distinguishes automatic chapter scope from explicit read-only scope without selecting objects', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
+    await wrapper.get('[data-testid="sender"]').trigger('click')
+    expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ targets: [], write_scope: 'chapter' }))
+    await wrapper.get('[aria-label="助手操作范围"]').setValue('read_only')
+    await wrapper.get('[data-testid="sender"]').trigger('click')
+    expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ targets: [], write_scope: 'read_only' }))
+    wrapper.unmount()
+  })
+
   it('shows conversation history and new conversation above messages, with model selection below the sender', async () => {
     vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [
       { id: 8, novel_id: 7, active_task_id: null, created_at: '2026-09-05T08:00:00Z', updated_at: '2026-09-05T09:30:00Z' },
@@ -61,7 +74,7 @@ describe('creation assistant panel', () => {
     await wrapper.get('button[aria-label="选择修改对象"]').trigger('click')
     await wrapper.get('input[value="scene:9"]').setValue(false)
     await wrapper.setProps({ selectedTargets: [{ kind: 'scene', id: 9 }] })
-    expect(wrapper.text()).toContain('添加对象')
+    expect(wrapper.text()).toContain('指定对象')
     expect((wrapper.get('input[value="scene:9"]').element as HTMLInputElement).checked).toBe(false)
     await wrapper.get('input[value="scene:9"]').setValue(true)
     await wrapper.setProps({ selectedTargets: [{ kind: 'scene', id: 10 }] })
@@ -97,7 +110,7 @@ describe('creation assistant panel', () => {
     const store = useCreationAgentStore(pinia)
     const send = vi.spyOn(store, 'send').mockResolvedValue(true)
     await wrapper.get('[data-testid="sender"]').trigger('click')
-    expect(send).toHaveBeenCalledWith({ message: '灯光柔和一点', chapter_id: 3, model_config_id: 1, targets: [{ kind: 'scene', id: 9 }] })
+    expect(send).toHaveBeenCalledWith({ message: '灯光柔和一点', chapter_id: 3, model_config_id: 1, targets: [{ kind: 'scene', id: 9 }], write_scope: 'selected' })
   })
 
   it('disables sending when the server feature flag is off', async () => {

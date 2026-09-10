@@ -1,4 +1,4 @@
-from prompts.creation_agent import CREATION_AGENT_INSTRUCTIONS, render_creation_request, render_creation_summary
+from prompts.creation_agent import CREATION_AGENT_INSTRUCTIONS, CREATION_CRUD_INSTRUCTIONS, render_creation_request, render_creation_summary
 
 
 def test_agent_request_does_not_duplicate_large_context():
@@ -28,3 +28,13 @@ def test_truncated_chapter_instructions_require_scoped_reading_instead_of_invent
     assert 'chapter_offset' in CREATION_AGENT_INSTRUCTIONS
     assert '不要假装已读完整章节' in CREATION_AGENT_INSTRUCTIONS
     assert '仅按任务需要读取当前章' in CREATION_AGENT_INSTRUCTIONS
+
+
+def test_crud_prompt_uses_durable_receipts_and_keeps_creative_boundaries():
+    assert 'recent_changes' in CREATION_CRUD_INSTRUCTIONS and 'changes_page' in CREATION_CRUD_INSTRUCTIONS
+    assert '查询不到不代表永久删除' in CREATION_CRUD_INSTRUCTIONS
+    assert '只有 apply_creation_changes 写入业务内容' in CREATION_CRUD_INSTRUCTIONS
+    assert '从1开始' in CREATION_CRUD_INSTRUCTIONS
+    assert '不写“镜头1的女生”' in CREATION_CRUD_INSTRUCTIONS
+    assert '类别用人物、场景、道具等中文' in CREATION_CRUD_INSTRUCTIONS
+    assert '不操作书稿、项目和模型配置、计费、媒体生成' in CREATION_CRUD_INSTRUCTIONS

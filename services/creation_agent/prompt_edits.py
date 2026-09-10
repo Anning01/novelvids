@@ -77,7 +77,9 @@ def prepare_storyboard_edit(
     strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
 ) -> dict:
     if edit.legacy_prompt is not None:
-        visual_prompt = normalize_storyboard_reference_text(edit.legacy_prompt, entities)
+        from prompts.creation_agent import without_prompt_definitions
+
+        visual_prompt = normalize_storyboard_reference_text(without_prompt_definitions(edit.legacy_prompt), entities)
         validate_prompt_dependencies(visual_prompt, entities)
         numbers = [int(number) for number in _LOCAL_HEADING.findall(visual_prompt)]
         if numbers != list(range(1, len(numbers) + 1)):

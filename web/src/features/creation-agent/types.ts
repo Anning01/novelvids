@@ -15,6 +15,23 @@ export interface AgentChangeItem {
   before: Record<string, unknown>
   after: Record<string, unknown>
   after_version: string
+  operation?: 'create' | 'update' | 'delete'
+  chapter_id?: number | null
+  recovery?: Record<string, unknown>
+}
+
+export interface AgentQueryItem {
+  kind: AgentTarget['kind'] | 'chapter'
+  id: number
+  name: string
+  asset_id?: number | null
+  chapter_id?: number | null
+}
+
+export interface AgentQueryResult {
+  items: AgentQueryItem[]
+  total: number
+  has_more: boolean
 }
 
 export interface AgentChange {
@@ -43,6 +60,7 @@ export interface AgentMessage {
   changes: AgentChange[]
   usage: Record<string, unknown>
   created_at: string
+  query_results?: AgentQueryResult[]
 }
 
 export interface AgentRun {
@@ -54,6 +72,7 @@ export interface AgentRun {
   changes: AgentChange[]
   usage: Record<string, unknown>
   event_count: number
+  query_results?: AgentQueryResult[]
 }
 
 export interface AgentCapabilities {
@@ -69,6 +88,7 @@ export interface AgentRunInput {
   chapter_id: number | null
   model_config_id: number | null
   targets: AgentTarget[]
+  write_scope?: 'selected' | 'chapter' | 'project' | 'read_only'
 }
 
 export interface AgentConfiguration {

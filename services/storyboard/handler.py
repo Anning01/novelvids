@@ -15,6 +15,7 @@ from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.storyboard.entities import visual_entity_description
 from services.creation_agent.memory import creation_memory
+from services.creation_objects import CreationObjects, project_write
 from schemas.scene import SceneEntity
 from utils.enums import AssetTypeEnum
 from utils.prompt_language import normalize_prompt_language
@@ -126,6 +127,14 @@ class StoryboardTaskHandler(BaseTaskHandler):
         storyboard_strategy: str | None = None,
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
+        chapter = await Chapter.get(id=chapter_id)
+        async with project_write(chapter.novel_id):
+            return await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
+                                              prompt_language, entities, storyboard_strategy)
+
+    async def _persist_scenes(self, chapter: Chapter, storyboard, api_metadata: dict, request_duration: float,
+                             prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None) -> List[Scene]:
+        objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
 
@@ -204,18 +213,14 @@ class StoryboardTaskHandler(BaseTaskHandler):
             ]
 
             # 创建 Scene 记录
-            scene = await Scene.create(
-                chapter_id=chapter_id,
-                sequence=shot.sequence,
+            scene = await objects.create_scene(chapter.id, after_id=None, values=dict(
                 description=original_description,
                 prompt_params=prompt_params,
                 prompt=prompt,
                 duration=duration_value,
                 metadata=scene_metadata
-            )
-
-            if referenced_asset_ids:
-                await scene.assets.add(*await Asset.filter(id__in=referenced_asset_ids))
+            ))
+            await objects.bind_assets(scene, referenced_asset_ids)
 
             scenes_created.append(scene)
 

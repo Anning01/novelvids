@@ -13,6 +13,8 @@ from services.creation_agent.memory import creation_memory
 from services.creation_agent.handler import authorize_run
 from services.creation_agent.sessions import ACTIVE_STATUSES, agent_sessions, agent_configuration, agent_models
 from services.creation_agent.tools import PromptEditService, PromptEditConflict
+from services.creation_agent.changes import CreationChanges
+from services.creation_agent.results import message_changes, query_results
 from utils.enums import TaskStatusEnum
 
 
@@ -66,11 +68,11 @@ class CreationAgentController:
     async def snapshot(self, task_id, ctx: AuthContext) -> AgentRunOut:
         conversation, assistant = await agent_sessions.for_task(task_id, ctx)
         task = await AiTask.get(id=task_id)
-        changes = await PromptChange.filter(task_id=task_id, novel_id=conversation.novel_id).order_by('id')
+        changes = await message_changes(assistant, conversation.novel_id)
         return AgentRunOut(task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
             changes=[change_projection(change) for change in changes], usage=assistant.usage,
-            event_count=len(assistant.events))
+            event_count=len(assistant.events), query_results=query_results(assistant))
 
     async def messages(self, conversation_id: int, ctx: AuthContext, before: int | None):
         conversation = await agent_sessions.get(conversation_id, ctx)
@@ -78,11 +80,12 @@ class CreationAgentController:
         if before is not None:
             query = query.filter(id__lt=before)
         rows = await query.order_by('-id').select_related('task').limit(50)
-        changes = await PromptChange.filter(task_id__in=[row.task_id for row in rows]).order_by('id')
+        changes = {row.id: await message_changes(row, conversation.novel_id) for row in rows if row.role == 'assistant'}
         return {"items": [{"id": row.id, "role": row.role, "content": row.content,
                            "task_id": str(row.task_id), "status": row.task.status,
                            "created_at": row.created_at,
-                           "changes": [change_projection(change) for change in changes if change.task_id == row.task_id] if row.role == 'assistant' else [],
+                           "changes": [change_projection(change) for change in changes.get(row.id, [])],
+                           "query_results": query_results(row) if row.role == 'assistant' else [],
                            "usage": row.usage if row.role == 'assistant' else {}}
                           for row in reversed(rows)],
                 "next_before": rows[-1].id if len(rows) == 50 else None}
@@ -106,12 +109,18 @@ class CreationAgentController:
         limits = AgentConfiguration.model_validate(task.request_params['agent_configuration'])
         async def check():
             await authorize_run(task.request_params)
-        service = PromptEditService(novel_id=change.novel_id, task_id=task.id,
-            allowed_targets={(target.kind, target.id) for target in request.targets}, max_batch_size=limits.max_targets,
-            authorization_check=check)
+        if any('operation' in item for item in change.changes):
+            service = CreationChanges(novel_id=change.novel_id, task_id=task.id, request=request,
+                max_batch_size=limits.max_targets, authorization_check=check)
+        else:
+            service = PromptEditService(novel_id=change.novel_id, task_id=task.id,
+                allowed_targets={(target.kind, target.id) for target in request.targets}, max_batch_size=limits.max_targets,
+                authorization_check=check)
         try:
             result = await service.undo(change_id)
         except PromptEditConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return change_projection(result)
 

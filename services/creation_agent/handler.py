@@ -25,6 +25,8 @@ from services.creation_agent.model_usage import UsagePreservingChatModel
 from services.creation_agent.runtime import CreationAgentDeps, stream_creation_agent
 from services.creation_agent.sessions import agent_configuration, agent_models
 from services.creation_agent.tools import PromptEditService
+from services.creation_agent.changes import CreationChanges
+from services.creation_agent.context import chapter_context
 from services.creation_agent.memory import creation_memory
 from services.creation_agent.history import prepare_history
 from utils.enums import TaskStatusEnum, UserStatusEnum
@@ -52,31 +54,6 @@ def configured_model(config, limits: AgentConfiguration):
         extra_body['thinking'] = {'type': config.thinking}
     return UsagePreservingChatModel(config.model, provider=OpenAIProvider(openai_client=client),
                                    settings={'extra_body': extra_body})
-
-
-def chapter_context(chapter: Chapter | None, character_budget: int, offset: int | None = None) -> dict | None:
-    if chapter is None:
-        if offset is not None:
-            raise ValueError('当前请求未选择章节，不能读取章节片段')
-        return None
-    content = chapter.content or ""
-    total = len(content)
-    if offset is not None:
-        if offset < 0 or offset > total:
-            raise ValueError('章节读取位置超出正文范围，请根据 content_characters 调整')
-        end = min(total, offset + character_budget)
-        return {"id": chapter.id, "number": chapter.number, "name": chapter.name,
-                "content_excerpt": content[offset:end], "content_truncated": offset > 0 or end < total,
-                "content_characters": total, "content_offset": offset,
-                "content_next_offset": end if end < total else None}
-    truncated = len(content) > character_budget
-    if truncated:
-        half = max(1, character_budget // 2)
-        content = f"{content[:half]}\n[…章节中部未载入…]\n{content[-half:]}"
-    return {"id": chapter.id, "number": chapter.number, "name": chapter.name,
-            "content_excerpt": content, "content_truncated": truncated,
-            "content_characters": total, "content_offset": 0,
-                "content_next_offset": character_budget // 2 if truncated else None}
 
 
 def public_run_error(message: str, calls: list[dict]) -> str:
@@ -143,6 +120,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             return context['constraints']
 
         service.context_check = check_context
+        changes = CreationChanges(novel_id=novel.id, task_id=assistant.task_id, request=request,
+                                  max_batch_size=limits.max_targets, authorization_check=before_request,
+                                  max_context_characters=limits.max_context_characters)
         model = configured_model(chosen, limits)
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
             max_characters=min(limits.max_context_characters, chosen.max_context_characters or limits.max_context_characters),
@@ -152,6 +132,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         content = ""
         last_flush = time.monotonic()
         error = ''
+        final_message_id = f'{task_id}:validated-reply'
 
         async def flush():
             nonlocal last_flush
@@ -166,18 +147,18 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             if isinstance(result.output, CreationReply):
                 await creation_memory.save(user_message, result.output.constraints)
             await AgentMessage.filter(id=assistant.id).update(native_messages=json.loads(result.new_messages_json()))
-            if isinstance(result.output, CreationReply):
-                message_id = f'{task_id}:reply'
-                yield TextMessageStartEvent(message_id=message_id)
-                yield TextMessageContentEvent(message_id=message_id, delta=result.output.message)
-                yield TextMessageEndEvent(message_id=message_id)
+            final_text = result.output.message if isinstance(result.output, CreationReply) else result.output
+            yield TextMessageStartEvent(message_id=final_message_id)
+            yield TextMessageContentEvent(message_id=final_message_id, delta=final_text)
+            yield TextMessageEndEvent(message_id=final_message_id)
 
         try:
             history = await prepare_history(conversation, assistant, limits, recorded_model)
             context['conversation_summary'] = conversation.summary
             async for event in stream_creation_agent(
                 message=request.message, conversation_id=str(conversation.id), run_id=task_id,
-                model=recorded_model, deps=CreationAgentDeps(service=service, context=context, source_message=user_message, context_loader=refresh_context),
+                model=recorded_model, deps=CreationAgentDeps(service=service, context=context, source_message=user_message, context_loader=refresh_context,
+                    changes=changes if 'write_scope' in user_message.run_input else None),
                 usage_limits=UsageLimits(request_limit=limits.request_limit, tool_calls_limit=limits.tool_calls_limit,
                                          total_tokens_limit=limits.total_tokens_limit),
                 model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)},
@@ -188,6 +169,10 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                 if kind.startswith('THINKING'):
                     # Provider reasoning stays in native model history; the UI
                     # needs progress and results, not thousands of reasoning chunks.
+                    continue
+                if kind.startswith('TEXT_MESSAGE') and item.get('messageId') != final_message_id:
+                    # Some models put planning/retries in ordinary content.
+                    # Stream tool progress, then publish only the validated reply.
                     continue
                 if kind == "RUN_ERROR":
                     error = public_run_error(item.get('message', ''), recorded_model.calls)

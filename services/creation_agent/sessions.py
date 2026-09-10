@@ -82,6 +82,9 @@ class AgentSessions:
         if chosen is None:
             raise HTTPException(422, "请配置已启用且支持工具调用的创作助手模型")
         payload = request.model_dump(mode="json")
+        if 'write_scope' not in request.model_fields_set:
+            # Older clients retain their original selected-prompt contract.
+            payload.pop('write_scope', None)
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         async with in_transaction() as connection:
             # A row write serializes admission on SQLite as well as PostgreSQL.

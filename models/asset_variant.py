@@ -2,13 +2,13 @@ from typing import TYPE_CHECKING
 
 from tortoise import fields
 
-from models._base import AbstractBaseModel
+from models._lifecycle import ActiveObjects, RecoverableModel
 
 if TYPE_CHECKING:
     from models.asset import Asset
 
 
-class AssetVariant(AbstractBaseModel):
+class AssetVariant(RecoverableModel):
     """资产在不同章节中的视觉形态，例如人物变装、场景升级或道具变形。"""
 
     asset: fields.ForeignKeyRelation["Asset"] = fields.ForeignKeyField(
@@ -28,5 +28,6 @@ class AssetVariant(AbstractBaseModel):
     metadata = fields.JSONField(default=dict, description="扩展生成参数")
 
     class Meta:
+        manager = ActiveObjects()
         table = "asset_variants"
         unique_together = (("asset", "name"),)

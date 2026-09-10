@@ -98,7 +98,9 @@ async def test_storyboard_persistence_keeps_segments_and_their_references():
     )
     assert len(scenes) == 1
     scene = scenes[0]
-    assert scene.sequence == 4
+    # Business order is allocated by the shared ordering service, independently
+    # of the model's proposed sequence (4) and internal shot numbering (1/2/3).
+    assert scene.sequence == 1
     assert scene.duration == 6
     assert len(scene.prompt_params["segments"]) == 3
     assert await scene.assets.all().values_list("id", flat=True) == [asset.id]

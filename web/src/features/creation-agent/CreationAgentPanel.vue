@@ -10,11 +10,12 @@ import { notice } from '@/shared/notice'
 import { useCreationAgentStore } from './store'
 import { agentApi } from './api'
 import PromptChangeCard from './PromptChangeCard.vue'
+import AgentQueryResults from './AgentQueryResults.vue'
 import AgentComposer from './AgentComposer.vue'
 import AgentTargetPicker from './AgentTargetPicker.vue'
 import AgentSetupState from './AgentSetupState.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
-import type { AgentChange, AgentChangeItem, AgentTarget, PromptTargetStatus } from './types'
+import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, PromptTargetStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; phase?: 'script' | 'settings' | 'storyboard' | 'video' }>()
 const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]] }>()
@@ -36,6 +37,7 @@ const selected = computed({
 })
 const options = ref<(AgentTargetOption & { key: string })[]>([])
 const pickerOpen = ref(false)
+const writeScope = ref<'chapter' | 'project' | 'read_only'>('chapter')
 const catalogLoading = ref(false)
 const catalogPage = ref(1)
 const hasMoreAssets = ref(false)
@@ -58,10 +60,8 @@ const suggestions = computed(() => targets.value.length ? [
   '光线更柔和，保留人物外貌和服装。',
   '画面更有电影感，每个分镜独立完整描述。',
 ] : ['先聊聊这个故事适合怎样的画面风格。', '帮我梳理人物与场景需要保持一致的设定。'])
-const welcomeHint = computed(() => targets.value.length ? '说出你的想法，助手会直接调整选中的提示词。'
-  : props.phase === 'script' ? '先聊风格和人物设定。确认故事后，在设定页提取本章资产，就可以开始调整画面。'
-    : props.phase === 'storyboard' ? '点击分镜上的“用助手修改”，或在输入框旁添加多个对象，一起调整。'
-      : '可以先聊风格和人物设定；要修改画面，点击页面上的“用助手修改”。')
+const welcomeHint = computed(() => targets.value.length ? '已指定操作对象，直接说出你希望的变化。'
+  : '可以查找设定、新增分镜或调整画面。直接描述要求，助手会在当前范围内找到对象。')
 
 function applyDefaults() {
   if (workspace.scopeEdited || store.busy) return
@@ -74,9 +74,10 @@ function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
 const bubbles = computed(() => store.messages.map(message => ({ ...message,
+  content: message.role === 'assistant' && message.status !== 3 ? '' : message.content,
   placement: message.role === 'user' ? 'end' as const : 'start' as const,
   variant: message.role === 'user' ? 'filled' as const : 'borderless' as const,
-  maxWidth: '100%', loading: message.role === 'assistant' && !message.content && store.busy,
+  maxWidth: '100%', loading: message.role === 'assistant' && message.task_id === store.currentRun?.task_id && store.busy,
 })))
 
 async function loadTargets(more = false) {
@@ -144,14 +145,21 @@ watch(() => store.conversationId, (id, previous) => {
     workspace.drafts.new = ''
   }
 })
-watch(() => store.changesRevision, () => emit('changed', store.latestChanges))
+watch(() => store.changesRevision, () => {
+  const removed = new Set(store.latestChanges.flatMap(change => change.changes.filter(item =>
+    change.reverted_at ? item.operation === 'create' : item.operation === 'delete').map(item => `${item.kind}:${item.target_id}`)))
+  if (removed.size) workspace.select(workspace.selection.filter(option => !removed.has(targetKey(option.target))))
+  emit('changed', store.latestChanges)
+  void loadTargets()
+})
 watch(() => [store.busy, store.changesRevision], () => { if (!store.busy) void refreshTargetStatus() })
 watch(pickerOpen, open => { if (open) void refreshTargetStatus() })
 
 async function send(text: string) {
   if (!text.trim() || !ready.value || store.busy) return
   const key = draftKey.value
-  if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null, targets: targets.value })) {
+  if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null,
+    targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : writeScope.value })) {
     workspace.drafts[key] = ''
     // The first accepted request creates a conversation with its own draft slot.
     workspace.drafts[draftKey.value] = ''
@@ -196,6 +204,23 @@ async function locate(target: AgentChangeItem) {
   }
 }
 
+async function locateQuery(target: AgentQueryItem) {
+  if (target.kind === 'chapter') {
+    await router.push({ path: `/create/short-drama/storyboard/${props.projectId}`, query: { chapter: target.id } })
+    return
+  }
+  await locate({ kind: target.kind, target_id: target.id, asset_id: target.asset_id, chapter_id: target.chapter_id,
+    target_label: target.name, before: {}, after: {}, after_version: '' })
+}
+
+function selectQueryTarget(target: AgentQueryItem) {
+  if (target.kind === 'chapter' || store.busy) return
+  const existing = workspace.selection.some(option => option.target.kind === target.kind && option.target.id === target.id)
+  if (!existing && targets.value.length >= (store.capabilities?.max_targets || 1)) { notice.info('已达到本轮对象上限'); return }
+  workspace.select([...workspace.selection, { target: { kind: target.kind, id: target.id }, label: target.name }])
+  void nextTick(() => composer.value?.focus())
+}
+
 onBeforeUnmount(() => { catalogEpoch += 1; statusEpoch += 1; window.removeEventListener('focus', refreshTargetStatus); store.disconnect() })
 onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 </script>
@@ -217,7 +242,9 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
       </label>
       <AppButton size="sm" variant="soft" aria-label="新建对话" :disabled="store.busy || operationBusy || store.loading || !ready" @click="operation(store.newConversation)"><Plus :size="15" />新会话</AppButton>
     </div>
-    <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || '当前章节' }}</span></div>
+    <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || '当前章节' }}</span>
+      <select v-model="writeScope" aria-label="助手操作范围" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? '指定对象' : '当前章' }}</option><option value="project">全项目</option><option value="read_only">只查询</option></select>
+    </div>
     <AgentSetupState v-if="store.loading || !ready" :capabilities="store.capabilities" :loading="store.loading" :error="store.error" @retry="store.open(projectId)" />
     <div v-else-if="!store.messages.length" class="creation-agent-panel__welcome">
       <span class="creation-agent-panel__welcome-icon"><Bot :size="27" /></span>
@@ -230,6 +257,8 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
     <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }"><div class="creation-agent-panel__message">{{ item.content }}</div></template>
       <template #footer="{ item }">
+        <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
+          @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
         <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? '本轮已停止' : '本轮未完成' }}{{ item.changes.length ? '，已保存的修改见下方记录' : '，尚未保存修改' }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
@@ -252,7 +281,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
           <AgentTargetPicker v-model="selected" v-model:open="pickerOpen" :options="allOptions" :limit="store.capabilities?.max_targets || 1" :loading="catalogLoading" :has-more="hasMoreAssets || hasMoreScenes" :disabled="store.busy" :pending="pendingConstraints" @refresh="loadTargets()" @more="loadTargets(true)" @done="nextTick(() => composer?.focus())" />
         </template>
       </AgentComposer>
-      <p class="creation-agent-panel__boundary">仅调整图片与分镜提示词 · Enter 发送，Shift + Enter 换行</p>
+      <p class="creation-agent-panel__boundary">管理设定与分镜 · 操作可撤销 · Shift + Enter 换行</p>
     </footer>
   </aside>
 </template>
@@ -276,13 +305,14 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 .creation-agent-panel__suggestion:hover { color: var(--app-accent); background: var(--app-accent-soft); border-color: var(--app-accent); }
 .creation-agent-panel__context { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 10px 14px 2px; color: var(--app-text-muted); font-size: 11px; }
 .creation-agent-panel__context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creation-agent-panel__context select { margin-left: auto; flex-shrink: 0; padding: 3px; font-size: 11px; border: 0; background: transparent; }
 .creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 5px; max-height: 88px; overflow: auto; padding: 10px 12px 0; }
 .creation-agent-panel__selected > span { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; overflow-wrap: anywhere; }
 .creation-agent-panel__selected-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creation-agent-panel__selected button { flex: none; display: grid; place-items: center; min-width: 22px; min-height: 22px; color: inherit; background: transparent; cursor: pointer; }
 .creation-agent-panel__welcome p { color: var(--app-text-secondary); line-height: 1.8; margin: 0; }
 .creation-agent-panel__welcome span { font-size: 12px; color: var(--app-text-secondary); }
-.creation-agent-panel__messages { flex: 1; min-height: 0; padding: 10px 14px; overflow: auto; }
+.creation-agent-panel__messages { flex: 1; min-width: 0; min-height: 0; padding: 10px 14px; overflow-y: auto; overflow-x: hidden; }
 .creation-agent-panel__message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .creation-agent-panel footer { padding: 12px; border-top: 1px solid var(--app-border); margin-top: auto; background: color-mix(in srgb,var(--app-surface) 96%,var(--app-accent)); }
 .creation-agent-panel__status { color: var(--app-text-secondary); margin-bottom: 8px; font-size: 12px; }
@@ -291,6 +321,8 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 .creation-agent-panel__round-status { color: var(--app-text-secondary); margin: 6px 0; font-size: 11px; }
 .creation-agent-panel__error { color: var(--app-text); border-left: 3px solid var(--app-accent); padding-left: 8px; font-size: 12px; }
 .creation-agent-panel :deep(.elx-bubble__avatar-placeholder) { display: none; }
+.creation-agent-panel :deep(.elx-bubble__content-wrapper), .creation-agent-panel :deep(.elx-bubble__content) { min-width: 0; max-width: 100%; }
+.creation-agent-panel :deep(.elx-bubble__footer) { min-width: 0; width: 100%; max-width: 100%; }
 .creation-agent-panel :deep(.elx-bubble__content--filled) { background: var(--app-accent-soft); }
 .creation-agent-panel :deep([contenteditable]) { color: var(--app-text); max-height: 160px; overflow-y: auto; }
 @media (max-width: 760px) { .creation-agent-panel { flex: 1 1 100%; width: 100%; border-left: 0; } }

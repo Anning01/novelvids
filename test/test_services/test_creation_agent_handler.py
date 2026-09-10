@@ -40,6 +40,7 @@ async def test_handler_persists_events_history_and_usage_without_exposing_privat
         nonlocal calls
         calls += 1
         if calls == 1:
+            yield 'Internal planning: inspect scene_id and tool parameters.'
             yield {0: DeltaToolCall(name='get_creation_context', json_args='{}', tool_call_id='read')}
         elif calls == 2:
             from pydantic_ai.messages import ToolReturnPart
@@ -69,6 +70,7 @@ async def test_handler_persists_events_history_and_usage_without_exposing_privat
     assert request.message not in str(task.response_data)
     assistant = await AgentMessage.get(task=task, role='assistant')
     assert assistant.content == '已调暖当前镜头。'
+    assert 'Internal planning' not in str(assistant.events)
     assert assistant.native_messages
     assert assistant.events[-1]['type'] == 'RUN_FINISHED'
     assert len(assistant.usage['calls']) == 3

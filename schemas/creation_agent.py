@@ -53,6 +53,8 @@ class AgentRunRequest(BaseModel):
     chapter_id: int | None = Field(None, gt=0)
     model_config_id: int | None = Field(None, gt=0)
     targets: list[AgentTarget] = Field(default_factory=list, max_length=100)
+    # Missing on historical requests means the original selected-only contract.
+    write_scope: Literal['selected', 'chapter', 'project', 'read_only'] = 'selected'
 
     @model_validator(mode="after")
     def unique_targets(self):
@@ -79,9 +81,12 @@ class AgentConversationOut(BaseModel):
 class PromptChangeItemOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["asset", "variant", "scene"]
+    operation: Literal['create', 'update', 'delete'] = 'update'
     target_id: int
     asset_id: int | None = None
     target_label: str | None = None
+    chapter_id: int | None = None
+    recovery: dict = Field(default_factory=dict)
     constraint_ids: list[int] = Field(default_factory=list)
     before: dict
     after: dict
@@ -96,6 +101,20 @@ class PromptChangeOut(BaseModel):
     created_at: datetime
 
 
+class CreationQueryItemOut(BaseModel):
+    kind: Literal['asset', 'variant', 'scene', 'chapter']
+    id: int
+    name: str
+    asset_id: int | None = None
+    chapter_id: int | None = None
+
+
+class CreationQueryResultOut(BaseModel):
+    items: list[CreationQueryItemOut]
+    total: int
+    has_more: bool
+
+
 class AgentRunOut(BaseModel):
     task_id: UUID
     conversation_id: int
@@ -105,6 +124,7 @@ class AgentRunOut(BaseModel):
     changes: list[PromptChangeOut] = Field(default_factory=list)
     usage: dict = Field(default_factory=dict)
     event_count: int = 0
+    query_results: list[CreationQueryResultOut] = Field(default_factory=list)
 
 
 class AgentMessageOut(BaseModel):
@@ -116,6 +136,7 @@ class AgentMessageOut(BaseModel):
     changes: list[PromptChangeOut] = Field(default_factory=list)
     usage: dict = Field(default_factory=dict)
     created_at: datetime
+    query_results: list[CreationQueryResultOut] = Field(default_factory=list)
 
 
 class AgentMessagePage(BaseModel):

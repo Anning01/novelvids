@@ -14,12 +14,12 @@ from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.creation_agent import PromptChange
 from models.scene import Scene
-from models.novel import Novel
 from schemas.creation_agent import ImagePromptEdit, StoryboardPromptEdit
 from schemas.scene import SceneEntity
 from services.creation_agent.prompt_edits import prepare_storyboard_edit, validate_image_prompt_edit, current_storyboard_structure
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.storyboard.entities import visual_entity_description
+from services.creation_objects import project_write
 from utils.enums import TaskStatusEnum, AssetTypeEnum
 
 
@@ -71,7 +71,8 @@ class PromptEditService:
             raise ValueError("当前项目内不存在该目标")
         return target
 
-    async def _entities(self, scene: Scene) -> list[SceneEntity]:
+    @staticmethod
+    async def _entities(scene: Scene) -> list[SceneEntity]:
         from services.video.asset_resolver import normalize_selected_variant_ids, select_asset_variant
 
         await scene.fetch_related("chapter__novel", "assets__variants")
@@ -139,7 +140,7 @@ class PromptEditService:
             raise ValueError("修改目标数量超出当前批次上限")
         request_hash = _digest([edit.model_dump(mode="json") for edit in edits])
         try:
-            async with in_transaction() as connection:
+            async with project_write(self.novel_id) as connection:
                 replay = await self._replay(tool_call_id, request_hash)
                 if replay:
                     return replay
@@ -152,7 +153,6 @@ class PromptEditService:
                 active = await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).using_db(connection).update(status=TaskStatusEnum.running.value)
                 if not active:
                     raise PromptEditConflict("运行已停止，不能继续写入")
-                await Novel.filter(id=self.novel_id).using_db(connection).select_for_update().first()
                 constraints = (await self.context_check() if self.context_check else None) or []
                 seen = set()
                 changes = []
@@ -225,7 +225,7 @@ class PromptEditService:
         return await self._apply(edits, tool_call_id=tool_call_id)
 
     async def undo(self, change_id: int):
-        async with in_transaction() as connection:
+        async with project_write(self.novel_id) as connection:
             change = await PromptChange.filter(id=change_id, novel_id=self.novel_id, task_id=self.task_id).using_db(connection).select_for_update().first()
             if change is None:
                 raise ValueError("当前运行中不存在该修改记录")

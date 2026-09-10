@@ -53,7 +53,7 @@ function opened() { search.value = ''; void nextTick(() => searchInput.value?.fo
 
 <template>
   <ElPopover :visible="open" trigger="click" placement="top-start" :width="380" :show-arrow="false" popper-class="agent-target-popover" :popper-style="{ padding: '0', maxWidth: 'calc(100vw - 24px)' }" @update:visible="emit('update:open', $event)" @after-enter="opened">
-    <template #reference><AppButton ref="trigger" size="sm" class="agent-target-trigger" :disabled="disabled" :aria-expanded="open" aria-label="选择修改对象" aria-haspopup="dialog"><Plus :size="15" />{{ modelValue.length ? `修改对象 · ${modelValue.length}` : '添加对象' }}</AppButton></template>
+    <template #reference><AppButton ref="trigger" size="sm" class="agent-target-trigger" :disabled="disabled" :aria-expanded="open" aria-label="选择修改对象" aria-haspopup="dialog"><Plus :size="15" />{{ modelValue.length ? `修改对象 · ${modelValue.length}` : '指定对象' }}</AppButton></template>
     <section class="agent-target-picker" role="dialog" aria-label="选择修改对象" @keydown.esc.stop.prevent="close">
       <header><div><strong>选择修改对象</strong><span>可多选，最多 {{ limit }} 个</span></div><AppButton icon-only size="sm" aria-label="关闭对象选择" @click="close"><X :size="16" /></AppButton></header>
       <label class="agent-target-picker__search"><Search :size="16" /><input ref="searchInput" v-model="search" type="search" aria-label="搜索修改对象" placeholder="搜索名称或分镜内容" /></label>

@@ -54,6 +54,24 @@ def test_legacy_text_edit_preserves_content_without_fabricating_parameters():
     assert result["prompt_params"] == {}
 
 
+def test_repeated_legacy_edits_replace_generated_definitions_and_preserve_voice_sections():
+    from prompts.creation_agent import render_prompt_definitions, without_prompt_definitions
+
+    original = '@{女主}在窗边打开信封。'
+    old_entity = heroine().model_copy(update={'description': '旧灰色风衣'})
+    prior = render_prompt_definitions(original, [old_entity])
+    prior += '\n\n【人物台词】\n“欢迎回家。”'
+    assert without_prompt_definitions(prior) == original + '\n\n【人物台词】\n“欢迎回家。”'
+    for _ in range(2):
+        result = prepare_storyboard_edit(edit=StoryboardPromptEdit(scene_id=1, legacy_prompt=prior),
+            prompt=prior, params={}, sequence=1, description='窗边', duration=3, entities=[heroine()])
+        prior = result['prompt']
+        assert prior.count('【当前请求资产定义】') == 1
+        assert old_entity.description not in prior
+        assert heroine().description in prior
+        assert '“欢迎回家。”' in prior and '打开信封' in prior
+
+
 def test_legacy_plain_names_and_retained_voice_references_receive_complete_definitions():
     from schemas.scene import SceneEntity
     entities = [heroine(), SceneEntity(name='值班室', aliases=[], description='木桌靠右，绿色档案柜靠左。', asset_type='场景'),

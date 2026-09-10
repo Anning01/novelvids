@@ -263,6 +263,16 @@ async function refreshAgentChanges(changes: AgentChange[]) {
   const changedVariants = new Set(targets.filter(target => target.kind === 'variant').map(target => target.target_id))
   const ids = new Set([...changedAssets, ...assets.value.filter(asset => asset.variants?.some(variant => changedVariants.has(variant.id))).map(asset => asset.id)])
   try {
+    if (targets.some(target => target.operation)) {
+      const editingId = editingAsset.value?.id
+      // Refresh membership as well as content; retain an open editor's draft.
+      const chapterId = assetScope.value === 'chapter' ? selectedChapter.value?.id : undefined
+      assets.value = (await api.assets(projectId.value, 1, 100, chapterId)).data.items
+      if (editingId && !assets.value.some(asset => asset.id === editingId)) {
+        notice.info('当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。')
+      } else if (editingId && ids.has(editingId)) notice.info('助手已保存设定调整。当前编辑草稿已保留，请核对后再保存。')
+      return
+    }
     const updated = await Promise.all([...ids].map(async id => (await api.asset(id)).data))
     assets.value = assets.value.map(asset => updated.find(item => item.id === asset.id) || asset)
     if (editingAsset.value && ids.has(editingAsset.value.id)) notice.info('助手已保存新的提示词。当前编辑草稿已保留，重新打开设定可查看最新内容。')

@@ -143,9 +143,9 @@ async def get_video_list(
     params: QueryParams = Depends(get_list_params),
     ctx: AuthContext = Depends(get_auth_context),
 ):
-    base_query = None
+    base_query = Video.filter(scene__deleted_at__isnull=True)
     if ctx.team_id is not None:
-        base_query = Video.filter(scene__chapter__novel__team_id=ctx.team_id)
+        base_query = base_query.filter(scene__chapter__novel__team_id=ctx.team_id)
     videos = await video_controller.list(params, VideoBriefOut, base_query=base_query)
     return ResponseSchema(data=videos)
 

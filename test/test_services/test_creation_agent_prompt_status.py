@@ -51,6 +51,28 @@ async def test_pending_rules_are_scoped_and_cleared_only_for_current_recorded_ed
 
 
 @pytest.mark.asyncio
+async def test_crud_receipts_compare_prompt_fields_and_ignore_later_order_only_changes():
+    from schemas.creation_agent import AgentRunRequest
+    from schemas.creation_objects import CreationChangeSet
+    from services.creation_agent.changes import CreationChanges
+
+    conversation, request, scene, _, rule, legacy = await status_fixture()
+    changes = CreationChanges(novel_id=conversation.novel_id, task_id=legacy.task_id,
+        request=AgentRunRequest(request_id=legacy.task_id, message='调整暖光和描述',
+            chapter_id=scene.chapter_id, write_scope='chapter'), max_batch_size=8)
+    await changes.read([request.targets[0]])
+    await changes.apply(CreationChangeSet.model_validate({'operations': [{
+        'operation': 'update_scene', 'scene_id': scene.id,
+        'fields': {'prompt': '暖黄灯光照亮独立完整的站台。', 'description': '暖光站台'},
+    }]}), tool_call_id='crud-prompt')
+    assert (await creation_memory.prompt_status(conversation.novel_id, request))[0]['pending_constraints'] == []
+    await changes.apply(CreationChangeSet.model_validate({'operations': [{
+        'operation': 'update_scene', 'scene_id': scene.id, 'fields': {'after': None},
+    }]}), tool_call_id='reorder-only')
+    assert (await creation_memory.prompt_status(conversation.novel_id, request))[0]['pending_constraints'] == []
+
+
+@pytest.mark.asyncio
 async def test_pending_status_uses_recorded_rules_with_production_timezone(monkeypatch):
     from tortoise.timezone import _reset_timezone_cache
 

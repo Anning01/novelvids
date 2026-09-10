@@ -124,4 +124,23 @@ describe('人工模式无章节时创建第一个分镜', () => {
     expect(wrapper.findAll('button').some(button => button.text() === '返回剧本')).toBe(true)
     wrapper.unmount()
   })
+
+  it('结果卡只改变分镜查询参数时，也滚动到已渲染的目标', async () => {
+    vi.mocked(api.novelMeta).mockResolvedValue({ data: { id: 9, name: '测试故事', author: 'Agent 创建' } } as never)
+    vi.mocked(api.chapters).mockResolvedValue({ data: { items: [chapter] } } as never)
+    const scenes = [1, 2].map(id => ({ id, chapter_id: 1, sequence: id, description: `分镜${id}`,
+      prompt: '完整提示词', prompt_params: {}, duration: 3, assets: [], metadata: {} }))
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, assets: [], scenes, videos: {} } } as never)
+    const wrapper = await mountPage()
+    document.body.appendChild(wrapper.element)
+    await flushPromises()
+    const scroll = vi.fn()
+    const target = wrapper.get('#scene-2').element as HTMLElement
+    Object.defineProperty(target, 'scrollIntoView', { value: scroll, configurable: true })
+    await wrapper.vm.$router.push({ query: { chapter: '1', scene: '2' } })
+    await flushPromises()
+    expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    expect(wrapper.get('#scene-2').classes()).toContain('is-active')
+    wrapper.unmount()
+  })
 })

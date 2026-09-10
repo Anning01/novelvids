@@ -13,7 +13,8 @@ from services.oss import normalize_media_url
 from services.prompt_revision import apply_prompt_precondition
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from fastapi import HTTPException
-from tortoise.transactions import in_transaction
+from controllers._creation import creation_write
+from services.creation_objects import CreationObjects
 
 
 def _normalize_scene_metadata(metadata: dict) -> dict:
@@ -46,12 +47,22 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
     async def create(self, obj_in: SceneCreate, **kwargs) -> Scene:
         data = obj_in.model_dump(exclude_unset=True)
         asset_ids = data.pop("asset_ids", None)
+        data.pop('assets', None)
         if isinstance(data.get("metadata"), dict):
             data["metadata"] = _normalize_scene_metadata(data["metadata"])
-        instance = await super().create(data, **kwargs)
-        if asset_ids:
-            await instance.assets.add(*await Asset.filter(id__in=asset_ids))
-        # 直接在当前实例上 fetch，无需重新数据库查询
+        chapter = await Chapter.get_or_none(id=obj_in.chapter_id)
+        if chapter is None:
+            raise HTTPException(404, '章节不存在')
+        async with creation_write(chapter.novel_id):
+            objects = CreationObjects(chapter.novel_id)
+            sequence = data.pop('sequence')
+            data.pop('chapter_id')
+            ordered = await objects._ordered(chapter.id)
+            position = max(0, min(sequence - 1, len(ordered)))
+            after_id = ordered[position - 1].id if position else 0
+            await objects.validate_variant_bindings(asset_ids or [], (data.get('metadata') or {}).get('asset_variant_ids') or {})
+            instance = await objects.create_scene(chapter.id, after_id=after_id, values={**data, **kwargs})
+            await objects.bind_assets(instance, asset_ids or [])
         await instance.fetch_related("assets")
         return instance
     
@@ -60,11 +71,19 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         统一处理 update 和 patch 的内部逻辑
         method: 'update' | 'patch'
         """
-        async with in_transaction():
+        initial = await self.get(scene_id)
+        await initial.fetch_related('chapter')
+        async with creation_write(initial.chapter.novel_id):
             instance = await self.get(scene_id)
+            objects = CreationObjects(initial.chapter.novel_id)
 
             data = obj_in.model_dump(exclude_unset=True)
             asset_ids = data.pop("asset_ids", None)
+            data.pop('assets', None)
+            chapter_id = data.pop('chapter_id', instance.chapter_id)
+            if chapter_id != instance.chapter_id:
+                raise ValueError('分镜不能通过普通编辑转移章节')
+            sequence = data.pop('sequence', None)
             if isinstance(data.get("metadata"), dict):
                 data["metadata"] = _normalize_scene_metadata(data["metadata"])
 
@@ -74,10 +93,14 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 else:
                     instance = await super().update(instance, data)
 
+            ids = asset_ids if asset_ids is not None else await instance.assets.all().values_list('id', flat=True)
+            await objects.validate_variant_bindings(ids, (instance.metadata or {}).get('asset_variant_ids') or {})
             if asset_ids is not None:
-                await instance.assets.clear()
-                if asset_ids:
-                    await instance.assets.add(*await Asset.filter(id__in=asset_ids))
+                await objects.bind_assets(instance, asset_ids)
+            if sequence is not None and sequence != instance.sequence:
+                ordered = [scene for scene in await objects._ordered(instance.chapter_id) if scene.id != instance.id]
+                position = max(0, min(sequence - 1, len(ordered)))
+                await objects.move_scene(instance, after_id=ordered[position - 1].id if position else 0)
 
             # 使用 fetch_related 填充已有的实例，避免重复执行 SELECT ... WHERE id = ...
             await instance.fetch_related("assets")
@@ -91,31 +114,17 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
 
     async def remove(self, scene_id: int) -> None:
         instance = await self.get(scene_id)
-        await super().remove(instance)
+        await instance.fetch_related('chapter')
+        async with creation_write(instance.chapter.novel_id):
+            await CreationObjects(instance.chapter.novel_id).archive('scene', scene_id)
 
     async def insert_after(self, scene_id: int) -> Scene:
         """在目标分镜后原子插入一个空白分镜，并保持序号连续。"""
-        async with in_transaction() as connection:
-            target = await Scene.filter(id=scene_id).using_db(connection).first()
-            if target is None:
-                raise HTTPException(status_code=404, detail="分镜不存在")
-
-            following = await Scene.filter(
-                chapter_id=target.chapter_id,
-                sequence__gt=target.sequence,
-            ).using_db(connection).order_by("-sequence")
-            for scene in following:
-                scene.sequence += 1
-                await scene.save(using_db=connection, update_fields=["sequence", "updated_at"])
-
-            created = await Scene.create(
-                using_db=connection,
-                chapter_id=target.chapter_id,
-                sequence=target.sequence + 1,
-                description="新分镜",
-                prompt="",
-                duration=6,
-            )
+        target = await self.get(scene_id)
+        await target.fetch_related('chapter')
+        async with creation_write(target.chapter.novel_id):
+            created = await CreationObjects(target.chapter.novel_id).create_scene(target.chapter_id,
+                after_id=target.id, values={'description': '新分镜', 'prompt': '', 'duration': 6})
 
         await created.fetch_related("assets")
         return created
@@ -167,7 +176,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
 
         # 3. 事务内锁章节行：检查活跃任务并创建任务保持原子性，
         #    同章节并发提交只会创建一个任务，其余请求复用同一个任务。
-        async with in_transaction() as connection:
+        async with creation_write(chapter.novel_id) as connection:
             locked_chapter = await Chapter.filter(
                 id=chapter_id
             ).using_db(connection).select_for_update().first()

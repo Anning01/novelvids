@@ -80,29 +80,45 @@ class CreationMemory:
         """Keep per-target scope explicit so a batch never propagates A-only rules to B."""
         scenes = await Scene.filter(id__in=[t.id for t in request.targets if t.kind == 'scene'], chapter__novel_id=novel_id).prefetch_related('chapter', 'assets')
         variants = await AssetVariant.filter(id__in=[t.id for t in request.targets if t.kind == 'variant'], asset__novel_id=novel_id)
+        assets = await Asset.filter(id__in=[t.id for t in request.targets if t.kind == 'asset'], novel_id=novel_id)
         chapter = await Chapter.get_or_none(id=request.chapter_id, novel_id=novel_id) if request.chapter_id else None
         context = {}
         for target in request.targets:
             related_scene = next((scene for scene in scenes if target.kind == 'scene' and scene.id == target.id), None)
             related_variant = next((variant for variant in variants if target.kind == 'variant' and variant.id == target.id), None)
-            context[(target.kind, target.id)] = (
-                related_scene.chapter if related_scene else chapter,
-                {asset.id for asset in related_scene.assets} if related_scene else
-                {related_variant.asset_id} if related_variant else {target.id} if target.kind == 'asset' else set(),
-            )
+            related_asset = next((asset for asset in assets if target.kind == 'asset' and asset.id == target.id), None)
+            if related_scene:
+                chapters = [related_scene.chapter]
+                asset_ids = {asset.id for asset in related_scene.assets}
+            elif related_variant:
+                from services.creation_objects import CreationObjects
+
+                uses = await CreationObjects(novel_id).variant_references(related_variant)
+                numbers = set(related_variant.chapter_numbers or []) | {scene.chapter.number for scene in uses}
+                chapters = await Chapter.filter(novel_id=novel_id, number__in=numbers)
+                asset_ids = {related_variant.asset_id}
+            elif related_asset:
+                uses = await Scene.filter(assets__id=related_asset.id).prefetch_related('chapter')
+                numbers = set(related_asset.source_chapters or []) | {scene.chapter.number for scene in uses}
+                query = Chapter.filter(novel_id=novel_id)
+                chapters = await (query if related_asset.is_global else query.filter(number__in=numbers))
+                asset_ids = {related_asset.id}
+            else:
+                chapters, asset_ids = [], set()
+            context[(target.kind, target.id)] = (chapters, asset_ids)
         constraints = await CreationConstraint.filter(novel_id=novel_id, superseded_by_id=None).order_by('id')
         result = []
         for constraint in constraints:
             scope = CreationConstraintScope.model_validate(constraint.scope)
             applicable = []
             for target in request.targets:
-                current_chapter, asset_ids = context[(target.kind, target.id)]
+                target_chapters, asset_ids = context[(target.kind, target.id)]
                 if scope.asset_id and scope.asset_id not in asset_ids:
                     continue
                 if (scope.kind == 'project'
                     or scope.kind == 'targets' and target in scope.targets
-                    or scope.kind == 'chapter' and current_chapter and current_chapter.id == scope.chapter_id
-                    or scope.kind == 'range' and current_chapter and scope.start_chapter <= current_chapter.number <= scope.end_chapter):
+                    or scope.kind == 'chapter' and any(ch.id == scope.chapter_id for ch in target_chapters)
+                    or scope.kind == 'range' and any(scope.start_chapter <= ch.number <= scope.end_chapter for ch in target_chapters)):
                     applicable.append(target.model_dump())
             if applicable or (not request.targets and not scope.asset_id and (scope.kind == 'project' or scope.kind == 'chapter' and chapter and chapter.id == scope.chapter_id
                 or scope.kind == 'range' and chapter and scope.start_chapter <= chapter.number <= scope.end_chapter)):
@@ -140,8 +156,15 @@ class CreationMemory:
                         key = (item['kind'], item['target_id'])
                         if key not in unresolved:
                             continue
+                        # CRUD receipts also contain names, ordering and relation
+                        # fields. Only a recorded prompt change establishes that
+                        # the current prompt was checked against these rules.
+                        prompt_after = {field: value for field, value in item['after'].items()
+                                        if field in {'prompt', 'prompt_params', 'base_traits'}}
+                        if not prompt_after:
+                            continue
                         unresolved.remove(key)
-                        if key in current and all(current[key].get(field) == value for field, value in item['after'].items()):
+                        if key in current and all(current[key].get(field) == value for field, value in prompt_after.items()):
                             pending[key] = [rule for rule in pending[key] if rule['id'] not in item.get('constraint_ids', [])]
                 offset += len(batch)
         return [{**target.model_dump(), 'pending_constraints': [{'id': rule['id'], 'content': rule['content']}

@@ -82,6 +82,30 @@ async def test_revoke_membership_after_submit_blocks_execution(client):
 
 
 @pytest.mark.asyncio
+async def test_recovery_endpoints_enforce_team_and_editor_role(client):
+    from models.asset import Asset
+    from models.chapter import Chapter
+    from models.scene import Scene
+    from services.creation_objects import CreationObjects, project_write
+
+    team, owner, _, conversation, _, _ = await setup_private_run(client)
+    viewer, _ = await _create_member('recovery-viewer', team, role='viewer')
+    foreign_team = await Team.create(name='其他团队')
+    outsider, _ = await _create_member('recovery-outsider', foreign_team)
+    chapter = await Chapter.create(novel_id=conversation.novel_id, number=1, name='雨夜', content='合成')
+    scene = await Scene.create(chapter=chapter, sequence=1)
+    asset = await Asset.create(novel_id=conversation.novel_id, canonical_name='雨衣', asset_type=3)
+    async with project_write(conversation.novel_id):
+        await CreationObjects(conversation.novel_id).archive('scene', scene.id)
+        await CreationObjects(conversation.novel_id).archive('asset', asset.id)
+    for user, code in [(viewer, 403), (outsider, 404), (owner, 0)]:
+        headers = _auth(await _login(client, user.username))
+        for path in [f'/api/scene/{scene.id}/restore', f'/api/asset/{asset.id}/restore']:
+            response = await client.post(path, headers=headers)
+            assert response.json()['code'] == code
+
+
+@pytest.mark.asyncio
 async def test_agent_billing_uses_existing_balance_path_once(client, monkeypatch):
     from pydantic_ai.models.function import FunctionModel
     from services.ai_task_executor import AiTaskExecutor

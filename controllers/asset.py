@@ -12,6 +12,7 @@ from tortoise.queryset import QuerySet
 from controllers.config import ai_model_config_controller, general_config_controller
 from models.ai_task import AiTask
 from models.asset import Asset
+from models.scene import Scene
 from models.asset_variant import AssetVariant
 from models.chapter import Chapter
 from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
@@ -25,6 +26,8 @@ from utils.crud import CRUDBase
 from utils.decorators import atomic
 from utils.enums import AiTaskTypeEnum, ImageSourceEnum, TaskStatusEnum
 from utils.page import QueryParams
+from controllers._creation import creation_write
+from services.creation_objects import CreationObjects
 
 
 def _normalize_asset_media(data: dict) -> dict:
@@ -199,66 +202,86 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 int(data.get("last_updated_chapter") or 0),
                 chapter.number,
             )
-        asset = await super().create(data, **kwargs)
+        novel_id = data.pop('novel_id')
+        async with creation_write(novel_id):
+            asset = await CreationObjects(novel_id).create_setting({**data, **kwargs})
         await _ensure_asset_image_derivatives(_asset_image_references(data))
         return asset
 
     async def update(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
+        return await self._edit_asset(asset_id, obj_in)
+
+    async def _edit_asset(self, asset_id: int, obj_in: BaseModel) -> Asset:
         instance = await self.get(asset_id)
         data = _normalize_asset_media(obj_in.model_dump(exclude_unset=True))
         references = _asset_image_references(data)
-        asset = instance
-        if not await apply_prompt_precondition(instance, data, "base_traits"):
-            asset = await super().update(instance, data)
+        async with creation_write(instance.novel_id):
+            instance = await self.get(asset_id)
+            if data.pop('novel_id', instance.novel_id) != instance.novel_id:
+                raise ValueError('设定不能通过普通编辑转移项目')
+            data.pop('chapter_id', None)
+            old_name = instance.canonical_name
+            name = data.get('canonical_name', old_name)
+            if name != old_name:
+                data['aliases'] = list(dict.fromkeys([*(data.get('aliases', instance.aliases) or []), old_name]))
+                await instance.fetch_related('scenes')
+                for scene in instance.scenes:
+                    values = CreationObjects.rename_reference_values({key: getattr(scene, key) for key in ('prompt', 'prompt_params', 'description')}, old_name, name)
+                    if values:
+                        await CreationObjects(instance.novel_id).ensure_idle('scene', scene)
+                        scene.update_from_dict(values)
+                        await scene.save(update_fields=[*values, 'updated_at'])
+            if not await apply_prompt_precondition(instance, data, "base_traits"):
+                instance = await super().patch(instance, data)
         await _ensure_asset_image_derivatives(references)
-        return asset
+        return instance
 
     async def patch(self, asset_id: int, obj_in: AssetUpdate) -> Asset:
-        instance = await self.get(asset_id)
-        data = _normalize_asset_media(obj_in.model_dump(exclude_unset=True))
-        references = _asset_image_references(data)
-        asset = instance
-        if not await apply_prompt_precondition(instance, data, "base_traits"):
-            asset = await super().patch(instance, data)
-        await _ensure_asset_image_derivatives(references)
-        return asset
+        return await self._edit_asset(asset_id, obj_in)
 
     async def remove(self, asset_id: int) -> None:
         instance = await self.get(asset_id)
-        await super().remove(instance)
+        async with creation_write(instance.novel_id):
+            await CreationObjects(instance.novel_id).archive('asset', asset_id)
 
     async def reuse_in_chapter(self, asset_id: int, chapter_id: int) -> Asset:
         asset = await self.get(asset_id)
-        chapter = await Chapter.get_or_none(id=chapter_id)
-        if chapter is None:
-            raise HTTPException(status_code=404, detail="章节不存在")
-        if chapter.novel_id != asset.novel_id:
-            raise HTTPException(status_code=400, detail="资产与章节不属于同一项目")
-        source_chapters = list(asset.source_chapters or [])
-        if chapter.number not in source_chapters:
-            source_chapters.append(chapter.number)
-            asset.source_chapters = sorted(source_chapters)
-            asset.last_updated_chapter = max(
-                int(asset.last_updated_chapter or 0),
-                chapter.number,
-            )
-            await asset.save(
-                update_fields=[
-                    "source_chapters",
-                    "last_updated_chapter",
-                    "updated_at",
-                ]
-            )
-        await asset.fetch_related("variants")
-        return asset
+        async with creation_write(asset.novel_id):
+            asset = await self.get(asset_id)
+            chapter = await Chapter.get_or_none(id=chapter_id)
+            if chapter is None:
+                raise HTTPException(status_code=404, detail="章节不存在")
+            if chapter.novel_id != asset.novel_id:
+                raise HTTPException(status_code=400, detail="资产与章节不属于同一项目")
+            source_chapters = list(asset.source_chapters or [])
+            if chapter.number not in source_chapters:
+                source_chapters.append(chapter.number)
+                asset.source_chapters = sorted(source_chapters)
+                asset.last_updated_chapter = max(
+                    int(asset.last_updated_chapter or 0),
+                    chapter.number,
+                )
+                await asset.save(
+                    update_fields=[
+                        "source_chapters",
+                        "last_updated_chapter",
+                        "updated_at",
+                    ]
+                )
+            await asset.fetch_related("variants")
+            return asset
 
     async def get_with_variants(self, asset_id: int) -> Asset:
         instance = await self.get(asset_id)
         await instance.fetch_related("variants")
         return instance
 
-    @atomic()
     async def merge(self, source_asset_id: int, target_asset_id: int) -> dict[str, Any]:
+        source = await self.get(source_asset_id)
+        async with creation_write(source.novel_id):
+            return await self._merge_locked(source_asset_id, target_asset_id)
+
+    async def _merge_locked(self, source_asset_id: int, target_asset_id: int) -> dict[str, Any]:
         """Merge source into target, preserving target identity and every useful field."""
         if source_asset_id == target_asset_id:
             raise HTTPException(status_code=400, detail="不能合并同一个资产")
@@ -275,6 +298,10 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             raise HTTPException(status_code=400, detail="只能合并同一项目内的资产")
         if source.asset_type != target.asset_type:
             raise HTTPException(status_code=400, detail="只能合并相同类型的资产")
+
+        if (await Scene.with_deleted().filter(assets__id__in=[source.id, target.id], deleted_at__not_isnull=True).exists()
+            or await AssetVariant.with_deleted().filter(asset_id__in=[source.id, target.id], deleted_at__not_isnull=True).exists()):
+            raise HTTPException(409, '资产关联了已移除的分镜或形态，请先恢复相关对象再合并，以保留恢复关系')
 
         active_tasks = await AiTask.filter(
             task_type=AiTaskTypeEnum.reference_image.value,
@@ -446,11 +473,12 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         return await AssetVariant.filter(asset_id=asset_id).order_by("id")
 
     async def create_variant(self, asset_id: int, obj_in: AssetVariantCreate) -> AssetVariant:
-        await self.get(asset_id)
+        asset = await self.get(asset_id)
         data = obj_in.model_dump(exclude_unset=True)
         if isinstance(data.get("images"), list):
             data["images"] = _normalize_image_list(data["images"])
-        variant = await AssetVariant.create(asset_id=asset_id, **data)
+        async with creation_write(asset.novel_id):
+            variant = await CreationObjects(asset.novel_id).create_variant(asset_id, data)
         await _ensure_asset_image_derivatives(list(variant.images or []))
         return variant
 
@@ -460,15 +488,28 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         variant_id: int,
         obj_in: AssetVariantPatch,
     ) -> AssetVariant:
-        variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
-        if variant is None:
-            raise HTTPException(status_code=404, detail="资产形态不存在")
+        asset = await self.get(asset_id)
         data = obj_in.model_dump(exclude_unset=True)
         if isinstance(data.get("images"), list):
             data["images"] = _normalize_image_list(data["images"])
-        if not await apply_prompt_precondition(variant, data, "base_traits"):
-            variant.update_from_dict(data)
-            await variant.save()
+        async with creation_write(asset.novel_id):
+            variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
+            if variant is None:
+                raise HTTPException(status_code=404, detail="资产形态不存在")
+            if 'chapter_numbers' in data:
+                await CreationObjects(asset.novel_id).ensure_variant_chapters(asset_id, data['chapter_numbers'] or [], exclude_id=variant_id)
+            if data.get('name', variant.name) != variant.name:
+                for scene in await Scene.filter(assets__id=asset.id):
+                    values = CreationObjects.rename_reference_values(
+                        {key: getattr(scene, key) for key in ('prompt', 'prompt_params', 'description')},
+                        f'{asset.canonical_name}#{variant.name}', f"{asset.canonical_name}#{data['name']}", variant=variant.name)
+                    if values:
+                        await CreationObjects(asset.novel_id).ensure_idle('scene', scene)
+                        scene.update_from_dict(values)
+                        await scene.save(update_fields=[*values, 'updated_at'])
+            if not await apply_prompt_precondition(variant, data, "base_traits"):
+                variant.update_from_dict(data)
+                await variant.save(update_fields=[*data, 'updated_at'])
         if isinstance(data.get("images"), list):
             await _ensure_asset_image_derivatives(data["images"])
         return variant
@@ -480,33 +521,37 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         chapter_number: int,
     ) -> list[AssetVariant]:
         """Make exactly one variant of an asset active for a chapter number."""
-        await self.get(asset_id)
-        variants = await AssetVariant.filter(asset_id=asset_id).order_by("id")
-        target = next((variant for variant in variants if variant.id == variant_id), None)
-        if target is None:
-            raise HTTPException(status_code=404, detail="资产形态不存在")
+        asset = await self.get(asset_id)
+        async with creation_write(asset.novel_id):
+            await self.get(asset_id)
+            variants = await AssetVariant.filter(asset_id=asset_id).order_by("id")
+            target = next((variant for variant in variants if variant.id == variant_id), None)
+            if target is None:
+                raise HTTPException(status_code=404, detail="资产形态不存在")
 
-        for variant in variants:
-            chapters = {
-                int(value)
-                for value in (variant.chapter_numbers or [])
-                if isinstance(value, int) and value > 0
-            }
-            if variant.id == variant_id:
-                chapters.add(chapter_number)
-            else:
-                chapters.discard(chapter_number)
-            normalized = sorted(chapters)
-            if normalized != list(variant.chapter_numbers or []):
-                variant.chapter_numbers = normalized
-                await variant.save(update_fields=["chapter_numbers", "updated_at"])
-        return variants
+            for variant in variants:
+                chapters = {
+                    int(value)
+                    for value in (variant.chapter_numbers or [])
+                    if isinstance(value, int) and value > 0
+                }
+                if variant.id == variant_id:
+                    chapters.add(chapter_number)
+                else:
+                    chapters.discard(chapter_number)
+                normalized = sorted(chapters)
+                if normalized != list(variant.chapter_numbers or []):
+                    variant.chapter_numbers = normalized
+                    await variant.save(update_fields=["chapter_numbers", "updated_at"])
+            return variants
 
     async def remove_variant(self, asset_id: int, variant_id: int) -> None:
-        variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
-        if variant is None:
-            raise HTTPException(status_code=404, detail="资产形态不存在")
-        await variant.delete()
+        asset = await self.get(asset_id)
+        async with creation_write(asset.novel_id):
+            variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
+            if variant is None:
+                raise HTTPException(status_code=404, detail="资产形态不存在")
+            await CreationObjects(asset.novel_id).archive('variant', variant_id)
 
     async def generation_history(self, asset_id: int) -> list[dict[str, Any]]:
         """Return sanitized base-asset image-generation history."""
@@ -780,14 +825,14 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         if user_id is not None:
             request_params["user_id"] = user_id
 
-        task = await ai_task_executor.submit(
-            AiTaskTypeEnum.reference_image, request_params
-        )
-        task.request_params = {
-            **(task.request_params or request_params),
-            "generation_run_id": str(task.id),
-        }
-        await task.save(update_fields=["request_params", "updated_at"])
+        async with creation_write(asset.novel_id) as connection:
+            objects = CreationObjects(asset.novel_id)
+            await objects.get('asset', asset.id)
+            if variant:
+                await objects.get('variant', variant.id)
+            task = await ai_task_executor.submit(AiTaskTypeEnum.reference_image, request_params, db_connection=connection)
+            task.request_params = {**(task.request_params or request_params), 'generation_run_id': str(task.id)}
+            await task.save(update_fields=['request_params', 'updated_at'])
         return task
 
     async def active_generations(self, novel_id: int) -> list[dict]:

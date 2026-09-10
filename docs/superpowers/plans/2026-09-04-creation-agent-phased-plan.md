@@ -1,5 +1,7 @@
 # 创作助手分阶段开发计划
 
+> 2026-09-10 范围更新：本文保留原 Prompt 编辑阶段的设计与验收记录。后续需求已扩展为设定、形态和分镜的完整增删改查；以 [CRUD 开发验收方案](../plans/2026-09-10-creation-agent-crud.md) 为当前功能边界，旧版“两类 Prompt 写权限”不再限制新运行。
+
 日期：2026-09-04。状态：P0–P4 主体实现已落地并通过当前离线回归；P3/P4 产品验收仍有缺口，P5 正在进行，真实模型与最终验收未完成。具体证据见[实施记录](../verification/2026-09-04-creation-agent-progress.md)。
 
 设计依据：[创作助手设计与开发约定](../specs/2026-09-04-creation-agent-design.md)。验收依据：[验收矩阵](../verification/2026-09-04-creation-agent-acceptance.md)。本计划只采用 Pydantic AI + AG-UI + Element Plus X，不重新比较或同时引入 Deep Agents。

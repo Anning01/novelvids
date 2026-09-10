@@ -5,7 +5,7 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn() },
+  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn(), workbenchBootstrap: vi.fn() },
   sleep: vi.fn(),
 }))
 
@@ -25,6 +25,29 @@ beforeEach(() => {
   store = useWorkbenchStore()
   store.chapterId = 2162
   store.novelId = 9
+})
+
+it('keeps unsaved node content across agent removal and restoration, clearing stale selection', async () => {
+  const timestamp = '2026-09-10T00:00:00Z'
+  const chapter = { id: 2162, novel_id: 9, number: 1, name: '雨夜', content: '', created_at: timestamp, updated_at: timestamp }
+  const scene = { id: 10, chapter_id: chapter.id, sequence: 1, prompt: '已保存画面', created_at: timestamp, updated_at: timestamp }
+  store.chapter = chapter; store.scenes = [scene]; store.rebuildGraph()
+  const shot = store.nodeByKey('shot-10')!
+  shot.data = { ...shot.data, scene: { ...scene, prompt: '尚未保存的画面' }, prompt_dirty: true }
+  shot.position = { x: 444, y: 333 }
+  store.selectedNodeKeys = [shot.key]
+  const bootstrap = { chapter, assets: [], scenes: [], videos: {} }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValueOnce({ code: 0, message: '', data: bootstrap })
+  await store.refreshAgentObjects()
+  expect(store.selectedNodeKeys).toEqual([])
+  expect(store.nodeByKey(shot.key)).toBeUndefined()
+  vi.mocked(api.workbenchBootstrap).mockResolvedValueOnce({ code: 0, message: '', data: { ...bootstrap, scenes: [scene] } })
+  await store.refreshAgentObjects()
+  expect(store.nodeByKey(shot.key)?.data.scene).toEqual({ ...scene, prompt: '尚未保存的画面' })
+  expect(store.nodeByKey(shot.key)?.data.prompt_dirty).toBe(true)
+  expect(store.nodeByKey(shot.key)?.position).toEqual({ x: 444, y: 333 })
+  expect(store.removedAgentDrafts).toEqual({})
+  expect(updateSceneMock).not.toHaveBeenCalled()
 })
 
 it('persists chapter content and refreshes the chapter note data', async () => {
