@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Activity, Clapperboard, Coins, Image, Type } from 'lucide-vue-next'
+import { Activity, Clapperboard, Coins, Image, Type, ChevronRight } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
-import { api, statusLabel } from '@/api'
+import { api } from '@/api'
+import BillingRecordDetails from '@/features/billing/BillingRecordDetails.vue'
+import { costSourceLabel, money, recordStatus, usageLabel } from '@/features/billing/recordDisplay'
 import { useAuthStore } from '@/features/auth/authStore'
 import { notice } from '@/shared/notice'
 import type { BillingProject, BillingRecord, BillingSummary } from '@/types'
@@ -15,26 +17,15 @@ const loading = ref(true)
 const page = ref(1)
 const pageSize = ref(20)
 const selectedProjectId = ref('all')
+const expandedRecordId = ref<number | null>(null)
 const auth = useAuthStore()
 const showSourceColumn = computed(() => auth.enabled === true)
-function costSourceLabel(source?: string) {
-  if (source === 'team_key') return '团队 Key'
-  if (source === 'balance') return '团队余额'
-  return '平台'
-}
 
 const billingTypeLabel = (value: string) => ({ text: '文本', image: '生图', video: '视频' }[value] || value)
-const taskTypeLabel = (value: number) => ({ 1: '提取', 2: '参考图', 3: '分镜', 4: '视频', 5: '项目分析' }[value] || `任务 ${value}`)
-
-function money(value: number): string {
-  if (!value) return '¥0'
-  const abs = Math.abs(value)
-  if (abs >= 1) return `¥${value.toFixed(2)}`
-  if (abs >= 0.01) return `¥${value.toFixed(4)}`
-  return `¥${value.toFixed(6)}`
-}
+const taskTypeLabel = (value: number) => ({ 1: '提取', 2: '参考图', 3: '分镜', 4: '视频', 5: '项目分析', 6: '重制', 7: '创作助手' }[value] || `任务 ${value}`)
 
 function recordDiscount(item: BillingRecord): number {
+  if (item.record_kind === 'agent_conversation') return 1
   const snapshot = item.pricing_snapshot as Record<string, unknown> | null | undefined
   const raw = snapshot?.discount
   const value = Number(raw)
@@ -62,12 +53,6 @@ const projectName = (novelId: number) => (
 )
 const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize.value)))
 
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-  return String(value)
-}
-
 function formatDuration(seconds: number | null | undefined): string {
   if (seconds == null) return '—'
   if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
@@ -76,30 +61,12 @@ function formatDuration(seconds: number | null | undefined): string {
   return `${minutes}m ${Math.round(seconds % 60)}s`
 }
 
-function usageLabel(item: BillingRecord): string {
-  const usage = item.usage || {}
-  const num = (value: unknown) => Number(value) || 0
-  if (item.billing_type === 'text') {
-    return `输入 ${formatTokens(num(usage.input_tokens))} · 输出 ${formatTokens(num(usage.output_tokens))} token`
-  }
-  if (item.billing_type === 'image') {
-    const count = num(usage.image_count)
-    const clarity = usage.clarity ? ` @${usage.clarity}` : ''
-    const input = num(usage.input_image_count)
-    return `${count} 张${clarity}${input ? ` · 输入 ${input} 张` : ''}`
-  }
-  const seconds = num(usage.seconds)
-  const resolution = usage.resolution ? ` @${usage.resolution}` : ''
-  const input = num(usage.input_video_seconds)
-  const inputImages = num(usage.input_image_count)
-  return `${seconds}s${resolution}${input ? ` · 参考视频 ${input}s` : ''}${inputImages ? ` · 输入图片 ${inputImages} 张` : ''}`
-}
-
 function currentNovelId(): number | undefined {
   return selectedProjectId.value === 'all' ? undefined : Number(selectedProjectId.value)
 }
 
 async function load() {
+  expandedRecordId.value = null
   loading.value = true
   try {
     const novelId = currentNovelId()
@@ -120,6 +87,7 @@ async function load() {
 }
 
 async function loadRecords() {
+  expandedRecordId.value = null
   loading.value = true
   try {
     const response = await api.billingRecords({ novel_id: currentNovelId(), page: page.value, page_size: pageSize.value })
@@ -177,9 +145,9 @@ onMounted(load)
           <small class="stat-sub">{{ selectedProject ? selectedProject.novel_name : '全部项目累计' }}</small>
         </article>
         <article class="stat-card">
-          <span class="stat-label"><Activity :size="15" />调用次数</span>
+          <span class="stat-label"><Activity :size="15" />计费记录</span>
           <strong class="stat-value">{{ summary?.total_records ?? 0 }}</strong>
-          <small class="stat-sub">次模型调用</small>
+          <small class="stat-sub">条原始用量记录</small>
         </article>
         <article class="stat-card is-text">
           <span class="stat-label"><Type :size="15" />文本</span>
@@ -197,9 +165,8 @@ onMounted(load)
 
       <section class="table-card">
         <header class="table-card__header">
-          <h2>调用流水</h2>
-          <small v-if="selectedProject">{{ selectedProject.novel_name }}</small>
-          <small v-else>全部项目</small>
+          <div><h2>调用流水</h2><p>创作助手按会话汇总，展开可查看明细。</p></div>
+          <small>{{ selectedProject?.novel_name || '全部项目' }}</small>
         </header>
         <table class="data-table">
           <thead>
@@ -217,26 +184,33 @@ onMounted(load)
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in records" :key="item.id">
+            <template v-for="item in records" :key="item.id"><tr>
               <td class="cell-muted">{{ item.created_at }}</td>
               <td>{{ projectName(item.novel_id) }}</td>
               <td>{{ billingTypeLabel(item.billing_type) }}</td>
-              <td>{{ taskTypeLabel(item.task_type) }}</td>
+              <td><template v-if="item.record_kind === 'agent_conversation'">
+                <button class="conversation-record-toggle" type="button" :aria-label="`查看会话 ${item.conversation_id} 费用明细`" :aria-expanded="expandedRecordId === item.id" :aria-controls="`billing-details-${item.id}`" @click="expandedRecordId = expandedRecordId === item.id ? null : item.id">
+                  <ChevronRight :size="13" :class="{ 'is-expanded': expandedRecordId === item.id }" />创作助手
+                </button><small class="conversation-record-meta">会话 {{ item.conversation_id }} · {{ item.turn_count }} 轮对话</small>
+              </template><template v-else>{{ taskTypeLabel(item.task_type) }}</template></td>
               <td>{{ item.model_name || item.model }}</td>
               <td class="cell-muted">{{ usageLabel(item) }}</td>
               <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
-              <td>{{ statusLabel(item.status) }}</td>
+              <td>{{ recordStatus(item) }}</td>
               <td v-if="showSourceColumn">
-                <span class="source-badge" :class="item.cost_source === 'team_key' ? 'is-key' : 'is-balance'">{{ costSourceLabel(item.cost_source) }}</span>
+                <span class="source-badge" :class="{ 'is-key': item.cost_source === 'team_key', 'is-balance': item.cost_source === 'balance' }">{{ costSourceLabel(item.cost_source) }}</span>
               </td>
               <td class="is-num cell-mono">
                 <div v-if="recordDiscount(item) !== 1" class="cost-with-discount">
-                  <span class="list-price">{{ money(item.cost / recordDiscount(item)) }}</span>
+                  <span class="list-price">{{ money(item.cost / recordDiscount(item), item.currency) }}</span>
                   <span class="discount-chip">{{ discountText(recordDiscount(item)) }}</span>
                 </div>
-                {{ money(item.cost) }}
+                {{ money(item.cost, item.currency) }}
               </td>
             </tr>
+            <tr v-if="expandedRecordId === item.id" :id="`billing-details-${item.id}`" class="conversation-record-detail"><td :colspan="showSourceColumn ? 10 : 9">
+              <BillingRecordDetails :record-id="item.id" :novel-id="item.novel_id" :show-source="showSourceColumn" />
+            </td></tr></template>
             <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">暂无调用记录</td></tr>
           </tbody>
         </table>
@@ -289,6 +263,13 @@ onMounted(load)
 .table-card { margin-bottom: 22px; border-radius: 16px; background: var(--app-surface-raised, #fff); box-shadow: 0 1px 2px rgb(20 22 28 / 3%), 0 10px 28px rgb(20 22 28 / 5%); overflow: hidden; }
 .table-card__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 16px 20px 12px; }
 .table-card__header h2 { margin: 0; font-size: 14px; }
+.table-card__header p { margin: 5px 0 0; color: var(--app-text-muted); font-size: 11px; }
+.conversation-record-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; border: 0; background: transparent; color: var(--app-accent); font: inherit; cursor: pointer; white-space: nowrap; }
+.conversation-record-toggle:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; border-radius: 4px; }
+.conversation-record-toggle svg { transition: transform .18s; }.conversation-record-toggle .is-expanded { transform: rotate(90deg); }
+.conversation-record-meta { display: block; color: var(--app-text-muted); font-size: 10px; margin-top: 2px; white-space: nowrap; }
+.data-table .conversation-record-detail > td { padding: 0; }
+@media (prefers-reduced-motion: reduce) { .conversation-record-toggle svg { transition: none; } }
 .table-card__header small { color: var(--app-text-muted); font-size: 11px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th, .data-table td { padding: 11px 20px; text-align: left; }

@@ -383,6 +383,7 @@ export const api = {
   billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
   billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
+  billingRecordDetails: (recordId: number, params: { novel_id?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records/${recordId}/details${qs(params)}`),
   async upload(file: File): Promise<UploadResult> {
     const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
     if (policyResponse.data.direct) {

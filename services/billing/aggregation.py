@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from models.novel import Novel
 from models.usage_record import ModelUsageRecord
-from schemas.billing import ModelUsageRecordOut
+from services.billing.record_view import BillingRecordView
 from utils.page import QueryBuilder
 
 
@@ -145,6 +145,7 @@ async def list_records(
     params,
     team_id: int | None = None,
     user_id: int | None = None,
+    record_id: int | None = None,
 ) -> dict:
     query = ModelUsageRecord.all()
     if team_id is not None:
@@ -152,18 +153,5 @@ async def list_records(
     if user_id is not None:
         query = query.filter(user_id=user_id)
     query = await QueryBuilder.apply_filters(query, ModelUsageRecord, params.filters or {})
-    query = query.order_by("-id")
-    total = await query.count()
-    query = await QueryBuilder.apply_pagination(query, params.page, params.page_size)
-    items = await query
-    items_out = [ModelUsageRecordOut.model_validate(item) for item in items]
-    pages = (total + params.page_size - 1) // params.page_size if total else 0
-    return {
-        "items": items_out,
-        "pagination": {
-            "total": total,
-            "page": params.page,
-            "page_size": params.page_size,
-            "pages": pages,
-        },
-    }
+    view = BillingRecordView(query)
+    return await view.details(record_id, params) if record_id is not None else await view.list(params)

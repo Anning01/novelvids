@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from auth.deps import AuthContext, require_roles, require_team_access
 from controllers.billing import billing_controller
@@ -83,3 +83,13 @@ async def get_billing_records(
     return ResponseSchema(
         data=await billing_controller.records(params, team_id, user_id)
     )
+
+
+@router.get('/records/{record_id}/details', summary='流水原始明细',
+            response_model=ResponseSchema[PaginationResponse[ModelUsageRecordOut]])
+async def get_billing_record_details(record_id: int, params: QueryParams = Depends(get_list_params), ctx: AuthContext = _BILLING):
+    team_id, user_id = _team_scope(ctx)
+    try:
+        return ResponseSchema(data=await billing_controller.records(params, team_id, user_id, record_id))
+    except LookupError:
+        raise HTTPException(404, '当前范围内不存在该流水') from None

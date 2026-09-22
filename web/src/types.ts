@@ -437,6 +437,11 @@ export interface BillingRecord {
   user_id?: number | null
   created_at: string
   updated_at: string
+  record_kind?: 'call' | 'agent_conversation'
+  conversation_id?: number | null
+  record_count?: number
+  turn_count?: number
+  statuses?: number[]
 }
 export interface BillingSummary {
   total_cost: number
