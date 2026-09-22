@@ -21,6 +21,7 @@ import {
 } from 'lucide-vue-next'
 import AppMultiSelect from '@/components/AppMultiSelect.vue'
 import AppIconTile from '@/components/AppIconTile.vue'
+import AppSettingsCard from '@/components/AppSettingsCard.vue'
 import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
 import { api } from '@/api'
 import { defaultPricing } from '@/shared/modelPricing'
@@ -527,21 +528,14 @@ onMounted(load)
     <section v-else class="general-settings-section">
       <header>
         <div>
-          <span>GENERAL PREFERENCES</span>
-          <h2>通用配置</h2>
-          <p>这些设置作用于之后新提交的生成任务，不会改写已有资产和分镜。</p>
+          <h2>创作偏好</h2>
+          <p>设置输出语言与助手的工作方式。</p>
         </div>
       </header>
 
-      <article class="general-setting-card">
-        <div class="general-setting-heading">
-          <AppIconTile tone="accent" size="lg"><Languages :size="22" /></AppIconTile>
-          <div>
-            <h3>提示词语言</h3>
-            <p>同时控制图片提示词、资产视觉特征与镜头提示词的输出语言。</p>
-          </div>
-          <span class="general-setting-status"><CheckCircle2 :size="14" />全局生效</span>
-        </div>
+      <AppSettingsCard class="general-setting-card" title="提示词语言" description="统一图片、资产视觉特征与分镜提示词的输出语言。">
+        <template #icon><Languages :size="20" /></template>
+        <template #status><span class="general-setting-status">生成偏好</span></template>
 
         <div class="prompt-language-options" role="radiogroup" aria-label="提示词语言">
           <button
@@ -568,18 +562,15 @@ onMounted(load)
           </button>
         </div>
 
-        <div class="general-setting-note">
-          <strong>生效范围</strong>
-          <span>章节资产提取、人物/场景/道具参考图、项目封面与自动分镜。</span>
-        </div>
+        <p class="general-setting-note">用于之后新生成的内容，已有资产与分镜保持不变。</p>
 
-        <footer>
+        <template #footer>
           <span v-if="generalConfig">当前已保存：{{ generalConfig.prompt_language === 'zh' ? '中文' : 'English' }}</span>
-          <AppButton variant="primary" size="lg" type="button" :loading="savingGeneral" @click="saveGeneralConfig">
+          <AppButton variant="primary" size="sm" type="button" :loading="savingGeneral" @click="saveGeneralConfig">
             {{ savingGeneral ? '保存中…' : '保存通用配置' }}
           </AppButton>
-        </footer>
-      </article>
+        </template>
+      </AppSettingsCard>
       <AgentSettingsPanel v-if="auth.enabled === false || auth.isSuperAdmin" />
     </section>
 
@@ -756,29 +747,21 @@ onMounted(load)
 .model-settings-header h1 { margin: 0; color: #252937; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.035em; }
 .model-settings-header p, .model-config-section > header p { margin: 0; color: #848a9a; font-size: 12px; line-height: 1.6; }
 .settings-section-tabs { margin: 0 0 28px; }
-.general-settings-section { display: grid; width: min(860px, 100%); gap: 15px; }
+.general-settings-section { display: grid; width: min(1000px, 100%); gap: 20px; padding-bottom: 24px; }
 .general-settings-section > header > div { display: grid; gap: 5px; }
-.general-settings-section > header span { color: var(--app-accent); font-size: 9px; font-weight: 750; letter-spacing: .16em; }
-.general-settings-section > header h2 { margin: 0; color: var(--app-text); font-size: 18px; }
-.general-settings-section > header p { margin: 0; color: var(--app-text-muted); font-size: 11px; line-height: 1.6; }
-.general-setting-card { display: grid; gap: 22px; padding: 22px; border: 1px solid var(--app-border); border-radius: 16px; color: var(--app-text); background: var(--app-surface); box-shadow: var(--app-shadow); }
-.general-setting-heading { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 13px; }
-.general-setting-heading h3 { margin: 0 0 4px; color: var(--app-text); font-size: 14px; }
-.general-setting-heading p { margin: 0; color: var(--app-text-muted); font-size: 10px; line-height: 1.55; }
-.general-setting-status { display: inline-flex; align-items: center; gap: 5px; color: #258662; font-size: 9px; }
+.general-settings-section > header h2 { margin: 0; color: var(--app-text); font-size: 16px; }
+.general-settings-section > header p { margin: 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
+.general-setting-status { display: inline-flex; padding: 4px 9px; border-radius: 6px; background: var(--app-surface-muted); color: var(--app-text-secondary); font-size: 11px; }
 .prompt-language-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.prompt-language-options button { display: grid; min-height: 88px; grid-template-columns: 42px minmax(0, 1fr) 18px; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--app-border); border-radius: 13px; outline: none; color: var(--app-text-secondary); background: var(--app-surface-muted); cursor: pointer; text-align: left; transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+.prompt-language-options button { display: grid; min-height: 64px; grid-template-columns: 32px minmax(0, 1fr) 18px; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--app-border); border-radius: 10px; outline: none; color: var(--app-text-secondary); background: var(--app-surface); cursor: pointer; text-align: left; transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
 .prompt-language-options button:hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
 .prompt-language-options button:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 18%,transparent); }
 .prompt-language-options button.is-selected { border-color: color-mix(in srgb,var(--app-accent) 58%,var(--app-border)); color: var(--app-accent); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 18%,transparent); }
 .prompt-language-options button > span:nth-child(2) { display: grid; gap: 4px; }
-.prompt-language-options button strong { color: inherit; font-size: 12px; }
-.prompt-language-options button small { color: var(--app-text-muted); font-size: 9px; line-height: 1.45; }
-.language-mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: var(--app-accent); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 11px; font-weight: 750; }
-.general-setting-note { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 10px; color: var(--app-text-muted); background: var(--app-surface-muted); font-size: 9px; line-height: 1.55; }
-.general-setting-note strong { color: var(--app-text-secondary); white-space: nowrap; }
-.general-setting-card > footer { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding-top: 2px; }
-.general-setting-card > footer > span { margin-right: auto; color: var(--app-text-muted); font-size: 9px; }
+.prompt-language-options button strong { color: inherit; font-size: 13px; }
+.prompt-language-options button small { color: var(--app-text-secondary); font-size: 11px; line-height: 1.45; }
+.language-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 8px; color: var(--app-accent); background: var(--app-surface-muted); font-size: 11px; font-weight: 650; }
+.general-setting-note { margin: 12px 0 0; color: var(--app-text-muted); font-size: 11px; line-height: 1.6; }
 .settings-primary-button, .model-config-section > header > button, .model-empty-state button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid #5b5cf6; border-radius: 10px; color: #fff; background: #5b5cf6; box-shadow: 0 8px 20px rgb(91 92 246 / 18%); cursor: pointer; font-size: 12px; font-weight: 600; }
 .settings-primary-button:hover, .model-config-section > header > button:hover, .model-empty-state button:hover { background: #4d4ee8; }
 .model-source-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; padding: 14px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
@@ -896,9 +879,5 @@ onMounted(load)
   .model-form-grid { grid-template-columns: 1fr; }
   .model-form-grid label, .model-form-grid label.is-full { grid-column: 1; }
   .prompt-language-options { grid-template-columns: 1fr; }
-  .general-setting-heading { grid-template-columns: 46px minmax(0, 1fr); }
-  .general-setting-status { grid-column: 2; }
-  .general-setting-card > footer { align-items: stretch; flex-direction: column; }
-  .general-setting-card > footer > span { margin-right: 0; }
 }
 </style>
