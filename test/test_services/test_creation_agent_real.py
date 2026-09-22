@@ -145,3 +145,59 @@ async def test_real_handler_persists_patch_and_usage_through_production_path(tes
         'input_tokens': assistant.usage['input_tokens'], 'output_tokens': assistant.usage['output_tokens'],
         'cache_read_tokens': assistant.usage['cache_read_tokens'], 'cost_cny': str(record.cost),
         'compactions': assistant.usage['compactions']}, ensure_ascii=False))
+
+
+@pytest.mark.real_llm
+@pytest.mark.asyncio
+@pytest.mark.parametrize('archived_name', [False, True])
+async def test_real_creation_and_archived_conflict_finish_without_permission_handshake(test_env, monkeypatch, archived_name):
+    import json
+    from auth.deps import AuthContext
+    from models.asset import Asset
+    from models.creation_agent import AgentMessage, PromptChange
+    from services.ai_task_executor import AiTaskExecutor
+    from services.creation_agent import handler
+    from services.creation_agent.sessions import agent_sessions
+    from services.creation_objects import CreationObjects, project_write
+    from test.test_services.test_creation_agent_sessions import session_fixture
+    from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+
+    configured = real_evaluation_configuration(test_env)
+    if configured is None:
+        pytest.skip('未配置真实模型验收参数')
+    settings, ledger, _ = configured
+    conversation, request, config = await session_fixture()
+    config.pricing = settings['pricing']
+    config.max_tokens = 1200
+    await config.save()
+    if archived_name:
+        asset = await Asset.create(novel_id=conversation.novel_id, canonical_name='胖子', asset_type=1,
+            description='旧人物', base_traits='旧形象', source_chapters=[1])
+        async with project_write(conversation.novel_id):
+            await CreationObjects(conversation.novel_id).archive('asset', asset.id)
+    request = request.model_copy(update={'targets': [], 'write_scope': 'chapter',
+        'message': '你能帮我创建一个新的角色吗，叫胖子，是主角的死党，黑色短发，圆脸，穿校服。'})
+    model = UsagePreservingChatModel(settings['model'], provider=OpenAIProvider(openai_client=AsyncOpenAI(
+        base_url=settings['base_url'], api_key=settings['api_key'], max_retries=0, timeout=60)))
+    monkeypatch.setattr(handler, 'configured_model', lambda *args: BudgetedEvaluationModel(model, ledger))
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, handler.CreationAgentTaskHandler())
+    try:
+        await executor.run(task)
+    finally:
+        await model.client.close()
+    await task.refresh_from_db()
+    assistant = await AgentMessage.get(task=task, role='assistant')
+    assert task.status == TaskStatusEnum.completed.value, task.error_message
+    assert '尚未接入' not in assistant.content
+    if archived_name:
+        assert not await Asset.filter(novel_id=conversation.novel_id, canonical_name='胖子').exists()
+        assert any(word in assistant.content for word in ('移除', '删除', '回收', '归档'))
+        assert not await PromptChange.filter(task=task).exists()
+    else:
+        assert await Asset.filter(novel_id=conversation.novel_id, canonical_name='胖子').count() == 1
+        assert await PromptChange.filter(task=task).count() == 1
+    print(json.dumps({'case': 'archived_conflict' if archived_name else 'creation',
+        'requests': assistant.usage['requests'], 'input_tokens': assistant.usage['input_tokens'],
+        'cache_read_tokens': assistant.usage['cache_read_tokens'], 'saved': not archived_name}, ensure_ascii=False))

@@ -158,23 +158,25 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         async def complete(result):
             await before_request()
+            assistant.usage['turn_limited'] = deps.turn_limited
             if isinstance(result.output, CreationReply):
                 saved_memories = await creation_memory.save(user_message, result.output.constraints)
                 assistant.usage['remembered_rules'] = [{'content': m.content, 'scope': m.scope} for m in saved_memories]
-                await assistant.save(update_fields=['usage'])
+            await assistant.save(update_fields=['usage'])
             await AgentMessage.filter(id=assistant.id).update(native_messages=json.loads(result.new_messages_json()))
             final_text = result.output.message if isinstance(result.output, CreationReply) else result.output
             yield TextMessageStartEvent(message_id=final_message_id)
             yield TextMessageContentEvent(message_id=final_message_id, delta=final_text)
             yield TextMessageEndEvent(message_id=final_message_id)
 
+        deps = CreationAgentDeps(service=service, context=context, source_message=user_message,
+                                 context_loader=refresh_context, changes=changes if progressive else None, limits=limits)
         try:
             history = await prepare_history(conversation, assistant, limits, recorded_model)
             context['conversation_summary'] = conversation.summary
             async for event in stream_creation_agent(
                 message=request.message, conversation_id=str(conversation.id), run_id=task_id,
-                model=recorded_model, deps=CreationAgentDeps(service=service, context=context, source_message=user_message, context_loader=refresh_context,
-                    changes=changes if progressive else None, limits=limits),
+                model=recorded_model, deps=deps,
                 usage_limits=UsageLimits(request_limit=limits.request_limit, tool_calls_limit=limits.tool_calls_limit,
                                          total_tokens_limit=limits.total_tokens_limit),
                 model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)},

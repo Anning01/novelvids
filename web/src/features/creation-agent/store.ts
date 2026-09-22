@@ -57,7 +57,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [] })
     reportChanges(run.changes)
     if (!isAgentRunning(run.status)) {
-      statusText.value = run.status === 3 ? (run.changes.length ? '修改已保存' : '回复已完成')
+      statusText.value = run.status === 3 ? (run.usage.turn_limited ? '本轮处理已结束，可以继续对话' : run.changes.length ? '修改已保存' : '回复已完成')
         : run.status === 5 ? '已停止，已保存的修改仍保留' : '运行未完成，已保存的修改仍可查看'
       error.value = run.error_message || ''
     }
@@ -105,6 +105,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         onToolCallStartEvent({ event }) {
           if (revision !== epoch || subscription !== handle) return
           const labels: Record<string, string> = { get_creation_context: '正在读取创作上下文', query_creation_objects: '正在查找对象',
+            create_creation_setting: '正在创建新设定', patch_creation_prompts: '正在保存提示词调整',
             read_creation_objects: '正在查看设定和引用', apply_creation_changes: '正在保存创作调整', undo_creation_change: '正在撤销操作' }
           statusText.value = labels[event.toolCallName] || '正在调整提示词'
         },

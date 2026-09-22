@@ -27,6 +27,19 @@ beforeEach(() => {
 })
 
 describe('creation assistant store', () => {
+  it('allows another message after the per-turn limit without discarding history', async () => {
+    const store = useCreationAgentStore()
+    await store.open(7)
+    vi.mocked(agentApi.submit).mockResolvedValueOnce({ code: 0, message: '', data: {
+      ...run, content: '本轮已结束，可以继续', usage: { turn_limited: true },
+    } }).mockResolvedValueOnce({ code: 0, message: '', data: { ...run, task_id: 'run-2' } })
+    expect(await store.send(input)).toBe(true)
+    expect(store.statusText).toContain('可以继续对话')
+    expect(store.busy).toBe(false)
+    expect(await store.send({ ...input, message: '继续完成' })).toBe(true)
+    expect(agentApi.submit).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(agentApi.submit).mock.calls[1]?.[0]).toBe(vi.mocked(agentApi.submit).mock.calls[0]?.[0])
+  })
   it('updates the original result card when conversational undo returns its receipt', async () => {
     const store = useCreationAgentStore()
     await store.open(7)

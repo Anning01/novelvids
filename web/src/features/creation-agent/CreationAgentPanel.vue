@@ -259,10 +259,11 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
     </BubbleList>
     <footer v-if="ready && !store.loading">
       <div v-if="store.statusText" class="creation-agent-panel__status" role="status">{{ store.statusText }}</div>
+      <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">继续对话</AppButton>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">编辑后重试</AppButton><AppButton size="xs" @click="router.push('/settings')">查看设置</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">重新连接</AppButton></p>
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />重新连接</AppButton>
       <p v-if="pendingCount" class="creation-agent-panel__constraint-notice" role="status"><button type="button" @click="pickerOpen = true">{{ pendingCount }} 个对象有新设定待核对 <span>查看</span></button></p>
-      <p v-if="statusError" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
+      <p v-if="statusError && (pickerOpen || targets.length)" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
       <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
         <template #context>
           <div v-if="targets.length" class="creation-agent-panel__selected" aria-label="已选修改对象">

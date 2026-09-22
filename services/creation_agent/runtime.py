@@ -16,13 +16,14 @@ from pydantic_ai.usage import UsageLimits
 from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.settings import ModelSettings
 
-from prompts.creation_agent import CREATION_AGENT_INSTRUCTIONS, CREATION_CRUD_INSTRUCTIONS, render_creation_request
+from prompts.creation_agent import CREATION_AGENT_INSTRUCTIONS, CREATION_CRUD_INSTRUCTIONS, render_creation_request, render_turn_limit_instruction
 from schemas.creation_agent import AgentConfiguration, ImagePromptEdit, StoryboardPromptEdit, CreationReply, AgentTarget
 from schemas.creation_objects import CreationObjectQuery, CreationChangeSet, CreationPromptPatch
 from models.creation_agent import AgentMessage, PromptChange
 from services.creation_agent.tools import PromptEditService
 from services.creation_agent.changes import CreationChanges
 from services.creation_agent.history import compact_retry_history
+from services.creation_objects import CreationNameConflict
 
 
 @dataclass
@@ -37,6 +38,17 @@ class CreationAgentDeps:
     tools_enabled: bool = False
     enabled_capabilities: set[str] = field(default_factory=set)
     read_cache: dict = field(default_factory=dict)
+    creation_rules_seen: dict[int, list[dict]] = field(default_factory=dict)
+    turn_limited: bool = False
+
+
+def final_reply_due(ctx: RunContext[CreationAgentDeps]) -> bool:
+    if ctx.deps.changes is None:
+        return False
+    calls = getattr(ctx.model, 'calls', None)
+    count = len(calls) if isinstance(calls, list) else ctx.usage.requests
+    limit = getattr(ctx.model, 'request_limit', None) or ctx.deps.limits.request_limit
+    return count >= limit - 1
 
 
 def _referenced_definitions(schema: dict) -> set[str]:
@@ -110,11 +122,14 @@ def _narrow_change_schema(schema: dict, capabilities: set[str]) -> dict:
 
 
 async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions):
+    if final_reply_due(ctx):
+        ctx.deps.turn_limited = True
+        return []
     legacy = {'update_image_prompt', 'update_storyboard_prompt'}
     current = {'query_creation_objects', 'read_creation_objects', 'apply_creation_changes', 'undo_creation_change'}
     # Historical selected-prompt runners remain replayable. Each live run sees
     # exactly one set of writers, never two competing business contracts.
-    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts'}
+    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting'}
     capabilities = (
         {'query', 'read', 'create', 'update', 'delete', 'undo'}
         if ctx.deps.tools_enabled
@@ -122,12 +137,8 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
     )
     if ctx.deps.changes:
         if not capabilities:
-            omitted |= current
+            omitted |= current - {'query_creation_objects', 'read_creation_objects'}
         else:
-            if 'query' not in capabilities:
-                omitted.add('query_creation_objects')
-            if 'read' not in capabilities:
-                omitted.add('read_creation_objects')
             if not capabilities.intersection({
                 'create', 'create_setting', 'create_scene',
                 'update', 'update_setting', 'update_scene', 'delete',
@@ -154,7 +165,8 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
 
 
 def creation_instructions(ctx: RunContext[CreationAgentDeps]):
-    return CREATION_CRUD_INSTRUCTIONS if ctx.deps.changes else CREATION_AGENT_INSTRUCTIONS
+    instructions = CREATION_CRUD_INSTRUCTIONS if ctx.deps.changes else CREATION_AGENT_INSTRUCTIONS
+    return instructions + render_turn_limit_instruction() if final_reply_due(ctx) else instructions
 
 
 async def process_working_history(ctx: RunContext[CreationAgentDeps], messages: list[ModelMessage]):
@@ -181,7 +193,7 @@ _TECHNICAL_REPLY_REFERENCE = re.compile(
 @creation_agent.output_validator
 async def validate_creative_memory(ctx: RunContext[CreationAgentDeps], output: str | CreationReply):
     message = output.message if isinstance(output, CreationReply) else output
-    if _TECHNICAL_REPLY_REFERENCE.search(message):
+    if _TECHNICAL_REPLY_REFERENCE.search(message) and not final_reply_due(ctx):
         raise ModelRetry("最终回复请使用用户可见的对象名称和人物、场景、道具等中文类别，不展示内部ID或字段名")
     if isinstance(output, CreationReply) and output.constraints:
         from services.creation_agent.memory import creation_memory
@@ -224,6 +236,8 @@ async def get_creation_context(ctx: RunContext[CreationAgentDeps], chapter_offse
             if include_creation_rules and service.request.chapter_id
             else {}
         )
+        if include_creation_rules and service.request.chapter_id:
+            ctx.deps.creation_rules_seen[service.request.chapter_id] = deepcopy(prospective['constraints_for_new_objects'])
         context = dict(ctx.deps.context)
         if include_project:
             from models.novel import Novel
@@ -374,6 +388,8 @@ async def read_creation_objects(ctx: RunContext[CreationAgentDeps], targets: lis
     try:
         prospective = await service.read_creation_context(chapter_id) if chapter_id else {}
         if chapter_id:
+            ctx.deps.creation_rules_seen[chapter_id] = deepcopy(prospective['constraints_for_new_objects'])
+        if chapter_id:
             prospective['chapter'] = await service.catalog.read_chapter(chapter_id, service.chapter_character_budget, chapter_offset)
         elif chapter_offset is not None:
             raise ValueError('读取正文片段时请指定章节')
@@ -429,6 +445,39 @@ async def patch_creation_prompts(ctx: RunContext[CreationAgentDeps], patches: li
 
 
 @creation_agent.tool(sequential=True)
+async def create_creation_setting(
+    ctx: RunContext[CreationAgentDeps], name: Annotated[str, Field(min_length=1, max_length=100)],
+    asset_type: Literal[1, 2, 3], description: Annotated[str, Field(min_length=1, max_length=8000)],
+    prompt: Annotated[str, Field(min_length=1, max_length=32000)],
+    chapter_id: Annotated[int | None, Field(gt=0)] = None,
+) -> dict:
+    """直接创建人物(1)、场景(2)或道具(3)；已具备权限，无需额外启用工具。"""
+    service = crud_service(ctx)
+    try:
+        await service.authorize()
+        chapter = await service.scope.chapter(chapter_id)
+        rules = await service.read_creation_context(chapter.id)
+        # Rules must be visible to the model before it authors a new setting.
+        # Empty rules need no additional model round trip.
+        applicable = rules['constraints_for_new_objects']
+        known = ctx.deps.creation_rules_seen.get(chapter.id)
+        if applicable and applicable != known:
+            ctx.deps.creation_rules_seen[chapter.id] = deepcopy(applicable)
+            return {'status': 'rules_required', 'constraints_for_new_objects': applicable,
+                    'message': '请按这些新增约束调整设定，再提交创建。尚未保存。'}
+        change_set = CreationChangeSet.model_validate({'operations': [{
+            'operation': 'create_setting', 'kind': 'asset', 'client_ref': 'new_setting',
+            'asset_type': asset_type, 'name': name, 'description': description,
+            'prompt': prompt, 'chapter_ids': [chapter.id],
+        }]})
+        return change_receipt(await service.apply(change_set, tool_call_id=ctx.tool_call_id or ''))
+    except CreationNameConflict as exc:
+        return exc.result()
+    except ValueError as exc:
+        raise ModelRetry(str(exc)) from None
+
+
+@creation_agent.tool(sequential=True)
 async def apply_creation_changes(ctx: RunContext[CreationAgentDeps], changes: CreationChangeSet) -> dict:
     """原子执行设定与分镜增删改；相关新增用 client_ref 引用；只返回已成功保存的回执。"""
     try:
@@ -444,6 +493,8 @@ async def apply_creation_changes(ctx: RunContext[CreationAgentDeps], changes: Cr
             if not allowed:
                 raise ValueError('本轮未启用所需写入能力，请重新读取上下文并声明具体的新增、修改或删除能力')
         return change_receipt(await crud_service(ctx).apply(changes, tool_call_id=ctx.tool_call_id or ''))
+    except CreationNameConflict as exc:
+        return exc.result()
     except ValueError as exc:
         raise ModelRetry(str(exc)) from None
 

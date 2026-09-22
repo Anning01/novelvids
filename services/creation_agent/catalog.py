@@ -105,7 +105,23 @@ class CreationCatalog:
                 item['reference_count'] = await Scene.filter(chapter_id=object_id).count()
             else:
                 item['reference_count'] = (await self.references(kind, object_id, page_size=1))['total']
-        return {'items': items, 'total': total, 'page': request.page,
+        archived_matches = []
+        if request.search and request.kind in {'all', 'asset', 'variant'}:
+            # Name-only tombstones explain uniqueness conflicts without exposing
+            # removed prompts or offering them as active writable UI targets.
+            archived = Asset.with_deleted().filter(novel_id=self.novel_id, deleted_at__isnull=False,
+                canonical_name__icontains=request.search, asset_type__in=[1, 2, 3])
+            if request.asset_type:
+                archived = archived.filter(asset_type=request.asset_type)
+            if chapter:
+                # Removed objects no longer occur in active scene relations.
+                candidates = await archived.order_by('id').values('id', 'source_chapters', 'is_global')
+                archived = archived.filter(id__in=[r['id'] for r in candidates
+                    if r['is_global'] or chapter.number in (r['source_chapters'] or [])])
+            if request.kind != 'variant':
+                rows = await archived.order_by('id').offset((request.page - 1) * request.page_size).limit(request.page_size).values('id', 'canonical_name')
+                archived_matches = [{'kind': 'asset', 'id': row['id'], 'name': row['canonical_name'], 'state': 'archived'} for row in rows]
+        return {'items': items, 'total': total, 'page': request.page, 'archived_matches': archived_matches,
                 'next_page': request.page + 1 if request.page * request.page_size < total else None,
                 'chapter_id': chapter_id, 'read_only': True}
 

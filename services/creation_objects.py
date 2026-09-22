@@ -24,6 +24,21 @@ OBJECT_MODELS = {"asset": Asset, "variant": AssetVariant, "scene": Scene}
 ACTIVE_TASK_STATUSES = [TaskStatusEnum.pending, TaskStatusEnum.queued, TaskStatusEnum.running]
 
 
+class CreationNameConflict(ValueError):
+    """A creation collision is a resolvable business state, not a model retry."""
+
+    def __init__(self, kind: str, target):
+        self.existing = {'kind': kind, 'id': target.id,
+                         'name': target.canonical_name if kind == 'asset' else target.name,
+                         'state': 'archived' if target.deleted_at else 'active'}
+        super().__init__('同名设定已存在；已移除的对象不能通过创建操作覆盖')
+
+    def result(self) -> dict:
+        return {'status': 'needs_resolution', 'reason': 'name_conflict', 'existing': self.existing,
+                'saved': False, 'message': '同名对象已移除，请告知用户选择恢复原对象或换名创建；无需重复查询活动目录。'
+                if self.existing['state'] == 'archived' else '同名对象已存在，请读取并使用现有对象；不要重复创建。'}
+
+
 @asynccontextmanager
 async def project_write(novel_id: int):
     """Serialize dependent writes on PostgreSQL and acquire SQLite's write lock."""
@@ -76,8 +91,9 @@ class CreationObjects:
         return assets
 
     async def create_setting(self, values: dict) -> Asset:
-        if await Asset.with_deleted().filter(novel_id=self.novel_id, asset_type=values['asset_type'], canonical_name=values['canonical_name']).exists():
-            raise ValueError('同名设定已存在；若已移除，请恢复原设定')
+        existing = await Asset.with_deleted().filter(novel_id=self.novel_id, asset_type=values['asset_type'], canonical_name=values['canonical_name']).first()
+        if existing:
+            raise CreationNameConflict('asset', existing)
         return await Asset.create(novel_id=self.novel_id, **values)
 
     async def ensure_variant_chapters(self, asset_id: int, numbers: list[int], *, exclude_id: int | None = None):
@@ -87,8 +103,9 @@ class CreationObjects:
 
     async def create_variant(self, asset_id: int, values: dict) -> AssetVariant:
         await self.get('asset', asset_id)
-        if await AssetVariant.with_deleted().filter(asset_id=asset_id, name=values['name']).exists():
-            raise ValueError('同名形态已存在；若已移除，请恢复原形态')
+        existing = await AssetVariant.with_deleted().filter(asset_id=asset_id, name=values['name']).first()
+        if existing:
+            raise CreationNameConflict('variant', existing)
         await self.ensure_variant_chapters(asset_id, values.get('chapter_numbers') or [])
         return await AssetVariant.create(asset_id=asset_id, **values)
 
