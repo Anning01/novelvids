@@ -98,6 +98,12 @@ export interface AgentConfiguration {
   max_targets: number
   timeout_seconds: number
   max_context_characters: number
+  working_input_tokens?: number
+  compaction_trigger_ratio?: number
+  compaction_target_ratio?: number
+  summary_output_tokens?: number
+  summary_timeout_seconds?: number
+  context_page_characters?: number
   history_runs: number
   max_output_tokens: number
   total_tokens_limit: number

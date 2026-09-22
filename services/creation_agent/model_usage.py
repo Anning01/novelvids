@@ -16,8 +16,15 @@ def preserve_chat_usage(mapped: RequestUsage, raw: CompletionUsage | None) -> Re
     if raw is not None:
         mapped.input_tokens = raw.prompt_tokens
         mapped.output_tokens = raw.completion_tokens
-        if raw.prompt_tokens_details is not None:
-            mapped.cache_read_tokens = raw.prompt_tokens_details.cached_tokens or 0
+        cached = raw.prompt_tokens_details.cached_tokens if raw.prompt_tokens_details is not None else None
+        extras = raw.model_extra or {}
+        if cached is None:
+            cached = extras.get('prompt_cache_hit_tokens')
+        if cached is not None:
+            mapped.cache_read_tokens = min(raw.prompt_tokens, max(0, int(cached)))
+            mapped.details['cache_usage_reported'] = 1
+        elif mapped.cache_read_tokens:
+            mapped.details['cache_usage_reported'] = 1
     return mapped
 
 

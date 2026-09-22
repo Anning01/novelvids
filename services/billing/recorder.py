@@ -93,6 +93,10 @@ class BillingRecorder:
     ) -> ModelUsageRecord | None:
         config = config_snapshot or await self._config(model_config_id)
         usage = normalize_token_usage(token_usage)
+        if isinstance(token_usage, dict):
+            for key in ('cache_read_tokens', 'cache_write_tokens', 'cache_usage_reported', 'summary_requests', 'compactions', 'cache_price_configured'):
+                if key in token_usage:
+                    usage[key] = token_usage[key]
         cost = compute_text_cost(token_usage, config.pricing if config else None)
         return await self._create(
             novel_id=novel_id,

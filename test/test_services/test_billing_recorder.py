@@ -35,6 +35,53 @@ async def test_record_text_snapshots_pricing_and_cost():
 
 
 @pytest.mark.asyncio
+async def test_record_text_preserves_cache_and_compaction_usage():
+    config = await AiModelConfig.create(
+        task_type=AiTaskTypeEnum.creation_agent.value,
+        name="agent-cache",
+        base_url="https://api.example.com",
+        api_key="sk",
+        model="agent-model",
+        pricing={
+            "type": "text",
+            "currency": "CNY",
+            "input_price_per_1m": 4.0,
+            "cache_input_price_per_1m": 0.5,
+            "output_price_per_1m": 8.0,
+        },
+    )
+    record = await billing_recorder.record_text(
+        novel_id=7,
+        task_type=AiTaskTypeEnum.creation_agent.value,
+        model_config_id=config.id,
+        token_usage={
+            "input_tokens": 10_000,
+            "output_tokens": 500,
+            "cache_read_tokens": 8_000,
+            "cache_write_tokens": 1_000,
+            "cache_usage_reported": True,
+            "summary_requests": 1,
+            "compactions": 2,
+            "cache_price_configured": True,
+        },
+        status=TaskStatusEnum.completed.value,
+    )
+
+    assert record is not None
+    assert record.usage == {
+        "input_tokens": 10_000,
+        "output_tokens": 500,
+        "cache_read_tokens": 8_000,
+        "cache_write_tokens": 1_000,
+        "cache_usage_reported": True,
+        "summary_requests": 1,
+        "compactions": 2,
+        "cache_price_configured": True,
+    }
+    assert record.cost == Decimal("0.016000")
+
+
+@pytest.mark.asyncio
 async def test_record_image_only_bills_on_provided_count():
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.reference_image.value,

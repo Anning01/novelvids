@@ -1,6 +1,10 @@
 """Validate prompt dependencies and prepare edits without database side effects."""
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from schemas.creation_objects import PromptReplacement
 from collections.abc import Sequence
 
 from prompts.storyboard import (
@@ -131,3 +135,21 @@ def append_prompt_definitions(prompt: str, entities: Sequence[SceneEntity]) -> s
 
     missing = [entity for entity in entities if entity.description not in prompt]
     return render_prompt_definitions(prompt, missing)
+
+def replace_prompt_fragments(prompt: str, replacements: Sequence["PromptReplacement"]) -> str:
+    # Resolve against the original snapshot so replacements cannot cascade into
+    # one another and the operation is all-or-nothing.
+    spans = []
+    for item in replacements:
+        if prompt.count(item.old) != 1:
+            raise ValueError('替换片段必须在当前提示词中唯一匹配，请重新读取准确原文')
+        start = prompt.index(item.old)
+        end = start + len(item.old)
+        if any(start < other_end and other_start < end for other_start, other_end, _ in spans):
+            raise ValueError('替换片段不能重叠')
+        spans.append((start, end, item.new))
+    for start, end, new in sorted(spans, reverse=True):
+        prompt = prompt[:start] + new + prompt[end:]
+    if not prompt.strip() or len(prompt) > 32000:
+        raise ValueError('替换后的完整提示词长度无效')
+    return prompt

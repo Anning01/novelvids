@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import json
+import asyncio
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -11,13 +12,14 @@ from pydantic_ai.messages import (
     ModelResponse,
     RetryPromptPart,
     ToolCallPart,
+    UserPromptPart,
+    TextPart,
 )
 from pydantic_ai.usage import UsageLimits
 
-from models.creation_agent import AgentConversation, AgentMessage
+from models.creation_agent import AgentConversation, AgentMessage, AgentContextCheckpoint
 from prompts.creation_agent import CREATION_SUMMARY_INSTRUCTIONS, render_creation_summary
 from schemas.creation_agent import AgentConfiguration
-from utils.enums import TaskStatusEnum
 
 
 summary_agent = Agent(instructions=CREATION_SUMMARY_INSTRUCTIONS, name='creation_history_summary')
@@ -72,31 +74,78 @@ def compact_retry_history(messages: list[ModelMessage]) -> list[ModelMessage]:
 
 
 async def prepare_history(conversation: AgentConversation, assistant: AgentMessage, limits: AgentConfiguration, model):
-    previous = await AgentMessage.filter(conversation=conversation, role='assistant', id__lt=assistant.id, id__gt=conversation.summary_until_id,
-        task__status=TaskStatusEnum.completed.value).order_by('-id').only('id', 'task_id', 'native_messages', 'content')
+    """Load a bounded tail; unresolved older history is recoverable, never re-injected wholesale."""
+    query = AgentMessage.filter(conversation=conversation, role='assistant', id__lt=assistant.id,
+                               id__gt=conversation.summary_until_id)
+    previous = await query.order_by('-id').limit(max(32, limits.history_runs * 4))
     recent = []
     characters = 0
+    history_budget = min(limits.max_context_characters // 3, limits.working_input_tokens)
+    from services.creation_agent.context_budget import wire_size
+    from pydantic_ai.models import ModelRequestParameters
     for message in previous[:limits.history_runs]:
-        size = len(json.dumps(message.native_messages, ensure_ascii=False))
-        if characters + size > limits.max_context_characters // 3:
+        native = ModelMessagesTypeAdapter.validate_python(message.native_messages) if message.native_messages else []
+        size = wire_size(native, ModelRequestParameters())['total_characters'] if native else len(message.content) + 800
+        if characters + size > history_budget * limits.compaction_trigger_ratio:
             break
         recent.append(message)
         characters += size
-    older = list(reversed(previous[len(recent):]))
+    cutoff = recent[-1].id if recent else assistant.id
+    older = await query.filter(id__lt=cutoff).order_by('id').limit(limits.history_runs)
     if older:
-        # Only a bounded block is summarized per run. Original records remain available.
-        block = older[:limits.history_runs]
-        records = await AgentMessage.filter(conversation=conversation, task_id__in=[message.task_id for message in block]).order_by('id').only('id', 'role', 'content', 'run_input')
-        budget = max(256, limits.max_context_characters // (2 * max(len(records), 1)))
-        data = [{'message_id': message.id, 'role': message.role, 'content': message.content[:budget],
-                 'targets': (message.run_input or {}).get('targets', []),
-                 'truncated': len(message.content) > budget} for message in records]
-        result = await summary_agent.run(render_creation_summary(conversation.summary, data), model=model,
-            model_settings={'max_tokens': min(1500, limits.max_output_tokens)}, usage_limits=UsageLimits(request_limit=1))
-        conversation.summary = result.output
-        conversation.summary_until_id = block[-1].id
+        records = await AgentMessage.filter(conversation=conversation,
+            task_id__in=[m.task_id for m in older]).order_by('id').only('id', 'role', 'content', 'run_input')
+        budget = max(64, min(800, history_budget // (2 * max(len(records), 1))))
+        data = [{'message_id': m.id, 'role': m.role, 'content': m.content[:budget],
+                 'targets': (m.run_input or {}).get('targets', []),
+                 'truncated': len(m.content) > budget} for m in records]
+        # Fallback is an extractive checkpoint, not a fabricated successful summary.
+        excerpt = '\n'.join(f"[{item['message_id']}] {item['role']}: {item['content']}" for item in data)
+        summary = (conversation.summary + '\n' + excerpt)[-history_budget:]
+        kind = 'extractive_summary'
+        previous_phase = getattr(model, 'phase', 'main')
+        try:
+            if hasattr(model, 'phase'):
+                model.phase = 'summary'
+            result = await asyncio.wait_for(summary_agent.run(
+                render_creation_summary(conversation.summary[:history_budget], data), model=model,
+                model_settings={'max_tokens': min(limits.summary_output_tokens, limits.max_output_tokens)},
+                usage_limits=UsageLimits(request_limit=1)), timeout=limits.summary_timeout_seconds)
+            if not isinstance(result.output, str) or not result.output.strip():
+                raise ValueError('empty summary')
+            summary = result.output[:history_budget]
+            kind = 'summary'
+        except Exception:
+            # Cancellation must propagate. Failures of this optional compression
+            # model never force the main agent to consume an unbounded history.
+            pass
+        finally:
+            if hasattr(model, 'phase'):
+                model.phase = previous_phase
+        await AgentContextCheckpoint.create(conversation=conversation, message_id=assistant.id,
+            until_message_id=older[-1].id, kind=kind, content=summary,
+            payload={'source_message_ids': [m.id for m in records]})
+        conversation.summary = summary
+        conversation.summary_until_id = older[-1].id
         await conversation.save(update_fields=['summary', 'summary_until_id', 'updated_at'])
-    # Do not silently discard the intermediate unsummarized gap after a failed/bounded summary.
-    remaining = [message for message in reversed(previous) if message.id > conversation.summary_until_id and message not in recent]
-    ordered = [*remaining, *reversed(recent)]
-    return [item for message in ordered for item in ModelMessagesTypeAdapter.validate_python(message.native_messages)]
+    history = []
+    if conversation.summary:
+        history.append(ModelRequest(parts=[UserPromptPart(render_creation_summary(conversation.summary, []))]))
+        history.append(ModelResponse(parts=[TextPart('已读取历史摘要；当前业务事实以重新读取的对象为准。')]))
+    # The recent tail may not include a large last run. Preserve its user intent
+    # and actual outcome, not the full payload that caused the original overflow.
+    if not recent and previous:
+        last = previous[0]
+        user = await AgentMessage.get_or_none(conversation=conversation, task_id=last.task_id, role='user')
+        if user:
+            history.append(ModelRequest(parts=[UserPromptPart(user.content[:history_budget // 2])]))
+        history.append(ModelResponse(parts=[TextPart(last.content[:history_budget // 2] or '上一轮未完成，可查询实际保存回执。')]))
+    for message in reversed(recent):
+        if message.native_messages:
+            history.extend(ModelMessagesTypeAdapter.validate_python(message.native_messages))
+        else:
+            user = await AgentMessage.get_or_none(conversation=conversation, task_id=message.task_id, role='user')
+            if user:
+                history.append(ModelRequest(parts=[UserPromptPart(user.content[:800])]))
+            history.append(ModelResponse(parts=[TextPart(message.content[:800] or '上一轮未完成，请查询操作记录。')]))
+    return history

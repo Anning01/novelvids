@@ -52,7 +52,18 @@ class CreateVariantSetting(CreateSetting):
 SettingCreation = Annotated[CreateAssetSetting | CreateVariantSetting, Field(discriminator='kind')]
 
 
+class PromptReplacement(ChangeInput):
+    old: str = Field(min_length=1, max_length=8000)
+    new: str = Field(max_length=8000)
+
+
+class CreationPromptPatch(ChangeInput):
+    target: AgentTarget
+    replacements: list[PromptReplacement] = Field(min_length=1, max_length=30)
+
+
 class SettingFields(ChangeInput):
+    prompt_replacements: list[PromptReplacement] | None = Field(None, min_length=1, max_length=30)
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = Field(None, max_length=8000)
     prompt: str | None = Field(None, min_length=1, max_length=32000)
@@ -62,6 +73,8 @@ class SettingFields(ChangeInput):
 
     @model_validator(mode='after')
     def nonempty(self):
+        if self.prompt is not None and self.prompt_replacements is not None:
+            raise ValueError('完整提示词和片段替换二选一')
         if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
             raise ValueError('提供实际修改字段，未修改的字段省略，不传 null')
         return self
@@ -108,6 +121,7 @@ class SceneContentChanges(StoryboardVisualChanges):
 
 
 class SceneFields(ChangeInput):
+    prompt_replacements: list[PromptReplacement] | None = Field(None, min_length=1, max_length=30)
     description: str | None = Field(None, min_length=1, max_length=8000)
     duration: float | None = Field(None, ge=1, le=30, allow_inf_nan=False)
     assets: list[ObjectRef] | None = Field(None, max_length=30)
@@ -120,7 +134,7 @@ class SceneFields(ChangeInput):
     def nonempty(self):
         if not self.model_fields_set:
             raise ValueError('至少提供一个修改字段')
-        if self.prompt is not None and self.visual is not None:
+        if sum(value is not None for value in (self.prompt, self.visual, self.prompt_replacements)) > 1:
             raise ValueError('纯文本和结构化 Prompt 修改二选一')
         if any(getattr(self, key) is None for key in self.model_fields_set - {'after'}):
             raise ValueError('未修改的字段省略，不传 null')

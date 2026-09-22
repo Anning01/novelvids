@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentUsageDetails from './AgentUsageDetails.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BubbleList } from 'vue-element-plus-x'
@@ -252,6 +253,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
         <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? '本轮已停止' : '本轮未完成' }}{{ item.changes.length ? '，已保存的修改见下方记录' : '，尚未保存修改' }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
+        <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
       </template>
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? `${unreadCount} 条新消息` : '回到最新' }}</AppButton></template>
     </BubbleList>

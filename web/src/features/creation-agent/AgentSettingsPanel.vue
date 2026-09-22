@@ -8,10 +8,16 @@ import type { AgentConfiguration } from './types'
 const configuration = ref<AgentConfiguration | null>(null)
 const saving = ref(false)
 const error = ref('')
-const fields: { key: Exclude<keyof AgentConfiguration, 'enabled'>; label: string }[] = [
+const fields: { key: Exclude<keyof AgentConfiguration, 'enabled'>; label: string; ratio?: boolean }[] = [
   { key: 'request_limit', label: '每轮模型调用上限' }, { key: 'tool_calls_limit', label: '每轮工具调用上限' },
   { key: 'max_targets', label: '每轮最多修改对象数' }, { key: 'timeout_seconds', label: '运行超时（秒）' },
   { key: 'max_context_characters', label: '上下文字符预算' }, { key: 'history_runs', label: '保留近期对话轮数' },
+  { key: 'working_input_tokens', label: '工作上下文预算（预估 token）' },
+  { key: 'compaction_trigger_ratio', label: '自动整理触发比例', ratio: true },
+  { key: 'compaction_target_ratio', label: '整理后目标比例', ratio: true },
+  { key: 'summary_output_tokens', label: '摘要输出上限' },
+  { key: 'summary_timeout_seconds', label: '摘要等待时间（秒）' },
+  { key: 'context_page_characters', label: '每页读取字符数' },
   { key: 'max_output_tokens', label: '单次输出 token 上限' }, { key: 'total_tokens_limit', label: '每轮总 token 上限' },
 ]
 onMounted(async () => {
@@ -30,12 +36,12 @@ async function save() {
 <template>
   <article class="agent-settings-panel">
     <h2>创作助手</h2>
-    <p>只允许修改图片与分镜提示词。请先在模型配置中选择“创作助手”用途，并启用工具调用能力。</p>
+    <p>支持管理人物、场景、道具与分镜。请先在模型配置中选择“创作助手”用途，并启用工具调用能力。</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <form v-if="configuration" @submit.prevent="save">
       <label class="agent-settings-panel__enable"><input v-model="configuration.enabled" type="checkbox" role="switch" />启用创作助手</label>
       <details><summary>调用预算与运行限制</summary><div class="agent-settings-panel__fields">
-        <label v-for="field in fields" :key="field.key">{{ field.label }}<input v-model.number="configuration[field.key]" type="number" min="1" required /></label>
+        <label v-for="field in fields" :key="field.key">{{ field.label }}<input v-model.number="configuration[field.key]" type="number" :min="field.ratio ? 0.01 : 1" :max="field.ratio ? 0.99 : undefined" :step="field.ratio ? 0.01 : 1" /></label>
       </div></details>
       <AppButton type="submit" variant="primary" :loading="saving">保存助手配置</AppButton>
     </form>

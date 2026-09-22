@@ -19,9 +19,21 @@ class AgentConfiguration(BaseModel):
     max_targets: int = Field(8, ge=1, le=100)
     timeout_seconds: int = Field(180, ge=10, le=900)
     max_context_characters: int = Field(64000, ge=2000, le=200000)
+    working_input_tokens: int = Field(12000, ge=1000, le=100000)
+    compaction_trigger_ratio: float = Field(0.70, gt=0.1, lt=1)
+    compaction_target_ratio: float = Field(0.45, gt=0, lt=1)
+    summary_output_tokens: int = Field(1000, ge=128, le=2000)
+    summary_timeout_seconds: int = Field(15, ge=1, le=60)
+    context_page_characters: int = Field(4000, ge=500, le=16000)
     history_runs: int = Field(6, ge=1, le=30)
     max_output_tokens: int = Field(8000, ge=256, le=16000)
     total_tokens_limit: int = Field(100000, ge=1000, le=500000)
+
+    @model_validator(mode='after')
+    def valid_compaction_thresholds(self):
+        if self.compaction_target_ratio >= self.compaction_trigger_ratio:
+            raise ValueError('压缩目标必须小于触发阈值')
+        return self
 
 
 class AgentTarget(BaseModel):

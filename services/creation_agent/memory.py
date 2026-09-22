@@ -60,6 +60,12 @@ class CreationMemory:
             await Novel.filter(id=source.conversation.novel_id).using_db(connection).select_for_update().first()
             saved = []
             for proposal in proposals:
+                identical = await CreationConstraint.filter(novel_id=source.conversation.novel_id,
+                    content=proposal.content, superseded_by_id=None).using_db(connection)
+                existing = next((row for row in identical if row.scope == proposal.scope.model_dump()), None)
+                if existing is not None and proposal.supersedes_id is None:
+                    saved.append(existing)
+                    continue
                 fingerprint = hashlib.sha256(proposal.model_dump_json().encode()).hexdigest()
                 constraint, created = await CreationConstraint.get_or_create(
                     source_message_id=source.id, fingerprint=fingerprint, using_db=connection,

@@ -101,18 +101,25 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             max_batch_size=limits.max_targets, authorization_check=before_request)
         novel = await Novel.get(id=conversation.novel_id)
         chapter = await Chapter.get_or_none(id=request.chapter_id, novel_id=novel.id) if request.chapter_id else None
+        progressive = 'write_scope' in user_message.run_input
         context = {"project": {"id": novel.id, "name": novel.name, "outline": novel.story_outline,
                               "setting": novel.project_setting, "style": novel.custom_style_prompt or novel.style_key},
                    "chapter": chapter_context(chapter, max(500, limits.max_context_characters // 3)),
                    "conversation_summary": conversation.summary}
+        if progressive:
+            context['project'] = {'id': novel.id, 'name': novel.name, 'style': novel.custom_style_prompt or novel.style_key}
+            context['chapter'] = {'id': chapter.id, 'name': chapter.name, 'number': chapter.number} if chapter else None
         context['constraints'] = await creation_memory.applicable(novel.id, request)
         async def refresh_context(chapter_offset: int | None = None):
             await before_request()
             await novel.refresh_from_db()
             current_chapter = await Chapter.get_or_none(id=request.chapter_id, novel_id=novel.id) if request.chapter_id else None
-            context['chapter'] = chapter_context(current_chapter, max(500, limits.max_context_characters // 3), chapter_offset)
-            context['project'].update(outline=novel.story_outline, setting=novel.project_setting,
-                                      style=novel.custom_style_prompt or novel.style_key)
+            context['chapter'] = (chapter_context(current_chapter, limits.context_page_characters, chapter_offset)
+                if not progressive or chapter_offset is not None else
+                {'id': current_chapter.id, 'name': current_chapter.name, 'number': current_chapter.number} if current_chapter else None)
+            if not progressive:
+                context['project'].update(outline=novel.story_outline, setting=novel.project_setting,
+                                          style=novel.custom_style_prompt or novel.style_key)
             context['constraints'] = await creation_memory.applicable(novel.id, request)
             return context
 
@@ -125,15 +132,20 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         changes = CreationChanges(novel_id=novel.id, task_id=assistant.task_id, request=request,
                                   max_batch_size=limits.max_targets, authorization_check=before_request,
                                   max_context_characters=limits.max_context_characters)
+        changes.chapter_character_budget = limits.context_page_characters
         model = configured_model(chosen, limits)
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
             max_characters=min(limits.max_context_characters, chosen.max_context_characters or limits.max_context_characters),
-            request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit)
+            request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits)
         persisted = []
         buffer = []
         content = ""
         last_flush = time.monotonic()
         error = ''
+        async def notify_compaction():
+            buffer.append({'type': 'CUSTOM', 'name': 'context_compaction', 'value': {'status': 'running'}})
+            await flush()
+        recorded_model.budget.on_compact = notify_compaction
         final_message_id = f'{task_id}:validated-reply'
 
         async def flush():
@@ -147,7 +159,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         async def complete(result):
             await before_request()
             if isinstance(result.output, CreationReply):
-                await creation_memory.save(user_message, result.output.constraints)
+                saved_memories = await creation_memory.save(user_message, result.output.constraints)
+                assistant.usage['remembered_rules'] = [{'content': m.content, 'scope': m.scope} for m in saved_memories]
+                await assistant.save(update_fields=['usage'])
             await AgentMessage.filter(id=assistant.id).update(native_messages=json.loads(result.new_messages_json()))
             final_text = result.output.message if isinstance(result.output, CreationReply) else result.output
             yield TextMessageStartEvent(message_id=final_message_id)
@@ -160,7 +174,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             async for event in stream_creation_agent(
                 message=request.message, conversation_id=str(conversation.id), run_id=task_id,
                 model=recorded_model, deps=CreationAgentDeps(service=service, context=context, source_message=user_message, context_loader=refresh_context,
-                    changes=changes if 'write_scope' in user_message.run_input else None),
+                    changes=changes if progressive else None, limits=limits),
                 usage_limits=UsageLimits(request_limit=limits.request_limit, tool_calls_limit=limits.tool_calls_limit,
                                          total_tokens_limit=limits.total_tokens_limit),
                 model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)},

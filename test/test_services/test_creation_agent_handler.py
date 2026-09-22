@@ -1,3 +1,4 @@
+from schemas.creation_agent import AgentConfiguration
 import json
 import asyncio
 from unittest.mock import AsyncMock
@@ -337,7 +338,7 @@ async def test_agent_can_read_bounded_middle_of_current_chapter_and_correct_inva
             assert excerpt['content_offset'] == 15000
             assert excerpt['content_excerpt'].startswith('她的左手受伤，仍穿灰色风衣。')
             assert len(excerpt['content_excerpt']) <= 28000 // 3
-            assert excerpt['content_next_offset'] == 15000 + 28000 // 3
+            assert excerpt['content_next_offset'] == 15000 + AgentConfiguration().context_page_characters
             yield '当前章节中段写明她的左手受伤，仍穿灰色风衣。'
 
     monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args: FunctionModel(stream_function=model))

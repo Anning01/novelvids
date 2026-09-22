@@ -38,6 +38,8 @@ class CreationChanges:
         self.observed: dict[tuple[str, int], str] = {}
         self.rules: dict[tuple[str, int], list[dict]] = {}
         self.creation_rules: dict[int, list[dict]] = {}
+        self.read_snapshots: dict = {}
+        self.partial_prompts: set[tuple[str, int]] = set()
 
     async def authorize(self):
         if self.authorization_check:
@@ -81,7 +83,7 @@ class CreationChanges:
         self.creation_rules[chapter.id] = deepcopy(rules)
         return {'chapter_id': chapter.id, 'constraints_for_new_objects': rules}
 
-    async def read(self, targets: list[AgentTarget]) -> list[dict]:
+    async def read(self, targets: list[AgentTarget], *, use_cache: bool = False) -> list[dict]:
         await self.authorize()
         if not 1 <= len(targets) <= self.max_batch_size:
             raise ValueError('读取对象数量超出本轮上限')
@@ -89,23 +91,26 @@ class CreationChanges:
         # Otherwise a page write between two reads could authorize stale content
         # against a newer version. The lock is released before any model call.
         async with project_write(self.novel_id):
-            return await self._read_locked(targets)
+            return await self._read_locked(targets, use_cache=use_cache)
 
-    async def _read_locked(self, targets: list[AgentTarget]) -> list[dict]:
+    async def _read_locked(self, targets: list[AgentTarget], *, use_cache: bool) -> list[dict]:
         result = []
         for ref in targets:
             await self.creative_target(ref.kind, ref.id)
-        # Reuse the existing standalone prompt/entity projections.
-        reader = PromptEditService(novel_id=self.novel_id, task_id=self.task_id,
-            allowed_targets={(t.kind, t.id) for t in targets}, max_batch_size=self.max_batch_size)
-        prompt_data = {(item['kind'], item['id']): item for item in await reader.read_targets(for_model=True)}
         for ref in targets:
             target = await self.objects.get(ref.kind, ref.id)
             key = (ref.kind, ref.id)
-            self.observed[key] = await object_version(target)
+            version = await object_version(target)
             rules = await self.target_rules(ref)
+            self.observed[key] = version
             self.rules[key] = deepcopy(rules)
-            data = prompt_data[key]
+            cached = self.read_snapshots.get(key) if use_cache else None
+            if cached and cached[0] == version and cached[1] == rules:
+                result.append(deepcopy(cached[2]))
+                continue
+            reader = PromptEditService(novel_id=self.novel_id, task_id=self.task_id,
+                allowed_targets={key}, max_batch_size=self.max_batch_size)
+            data = (await reader.read_targets(for_model=True))[0]
             data.pop('version', None)
             if data.get('edit_mode') == 'legacy_prompt':
                 # In legacy mode the rendered prompt is authoritative. Stale
@@ -120,6 +125,10 @@ class CreationChanges:
             data['fields'].pop('base_traits', None)
             if isinstance(target, Scene):
                 data['chapter_id'] = target.chapter_id
+            if use_cache:
+                if len(self.read_snapshots) >= 100:
+                    self.read_snapshots.pop(next(iter(self.read_snapshots)))
+                self.read_snapshots[key] = (version, deepcopy(rules), deepcopy(data))
             result.append(data)
         return result
 

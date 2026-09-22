@@ -38,16 +38,16 @@ async def test_incremental_summary_preserves_recent_tool_history_and_constraint_
     limits = AgentConfiguration(history_runs=2)
     history = await prepare_history(conversation, current, limits, FunctionModel(model))
     assert len(calls) == 1
-    assert len(history) == 4
-    assert history[0].parts[0].content == '第2轮要求'
+    assert len(history) == 6
+    assert history[2].parts[0].content == '第2轮要求'
     assert conversation.summary_until_id > 0
     again = await prepare_history(conversation, current, limits, FunctionModel(model))
-    assert len(calls) == 1 and len(again) == 4
+    assert len(calls) == 1 and len(again) == 6
     assert await CreationConstraint.filter(novel_id=conversation.novel_id).count() == 1
 
 
 @pytest.mark.asyncio
-async def test_failed_summary_does_not_advance_checkpoint_or_delete_history():
+async def test_failed_summary_uses_extract_checkpoint_without_deleting_history():
     conversation, _, _ = await session_fixture()
     for number in range(3):
         task = await AiTask.create(task_type=7, status=TaskStatusEnum.completed.value)
@@ -56,10 +56,12 @@ async def test_failed_summary_does_not_advance_checkpoint_or_delete_history():
     current = await AgentMessage.create(conversation=conversation, task=task, role='assistant', request_id=uuid4(), request_hash='current')
     def failing(messages, info):
         raise RuntimeError('summary unavailable')
-    with pytest.raises(RuntimeError, match='unavailable'):
-        await prepare_history(conversation, current, AgentConfiguration(history_runs=1), FunctionModel(failing))
+    history = await prepare_history(conversation, current, AgentConfiguration(history_runs=1), FunctionModel(failing))
+    assert history
     await conversation.refresh_from_db()
-    assert conversation.summary_until_id == 0 and conversation.summary == ''
+    assert conversation.summary_until_id > 0 and '回复' in conversation.summary
+    from models.creation_agent import AgentContextCheckpoint
+    assert await AgentContextCheckpoint.filter(conversation=conversation, kind='extractive_summary').count() == 1
     assert await AgentMessage.filter(conversation=conversation).count() == 4
 
 
@@ -80,5 +82,5 @@ async def test_large_history_is_summarized_before_the_turn_count_limit():
         return ModelResponse(parts=[TextPart('上一轮调整了目标12的画面。')])
     history = await prepare_history(conversation, current, AgentConfiguration(history_runs=6, max_context_characters=2000), FunctionModel(summarize))
     assert len(calls) == 1
-    assert history == []
+    assert history and '历史完整提示词' not in str(history)
     assert '目标12' in conversation.summary

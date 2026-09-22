@@ -11,7 +11,7 @@ from schemas.creation_agent import AgentTarget, StoryboardPromptEdit
 from schemas.creation_objects import CreateScene, CreateSetting, CreateAssetSetting, CreateVariantSetting, DeleteObject, UpdateScene, UpdateSetting
 from schemas.scene import SoraScenePromptConfig
 from services.creation_agent.object_state import creation_version, object_label, object_state, object_version, write_fields
-from services.creation_agent.prompt_edits import current_storyboard_structure, prepare_storyboard_edit, validate_image_prompt_edit, validate_prompt_dependencies
+from services.creation_agent.prompt_edits import replace_prompt_fragments, current_storyboard_structure, prepare_storyboard_edit, validate_image_prompt_edit, validate_prompt_dependencies
 from services.creation_agent.tools import PromptEditService
 from services.storyboard.strategies import storyboard_strategy_factory
 
@@ -190,6 +190,10 @@ class CreationOperations:
             sequence=previous.sequence, description=previous.description, duration=previous.duration,
             entities=old_entities, strategy=old_strategy)
         fields = operation.fields
+        if fields.prompt is not None and ('scene', target.id) in self.service.partial_prompts:
+            raise ValueError('当前提示词只读取了片段，请使用精确片段替换以保留未读取的内容')
+        if fields.prompt_replacements is not None:
+            fields = fields.model_copy(update={'prompt': replace_prompt_fragments(target.prompt or '', fields.prompt_replacements)})
         updates = fields.model_dump(exclude_unset=True, include={'description', 'duration'})
         if fields.assets is not None or fields.variant_refs is not None:
             await self.service._check_creation_context(target.chapter_id)
@@ -213,6 +217,10 @@ class CreationOperations:
         await self.objects.ensure_idle(kind, target)
         before = await object_state(target)
         fields = operation.fields
+        if fields.prompt is not None and (kind, target.id) in self.service.partial_prompts:
+            raise ValueError('当前提示词只读取了片段，请使用精确片段替换以保留未读取的内容')
+        if fields.prompt_replacements is not None:
+            fields = fields.model_copy(update={'prompt': replace_prompt_fragments(target.base_traits or '', fields.prompt_replacements)})
         updates = fields.model_dump(exclude_unset=True, include={'description', 'aliases', 'is_global'})
         if fields.is_global is not None and self.service.request.write_scope != 'project':
             raise ValueError('改变全书共用关系需要项目操作范围')

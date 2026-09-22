@@ -70,3 +70,16 @@ class CreationConstraint(AbstractBaseModel):
     class Meta:
         table = "creation_agent_constraints"
         unique_together = (("source_message", "fingerprint"),)
+
+
+class AgentContextCheckpoint(AbstractBaseModel):
+    """Derived working context and bounded recovery archives; original messages remain intact."""
+    conversation = fields.ForeignKeyField("models.AgentConversation", related_name="context_checkpoints", on_delete=fields.CASCADE)
+    message_id = fields.IntField(db_index=True)
+    until_message_id = fields.IntField(default=0)
+    kind = fields.CharField(max_length=24)
+    content = fields.TextField(default="")
+    payload = fields.JSONField(default=dict)
+
+    class Meta:
+        table = "creation_agent_context_checkpoints"

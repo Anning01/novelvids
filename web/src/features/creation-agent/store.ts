@@ -98,6 +98,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
           const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
           if (message) message.content = textMessageBuffer
         },
+        onCustomEvent({ event }) {
+          if (revision !== epoch || subscription !== handle) return
+          if (event.name === 'context_compaction') statusText.value = '正在整理上下文'
+        },
         onToolCallStartEvent({ event }) {
           if (revision !== epoch || subscription !== handle) return
           const labels: Record<string, string> = { get_creation_context: '正在读取创作上下文', query_creation_objects: '正在查找对象',

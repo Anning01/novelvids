@@ -46,7 +46,7 @@ async def test_long_rejected_scene_edit_is_compacted_and_can_finish_within_conte
         message=SimpleNamespace(id=99_999_999, usage={}), before_request=allowed,
         max_characters=64_000, request_limit=4, total_tokens_limit=100_000)
     result = await creation_agent.run('确认', model=recorded,
-        deps=CreationAgentDeps(service=legacy, changes=changes, context={}),
+        deps=CreationAgentDeps(service=legacy, changes=changes, context={}, tools_enabled=True),
         usage_limits=UsageLimits(request_limit=4))
 
     await scene.refresh_from_db()
@@ -65,10 +65,17 @@ async def test_crud_model_discovers_then_creates_without_manual_selection():
         nonlocal calls
         calls += 1
         names = {tool.name for tool in info.function_tools}
-        assert names == {'get_creation_context', 'query_creation_objects', 'read_creation_objects', 'apply_creation_changes', 'undo_creation_change'}
+        assert names == (
+            {'get_creation_context', 'read_creation_history', 'patch_creation_prompts'}
+            if calls == 1 else
+            {'get_creation_context', 'read_creation_history', 'patch_creation_prompts', 'query_creation_objects', 'apply_creation_changes'}
+        )
         assert 'expected_version' not in json.dumps([t.parameters_json_schema for t in info.function_tools])
         if calls == 1:
-            return ModelResponse(parts=[ToolCallPart('get_creation_context', {}, tool_call_id='context')])
+            return ModelResponse(parts=[ToolCallPart('get_creation_context', {
+                'capabilities': ['query', 'create_setting'],
+                'include_changes': True,
+            }, tool_call_id='context')])
         if calls == 2:
             return ModelResponse(parts=[ToolCallPart('query_creation_objects', {'query': {'kind': 'asset'}}, tool_call_id='query')])
         if calls == 3:
@@ -129,7 +136,10 @@ async def test_model_can_find_and_undo_deleted_object_after_native_history_is_co
         nonlocal calls
         calls += 1
         if calls == 1:
-            return ModelResponse(parts=[ToolCallPart('get_creation_context', {}, tool_call_id='context')])
+            return ModelResponse(parts=[ToolCallPart('get_creation_context', {
+                'capabilities': ['undo'],
+                'include_changes': True,
+            }, tool_call_id='context')])
         receipt = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)][-1].content
         if calls == 2:
             candidates = receipt['recent_changes']['items']
