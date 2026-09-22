@@ -53,7 +53,7 @@ withDefaults(defineProps<{
 
 .creation-entry-heading p {
   margin: 0 0 10px;
-  color: #777cf7;
+  color: var(--app-accent);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: .16em;
@@ -61,20 +61,20 @@ withDefaults(defineProps<{
 
 .creation-entry-heading h1 {
   margin: 0;
-  color: #262a37;
+  color: var(--app-text);
   font-size: clamp(28px, 3vw, 38px);
   line-height: 1.2;
   letter-spacing: -.035em;
 }
 
 .creation-entry-heading :deep(.creation-entry-accent) {
-  color: #6263f5;
+  color: var(--app-accent);
 }
 
 .creation-entry-heading small {
   max-width: 620px;
   margin-top: 10px;
-  color: #9398a8;
+  color: var(--app-text-secondary);
   font-size: 13px;
   line-height: 1.6;
 }

@@ -41,9 +41,10 @@ async def write_fields(objects: CreationObjects, target, fields: dict):
     if isinstance(target, AssetVariant) and 'chapter_numbers' in values:
         await objects.ensure_variant_chapters(target.asset_id, values['chapter_numbers'], exclude_id=target.id)
     if isinstance(target, Scene):
-        asset_ids = values.get('asset_ids', await target.assets.all().values_list('id', flat=True))
-        bindings = values.get('variant_bindings', (target.metadata or {}).get('asset_variant_ids') or {})
-        await objects.validate_variant_bindings(asset_ids, bindings)
+        if 'asset_ids' in values or 'variant_bindings' in values:
+            asset_ids = values.get('asset_ids', await target.assets.all().values_list('id', flat=True))
+            bindings = values.get('variant_bindings', (target.metadata or {}).get('asset_variant_ids') or {})
+            await objects.validate_variant_bindings(asset_ids, bindings)
         if 'asset_ids' in values:
             await objects.bind_assets(target, values.pop('asset_ids'))
         if 'variant_bindings' in values:

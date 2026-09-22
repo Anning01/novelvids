@@ -13,6 +13,7 @@ class AgentSettings(AbstractBaseModel):
 
 
 class AgentConversation(AbstractBaseModel):
+    deleted_at = fields.DatetimeField(null=True, description="会话可恢复删除时间")
     novel = fields.ForeignKeyField("models.Novel", related_name="agent_conversations", on_delete=fields.CASCADE)
     created_by = fields.IntField(null=True, db_index=True)
     team_id = fields.IntField(null=True)

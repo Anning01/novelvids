@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, X } from 'lucide-vue-next'
 import type { VideoGenerationModel, VideoReferenceMedia } from '@/types'
 import ImageLightbox from './ImageLightbox.vue'
+import { fallbackImage } from '@/shared/mediaFallback'
 
 const props = defineProps<{
   model: VideoGenerationModel | null
@@ -91,7 +92,8 @@ function closeImagePreview() {
           title="点击放大"
           @click="openImagePreview(item)"
         >
-          <img :src="item.url" :alt="item.name || '参考图片'" />
+          <ImageIcon :size="16" aria-hidden="true" />
+          <img :src="item.url" :alt="item.name || '参考图片'" @error="fallbackImage($event)" />
         </button>
         <video
           v-else
@@ -130,19 +132,19 @@ function closeImagePreview() {
 </template>
 
 <style scoped>
-.reference-media-bar { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 0 16px 8px; color: #858b99; font-size: 9px; }
+.reference-media-bar { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 0 16px 8px; color: var(--app-text-muted); font-size: 9px; }
 .reference-media-bar > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.reference-add { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 0; border-radius: 9px; color: #5e60ed; background: #eeeefe; box-shadow: inset 0 0 0 1px #e1e2ff; cursor: pointer; transition: transform .16s ease, background .16s ease; }
-.reference-add:hover:not(:disabled) { background: #e5e6ff; transform: translateY(-1px); }
-.reference-add:disabled { color: #aeb2bf; background: #f2f3f6; cursor: not-allowed; }
+.reference-add { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 0; border-radius: 9px; color: var(--app-accent); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 18%,var(--app-border)); cursor: pointer; transition: transform .16s ease, background .16s ease; }
+.reference-add:hover:not(:disabled) { background: color-mix(in srgb,var(--app-accent) 16%,var(--app-surface)); transform: translateY(-1px); }
+.reference-add:disabled { color: var(--app-text-muted); background: var(--app-surface-muted); cursor: not-allowed; }
 .reference-add svg.is-spinning, .reference-add svg { animation: none; }
 .reference-add svg:first-child:last-child:is(.lucide-loader-circle) { animation: spin 1s linear infinite; }
 .reference-list { display: flex; min-width: 0; max-width: 56%; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .reference-list::-webkit-scrollbar { display: none; }
-.reference-item { position: relative; width: 58px; height: 34px; flex: 0 0 58px; overflow: hidden; border-radius: 8px; background: #e7e9f1; box-shadow: inset 0 0 0 1px #e1e3ea; }
+.reference-item { position: relative; display: grid; width: 58px; height: 34px; flex: 0 0 58px; overflow: hidden; place-items: center; border-radius: 8px; color: var(--app-text-muted); background: var(--app-fill-subtle); box-shadow: inset 0 0 0 1px var(--app-border); }
 .reference-item.is-reference-highlighted { box-shadow: inset 0 0 0 2px #ff7a8c, 0 0 0 3px rgb(255 122 140 / 24%); animation: reference-pulse .7s ease 2; }
-.reference-image-preview { display: block; width: 100%; height: 100%; padding: 0; overflow: hidden; border: 0; border-radius: inherit; background: transparent; cursor: zoom-in; }
-.reference-image-preview img, .reference-video { display: block; width: 100%; height: 100%; border-radius: inherit; background: #e7e9f1; object-fit: cover; transition: transform .16s ease; }
+.reference-image-preview { position: relative; display: grid; width: 100%; height: 100%; padding: 0; overflow: hidden; place-items: center; border: 0; border-radius: inherit; color: inherit; background: transparent; cursor: zoom-in; }
+.reference-image-preview img, .reference-video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--app-fill-subtle); object-fit: cover; transition: transform .16s ease; }
 .reference-image-preview:hover img { transform: scale(1.05); }
 .reference-image-preview:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
 .reference-name { position: absolute; right: 0; bottom: 0; left: 0; overflow: hidden; padding: 9px 4px 3px; opacity: 0; color: #fff; background: linear-gradient(transparent,rgb(20 23 31 / 78%)); pointer-events: none; transform: translateY(3px); transition: opacity .15s ease,transform .15s ease; }
@@ -158,8 +160,4 @@ function closeImagePreview() {
 .is-disabled .reference-summary { color: #aeb2bd; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes reference-pulse { 50% { transform: scale(1.06); } }
-@media (prefers-color-scheme: dark) {
-  .reference-add { color: #a9aaff; background: #292943; box-shadow: inset 0 0 0 1px #3e3f68; }
-  .reference-item, .reference-video { background: #30333d; box-shadow: inset 0 0 0 1px #414550; }
-}
 </style>

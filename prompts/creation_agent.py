@@ -101,12 +101,24 @@ def render_prompt_definitions(prompt: str, entities: Sequence[StoryboardEntity])
 def render_preserved_tracks(prompt: str, parameters: dict) -> str:
     """Carry authoritative voice tracks into a free-text edit of the visual prompt."""
     parts = [prompt]
+    section_patterns = {
+        "narration": re.compile(r"(?m)^\s*(?:【旁白(?:\s*/\s*内心\s*OS)?】|旁白\s*[：:])"),
+        "dialogue": re.compile(r"(?m)^\s*(?:【人物台词】|(?:人物)?(?:台词|对白)\s*[：:])"),
+    }
     for key, label in (("narration", "旁白 / 内心 OS"), ("dialogue", "人物台词")):
         tracks = parameters.get(key)
-        missing = [track for track in tracks if isinstance(track, str) and track.strip() and track not in prompt] if isinstance(tracks, list) else []
+        missing = (
+            [track for track in tracks if isinstance(track, str) and track.strip() and track not in prompt]
+            if isinstance(tracks, list) and section_patterns[key].search(prompt) is None
+            else []
+        )
         if missing:
             parts.extend((f"【{label}】", *missing))
     sound = parameters.get("sound_design")
-    if isinstance(sound, str) and sound.strip() and sound not in prompt:
+    has_sound_section = re.search(
+        r"(?m)^\s*(?:【声音设计】|(?:环境音|同步声音|声音设计)\s*[：:])",
+        prompt,
+    )
+    if isinstance(sound, str) and sound.strip() and sound not in prompt and has_sound_section is None:
         parts.extend(("【声音设计】", sound))
     return "\n".join(parts)

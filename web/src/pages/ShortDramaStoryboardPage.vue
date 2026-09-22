@@ -46,6 +46,7 @@ import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
 import { api, mediaUrl, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
+import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
 import { estimateVideoCost } from '@/shared/modelPricing'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
@@ -902,26 +903,17 @@ async function selectAssetVoiceReference(reference: AudioReference) {
 
 function selectedAssetImage(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
-  if (variant) return variant.images[0] || ''
-  return asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
+  if (variant) return mediaUrl(variant.images[0] || '')
+  return mediaUrl(asset.main_image || asset.angle_image_1 || asset.angle_image_2 || '')
 }
 
 function selectedAssetThumbnail(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
-  if (variant) return variant.image_thumbnails?.[0] || variant.images[0] || ''
-  return asset.main_image_thumbnail
+  if (variant) return mediaUrl(variant.image_thumbnails?.[0] || variant.images[0] || '')
+  return mediaUrl(asset.main_image_thumbnail
     || asset.angle_image_1_thumbnail
     || asset.angle_image_2_thumbnail
-    || selectedAssetImage(scene, asset)
-}
-
-function selectedAssetPreview(scene: Scene, asset: Asset) {
-  const variant = selectedVariantFor(scene, asset)
-  if (variant) return variant.image_previews?.[0] || variant.images[0] || ''
-  return asset.main_image_preview
-    || asset.angle_image_1_preview
-    || asset.angle_image_2_preview
-    || selectedAssetImage(scene, asset)
+    || selectedAssetImage(scene, asset))
 }
 
 function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
@@ -1020,8 +1012,9 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     label: selectedAssetLabel(scene, asset),
     syntax: `@{${asset.canonical_name}}`,
     group: asset.asset_type === AssetTypeEnum.PERSON ? '角色' : asset.asset_type === AssetTypeEnum.SCENE ? '场景' : '道具',
-    previewUrl: selectedAssetPreview(scene, asset) || undefined,
+    previewUrl: selectedAssetImage(scene, asset) || undefined,
     thumbnailUrl: selectedAssetThumbnail(scene, asset) || undefined,
+    fallbackUrl: selectedAssetImage(scene, asset) || undefined,
     description: asset.description || asset.canonical_name,
     aliases: asset.aliases || [],
   })))
@@ -2126,7 +2119,7 @@ onBeforeUnmount(() => {
                         class="asset-thumb"
                         :class="{ 'is-reference-highlighted': highlightedReferenceKey === `asset:${scene.id}:${asset.id}` }"
                         :data-reference-asset-id="asset.id"
-                      ><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" /><component v-else :is="group.icon" :size="16" /></span>
+                      ><component :is="group.icon" :size="16" /><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" @error="fallbackImage($event, selectedAssetImage(scene, asset))" /></span>
                       <AppButton
                         :id="assetRowPickerAnchorId(scene, asset)"
                         variant="soft"
@@ -2321,7 +2314,7 @@ onBeforeUnmount(() => {
 .storyboard-main.is-workflow-view { height: 100%; padding: 0; }
 .chapter-toolbar { flex-wrap: wrap; position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
 .chapter-summary { position: relative; display: block; min-width: 0; max-width: min(840px,calc(100% - 540px)); padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
-.chapter-summary:hover { background: rgb(255 255 255 / 72%); box-shadow: inset 0 0 0 1px #eceef5; }
+.chapter-summary:hover { background: color-mix(in srgb,var(--app-surface) 72%,transparent); box-shadow: inset 0 0 0 1px var(--app-border); }
 .chapter-summary:focus-visible { outline: 3px solid rgb(91 92 246 / 18%); outline-offset: 1px; }
 .chapter-summary:disabled { cursor: default; }
 .chapter-summary > span { color: #8c91a0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
@@ -2392,9 +2385,9 @@ onBeforeUnmount(() => {
 .selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: minmax(0,1fr) 30px; align-items: end; }
 .selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 10px; }
 .selected-assets.is-scene-assets .asset-name-button { grid-column: 1; }
-.asset-thumb { display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; transition: box-shadow .18s ease, transform .18s ease; }
+.asset-thumb { position: relative; display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; transition: box-shadow .18s ease, transform .18s ease; }
 .asset-thumb.is-reference-highlighted { box-shadow: 0 0 0 3px rgb(255 122 140 / 42%), 0 6px 18px rgb(120 35 52 / 18%); transform: scale(1.04); }
-.asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.asset-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .shot-assets > p { display: grid; min-height: 52px; margin: 0; place-items: center; border-radius: 9px; color: #a1a6b3; background: #f7f8fb; font-size: 9px; }
 .asset-picker { display: grid; max-height: 180px; gap: 4px; overflow-y: auto; padding: 6px; border-radius: 10px; background: #f7f8fb; }
 .asset-picker button { width: 100%; justify-content: flex-start; color: #646a79; }

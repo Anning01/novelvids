@@ -107,6 +107,11 @@ class CreationChanges:
             self.rules[key] = deepcopy(rules)
             data = prompt_data[key]
             data.pop('version', None)
+            if data.get('edit_mode') == 'legacy_prompt':
+                # In legacy mode the rendered prompt is authoritative. Stale
+                # structured parameters invite two competing edit formats and
+                # duplicate a long prompt when the model retries validation.
+                data.pop('prompt_params', None)
             data.update(name=await object_label(target), constraints=rules,
                         fields=await object_state(target), references=await self.catalog.references(ref.kind, ref.id))
             # The prompt projection already contains canonical structured fields.

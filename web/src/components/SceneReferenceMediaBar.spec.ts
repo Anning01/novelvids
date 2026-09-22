@@ -83,6 +83,16 @@ describe('SceneReferenceMediaBar', () => {
     expect(lightbox.get('img').attributes('alt')).toBe('首帧参考.png')
   })
 
+  it('hides a missing uploaded preview instead of showing a broken image icon', async () => {
+    const wrapper = mount(SceneReferenceMediaBar, {
+      props: { model, assetImageCount: 0, media: [{ type: 'image', url: '/media/missing.png', name: '已失效图片' }] },
+    })
+    const image = wrapper.get('.reference-image-preview img')
+    await image.trigger('error')
+    expect((image.element as HTMLImageElement).hidden).toBe(true)
+    expect(wrapper.find('.reference-image-preview .lucide-image').exists()).toBe(true)
+  })
+
   it('disables upload in keyframe mode', () => {
     const wrapper = mount(SceneReferenceMediaBar, {
       props: { model, assetImageCount: 0, media: [], disabled: true },

@@ -62,6 +62,16 @@ describe('SceneAssetVariantPicker', () => {
     expect(wrapper.text()).toContain('艾伦 · 日常便装与义肢')
   })
 
+  it('uses the original image when a generated thumbnail is unavailable', async () => {
+    const wrapper = mount(SceneAssetVariantPicker, {
+      props: { open: true, anchorId: 'missing-test-anchor', label: '出镜角色', assets, selectedAssetIds: [], selectedVariantIds: {} },
+      global: { stubs: { Teleport: true } },
+    })
+    const image = wrapper.get('nav .scene-asset-variant-picker__thumb img')
+    await image.trigger('error')
+    expect(image.attributes('src')).toBe('/media/eren-base.png')
+  })
+
   it('emits the concrete asset variant selection and can deselect it', async () => {
     const wrapper = mount(SceneAssetVariantPicker, {
       props: {

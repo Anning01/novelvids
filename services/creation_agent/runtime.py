@@ -21,6 +21,7 @@ from schemas.creation_objects import CreationObjectQuery, CreationChangeSet
 from models.creation_agent import AgentMessage, PromptChange
 from services.creation_agent.tools import PromptEditService
 from services.creation_agent.changes import CreationChanges
+from services.creation_agent.history import compact_retry_history
 
 
 @dataclass
@@ -53,6 +54,7 @@ creation_agent = Agent(
     name="creation_assistant",
     output_type=[str, CreationReply],
     retries=2,
+    history_processors=[compact_retry_history],
 )
 
 _TECHNICAL_REPLY_REFERENCE = re.compile(

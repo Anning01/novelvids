@@ -160,6 +160,38 @@ def test_free_text_mode_keeps_existing_voice_tracks_and_other_metadata():
     assert "旁白：雨停了。" in result["prompt"] and "雨声" in result["prompt"]
 
 
+def test_free_text_translation_does_not_restore_old_language_tracks():
+    translated = """终端屏幕发出冷白光。
+【旁白 / 内心 OS】
+旁白：她终于找到了答案。
+【人物台词】
+羽宁：“结束了。”
+环境音：服务器风扇低鸣，远处传来列车经过的震动。"""
+    result = prepare_storyboard_edit(
+        edit=StoryboardPromptEdit(scene_id=1, expected_version="v", legacy_prompt=translated),
+        prompt="旧文本",
+        params={
+            "narration": ["Narrator: She finally found the answer."],
+            "dialogue": ['Yu Ning: "It is over."'],
+            "sound_design": "Server fans hum; a distant train passes.",
+        },
+        sequence=1,
+        description="终端",
+        duration=6,
+        entities=[],
+    )
+
+    assert result["prompt"].startswith(translated)
+    assert "Narrator" not in result["prompt"]
+    assert "Yu Ning" not in result["prompt"]
+    assert "Server fans" not in result["prompt"]
+    assert result["prompt_params"] == {
+        "narration": ["Narrator: She finally found the answer."],
+        "dialogue": ['Yu Ning: "It is over."'],
+        "sound_design": "Server fans hum; a distant train passes.",
+    }
+
+
 def test_legacy_mode_also_rejects_continued_local_numbers():
     with pytest.raises(ValueError, match="从1开始"):
         prepare_storyboard_edit(

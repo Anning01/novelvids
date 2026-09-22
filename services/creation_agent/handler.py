@@ -59,6 +59,8 @@ def configured_model(config, limits: AgentConfiguration):
 def public_run_error(message: str, calls: list[dict]) -> str:
     """Return actionable fixed copy without disclosing a provider's error payload."""
     if '上下文超过配置上限' in message:
+        if calls:
+            return '本轮多次校验重试后超过了上下文额度。已保存的修改仍然有效，请编辑要求后重试。'
         return '当前内容超过助手的上下文额度。请减少选中的对象，或在助手设置提高上下文额度后重试。'
     if '本轮模型调用次数已达到配置上限' in message or 'request_limit' in message:
         return '本轮处理次数已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。'

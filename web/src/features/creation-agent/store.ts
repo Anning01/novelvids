@@ -11,6 +11,8 @@ export const isAgentRunning = (status: number) => activeStatuses.has(status)
 export const useCreationAgentStore = defineStore('creation-agent', () => {
   const projectId = ref(0)
   const conversations = ref<AgentConversation[]>([])
+  const deletedConversations = ref<AgentConversation[]>([])
+  const sessionBusy = ref(false)
   const conversationId = ref<number | null>(null)
   const messages = ref<AgentMessage[]>([])
   const capabilities = ref<AgentCapabilities | null>(null)
@@ -121,7 +123,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     }
   }
 
-  async function selectConversation(id: number) {
+  async function selectConversation(id: number | null) {
     disconnect()
     epoch += 1
     conversationId.value = id
@@ -131,6 +133,8 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     error.value = ''
     statusText.value = ''
     observed.clear()
+    nextBefore.value = null
+    if (id === null) { loading.value = false; return }
     const revision = epoch
     loading.value = true
     try {
@@ -157,6 +161,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (identity !== nextIdentity || projectId.value !== novelId) {
       conversationId.value = null; currentRun.value = null; messages.value = []; pendingRequest = null
       capabilities.value = null; conversations.value = []; nextBefore.value = null
+      deletedConversations.value = []
       statusText.value = ''
       observed.clear(); latestChanges.value = []
     }
@@ -170,23 +175,60 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       capabilities.value = available.data
       conversations.value = listed.data
       const selected = listed.data.find(item => item.id === conversationId.value) ?? listed.data[0]
-      if (selected) await selectConversation(selected.id)
+      await selectConversation(selected?.id ?? null)
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : '加载助手失败'
     } finally { if (revision === epoch) loading.value = false }
   }
 
   async function newConversation() {
-    if (busy.value) return
+    if (busy.value || sessionBusy.value || loading.value) return
     const revision = epoch
-    const created = await agentApi.create(projectId.value)
-    if (revision !== epoch) return
-    conversations.value.unshift(created.data)
-    await selectConversation(created.data.id)
+    sessionBusy.value = true
+    try {
+      const created = await agentApi.create(projectId.value)
+      if (revision !== epoch) return
+      conversations.value.unshift(created.data)
+      await selectConversation(created.data.id)
+    } finally { sessionBusy.value = false }
+  }
+
+  async function loadDeletedConversations() {
+    const revision = epoch
+    const response = await agentApi.conversations(projectId.value, true)
+    if (revision === epoch) deletedConversations.value = response.data
+  }
+
+  async function deleteConversation(id: number) {
+    if (busy.value || sessionBusy.value || loading.value) return
+    const revision = epoch
+    sessionBusy.value = true
+    try {
+      await agentApi.deleteConversation(id)
+      if (revision !== epoch) return
+      const removed = conversations.value.find(item => item.id === id)
+      conversations.value = conversations.value.filter(item => item.id !== id)
+      if (removed) deletedConversations.value = [removed, ...deletedConversations.value.filter(item => item.id !== id)]
+      if (id === conversationId.value) await selectConversation(conversations.value[0]?.id ?? null)
+    } finally { sessionBusy.value = false }
+  }
+
+  async function restoreConversation(id: number) {
+    if (busy.value || sessionBusy.value || loading.value) return
+    const revision = epoch
+    sessionBusy.value = true
+    try {
+      const response = await agentApi.restoreConversation(id)
+      if (revision !== epoch) return
+      const previous = deletedConversations.value.find(item => item.id === id)
+      conversations.value = [{ ...response.data, title: previous?.title || response.data.title }, ...conversations.value.filter(item => item.id !== id)]
+      conversations.value.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) || b.id - a.id)
+      deletedConversations.value = deletedConversations.value.filter(item => item.id !== id)
+    } finally { sessionBusy.value = false }
   }
 
   async function send(input: Omit<AgentRunInput, 'request_id'>) {
-    if (busy.value) return false
+    if (busy.value || sessionBusy.value || loading.value) return false
     submitting.value = true
     error.value = ''
     const revision = epoch
@@ -225,6 +267,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         conversation.active_task_id = response.data.task_id
         conversation.updated_at = new Date().toISOString()
         if (!conversation.title || conversation.title === '新会话') conversation.title = frozenInput.message.replace(/\s+/g, ' ').slice(0, 40)
+        conversations.value = [conversation, ...conversations.value.filter(item => item.id !== id)]
       }
       if (isAgentRunning(response.data.status)) {
         statusText.value = '正在处理你的创作要求'
@@ -249,7 +292,8 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     reportChanges([response.data])
   }
 
-  return { projectId, conversations, conversationId, messages, capabilities, currentRun, loading, submitting,
+  return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
     streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
-    open, history, send, stop, undo, newConversation, selectConversation, follow, disconnect }
+    open, history, send, stop, undo, newConversation, selectConversation, follow, disconnect,
+    deleteConversation, restoreConversation, loadDeletedConversations }
 })

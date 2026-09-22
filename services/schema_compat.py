@@ -21,7 +21,7 @@ async def ensure_creation_agent_schema() -> None:
 
     # Run before safe schema creation: it does not add columns to old tables.
     # Names below are application constants, never supplied by a request.
-    for table in ("assets", "asset_variants", "scenes"):
+    for table in ("assets", "asset_variants", "scenes", "creation_agent_conversations"):
         if settings.DATABASE_URL.startswith("sqlite"):
             columns = await connection.execute_query_dict(f"PRAGMA table_info({table})")
             if columns and "deleted_at" not in {str(column["name"]) for column in columns}:

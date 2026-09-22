@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from tortoise.transactions import in_transaction
+from tortoise.expressions import F
 
 from auth.deps import AuthContext, ensure_novel_access, require_roles
 from models.ai_task import AiTask
@@ -42,12 +43,27 @@ class AgentSessions:
             raise HTTPException(404, "项目不存在")
         return await AgentConversation.create(novel=novel, created_by=ctx.user.id if ctx.user else None, team_id=novel.team_id)
 
-    async def get(self, conversation_id: int, ctx: AuthContext) -> AgentConversation:
-        conversation = await AgentConversation.get_or_none(id=conversation_id, created_by=ctx.user.id if ctx.user else None)
+    async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False) -> AgentConversation:
+        query = AgentConversation.filter(id=conversation_id, created_by=ctx.user.id if ctx.user else None)
+        conversation = await (query if include_deleted else query.filter(deleted_at__isnull=True)).first()
         if conversation is None:
             raise HTTPException(404, "会话不存在")
         await ensure_novel_access(conversation.novel_id, ctx)
         return conversation
+
+    async def set_deleted(self, conversation_id: int, ctx: AuthContext, *, deleted: bool) -> AgentConversation:
+        conversation = await self.get(conversation_id, ctx, include_deleted=True)
+        async with in_transaction() as connection:
+            # Same row lock as submit: a concurrent run cannot be admitted after removal.
+            await AgentConversation.filter(id=conversation.id).using_db(connection).update(updated_at=F('updated_at'))
+            current = await AgentConversation.get(id=conversation.id).using_db(connection)
+            if deleted and current.active_task_id and await AiTask.filter(
+                id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
+                raise HTTPException(409, '会话正在运行，请先停止后再删除')
+            if (current.deleted_at is not None) != deleted:
+                current.deleted_at = datetime.now(timezone.utc) if deleted else None
+                await current.save(using_db=connection, update_fields=['deleted_at'])
+            return current
 
     async def for_task(self, task_id, ctx: AuthContext) -> tuple[AgentConversation, AgentMessage]:
         message = await AgentMessage.get_or_none(task_id=task_id, role="assistant")
@@ -90,6 +106,8 @@ class AgentSessions:
             # A row write serializes admission on SQLite as well as PostgreSQL.
             await AgentConversation.filter(id=conversation.id).using_db(connection).update(updated_at=datetime.now(timezone.utc))
             current = await AgentConversation.get(id=conversation.id).using_db(connection)
+            if current.deleted_at is not None:
+                raise HTTPException(404, '会话已删除，请先恢复后继续')
             previous = await AgentMessage.filter(conversation=current, request_id=request.request_id, role="user").using_db(connection).first()
             if previous:
                 if previous.request_hash != digest:

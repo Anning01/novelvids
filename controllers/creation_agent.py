@@ -47,9 +47,10 @@ class CreationAgentController:
         return {"enabled": limits.enabled, "can_write": can_write, "max_targets": limits.max_targets,
                 "models": [{"id": item.id, "name": item.name, "model": item.model} for item in await agent_models(ctx)]}
 
-    async def conversations(self, novel_id: int, ctx: AuthContext):
+    async def conversations(self, novel_id: int, ctx: AuthContext, *, deleted: bool = False):
         await ensure_novel_access(novel_id, ctx)
-        rows = await AgentConversation.filter(novel_id=novel_id, created_by=ctx.user.id if ctx.user else None).order_by('-updated_at').limit(30)
+        rows = await AgentConversation.filter(novel_id=novel_id, created_by=ctx.user.id if ctx.user else None,
+            deleted_at__isnull=not deleted).order_by('-deleted_at' if deleted else '-updated_at', '-id').limit(30)
         if not rows:
             return []
         first_messages = await AgentMessage.filter(conversation_id__in=[row.id for row in rows], role='user').annotate(
@@ -60,6 +61,12 @@ class CreationAgentController:
 
     async def create(self, novel_id: int, ctx: AuthContext):
         return await agent_sessions.create(novel_id, ctx)
+
+    async def delete_conversation(self, conversation_id: int, ctx: AuthContext):
+        await agent_sessions.set_deleted(conversation_id, ctx, deleted=True)
+
+    async def restore_conversation(self, conversation_id: int, ctx: AuthContext):
+        return await agent_sessions.set_deleted(conversation_id, ctx, deleted=False)
 
     async def submit(self, conversation_id: int, request: AgentRunRequest, ctx: AuthContext):
         conversation = await agent_sessions.get(conversation_id, ctx)

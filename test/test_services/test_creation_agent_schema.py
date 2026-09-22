@@ -53,3 +53,25 @@ async def test_capability_migration_runs_before_generation(monkeypatch):
         monkeypatch.setattr(main, name, record(name))
     await main._initialize_database_schema()
     assert events.index('ensure_creation_agent_schema') < events.index('generate')
+
+
+@pytest.mark.asyncio
+async def test_legacy_conversation_migration_is_repeatable_and_preserves_deleted_state(monkeypatch):
+    from datetime import datetime, timezone
+    from tortoise import Tortoise
+    from models.creation_agent import AgentConversation
+    from models.novel import Novel
+
+    novel = await Novel.create(name='会话旧库验证')
+    conversation = await AgentConversation.create(novel=novel, summary='保留历史摘要')
+    connection = Tortoise.get_connection('default')
+    monkeypatch.setattr('services.schema_compat.settings.DATABASE_URL', 'sqlite://:memory:')
+    await connection.execute_script('ALTER TABLE creation_agent_conversations DROP COLUMN deleted_at;')
+    await ensure_creation_agent_schema()
+    await ensure_creation_agent_schema()
+    restored = await AgentConversation.get(id=conversation.id)
+    assert restored.summary == '保留历史摘要' and restored.deleted_at is None
+    await AgentConversation.filter(id=conversation.id).update(deleted_at=datetime.now(timezone.utc))
+    await ensure_creation_agent_schema()
+    await Tortoise.generate_schemas(safe=True)
+    assert (await AgentConversation.get(id=conversation.id)).deleted_at is not None

@@ -7,7 +7,7 @@ import { reactive } from 'vue'
 
 vi.mock('./api', () => ({
   agentApi: { capabilities: vi.fn(), conversations: vi.fn(), create: vi.fn(), history: vi.fn(),
-    submit: vi.fn(), snapshot: vi.fn(), stop: vi.fn(), undo: vi.fn() },
+    submit: vi.fn(), snapshot: vi.fn(), stop: vi.fn(), undo: vi.fn(), deleteConversation: vi.fn(), restoreConversation: vi.fn() },
   runSubscription: vi.fn(),
 }))
 
@@ -163,4 +163,68 @@ describe('creation assistant store', () => {
     resolve({ code: 0, message: '', data: run })
     await sending
   })
+})
+
+it('deletes the current conversation and chooses another, then clears the last conversation', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  store.conversations = [conversation, { ...conversation, id: 2 }]
+  vi.mocked(agentApi.deleteConversation).mockResolvedValue({ code: 0, message: '', data: null })
+  await store.deleteConversation(1)
+  expect(store.conversationId).toBe(2)
+  expect(store.deletedConversations[0]?.id).toBe(1)
+  store.messages = [{ id: 1, role: 'user', task_id: 'old', content: '不带入新会话', status: 3, changes: [], usage: {}, created_at: '' }]
+  await store.deleteConversation(2)
+  expect(store.conversationId).toBeNull()
+  expect(store.messages).toEqual([])
+  expect(store.currentRun).toBeNull()
+  expect(store.nextBefore).toBeNull()
+})
+
+it('keeps history on delete failure and restores the original conversation without sending a model request', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  vi.mocked(agentApi.deleteConversation).mockRejectedValue(new Error('会话正在运行'))
+  await expect(store.deleteConversation(1)).rejects.toThrow('正在运行')
+  expect(store.conversationId).toBe(1)
+  expect(store.conversations).toEqual([conversation])
+  store.deletedConversations = [{ ...conversation, id: 2, title: '保留原来的标题' }]
+  vi.mocked(agentApi.restoreConversation).mockResolvedValue({ code: 0, message: '', data: { ...conversation, id: 2 } })
+  await store.restoreConversation(2)
+  expect(store.conversations[0]?.title).toBe('保留原来的标题')
+  expect(store.deletedConversations).toEqual([])
+  expect(agentApi.submit).not.toHaveBeenCalled()
+})
+
+it('does not leak a delayed delete response into a different project', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  let resolve!: (result: { code: number; message: string; data: null }) => void
+  vi.mocked(agentApi.deleteConversation).mockImplementation(() => new Promise(done => { resolve = done }))
+  const deleting = store.deleteConversation(1)
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [{ ...conversation, id: 3, novel_id: 8 }] })
+  await store.open(8)
+  resolve({ code: 0, message: '', data: null })
+  await deleting
+  expect(store.conversationId).toBe(3)
+  expect(store.conversations[0]?.novel_id).toBe(8)
+  expect(store.deletedConversations).toEqual([])
+})
+
+it('admits one new conversation at a time without showing a model run or sending into the old conversation', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  let resolve!: (result: { code: number; message: string; data: typeof conversation }) => void
+  vi.mocked(agentApi.create).mockImplementation(() => new Promise(done => { resolve = done }))
+  const creating = store.newConversation()
+  expect(store.sessionBusy).toBe(true)
+  expect(store.busy).toBe(false)
+  await store.newConversation()
+  expect(agentApi.create).toHaveBeenCalledOnce()
+  expect(await store.send(input)).toBe(false)
+  expect(agentApi.submit).not.toHaveBeenCalled()
+  resolve({ code: 0, message: '', data: { ...conversation, id: 4 } })
+  await creating
+  expect(store.conversationId).toBe(4)
+  expect(store.sessionBusy).toBe(false)
 })

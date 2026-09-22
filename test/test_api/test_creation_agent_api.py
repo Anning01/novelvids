@@ -135,3 +135,63 @@ async def test_conversation_title_uses_first_request_and_legacy_empty_sessions_s
     titles = {row['id']: row['title'] for row in response.json()['data']}
     assert titles[conversation.id] == request.message
     assert titles[empty.id] == '新会话'
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_hides_it_and_restores_same_history_without_deleting_work(client):
+    from models.creation_agent import AgentConversation, CreationConstraint, PromptChange
+    from models.ai_task import AiTask
+    from models.scene import Scene
+
+    conversation, request, _ = await session_fixture()
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    await AiTask.filter(id=task.id).update(status=TaskStatusEnum.completed.value)
+    source = await AgentMessage.get(task=task, role='user')
+    rule = await CreationConstraint.create(novel_id=conversation.novel_id, source_message=source,
+        fingerprint='keep-rule', content='保留暖光', source_quote='暖光', scope={'kind': 'project'})
+    change = await PromptChange.create(novel_id=conversation.novel_id, task=task, tool_call_id='keep', request_hash='keep', changes=[])
+    path = f'/api/creation-agent/conversations/{conversation.id}'
+    for _ in range(2):
+        assert (await client.delete(path)).json()['code'] == 0
+    assert (await AgentConversation.get(id=conversation.id)).deleted_at
+    assert (await client.get(path + '/messages')).json()['code'] == 404
+    assert (await client.get(f'/api/creation-agent/runs/{task.id}')).json()['code'] == 404
+    assert (await client.get('/api/creation-agent/conversations', params={'novel_id': conversation.novel_id})).json()['data'] == []
+    removed = (await client.get('/api/creation-agent/conversations', params={'novel_id': conversation.novel_id, 'deleted': 'true'})).json()['data']
+    assert [item['id'] for item in removed] == [conversation.id]
+    assert await CreationConstraint.filter(id=rule.id).exists() and await PromptChange.filter(id=change.id).exists()
+    assert await Scene.filter(id=request.targets[0].id).exists() and await AiTask.filter(id=task.id).exists()
+    for _ in range(2):
+        assert (await client.post(path + '/restore')).json()['data']['id'] == conversation.id
+    assert (await client.get(path + '/messages')).json()['data']['items'][0]['content'] == request.message
+    assert await AgentMessage.filter(conversation=conversation).count() == 2
+
+
+@pytest.mark.asyncio
+async def test_running_conversation_must_be_stopped_before_delete(client):
+    conversation, request, _ = await session_fixture()
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    path = f'/api/creation-agent/conversations/{conversation.id}'
+    response = await client.delete(path)
+    assert response.json()['code'] == 409
+    assert '先停止' in response.json()['message']
+    await client.post(f'/api/creation-agent/runs/{task.id}/stop')
+    assert (await client.delete(path)).json()['code'] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_during_run_admission_rejects_the_stale_submission(monkeypatch):
+    from fastapi import HTTPException
+    from models.ai_task import AiTask
+    from services.creation_agent import sessions
+
+    conversation, request, _ = await session_fixture()
+    original = sessions.agent_models
+    async def delayed_models(ctx):
+        await agent_sessions.set_deleted(conversation.id, ctx, deleted=True)
+        return await original(ctx)
+    monkeypatch.setattr(sessions, 'agent_models', delayed_models)
+    with pytest.raises(HTTPException) as error:
+        await agent_sessions.submit(conversation, request, AuthContext())
+    assert error.value.status_code == 404
+    assert not await AiTask.all().exists()

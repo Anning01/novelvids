@@ -54,7 +54,7 @@ describe('creation assistant panel', () => {
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
     await flushPromises()
 
-    expect(wrapper.get('[aria-label="对话记录"]').text()).toContain('对话 8')
+    expect(wrapper.get('[aria-label="对话记录"]').text()).toContain('新会话')
     expect(wrapper.findAll('button').some(button => button.text().includes('新会话'))).toBe(true)
     const senderElement = wrapper.get('[data-testid="sender"]').element
     const modelElement = wrapper.get('[aria-label="助手模型"]').element
@@ -62,7 +62,7 @@ describe('creation assistant panel', () => {
 
     const store = useCreationAgentStore(pinia)
     const createConversation = vi.spyOn(store, 'newConversation').mockResolvedValue(undefined)
-    await wrapper.findAll('button').find(button => button.text().includes('新会话'))!.trigger('click')
+    await wrapper.get('button[aria-label="新建对话"]').trigger('click')
     expect(createConversation).toHaveBeenCalledOnce()
     wrapper.unmount()
   })

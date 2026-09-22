@@ -434,7 +434,7 @@ async function resumeImport() {
 .story-text-source textarea { resize: vertical; min-height: 180px; }
 .story-text-source small,.story-import-guide { color: var(--app-text-muted); font-size: 11px; line-height: 1.7; }
 .story-import-guide { margin: 16px 0 0; text-align: center; }
-.story-import-error { padding: 12px; border: 1px solid var(--app-border); border-radius: 10px; color: var(--app-danger, #b65361); font-size: 13px; line-height: 1.7; }
+.story-import-error { padding: 12px; border: 1px solid var(--app-border); border-radius: 10px; color: var(--creation-danger); font-size: 13px; line-height: 1.7; }
 
 .short-drama-form {
   display: grid;
@@ -448,19 +448,19 @@ async function resumeImport() {
   align-content: center;
   gap: 9px;
   padding: 26px;
-  border: 1px dashed #d8dbea;
+  border: 1px dashed var(--app-border-strong);
   border-radius: 16px;
-  color: #565c6d;
-  background: #fbfbfe;
+  color: var(--app-text-secondary);
+  background: var(--app-surface);
   cursor: pointer;
   transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 
 .script-dropzone:hover,
 .script-dropzone.is-dragging {
-  border-color: #8586f7;
-  background: #f8f8ff;
-  box-shadow: 0 12px 34px rgb(91 92 246 / 8%);
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+  box-shadow: var(--app-shadow);
 }
 
 .script-dropzone.has-file {
@@ -474,7 +474,7 @@ async function resumeImport() {
 .script-dropzone strong {
   max-width: 80%;
   overflow: hidden;
-  color: #4a4f60;
+  color: var(--app-text);
   font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -482,7 +482,7 @@ async function resumeImport() {
 }
 
 .script-dropzone small {
-  color: #a0a5b4;
+  color: var(--app-text-secondary);
   font-size: 11px;
 }
 
@@ -492,16 +492,16 @@ async function resumeImport() {
   height: 50px;
   margin-bottom: 3px;
   place-items: center;
-  border: 1px solid #e6e7f2;
+  border: 1px solid var(--app-border);
   border-radius: 14px;
-  color: #7779ef;
-  background: #fff;
-  box-shadow: 0 8px 24px rgb(50 54 73 / 7%);
+  color: var(--app-accent);
+  background: var(--app-surface-muted);
+  box-shadow: var(--app-shadow);
 }
 
 .dropzone-icon.has-file {
-  color: #4d9a78;
-  background: #f1faf6;
+  color: var(--creation-success);
+  background: color-mix(in srgb, var(--creation-success) 10%, var(--app-surface));
 }
 
 .remove-file {
@@ -513,12 +513,12 @@ async function resumeImport() {
   height: 30px;
   place-items: center;
   border-radius: 8px;
-  color: #8b90a0;
+  color: var(--app-text-secondary);
 }
 
 .remove-file:hover {
-  color: #dc645a;
-  background: #fff0ef;
+  color: var(--creation-danger);
+  background: color-mix(in srgb, var(--creation-danger) 10%, var(--app-surface));
 }
 
 .manual-mode-card {
@@ -529,10 +529,10 @@ async function resumeImport() {
   align-items: center;
   gap: 18px 20px;
   padding: 32px 38px;
-  border: 1px solid #e1e3f5;
+  border: 1px solid var(--app-border);
   border-radius: 16px;
-  background: #fafaff;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 80%);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
 }
 
 .manual-mode-icon {
@@ -540,16 +540,16 @@ async function resumeImport() {
   width: 58px;
   height: 58px;
   place-items: center;
-  border: 1px solid #e4e5f4;
+  border: 1px solid var(--app-border);
   border-radius: 17px;
-  color: #6263f5;
-  background: #fff;
-  box-shadow: 0 10px 28px rgb(54 58 87 / 8%);
+  color: var(--app-accent);
+  background: var(--app-surface-muted);
+  box-shadow: var(--app-shadow);
 }
 
 .manual-mode-copy p {
   margin: 0 0 7px;
-  color: #7779ef;
+  color: var(--app-accent);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: .15em;
@@ -557,13 +557,13 @@ async function resumeImport() {
 
 .manual-mode-copy h2 {
   margin: 0 0 7px;
-  color: #353947;
+  color: var(--app-text);
   font-size: 20px;
   letter-spacing: -.02em;
 }
 
 .manual-mode-copy > span {
-  color: #9297a7;
+  color: var(--app-text-secondary);
   font-size: 12px;
   line-height: 1.65;
 }
@@ -581,15 +581,15 @@ async function resumeImport() {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid #e7e8f1;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: #686e7e;
-  background: #fff;
+  color: var(--app-text-secondary);
+  background: var(--app-surface-muted);
   font-size: 11px;
 }
 
 .manual-mode-features svg {
-  color: #7274ed;
+  color: var(--app-accent);
 }
 
 .format-select {
@@ -619,8 +619,8 @@ async function resumeImport() {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 6px;
-  color: #6466ef;
-  background: #eff0ff;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
 }
 
 .custom-prompt-panel {
@@ -629,13 +629,13 @@ async function resumeImport() {
   gap: 8px;
   margin-top: 12px;
   padding: 14px;
-  border: 1px solid #e4e6ed;
+  border: 1px solid var(--app-border);
   border-radius: 12px;
-  background: #fbfbfd;
+  background: var(--app-surface);
 }
 
 .custom-prompt-panel label {
-  color: #505566;
+  color: var(--app-text-secondary);
   font-size: 12px;
   font-weight: 600;
 }
@@ -644,7 +644,7 @@ async function resumeImport() {
   width: 100%;
   border: 0;
   outline: 0;
-  color: #3e4352;
+  color: var(--app-text);
   background: transparent;
   font-size: 13px;
   line-height: 1.7;
@@ -652,12 +652,12 @@ async function resumeImport() {
 }
 
 .custom-prompt-panel textarea::placeholder {
-  color: #a2a7b5;
+  color: var(--app-text-muted);
 }
 
 .custom-prompt-panel small {
   justify-self: end;
-  color: #a2a7b5;
+  color: var(--app-text-muted);
   font-size: 10px;
 }
 

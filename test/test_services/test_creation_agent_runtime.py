@@ -1,13 +1,53 @@
 import json
 
 import pytest
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, RetryPromptPart
+from pydantic_ai.messages import (
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.function import FunctionModel, DeltaToolCall
 from pydantic_ai.usage import UsageLimits
 
 from models.creation_agent import PromptChange
+from services.creation_agent.history import compact_retry_history
 from services.creation_agent.runtime import CreationAgentDeps, creation_agent, stream_creation_agent
 from test.test_services.test_creation_agent_tools import setup_service
+
+
+def test_failed_long_tool_payload_is_compacted_before_retry():
+    prompt = '很长的分镜提示词' * 5000
+    messages = [
+        ModelRequest(parts=[UserPromptPart('把英文改成中文')]),
+        ModelResponse(parts=[ToolCallPart('apply_creation_changes', {
+            'operations': [{'operation': 'update_scene', 'fields': {
+                'prompt': prompt, 'visual': {'visual_prose': prompt},
+            }}],
+        }, tool_call_id='failed-write')]),
+        ModelRequest(parts=[RetryPromptPart([{
+            'type': 'value_error',
+            'loc': ('operations', 0, 'update_scene', 'fields'),
+            'msg': 'Value error, 纯文本和结构化 Prompt 修改二选一',
+            'input': {'prompt': prompt},
+        }], tool_name='apply_creation_changes', tool_call_id='failed-write')]),
+    ]
+
+    before = len(ModelMessagesTypeAdapter.dump_json(messages).decode())
+    compacted = compact_retry_history(messages)
+    after = len(ModelMessagesTypeAdapter.dump_json(compacted).decode())
+    call = next(part for message in compacted for part in message.parts if isinstance(part, ToolCallPart))
+    retry = next(part for message in compacted for part in message.parts if isinstance(part, RetryPromptPart))
+
+    assert before > 100_000
+    assert after < 2_000
+    assert prompt not in str(call.args)
+    assert '纯文本和结构化 Prompt 修改二选一' in retry.content
+    assert prompt not in retry.content
 
 
 @pytest.mark.asyncio

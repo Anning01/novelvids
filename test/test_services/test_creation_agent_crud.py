@@ -27,6 +27,40 @@ async def crud(scope='chapter', targets=None):
 
 
 @pytest.mark.asyncio
+async def test_legacy_scene_projection_omits_stale_structured_prompt_fields():
+    legacy, scene, _, _, task = await setup_service()
+    await Scene.filter(id=scene.id).update(prompt='用户手工维护的完整提示词', prompt_params={
+        'visual_prose': '已经过时的结构画面',
+    })
+    request = AgentRunRequest(request_id=task.id, message='把英文改成中文', chapter_id=scene.chapter_id,
+                              write_scope='selected', targets=[AgentTarget(kind='scene', id=scene.id)])
+    service = CreationChanges(novel_id=legacy.novel_id, task_id=task.id, request=request, max_batch_size=8)
+
+    projected = (await service.read(request.targets))[0]
+
+    assert projected['edit_mode'] == 'legacy_prompt'
+    assert projected['prompt'] == '用户手工维护的完整提示词'
+    assert 'prompt_params' not in projected
+
+
+@pytest.mark.asyncio
+async def test_prompt_only_edit_preserves_legacy_empty_variant_binding():
+    service, scene, asset, _, _ = await crud()
+    await scene.assets.add(asset)
+    await Scene.filter(id=scene.id).update(metadata={'asset_variant_ids': {str(asset.id): None}})
+    await service.read([AgentTarget(kind='scene', id=scene.id)])
+
+    saved = await service.apply(CreationChangeSet.model_validate({'operations': [{
+        'operation': 'update_scene', 'scene_id': scene.id,
+        'fields': {'prompt': '@{女主}站在空站台，画面描述全部使用中文。'},
+    }]}), tool_call_id='legacy-empty-binding')
+
+    await scene.refresh_from_db()
+    assert saved.changes[0]['after']['prompt'].startswith('@{女主}站在空站台，画面描述全部使用中文。')
+    assert scene.metadata['asset_variant_ids'] == {str(asset.id): None}
+
+
+@pytest.mark.asyncio
 async def test_create_dependent_asset_scene_is_atomic_idempotent_and_undoable():
     service, scene, _, _, _ = await crud()
     changes = CreationChangeSet.model_validate({'operations': [

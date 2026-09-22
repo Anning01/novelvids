@@ -13,7 +13,9 @@ export const agentApi = {
     method: 'PUT', body: JSON.stringify(configuration),
   }),
   capabilities: (novelId: number) => request<SingleResponse<AgentCapabilities>>(`${base}/capabilities?novel_id=${novelId}`),
-  conversations: (novelId: number) => request<SingleResponse<AgentConversation[]>>(`${base}/conversations?novel_id=${novelId}`),
+  conversations: (novelId: number, deleted = false) => request<SingleResponse<AgentConversation[]>>(`${base}/conversations?novel_id=${novelId}${deleted ? '&deleted=true' : ''}`),
+  deleteConversation: (id: number) => request<SingleResponse<null>>(`${base}/conversations/${id}`, { method: 'DELETE' }),
+  restoreConversation: (id: number) => request<SingleResponse<AgentConversation>>(`${base}/conversations/${id}/restore`, { method: 'POST' }),
   create: (novelId: number) => request<SingleResponse<AgentConversation>>(`${base}/conversations`, {
     method: 'POST', body: JSON.stringify({ novel_id: novelId }),
   }),

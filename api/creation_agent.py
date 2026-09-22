@@ -46,13 +46,24 @@ async def update_configuration(body: AgentConfiguration, _: AuthContext = Depend
 
 
 @router.get('/conversations', response_model=ResponseSchema[list[AgentConversationOut]])
-async def conversations(novel_id: int = Query(gt=0), ctx: AuthContext = Depends(get_auth_context)):
-    return ResponseSchema(data=await creation_agent_controller.conversations(novel_id, ctx))
+async def conversations(novel_id: int = Query(gt=0), deleted: bool = False, ctx: AuthContext = Depends(get_auth_context)):
+    return ResponseSchema(data=await creation_agent_controller.conversations(novel_id, ctx, deleted=deleted))
 
 
 @router.post('/conversations', response_model=ResponseSchema[AgentConversationOut])
 async def create_conversation(body: AgentConversationCreate, ctx: AuthContext = Depends(get_auth_context)):
     return ResponseSchema(data=await creation_agent_controller.create(body.novel_id, ctx))
+
+
+@router.delete('/conversations/{conversation_id}', response_model=ResponseSchema)
+async def delete_conversation(conversation_id: int, ctx: AuthContext = Depends(get_auth_context)):
+    await creation_agent_controller.delete_conversation(conversation_id, ctx)
+    return ResponseSchema(data=None)
+
+
+@router.post('/conversations/{conversation_id}/restore', response_model=ResponseSchema[AgentConversationOut])
+async def restore_conversation(conversation_id: int, ctx: AuthContext = Depends(get_auth_context)):
+    return ResponseSchema(data=await creation_agent_controller.restore_conversation(conversation_id, ctx))
 
 
 @router.get('/conversations/{conversation_id}/messages', response_model=ResponseSchema[AgentMessagePage])

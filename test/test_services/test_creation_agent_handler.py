@@ -20,7 +20,8 @@ def test_truncated_output_stays_actionable_after_a_failed_automatic_retry():
     from services.creation_agent.handler import public_run_error
     calls = [{'status': 'completed', 'finish_reason': 'length'}, {'status': 'failed'}]
     assert '输出达到上限' in public_run_error('secret provider payload', calls)
-    assert '上下文额度' in public_run_error('上下文超过配置上限', calls)
+    assert '多次校验重试' in public_run_error('上下文超过配置上限', calls)
+    assert '减少选中的对象' in public_run_error('上下文超过配置上限', [])
 
 
 @pytest.mark.asyncio

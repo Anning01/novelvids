@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart, TextPart, RetryPromptPart
@@ -8,8 +9,50 @@ from pydantic_ai.usage import UsageLimits
 from models.asset import Asset
 from models.creation_agent import PromptChange
 from services.creation_agent.runtime import CreationAgentDeps, creation_agent
+from services.creation_agent.model_boundary import RecordedAgentModel
 from test.test_services.test_creation_agent_crud import crud
 from services.creation_agent.tools import PromptEditService
+
+
+@pytest.mark.asyncio
+async def test_long_rejected_scene_edit_is_compacted_and_can_finish_within_context_budget():
+    changes, scene, _, _, task = await crud()
+    legacy = PromptEditService(novel_id=changes.novel_id, task_id=task.id,
+        allowed_targets=set(), max_batch_size=8)
+    translated = '完整中文镜头描述；' * 1600
+    calls = 0
+
+    def model(messages, info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ModelResponse(parts=[ToolCallPart('apply_creation_changes', {'operations': [{
+                'operation': 'update_scene', 'scene_id': scene.id,
+                'fields': {'prompt': translated, 'visual': {'visual_prose': translated}},
+            }]}, tool_call_id='invalid-long-edit')])
+        if calls == 2:
+            retry = next(part for message in messages for part in message.parts if isinstance(part, RetryPromptPart))
+            assert '纯文本和结构化 Prompt 修改二选一' in retry.content
+            assert translated not in retry.content
+            return ModelResponse(parts=[ToolCallPart('apply_creation_changes', {'operations': [{
+                'operation': 'update_scene', 'scene_id': scene.id, 'fields': {'prompt': translated},
+            }]}, tool_call_id='valid-long-edit')])
+        return ModelResponse(parts=[TextPart('已完成中文化。')])
+
+    async def allowed():
+        return None
+
+    recorded = RecordedAgentModel(FunctionModel(model),
+        message=SimpleNamespace(id=99_999_999, usage={}), before_request=allowed,
+        max_characters=64_000, request_limit=4, total_tokens_limit=100_000)
+    result = await creation_agent.run('确认', model=recorded,
+        deps=CreationAgentDeps(service=legacy, changes=changes, context={}),
+        usage_limits=UsageLimits(request_limit=4))
+
+    await scene.refresh_from_db()
+    assert calls == 3
+    assert result.output == '已完成中文化。'
+    assert scene.prompt == translated
 
 
 @pytest.mark.asyncio

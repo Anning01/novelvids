@@ -69,6 +69,20 @@ describe('ScenePromptEditor', () => {
     expect(wrapper.find('.image-lightbox').exists()).toBe(true)
   })
 
+  it('falls back to the original asset image when a mention thumbnail is missing', async () => {
+    const resilientOption = { ...options[0]!, thumbnailUrl: '/media/derivatives/missing.webp', fallbackUrl: '/media/mountain-original.png' }
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '@{断罪山脉}', options: [resilientOption] },
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+
+    const image = wrapper.get('[data-mention-id="scene-1"] img')
+    await image.trigger('error')
+    expect(image.attributes('src')).toBe('/media/mountain-original.png')
+    await image.trigger('error')
+    expect((image.element as HTMLImageElement).hidden).toBe(true)
+  })
+
   it('previews referenced images and videos on hover in focus mode only', async () => {
     const videoOption: ScenePromptMentionOption = {
       id: 'video-5',

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BubbleList } from 'vue-element-plus-x'
 import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList'
-import { Bot, History, Plus, RefreshCw, X, BookOpenText } from 'lucide-vue-next'
+import { Bot, RefreshCw, X, BookOpenText } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import { notice } from '@/shared/notice'
@@ -12,6 +12,7 @@ import { agentApi } from './api'
 import PromptChangeCard from './PromptChangeCard.vue'
 import AgentQueryResults from './AgentQueryResults.vue'
 import AgentComposer from './AgentComposer.vue'
+import AgentConversationMenu from './AgentConversationMenu.vue'
 import AgentTargetPicker from './AgentTargetPicker.vue'
 import AgentSetupState from './AgentSetupState.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
@@ -174,19 +175,16 @@ async function operation(action: () => Promise<unknown>) {
   finally { operationBusy.value = false }
 }
 
-function editFailedRequest() {
-  if (failedRequest.value) selectSuggestion(failedRequest.value)
+async function newConversation() {
+  await operation(async () => {
+    await store.newConversation()
+    await nextTick()
+    composer.value?.focus()
+  })
 }
 
-function conversationLabel(conversation: { id: number; updated_at: string; title?: string }) {
-  if (conversation.title) return conversation.title
-  if (!conversation.updated_at) return `对话 ${conversation.id}`
-  const updatedAt = new Date(conversation.updated_at)
-  if (Number.isNaN(updatedAt.getTime())) return `对话 ${conversation.id}`
-  const time = new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(updatedAt)
-  return `对话 ${conversation.id} · ${time}`
+function editFailedRequest() {
+  if (failedRequest.value) selectSuggestion(failedRequest.value)
 }
 
 function close() {
@@ -231,17 +229,9 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
       <div><Bot :size="18" /><strong>创作助手</strong></div>
       <AppButton size="sm" icon-only aria-label="关闭创作助手" @click="close"><X :size="18" /></AppButton>
     </header>
-    <div class="creation-agent-panel__toolbar" aria-label="对话管理">
-      <label class="creation-agent-panel__conversation-select">
-        <History :size="15" aria-hidden="true" />
-        <span>对话记录</span>
-        <select aria-label="对话记录" :value="store.conversationId || ''" :disabled="store.busy || store.loading || operationBusy || !store.conversations.length" @change="operation(() => store.selectConversation(Number(($event.target as HTMLSelectElement).value)))">
-          <option v-if="!store.conversations.length" value="">暂无记录</option>
-          <option v-for="conversation in store.conversations" :key="conversation.id" :value="conversation.id">{{ conversationLabel(conversation) }}</option>
-        </select>
-      </label>
-      <AppButton size="sm" variant="soft" aria-label="新建对话" :disabled="store.busy || operationBusy || store.loading || !ready" @click="operation(store.newConversation)"><Plus :size="15" />新会话</AppButton>
-    </div>
+    <AgentConversationMenu :conversations="store.conversations" :deleted-conversations="store.deletedConversations" :current-id="store.conversationId" :workflow="workflow" :disabled="store.busy || store.loading || store.sessionBusy || operationBusy"
+      @select="operation(() => store.selectConversation($event))" @create="newConversation"
+      @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" />
     <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || '当前章节' }}</span>
       <select v-model="writeScope" aria-label="助手操作范围" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? '指定对象' : '当前章' }}</option><option value="project">全项目</option><option value="read_only">只查询</option></select>
     </div>
@@ -271,7 +261,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />重新连接</AppButton>
       <p v-if="pendingCount" class="creation-agent-panel__constraint-notice" role="status"><button type="button" @click="pickerOpen = true">{{ pendingCount }} 个对象有新设定待核对 <span>查看</span></button></p>
       <p v-if="statusError" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
-      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
+      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
         <template #context>
           <div v-if="targets.length" class="creation-agent-panel__selected" aria-label="已选修改对象">
             <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label.replace(/@\{([^{}]+)\}/g, '$1') }}</span><button type="button" :disabled="store.busy" :aria-label="`移除${option.label}`" @click="removeTarget(option)"><X :size="12" /></button></span>
@@ -291,11 +281,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 .creation-agent-panel > header,.creation-agent-panel__toolbar,.creation-agent-panel__scope,.creation-agent-panel__context,.creation-agent-panel__selected,.creation-agent-panel > footer { flex-shrink: 0; }
 .creation-agent-panel header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--app-border); }
 .creation-agent-panel header > div { display: flex; align-items: center; gap: 8px; }
-.creation-agent-panel__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
-.creation-agent-panel__conversation-select { min-width: 0; flex: 1; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 6px; min-height: 34px; padding: 0 8px; color: var(--app-text-secondary); border: 1px solid var(--app-border); border-radius: 9px; background: var(--app-surface); }
-.creation-agent-panel__conversation-select > span { white-space: nowrap; font-size: 11px; }
 .creation-agent-panel select { min-width: 0; color: var(--app-text-secondary); background: var(--app-surface); border: 1px solid var(--app-border); border-radius: 8px; padding: 6px; font: inherit; }
-.creation-agent-panel__conversation-select select { width: 100%; border: 0; padding-inline: 2px; background: transparent; text-overflow: ellipsis; }
 .creation-agent-panel__constraint-notice { margin: 0 2px 8px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
 .creation-agent-panel__hint { padding: 10px 16px; color: var(--app-text-secondary); }
 .creation-agent-panel__welcome { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: flex-start; justify-content: safe center; padding: 24px; gap: 14px; }

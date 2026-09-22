@@ -148,3 +148,19 @@ async def test_prompt_status_shares_creative_rule_but_not_private_source_and_rej
     denied = await client.post(url, json=body, headers=_auth(await _login(client, outsider.username)))
     assert denied.json()['code'] in (403, 404)
     assert '低饱和' not in denied.text
+
+
+@pytest.mark.asyncio
+async def test_delete_and_restore_conversation_are_private_to_its_owner(client):
+    _, owner, teammate, conversation, task, _ = await setup_private_run(client)
+    from models.ai_task import AiTask
+    await AiTask.filter(id=task.id).update(status=3)
+    other_headers = _auth(await _login(client, teammate.username))
+    path = f'/api/creation-agent/conversations/{conversation.id}'
+    assert (await client.delete(path, headers=other_headers)).json()['code'] == 404
+    owner_headers = _auth(await _login(client, owner.username))
+    assert (await client.delete(path, headers=owner_headers)).json()['code'] == 0
+    hidden = await client.get('/api/creation-agent/conversations', params={'novel_id': conversation.novel_id, 'deleted': True}, headers=other_headers)
+    assert hidden.json()['data'] == []
+    assert (await client.post(path + '/restore', headers=other_headers)).json()['code'] == 404
+    assert (await client.post(path + '/restore', headers=owner_headers)).json()['code'] == 0

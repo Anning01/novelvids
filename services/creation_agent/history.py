@@ -1,9 +1,17 @@
 """Incremental conversation compression; durable creative constraints remain separate."""
 
+from dataclasses import replace
 import json
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    ToolCallPart,
+)
 from pydantic_ai.usage import UsageLimits
 
 from models.creation_agent import AgentConversation, AgentMessage
@@ -13,6 +21,54 @@ from utils.enums import TaskStatusEnum
 
 
 summary_agent = Agent(instructions=CREATION_SUMMARY_INSTRUCTIONS, name='creation_history_summary')
+
+
+def _compact_retry_content(content: list[dict] | str) -> str:
+    if isinstance(content, str):
+        return content if len(content) <= 1200 else f'{content[:1200]}…'
+    errors = []
+    for item in content[:12]:
+        location = '.'.join(str(value) for value in item.get('loc', ()))
+        message = str(item.get('msg') or '参数无效').removeprefix('Value error, ')
+        errors.append(f'{location}: {message}' if location else message)
+    suffix = '\n其余错误已省略，请先修正以上字段。' if len(content) > len(errors) else ''
+    return '工具参数校验失败：\n' + '\n'.join(errors) + suffix
+
+
+def compact_retry_history(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Keep retry guidance while removing rejected payloads from later model calls.
+
+    Pydantic validation errors include the complete invalid input. For long scene
+    prompts that duplicates the prompt in both the failed tool call and its retry
+    message, so a few corrections can exhaust the context budget even for one
+    selected scene.
+    """
+    failed_call_ids = {
+        part.tool_call_id
+        for message in messages if isinstance(message, ModelRequest)
+        for part in message.parts if isinstance(part, RetryPromptPart) and part.tool_call_id
+    }
+    if not failed_call_ids:
+        return messages
+
+    compacted = []
+    for message in messages:
+        parts = []
+        changed = False
+        for part in message.parts:
+            if isinstance(part, ToolCallPart) and part.tool_call_id in failed_call_ids:
+                part = replace(part, args={'retry_context': '未通过校验的完整参数已省略，请按后续错误修正'})
+                changed = True
+            elif isinstance(part, RetryPromptPart):
+                content = _compact_retry_content(part.content)
+                if content != part.content:
+                    part = replace(part, content=content)
+                    changed = True
+            parts.append(part)
+        if changed and isinstance(message, (ModelRequest, ModelResponse)):
+            message = replace(message, parts=parts)
+        compacted.append(message)
+    return compacted
 
 
 async def prepare_history(conversation: AgentConversation, assistant: AgentMessage, limits: AgentConfiguration, model):

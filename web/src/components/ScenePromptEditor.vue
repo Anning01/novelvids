@@ -3,6 +3,7 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch }
 import { AtSign, Boxes, Clock3, Film, Image as ImageIcon, Map as MapIcon, Pause, UserRound, Volume2, X } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
 import ImageLightbox from './ImageLightbox.vue'
+import { fallbackImage } from '@/shared/mediaFallback'
 
 export type ScenePromptMentionKind = 'person' | 'scene' | 'item' | 'image' | 'video' | 'audio' | 'duration'
 
@@ -15,6 +16,7 @@ export interface ScenePromptMentionOption {
   previewUrl?: string
   audioUrl?: string
   thumbnailUrl?: string
+  fallbackUrl?: string
   description?: string
   aliases?: string[]
 }
@@ -146,6 +148,7 @@ function createMentionNode(option: ScenePromptMentionOption) {
       image.src = thumbnail
       image.alt = ''
       image.draggable = false
+      image.addEventListener('error', event => fallbackImage(event, option.fallbackUrl || option.previewUrl))
       mention.append(image)
     }
   }
@@ -644,9 +647,9 @@ onBeforeUnmount(() => {
                 @pointerdown.prevent="selectMention(option)"
               >
                 <span class="scene-prompt-mentions__thumb">
-                  <img v-if="option.thumbnailUrl && option.kind !== 'video'" :src="option.thumbnailUrl" alt="" />
+                  <component :is="iconFor(option.kind)" :size="16" />
+                  <img v-if="option.thumbnailUrl && option.kind !== 'video'" :src="option.thumbnailUrl" alt="" @error="fallbackImage($event, option.fallbackUrl || option.previewUrl)" />
                   <video v-else-if="option.thumbnailUrl && option.kind === 'video'" :src="option.thumbnailUrl" muted playsinline preload="metadata" />
-                  <component :is="iconFor(option.kind)" v-else :size="16" />
                 </span>
                 <span><strong>{{ option.label }}</strong><small>{{ option.description || option.group }}</small></span>
               </button>
@@ -746,8 +749,8 @@ onBeforeUnmount(() => {
 .scene-prompt-mentions h3 { margin: 0; padding: 5px 7px 3px; color: var(--app-text-muted); font-size: 8px; font-weight: 700; letter-spacing: .08em; }
 .scene-prompt-mentions button { display: grid; width: 100%; min-width: 0; grid-template-columns: 34px minmax(0,1fr); align-items: center; gap: 8px; padding: 6px; border: 0; border-radius: 9px; color: var(--app-text-secondary); background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .scene-prompt-mentions button:hover,.scene-prompt-mentions button.is-active { color: var(--app-accent); background: var(--app-accent-soft); }
-.scene-prompt-mentions__thumb { display: grid; width: 34px; height: 30px; overflow: hidden; place-items: center; border-radius: 7px; color: var(--app-text-muted); background: var(--app-surface-muted); }
-.scene-prompt-mentions__thumb img,.scene-prompt-mentions__thumb video { width: 100%; height: 100%; object-fit: cover; }
+.scene-prompt-mentions__thumb { position: relative; display: grid; width: 34px; height: 30px; overflow: hidden; place-items: center; border-radius: 7px; color: var(--app-text-muted); background: var(--app-surface-muted); }
+.scene-prompt-mentions__thumb img,.scene-prompt-mentions__thumb video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .scene-prompt-mentions__actions button { grid-template-columns: 34px minmax(0,1fr); }
 .scene-prompt-mentions__action-icon { display: grid; width: 34px; height: 30px; place-items: center; border-radius: 7px; color: var(--app-text-secondary); background: var(--app-surface-muted); }
 .scene-prompt-mentions button > span:last-child { display: grid; min-width: 0; gap: 2px; }
