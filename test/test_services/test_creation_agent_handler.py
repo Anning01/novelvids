@@ -25,6 +25,13 @@ def test_truncated_output_stays_actionable_after_a_failed_automatic_retry():
     assert '减少选中的对象' in public_run_error('上下文超过配置上限', [])
 
 
+def test_hidden_tool_retry_at_turn_limit_is_actionable_without_masking_provider_errors():
+    from services.creation_agent.handler import public_run_error
+    assert '本轮处理次数' in public_run_error('Exceeded maximum retries (2) for output validation', [], turn_limited=True)
+    assert '本轮处理次数' in public_run_error('Unknown tool name: read_creation_objects', [], turn_limited=True)
+    assert '确认模型可用' in public_run_error('Connection failed', [], turn_limited=True)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('with_constraint', [False, True])
 async def test_handler_persists_events_history_and_usage_without_exposing_private_text(monkeypatch, with_constraint):

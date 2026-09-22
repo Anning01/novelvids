@@ -93,12 +93,12 @@ watch(() => props.conversations.map(item => item.id).join(','), () => { confirmi
 .agent-conversation-popover.el-popper { overflow: hidden; color: var(--app-text); background: var(--app-surface); border: 1px solid var(--app-border); border-radius: 14px; box-shadow: 0 12px 36px rgb(0 0 0 / 20%); }
 </style>
 <style scoped>
-.agent-conversations { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 14px 0; flex-shrink: 0; }
-.agent-conversations__trigger { flex: 0 1 auto; min-width: 0; height: 32px; min-height: 32px; padding: 0 7px; gap: 6px; text-align: left; border-radius: 7px; }
+.agent-conversations { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 3px 8px 0; flex-shrink: 0; }
+.agent-conversations__trigger { flex: 0 1 auto; min-width: 0; height: 28px; min-height: 28px; padding: 0 5px; gap: 5px; text-align: left; border-radius: 7px; }
 .agent-conversations__trigger:hover:not(:disabled),.agent-conversations__trigger[aria-expanded=true] { color: var(--app-text); background: var(--app-surface-hover); }
 .agent-conversations__history,.agent-conversations__chevron { flex-shrink: 0; color: var(--app-text-muted); }
 .agent-conversations__current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; line-height: 1.4; }
-.agent-conversations__new { flex: 0 0 auto; margin-left: auto; height: 32px; min-height: 32px; padding-inline: 7px; gap: 4px; border-radius: 7px; font-weight: 500; color: var(--app-accent); }
+.agent-conversations__new { flex: 0 0 auto; margin-left: auto; height: 28px; min-height: 28px; padding-inline: 5px; gap: 4px; border-radius: 7px; font-weight: 500; color: var(--app-accent); }
 .agent-conversations__new:hover:not(:disabled) { color: var(--app-accent); background: var(--app-accent-soft); }
 .agent-conversation-list { color: var(--app-text); font-size: 12px; }
 header { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px 16px; }header > div { display: grid; gap: 4px; }header strong { font-size: 14px; }header span { font-size: 11px; color: var(--app-text-muted); }

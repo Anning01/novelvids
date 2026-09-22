@@ -30,15 +30,18 @@ SCENE_PROMPT_PREFIX_ZH = (
     "3. 无动态、特效、技能、光效及战斗相关描写。"
 )
 
-COMPLETE_REFERENCE_PROMPT_MARKERS = (
-    "任务：完成角色的上半身正面平视特写",
-    "任务：生成同一组角色的群像关系参考图",
-    "生成四宫格画面，展示同一个场景",
-    "【道具描述】",
-    "Task: Create an upper-body, front-facing, eye-level close-up",
-    "Task: Create an ensemble character relationship reference image",
-    "Create a four-panel environment reference sheet",
-    "[Prop description]",
+REFERENCE_PROMPT_MARKERS_BY_KIND = {
+    "person": (
+        "任务：完成角色的上半身正面平视特写",
+        "任务：生成同一组角色的群像关系参考图",
+        "Task: Create an upper-body, front-facing, eye-level close-up",
+        "Task: Create an ensemble character relationship reference image",
+    ),
+    "scene": ("生成四宫格画面，展示同一个场景", "Create a four-panel environment reference sheet"),
+    "item": ("【道具描述】", "[Prop description]"),
+}
+COMPLETE_REFERENCE_PROMPT_MARKERS = tuple(
+    marker for markers in REFERENCE_PROMPT_MARKERS_BY_KIND.values() for marker in markers
 )
 
 

@@ -9,6 +9,7 @@ from services.creation_agent.runtime import CreationAgentDeps, creation_agent
 from services.creation_agent.tools import PromptEditService
 from services.creation_objects import CreationObjects, project_write
 from test.test_services.test_creation_agent_crud import crud
+from test.test_services.creation_prompt_fixtures import person_traits
 
 
 @pytest.mark.asyncio
@@ -22,7 +23,7 @@ async def test_creation_is_available_on_first_request_and_saves_without_capabili
         if calls == 1:
             assert {'create_creation_setting', 'query_creation_objects', 'read_creation_objects'} <= {t.name for t in info.function_tools}
             return ModelResponse(parts=[ToolCallPart('create_creation_setting', {
-                'name': '胖子', 'asset_type': 1, 'description': '主角的死党', 'prompt': '圆脸少年，黑色短发，校服。',
+                'name': '胖子', 'asset_type': 1, 'description': '主角的死党', 'prompt': person_traits(脸型='round face', 上身着装='school uniform jacket'),
             }, tool_call_id='create')])
         result = [p.content for m in messages for p in m.parts if isinstance(p, ToolReturnPart)][-1]
         assert result['status'] == 'saved'
@@ -45,7 +46,7 @@ async def test_archived_name_conflict_returns_actionable_result_without_query_lo
         calls += 1
         if calls == 1:
             return ModelResponse(parts=[ToolCallPart('create_creation_setting', {
-                'name': asset.canonical_name, 'asset_type': 1, 'description': '新角色', 'prompt': '完整形象。',
+                'name': asset.canonical_name, 'asset_type': 1, 'description': '新角色', 'prompt': person_traits(),
             }, tool_call_id='create')])
         result = [p.content for m in messages for p in m.parts if isinstance(p, ToolReturnPart)][-1]
         assert result['status'] == 'needs_resolution' and result['existing']['state'] == 'archived'

@@ -78,7 +78,7 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
 <template>
   <div ref="root" class="agent-composer">
     <slot name="context" />
-    <XSender ref="sender" placeholder="说说你想怎么改…" :max-length="8000" :disabled="disabled || submitting" :loading="busy" submit-type="enter" :auto-focus="false" :tip-config="false" @change="changed" @submit="submit" @cancel="emit('stop')">
+    <XSender ref="sender" placeholder="说说你想怎么改…" :custom-style="{ minHeight: '28px', maxHeight: '160px', padding: '4px 6px' }" :max-length="8000" :disabled="disabled || submitting" :loading="busy" submit-type="enter" :auto-focus="false" :tip-config="false" @change="changed" @submit="submit" @cancel="emit('stop')">
       <template #action-list><span /></template>
       <template #footer>
         <div class="agent-composer__tools">
@@ -90,8 +90,8 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
               </select><ChevronDown :size="13" aria-hidden="true" />
             </label>
           </div>
-          <AppButton v-if="busy" class="agent-composer__send" size="sm" variant="soft" icon-only aria-label="停止创作助手" @click="emit('stop')"><Square :size="14" /></AppButton>
-          <AppButton v-else class="agent-composer__send" size="sm" variant="primary" icon-only aria-label="发送创作要求" :disabled="!canSend" @click="submit"><ArrowUp :size="18" /></AppButton>
+          <AppButton v-if="busy" class="agent-composer__send" size="xs" variant="soft" icon-only aria-label="停止创作助手" @click="emit('stop')"><Square :size="14" /></AppButton>
+          <AppButton v-else class="agent-composer__send" size="xs" variant="primary" icon-only aria-label="发送创作要求" :disabled="!canSend" @click="submit"><ArrowUp :size="18" /></AppButton>
         </div>
       </template>
     </XSender>
@@ -99,20 +99,24 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
 </template>
 
 <style scoped>
-.agent-composer { min-width: 0; border: 1px solid var(--app-border-strong, var(--app-border)); border-radius: 16px; background: var(--app-surface); box-shadow: 0 3px 12px rgb(0 0 0 / 4%); transition: border-color .15s; }
-.agent-composer:focus-within { border-color: color-mix(in srgb, var(--app-accent) 55%, var(--app-border)); }
+.agent-composer { min-width: 0; border: 1px solid var(--app-border-strong, var(--app-border)); border-radius: 12px; background: var(--app-surface); box-shadow: 0 2px 8px rgb(0 0 0 / 3%); transition: border-color .18s, box-shadow .18s; }
+.agent-composer:focus-within { border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent) 7%, transparent); }
 .agent-composer :deep(.elx-x-sender) { border: 0; border-radius: inherit; background: transparent; box-shadow: none; }
 .agent-composer :deep(.elx-x-sender::after) { display: none; }
 .agent-composer :deep(.elx-x-sender__content) { padding: 4px 6px 0; }
+.agent-composer :deep(.elx-x-sender__chat-room) { min-height: 36px; }
 .agent-composer :deep(.elx-x-sender__action-list) { display: none; }
 .agent-composer :deep(.elx-x-sender__footer) { border: 0; }
-.agent-composer :deep([contenteditable]) { color: var(--app-text); min-height: 68px; max-height: 180px; overflow-y: auto; font-size: 14px; font-weight: 400; line-height: 1.7; }
+.agent-composer :deep([contenteditable]) { color: var(--app-text); min-height: 28px; max-height: 160px; overflow-y: auto; font-size: 13px; font-weight: 400; line-height: 1.6; }
 .agent-composer :deep(.chat-placeholder-wrap) { color: var(--app-text-muted) !important; font-weight: 400 !important; font-size: 14px; }
-.agent-composer__tools { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 10px 10px; }
+.agent-composer__tools { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 8px 6px; }
 .agent-composer__choices { display: flex; min-width: 0; align-items: center; gap: 2px; }
 .agent-composer__model { display: flex; min-width: 0; align-items: center; gap: 3px; padding: 0 7px; color: var(--app-text-secondary); border-radius: 8px; }
 .agent-composer__model:hover { background: var(--app-surface-hover); }.agent-composer__model:focus-within { outline: 2px solid var(--app-accent); }
-.agent-composer__model select { appearance: none; min-width: 0; max-width: 125px; height: 34px; padding: 0; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 12px; text-overflow: ellipsis; cursor: pointer; }
+.agent-composer__model select { appearance: none; min-width: 0; max-width: 125px; height: 28px; padding: 0; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 12px; text-overflow: ellipsis; cursor: pointer; }
 .agent-composer__model svg { flex-shrink: 0; pointer-events: none; }
 .agent-composer__send { border-radius: 50%; box-shadow: none; }
+.agent-composer__send { min-width: 28px; min-height: 28px; width: 28px; height: 28px; transition: transform .18s cubic-bezier(.23,1,.32,1), background .15s; }
+.agent-composer__send:active:not(:disabled) { transform: scale(.92); }
+@media (prefers-reduced-motion: reduce) { .agent-composer, .agent-composer__send { transition: none; } }
 </style>

@@ -10,6 +10,7 @@ from schemas.creation_agent import AgentRunRequest, AgentTarget
 from schemas.creation_objects import CreationChangeSet
 from services.creation_agent.changes import CreationChanges
 from test.test_services.test_creation_agent_tools import setup_service
+from test.test_services.creation_prompt_fixtures import full_scene_prompt, person_traits
 
 
 async def crud(scope='chapter', targets=None):
@@ -67,7 +68,7 @@ async def test_create_dependent_asset_scene_is_atomic_idempotent_and_undoable():
         {'operation': 'create_setting', 'client_ref': 'coat', 'name': '蓝色雨衣', 'asset_type': 3,
          'description': '蓝色长款雨衣', 'prompt': '蓝色长款雨衣，完整展示材质与轮廓'},
         {'operation': 'create_scene', 'client_ref': 'rain', 'after': scene.id, 'description': '雨衣特写',
-         'duration': 3, 'assets': ['coat'], 'prompt': '@{蓝色雨衣}挂在衣架上，细雨从窗外落下。'},
+         'duration': 3, 'assets': ['coat'], 'prompt': full_scene_prompt('@{蓝色雨衣}挂在衣架上，细雨从窗外落下。')},
     ]})
     saved = await service.apply(changes, tool_call_id='create')
     repeated = await service.apply(changes, tool_call_id='create')
@@ -102,7 +103,7 @@ async def test_dependent_failure_does_not_leave_new_asset():
 async def test_updates_and_delete_restore_preserve_later_nonedited_fields():
     service, scene, asset, _, _ = await crud()
     batch = CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
-        'target': {'kind': 'asset', 'id': asset.id}, 'fields': {'description': '新的描述', 'prompt': '灰色风衣，暖光'}}]})
+        'target': {'kind': 'asset', 'id': asset.id}, 'fields': {'description': '新的描述', 'prompt': person_traits(上身着装='灰色风衣')}}]})
     saved = await service.apply(batch, tool_call_id='update')
     await Asset.filter(id=asset.id).update(main_image='later.png')
     await service.undo(saved.id)
@@ -145,9 +146,9 @@ async def test_multiple_insertions_and_undo_are_one_consistent_change_set():
     service, scene, _, _, _ = await crud()
     batch = CreationChangeSet.model_validate({'operations': [
         {'operation': 'create_scene', 'client_ref': 'one', 'after': scene.id,
-         'description': '第一幅空镜', 'duration': 3, 'prompt': '雨夜空荡的站台。'},
+         'description': '第一幅空镜', 'duration': 3, 'prompt': full_scene_prompt('雨夜空荡的站台。')},
         {'operation': 'create_scene', 'client_ref': 'two', 'after': 'one',
-         'description': '第二幅空镜', 'duration': 3, 'prompt': '站台水洼中的暖色倒影。'},
+         'description': '第二幅空镜', 'duration': 3, 'prompt': full_scene_prompt('站台水洼中的暖色倒影。')},
     ]})
     saved = await service.apply(batch, tool_call_id='two')
     await service.undo(saved.id)
@@ -287,7 +288,7 @@ async def test_chapter_variant_and_structured_scenes_keep_independent_identity_a
     await service.read([AgentTarget(kind='asset', id=asset.id), AgentTarget(kind='variant', id=variant.id)])
     await service.apply(CreationChangeSet.model_validate({'operations': [{
         'operation': 'update_setting', 'target': {'kind': 'variant', 'id': variant.id},
-        'fields': {'name': '蓝雨衣', 'description': '同一人物的雨衣形态', 'prompt': '女主齐肩黑发，穿深蓝色长款连帽雨衣。'},
+        'fields': {'name': '蓝雨衣', 'description': '同一人物的雨衣形态', 'prompt': person_traits(发型='齐肩黑发', 上身着装='深蓝色长款连帽雨衣', 性别='女性')},
     }]}), tool_call_id='costume')
     await service.read_creation_context(old_scene.chapter_id)
     shot = _shot(1, '@{女主}站在雨夜站台。').model_dump()
@@ -344,7 +345,7 @@ async def test_new_variant_schema_and_creation_preserve_parent_identity():
     batch = CreationChangeSet.model_validate({'operations': [{
         'operation': 'create_setting', 'kind': 'variant', 'client_ref': 'coat',
         'parent': asset.id, 'name': '咖啡馆雨衣', 'description': '本章临时雨衣形态',
-        'prompt': '女主齐肩黑发，深蓝色长款连帽雨衣。',
+        'prompt': person_traits(发型='齐肩黑发', 上身着装='深蓝色长款连帽雨衣', 性别='女性'),
     }]})
     assert 'asset_type' not in CreationChangeSet.model_json_schema()['$defs']['CreateVariantSetting']['properties']
     saved = await service.apply(batch, tool_call_id='variant')

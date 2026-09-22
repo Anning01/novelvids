@@ -168,7 +168,7 @@ async def test_real_creation_and_archived_conflict_finish_without_permission_han
     settings, ledger, _ = configured
     conversation, request, config = await session_fixture()
     config.pricing = settings['pricing']
-    config.max_tokens = 1200
+    config.max_tokens = 2400  # Complete fourteen-field design plus tool arguments.
     await config.save()
     if archived_name:
         asset = await Asset.create(novel_id=conversation.novel_id, canonical_name='胖子', asset_type=1,
@@ -198,6 +198,76 @@ async def test_real_creation_and_archived_conflict_finish_without_permission_han
     else:
         assert await Asset.filter(novel_id=conversation.novel_id, canonical_name='胖子').count() == 1
         assert await PromptChange.filter(task=task).count() == 1
+        from prompts.creation_standards import validate_person_visual_traits
+        from prompts.reference import is_complete_reference_prompt
+        created = await Asset.get(novel_id=conversation.novel_id, canonical_name='胖子')
+        validate_person_visual_traits(created.base_traits)
+        assert is_complete_reference_prompt(created.base_traits)
     print(json.dumps({'case': 'archived_conflict' if archived_name else 'creation',
         'requests': assistant.usage['requests'], 'input_tokens': assistant.usage['input_tokens'],
         'cache_read_tokens': assistant.usage['cache_read_tokens'], 'saved': not archived_name}, ensure_ascii=False))
+
+
+@pytest.mark.real_llm
+@pytest.mark.asyncio
+async def test_real_selected_followup_edits_only_current_scene_reference_mode(test_env, monkeypatch):
+    """Reproduce the selected-shot follow-up against isolated production-path data."""
+    import json
+    from auth.deps import AuthContext
+    from models.asset import Asset
+    from models.creation_agent import AgentMessage, PromptChange
+    from models.scene import Scene
+    from prompts.storyboard import format_storyboard_prompt
+    from services.ai_task_executor import AiTaskExecutor
+    from services.creation_agent import handler
+    from services.creation_agent.sessions import agent_sessions
+    from test.test_services.test_creation_agent_sessions import session_fixture
+    from test.test_services.test_storyboard_handler import _shot
+    from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+
+    configured = real_evaluation_configuration(test_env)
+    if configured is None:
+        pytest.skip('未配置真实模型验收参数')
+    settings, ledger, _ = configured
+    conversation, request, config = await session_fixture()
+    config.pricing, config.max_tokens = settings['pricing'], 1200
+    await config.save()
+    conversation.summary = '用户要求：人物提示词不要放到镜头里，仅通过人物引用关联外貌。助手上一轮只记住了要求，还没有修改分镜。'
+    await conversation.save()
+    scene = await Scene.get(id=request.targets[0].id)
+    person = await Asset.create(novel_id=conversation.novel_id, canonical_name='测试女主', asset_type=1,
+                                base_traits='黑色齐肩短发，灰色风衣。', source_chapters=[1])
+    await scene.assets.add(person)
+    entities = await PromptEditService._entities(scene)
+    shot = _shot(1, '@{测试女主}站在站台中央。').model_copy(update={
+        'duration': '6s', 'actions': ['0s-6s: @{测试女主}向车门走出两步。'],
+    })
+    scene.prompt = format_storyboard_prompt(shot, entities=entities)
+    scene.prompt_params = {'sound_design': shot.sound_design}
+    await scene.save()
+    original = scene.prompt
+    sibling = await Scene.create(chapter_id=scene.chapter_id, sequence=2, duration=6, prompt=original)
+    request = request.model_copy(update={'write_scope': 'selected', 'message': '帮我改啊'})
+    model = UsagePreservingChatModel(settings['model'], provider=OpenAIProvider(openai_client=AsyncOpenAI(
+        base_url=settings['base_url'], api_key=settings['api_key'], max_retries=0, timeout=60)))
+    monkeypatch.setattr(handler, 'configured_model', lambda *args: BudgetedEvaluationModel(model, ledger))
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, handler.CreationAgentTaskHandler())
+    try:
+        await executor.run(task)
+    finally:
+        await model.client.close()
+    await task.refresh_from_db()
+    await scene.refresh_from_db()
+    assistant = await AgentMessage.get(task=task, role='assistant')
+    assert task.status == TaskStatusEnum.completed.value, task.error_message
+    assert scene.prompt_params.get('reference_only_types') == ['人物']
+    assert '角色设定图' not in scene.prompt and person.base_traits not in scene.prompt
+    assert '@{测试女主}' in scene.prompt and shot.actions[0] in scene.prompt
+    assert (await Scene.get(id=sibling.id)).prompt == original
+    changes = await PromptChange.filter(task=task)
+    assert len(changes) == 1 and [item['target_id'] for item in changes[0].changes] == [scene.id]
+    assert assistant.usage['requests'] <= 4
+    print(json.dumps({'case': 'selected_reference_followup', 'saved': True,
+        'requests': assistant.usage['requests'], 'input_tokens': assistant.usage['input_tokens']}, ensure_ascii=False))

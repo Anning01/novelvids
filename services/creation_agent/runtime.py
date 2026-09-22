@@ -129,7 +129,7 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
     current = {'query_creation_objects', 'read_creation_objects', 'apply_creation_changes', 'undo_creation_change'}
     # Historical selected-prompt runners remain replayable. Each live run sees
     # exactly one set of writers, never two competing business contracts.
-    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting'}
+    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'get_creation_prompt_rules'}
     capabilities = (
         {'query', 'read', 'create', 'update', 'delete', 'undo'}
         if ctx.deps.tools_enabled
@@ -147,6 +147,12 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
             if 'undo' not in capabilities:
                 omitted.add('undo_creation_change')
     prepared = [definition for definition in definitions if definition.name not in omitted]
+    if ctx.deps.changes:
+        for index, definition in enumerate(prepared):
+            if definition.name == 'read_creation_objects':
+                schema = deepcopy(definition.parameters_json_schema)
+                schema['properties']['targets']['maxItems'] = ctx.deps.changes.max_batch_size
+                prepared[index] = replace(definition, parameters_json_schema=schema)
     if ctx.deps.changes and capabilities.intersection({
         'create', 'create_setting', 'create_scene',
         'update', 'update_setting', 'update_scene', 'delete',
@@ -209,7 +215,7 @@ async def validate_creative_memory(ctx: RunContext[CreationAgentDeps], output: s
 @creation_agent.tool
 async def get_creation_context(ctx: RunContext[CreationAgentDeps], chapter_offset: Annotated[int | None, Field(ge=0)] = None,
                                changes_page: Annotated[int, Field(ge=1)] = 1,
-                               include_targets: bool = False, include_catalog: bool = False,
+                               include_targets: bool = True, include_catalog: bool = False,
                                include_chapter: bool = False, include_project: bool = False,
                                include_changes: bool = False,
                                include_creation_rules: bool = False,
@@ -378,6 +384,30 @@ def project_read_items(ctx, items, fields=None, prompt_offset=0):
 
 
 @creation_agent.tool
+async def get_creation_prompt_rules(
+    ctx: RunContext[CreationAgentDeps], kind: Literal['person', 'scene', 'item', 'storyboard'],
+    target: AgentTarget | None = None,
+    reference_layout: Literal['character_turnaround', 'group_portrait'] = 'character_turnaround',
+) -> dict:
+    """新建或整篇重写前读取对应类型的系统规范；指定 target 时同时读取实际对象，类型以对象为准。"""
+    service = crud_service(ctx)
+    try:
+        await service.authorize()
+        items = []
+        if target:
+            items = await service.read([target], use_cache=True)
+            if target.kind == 'scene':
+                kind = 'storyboard'
+            else:
+                obj = await service.creative_target(target.kind, target.id)
+                kind, reference_layout = await service.prompt_standards.asset_kind(obj)
+        return {'prompt_rules': await service.prompt_standards.contract(kind, reference_layout),
+                'targets': project_read_items(ctx, items)}
+    except ValueError as exc:
+        raise ModelRetry(str(exc)) from None
+
+
+@creation_agent.tool
 async def read_creation_objects(ctx: RunContext[CreationAgentDeps], targets: list[AgentTarget],
                                 chapter_id: Annotated[int | None, Field(gt=0)] = None,
                                 chapter_offset: Annotated[int | None, Field(ge=0)] = None,
@@ -450,8 +480,9 @@ async def create_creation_setting(
     asset_type: Literal[1, 2, 3], description: Annotated[str, Field(min_length=1, max_length=8000)],
     prompt: Annotated[str, Field(min_length=1, max_length=32000)],
     chapter_id: Annotated[int | None, Field(gt=0)] = None,
+    reference_layout: Literal['character_turnaround', 'group_portrait'] = 'character_turnaround',
 ) -> dict:
-    """直接创建人物(1)、场景(2)或道具(3)；已具备权限，无需额外启用工具。"""
+    """创建人物(1)、场景(2)或道具(3)；先读取 get_creation_prompt_rules，提交完整视觉描述，服务端渲染参考图任务。"""
     service = crud_service(ctx)
     try:
         await service.authorize()
@@ -468,7 +499,7 @@ async def create_creation_setting(
         change_set = CreationChangeSet.model_validate({'operations': [{
             'operation': 'create_setting', 'kind': 'asset', 'client_ref': 'new_setting',
             'asset_type': asset_type, 'name': name, 'description': description,
-            'prompt': prompt, 'chapter_ids': [chapter.id],
+            'prompt': prompt, 'chapter_ids': [chapter.id], 'reference_layout': reference_layout,
         }]})
         return change_receipt(await service.apply(change_set, tool_call_id=ctx.tool_call_id or ''))
     except CreationNameConflict as exc:
@@ -517,9 +548,14 @@ async def stream_creation_agent(
     on_complete: Callable[[AgentRunResult], Awaitable[None] | AsyncIterator[BaseEvent]] | None = None,
 ) -> AsyncIterator[BaseEvent]:
     # Build the protocol envelope on the server: never accept client tools or system messages.
+    selection = None
+    if deps.changes:
+        request = deps.changes.request
+        selection = {'write_scope': request.write_scope, 'chapter_id': request.chapter_id,
+                     'selected_targets': [target.model_dump() for target in request.targets]}
     run_input = RunAgentInput(
         thread_id=conversation_id, run_id=run_id,
-        messages=[UserMessage(id=f"{run_id}:user", content=render_creation_request(message))],
+        messages=[UserMessage(id=f"{run_id}:user", content=render_creation_request(message, selection))],
         tools=[], context=[], state={}, forwarded_props={},
     )
     adapter = AGUIAdapter(agent=creation_agent, run_input=run_input)

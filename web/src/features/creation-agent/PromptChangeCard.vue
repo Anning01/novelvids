@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { CornerUpLeft, LocateFixed } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import AgentDisclosure from './AgentDisclosure.vue'
 import type { AgentChange, AgentChangeItem } from './types'
 
 const props = defineProps<{ change: AgentChange; canUndo: boolean }>()
@@ -25,11 +26,9 @@ function text(value: Record<string, unknown>) {
 
 <template>
   <section class="prompt-change-card" :aria-label="`修改记录 ${props.change.id}`">
-    <div class="prompt-change-card__heading">
-      <span>{{ summary }} · {{ change.changes.length }} 项操作</span>
-      <AppButton size="xs" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起差异' : '查看差异' }}</AppButton>
-    </div>
-    <div v-if="expanded" class="prompt-change-card__details">
+    <AgentDisclosure v-model:open="expanded" :title="`${summary} · ${change.changes.length} 项操作`" summary="查看差异">
+      <template #actions><AppButton v-if="!change.reverted_at && canUndo" size="xs" icon-only aria-label="撤销这次修改" title="撤销这次修改" @click="emit('undo', change.id)"><CornerUpLeft :size="13" /></AppButton></template>
+    <div class="prompt-change-card__details">
       <div v-for="(target, index) in change.changes" :key="`${target.kind}-${target.target_id}-${index}`">
         <strong v-if="removed(target)">{{ target.target_label || '已移除对象' }}</strong>
         <AppButton v-else size="xs" @click="emit('locate', target)"><LocateFixed :size="13" />{{ target.target_label || (target.kind === 'scene' ? '查看分镜' : '查看图片设定') }}</AppButton>
@@ -39,14 +38,14 @@ function text(value: Record<string, unknown>) {
         <p v-if="target.operation === 'delete' && !change.reverted_at">原有媒体保留，可撤销恢复。</p>
       </div>
     </div>
-    <AppButton v-if="!change.reverted_at && canUndo" size="xs" @click="emit('undo', change.id)"><CornerUpLeft :size="13" />撤销这次修改</AppButton>
+    </AgentDisclosure>
   </section>
 </template>
 
 <style scoped>
-.prompt-change-card { margin-top: 8px; padding: 10px; border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface); font-size: 12px; }
+.prompt-change-card { margin-top: 4px; padding: 0 7px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); font-size: 12px; }
 .prompt-change-card__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.prompt-change-card__details { margin: 10px 0; }
+.prompt-change-card__details { margin: 2px 0; }
 label { display: block; margin: 8px 0 4px; color: var(--app-text-secondary); }
 pre { max-height: 240px; overflow: auto; margin: 0; padding: 8px; background: var(--app-surface-muted); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
 </style>

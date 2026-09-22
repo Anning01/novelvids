@@ -62,6 +62,11 @@ class ScenePromptSegment(BaseModel):
 class SoraScenePromptConfig(BaseModel):
     """专业视频分镜提示词的结构化内容。"""
 
+    reference_only_types: list[Literal['人物', '场景', '物品']] = Field(
+        default_factory=list, max_length=3,
+        description='这些资产类型只保留名称引用，不在分镜中展开外貌设定；其他类型保持默认展开',
+    )
+
     sequence: int = Field(..., description="分镜序列号")
     description: str = Field(
         ...,

@@ -6,6 +6,7 @@ import re
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.scene import Scene
+from prompts.creation_standards import validate_storyboard_sections
 from prompts.storyboard import format_storyboard_prompt, normalized_storyboard_reference_fields
 from schemas.creation_agent import AgentTarget, StoryboardPromptEdit
 from schemas.creation_objects import CreateScene, CreateSetting, CreateAssetSetting, CreateVariantSetting, DeleteObject, UpdateScene, UpdateSetting
@@ -91,13 +92,22 @@ class CreationOperations:
             raise ValueError('全书共用设定需要项目操作范围')
         validate_image_prompt_edit(operation.prompt, '')
         if isinstance(operation, CreateAssetSetting):
+            asset_type, layout = operation.asset_type, operation.reference_layout
+        else:
+            parent = await self.objects.get('asset', parent_id)
+            asset_type = parent.asset_type
+            _, layout = await self.service.prompt_standards.asset_kind(parent)
+        prompt = await self.service.prompt_standards.prepare_asset(
+            operation.prompt, asset_type=asset_type, layout=layout)
+        if isinstance(operation, CreateAssetSetting):
             target = await self.objects.create_setting({
                 'canonical_name': operation.name, 'asset_type': operation.asset_type, 'aliases': operation.aliases,
-                'description': operation.description, 'base_traits': operation.prompt, 'is_global': operation.is_global,
+                'description': operation.description, 'base_traits': prompt, 'is_global': operation.is_global,
+                'metadata': {'reference_layout': layout},
                 'source_chapters': [c.number for c in chapters], 'last_updated_chapter': max(c.number for c in chapters)})
         else:
             target = await self.objects.create_variant(parent_id, {
-                'name': operation.name, 'description': operation.description, 'base_traits': operation.prompt,
+                'name': operation.name, 'description': operation.description, 'base_traits': prompt,
                 'chapter_numbers': [c.number for c in chapters]})
         self.refs[operation.client_ref] = (operation.kind, target.id)
         self.created.add((operation.kind, target.id))
@@ -122,6 +132,7 @@ class CreationOperations:
     async def scene_prompt(self, scene: Scene, *, prompt=None, structure=None, visual=None, previous=None):
         entities = await PromptEditService._entities(scene)
         strategy = storyboard_strategy_factory.resolve(scene.chapter.novel.storyboard_strategy)
+        legacy_params = scene.prompt_params or {}
         if structure is not None:
             candidate = SoraScenePromptConfig.model_validate({**structure.model_dump(), 'sequence': scene.sequence,
                 **(visual.model_dump(exclude_unset=True) if visual else {}),
@@ -135,13 +146,18 @@ class CreationOperations:
                     **(visual.model_dump(exclude_unset=True) if visual else {}),
                     'sequence': scene.sequence, 'duration': f'{scene.duration:g}s', 'description': scene.description})
             elif visual is not None:
-                raise ValueError('当前为手工文本或引用已变化，请提交完整 prompt 保留当前画面')
+                if visual.model_fields_set == {'reference_only_types'}:
+                    prompt = scene.prompt or ''
+                    legacy_params = {**legacy_params, **visual.model_dump(exclude_unset=True)}
+                else:
+                    raise ValueError('当前为手工文本或引用已变化，请提交完整 prompt 保留当前画面')
         else:
             candidate = None
         if prompt is not None:
+            validate_storyboard_sections(prompt, previous.prompt if previous is not None else None)
             # The shared legacy path preserves tracks and expands actual references.
             values = prepare_storyboard_edit(edit=StoryboardPromptEdit(scene_id=scene.id, legacy_prompt=prompt),
-                prompt=scene.prompt, params=scene.prompt_params or {}, sequence=scene.sequence,
+                prompt=scene.prompt, params=legacy_params, sequence=scene.sequence,
                 description=scene.description, duration=scene.duration, entities=entities, strategy=strategy)
             self.validate_timing(values['prompt'], scene.duration)
         elif candidate:
@@ -227,7 +243,11 @@ class CreationOperations:
             raise ValueError('改变全书共用关系需要项目操作范围')
         if fields.prompt is not None:
             validate_image_prompt_edit(fields.prompt, target.base_traits or '')
-            updates['base_traits'] = fields.prompt
+            asset = target if isinstance(target, Asset) else await self.objects.get('asset', target.asset_id)
+            _, layout = await self.service.prompt_standards.asset_kind(target)
+            updates['base_traits'] = await self.service.prompt_standards.prepare_asset(
+                fields.prompt, asset_type=asset.asset_type, layout=layout,
+                previous=target.base_traits or '', local_edit=fields.prompt_replacements is not None)
         if fields.name is not None:
             updates['canonical_name' if kind == 'asset' else 'name'] = fields.name
         if fields.chapter_ids is not None:

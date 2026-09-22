@@ -56,8 +56,10 @@ def configured_model(config, limits: AgentConfiguration):
                                    settings={'extra_body': extra_body})
 
 
-def public_run_error(message: str, calls: list[dict]) -> str:
+def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = False) -> str:
     """Return actionable fixed copy without disclosing a provider's error payload."""
+    if turn_limited and ('Unknown tool name' in message or 'Exceeded maximum retries' in message):
+        message = '本轮模型调用次数已达到配置上限'
     if '上下文超过配置上限' in message:
         if calls:
             return '本轮多次校验重试后超过了上下文额度。已保存的修改仍然有效，请编辑要求后重试。'
@@ -193,7 +195,8 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                     # Stream tool progress, then publish only the validated reply.
                     continue
                 if kind == "RUN_ERROR":
-                    error = public_run_error(item.get('message', ''), recorded_model.calls)
+                    error = public_run_error(item.get('message', ''), recorded_model.calls,
+                                             turn_limited=deps.turn_limited)
                     item["message"] = error
                 if kind == "TEXT_MESSAGE_START":
                     # AG-UI emits one text message per model response. Persist

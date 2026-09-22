@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BubbleList } from 'vue-element-plus-x'
 import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList'
-import { Bot, RefreshCw, X, BookOpenText } from 'lucide-vue-next'
+import { Bot, RefreshCw, X, BookOpenText, ChevronsUpDown } from 'lucide-vue-next'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import { notice } from '@/shared/notice'
@@ -16,6 +16,8 @@ import AgentComposer from './AgentComposer.vue'
 import AgentConversationMenu from './AgentConversationMenu.vue'
 import AgentTargetPicker from './AgentTargetPicker.vue'
 import AgentSetupState from './AgentSetupState.vue'
+import AgentDisclosure from './AgentDisclosure.vue'
+import AgentActivity from './AgentActivity.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
 import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, PromptTargetStatus } from './types'
 
@@ -47,6 +49,8 @@ const hasMoreScenes = ref(false)
 const operationBusy = ref(false)
 const pendingConstraints = ref<Record<string, PromptTargetStatus['pending_constraints']>>({})
 const statusError = ref('')
+const messageExpansion = ref<Record<number, boolean>>({})
+const statusOpen = ref(false)
 const pendingCount = computed(() => allOptions.value.filter(option => pendingConstraints.value[option.key]?.length).length)
 let catalogEpoch = 0
 let statusEpoch = 0
@@ -75,12 +79,28 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
-const bubbles = computed(() => store.messages.map(message => ({ ...message,
+const bubbles = computed(() => store.messages.filter(message => message.role === 'user' ||
+  message.content || message.query_results?.length || message.changes.length || message.status === 4 || message.status === 5,
+).map(message => ({ ...message,
   content: message.role === 'assistant' && message.status !== 3 ? '' : message.content,
+  paragraphs: (message.role === 'assistant' && message.status !== 3 ? '' : message.content).split(/\n\s*\n/).filter(Boolean),
+  preview: message.content.replace(/\s+/g, ' ').slice(0, 90) || (message.changes.length ? `${message.changes.length} 条修改记录` : message.status === 4 ? '本轮未完成' : '查询与处理记录'),
   placement: message.role === 'user' ? 'end' as const : 'start' as const,
   variant: message.role === 'user' ? 'filled' as const : 'borderless' as const,
-  maxWidth: '100%', loading: message.role === 'assistant' && message.task_id === store.currentRun?.task_id && store.busy,
+  maxWidth: '100%', loading: false,
 })))
+const messageIsOpen = (message: { id: number; role: string }) => messageExpansion.value[message.id] ?? message.role === 'assistant'
+const allCollapsed = computed(() => bubbles.value.length > 0 && bubbles.value.every(message => !messageIsOpen(message)))
+function toggleMessage(id: number, open: boolean) {
+  messageExpansion.value[id] = open
+}
+function toggleAllMessages() {
+  const open = allCollapsed.value
+  messageExpansion.value = Object.fromEntries(bubbles.value.map(message => [message.id, open]))
+}
+const statusLabel = computed(() => store.error ? '本轮未完成 · 查看原因' : store.statusText || '创作上下文')
+watch(() => store.error, error => { if (error) statusOpen.value = true })
+watch(() => store.conversationId, () => { messageExpansion.value = {}; statusOpen.value = false })
 
 async function loadTargets(more = false) {
   const epoch = ++catalogEpoch
@@ -228,7 +248,9 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
   <aside class="creation-agent-panel" :class="{ 'is-workflow': workflow }" aria-label="创作助手" @keydown.esc.stop="close">
     <header>
       <div><Bot :size="18" /><strong>创作助手</strong></div>
-      <AppButton size="sm" icon-only aria-label="关闭创作助手" @click="close"><X :size="18" /></AppButton>
+      <div class="creation-agent-panel__header-actions"><AppButton v-if="bubbles.length" size="xs" icon-only :aria-label="allCollapsed ? '展开全部消息' : '折叠全部消息'" :title="allCollapsed ? '展开全部消息' : '折叠全部消息'" @click="toggleAllMessages"><ChevronsUpDown :size="15" /></AppButton>
+      <AppButton size="xs" icon-only aria-label="关闭创作助手" @click="close"><X :size="18" /></AppButton>
+      </div>
     </header>
     <AgentConversationMenu :conversations="store.conversations" :deleted-conversations="store.deletedConversations" :current-id="store.conversationId" :workflow="workflow" :disabled="store.busy || store.loading || store.sessionBusy || operationBusy"
       @select="operation(() => store.selectConversation($event))" @create="newConversation"
@@ -246,35 +268,42 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
     </div>
     <AppButton v-if="store.nextBefore" size="xs" @click="operation(() => store.history(store.nextBefore || undefined))">查看更早的消息</AppButton>
     <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
-      <template #content="{ item }"><div class="creation-agent-panel__message">{{ item.content }}</div></template>
-      <template #footer="{ item }">
+      <template #content="{ item }">
+        <AgentDisclosure class="creation-agent-panel__message-group" :title="item.role === 'user' ? '你' : '创作助手'" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
+        <div v-if="item.content" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
         <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? '本轮已停止' : '本轮未完成' }}{{ item.changes.length ? '，已保存的修改见下方记录' : '，尚未保存修改' }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
+        </AgentDisclosure>
       </template>
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? `${unreadCount} 条新消息` : '回到最新' }}</AppButton></template>
     </BubbleList>
     <footer v-if="ready && !store.loading">
-      <div v-if="store.statusText" class="creation-agent-panel__status" role="status">{{ store.statusText }}</div>
+      <AgentDisclosure v-if="store.statusText || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
+        <template #title><AgentActivity :text="statusLabel" :active="store.busy" /></template>
+        <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="`${pendingCount} 个对象有新设定待核对`" @click="pickerOpen = true">待核对 {{ pendingCount }}</button></template>
       <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">继续对话</AppButton>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">编辑后重试</AppButton><AppButton size="xs" @click="router.push('/settings')">查看设置</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">重新连接</AppButton></p>
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />重新连接</AppButton>
-      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice" role="status"><button type="button" @click="pickerOpen = true">{{ pendingCount }} 个对象有新设定待核对 <span>查看</span></button></p>
+      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} 个对象有新设定待核对 <span>查看</span></button></p>
       <p v-if="statusError && (pickerOpen || targets.length)" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
+      </AgentDisclosure>
       <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
         <template #context>
-          <div v-if="targets.length" class="creation-agent-panel__selected" aria-label="已选修改对象">
+          <AgentDisclosure v-if="targets.length" class="creation-agent-panel__references" :title="`引用 ${targets.length}`" :summary="workspace.selection.map(option => option.label).join('、')">
+          <div class="creation-agent-panel__selected" aria-label="已选修改对象">
             <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label.replace(/@\{([^{}]+)\}/g, '$1') }}</span><button type="button" :disabled="store.busy" :aria-label="`移除${option.label}`" @click="removeTarget(option)"><X :size="12" /></button></span>
           </div>
+          </AgentDisclosure>
         </template>
         <template #tools>
           <AgentTargetPicker v-model="selected" v-model:open="pickerOpen" :options="allOptions" :limit="store.capabilities?.max_targets || 1" :loading="catalogLoading" :has-more="hasMoreAssets || hasMoreScenes" :disabled="store.busy" :pending="pendingConstraints" @refresh="loadTargets()" @more="loadTargets(true)" @done="nextTick(() => composer?.focus())" />
         </template>
       </AgentComposer>
-      <p class="creation-agent-panel__boundary">管理设定与分镜 · 操作可撤销 · Shift + Enter 换行</p>
+      <p class="creation-agent-panel__boundary">操作可撤销<span>Enter 发送 · Shift + Enter 换行</span></p>
     </footer>
   </aside>
 </template>
@@ -282,7 +311,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 <style scoped>
 .creation-agent-panel { --el-color-primary: var(--app-accent); --el-bg-color: var(--app-surface); --el-bg-color-overlay: var(--app-surface); --el-fill-color: var(--app-surface-muted); --el-fill-color-light: var(--app-surface-muted); --el-fill-color-blank: var(--app-surface); --el-text-color-primary: var(--app-text); --el-text-color-regular: var(--app-text-secondary); --el-border-color: var(--app-border); --el-border-color-light: var(--app-border); --el-border-radius-base: 10px; --el-font-size-base: 13px; --el-font-line-height-primary: 1.65; position: sticky; top: var(--short-drama-header-height, 72px); flex: 0 0 var(--short-drama-assistant-width, 420px); width: var(--short-drama-assistant-width, 420px); min-width: 0; height: calc(100dvh - var(--short-drama-header-height, 72px)); display: flex; flex-direction: column; border-left: 1px solid var(--app-border); color: var(--app-text); background: var(--app-surface); overflow: hidden; font-size: 13px; }
 .creation-agent-panel > header,.creation-agent-panel__toolbar,.creation-agent-panel__scope,.creation-agent-panel__context,.creation-agent-panel__selected,.creation-agent-panel > footer { flex-shrink: 0; }
-.creation-agent-panel header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--app-border); }
+.creation-agent-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; min-height: 38px; border-bottom: 1px solid var(--app-border); }
 .creation-agent-panel header > div { display: flex; align-items: center; gap: 8px; }
 .creation-agent-panel select { min-width: 0; color: var(--app-text-secondary); background: var(--app-surface); border: 1px solid var(--app-border); border-radius: 8px; padding: 6px; font: inherit; }
 .creation-agent-panel__constraint-notice { margin: 0 2px 8px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
@@ -292,21 +321,33 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 .creation-agent-panel__welcome > strong { font-size: 17px; }
 .creation-agent-panel__suggestion { width: 100%; padding: 12px; text-align: left; color: var(--app-text-secondary); border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface); font: inherit; line-height: 1.6; cursor: pointer; }
 .creation-agent-panel__suggestion:hover { color: var(--app-accent); background: var(--app-accent-soft); border-color: var(--app-accent); }
-.creation-agent-panel__context { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 10px 14px 2px; color: var(--app-text-muted); font-size: 11px; }
+.creation-agent-panel__context { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 12px 5px; color: var(--app-text-muted); font-size: 11px; border-bottom: 1px solid var(--app-border); }
 .creation-agent-panel__context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creation-agent-panel__context select { margin-left: auto; flex-shrink: 0; padding: 3px; font-size: 11px; border: 0; background: transparent; }
-.creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 5px; max-height: 88px; overflow: auto; padding: 10px 12px 0; }
+.creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 4px; max-height: 72px; overflow: auto; padding: 0 2px; }
 .creation-agent-panel__selected > span { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; overflow-wrap: anywhere; }
 .creation-agent-panel__selected-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creation-agent-panel__selected button { flex: none; display: grid; place-items: center; min-width: 22px; min-height: 22px; color: inherit; background: transparent; cursor: pointer; }
 .creation-agent-panel__welcome p { color: var(--app-text-secondary); line-height: 1.8; margin: 0; }
 .creation-agent-panel__welcome span { font-size: 12px; color: var(--app-text-secondary); }
-.creation-agent-panel__messages { flex: 1; min-width: 0; min-height: 0; padding: 10px 14px; overflow-y: auto; overflow-x: hidden; }
-.creation-agent-panel__message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
-.creation-agent-panel footer { padding: 12px; border-top: 1px solid var(--app-border); margin-top: auto; background: color-mix(in srgb,var(--app-surface) 96%,var(--app-accent)); }
+.creation-agent-panel__messages { flex: 1; min-width: 0; min-height: 0; padding: 8px 12px; overflow-y: auto; overflow-x: hidden; }
+.creation-agent-panel__message { overflow-wrap: anywhere; line-height: 1.65; }
+.creation-agent-panel__message p { margin: 0; white-space: pre-wrap; }.creation-agent-panel__message p + p { margin-top: 6px; }
+.creation-agent-panel > footer { padding: 4px 10px 6px; border-top: 1px solid var(--app-border); margin-top: auto; background: var(--app-surface); max-height: 48%; overflow-y: auto; }
 .creation-agent-panel__status { color: var(--app-text-secondary); margin-bottom: 8px; font-size: 12px; }
 .creation-agent-panel__constraint-notice button { color: inherit; background: transparent; font: inherit; cursor: pointer; }.creation-agent-panel__constraint-notice button span { color: var(--app-accent); margin-left: 6px; }
-.creation-agent-panel__boundary { margin: 9px 0 0; text-align: center; font-size: 10px; color: var(--app-text-muted); }
+.creation-agent-panel__boundary { display: flex; justify-content: space-between; gap: 6px; margin: 5px 2px 0; font-size: 10px; color: var(--app-text-muted); }
+.creation-agent-panel__references { padding: 2px 8px 0; box-sizing: border-box; }
+.creation-agent-panel__run-details { margin-bottom: 4px; }
+.creation-agent-panel__pending-chip { padding: 3px 6px; flex-shrink: 0; border-radius: 5px; color: var(--app-text-secondary); background: var(--app-surface-muted); font: inherit; font-size: 10px; cursor: pointer; }
+.creation-agent-panel__pending-chip:hover { color: var(--app-accent); background: var(--app-accent-soft); }
+.creation-agent-panel__pending-chip:focus-visible { outline: 2px solid var(--app-accent); }
+.creation-agent-panel :deep(.elx-bubble-list__list) { gap: 10px; }
+.creation-agent-panel :deep(.elx-bubble__content) { padding: 2px 8px; border-radius: 9px; min-height: 0; white-space: normal; }
+.creation-agent-panel :deep(.elx-bubble__content--borderless) { padding: 0; background: transparent; }
+.creation-agent-panel :deep(.elx-bubble__footer:empty) { display: none; }
+.creation-agent-panel :deep(.elx-bubble__content-wrapper) { gap: 0; }
+.creation-agent-panel :deep(.elx-bubble--end .agent-disclosure__summary) { color: var(--app-text); }
 .creation-agent-panel__round-status { color: var(--app-text-secondary); margin: 6px 0; font-size: 11px; }
 .creation-agent-panel__error { color: var(--app-text); border-left: 3px solid var(--app-accent); padding-left: 8px; font-size: 12px; }
 .creation-agent-panel :deep(.elx-bubble__avatar-placeholder) { display: none; }

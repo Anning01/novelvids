@@ -82,20 +82,25 @@ def prepare_storyboard_edit(
 ) -> dict:
     if edit.legacy_prompt is not None:
         from prompts.creation_agent import without_prompt_definitions
+        from prompts.storyboard import without_inline_reference_descriptions
 
-        visual_prompt = normalize_storyboard_reference_text(without_prompt_definitions(edit.legacy_prompt), entities)
+        reference_only_types = params.get('reference_only_types', [])
+        visual_prompt = normalize_storyboard_reference_text(without_inline_reference_descriptions(
+            without_prompt_definitions(edit.legacy_prompt), reference_only_types), entities)
         validate_prompt_dependencies(visual_prompt, entities)
         numbers = [int(number) for number in _LOCAL_HEADING.findall(visual_prompt)]
         if numbers != list(range(1, len(numbers) + 1)):
             raise ValueError("每个独立请求的小镜头编号必须从1开始连续排列")
         complete_prompt = normalize_storyboard_reference_text(render_preserved_tracks(visual_prompt, params), entities)
-        referenced = entity_reference_names(complete_prompt, entities)
+        referenced = [entity for entity in entity_reference_names(complete_prompt, entities)
+                      if entity.asset_type not in reference_only_types]
         return {
             "prompt": append_prompt_definitions(complete_prompt, referenced),
             # Preserve audio tracks/other metadata, but never revive stale visual fields.
             "prompt_params": {
                 key: value for key, value in params.items()
                 if key not in StoryboardVisualChanges.model_fields
+                or key == 'reference_only_types'
             },
         }
 

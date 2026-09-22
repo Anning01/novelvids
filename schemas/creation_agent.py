@@ -239,6 +239,7 @@ class StoryboardVisualChanges(BaseModel):
     transition: str | SkipJsonSchema[None] = Field(None, min_length=1)
     allowed_effects: list[str] | SkipJsonSchema[None] = None
     segments: list[ScenePromptSegment] | SkipJsonSchema[None] = None
+    reference_only_types: list[Literal['人物', '场景', '物品']] | SkipJsonSchema[None] = Field(None, max_length=3)
 
     @model_validator(mode='before')
     @classmethod

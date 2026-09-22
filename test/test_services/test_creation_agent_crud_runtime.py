@@ -66,9 +66,9 @@ async def test_crud_model_discovers_then_creates_without_manual_selection():
         calls += 1
         names = {tool.name for tool in info.function_tools}
         assert names == (
-            {'get_creation_context', 'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'query_creation_objects', 'read_creation_objects'}
+            {'get_creation_context', 'get_creation_prompt_rules', 'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'query_creation_objects', 'read_creation_objects'}
             if calls == 1 else
-            {'get_creation_context', 'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'read_creation_objects', 'query_creation_objects', 'apply_creation_changes'}
+            {'get_creation_context', 'get_creation_prompt_rules', 'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'read_creation_objects', 'query_creation_objects', 'apply_creation_changes'}
         )
         assert 'expected_version' not in json.dumps([t.parameters_json_schema for t in info.function_tools])
         if calls == 1:

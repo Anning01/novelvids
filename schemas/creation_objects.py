@@ -39,6 +39,7 @@ class CreateAssetSetting(CreateSetting):
     """新增人物、场景或道具基础设定。"""
     kind: Literal['asset'] = 'asset'
     asset_type: Literal[1, 2, 3]
+    reference_layout: Literal['character_turnaround', 'group_portrait'] = 'character_turnaround'
     aliases: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(default_factory=list, max_length=30)
     is_global: bool = False
 

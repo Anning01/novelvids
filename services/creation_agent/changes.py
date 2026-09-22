@@ -19,6 +19,7 @@ from services.creation_agent.catalog import CreationCatalog
 from services.creation_agent.memory import creation_memory
 from services.creation_agent.object_state import creation_version, object_label, object_state, object_version, write_fields
 from services.creation_agent.scope import CreationWriteScope
+from services.creation_agent.prompt_standards import CreationPromptStandards
 from services.creation_agent.tools import PromptEditConflict, PromptEditService, _digest
 from services.creation_objects import CreationObjects, project_write
 from utils.enums import TaskStatusEnum
@@ -36,6 +37,7 @@ class CreationChanges:
         self.chapter_character_budget = max(500, max_context_characters // 3)
         self.scope = CreationWriteScope(novel_id, request)
         self.objects = CreationObjects(novel_id)
+        self.prompt_standards = CreationPromptStandards(novel_id)
         self.catalog = CreationCatalog(novel_id, request.chapter_id)
         self.observed: dict[tuple[str, int], str] = {}
         self.rules: dict[tuple[str, int], list[dict]] = {}
@@ -132,6 +134,7 @@ class CreationChanges:
             data['fields'].pop('base_traits', None)
             if isinstance(target, Scene):
                 data['chapter_id'] = target.chapter_id
+                data['reference_only_types'] = (target.prompt_params or {}).get('reference_only_types', [])
             if use_cache:
                 if len(self.read_snapshots) >= 100:
                     self.read_snapshots.pop(next(iter(self.read_snapshots)))

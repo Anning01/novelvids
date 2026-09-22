@@ -32,6 +32,41 @@ beforeEach(() => {
 })
 
 describe('creation assistant panel', () => {
+  it('folds all messages without hiding the composer or triggering another request', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.messages = [
+      { id: 1, role: 'user', content: '保留角色，只改光线', task_id: 'done', status: 3, changes: [], usage: {}, created_at: '' },
+      { id: 2, role: 'assistant', content: '已调整光线。\n\n人物保持一致。', task_id: 'done', status: 3, changes: [], usage: {}, created_at: '' },
+    ]
+    const send = vi.spyOn(store, 'send')
+    await flushPromises()
+    expect(wrapper.findAll('.creation-agent-panel__message p')).toHaveLength(3)
+    await wrapper.get('[aria-label="折叠全部消息"]').trigger('click')
+    expect(wrapper.findAll('.creation-agent-panel__message-group.is-open')).toHaveLength(0)
+    expect(wrapper.find('[aria-label="创作要求"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="展开全部消息"]').trigger('click')
+    expect(wrapper.findAll('.creation-agent-panel__message-group.is-open')).toHaveLength(2)
+    expect(send).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows one compact activity indicator without an empty assistant bubble', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.messages = [{ id: 2, role: 'assistant', content: '', task_id: 'active', status: 2, changes: [], usage: { requests: 1 }, created_at: '' }]
+    store.currentRun = { task_id: 'active', conversation_id: 1, status: 2, content: '', error_message: '', changes: [], usage: {}, event_count: 1 }
+    store.statusText = '正在整理上下文'
+    await flushPromises()
+    expect(wrapper.findAll('.creation-agent-panel__message-group')).toHaveLength(0)
+    expect(wrapper.findAll('.agent-activity.is-active')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('distinguishes automatic chapter scope from explicit read-only scope without selecting objects', async () => {
     const pinia = createPinia()
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
@@ -133,7 +168,7 @@ describe('creation assistant panel', () => {
       changes: [{ id: 13, task_id: 'task', changes: [], created_at: '', reverted_at: null }] }]
     const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
     await flushPromises()
-    const button = wrapper.findAll('button').find(item => item.text().includes('撤销这次修改'))!
+    const button = wrapper.get('button[aria-label="撤销这次修改"]')
     await button.trigger('click')
     expect(undo).toHaveBeenCalledWith(13)
   })
@@ -148,7 +183,7 @@ it('locates a variant through its parent asset even when the catalog does not co
     changes: [{ id: 13, task_id: 'task', created_at: '', reverted_at: null,
       changes: [{ kind: 'variant', target_id: 31, asset_id: 8, before: {}, after: { base_traits: '雨衣' }, after_version: 'v1' }] }] }]
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text() === '查看差异')!.trigger('click')
+  await wrapper.get('.prompt-change-card button[aria-expanded="false"]').trigger('click')
   await wrapper.findAll('button').find(button => button.text().includes('查看图片设定'))!.trigger('click')
   expect(push).toHaveBeenCalledWith({ path: '/create/short-drama/manual/7', query: { chapter: 3, asset: 8, variant: 31 } })
   wrapper.unmount()

@@ -132,7 +132,7 @@ async def test_small_talk_uses_one_light_request_without_business_context():
     def respond(messages, info):
         calls.append(messages)
         assert {t.name for t in info.function_tools} == {
-            'get_creation_context', 'read_creation_history', 'patch_creation_prompts',
+            'get_creation_context', 'get_creation_prompt_rules', 'read_creation_history', 'patch_creation_prompts',
             'create_creation_setting', 'query_creation_objects', 'read_creation_objects',
         }
         assert not any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts)

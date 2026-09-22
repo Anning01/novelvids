@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import AgentDisclosure from './AgentDisclosure.vue'
 
 const props = defineProps<{ usage: Record<string, unknown> }>()
 const number = (key: string) => typeof props.usage[key] === 'number' ? props.usage[key] as number : 0
@@ -13,8 +14,7 @@ const scopeName = (scope: { kind?: string }) => ({ project: '项目', chapter: '
 </script>
 
 <template>
-  <details v-if="number('requests')" class="agent-usage">
-    <summary>本轮用量<span v-if="number('compactions')"> · 已整理上下文</span></summary>
+  <AgentDisclosure v-if="number('requests')" class="agent-usage" title="本轮用量" :summary="number('compactions') ? '已整理上下文' : `${number('requests')} 次调用`">
     <dl>
       <dt>模型调用</dt><dd>{{ number('requests') }} 次<span v-if="number('summary_requests')">（含 {{ number('summary_requests') }} 次摘要）</span></dd>
       <dt>输入 / 输出</dt><dd>{{ number('input_tokens').toLocaleString() }} / {{ number('output_tokens').toLocaleString() }} token</dd>
@@ -23,15 +23,14 @@ const scopeName = (scope: { kind?: string }) => ({ project: '项目', chapter: '
     </dl>
     <p v-if="usage.cache_price_configured === false">尚未配置缓存输入单价，费用按当前模型价格计算。</p>
     <p v-if="usage.missing_usage">部分请求未返回完整用量。</p>
-  </details>
-  <details v-if="rules.length" class="agent-usage">
-    <summary>已记住 {{ rules.length }} 条设定</summary>
+  </AgentDisclosure>
+  <AgentDisclosure v-if="rules.length" class="agent-usage" :title="`已记住 ${rules.length} 条设定`">
     <ul><li v-for="(rule, index) in rules" :key="index">{{ scopeName(rule.scope || {}) }}：{{ rule.content }}</li></ul>
-  </details>
+  </AgentDisclosure>
 </template>
 
 <style scoped>
-.agent-usage { margin: 8px 0; color: var(--app-text-secondary); font-size: 11px; line-height: 1.6; }
+.agent-usage { margin: 2px 0 0; color: var(--app-text-secondary); font-size: 11px; line-height: 1.6; }
 summary { cursor: pointer; width: fit-content; }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0; }
 dd { margin: 0; text-align: right; overflow-wrap: anywhere; }

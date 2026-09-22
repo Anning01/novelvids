@@ -435,6 +435,29 @@ def referenced_entities(
     return entity_reference_names(_shot_search_text(shot), entities)
 
 
+ASSET_REFERENCE_LABELS = (
+    ("人物", "角色参考", "角色设定图"),
+    ("物品", "道具参考", "道具概念设计图"),
+    ("场景", "场景参考", "场景概念图"),
+)
+
+
+def without_inline_reference_descriptions(prompt: str, reference_only_types: Sequence[str]) -> str:
+    """Remove only renderer-owned detail entries; keep references and narrative prose."""
+    if not reference_only_types:
+        return prompt
+    boundaries = '|'.join(re.escape(label) for _, summary, detail in ASSET_REFERENCE_LABELS for label in (summary, detail))
+
+    def clean_section(match: re.Match) -> str:
+        body = match.group(2)
+        for kind, _, detail in ASSET_REFERENCE_LABELS:
+            if kind in reference_only_types:
+                body = re.sub(r'(?ms)^[ \t]*' + re.escape(detail) + r'[：:].*?(?=^[ \t]*(?:' + boundaries + r')[：:]|\Z)', '', body)
+        return match.group(1) + body
+
+    return re.sub(r'(?ms)(^【角色 / 道具 / 场景引用】[^\S\n]*\n)(.*?)(?=^【|\Z)', clean_section, prompt)
+
+
 def _format_asset_references(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
@@ -447,13 +470,8 @@ def _format_asset_references(
     if not referenced:
         return "本镜头未引用已登记资产。"
 
-    category_config = (
-        ("人物", "角色参考", "角色设定图"),
-        ("物品", "道具参考", "道具概念设计图"),
-        ("场景", "场景参考", "场景概念图"),
-    )
     sections: list[str] = []
-    for asset_type, summary_label, detail_label in category_config:
+    for asset_type, summary_label, detail_label in ASSET_REFERENCE_LABELS:
         category_entities = [
             entity for entity in referenced if entity.asset_type == asset_type
         ]
@@ -463,10 +481,11 @@ def _format_asset_references(
             f"{summary_label}："
             f"{_join_values([f'@{{{entity.name}}}' for entity in category_entities])}"
         )
-        sections.extend(
-            f"{detail_label}：@{{{entity.name}}}。{entity.description}"
-            for entity in category_entities
-        )
+        if asset_type not in getattr(shot, 'reference_only_types', ()):
+            sections.extend(
+                f"{detail_label}：@{{{entity.name}}}。{entity.description}"
+                for entity in category_entities
+            )
     return "\n".join(sections)
 
 

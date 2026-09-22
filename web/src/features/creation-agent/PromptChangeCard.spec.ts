@@ -9,11 +9,11 @@ const change: AgentChange = { id: 1, task_id: 'run', created_at: '', reverted_at
 
 it('shows deleted content and undo without linking to a hidden object', async () => {
   const wrapper = mount(PromptChangeCard, { props: { change, canUndo: true } })
-  await wrapper.findAll('button').find(button => button.text() === '查看差异')!.trigger('click')
+  await wrapper.get('button[aria-expanded="false"]').trigger('click')
   expect(wrapper.text()).toContain('已移除')
   expect(wrapper.text()).toContain('完整雨夜画面')
   expect(wrapper.findAll('button').some(button => button.text() === '雨夜空镜')).toBe(false)
-  await wrapper.findAll('button').find(button => button.text() === '撤销这次修改')!.trigger('click')
+  await wrapper.get('button[aria-label="撤销这次修改"]').trigger('click')
   expect(wrapper.emitted('undo')).toEqual([[1]])
   await wrapper.setProps({ change: { ...change, reverted_at: '2026-09-10' } })
   await wrapper.findAll('button').find(button => button.text() === '雨夜空镜')!.trigger('click')
@@ -25,7 +25,7 @@ it('renders setting field changes and preserves legacy prompt history', async ()
     kind: 'asset', target_id: 8, before: { description: '原描述', base_traits: '原提示词' },
     after: { description: '新描述', base_traits: '新提示词' }, after_version: 'version',
   }] } } })
-  await wrapper.findAll('button').find(button => button.text() === '查看差异')!.trigger('click')
+  await wrapper.get('button[aria-expanded="false"]').trigger('click')
   expect(wrapper.text()).toContain('已保存')
   expect(wrapper.text()).toContain('原描述')
   expect(wrapper.text()).toContain('新提示词')
