@@ -46,6 +46,8 @@ from prompts.styles import video_project_style_suffix
 from services.video.merge import video_merger
 from utils.crud import CRUDBase
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from controllers._creation import creation_write
+from services.creation_objects import CreationObjects
 
 logger = logging.getLogger(__name__)
 
@@ -464,6 +466,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
             video_metadata["team_id"] = team_id
         if user_id is not None:
             video_metadata["user_id"] = user_id
+        # Reserve an active generation before the external call. Deletion sees
+        # this row atomically, without holding a database lock over the network.
+        await scene.fetch_related('chapter')
+        async with creation_write(scene.chapter.novel_id):
+            await CreationObjects(scene.chapter.novel_id).get('scene', scene.id)
+            video = await Video.create(scene_id=scene.id, model_type=record_model_type.value,
+                external_task_id=None, status=TaskStatusEnum.running.value,
+                metadata={**video_metadata, 'submission_pending': True})
         try:
             external_task_id = await generator.submit(
                 prompt=provider_prompt,
@@ -484,13 +494,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
         except VideoProviderError as error:
             # 供应商在提交阶段直接拒绝请求时也创建失败记录，让异常在预览区可见，
             # 并使分镜状态在刷新页面后仍保持为红色。
-            video = await Video.create(
-                scene_id=scene.id,
-                model_type=record_model_type.value,
-                external_task_id=None,
-                status=TaskStatusEnum.failed.value,
-                metadata={**video_metadata, "error": str(error)},
-            )
+            video.status = TaskStatusEnum.failed.value
+            video.metadata = {**video_metadata, 'error': str(error)}
+            await video.save(update_fields=['status', 'metadata', 'updated_at'])
             await self._set_scene_current_video(scene, video.id)
             logger.warning(
                 "Video submit rejected: video_id=%s, scene_id=%s, model_config_id=%s",
@@ -500,14 +506,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
             )
             return video
 
+        except BaseException:
+            video.status = TaskStatusEnum.failed.value
+            video.metadata = {**video_metadata, 'error': '视频提交未完成，请核对后重试'}
+            await video.save(update_fields=['status', 'metadata', 'updated_at'])
+            raise
+
         # 创建 Video 记录
-        video = await Video.create(
-            scene_id=scene.id,
-            model_type=record_model_type.value,
-            external_task_id=external_task_id,
-            status=TaskStatusEnum.pending.value,
-            metadata=video_metadata,
-        )
+        video.external_task_id = external_task_id
+        video.status = TaskStatusEnum.pending.value
+        video.metadata = video_metadata
+        await video.save(update_fields=['external_task_id', 'status', 'metadata', 'updated_at'])
         await self._set_scene_current_video(scene, video.id)
         logger.info(
             "Video generate: video_id=%s, scene_id=%s, task_id=%s",
@@ -533,6 +542,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
             return video
 
         if not video.external_task_id:
+            if (video.metadata or {}).get('submission_pending'):
+                return video
             raise HTTPException(400, detail="该视频无外部任务ID，无法查询")
 
         # 新记录保存了配置 ID：即使管理员之后停用它，也要用原配置完成状态查询。
@@ -808,7 +819,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             ]
         """
         videos = await Video.filter(
-            scene__chapter__novel_id=novel_id
+            scene__chapter__novel_id=novel_id, scene__deleted_at__isnull=True
         ).order_by("-created_at")
         return [
         {

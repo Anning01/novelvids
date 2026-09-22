@@ -60,6 +60,7 @@ class AiModelConfig(AbstractBaseModel):
         default=False,
         description="是否支持 response_format=json_object",
     )
+    supports_tool_calls = fields.BooleanField(default=False, description="是否支持多轮工具调用")
     max_context_characters = fields.IntField(
         null=True,
         description="四层业务消息允许的最大总字符数；留空表示不预检",

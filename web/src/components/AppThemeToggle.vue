@@ -5,7 +5,7 @@ import AppButton from './AppButton.vue'
 import { appThemeControllerKey, type AppThemePreference, useAppThemeController } from '@/shared/appTheme'
 
 withDefaults(defineProps<{
-  placement?: 'floating' | 'sidebar'
+  placement?: 'floating' | 'sidebar' | 'inline'
 }>(), {
   placement: 'floating',
 })
@@ -33,7 +33,7 @@ function select(preference: AppThemePreference) {
       class="app-theme-toggle__trigger"
       variant="secondary"
       size="sm"
-      :icon-only="placement === 'floating'"
+      :icon-only="placement !== 'sidebar'"
       :aria-label="`外观主题：${activeLabel}`"
       aria-haspopup="menu"
       :aria-expanded="open"
@@ -80,6 +80,9 @@ function select(preference: AppThemePreference) {
 .app-theme-toggle__label { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
 .app-theme-toggle__label small { overflow: hidden; color: var(--app-text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .app-theme-toggle.is-sidebar .app-theme-toggle__menu { right: auto; bottom: 52px; left: 0; }
+.app-theme-toggle.is-inline { position: relative; inset: auto; z-index: 1; }
+.app-theme-toggle.is-inline .app-theme-toggle__trigger { min-width: 34px; min-height: 34px; box-shadow: none; border-radius: 9px; }
+.app-theme-toggle.is-inline .app-theme-toggle__menu { top: calc(100% + 10px); bottom: auto; }
 @media (max-width: 720px) { .app-theme-toggle { right: 12px; bottom: 12px; }.app-theme-toggle__menu { width: min(228px,calc(100vw - 24px)); } }
 @media (max-width: 720px) {
   .app-theme-toggle.is-sidebar { margin-right: 8px; margin-left: 8px; }

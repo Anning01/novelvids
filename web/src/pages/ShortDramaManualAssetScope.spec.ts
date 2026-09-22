@@ -1,3 +1,4 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { parse } from '@vue/compiler-sfc'
@@ -10,18 +11,22 @@ import { AssetTypeEnum, TaskStatusEnum, type Asset } from '@/types'
 import ShortDramaManualPage from './ShortDramaManualPage.vue'
 import manualPageSource from './ShortDramaManualPage.vue?raw'
 
+const { routeQuery } = vi.hoisted(() => ({ routeQuery: { chapter: '2162' } as Record<string, string> }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { projectId: '9' }, query: { chapter: '2162' } }),
+  useRoute: () => ({ params: { projectId: '9' }, query: routeQuery }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }))
 
 vi.mock('@/api', () => ({
+  getAuthToken: () => null, getActiveTeamId: () => null,
   api: {
     novel: vi.fn(),
     novelMeta: vi.fn(),
     chapters: vi.fn(),
     chaptersPage: vi.fn(),
     assets: vi.fn(),
+    asset: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
     updateAsset: vi.fn(),
@@ -43,7 +48,10 @@ const chapter = {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
+  delete routeQuery.asset
+  delete routeQuery.variant
   vi.mocked(api.novelMeta).mockResolvedValue({
     code: 0,
     message: 'ok',
@@ -290,4 +298,18 @@ it('shows loading for every queued asset and hides title and description before 
   await propTab!.trigger('click')
   await nextTick()
   assertVisibleAssetIsLoading()
+})
+
+it('opens the exact asset and variant from an assistant result link outside the loaded page', async () => {
+  routeQuery.asset = '901'
+  routeQuery.variant = '807'
+  const asset: Asset = { id: 901, novel_id: 9, canonical_name: '雨夜站台', asset_type: AssetTypeEnum.SCENE,
+    created_at: '', updated_at: '', variants: [{ id: 807, asset_id: 901, name: '雨夜', images: [], created_at: '', updated_at: '' }] }
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: '', data: asset })
+  const wrapper = mount(ShortDramaManualPage, { global: { stubs: { AssetCreateDialog: true, AssetBatchGenerateDialog: true } } })
+  await flushPromises()
+  const drawer = wrapper.findComponent(AssetCreateDialog)
+  expect(api.asset).toHaveBeenCalledWith(901)
+  expect(drawer.props()).toMatchObject({ open: true, kind: 'scene', asset, initialVariantId: 807 })
+  wrapper.unmount()
 })

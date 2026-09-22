@@ -123,6 +123,7 @@ class AiTaskTypeEnum(NicknameIntEnum):
     video = 4, "生成视频"
     project_analysis = 5, "项目分析"
     remake_decomposition = 6, "重制"
+    creation_agent = 7, "创作助手"
 
 
 @enum_description

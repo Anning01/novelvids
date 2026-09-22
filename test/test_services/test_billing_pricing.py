@@ -44,6 +44,22 @@ def test_compute_text_cost_rounds_to_six_decimals():
     assert compute_text_cost(usage, TEXT_PRICING) == Decimal("0.002500")
 
 
+def test_compute_text_cost_uses_optional_provider_reported_cache_price():
+    pricing = {**TEXT_PRICING, "input_price_per_1m": 4.5, "cache_input_price_per_1m": 0.15,
+               "output_price_per_1m": 13.5}
+    usage = {"input_tokens": 3000, "output_tokens": 100, "calls": [
+        {"usage": {"cache_read_tokens": 2400}}, {"usage": {"cache_read_tokens": 300}},
+    ]}
+    # 300 full-price input + 2700 cached input + 100 output tokens.
+    assert compute_text_cost(usage, pricing) == Decimal("0.003105")
+
+
+def test_compute_text_cost_never_bills_more_cached_tokens_than_total_input():
+    pricing = {**TEXT_PRICING, "cache_input_price_per_1m": 0.1}
+    usage = {"input_tokens": 10, "output_tokens": 0, "cache_read_tokens": 999}
+    assert compute_text_cost(usage, pricing) == Decimal("0.000001")
+
+
 def test_compute_text_cost_missing_pricing_is_zero():
     assert compute_text_cost({"prompt_tokens": 100}, None) == Decimal("0")
     assert compute_text_cost({}, {"type": "image", "prices": {}}) == Decimal("0")

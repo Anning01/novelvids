@@ -49,6 +49,7 @@ watch([scene, projectDefaults], ([value, defaults]) => {
   prompt.value = value.prompt || ''
   config.value = normalizeShotConfig(value, defaults)
 }, { immediate: true })
+watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (scene.value.prompt || '') }))
 watch(videoModels, value => {
   if (!value.some(item => item.config_id === config.value.modelType)) {
     config.value.modelType = value[0]?.config_id || null

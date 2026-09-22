@@ -1,4 +1,5 @@
 from uuid import UUID
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
@@ -20,13 +21,15 @@ class AiTaskController:
         if task.status not in (
             TaskStatusEnum.pending.value,
             TaskStatusEnum.running.value,
+            TaskStatusEnum.queued.value,
         ):
             raise HTTPException(
                 status_code=400,
                 detail=f"当前状态({TaskStatusEnum(task.status).nickname})不可取消",
             )
-        task.status = TaskStatusEnum.cancelled.value
-        await task.save(update_fields=["status", "updated_at"])
+        await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value, TaskStatusEnum.queued.value]).update(
+            status=TaskStatusEnum.cancelled.value, finished_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+        await task.refresh_from_db()
         return task
 
 

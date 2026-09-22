@@ -27,10 +27,10 @@ withDefaults(defineProps<{
   gap: 18px;
   margin-top: 10px;
   padding: 8px;
-  border: 1px solid #e8e9ef;
+  border: 1px solid var(--app-border);
   border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgb(35 39 52 / 5%);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
 }
 
 .creation-config-modes,

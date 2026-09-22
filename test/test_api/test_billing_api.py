@@ -77,3 +77,23 @@ async def test_billing_records_serializes_uuid_and_cost(client: AsyncClient):
     item = response.json()["data"]["items"][0]
     assert item["ai_task_id"] == str(task.id)
     assert item["cost"] == 0.001
+
+
+@pytest.mark.asyncio
+async def test_agent_records_endpoint_groups_conversation_and_exposes_paged_details(client: AsyncClient):
+    from models.creation_agent import AgentConversation
+    from test.test_services.test_billing_conversation_records import agent_record
+    novel = await Novel.create(name='对话成本')
+    conversation = await AgentConversation.create(novel=novel)
+    first = await agent_record(conversation, '0.1')
+    await agent_record(conversation, '0.2')
+    response = await client.get(f'/api/billing/records?novel_id={novel.id}&page_size=1')
+    data = response.json()['data']
+    assert data['pagination']['total'] == 1
+    assert data['items'][0]['record_kind'] == 'agent_conversation'
+    assert data['items'][0]['cost'] == 0.3 and data['items'][0]['turn_count'] == 2
+    assert data['items'][0]['ai_task_id'] is None
+    detail = await client.get(f'/api/billing/records/{first.id}/details?page_size=1&page=2')
+    assert detail.json()['data']['pagination']['total'] == 2
+    assert detail.json()['data']['items'][0]['id'] == first.id
+    assert '私密会话' not in response.text + detail.text

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 from tortoise import fields
 
-from models._base import AbstractBaseModel
+from models._lifecycle import ActiveObjects, RecoverableModel
 from utils.enums import TaskStatusEnum
 
 if TYPE_CHECKING:
@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from models.asset import Asset
 
 
-class Scene(AbstractBaseModel):
+class Scene(RecoverableModel):
     """分镜表，表示单个分镜/镜头。"""
 
     chapter: fields.ForeignKeyRelation["Chapter"] = fields.ForeignKeyField(
@@ -34,6 +34,7 @@ class Scene(AbstractBaseModel):
 
 
     class Meta:
+        manager = ActiveObjects()
         table = "scenes"
         unique_together = (("chapter", "sequence"),)
 

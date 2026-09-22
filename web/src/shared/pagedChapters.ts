@@ -22,7 +22,7 @@ export function usePagedChapters(getNovelId: () => number | undefined) {
     try {
       const next = page.value + 1
       const response: PaginationResponse<Chapter> = await api.chaptersPage(novelId, next, CHAPTER_PAGE_SIZE)
-      chapters.value.push(...response.data.items)
+      chapters.value = [...new Map([...chapters.value, ...response.data.items].map(chapter => [chapter.id, chapter])).values()].sort((a, b) => a.number - b.number)
       total.value = response.data.pagination.total
       page.value = next
       hasMore.value = page.value < response.data.pagination.pages
@@ -38,5 +38,15 @@ export function usePagedChapters(getNovelId: () => number | undefined) {
     hasMore.value = true
   }
 
-  return { chapters, total, page, loading, hasMore, loadMore, reset }
+  async function ensureChapter(id: number): Promise<Chapter | undefined> {
+    const existing = chapters.value.find(chapter => chapter.id === id)
+    if (existing || !Number.isFinite(id) || id <= 0) return existing
+    const novelId = getNovelId()
+    const { data } = await api.chapter(id)
+    if (novelId !== getNovelId() || data.novel_id !== novelId) return undefined
+    chapters.value = [...chapters.value.filter(chapter => chapter.id !== id), data].sort((a, b) => a.number - b.number)
+    return data
+  }
+
+  return { chapters, total, page, loading, hasMore, loadMore, reset, ensureChapter }
 }

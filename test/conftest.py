@@ -119,6 +119,7 @@ async def clear_db():
     from models.digital_human import DigitalHuman
     from models.remake_source import RemakeSource
     from models.remake_upload import RemakeUpload
+    from models.creation_agent import AgentSettings
     from services.security.login_throttle import login_throttle
 
     await login_throttle.reset()
@@ -137,6 +138,7 @@ async def clear_db():
     await AiModelConfig.all().delete()
     await ModelUsageRecord.all().delete()
     await GeneralConfig.all().delete()
+    await AgentSettings.all().delete()
 
     if os.getenv("AUTH_ENABLED", "").lower() == "true":
         from auth.models import (

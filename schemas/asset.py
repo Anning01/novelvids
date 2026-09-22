@@ -91,12 +91,12 @@ class AssetCreate(AssetFullProperties):
 
 class AssetUpdate(AssetCreate):
     """全量更新：逻辑同创建"""
-    pass
+    expected_prompt: Optional[str] = None
 
 
 class AssetPatch(AssetFullProperties):
     """局部更新：全字段可选"""
-    pass
+    expected_prompt: Optional[str] = None
 
 
 class AssetReferencePromptPreview(BaseModel):
@@ -193,6 +193,7 @@ class AssetBriefOut(AssetProperties, BaseResponse):
     novel_id: int = Field(..., description="所属小说/剧本")
     # 资产编辑器需要从列表响应恢复音色、形态与生成参数等持久化设置。
     metadata: Optional[Any] = Field(None, description="资产编辑元数据")
+    variants: list[AssetVariantOut] = Field(default_factory=list, description="已有视觉形态，供编辑器及助手选择")
 
     id: int = Field(..., description="小说/剧本ID")
     main_image_thumbnail: Optional[str] = Field(None, description="三视主图缩略图")

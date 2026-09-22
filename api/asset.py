@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
 from uuid import UUID
 
 from auth.deps import (
@@ -38,10 +38,38 @@ from services.ai_task_executor import ai_task_executor
 from services.reference.generator import build_sora_compatible_prompt
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
+from services.creation_objects import CreationObjects
+from controllers._creation import creation_write
 
 router = APIRouter()
 
 _EDITOR = Depends(require_roles("admin", "creator"))
+
+
+@router.post('/{asset_id}/restore', summary='恢复已移除设定', response_model=ResponseSchema[AssetOut])
+async def restore_asset(asset_id: int, ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    asset = await Asset.with_deleted().filter(id=asset_id).first()
+    if asset is None:
+        raise HTTPException(404, '设定不存在')
+    await ensure_novel_access(asset.novel_id, ctx)
+    async with creation_write(asset.novel_id):
+        restored = await CreationObjects(asset.novel_id).restore('asset', asset.id)
+    return ResponseSchema(data=restored)
+
+
+@router.post('/{asset_id}/variants/{variant_id}/restore', summary='恢复已移除形态', response_model=ResponseSchema[AssetVariantOut])
+async def restore_asset_variant(asset_id: int, variant_id: int, ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    asset = await Asset.get_or_none(id=asset_id)
+    if asset is None:
+        raise HTTPException(404, '请先恢复所属设定')
+    await ensure_novel_access(asset.novel_id, ctx)
+    from models.asset_variant import AssetVariant
+    variant = await AssetVariant.with_deleted().filter(id=variant_id, asset_id=asset_id).first()
+    if variant is None:
+        raise HTTPException(404, '形态不存在')
+    async with creation_write(asset.novel_id):
+        restored = await CreationObjects(asset.novel_id).restore('variant', variant.id)
+    return ResponseSchema(data=restored)
 
 
 @router.post("", summary="创建资产", response_model=ResponseSchema[AssetOut])

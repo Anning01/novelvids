@@ -28,6 +28,7 @@ from services.extraction.handler import ExtractionTaskHandler
 from services.reference.handler import AssetReferenceHandler
 from services.project_analysis.handler import ProjectAnalysisTaskHandler
 from services.storyboard.handler import StoryboardTaskHandler
+from services.creation_agent.handler import CreationAgentTaskHandler
 from services.remake.handler import RemakeDecompositionTaskHandler
 from services.remake.uploads import remake_upload_service
 from utils.enums import AiTaskTypeEnum
@@ -37,6 +38,7 @@ from services.video.reconciler import VideoTaskReconciler
 from services.video.last_frame_backfill import backfill_last_frame_continuity
 from controllers.video import video_controller
 from services.schema_compat import (
+    ensure_creation_agent_schema,
     ensure_ai_model_config_schema,
     ensure_novel_analysis_schema,
     ensure_remake_schema,
@@ -80,6 +82,7 @@ async def _initialize_database_schema() -> None:
     include_compat_indexes = not settings.GENERATE_SCHEMAS
     await ensure_remake_schema(include_indexes=include_compat_indexes)
     await ensure_voice_reference_schema(include_indexes=include_compat_indexes)
+    await ensure_creation_agent_schema()
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
@@ -170,6 +173,7 @@ if settings.AUTH_ENABLED:
 ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.reference_image, AssetReferenceHandler())
 ai_task_executor.register(AiTaskTypeEnum.storyboard, StoryboardTaskHandler())
+ai_task_executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
 ai_task_executor.register(
     AiTaskTypeEnum.remake_decomposition,

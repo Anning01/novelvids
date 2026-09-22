@@ -56,6 +56,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     videoModelOptions: [] as VideoGenerationModel[],
     imageModelOptions: [] as ImageGenerationModel[],
     nodes: [] as WorkbenchNode[],
+    removedAgentDrafts: {} as Record<string, WorkbenchNode>,
     edges: [] as WorkbenchEdge[],
     selectedNodeKeys: [] as string[],
     selectedEdgeKeys: [] as string[],
@@ -174,6 +175,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async load(novelId: number, chapterId: number) {
       const epoch = this.loadEpoch.begin()
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
+      this.removedAgentDrafts = {}
       this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.busyComposerKeys = []; this.pollingVideoIds = []; this.pollingRemakeTaskId = null; this.projectConfig = defaultProjectConfig(); this.remakeSource = null; this.videoModelOptions = []; this.imageModelOptions = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
         const [bootstrapResponse, videoConfigResponse, imageConfigResponse] = await Promise.all([
@@ -782,8 +784,67 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return true
     },
     async saveScene(sceneId: number, patch: Partial<Scene>) {
-      const updated = (await api.updateScene(sceneId, patch)).data
+      const source = this.nodes.find(item => item.kind === 'shot' && item.id === sceneId)?.data.scene as Scene | undefined
+      const expected = Object.hasOwn(patch, 'prompt') ? (source ?? this.scenes.find(item => item.id === sceneId))?.prompt ?? null : undefined
+      const updated = (await api.updateScene(sceneId, patch, expected)).data
       this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item); this.rebuildGraph(); notice.success('镜头已保存')
+    },
+    async refreshAgentPrompts(targets: { kind: string; target_id: number }[]) {
+      const epoch = this.loadEpoch.snapshot()
+      const chapterId = this.chapterId
+      const sceneIds = new Set(targets.filter(target => target.kind === 'scene').map(target => target.target_id))
+      const variantIds = new Set(targets.filter(target => target.kind === 'variant').map(target => target.target_id))
+      const assetIds = new Set([...targets.filter(target => target.kind === 'asset').map(target => target.target_id),
+        ...this.assets.filter(asset => asset.variants?.some(variant => variantIds.has(variant.id))).map(asset => asset.id)])
+      const [scenes, assets] = await Promise.all([
+        Promise.all(this.scenes.filter(scene => sceneIds.has(scene.id)).map(async scene => (await api.scene(scene.id)).data)),
+        Promise.all(this.assets.filter(asset => assetIds.has(asset.id)).map(async asset => (await api.asset(asset.id)).data)),
+      ])
+      if (this.chapterId !== chapterId || !this.loadEpoch.isCurrent(epoch)) return
+      this.scenes = this.scenes.map(scene => scenes.find(updated => updated.id === scene.id) || scene)
+      this.assets = this.assets.map(asset => assets.find(updated => updated.id === asset.id) || asset)
+      const conflicts: string[] = []
+      for (const item of this.nodes) {
+        if (item.kind === 'shot') {
+          const updated = scenes.find(scene => scene.id === item.id)
+          if (updated) {
+            if (item.data.prompt_dirty === true) conflicts.push(item.title)
+            else item.data = { ...item.data, scene: updated }
+          }
+        } else if (item.kind === 'asset') {
+          const updated = assets.find(asset => asset.id === item.id)
+          if (updated) {
+            if (item.data.prompt_dirty === true) conflicts.push(item.title)
+            else item.data = { ...item.data, asset: updated }
+          }
+        }
+      }
+      return conflicts
+    },
+    async refreshAgentObjects() {
+      const epoch = this.loadEpoch.snapshot()
+      const chapterId = this.chapterId
+      const response = await api.workbenchBootstrap(this.novelId, chapterId)
+      if (this.chapterId !== chapterId || !this.loadEpoch.isCurrent(epoch)) return
+      const drafts = new Map([
+        ...Object.entries(this.removedAgentDrafts),
+        ...this.nodes.filter(item => item.data.prompt_dirty === true).map(item => [item.key, cloneValue(item)] as const),
+      ])
+      this.applyWorkbenchBootstrap(response.data)
+      const conflicts: string[] = []
+      for (const item of this.nodes) {
+        const draft = drafts.get(item.key)
+        if (draft) {
+          item.data = { ...item.data, ...draft.data }
+          item.position = draft.position; item.size = draft.size
+          conflicts.push(item.title)
+          drafts.delete(item.key)
+        }
+      }
+      this.removedAgentDrafts = Object.fromEntries(drafts)
+      this.selectedNodeKeys = this.selectedNodeKeys.filter(key => this.nodes.some(item => item.key === key))
+      this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
+      if (conflicts.length) notice.info(`助手调整已保存；${conflicts.join('、')} 的本地草稿已保留。`)
     },
     async setActiveVideo(sceneId: number, videoId: number) {
       const scene = this.scenes.find(item => item.id === sceneId)
@@ -796,7 +857,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return updated
     },
     async saveAsset(assetId: number, patch: Partial<Asset>) {
-      const updated = (await api.updateAsset(assetId, patch)).data
+      const source = this.nodes.find(item => item.kind === 'asset' && item.id === assetId)?.data.asset as Asset | undefined
+      const expected = Object.hasOwn(patch, 'base_traits') ? (source ?? this.assets.find(item => item.id === assetId))?.base_traits ?? null : undefined
+      const updated = (await api.updateAsset(assetId, patch, expected)).data
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
       this.rebuildGraph()
       notice.success('资产描述已保存')

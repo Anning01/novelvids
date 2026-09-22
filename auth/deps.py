@@ -19,7 +19,7 @@ from models.chapter import Chapter
 from models.novel import Novel
 from models.scene import Scene
 from models.video import Video
-from utils.enums import UserStatusEnum
+from utils.enums import UserStatusEnum, AiTaskTypeEnum
 
 
 @dataclass
@@ -220,6 +220,10 @@ async def require_task_access(
     if task is None:
         if not auth_disabled() and ctx.user is not None and not ctx.is_super_admin:
             raise HTTPException(status_code=404, detail="任务不存在")
+        return ctx
+    if task.task_type == AiTaskTypeEnum.creation_agent.value:
+        from services.creation_agent.sessions import agent_sessions
+        await agent_sessions.for_task(task.id, ctx)
         return ctx
     params = task.request_params or {}
     novel_id = params.get("novel_id")

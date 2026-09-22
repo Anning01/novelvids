@@ -74,6 +74,7 @@ async def generate_storyboard(
     thinking: str | None = None,
     max_tokens: int | None = None,
     storyboard_strategy: str | None = None,
+    creative_constraints: list[dict] | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
     strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
@@ -82,6 +83,7 @@ async def generate_storyboard(
         entities,
         prompt_language,
         strategy=strategy,
+        creative_constraints=creative_constraints or [],
     )
     chunker = NarrativeChunker.for_context_limit(
         max_context_characters,
@@ -103,6 +105,7 @@ async def generate_storyboard(
             next_sequence=len(shots) + 1,
             previous_shot=previous_shot,
             strategy=strategy,
+            creative_constraints=creative_constraints or [],
         )
         try:
             batch_storyboard, completion = await create_json_completion(

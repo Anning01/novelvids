@@ -7,7 +7,7 @@ import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { type Asset, type AssetVariant, type AssetVariantDraft } from '@/types'
 
-const props = withDefaults(defineProps<{ asset: Asset; draft?: AssetVariantDraft | null; chapterNumber?: number; episodeNumbers?: number[] }>(), {
+const props = withDefaults(defineProps<{ asset: Asset; draft?: AssetVariantDraft | null; chapterNumber?: number; episodeNumbers?: number[]; initialVariantId?: number }>(), {
   draft: null,
   episodeNumbers: () => [],
 })
@@ -74,6 +74,8 @@ async function loadVariants() {
   loading.value = true
   try {
     variants.value = (await api.assetVariants(props.asset.id)).data
+    const initialVariant = variants.value.find(variant => variant.id === props.initialVariantId)
+    if (initialVariant) selectVariant(initialVariant)
   } catch (error) {
     notice.error((error as Error).message)
   } finally {

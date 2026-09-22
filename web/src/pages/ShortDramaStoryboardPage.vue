@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Boxes,
+  Bot,
   Clapperboard,
   Copy,
   GripVertical,
@@ -34,14 +35,18 @@ import SceneReferenceMediaBar from '@/components/SceneReferenceMediaBar.vue'
 import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
 import ShortDramaBatchVideoDialog, { type BatchVideoGenerationRequest, type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
 import ShortDramaSceneStatusRail from '@/components/ShortDramaSceneStatusRail.vue'
+import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import type { AgentChange, AgentTarget } from '@/features/creation-agent/types'
 import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistory.vue'
 import VideoGenerationErrorState from '@/components/VideoGenerationErrorState.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
+import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
 import { api, mediaUrl, sleep } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
+import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
 import { estimateVideoCost } from '@/shared/modelPricing'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
@@ -65,10 +70,12 @@ interface ProjectView extends Novel {
   style: string
   creationMode: 'agent' | 'manual'
 }
+const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 
 interface SceneDraft {
   description: string
   prompt: string
+  basePrompt: string | null
   duration: number
   selectedAssetIds: number[]
   selectedVariantIds: Record<number, number | null>
@@ -122,6 +129,7 @@ const generatingChapterIds = ref<Set<number>>(new Set())
 const generatingVideoSceneIds = ref<Set<number>>(new Set())
 const refreshingVideoHistorySceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
+const disconnectedStoryboardTasks = ref<Record<number, string>>({})
 const videoGenerationErrors = ref<Record<number, string>>({})
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
 const focusedPromptSceneId = ref(0)
@@ -177,6 +185,83 @@ const sceneSaveQueues = new Map<number, Promise<void>>()
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
+const workbenchStore = useWorkbenchStore()
+const assistantTargets = computed<AgentTarget[]>(() => {
+  if (workspaceView.value === 'workflow') {
+    const targets: AgentTarget[] = []
+    for (const key of workbenchStore.selectedNodeKeys) {
+      const node = workbenchStore.nodeByKey(key)
+      if (node?.kind === 'shot') targets.push({ kind: 'scene', id: node.id })
+      else if (node?.kind === 'asset') targets.push({ kind: 'asset', id: node.id })
+    }
+    return targets
+  }
+  return []
+})
+
+async function refreshAgentChanges(changes: AgentChange[]) {
+  const targets = changes.flatMap(change => change.changes)
+  try {
+    if (targets.some(target => target.operation)) {
+      const chapterId = activeChapterId.value
+      const version = chapterLoadVersion
+      const result = await fetchChapterScenes(chapterId)
+      if (chapterId !== activeChapterId.value || version !== chapterLoadVersion) return
+      const previous = new Map(scenes.value.map(scene => [scene.id, scene]))
+      const changedIds = new Set(targets.filter(target => target.kind === 'scene').map(target => target.target_id))
+      const conflicts: string[] = []
+      for (const scene of result.scenes) {
+        const old = previous.get(scene.id)
+        const draft = sceneDrafts.value[scene.id]
+        if (draft && (!old || JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(old)))) {
+          if (changedIds.has(scene.id)) {
+            const timer = sceneAutoSaveTimers.get(scene.id)
+            if (timer) clearTimeout(timer)
+            sceneAutoSaveTimers.delete(scene.id)
+            conflicts.push(`分镜 ${scene.sequence}`)
+          }
+        } else sceneDrafts.value[scene.id] = makeSceneDraft(scene)
+      }
+      for (const old of previous.values()) {
+        if (result.scenes.some(scene => scene.id === old.id)) continue
+        const timer = sceneAutoSaveTimers.get(old.id)
+        if (timer) clearTimeout(timer)
+        sceneAutoSaveTimers.delete(old.id)
+        // Retain orphaned drafts for a subsequent restore; never autosave them.
+      }
+      assets.value = result.assets; scenes.value = result.scenes; videos.value = result.videos
+      if (!scenes.value.some(scene => scene.id === activeSceneId.value)) activeSceneId.value = scenes.value[0]?.id || 0
+      if (conflicts.length) notice.info(`${conflicts.join('、')} 的调整已保存，本地编辑草稿已保留，请核对后再保存。`)
+      if (workspaceView.value === 'workflow') await workbenchStore.refreshAgentObjects()
+      void nextTick(setupSceneTracking)
+      return
+    }
+    for (const id of new Set(targets.filter(target => target.kind === 'scene').map(target => target.target_id))) {
+      const current = scenes.value.find(scene => scene.id === id)
+      if (!current) continue
+      const updated = (await api.scene(id)).data
+      const draft = sceneDrafts.value[id]
+      if (draft && draft.prompt !== (current.prompt || '')) {
+        const timer = sceneAutoSaveTimers.get(id)
+        if (timer) clearTimeout(timer)
+        sceneAutoSaveTimers.delete(id)
+        notice.info(`镜头 ${current.sequence} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。`)
+      } else if (draft) { draft.prompt = updated.prompt || ''; draft.basePrompt = updated.prompt ?? null }
+      scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
+    }
+    const variantIds = new Set(targets.filter(target => target.kind === 'variant').map(target => target.target_id))
+    const assetIds = new Set([...targets.filter(target => target.kind === 'asset').map(target => target.target_id),
+      ...assets.value.filter(asset => asset.variants?.some(variant => variantIds.has(variant.id))).map(asset => asset.id)])
+    for (const id of assetIds) {
+      const updated = (await api.asset(id)).data
+      assets.value = assets.value.map(asset => asset.id === id ? updated : asset)
+    }
+    if (workspaceView.value === 'workflow') {
+      const conflicts = await workbenchStore.refreshAgentPrompts(targets)
+      if (conflicts?.length) notice.info(`助手修改已保存；${conflicts.join('、')} 正在编辑，本地草稿已保留。`)
+    }
+  } catch (error) { notice.error((error as Error).message) }
+}
 const generatingStoryboard = computed(() => generatingChapterIds.value.has(activeChapterId.value))
 const waitingAnalysis = ref(false)
 const creatingManualScene = ref(false)
@@ -210,6 +295,18 @@ async function waitForAnalysisThenGenerate(chapterId: number) {
   }
 }
 const generationError = computed(() => generationErrors.value[activeChapterId.value] || '')
+const canReconnectStoryboard = computed(() => Boolean(disconnectedStoryboardTasks.value[activeChapterId.value]))
+
+async function retryStoryboard() {
+  const chapterId = activeChapterId.value
+  const taskId = readPersistedStoryboardTasks()[chapterId]
+  if (taskId) await pollStoryboardTask(chapterId, taskId)
+  else await waitForAnalysisThenGenerate(chapterId)
+}
+
+function returnToScript() {
+  void router.push({ name: 'short-drama-agent', params: { projectId: projectId.value }, query: { chapter: String(activeChapterId.value) } })
+}
 const videoModelOptions = computed(() => videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })))
 const videoModelSelectWidth = computed(() => Math.min(420, Math.max(
   220,
@@ -280,6 +377,7 @@ function makeSceneDraft(scene: Scene): SceneDraft {
   return {
     description: scene.description || '',
     prompt: scene.prompt || '',
+    basePrompt: scene.prompt ?? null,
     duration: scene.duration || 6,
     selectedAssetIds: [...new Set(linkedAssetIds)],
     selectedVariantIds: readSelectedVariantIds(metadata.asset_variant_ids),
@@ -805,26 +903,17 @@ async function selectAssetVoiceReference(reference: AudioReference) {
 
 function selectedAssetImage(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
-  if (variant) return variant.images[0] || ''
-  return asset.main_image || asset.angle_image_1 || asset.angle_image_2 || ''
+  if (variant) return mediaUrl(variant.images[0] || '')
+  return mediaUrl(asset.main_image || asset.angle_image_1 || asset.angle_image_2 || '')
 }
 
 function selectedAssetThumbnail(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
-  if (variant) return variant.image_thumbnails?.[0] || variant.images[0] || ''
-  return asset.main_image_thumbnail
+  if (variant) return mediaUrl(variant.image_thumbnails?.[0] || variant.images[0] || '')
+  return mediaUrl(asset.main_image_thumbnail
     || asset.angle_image_1_thumbnail
     || asset.angle_image_2_thumbnail
-    || selectedAssetImage(scene, asset)
-}
-
-function selectedAssetPreview(scene: Scene, asset: Asset) {
-  const variant = selectedVariantFor(scene, asset)
-  if (variant) return variant.image_previews?.[0] || variant.images[0] || ''
-  return asset.main_image_preview
-    || asset.angle_image_1_preview
-    || asset.angle_image_2_preview
-    || selectedAssetImage(scene, asset)
+    || selectedAssetImage(scene, asset))
 }
 
 function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
@@ -923,8 +1012,9 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     label: selectedAssetLabel(scene, asset),
     syntax: `@{${asset.canonical_name}}`,
     group: asset.asset_type === AssetTypeEnum.PERSON ? '角色' : asset.asset_type === AssetTypeEnum.SCENE ? '场景' : '道具',
-    previewUrl: selectedAssetPreview(scene, asset) || undefined,
+    previewUrl: selectedAssetImage(scene, asset) || undefined,
     thumbnailUrl: selectedAssetThumbnail(scene, asset) || undefined,
+    fallbackUrl: selectedAssetImage(scene, asset) || undefined,
     description: asset.description || asset.canonical_name,
     aliases: asset.aliases || [],
   })))
@@ -1212,34 +1302,38 @@ async function pollStoryboardTask(chapterId: number, taskId: string) {
   // 组件卸载（切页/刷新）时保留持久化，下次进入自动恢复“生成中”。
   if (pollingStoryboardTaskIds.has(chapterId)) return
   pollingStoryboardTaskIds.add(chapterId)
+  delete disconnectedStoryboardTasks.value[chapterId]
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
     let current = await fetchTaskOrNull(taskId)
     if (current === null) {
-      // 任务已被服务端清理：清掉本地持久化，静默退出
       clearPersistedStoryboardTask(chapterId)
-      return
+      throw new Error('生成任务已不可用，请重新生成分镜')
     }
     while (alive && !terminalTaskStatuses.has(current.status)) {
       await sleep(2200)
       current = await fetchTaskOrNull(taskId)
       if (current === null) {
         clearPersistedStoryboardTask(chapterId)
-        return
+        throw new Error('生成任务已不可用，请重新生成分镜')
       }
     }
     if (!alive) return // 组件卸载：任务可能仍在跑，保留持久化，下次进入自动恢复
-    clearPersistedStoryboardTask(chapterId)
-    if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || 'Agent 分镜生成失败')
+    if (current.status !== TaskStatusEnum.COMPLETED) {
+      clearPersistedStoryboardTask(chapterId)
+      throw new Error(current.error_message || 'Agent 分镜生成失败')
+    }
     const result = await fetchChapterScenes(chapterId)
+    clearPersistedStoryboardTask(chapterId)
     if (activeChapterId.value === chapterId) showChapterScenes(result)
     const chapterNumber = chapters.value.find(item => item.id === chapterId)?.number || ''
     notice.success(`第 ${chapterNumber} 集分镜已生成`)
   } catch (error) {
     if (!alive) return
-    clearPersistedStoryboardTask(chapterId)
-    const message = (error as Error).message
+    const pendingTask = readPersistedStoryboardTasks()[chapterId]
+    if (pendingTask) disconnectedStoryboardTasks.value[chapterId] = pendingTask
+    const message = pendingTask ? '暂时无法获取生成进度，已保留这次任务。重新连接后继续查看结果。' : (error as Error).message
     setGenerationError(chapterId, message)
     notice.error(message)
   } finally {
@@ -1260,6 +1354,8 @@ function restorePersistedStoryboardTasks() {
 
 async function generateChapterStoryboard(chapterId: number) {
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
+  const pendingTask = readPersistedStoryboardTasks()[chapterId]
+  if (pendingTask) { await pollStoryboardTask(chapterId, pendingTask); return }
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
@@ -1279,6 +1375,7 @@ async function generateChapterStoryboard(chapterId: number) {
 async function regenerateStoryboard() {
   const chapterId = activeChapterId.value
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
+  if (!scenes.value.length || canReconnectStoryboard.value) { await retryStoryboard(); return }
   // 分析未完成时：等待完成后自动生成本集分镜（不删除现有内容）
   const analysis = (await api.novelAnalysis(projectId.value)).data
   const gate = analysisGate(analysis?.status)
@@ -1442,6 +1539,21 @@ function selectSceneById(sceneId: number) {
   if (scene) selectScene(scene)
 }
 
+// Result cards can change only the query while Vue keeps this page mounted.
+// Wait for the storyboard view to render before revealing its target.
+watch(() => [route.query.scene, route.query.chapter, workspaceView.value], async () => {
+  const chapterId = Number(route.query.chapter)
+  if (chapterId && chapterId !== activeChapterId.value && chapters.value.some(item => item.id === chapterId)) {
+    await flushPendingSceneSaves()
+    if (chapterId !== activeChapterId.value) await loadChapter(chapterId)
+  }
+  await nextTick()
+  if (workspaceView.value === 'storyboard' && !loading.value) {
+    setupSceneTracking()
+    selectSceneById(Number(route.query.scene))
+  }
+}, { flush: 'post' })
+
 function setupChapterToolbarObserver() {
   chapterToolbarObserver?.disconnect()
   const toolbar = document.querySelector<HTMLElement>('.chapter-toolbar')
@@ -1461,8 +1573,8 @@ async function selectChapter(chapter: Chapter) {
   chapterDetailOpen.value = false
   focusedPromptSceneId.value = 0
   await flushPendingSceneSaves()
-  await router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   await loadChapter(chapter.id)
+  await router.replace({ query: { ...route.query, chapter: String(chapter.id), scene: undefined } })
 }
 
 function setupSceneTracking() {
@@ -1545,7 +1657,8 @@ async function saveScene(
           video_aspect_ratio: sceneAspectRatio(currentScene, model),
           return_last_frame: draft.returnLastFrame,
         },
-      })).data
+      }, draft.basePrompt)).data
+      draft.basePrompt = updated.prompt ?? null
       scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
       if (showNotice) notice.success('分镜已保存')
     } catch (error) {
@@ -1908,6 +2021,7 @@ onBeforeUnmount(() => {
 <template>
   <main class="storyboard-page" :class="{ 'is-workflow-view': workspaceView === 'workflow' }">
     <ShortDramaWorkspaceShell
+      ref="workspaceShell"
       :project-id="projectId"
       :project-name="project?.name || '短剧项目'"
       :aspect-ratio="project?.aspectRatio || '9:16'"
@@ -1921,7 +2035,9 @@ onBeforeUnmount(() => {
       :show-episode-rail="workspaceView === 'storyboard'"
       :show-project-meta="workspaceView === 'storyboard'"
       :immersive="workspaceView === 'workflow'"
+      :agent-targets="assistantTargets"
       @select-chapter="selectChapter"
+      @prompts-changed="refreshAgentChanges"
     >
       <template v-if="workspaceView === 'workflow' && activeChapter" #project-name>
         <WorkbenchCanvasIdentity :name="stripChapterOrdinal(activeChapter.name) || '未命名'" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
@@ -1952,14 +2068,14 @@ onBeforeUnmount(() => {
           </button>
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
-            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : '重新生成分镜' }}</AppButton>
+            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : canReconnectStoryboard ? '重新连接' : scenes.length ? '重新生成分镜' : '生成本章分镜' }}</AppButton>
             <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建分镜" }}</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? '批量生成中' : '批量生视频' }}</AppButton>
           </div>
         </header>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
-        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>暂时无法生成分镜</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? generateChapterStoryboard(activeChapterId) : createManualScene()">重试</AppButton></div>
+        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? '生成进度暂时断开' : '暂时无法生成分镜' }}</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? '重新连接' : '重试' }}</AppButton><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">返回剧本</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>从第一个分镜开始，逐步搭建你的镜头列表。</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建第一个分镜" }}</AppButton></div>
         <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>点击下方按钮，AI 将生成本集全部分镜。</p><AppButton variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : waitingAnalysis ? '等待项目分析' : '生成全部分镜' }}</AppButton></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
@@ -1969,13 +2085,14 @@ onBeforeUnmount(() => {
           <article v-for="scene in scenes" :id="`scene-${scene.id}`" :key="scene.id" class="shot-editor" :class="{ 'is-active': activeSceneId === scene.id }" :data-scene-id="scene.id">
             <header class="shot-editor-header">
               <div class="shot-editor-heading">
-                <GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ scene.sequence }}</strong><small>ID {{ scene.id }}</small>
+                <GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ scene.sequence }}</strong>
                 <nav aria-label="视频生成方式">
                   <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'reference'" :aria-pressed="draftFor(scene).videoGenerationMode === 'reference'" @click="setVideoGenerationMode(scene, 'reference')"><span class="mode-dot" />全能参考生视频</AppButton>
                   <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')"><span class="mode-dot" />首尾帧生视频</AppButton>
                 </nav>
               </div>
               <div>
+                <AppButton variant="soft" size="sm" :aria-label="`用助手修改分镜 ${scene.sequence}`" @click="workspaceShell?.editWithAssistant([{ target: { kind: 'scene', id: scene.id }, label: `分镜 ${scene.sequence} · ${scene.description || '未命名'}` }])"><Bot :size="14" />用助手修改</AppButton>
                 <AppButton variant="ghost" size="sm" icon-only :aria-label="`在分镜 ${scene.sequence} 下方添加分镜`" title="在下方添加分镜" @click="insertSceneAfter(scene)"><Plus :size="15" /></AppButton>
                 <AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" title="复制分镜" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton>
                 <AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" title="删除分镜" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton>
@@ -2002,7 +2119,7 @@ onBeforeUnmount(() => {
                         class="asset-thumb"
                         :class="{ 'is-reference-highlighted': highlightedReferenceKey === `asset:${scene.id}:${asset.id}` }"
                         :data-reference-asset-id="asset.id"
-                      ><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" /><component v-else :is="group.icon" :size="16" /></span>
+                      ><component :is="group.icon" :size="16" /><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" @error="fallbackImage($event, selectedAssetImage(scene, asset))" /></span>
                       <AppButton
                         :id="assetRowPickerAnchorId(scene, asset)"
                         variant="soft"
@@ -2195,9 +2312,9 @@ onBeforeUnmount(() => {
 .storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
 .storyboard-main { min-width: 0; padding: 16px 16px 42px; }
 .storyboard-main.is-workflow-view { height: 100%; padding: 0; }
-.chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
+.chapter-toolbar { flex-wrap: wrap; position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
 .chapter-summary { position: relative; display: block; min-width: 0; max-width: min(840px,calc(100% - 540px)); padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
-.chapter-summary:hover { background: rgb(255 255 255 / 72%); box-shadow: inset 0 0 0 1px #eceef5; }
+.chapter-summary:hover { background: color-mix(in srgb,var(--app-surface) 72%,transparent); box-shadow: inset 0 0 0 1px var(--app-border); }
 .chapter-summary:focus-visible { outline: 3px solid rgb(91 92 246 / 18%); outline-offset: 1px; }
 .chapter-summary:disabled { cursor: default; }
 .chapter-summary > span { color: #8c91a0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }
@@ -2206,7 +2323,7 @@ onBeforeUnmount(() => {
 .chapter-summary:hover > small,.chapter-summary:focus-visible > small { opacity: 1; transform: translateX(0); }
 .chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; color: var(--app-text, #303442); }
 .chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: var(--app-text-muted, #898f9e); font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
-.chapter-actions { display: flex; flex: 0 0 auto; align-self: center; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.chapter-actions { display: flex; flex-wrap: wrap; min-width: 0; flex: 0 1 auto; align-self: center; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
 .chapter-model-select { width: 300px; min-width: 300px; }
 .video-model-select { max-width: min(420px, 48vw); }
 .video-model-select :deep(.app-select__value) { overflow: visible; text-overflow: clip; }
@@ -2230,9 +2347,9 @@ onBeforeUnmount(() => {
 .shot-editor-list { display: grid; gap: 12px; }
 .shot-editor { overflow: hidden; scroll-margin-top: calc(var(--short-drama-header-height,72px) + 116px); border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px #e9ebf2; }
 .shot-editor.is-active { box-shadow: inset 0 0 0 1px #dfe1f5; }
-.shot-editor-header { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 12px; background: #fbfbfd; }
+.shot-editor-header { flex-wrap: wrap; display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 12px; background: #fbfbfd; }
 .shot-editor-header > div { display: flex; align-items: center; gap: 7px; }
-.shot-editor-heading > nav { display: flex; align-items: center; gap: 2px; margin-left: 8px; padding: 3px; border-radius: 9px; background: #f1f2f7; }
+.shot-editor-heading > nav { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: 8px; padding: 3px; border-radius: 9px; background: #f1f2f7; }
 .shot-editor-heading > nav button { min-height: 28px; padding-inline: 9px; color: #747a89; background: transparent; box-shadow: none; font-size: 9px; }
 .shot-editor-heading > nav button.is-active { color: #5658ea; background: #fff; box-shadow: 0 2px 8px rgb(46 49 70 / 7%); }
 .mode-dot { width: 11px; height: 11px; border: 1px solid #d9dce6; border-radius: 50%; background: #fff; }
@@ -2240,7 +2357,7 @@ onBeforeUnmount(() => {
 .shot-editor-header strong { font-size: 12px; }
 .shot-editor-header small { padding: 3px 5px; border-radius: 5px; color: #7476df; background: #efefff; font-size: 8px; }
 .drag-mark { color: #9ba0ae; font-size: 17px; }
-.shot-editor-grid { display: grid; min-height: 630px; grid-template-columns: 410px minmax(600px,3fr) minmax(520px,2fr); gap: 12px; padding: 12px; background: #f8f9fc; }
+.shot-editor-grid { display: grid; min-height: 630px; grid-template-columns: minmax(230px,1fr) minmax(320px,2fr) minmax(260px,1fr); gap: 12px; padding: 12px; background: #f8f9fc; }
 .shot-info-panel,.prompt-panel,.preview-panel { min-width: 0; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 1px #e7e9f0; }
 .shot-info-panel { display: grid; align-content: start; gap: 16px; padding: 16px; overflow-y: auto; scrollbar-width: none; }
 .shot-info-panel::-webkit-scrollbar { display: none; }
@@ -2268,9 +2385,9 @@ onBeforeUnmount(() => {
 .selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: minmax(0,1fr) 30px; align-items: end; }
 .selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 10px; }
 .selected-assets.is-scene-assets .asset-name-button { grid-column: 1; }
-.asset-thumb { display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; transition: box-shadow .18s ease, transform .18s ease; }
+.asset-thumb { position: relative; display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; transition: box-shadow .18s ease, transform .18s ease; }
 .asset-thumb.is-reference-highlighted { box-shadow: 0 0 0 3px rgb(255 122 140 / 42%), 0 6px 18px rgb(120 35 52 / 18%); transform: scale(1.04); }
-.asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.asset-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .shot-assets > p { display: grid; min-height: 52px; margin: 0; place-items: center; border-radius: 9px; color: #a1a6b3; background: #f7f8fb; font-size: 9px; }
 .asset-picker { display: grid; max-height: 180px; gap: 4px; overflow-y: auto; padding: 6px; border-radius: 10px; background: #f7f8fb; }
 .asset-picker button { width: 100%; justify-content: flex-start; color: #646a79; }
@@ -2313,9 +2430,9 @@ onBeforeUnmount(() => {
 .preview-empty span { font-size: 9px; }
 .preview-empty.is-running svg { color: #8587ff; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@media (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; overflow-x: auto; padding-bottom: 4px; }.chapter-model-select { width: min(300px,70vw); min-width: min(300px,70vw); }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
-@media (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
+@container creation-workspace (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
+@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; padding-bottom: 4px; }.chapter-model-select { width: 100%; min-width: 0; }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@container creation-workspace (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 .scene-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 </style>

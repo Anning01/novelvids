@@ -1,6 +1,6 @@
 
 from typing import TYPE_CHECKING
-from models._base import AbstractBaseModel
+from models._lifecycle import ActiveObjects, RecoverableModel
 from tortoise import fields
 
 from utils.enums import ImageSourceEnum
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from models.asset_variant import AssetVariant
     from models.novel import Novel
     
-class Asset(AbstractBaseModel):
+class Asset(RecoverableModel):
     """通用资产模型 - 人物/场景/物品。
 
     统一管理所有类型的资产，支持：
@@ -54,6 +54,7 @@ class Asset(AbstractBaseModel):
 
 
     class Meta:
+        manager = ActiveObjects()
         table = "assets"
         unique_together = (("novel", "asset_type", "canonical_name"),)
 

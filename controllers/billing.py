@@ -34,8 +34,9 @@ class BillingController:
         params,
         team_id: int | None = None,
         user_id: int | None = None,
+        record_id: int | None = None,
     ) -> dict:
-        return await aggregation.list_records(params, team_id, user_id)
+        return await aggregation.list_records(params, team_id, user_id, record_id)
 
 
 billing_controller = BillingController()

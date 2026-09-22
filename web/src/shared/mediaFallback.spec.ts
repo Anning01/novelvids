@@ -10,5 +10,13 @@ describe('fallbackImage', () => {
 
     fallbackImage({ currentTarget: image } as unknown as Event, '/other.png')
     expect(image.src).toBe('/original.png')
+    expect(image.hidden).toBe(true)
+    expect(image.dataset.fallbackExhausted).toBe('true')
+  })
+
+  it('hides an unavailable image when no fallback exists', () => {
+    const image = document.createElement('img')
+    fallbackImage({ currentTarget: image } as unknown as Event)
+    expect(image.hidden).toBe(true)
   })
 })

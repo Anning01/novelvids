@@ -26,8 +26,7 @@ class BaseTaskHandler(abc.ABC):
 
     @abc.abstractmethod
     async def execute(self, request_params: dict) -> dict:
-        """
-        执行任务，返回结果字典。
+        """执行任务，返回结果字典。
 
         Args:
             request_params: 任务请求参数。
@@ -39,6 +38,9 @@ class BaseTaskHandler(abc.ABC):
             Exception: 任务执行失败时抛出异常。
         """
 
+    def timeout_seconds(self, request_params: dict) -> int | None:
+        return None
+
 
 # 由执行器负责的任务类型（视频任务走外部轮询，不在此列）
 EXECUTOR_TASK_TYPES = (
@@ -47,6 +49,7 @@ EXECUTOR_TASK_TYPES = (
     AiTaskTypeEnum.storyboard,
     AiTaskTypeEnum.project_analysis,
     AiTaskTypeEnum.remake_decomposition,
+    AiTaskTypeEnum.creation_agent,
 )
 
 
@@ -77,7 +80,6 @@ class AiTaskExecutor:
 
         超时以 started_at（running）或 created_at（pending）为起点计算。
         """
-        timeout = TASK_TIMEOUT.get(task_type, 60)
         now = datetime.now(timezone.utc)
 
         stale_tasks = await AiTask.filter(
@@ -90,6 +92,8 @@ class AiTaskExecutor:
         )
 
         for task in stale_tasks:
+            handler = self._handlers.get(task_type)
+            timeout = (handler.timeout_seconds(task.request_params) if handler else None) or TASK_TIMEOUT.get(task_type, 60)
             # running 任务以 started_at 为基准，pending 任务以 created_at 为基准
             baseline = task.started_at if task.started_at else task.created_at
             if baseline and (now - baseline).total_seconds() > timeout:
@@ -157,12 +161,14 @@ class AiTaskExecutor:
             logger.info("Task #%s skipped (status=%s)", task.id, task.status)
             return
 
-        timeout = TASK_TIMEOUT.get(task_type, 600)
+        timeout = handler.timeout_seconds(task.request_params) or TASK_TIMEOUT.get(task_type, 600)
 
         # 标记为执行中
-        task.status = TaskStatusEnum.running.value
-        task.started_at = datetime.now(timezone.utc)
-        await task.save(update_fields=["status", "started_at", "updated_at"])
+        claimed = await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.queued.value]).update(
+            status=TaskStatusEnum.running.value, started_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+        if not claimed:
+            return
+        await task.refresh_from_db()
 
         try:
             result = await asyncio.wait_for(
@@ -205,9 +211,11 @@ class AiTaskExecutor:
             task.stage = "completed"
             task.progress = 100
             update_fields.extend(["stage", "progress"])
-        await task.save(
-            update_fields=update_fields
+        await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(
+            **{field: getattr(task, field) for field in update_fields if field != "updated_at"},
+            updated_at=datetime.now(timezone.utc),
         )
+        await task.refresh_from_db()
         await record_ai_task_usage(task, result=result, error=None)
 
     async def fail_stale_on_boot(self) -> None:
@@ -215,7 +223,7 @@ class AiTaskExecutor:
 
         BackgroundTask 随进程消亡，重启前提交的 pending/running 任务不再有
         执行者，会永远卡住并阻塞后续同类任务（去重逻辑），因此启动即标记失败。
-        不计费：这些任务没有任何实际调用发生。
+        原有任务不重复补计费；创作助手按其已持久化的逐请求用量收口。
         """
         stale = await AiTask.filter(
             task_type__in=[task_type.value for task_type in EXECUTOR_TASK_TYPES],
@@ -230,7 +238,7 @@ class AiTaskExecutor:
             await self._fail(
                 task,
                 "服务重启导致任务中断，请重新发起",
-                record_usage=False,
+                record_usage=task.task_type == AiTaskTypeEnum.creation_agent.value,
             )
 
     async def _fail(
@@ -247,9 +255,11 @@ class AiTaskExecutor:
         if task.stage is not None:
             task.stage = "failed"
             update_fields.append("stage")
-        await task.save(
-            update_fields=update_fields
+        await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.queued.value, TaskStatusEnum.running.value]).update(
+            **{field: getattr(task, field) for field in update_fields if field != "updated_at"},
+            updated_at=datetime.now(timezone.utc),
         )
+        await task.refresh_from_db()
         if record_usage:
             # Handler 可能在执行期间补充了最终模型配置，失败计费应读取该快照。
             await task.refresh_from_db()

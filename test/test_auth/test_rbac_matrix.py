@@ -232,6 +232,31 @@ async def test_billing_super_admin_sees_all_teams(client, rbac_world):
     assert data["total_cost"] == 129  # 10 + 20 + 99
 
 
+@pytest.mark.asyncio
+async def test_conversation_billing_group_and_details_keep_creator_and_team_visibility(client, rbac_world):
+    from models.creation_agent import AgentConversation
+    from test.test_services.test_billing_conversation_records import agent_record
+    world = rbac_world
+    conversation = await AgentConversation.create(novel=world['novel_a'])
+    own = await agent_record(conversation, '1', team_id=world['team_a'].id, user_id=world['creator'].id)
+    teammate = await agent_record(conversation, '2', team_id=world['team_a'].id, user_id=world['creator2'].id)
+    headers = _auth(world['tokens']['rbac_creator'])
+    records = await client.get('/api/billing/records?task_type=7', headers=headers)
+    assert records.json()['data']['items'][0]['cost'] == 1
+    details = await client.get(f'/api/billing/records/{own.id}/details', headers=headers)
+    assert [item['id'] for item in details.json()['data']['items']] == [own.id]
+    denied = await client.get(f'/api/billing/records/{teammate.id}/details', headers=headers)
+    assert denied.json()['code'] == 404
+    viewer = await client.get(f'/api/billing/records/{own.id}/details', headers=_auth(world['tokens']['rbac_viewer']))
+    assert viewer.json()['code'] == 403
+    admin = await client.get('/api/billing/records?task_type=7', headers=_auth(world['tokens']['rbac_admin']))
+    assert admin.json()['data']['items'][0]['cost'] == 3
+    foreign = await agent_record(await AgentConversation.create(novel=world['novel_b']), '4', team_id=world['team_b'].id)
+    denied = await client.get(f'/api/billing/records/{foreign.id}/details', headers=_auth(world['tokens']['rbac_admin']))
+    assert denied.json()['code'] == 404
+    assert '私密会话' not in records.text + details.text + admin.text
+
+
 # ---------------------------------------------------------------- 跨团队写拦截
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from api.video import router as video_router
 from api.media_library import router as media_library_router
 from api.workbench import router as workbench_router
 from api.remake import router as remake_router
+from api.creation_agent import router as creation_agent_router
 
 api_router = APIRouter()
 
@@ -28,3 +29,4 @@ api_router.include_router(media_library_router, prefix="/media-library", tags=["
 api_router.include_router(workbench_router, prefix="/workbench", tags=["创作画布"])
 api_router.include_router(billing_router, prefix="/billing", tags=["账单计费"])
 api_router.include_router(remake_router, prefix="/remake", tags=["重制工坊"])
+api_router.include_router(creation_agent_router, prefix="/creation-agent", tags=["创作助手"])

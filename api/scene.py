@@ -24,10 +24,24 @@ from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 from services.storyboard.strategies import storyboard_strategy_factory
+from services.creation_objects import CreationObjects
+from controllers._creation import creation_write
 
 router = APIRouter()
 
 _EDITOR = Depends(require_roles("admin", "creator"))
+
+
+@router.post('/{scene_id}/restore', summary='恢复已移除分镜', response_model=ResponseSchema[SceneOut])
+async def restore_scene(scene_id: int, ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    scene = await Scene.with_deleted().filter(id=scene_id).prefetch_related('chapter').first()
+    if scene is None:
+        raise HTTPException(404, '分镜不存在')
+    await ensure_novel_access(scene.chapter.novel_id, ctx)
+    async with creation_write(scene.chapter.novel_id):
+        restored = await CreationObjects(scene.chapter.novel_id).restore('scene', scene.id)
+    await restored.fetch_related('assets')
+    return ResponseSchema(data=restored)
 
 
 async def _ensure_chapter_team_access(chapter_id: int, ctx: AuthContext) -> None:

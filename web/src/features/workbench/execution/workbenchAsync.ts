@@ -47,6 +47,8 @@ export class WorkbenchLoadEpoch {
   isCurrent(epoch: number) {
     return epoch === this.value
   }
+
+  snapshot() { return this.value }
 }
 
 export function isAbortError(error: unknown) {

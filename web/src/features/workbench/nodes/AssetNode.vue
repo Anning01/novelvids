@@ -89,6 +89,7 @@ watch(asset, value => {
     && !value.variants?.some(variant => String(variant.id) === selectedVariantValue.value)
   ) selectedVariantValue.value = 'base'
 }, { immediate: true })
+watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (asset.value.base_traits || '') }))
 
 watch(projectDefaults, value => {
   config.value = normalizeAssetConfig(asset.value, value)

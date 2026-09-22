@@ -1,9 +1,9 @@
 """账单计费相关 schema。"""
 
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from schemas._base import BaseResponse
 
@@ -30,6 +30,11 @@ class ModelUsageRecordOut(BaseResponse):
     cost_source: str = "balance"
     team_id: Optional[int] = None
     user_id: Optional[int] = None
+    record_kind: Literal['call', 'agent_conversation'] = 'call'
+    conversation_id: Optional[int] = None
+    record_count: int = 1
+    turn_count: int = 1
+    statuses: list[int] = Field(default_factory=list)
 
 
 class BillingSummaryOut(BaseModel):

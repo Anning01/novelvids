@@ -119,7 +119,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         instance.update_from_dict(update_data)
 
         # 3. 获取待更新的字段列表，传给 save() 提高性能并防止竞态条件
-        update_fields = list(update_data.keys())
+        update_fields = list(dict.fromkeys([*update_data, "updated_at"]))
         await instance.save(update_fields=update_fields)
 
         return instance
