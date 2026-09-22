@@ -9,7 +9,9 @@ from tortoise.exceptions import IntegrityError
 from models.ai_task import AiTask
 from models.asset import Asset
 from models.asset_variant import AssetVariant
+from models.chapter import Chapter
 from models.creation_agent import AgentMessage, PromptChange
+from models.novel import Novel
 from models.scene import Scene
 from schemas.creation_agent import AgentRunRequest, AgentTarget, PromptStatusRequest
 from schemas.creation_objects import CreationChangeSet
@@ -39,6 +41,7 @@ class CreationChanges:
         self.rules: dict[tuple[str, int], list[dict]] = {}
         self.creation_rules: dict[int, list[dict]] = {}
         self.read_snapshots: dict = {}
+        self.observed_dependencies: dict[tuple[str, int], str] = {}
         self.partial_prompts: set[tuple[str, int]] = set()
 
     async def authorize(self):
@@ -101,12 +104,16 @@ class CreationChanges:
             target = await self.objects.get(ref.kind, ref.id)
             key = (ref.kind, ref.id)
             version = await object_version(target)
+            dependency_version = await self._dependency_version(target)
             rules = await self.target_rules(ref)
             self.observed[key] = version
             self.rules[key] = deepcopy(rules)
+            self.observed_dependencies[key] = dependency_version
             cached = self.read_snapshots.get(key) if use_cache else None
-            if cached and cached[0] == version and cached[1] == rules:
-                result.append(deepcopy(cached[2]))
+            if cached and cached[0] == (version, dependency_version) and cached[1] == rules:
+                data = deepcopy(cached[2])
+                data['references'] = await self.catalog.references(ref.kind, ref.id)
+                result.append(data)
                 continue
             reader = PromptEditService(novel_id=self.novel_id, task_id=self.task_id,
                 allowed_targets={key}, max_batch_size=self.max_batch_size)
@@ -128,9 +135,22 @@ class CreationChanges:
             if use_cache:
                 if len(self.read_snapshots) >= 100:
                     self.read_snapshots.pop(next(iter(self.read_snapshots)))
-                self.read_snapshots[key] = (version, deepcopy(rules), deepcopy(data))
+                self.read_snapshots[key] = ((version, dependency_version), deepcopy(rules), deepcopy(data))
             result.append(data)
         return result
+
+    async def _dependency_version(self, target) -> str:
+        """Include linked character/variant facts in a scene's projection identity."""
+        data = {}
+        if isinstance(target, Scene):
+            ids = await target.assets.all().values_list('id', flat=True)
+            data['assets'] = await Asset.filter(id__in=ids).order_by('id').values('id', 'updated_at', 'deleted_at')
+            data['variants'] = await AssetVariant.filter(asset_id__in=ids).order_by('id').values('id', 'updated_at', 'deleted_at')
+            data['chapter'] = await Chapter.filter(id=target.chapter_id).values('id', 'number', 'updated_at')
+            data['project'] = await Novel.filter(id=self.novel_id).values('id', 'updated_at')
+        elif isinstance(target, AssetVariant):
+            data['parent'] = await Asset.filter(id=target.asset_id).values('id', 'updated_at', 'deleted_at')
+        return _digest(data)
 
     async def checked(self, kind: str, object_id: int, created: set[tuple[str, int]], *, write=True):
         target = await self.creative_target(kind, object_id)
@@ -142,6 +162,8 @@ class CreationChanges:
                 raise ValueError(f'写入或引用前请先读取对象详情，不能使用未经读取的 ID：{kind} {object_id}（{await object_label(target)}）')
             if self.observed[key] != await object_version(target):
                 raise PromptEditConflict('对象已有变化，请重新读取后重试')
+            if key in self.observed_dependencies and self.observed_dependencies[key] != await self._dependency_version(target):
+                raise PromptEditConflict('对象引用的设定已有变化，请重新读取后重试')
             if self.rules[key] != await self.target_rules(AgentTarget(kind=kind, id=object_id)):
                 raise PromptEditConflict('适用约束已有变化，请重新读取后重试')
         return target
@@ -183,6 +205,7 @@ class CreationChanges:
         digest = _digest(change_set.model_dump(mode='json'))
         # Internal snapshots change only after the DB transaction commits.
         observed_before, rules_before = dict(self.observed), deepcopy(self.rules)
+        dependencies_before = dict(self.observed_dependencies)
         try:
             async with project_write(self.novel_id):
                 await self.authorize()
@@ -204,9 +227,11 @@ class CreationChanges:
             return result
         except IntegrityError:
             self.observed, self.rules = observed_before, rules_before
+            self.observed_dependencies = dependencies_before
             raise ValueError('对象名称或位置已存在，可能位于已移除记录中；请查询或恢复原对象') from None
         except Exception:
             self.observed, self.rules = observed_before, rules_before
+            self.observed_dependencies = dependencies_before
             raise
 
     async def undo_for_run(self, change_id: int, source: AgentMessage | None):

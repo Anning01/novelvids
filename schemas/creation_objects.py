@@ -53,6 +53,7 @@ SettingCreation = Annotated[CreateAssetSetting | CreateVariantSetting, Field(dis
 
 
 class PromptReplacement(ChangeInput):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=False)
     old: str = Field(min_length=1, max_length=8000)
     new: str = Field(max_length=8000)
 

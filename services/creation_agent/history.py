@@ -83,7 +83,9 @@ async def prepare_history(conversation: AgentConversation, assistant: AgentMessa
     history_budget = min(limits.max_context_characters // 3, limits.working_input_tokens)
     from services.creation_agent.context_budget import wire_size
     from pydantic_ai.models import ModelRequestParameters
-    for message in previous[:limits.history_runs]:
+    # Small conversations can append to an unchanged prefix. A turn-count-only
+    # sliding window would rewrite the summary after every sixth short message.
+    for message in previous:
         native = ModelMessagesTypeAdapter.validate_python(message.native_messages) if message.native_messages else []
         size = wire_size(native, ModelRequestParameters())['total_characters'] if native else len(message.content) + 800
         if characters + size > history_budget * limits.compaction_trigger_ratio:

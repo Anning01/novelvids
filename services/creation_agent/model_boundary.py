@@ -66,9 +66,12 @@ class RecordedAgentModel(WrapperModel):
             cache_write_tokens=sum(c.get('usage', {}).get('cache_write_tokens', 0) for c in self.calls),
             cache_usage_reported=bool(self.calls) and all(c.get('cache_usage_reported', False) for c in self.calls),
             summary_requests=sum(c.get('phase') == 'summary' for c in self.calls),
+            summary_input_tokens=sum(c.get('usage', {}).get('input_tokens', 0) for c in self.calls if c.get('phase') == 'summary'),
+            summary_output_tokens=sum(c.get('usage', {}).get('output_tokens', 0) for c in self.calls if c.get('phase') == 'summary'),
             compactions=self.budget.compactions,
         )
-        usage['cache_price_configured'] = (getattr(self.message, 'model_snapshot', None) or {}).get('pricing', {}).get('cache_input_price_per_1m') is not None if (getattr(self.message, 'model_snapshot', None) or {}).get('pricing') else False
+        pricing = (getattr(self.message, 'model_snapshot', None) or {}).get('pricing') or {}
+        usage['cache_price_configured'] = pricing.get('cache_input_price_per_1m') is not None
         self.message.usage = usage
         await AgentMessage.filter(id=self.message.id).update(usage=usage)
 

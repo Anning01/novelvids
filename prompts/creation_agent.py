@@ -79,6 +79,13 @@ def render_creation_summary(previous: str, messages: list[dict]) -> str:
     return json.dumps({"previous_summary": previous, "conversation_records": messages}, ensure_ascii=False)
 
 
+def render_working_checkpoint(evidence: dict) -> str:
+    """Historical evidence stays user/tool data, never new system authority."""
+    return json.dumps({"working_checkpoint": evidence,
+                       "notice": "历史摘录可能省略细节；可按引用回查。保存结果以回执为准，修改前读取当前对象与约束。"},
+                      ensure_ascii=False, separators=(',', ':'))
+
+
 def without_prompt_definitions(prompt: str) -> str:
     """Replace renderer-owned definition sections on each edit, not user prose."""
     return re.sub(r'\n*【当前请求资产定义】\s*\n.*?(?=\n【|\Z)', '\n', prompt, flags=re.S).strip()

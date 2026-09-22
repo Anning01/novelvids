@@ -4,9 +4,10 @@ from dataclasses import replace
 import json
 import math
 
-from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 
 from models.creation_agent import AgentContextCheckpoint
+from prompts.creation_agent import render_working_checkpoint
 
 
 def encode(value) -> str:
@@ -46,7 +47,10 @@ class ContextBudget:
         self.replacements = {}
         self.archives = {}
         self.keep_from_run_id = None
-        self.keep_from_user_content = None
+        self.keep_from_user_part = None
+        self.recovery = {'requests': [], 'outcomes': [], 'constraints': [], 'receipts': [], 'archive_refs': []}
+        self.recovery_part = None
+        self.system_parts = []
 
     def observe(self, report, usage):
         if usage and usage.input_tokens:
@@ -68,8 +72,6 @@ class ContextBudget:
         if not force and report['total_characters'] <= ceiling * self.limits.compaction_trigger_ratio:
             self.last_report = report
             return messages
-        if self.on_compact:
-            await self.on_compact()
         target = max(report['instructions'] + report['tools'] + 2000, ceiling * self.limits.compaction_target_ratio)
         returns = [(i, j, p) for i, m in enumerate(messages) for j, p in enumerate(m.parts)
                    if isinstance(p, ToolReturnPart) and not (isinstance(p.content, dict) and 'archive_ref' in p.content)]
@@ -79,14 +81,15 @@ class ContextBudget:
         for i, message in enumerate(result):
             for j, part in enumerate(message.parts):
                 if isinstance(part, ToolCallPart) and part.tool_call_id in completed and len(part.args_as_json_str()) > 800:
-                    result[i].parts[j] = replace(part, args={'completed': True, 'tool_call_id': part.tool_call_id})
+                    reference = await self._archive(part)
+                    result[i].parts[j] = replace(part, args={'completed': True, **reference})
                     self.replacements[('call', part.tool_call_id)] = result[i].parts[j]
         for i, j, part in returns:
             if self.report(result, parameters)['total_characters'] <= target:
                 break
             # Keep the newest read usable if it fits the hard ceiling. Offloading
             # that result immediately would create an endless re-read loop.
-            if not force and returns and part is returns[-1][2] and self.report(result, parameters)['total_characters'] <= self.limits.max_context_characters:
+            if not force and returns and part is returns[-1][2] and self.report(result, parameters)['total_characters'] <= ceiling:
                 continue
             if len(encode(part.content)) < 800:
                 continue
@@ -97,26 +100,32 @@ class ContextBudget:
             self.replacements[('return', part.tool_call_id)] = result[i].parts[j]
         # Drop only complete earlier turns, never the current user's instruction.
         starts = [i for i, m in enumerate(result) if isinstance(m, ModelRequest)
-                  and any(isinstance(p, UserPromptPart) for p in m.parts)]
+                  and any(isinstance(p, UserPromptPart) and not self._is_checkpoint(p) for p in m.parts)
+                  and not any(isinstance(p, (ToolReturnPart, RetryPromptPart)) for p in m.parts)]
         while len(starts) > 1 and self.report(result, parameters)['total_characters'] > target:
             boundary = starts[1]
             old = result[:boundary]
             excerpt = '\n'.join(str(p.content)[:300] for m in old for p in m.parts
                                 if isinstance(p, UserPromptPart))
+            archive_id = None
             if self.message and getattr(self.message, 'conversation_id', None):
-                from pydantic_ai.messages import ModelMessagesTypeAdapter
-                await AgentContextCheckpoint.create(conversation_id=self.message.conversation_id,
+                checkpoint = await AgentContextCheckpoint.create(conversation_id=self.message.conversation_id,
                     message_id=self.message.id, kind='turn_archive', content=excerpt,
                     payload=json.loads(ModelMessagesTypeAdapter.dump_json(old)))
+                archive_id = checkpoint.id
+            self._remember_evidence(old, archive_id)
             boundary_message = result[boundary]
             self.keep_from_run_id = boundary_message.run_id
-            self.keep_from_user_content = next(
-                (part.content for part in boundary_message.parts if isinstance(part, UserPromptPart)),
+            self.keep_from_user_part = next(
+                (part for part in boundary_message.parts if isinstance(part, UserPromptPart) and not self._is_checkpoint(part)),
                 None,
             )
-            result = result[boundary:]
+            result = self._with_recovery(result[boundary:])
             starts = [i - boundary for i in starts[1:]]
-        self.compactions += 1
+        if result != messages:
+            self.compactions += 1
+            if self.on_compact:
+                await self.on_compact()
         self.last_report = self.report(result, parameters)
         self.last_report['compactions'] = self.compactions
         if self.last_report['total_characters'] > self.limits.max_context_characters:
@@ -131,29 +140,59 @@ class ContextBudget:
                 kind = 'call' if isinstance(part, ToolCallPart) else 'return' if isinstance(part, ToolReturnPart) else None
                 parts.append(self.replacements.get((kind, getattr(part, 'tool_call_id', None)), part))
             result.append(replace(message, parts=parts))
-        if self.keep_from_run_id or self.keep_from_user_content is not None:
+        if self.keep_from_run_id or self.keep_from_user_part is not None:
             for index, message in enumerate(result):
                 same_run = self.keep_from_run_id and message.run_id == self.keep_from_run_id
-                same_prompt = self.keep_from_user_content is not None and any(
-                    isinstance(part, UserPromptPart) and part.content == self.keep_from_user_content
+                same_prompt = not self.keep_from_run_id and self.keep_from_user_part is not None and any(
+                    isinstance(part, UserPromptPart) and part == self.keep_from_user_part
                     for part in message.parts
                 )
                 if same_run or same_prompt:
-                    return result[index:]
+                    return self._with_recovery(result[index:])
         return result
 
-    async def _archive(self, part):
-        payload = part.content
-        if part.tool_call_id in self.archives:
-            return self.archives[part.tool_call_id]
-        if self.message and getattr(self.message, 'conversation_id', None):
-            checkpoint = await AgentContextCheckpoint.create(conversation_id=self.message.conversation_id,
-                message_id=self.message.id, kind='tool_archive', content=part.tool_name,
-                payload={'tool_call_id': part.tool_call_id, 'content': payload})
-            ref = checkpoint.id
-        else:
-            # Test/standalone runners can always re-read business data.
-            ref = None
+    @staticmethod
+    def _is_checkpoint(part):
+        return isinstance(part, UserPromptPart) and isinstance(part.content, str) and part.content.startswith('{"working_checkpoint":')
+
+    def _remember_evidence(self, messages, archive_id):
+        for message in messages:
+            for part in message.parts:
+                if isinstance(part, SystemPromptPart) and part not in self.system_parts:
+                    self.system_parts.append(part)
+                elif isinstance(part, UserPromptPart) and not self._is_checkpoint(part):
+                    self.recovery['requests'].append(str(part.content)[:600])
+                elif isinstance(part, TextPart):
+                    self.recovery['outcomes'].append(part.content[:300])
+                elif isinstance(part, ToolReturnPart) and isinstance(part.content, dict):
+                    for constraint in self._constraints(part.content):
+                        if constraint not in self.recovery['constraints']:
+                            self.recovery['constraints'].append(constraint)
+                    if 'status' in part.content:
+                        receipt = {key: part.content[key] for key in ('status', 'change_id', 'changes') if key in part.content}
+                        if receipt not in self.recovery['receipts']:
+                            self.recovery['receipts'].append(receipt)
+        if archive_id:
+            self.recovery['archive_refs'].append(archive_id)
+        for key in ('requests', 'outcomes', 'archive_refs'):
+            self.recovery[key] = self.recovery[key][-4:]
+        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery))
+
+    def _with_recovery(self, messages):
+        result = []
+        inserted = False
+        for message in messages:
+            if isinstance(message, ModelRequest):
+                parts = [p for p in message.parts if not self._is_checkpoint(p)]
+                if not inserted and self.recovery_part is not None:
+                    parts = [*self.system_parts, self.recovery_part, *parts]
+                    inserted = True
+                message = replace(message, parts=parts)
+            result.append(message)
+        return result
+
+    @staticmethod
+    def _constraints(payload):
         constraints = []
         def collect(value):
             if isinstance(value, dict):
@@ -166,11 +205,28 @@ class ContextBudget:
                 for child in value:
                     collect(child)
         collect(payload)
+        return constraints
+
+    async def _archive(self, part):
+        is_call = isinstance(part, ToolCallPart)
+        payload = part.args_as_dict() if is_call else part.content
+        key = ('call' if is_call else 'return', part.tool_call_id)
+        if key in self.archives:
+            return self.archives[key]
+        if self.message and getattr(self.message, 'conversation_id', None):
+            checkpoint = await AgentContextCheckpoint.create(conversation_id=self.message.conversation_id,
+                message_id=self.message.id, kind='call_archive' if is_call else 'tool_archive', content=part.tool_name,
+                payload={'tool_call_id': part.tool_call_id, 'content': payload})
+            ref = checkpoint.id
+        else:
+            # Test/standalone runners can always re-read business data.
+            ref = None
+        constraints = self._constraints(payload)
         reference = {'constraints': constraints, 'archive_ref': ref, 'tool': part.tool_name, 'tool_call_id': part.tool_call_id,
                 'preview': encode(payload)[:320], 'content_truncated': True,
                 'recovery': 'read_creation_history(archive_id=archive_ref)，或重新按字段读取对象',
                 **({'status': payload['status'], 'change_id': payload.get('change_id')}
                    if isinstance(payload, dict) and 'status' in payload else {})}
 
-        self.archives[part.tool_call_id] = reference
+        self.archives[key] = reference
         return reference

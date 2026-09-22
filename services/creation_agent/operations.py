@@ -57,6 +57,7 @@ class CreationOperations:
         if isinstance(target, Scene):
             item['chapter_id'] = target.chapter_id
         self.service.observed[(kind, target.id)] = version
+        self.service.observed_dependencies[(kind, target.id)] = await self.service._dependency_version(target)
         self.service.rules[(kind, target.id)] = deepcopy(rules)
         return item
 

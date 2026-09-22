@@ -388,13 +388,14 @@ async def read_creation_objects(ctx: RunContext[CreationAgentDeps], targets: lis
 async def read_creation_history(ctx: RunContext[CreationAgentDeps], query: Annotated[str, Field(max_length=200)] = '',
                                 before: Annotated[int | None, Field(gt=0)] = None,
                                 archive_id: Annotated[int | None, Field(gt=0)] = None,
+                                message_id: Annotated[int | None, Field(gt=0)] = None,
                                 offset: Annotated[int, Field(ge=0)] = 0) -> dict:
     """分页回查本会话原始对话或压缩引用；历史不替代当前对象及权限。"""
     await crud_service(ctx).authorize()
     from services.creation_agent.retrieval import read_history
     try:
         return await read_history(ctx.deps.source_message, query=query, before=before,
-                                  archive_id=archive_id, offset=offset, limit=ctx.deps.limits.context_page_characters)
+                                  archive_id=archive_id, message_id=message_id, offset=offset, limit=ctx.deps.limits.context_page_characters)
     except ValueError as exc:
         raise ModelRetry(str(exc)) from None
 

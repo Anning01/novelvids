@@ -24,7 +24,7 @@ async def test_incremental_summary_preserves_recent_tool_history_and_constraint_
             request_hash='test', content=f'第{number}轮要求')
         await AgentMessage.create(conversation=conversation, task=task, role='assistant', request_id=request_id,
             request_hash='test', content=f'第{number}轮已完成', native_messages=json.loads(ModelMessagesTypeAdapter.dump_json([
-                ModelRequest(parts=[UserPromptPart(f'第{number}轮要求')]), ModelResponse(parts=[TextPart(f'第{number}轮已完成')])
+                ModelRequest(parts=[UserPromptPart(f'第{number}轮要求' + '补充细节' * 250)]), ModelResponse(parts=[TextPart(f'第{number}轮已完成')])
             ])))
         if number == 0:
             await CreationConstraint.create(novel_id=conversation.novel_id, source_message=user, fingerprint='test',
@@ -35,11 +35,11 @@ async def test_incremental_summary_preserves_recent_tool_history_and_constraint_
     def model(messages, info):
         calls.append(messages)
         return ModelResponse(parts=[TextPart('已调整前两轮光线，保留人物设定。')])
-    limits = AgentConfiguration(history_runs=2)
+    limits = AgentConfiguration(history_runs=2, max_context_characters=12000)
     history = await prepare_history(conversation, current, limits, FunctionModel(model))
     assert len(calls) == 1
     assert len(history) == 6
-    assert history[2].parts[0].content == '第2轮要求'
+    assert history[2].parts[0].content.startswith('第2轮要求')
     assert conversation.summary_until_id > 0
     again = await prepare_history(conversation, current, limits, FunctionModel(model))
     assert len(calls) == 1 and len(again) == 6
@@ -56,7 +56,7 @@ async def test_failed_summary_uses_extract_checkpoint_without_deleting_history()
     current = await AgentMessage.create(conversation=conversation, task=task, role='assistant', request_id=uuid4(), request_hash='current')
     def failing(messages, info):
         raise RuntimeError('summary unavailable')
-    history = await prepare_history(conversation, current, AgentConfiguration(history_runs=1), FunctionModel(failing))
+    history = await prepare_history(conversation, current, AgentConfiguration(history_runs=1, max_context_characters=2000), FunctionModel(failing))
     assert history
     await conversation.refresh_from_db()
     assert conversation.summary_until_id > 0 and '回复' in conversation.summary
