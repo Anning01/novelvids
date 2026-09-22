@@ -812,14 +812,14 @@ onMounted(load)
 .model-empty-state h3 { margin: 0; color: #434858; font-size: 14px; }
 .model-empty-state p { max-width: 360px; margin: 0 0 8px; color: #8d92a1; font-size: 10px; line-height: 1.6; }
 .model-empty-state button { min-height: 36px; }
-.model-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(8 9 12 / 64%); backdrop-filter: blur(8px); }
-.model-modal { display: grid; width: min(600px, 100%); max-height: calc(100vh - 40px); gap: 20px; overflow: auto; padding: 22px; border: 1px solid var(--app-border); border-radius: 17px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 24px 70px rgb(0 0 0 / 28%); }
+.model-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgb(8 9 12 / 64%); backdrop-filter: blur(8px); }
+.model-modal { display: grid; width: min(900px, 100%); max-height: calc(100dvh - 32px); gap: 24px; overflow: auto; padding: 28px; border: 1px solid var(--app-border); border-radius: 17px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 24px 70px rgb(0 0 0 / 28%); }
 .model-modal > header, .model-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .model-modal > header > div { display: flex; align-items: center; gap: 11px; }
 .model-modal header small { color: var(--app-accent); font-size: 8px; font-weight: 750; letter-spacing: .14em; }
 .model-modal h2 { margin: 3px 0 0; font-size: 17px; }
 .model-modal header > button { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 8px; cursor: pointer; }
-.model-form-grid { display: grid; grid-template-columns: 1fr 140px; gap: 13px; }
+.model-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 16px; }
 .model-form-grid label { display: grid; gap: 7px; color: var(--app-text-secondary); font-size: 10px; }
 .model-form-grid label.is-full { grid-column: 1 / -1; }
 .model-form-grid label > span:first-child { font-weight: 600; }
@@ -870,6 +870,8 @@ onMounted(load)
   .model-category-card { min-height: 130px; }
 }
 @media (max-width: 620px) {
+  .model-modal-backdrop { padding: 12px; }
+  .model-modal { padding: 18px; max-height: calc(100dvh - 24px); gap: 18px; }
   .model-settings-page { padding: 30px 16px 60px; }
   .model-category-grid { grid-template-columns: 1fr; }
   .model-settings-header, .model-config-section > header { align-items: stretch; flex-direction: column; }
