@@ -16,7 +16,7 @@ from models.chapter import Chapter
 from models.creation_agent import AgentConversation, AgentMessage, AgentSettings
 from models.novel import Novel
 from models.scene import Scene
-from schemas.creation_agent import AgentConfiguration, AgentRunRequest, PromptStatusRequest
+from schemas.creation_agent import AgentConfiguration, AgentRunRequest, PromptStatusRequest, stored_agent_configuration
 from services.ai_task_executor import ai_task_executor
 from services.model_resolution import resolve_scope_configs
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -27,7 +27,7 @@ ACTIVE_STATUSES = (TaskStatusEnum.pending.value, TaskStatusEnum.queued.value, Ta
 
 async def agent_configuration() -> AgentConfiguration:
     row = await AgentSettings.get_or_none(id=1)
-    return AgentConfiguration.model_validate(row.configuration if row else {})
+    return stored_agent_configuration(row.configuration if row else None)
 
 
 async def agent_models(ctx: AuthContext):

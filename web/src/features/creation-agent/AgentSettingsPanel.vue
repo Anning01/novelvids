@@ -22,7 +22,7 @@ interface BudgetField {
   ratio?: boolean
 }
 const groups: { title: string; description: string; fields: BudgetField[] }[] = [
-  { title: '对话用量', description: '控制一次对话的处理范围与用量。', fields: [
+  { title: '对话用量', description: '默认按 DeepSeek 长上下文对话设置，仍受所选模型自身上限约束。', fields: [
     { key: 'max_targets', label: '最多修改对象', unit: '个 / 轮' },
     { key: 'request_limit', label: '模型调用上限', unit: '次 / 轮' },
     { key: 'tool_calls_limit', label: '工具调用上限', unit: '次 / 轮' },
@@ -30,7 +30,7 @@ const groups: { title: string; description: string; fields: BudgetField[] }[] = 
     { key: 'max_output_tokens', label: '单次输出上限', unit: 'token' },
     { key: 'total_tokens_limit', label: '每轮总用量上限', unit: 'token' },
   ] },
-  { title: '记忆与上下文', description: '对话变长时，自动整理历史并保留创作依据。', fields: [
+  { title: '记忆与上下文', description: '按 840K 输入预算管理工作区，达到 70% 时自动整理历史。', fields: [
     { key: 'working_input_tokens', label: '工作上下文预算', unit: '预估 token' },
     { key: 'max_context_characters', label: '上下文字符上限', unit: '字符' },
     { key: 'compaction_trigger_ratio', label: '整理触发比例', unit: '0–1', ratio: true },

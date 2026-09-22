@@ -10,30 +10,61 @@ from pydantic.json_schema import SkipJsonSchema
 from schemas.scene import ScenePromptSegment
 
 
+LEGACY_AGENT_DEFAULTS = {
+    'request_limit': 6,
+    'tool_calls_limit': 8,
+    'max_targets': 8,
+    'timeout_seconds': 180,
+    'max_context_characters': 64_000,
+    'working_input_tokens': 12_000,
+    'compaction_trigger_ratio': 0.70,
+    'compaction_target_ratio': 0.45,
+    'summary_output_tokens': 1_000,
+    'summary_timeout_seconds': 15,
+    'context_page_characters': 4_000,
+    'history_runs': 6,
+    'max_output_tokens': 8_000,
+    'total_tokens_limit': 100_000,
+}
+
+
 class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    request_limit: int = Field(6, ge=1, le=30)
-    tool_calls_limit: int = Field(8, ge=1, le=100)
-    max_targets: int = Field(8, ge=1, le=100)
-    timeout_seconds: int = Field(180, ge=10, le=900)
-    max_context_characters: int = Field(64000, ge=2000, le=200000)
-    working_input_tokens: int = Field(12000, ge=1000, le=100000)
+    # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
+    # 128K output. The assistant keeps the default output below that maximum,
+    # while leaving enough room for tool schemas and provider-side reasoning.
+    request_limit: int = Field(20, ge=1, le=30)
+    tool_calls_limit: int = Field(50, ge=1, le=100)
+    max_targets: int = Field(32, ge=1, le=100)
+    timeout_seconds: int = Field(600, ge=10, le=900)
+    max_context_characters: int = Field(2_000_000, ge=2000, le=4_000_000)
+    working_input_tokens: int = Field(840_000, ge=1000, le=900_000)
     compaction_trigger_ratio: float = Field(0.70, gt=0.1, lt=1)
     compaction_target_ratio: float = Field(0.45, gt=0, lt=1)
-    summary_output_tokens: int = Field(1000, ge=128, le=2000)
-    summary_timeout_seconds: int = Field(15, ge=1, le=60)
-    context_page_characters: int = Field(4000, ge=500, le=16000)
-    history_runs: int = Field(6, ge=1, le=30)
-    max_output_tokens: int = Field(8000, ge=256, le=16000)
-    total_tokens_limit: int = Field(100000, ge=1000, le=500000)
+    summary_output_tokens: int = Field(4000, ge=128, le=8000)
+    summary_timeout_seconds: int = Field(30, ge=1, le=60)
+    # Keep tool reads deliberately small even when the model has a large
+    # context window; the agent can page forward when the next section matters.
+    context_page_characters: int = Field(4000, ge=500, le=64000)
+    history_runs: int = Field(12, ge=1, le=100)
+    max_output_tokens: int = Field(64000, ge=256, le=384000)
+    total_tokens_limit: int = Field(2_000_000, ge=1000, le=10_000_000)
 
     @model_validator(mode='after')
     def valid_compaction_thresholds(self):
         if self.compaction_target_ratio >= self.compaction_trigger_ratio:
             raise ValueError('压缩目标必须小于触发阈值')
         return self
+
+
+def stored_agent_configuration(value: dict | None) -> AgentConfiguration:
+    """Upgrade only the untouched legacy profile; preserve every custom profile."""
+    raw = value or {}
+    if raw and all(raw.get(key) == expected for key, expected in LEGACY_AGENT_DEFAULTS.items()):
+        return AgentConfiguration(enabled=bool(raw.get('enabled', False)))
+    return AgentConfiguration.model_validate(raw)
 
 
 class AgentTarget(BaseModel):
