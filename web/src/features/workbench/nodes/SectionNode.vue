@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core';
 import { Layers3, Minimize2, MoreVertical, Palette, Trash2 } from 'lucide-vue-next';
 import { computed, inject, ref } from 'vue';
@@ -36,7 +38,7 @@ async function saveColor() {
     previewedColor.value = '';
   }
   catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '分区颜色保存失败';
+    error.value = reason instanceof Error ? reason.message : tr('分区颜色保存失败');
   }
   finally {
     saving.value = false;
@@ -54,7 +56,7 @@ async function saveDescription() {
     await store.flushNodeDraft(props.id);
   }
   catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '分区说明保存失败';
+    error.value = reason instanceof Error ? reason.message : tr('分区说明保存失败');
   }
   finally {
     saving.value = false;
@@ -68,7 +70,7 @@ async function deleteSection() {
     await store.deleteSelection();
   }
   catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '分区删除失败';
+    error.value = reason instanceof Error ? reason.message : tr('分区删除失败');
   }
 }
 
@@ -78,41 +80,41 @@ async function fitToContent() {
     await sectionActions?.fitToContent(props.id);
   }
   catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '分区适配内容失败';
+    error.value = reason instanceof Error ? reason.message : tr('分区适配内容失败');
   }
 }
 </script>
 
 <template>
-  <section class="workbench-section" :class="{ 'is-selected': selected, 'is-drop-target': data.drop_candidate === true }" :style="backgroundStyle" :aria-label="`${data.title || '画布分区'}，包含 ${memberCount} 个节点`">
-    <div v-if="selected" class="workbench-section__toolbar nodrag nowheel" role="toolbar" aria-label="分区操作" @pointerdown.stop @click.stop>
-      <button type="button" aria-label="删除分区" title="删除分区（不会删除内部节点）" @click="deleteSection">
+  <section class="workbench-section" :class="{ 'is-selected': selected, 'is-drop-target': data.drop_candidate === true }" :style="backgroundStyle" :aria-label="tr('{p0}，包含 {p1} 个节点', { p0: data.title || '画布分区', p1: memberCount })">
+    <div v-if="selected" class="workbench-section__toolbar nodrag nowheel" role="toolbar" :aria-label="tr('分区操作')" @pointerdown.stop @click.stop>
+      <button type="button" :aria-label="tr('删除分区')" :title="tr('删除分区（不会删除内部节点）')" @click="deleteSection">
         <Trash2 :size="17" aria-hidden="true" />
       </button>
-      <label class="workbench-section__color-control" title="分区背景颜色">
+      <label class="workbench-section__color-control" :title="tr('分区背景颜色')">
         <Palette :size="17" aria-hidden="true" />
-        <input type="color" :value="color" :disabled="saving" aria-label="修改分区颜色" @input="previewColor" @change="saveColor">
+        <input type="color" :value="color" :disabled="saving" :aria-label="tr('修改分区颜色')" @input="previewColor" @change="saveColor">
       </label>
-      <button type="button" aria-label="重新包裹内部节点" title="重新包裹内部节点" :disabled="memberCount === 0" @click="fitToContent">
+      <button type="button" :aria-label="tr('重新包裹内部节点')" :title="tr('重新包裹内部节点')" :disabled="memberCount === 0" @click="fitToContent">
         <Minimize2 :size="17" aria-hidden="true" />
       </button>
-      <button type="button" aria-label="分区更多设置" title="更多设置" :class="{ 'is-active': detailsOpen }" @click="detailsOpen = !detailsOpen">
+      <button type="button" :aria-label="tr('分区更多设置')" :title="tr('更多设置')" :class="{ 'is-active': detailsOpen }" @click="detailsOpen = !detailsOpen">
         <MoreVertical :size="17" aria-hidden="true" />
       </button>
     </div>
-    <header title="拖动节点进入分区可加入，拖出分区可移除；拖动标题栏可移动整个分区">
+    <header :title="tr('拖动节点进入分区可加入，拖出分区可移除；拖动标题栏可移动整个分区')">
       <Layers3 :size="16" aria-hidden="true" />
-      <strong>{{ data.title || '画布分区' }}</strong>
-      <span>{{ memberCount }} 个节点</span>
-      <span v-if="selected" class="workbench-section__membership-hint">拖入加入 · 拖出移除</span>
+      <strong>{{ data.title || tr('画布分区') }}</strong>
+      <span>{{ memberCount }} {{ tr('个节点') }}</span>
+      <span v-if="selected" class="workbench-section__membership-hint">{{ tr('拖入加入 · 拖出移除') }}</span>
     </header>
     <textarea
       v-if="selected && detailsOpen"
       class="workbench-section__description nodrag nowheel"
       :value="description"
       maxlength="2000"
-      aria-label="分区文字说明"
-      placeholder="添加分区说明…"
+      :aria-label="tr('分区文字说明')"
+      :placeholder="tr('添加分区说明…')"
       @input="updateDescription"
       @blur="saveDescription"
       @keydown.stop

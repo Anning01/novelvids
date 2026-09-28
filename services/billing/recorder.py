@@ -1,5 +1,7 @@
 """计费流水写入器：从 model_config_id 快照定价并落 ModelUsageRecord。"""
 
+from utils.messages import localized_message
+
 import logging
 
 from models.config import AiModelConfig
@@ -344,7 +346,7 @@ async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:
         )
         if record is None:
             await AgentMessage.filter(id=message.id, billing_record_id=-1).using_db(connection).update(billing_record_id=None)
-            raise RuntimeError("创作助手用量记录失败")
+            raise RuntimeError(localized_message('创作助手用量记录失败'))
         record.usage = {**record.usage, "requests": message.usage["requests"],
                         "missing_usage": message.usage["missing_usage"]}
         await record.save(using_db=connection, update_fields=["usage"])

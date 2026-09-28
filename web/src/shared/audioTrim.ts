@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 const MAX_CLIP_DURATION = 30
 const MIN_CLIP_DURATION = 1
 
@@ -15,7 +17,7 @@ export function encodeAudioBufferSlice(
   const startFrame = Math.max(0, Math.floor(start * buffer.sampleRate))
   const endFrame = Math.min(buffer.length, Math.ceil(end * buffer.sampleRate))
   const frameCount = endFrame - startFrame
-  if (frameCount <= 0) throw new Error('裁剪范围无效')
+  if (frameCount <= 0) throw new Error(tr('裁剪范围无效'))
   const channels = Math.max(1, buffer.numberOfChannels)
   const bytesPerSample = 2
   const dataSize = frameCount * channels * bytesPerSample
@@ -50,17 +52,17 @@ export function encodeAudioBufferSlice(
 export async function trimLocalAudioFile(file: File, start: number, end: number) {
   const duration = end - start
   if (start < 0 || duration < MIN_CLIP_DURATION || duration > MAX_CLIP_DURATION) {
-    throw new Error('裁剪片段必须为 1-30 秒')
+    throw new Error(tr('裁剪片段必须为 1-30 秒'))
   }
   const AudioContextConstructor = window.AudioContext
-  if (!AudioContextConstructor) throw new Error('当前浏览器不支持在线音频裁剪')
+  if (!AudioContextConstructor) throw new Error(tr('当前浏览器不支持在线音频裁剪'))
   const context = new AudioContextConstructor()
   try {
     const buffer = await context.decodeAudioData(await file.arrayBuffer())
-    if (end > buffer.duration + 0.05) throw new Error('裁剪范围超出原音频时长')
+    if (end > buffer.duration + 0.05) throw new Error(tr('裁剪范围超出原音频时长'))
     const wav = encodeAudioBufferSlice(buffer, start, end)
-    const baseName = file.name.replace(/\.(mp3|wav)$/i, '') || '音色'
-    return new File([wav], `${baseName}-裁剪.wav`, { type: 'audio/wav' })
+    const baseName = file.name.replace(/\.(mp3|wav)$/i, '') || tr('音色')
+    return new File([wav], tr('{p0}-裁剪.wav', { p0: baseName }), { type: 'audio/wav' })
   } finally {
     await context.close()
   }

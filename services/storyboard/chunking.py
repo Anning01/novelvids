@@ -1,5 +1,7 @@
 """Narrative chunking policy for bounded storyboard generation calls."""
 
+from utils.messages import localized_message
+
 import re
 
 
@@ -20,7 +22,7 @@ class NarrativeChunker:
     def __init__(self, max_characters: int) -> None:
         if max_characters < MIN_NARRATIVE_CHUNK_CHARACTERS:
             raise ValueError(
-                f"max_characters 不能小于 {MIN_NARRATIVE_CHUNK_CHARACTERS}"
+                localized_message('max_characters 不能小于 {p1}', p1=f'{MIN_NARRATIVE_CHUNK_CHARACTERS}')
             )
         self.max_characters = max_characters
 

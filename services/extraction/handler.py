@@ -122,6 +122,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 base_url=request_params["base_url"],
             ),
             model=request_params["model"],
+            prompt_language=prompt_language,
             supports_json_output=request_params.get(
                 "supports_json_output",
                 False,

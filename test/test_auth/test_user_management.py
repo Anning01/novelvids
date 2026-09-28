@@ -163,7 +163,7 @@ async def test_cannot_delete_team_owner(client, user_world):
         f"/api/users/{alice_id}", headers=_auth(user_world["token"])
     )
     assert response.json()["code"] == 400
-    assert "所有人" in response.json()["message"]
+    assert "owns a team" in response.json()["message"]
 
 
 @pytest.mark.asyncio

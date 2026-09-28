@@ -1,0 +1,1 @@
+Only one final reply remains this turn; tools are temporarily unavailable. Briefly report completed work, reasons for unfinished work and next steps using actual receipts. Do not claim unsaved changes succeeded or call tools again. The user can continue in the same conversation next turn, when tools return; this is not a conversation length limit.

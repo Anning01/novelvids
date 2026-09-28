@@ -5,6 +5,8 @@
 - 成员加入团队的唯一方式：24 小时有效的邀请链接（新用户注册或老用户加入）
 """
 
+from utils.messages import localized_message
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from auth.deps import AuthContext, get_current_user, require_roles, require_super_admin
@@ -36,7 +38,7 @@ def _team_id_or_own(ctx: AuthContext, team_id: int | None) -> int:
     """超管可指定团队；团队管理员固定本人团队。"""
     if ctx.is_super_admin:
         if team_id is None:
-            raise HTTPException(status_code=400, detail="请指定 team_id")
+            raise HTTPException(status_code=400, detail=localized_message('请指定 team_id'))
         return team_id
     return ctx.team_id
 

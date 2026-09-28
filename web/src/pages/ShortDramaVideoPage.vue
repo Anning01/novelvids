@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -98,14 +100,14 @@ function formatTime(seconds: number) {
 }
 
 function sceneLabel(item: ChapterVideoTimelineItem) {
-  return `分镜 ${item.scene.sequence}`
+  return tr('分镜 {p0}', { p0: item.scene.sequence })
 }
 
 function statusLabel(item: ChapterVideoTimelineItem) {
-  if (item.state === 'completed') return '视频已生成'
-  if (item.state === 'generating') return '视频生成中'
-  if (item.state === 'failed') return '视频生成失败'
-  return '视频尚未生成'
+  if (item.state === 'completed') return tr('视频已生成')
+  if (item.state === 'generating') return tr('视频生成中')
+  if (item.state === 'failed') return tr('视频生成失败')
+  return tr('视频尚未生成')
 }
 
 function timelineClipStyle(item: ChapterVideoTimelineItem) {
@@ -157,7 +159,7 @@ async function loadChapter(chapterId: number) {
     clipCurrentTime.value = 0
   } catch (error) {
     if (version !== loadVersion) return
-    loadError.value = error instanceof Error ? error.message : '视频工作区加载失败'
+    loadError.value = error instanceof Error ? error.message : tr('视频工作区加载失败')
   } finally {
     if (version === loadVersion) loading.value = false
   }
@@ -176,7 +178,7 @@ async function load() {
       ...projectResponse.data,
       aspectRatio: settings.aspectRatio || '9:16',
       resolution: settings.resolution || '720p',
-      style: settings.style || '写实通用',
+      style: settings.style || tr('写实通用'),
       creationMode: settings.mode || 'agent',
     }
     chapters.value = chaptersResponse.data.items
@@ -191,7 +193,7 @@ async function load() {
     }
     await loadChapter(chapter.id)
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : '视频工作区加载失败'
+    loadError.value = error instanceof Error ? error.message : tr('视频工作区加载失败')
     loading.value = false
   }
 }
@@ -330,11 +332,11 @@ function toggleFullscreen() {
 }
 
 function chapterDownloadFilename() {
-  const projectName = project.value?.name || '短剧'
+  const projectName = project.value?.name || tr('短剧')
   const chapterTitle = stripChapterOrdinal(activeChapter.value?.name)
   const chapterName = activeChapter.value
-    ? `第${activeChapter.value.number}集${chapterTitle ? `-${chapterTitle}` : ''}`
-    : '当前集'
+    ? tr('第{p0}集{p1}', { p0: activeChapter.value.number, p1: chapterTitle ? `-${chapterTitle}` : '' })
+    : tr('当前集')
   const safeTitle = `${projectName}-${chapterName}-完整视频`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ')
   return `${safeTitle}.mp4`
 }
@@ -346,9 +348,9 @@ async function downloadCurrentChapterVideo() {
   try {
     const result = (await api.mergeChapterVideos(chapterId)).data
     await downloadFile(mediaUrl(result.merged_url), chapterDownloadFilename())
-    notice.success(`已按顺序合成并下载 ${result.video_count} 个分镜视频`)
+    notice.success(tr('已按顺序合成并下载 {p0} 个分镜视频', { p0: result.video_count }))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '完整视频合成下载失败')
+    notice.error(error instanceof Error ? error.message : tr('完整视频合成下载失败'))
   } finally {
     downloadingChapter.value = false
   }
@@ -382,10 +384,10 @@ onUnmounted(() => gapPlaybackClock.stop())
   <main class="video-editor-page">
     <ShortDramaWorkspaceShell
       :project-id="projectId"
-      :project-name="project?.name || '短剧项目'"
+      :project-name="project?.name || tr('短剧项目')"
       :aspect-ratio="project?.aspectRatio || '9:16'"
       :resolution="project?.resolution || '720p'"
-      :style-name="project?.style || '写实通用'"
+      :style-name="project?.style || tr('写实通用')"
       active-phase="video"
       :creation-mode="project?.creationMode || 'agent'"
       :chapters="chapters"
@@ -395,25 +397,25 @@ onUnmounted(() => gapPlaybackClock.stop())
     >
       <template #header-end>
         <div class="video-header-actions">
-          <AppButton variant="secondary" size="sm" @click="returnToStoryboard()"><Clapperboard :size="15" />返回分镜</AppButton>
-          <AppButton variant="secondary" size="sm" :disabled="playableItems.length === 0 || downloadingChapter" :aria-busy="downloadingChapter" aria-label="合成并下载本集已有视频" title="合成并下载本集已有视频" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="15" /><Download v-else :size="15" />{{ downloadingChapter ? '正在合成' : '下载当前' }}</AppButton>
+          <AppButton variant="secondary" size="sm" @click="returnToStoryboard()"><Clapperboard :size="15" />{{ tr('返回分镜') }}</AppButton>
+          <AppButton variant="secondary" size="sm" :disabled="playableItems.length === 0 || downloadingChapter" :aria-busy="downloadingChapter" :aria-label="tr('合成并下载本集已有视频')" :title="tr('合成并下载本集已有视频')" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="15" /><Download v-else :size="15" />{{ downloadingChapter ? tr('正在合成') : tr('下载当前') }}</AppButton>
         </div>
       </template>
 
       <section class="video-editor-workspace">
-        <div v-if="loading" class="video-page-state"><LoaderCircle class="is-spinning" :size="30" /><strong>正在加载本集视频</strong><span>准备分镜顺序和生成结果。</span></div>
-        <div v-else-if="loadError" class="video-page-state is-error"><AlertTriangle :size="30" /><strong>视频工作区加载失败</strong><span>{{ loadError }}</span><AppButton variant="primary" size="sm" @click="load">重新加载</AppButton></div>
-        <div v-else-if="!videoEnabled" class="video-page-state is-empty"><Film :size="34" /><strong>本集还没有可编辑的视频</strong><span>任意一个分镜视频生成成功后，即可进入视频编辑页。</span><AppButton variant="primary" size="sm" @click="returnToStoryboard()"><ChevronLeft :size="15" />返回分镜生成</AppButton></div>
+        <div v-if="loading" class="video-page-state"><LoaderCircle class="is-spinning" :size="30" /><strong>{{ tr('正在加载本集视频') }}</strong><span>{{ tr('准备分镜顺序和生成结果。') }}</span></div>
+        <div v-else-if="loadError" class="video-page-state is-error"><AlertTriangle :size="30" /><strong>{{ tr('视频工作区加载失败') }}</strong><span>{{ loadError }}</span><AppButton variant="primary" size="sm" @click="load">{{ tr('重新加载') }}</AppButton></div>
+        <div v-else-if="!videoEnabled" class="video-page-state is-empty"><Film :size="34" /><strong>{{ tr('本集还没有可编辑的视频') }}</strong><span>{{ tr('任意一个分镜视频生成成功后，即可进入视频编辑页。') }}</span><AppButton variant="primary" size="sm" @click="returnToStoryboard()"><ChevronLeft :size="15" />{{ tr('返回分镜生成') }}</AppButton></div>
 
         <template v-else>
           <section class="video-stage-card">
             <header class="video-stage-header">
               <div>
-                <span>{{ activeChapter ? episodeDisplayLabel(activeChapter) : '当前集' }}</span>
-                <strong>{{ activeItem ? sceneLabel(activeItem) : '选择分镜' }}</strong>
+                <span>{{ activeChapter ? episodeDisplayLabel(activeChapter) : tr('当前集') }}</span>
+                <strong>{{ activeItem ? sceneLabel(activeItem) : tr('选择分镜') }}</strong>
                 <small v-if="activeItem?.scene.description">{{ activeItem.scene.description }}</small>
               </div>
-              <AppButton variant="primary" size="sm" @click="returnToStoryboard(activeSceneId)"><Scissors :size="15" />编辑分镜</AppButton>
+              <AppButton variant="primary" size="sm" @click="returnToStoryboard(activeSceneId)"><Scissors :size="15" />{{ tr('编辑分镜') }}</AppButton>
             </header>
 
             <div ref="stage" class="video-stage" :class="{ 'has-video': Boolean(activeItem?.video?.url), 'is-blackout': Boolean(activeItem && !activeItem.video?.url) }">
@@ -425,7 +427,7 @@ onUnmounted(() => gapPlaybackClock.stop())
                 :poster="activeItem.coverUrl || undefined"
                 preload="metadata"
                 playsinline
-                :aria-label="`${sceneLabel(activeItem)} 视频预览`"
+                :aria-label="tr('{p0} 视频预览', { p0: sceneLabel(activeItem) })"
                 @loadedmetadata="updatePlayerMetadata"
                 @timeupdate="updatePlaybackPosition"
                 @play="handlePlayerPlay"
@@ -437,50 +439,50 @@ onUnmounted(() => gapPlaybackClock.stop())
                 v-else-if="activeItem?.video?.url"
                 type="button"
                 class="video-stage-poster"
-                :aria-label="`播放${sceneLabel(activeItem)}`"
+                :aria-label="tr('播放{p0}', { p0: sceneLabel(activeItem) })"
                 @click="togglePlayback"
               >
                 <img
                   v-if="videoCoverUrl(activeItem.video)"
                   :src="videoCoverUrl(activeItem.video)"
-                  :alt="`${sceneLabel(activeItem)}视频封面`"
+                  :alt="tr('{p0}视频封面', { p0: sceneLabel(activeItem) })"
                   decoding="async"
                 >
                 <Film v-else :size="38" />
                 <i><Play :size="24" fill="currentColor" /></i>
               </button>
-              <div v-else class="video-stage-blackout" role="img" :aria-label="activeItem ? `${sceneLabel(activeItem)}无视频，使用黑屏占位` : '黑屏占位'" />
+              <div v-else class="video-stage-blackout" role="img" :aria-label="activeItem ? tr('{p0}无视频，使用黑屏占位', { p0: sceneLabel(activeItem) }) : tr('黑屏占位')" />
 
               <div v-if="activeItem?.video?.url" class="video-stage-overlay">
-                <AppButton variant="dark" size="sm" icon-only :aria-label="muted ? '打开声音' : '静音'" :title="muted ? '打开声音' : '静音'" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></AppButton>
-                <AppButton variant="dark" size="sm" :aria-label="`播放速度 ${playbackRate} 倍`" @click="cyclePlaybackRate">{{ playbackRate }}x</AppButton>
-                <AppButton variant="dark" size="sm" icon-only :disabled="downloadingChapter" :aria-busy="downloadingChapter" aria-label="合成并下载本集已有视频" title="合成并下载本集已有视频" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="16" /><ArrowDownToLine v-else :size="16" /></AppButton>
-                <AppButton variant="dark" size="sm" icon-only aria-label="全屏预览" title="全屏预览" @click="toggleFullscreen"><Maximize2 :size="16" /></AppButton>
+                <AppButton variant="dark" size="sm" icon-only :aria-label="muted ? tr('打开声音') : tr('静音')" :title="muted ? tr('打开声音') : tr('静音')" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></AppButton>
+                <AppButton variant="dark" size="sm" :aria-label="tr('播放速度 {p0} 倍', { p0: playbackRate })" @click="cyclePlaybackRate">{{ playbackRate }}x</AppButton>
+                <AppButton variant="dark" size="sm" icon-only :disabled="downloadingChapter" :aria-busy="downloadingChapter" :aria-label="tr('合成并下载本集已有视频')" :title="tr('合成并下载本集已有视频')" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="16" /><ArrowDownToLine v-else :size="16" /></AppButton>
+                <AppButton variant="dark" size="sm" icon-only :aria-label="tr('全屏预览')" :title="tr('全屏预览')" @click="toggleFullscreen"><Maximize2 :size="16" /></AppButton>
               </div>
             </div>
 
             <footer class="video-player-controls">
               <div class="video-player-buttons">
-                <AppButton variant="ghost" size="sm" icon-only aria-label="上一个分镜" :disabled="!canGoPrevious" @click="previousClip"><SkipBack :size="17" /></AppButton>
-                <AppButton class="video-play-button" variant="dark" size="lg" icon-only :aria-label="playing ? '暂停' : '播放'" :disabled="!activeItem" @click="togglePlayback"><Pause v-if="playing" :size="18" fill="currentColor" /><Play v-else :size="18" fill="currentColor" /></AppButton>
-                <AppButton variant="ghost" size="sm" icon-only aria-label="下一个分镜" :disabled="!canGoNext" @click="nextClip()"><SkipForward :size="17" /></AppButton>
+                <AppButton variant="ghost" size="sm" icon-only :aria-label="tr('上一个分镜')" :disabled="!canGoPrevious" @click="previousClip"><SkipBack :size="17" /></AppButton>
+                <AppButton class="video-play-button" variant="dark" size="lg" icon-only :aria-label="playing ? tr('暂停') : tr('播放')" :disabled="!activeItem" @click="togglePlayback"><Pause v-if="playing" :size="18" fill="currentColor" /><Play v-else :size="18" fill="currentColor" /></AppButton>
+                <AppButton variant="ghost" size="sm" icon-only :aria-label="tr('下一个分镜')" :disabled="!canGoNext" @click="nextClip()"><SkipForward :size="17" /></AppButton>
               </div>
               <span>{{ formatTime(chapterCurrentTime) }} <i>/</i> {{ formatTime(totalDuration) }}</span>
-              <input type="range" min="0" max="100" step="0.1" :value="progressPercent" aria-label="本集视频播放进度" @input="seekChapter" />
+              <input type="range" min="0" max="100" step="0.1" :value="progressPercent" :aria-label="tr('本集视频播放进度')" @input="seekChapter" />
             </footer>
           </section>
 
-          <section class="video-timeline" aria-label="本集分镜视频时间线">
+          <section class="video-timeline" :aria-label="tr('本集分镜视频时间线')">
             <header>
-              <div><strong>本集时间线</strong><span>{{ playableItems.length }}/{{ timelineItems.length }} 条可用</span></div>
-              <small>缺失和异常分镜会保留位置，可随时返回补充生成。</small>
+              <div><strong>{{ tr('本集时间线') }}</strong><span>{{ playableItems.length }}/{{ timelineItems.length }} {{ tr('条可用') }}</span></div>
+              <small>{{ tr('缺失和异常分镜会保留位置，可随时返回补充生成。') }}</small>
             </header>
             <div class="video-timeline-body">
-              <div class="video-timeline-scale" aria-label="时间轴刻度缩放">
-                <button type="button" aria-label="放大时间轴刻度" :disabled="timelineScale >= MAX_TIMELINE_SCALE" @click="setTimelineScale(timelineScale + 1)"><ZoomIn :size="15" /></button>
-                <input v-model.number="timelineScale" type="range" :min="MIN_TIMELINE_SCALE" :max="MAX_TIMELINE_SCALE" step="1" aria-label="时间轴刻度尺寸" :aria-valuetext="`刻度 ${timelineScale}`" />
+              <div class="video-timeline-scale" :aria-label="tr('时间轴刻度缩放')">
+                <button type="button" :aria-label="tr('放大时间轴刻度')" :disabled="timelineScale >= MAX_TIMELINE_SCALE" @click="setTimelineScale(timelineScale + 1)"><ZoomIn :size="15" /></button>
+                <input v-model.number="timelineScale" type="range" :min="MIN_TIMELINE_SCALE" :max="MAX_TIMELINE_SCALE" step="1" :aria-label="tr('时间轴刻度尺寸')" :aria-valuetext="tr('刻度 {p0}', { p0: timelineScale })" />
                 <output>{{ timelineScale }}</output>
-                <button type="button" aria-label="缩小时间轴刻度" :disabled="timelineScale <= MIN_TIMELINE_SCALE" @click="setTimelineScale(timelineScale - 1)"><ZoomOut :size="15" /></button>
+                <button type="button" :aria-label="tr('缩小时间轴刻度')" :disabled="timelineScale <= MIN_TIMELINE_SCALE" @click="setTimelineScale(timelineScale - 1)"><ZoomOut :size="15" /></button>
               </div>
               <div ref="timelineScroll" class="video-timeline-scroll">
                 <div class="video-timeline-canvas" :style="{ '--timeline-width': `${timelineContentWidth}px` }">
@@ -507,10 +509,10 @@ onUnmounted(() => gapPlaybackClock.stop())
                       <span class="video-timeline-copy"><strong>{{ sceneLabel(item) }}</strong><small>{{ formatTime(item.duration) }}</small></span>
                       <span class="video-timeline-thumb">
                         <img v-if="item.video?.url && item.coverUrl" :src="item.coverUrl" alt="" loading="lazy" decoding="async" />
-                        <template v-else-if="item.video?.url"><Film :size="23" /><em>点击播放</em></template>
-                        <template v-else-if="item.state === 'failed'"><AlertTriangle :size="23" /><em>生成失败</em></template>
-                        <template v-else-if="item.state === 'generating'"><LoaderCircle class="is-spinning" :size="23" /><em>生成中</em></template>
-                        <template v-else><Film :size="23" /><em>待生成</em></template>
+                        <template v-else-if="item.video?.url"><Film :size="23" /><em>{{ tr('点击播放') }}</em></template>
+                        <template v-else-if="item.state === 'failed'"><AlertTriangle :size="23" /><em>{{ tr('生成失败') }}</em></template>
+                        <template v-else-if="item.state === 'generating'"><LoaderCircle class="is-spinning" :size="23" /><em>{{ tr('生成中') }}</em></template>
+                        <template v-else><Film :size="23" /><em>{{ tr('待生成') }}</em></template>
                       </span>
                     </button>
                   </div>

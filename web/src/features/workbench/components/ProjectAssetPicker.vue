@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Boxes, FolderKanban, Image as ImageIcon, Library, Search, UserRound, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api'
@@ -38,8 +40,8 @@ const loadingMore = ref(false)
 let loadVersion = 0
 
 const excluded = computed(() => new Set(props.excludedIds || []))
-const typeLabel = computed(() => assetTypePresentationOptions.find(item => item.value === String(props.assetType))?.label || '资产')
-const searchLabel = computed(() => `搜索${scope.value === 'public' ? '公共' : '项目'}${typeLabel.value}资产`)
+const typeLabel = computed(() => assetTypePresentationOptions.find(item => item.value === String(props.assetType))?.label || tr('资产'))
+const searchLabel = computed(() => tr('搜索{p0}{p1}资产', { p0: scope.value === 'public' ? tr('公共') : tr('项目'), p1: typeLabel.value }))
 
 function fallbackIcon() {
   if (props.assetType === AssetTypeEnum.PERSON) return UserRound
@@ -53,7 +55,7 @@ function projectItems(assets: Asset[]): PickerItem[] {
     .map(asset => ({
       key: `project-${asset.id}`,
       name: asset.canonical_name,
-      detail: asset.description || '暂无描述',
+      detail: asset.description || tr('暂无描述'),
       image: asset.main_image || '',
       choice: { scope: 'project', asset },
     }))
@@ -65,7 +67,7 @@ function publicAssetItems(assets: Asset[]): PickerItem[] {
     .map(asset => ({
       key: `public-asset-${asset.id}`,
       name: asset.canonical_name,
-      detail: asset.description || '公共资产',
+      detail: asset.description || tr('公共资产'),
       image: asset.main_image || '',
       choice: { scope: 'public', asset },
     }))
@@ -85,8 +87,8 @@ async function requestItems(nextPage: number, requestScope: AssetScope): Promise
     return {
       items: response.data.items.map(item => ({
         key: `public-human-${item.id}`,
-        name: item.occupation || '公共人物',
-        detail: `${item.country} · ${item.gender} · ${item.age} 岁`,
+        name: item.occupation || tr('公共人物'),
+        detail: tr('{p0} · {p1} · {p2} 岁', { p0: item.country, p1: item.gender, p2: item.age }),
         image: item.image_url,
         choice: { scope: 'public', digitalHuman: item },
       })),
@@ -156,22 +158,22 @@ watch(() => [props.open, props.assetType] as const, ([open]) => {
       <section class="project-asset-picker" role="dialog" aria-modal="true" aria-labelledby="project-asset-picker-title">
         <header>
           <div>
-            <h2 id="project-asset-picker-title">选择{{ typeLabel }}资产</h2>
-            <p>只显示与当前节点类型一致的资产。</p>
+            <h2 id="project-asset-picker-title">{{ tr('选择') }}{{ typeLabel }}{{ tr('资产') }}</h2>
+            <p>{{ tr('只显示与当前节点类型一致的资产。') }}</p>
           </div>
-          <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭" @click="emit('close')"><X :size="18" /></AppButton>
+          <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭')" @click="emit('close')"><X :size="18" /></AppButton>
         </header>
-        <nav class="project-asset-picker__scope" aria-label="资产范围">
-          <button type="button" :class="{ 'is-active': scope === 'public' }" :aria-pressed="scope === 'public'" @click="changeScope('public')"><Library :size="15" />公共资产</button>
-          <button type="button" :class="{ 'is-active': scope === 'project' }" :aria-pressed="scope === 'project'" @click="changeScope('project')"><FolderKanban :size="15" />项目资产</button>
+        <nav class="project-asset-picker__scope" :aria-label="tr('资产范围')">
+          <button type="button" :class="{ 'is-active': scope === 'public' }" :aria-pressed="scope === 'public'" @click="changeScope('public')"><Library :size="15" />{{ tr('公共资产') }}</button>
+          <button type="button" :class="{ 'is-active': scope === 'project' }" :aria-pressed="scope === 'project'" @click="changeScope('project')"><FolderKanban :size="15" />{{ tr('项目资产') }}</button>
         </nav>
         <form class="project-asset-picker__search" @submit.prevent="load()">
           <Search :size="16" />
           <input v-model="search" type="search" :placeholder="searchLabel" :aria-label="searchLabel">
-          <AppButton type="submit" variant="secondary" size="sm">搜索</AppButton>
+          <AppButton type="submit" variant="secondary" size="sm">{{ tr('搜索') }}</AppButton>
         </form>
         <div class="project-asset-picker__grid">
-          <p v-if="loading" class="project-asset-picker__state">正在读取{{ scope === 'public' ? '公共' : '项目' }}资产…</p>
+          <p v-if="loading" class="project-asset-picker__state">{{ tr('正在读取') }}{{ scope === 'public' ? tr('公共') : tr('项目') }}{{ tr('资产…') }}</p>
           <button v-for="item in items" v-else :key="item.key" type="button" @click="choose(item.choice)">
             <span class="project-asset-picker__thumb">
               <img v-if="item.image" :src="item.image" :alt="item.name" loading="lazy">
@@ -179,11 +181,11 @@ watch(() => [props.open, props.assetType] as const, ([open]) => {
             </span>
             <span><strong>{{ item.name }}</strong><small>{{ item.detail }}</small></span>
           </button>
-          <p v-if="!loading && !items.length" class="project-asset-picker__state">暂无可复用的{{ typeLabel }}{{ scope === 'public' ? '公共' : '项目' }}资产</p>
+          <p v-if="!loading && !items.length" class="project-asset-picker__state">{{ tr('暂无可复用的') }}{{ typeLabel }}{{ scope === 'public' ? tr('公共') : tr('项目') }}{{ tr('资产') }}</p>
         </div>
         <footer>
-          <span>已加载 {{ items.length }} 个{{ typeLabel }}资产</span>
-          <AppButton v-if="page < pages" type="button" variant="secondary" size="sm" :loading="loadingMore" @click="load(false)">加载更多</AppButton>
+          <span>{{ tr('已加载') }} {{ items.length }} {{ tr('个') }}{{ typeLabel }}{{ tr('资产') }}</span>
+          <AppButton v-if="page < pages" type="button" variant="secondary" size="sm" :loading="loadingMore" @click="load(false)">{{ tr('加载更多') }}</AppButton>
         </footer>
       </section>
     </div>

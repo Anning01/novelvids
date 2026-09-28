@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { XSender } from 'vue-element-plus-x'
 import { ArrowUp, ChevronDown, Square } from 'lucide-vue-next'
@@ -62,7 +64,7 @@ onMounted(async () => {
     const editor = root.value?.querySelector('[contenteditable]')
     if (!editor || !sender.value?.getSender()) return
     editor.setAttribute('role', 'textbox')
-    editor.setAttribute('aria-label', '创作要求')
+    editor.setAttribute('aria-label', tr('创作要求'))
     editor.setAttribute('aria-multiline', 'true')
     ready = true
     observer?.disconnect()
@@ -78,20 +80,20 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
 <template>
   <div ref="root" class="agent-composer">
     <slot name="context" />
-    <XSender ref="sender" placeholder="说说你想怎么改…" :custom-style="{ minHeight: '28px', maxHeight: '160px', padding: '4px 6px' }" :max-length="8000" :disabled="disabled || submitting" :loading="busy" submit-type="enter" :auto-focus="false" :tip-config="false" @change="changed" @submit="submit" @cancel="emit('stop')">
+    <XSender ref="sender" :placeholder="tr('说说你想怎么改…')" :custom-style="{ minHeight: '28px', maxHeight: '160px', padding: '4px 6px' }" :max-length="8000" :disabled="disabled || submitting" :loading="busy" submit-type="enter" :auto-focus="false" :tip-config="false" @change="changed" @submit="submit" @cancel="emit('stop')">
       <template #action-list><span /></template>
       <template #footer>
         <div class="agent-composer__tools">
           <div class="agent-composer__choices"><slot name="tools" />
             <label class="agent-composer__model">
-              <select :value="modelId" aria-label="助手模型" :disabled="busy || submitting" @change="emit('update:modelId', ($event.target as HTMLSelectElement).value)">
-                <option v-if="!models.length" value="">尚无可用模型</option>
+              <select :value="modelId" :aria-label="tr('助手模型')" :disabled="busy || submitting" @change="emit('update:modelId', ($event.target as HTMLSelectElement).value)">
+                <option v-if="!models.length" value="">{{ tr('尚无可用模型') }}</option>
                 <option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
               </select><ChevronDown :size="13" aria-hidden="true" />
             </label>
           </div>
-          <AppButton v-if="busy" class="agent-composer__send" size="xs" variant="soft" icon-only aria-label="停止创作助手" @click="emit('stop')"><Square :size="14" /></AppButton>
-          <AppButton v-else class="agent-composer__send" size="xs" variant="primary" icon-only aria-label="发送创作要求" :disabled="!canSend" @click="submit"><ArrowUp :size="18" /></AppButton>
+          <AppButton v-if="busy" class="agent-composer__send" size="xs" variant="soft" icon-only :aria-label="tr('停止创作助手')" @click="emit('stop')"><Square :size="14" /></AppButton>
+          <AppButton v-else class="agent-composer__send" size="xs" variant="primary" icon-only :aria-label="tr('发送创作要求')" :disabled="!canSend" @click="submit"><ArrowUp :size="18" /></AppButton>
         </div>
       </template>
     </XSender>

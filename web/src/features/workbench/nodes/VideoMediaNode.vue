@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import { Upload, Video } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
@@ -11,10 +13,10 @@ const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
 const uploading = ref(false)
 const url = computed(() => typeof props.data.url === 'string' ? props.data.url : '')
-const title = computed(() => String(props.data.title || props.data.originalFilename || '上传视频'))
+const title = computed(() => String(props.data.title || props.data.originalFilename || tr('上传视频')))
 const duration = computed(() => {
   const seconds = Number(props.data.durationSeconds)
-  return Number.isFinite(seconds) && seconds > 0 ? `${seconds.toFixed(1).replace(/\.0$/, '')} 秒` : ''
+  return Number.isFinite(seconds) && seconds > 0 ? tr('{p0} 秒', { p0: seconds.toFixed(1).replace(/\.0$/, '') }) : ''
 })
 
 async function replace(event: Event) {
@@ -26,7 +28,7 @@ async function replace(event: Event) {
   try {
     await store.replaceUploadedMedia(props.id, file)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '视频上传失败')
+    notice.error(error instanceof Error ? error.message : tr('视频上传失败'))
   } finally {
     uploading.value = false
   }
@@ -43,15 +45,15 @@ function captureMetadata(event: Event) {
 </script>
 
 <template>
-  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'video_media', title, status: uploading ? '上传中' : 'ready' }">
+  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'video_media', title, status: uploading ? tr('上传中') : 'ready' }">
     <div class="workbench-uploaded-media-node workbench-uploaded-video-node">
-      <span class="workbench-uploaded-media-node__type"><Video :size="14" aria-hidden="true" />视频</span>
+      <span class="workbench-uploaded-media-node__type"><Video :size="14" aria-hidden="true" />{{ tr('视频') }}</span>
       <DeferredVideoPlayer v-if="url" :src="url" :title="title" @loadedmetadata="captureMetadata" />
-      <div v-else class="workbench-media-placeholder">视频不可用</div>
+      <div v-else class="workbench-media-placeholder">{{ tr('视频不可用') }}</div>
       <small v-if="duration">{{ duration }}</small>
       <label class="workbench-uploaded-media-node__replace" :class="{ 'is-disabled': uploading }">
-        <Upload :size="14" aria-hidden="true" />{{ uploading ? '上传中…' : '重新上传' }}
-        <input type="file" accept="video/mp4,video/webm,video/quicktime" aria-label="上传资产视频" :disabled="uploading" @change="replace">
+        <Upload :size="14" aria-hidden="true" />{{ uploading ? tr('上传中…') : tr('重新上传') }}
+        <input type="file" accept="video/mp4,video/webm,video/quicktime" :aria-label="tr('上传资产视频')" :disabled="uploading" @change="replace">
       </label>
     </div>
   </WorkbenchNodeFrame>

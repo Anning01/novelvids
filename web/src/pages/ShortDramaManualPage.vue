@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -44,10 +46,10 @@ interface ManualProjectMeta {
 }
 
 const fallbackProject: ManualProjectMeta = {
-  name: '新项目',
+  name: tr('新项目'),
   aspectRatio: '9:16',
   resolution: '720p',
-  style: '写实通用',
+  style: tr('写实通用'),
   creationMode: 'manual',
 }
 
@@ -102,9 +104,9 @@ const terminalTaskStatuses = new Set([
 ])
 
 const tabs = [
-  { value: 'character' as const, label: '角色', icon: UsersRound, type: AssetTypeEnum.PERSON },
-  { value: 'scene' as const, label: '场景', icon: ImagePlus, type: AssetTypeEnum.SCENE },
-  { value: 'prop' as const, label: '道具', icon: Boxes, type: AssetTypeEnum.ITEM },
+  { value: 'character' as const, label: tr('角色'), icon: UsersRound, type: AssetTypeEnum.PERSON },
+  { value: 'scene' as const, label: tr('场景'), icon: ImagePlus, type: AssetTypeEnum.SCENE },
+  { value: 'prop' as const, label: tr('道具'), icon: Boxes, type: AssetTypeEnum.ITEM },
 ]
 
 const activeTabConfig = computed(() => tabs.find(item => item.value === activeTab.value) ?? tabs[0])
@@ -157,20 +159,20 @@ const extractionStatusVisible = computed(() => {
 })
 const extractionStatusText = computed(() => (
   extractionSubmissionError.value
-    ? '提交失败'
+    ? tr('提交失败')
     : submittingExtraction.value && !extractionTask.value
-      ? '提交中'
+      ? tr('提交中')
     : statusLabel(extractionTask.value?.status)
 ))
 const extractionStatusMessage = computed(() => {
   if (extractionSubmissionError.value) return extractionSubmissionError.value
   const task = extractionTask.value
-  if (!task) return submittingExtraction.value ? '正在创建本章资产提取任务。' : ''
-  if (task.status === TaskStatusEnum.PENDING) return '任务已提交，正在等待模型执行。'
-  if (task.status === TaskStatusEnum.QUEUED) return '任务正在队列中等待处理。'
-  if (task.status === TaskStatusEnum.PROCESSING) return '正在分析本章人物、场景和道具，并与项目资产增量合并。'
-  if (task.status === TaskStatusEnum.CANCELLED) return '任务已取消，可以重新提取本章资产。'
-  return extractionErrorMessage(new Error(task.error_message || '本章资产提取失败'))
+  if (!task) return submittingExtraction.value ? tr('正在创建本章资产提取任务。') : ''
+  if (task.status === TaskStatusEnum.PENDING) return tr('任务已提交，正在等待模型执行。')
+  if (task.status === TaskStatusEnum.QUEUED) return tr('任务正在队列中等待处理。')
+  if (task.status === TaskStatusEnum.PROCESSING) return tr('正在分析本章人物、场景和道具，并与项目资产增量合并。')
+  if (task.status === TaskStatusEnum.CANCELLED) return tr('任务已取消，可以重新提取本章资产。')
+  return extractionErrorMessage(new Error(task.error_message || tr('本章资产提取失败')))
 })
 const extractionStatusClass = computed(() => ({
   'is-running': extractionTaskActive.value || submittingExtraction.value,
@@ -243,9 +245,9 @@ async function selectChapter(chapter: Chapter) {
 }
 
 function extractionErrorMessage(error: unknown) {
-  const message = (error as Error).message || '本章资产提取失败'
+  const message = (error as Error).message || tr('本章资产提取失败')
   return /insufficient balance/i.test(message)
-    ? '模型余额不足，请充值或切换可用模型后重试'
+    ? tr('模型余额不足，请充值或切换可用模型后重试')
     : message
 }
 
@@ -269,13 +271,13 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       const chapterId = assetScope.value === 'chapter' ? selectedChapter.value?.id : undefined
       assets.value = (await api.assets(projectId.value, 1, 100, chapterId)).data.items
       if (editingId && !assets.value.some(asset => asset.id === editingId)) {
-        notice.info('当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。')
-      } else if (editingId && ids.has(editingId)) notice.info('助手已保存设定调整。当前编辑草稿已保留，请核对后再保存。')
+        notice.info(tr('当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。'))
+      } else if (editingId && ids.has(editingId)) notice.info(tr('助手已保存设定调整。当前编辑草稿已保留，请核对后再保存。'))
       return
     }
     const updated = await Promise.all([...ids].map(async id => (await api.asset(id)).data))
     assets.value = assets.value.map(asset => updated.find(item => item.id === asset.id) || asset)
-    if (editingAsset.value && ids.has(editingAsset.value.id)) notice.info('助手已保存新的提示词。当前编辑草稿已保留，重新打开设定可查看最新内容。')
+    if (editingAsset.value && ids.has(editingAsset.value.id)) notice.info(tr('助手已保存新的提示词。当前编辑草稿已保留，重新打开设定可查看最新内容。'))
   } catch (error) { notice.error((error as Error).message) }
 }
 
@@ -310,10 +312,10 @@ async function monitorExtractionTask(taskId: string, notifyWhenComplete = false)
     if (task.status === TaskStatusEnum.COMPLETED) {
       extractionTask.value = null
       await refreshAssets()
-      if (notifyWhenComplete) notice.success(`第 ${selectedChapter.value?.number || '-'} 章资产提取完成`)
+      if (notifyWhenComplete) notice.success(tr('第 {p0} 章资产提取完成', { p0: selectedChapter.value?.number || '-' }))
     }
   } catch (error) {
-    extractionSubmissionError.value = `任务状态读取失败：${extractionErrorMessage(error)}`
+    extractionSubmissionError.value = tr('任务状态读取失败：{p0}', { p0: extractionErrorMessage(error) })
     notice.error(extractionSubmissionError.value)
   }
 }
@@ -362,7 +364,7 @@ async function saveName() {
     const response = await api.updateNovel(projectId.value, { name: nextName })
     project.value.name = response.data.name
     editingName.value = false
-    notice.success('项目名称已更新')
+    notice.success(tr('项目名称已更新'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -389,7 +391,7 @@ watch(() => [loading.value, route.query.asset, route.query.variant, projectId.va
   const assetId = Number(route.query.asset)
   if (loading.value || !Number.isSafeInteger(assetId) || assetId <= 0) return
   if (showAssetDialog.value) {
-    notice.info('请先关闭当前设定，再定位修改结果；当前草稿已保留。')
+    notice.info(tr('请先关闭当前设定，再定位修改结果；当前草稿已保留。'))
     return
   }
   let stale = false
@@ -397,14 +399,14 @@ watch(() => [loading.value, route.query.asset, route.query.variant, projectId.va
   try {
     const asset = (await api.asset(assetId)).data
     if (stale || !pageAlive) return
-    if (asset.novel_id !== projectId.value) throw new Error('该资产不属于当前项目')
+    if (asset.novel_id !== projectId.value) throw new Error(tr('该资产不属于当前项目'))
     const variantId = Number(route.query.variant) || undefined
-    if (variantId && !asset.variants?.some(variant => variant.id === variantId)) throw new Error('该衍生形象已不存在')
+    if (variantId && !asset.variants?.some(variant => variant.id === variantId)) throw new Error(tr('该衍生形象已不存在'))
     activeTab.value = tabs.find(tab => tab.type === asset.asset_type)?.value ?? 'character'
     openAssetDialog(asset)
     editingVariantId.value = variantId
   } catch (error) {
-    if (!stale) notice.error(error instanceof Error ? error.message : '无法定位资产')
+    if (!stale) notice.error(error instanceof Error ? error.message : tr('无法定位资产'))
   }
 })
 
@@ -426,15 +428,15 @@ function truncateText(value: string | undefined, maxLength: number) {
 
 async function removeAsset(asset: Asset) {
   if (!await appConfirm({
-    title: `删除${activeTabConfig.value.label}「${asset.canonical_name}」？`,
-    message: '该资产及其参考图片将被删除，且无法恢复。',
-    confirmLabel: `删除${activeTabConfig.value.label}`,
+    title: tr('删除{p0}「{p1}」？', { p0: activeTabConfig.value.label, p1: asset.canonical_name }),
+    message: tr('该资产及其参考图片将被删除，且无法恢复。'),
+    confirmLabel: tr('删除{p0}', { p0: activeTabConfig.value.label }),
     tone: 'danger',
   })) return
   try {
     await api.deleteAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)
-    notice.success('资产已删除')
+    notice.success(tr('资产已删除'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -501,7 +503,7 @@ async function dropAsset(event: DragEvent, target: Asset) {
   clearMergeHover(true)
   if (!sourceId || sourceId === target.id) return
   if (!armed) {
-    notice.info('请在目标资产上停留 2 秒，出现“释放合并”后再放手')
+    notice.info(tr('请在目标资产上停留 2 秒，出现“释放合并”后再放手'))
     return
   }
 
@@ -519,7 +521,7 @@ async function dropAsset(event: DragEvent, target: Asset) {
     assets.value = remaining
     setAssetFailed(sourceId, false)
     setAssetFailed(target.id, false)
-    notice.success(result.summary.length ? result.summary.join('，') : '资产已增量合并')
+    notice.success(result.summary.length ? result.summary.join('，') : tr('资产已增量合并'))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -641,8 +643,8 @@ async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId:
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
     if (!pageAlive) return
     await refreshAssets()
-    if (failed) notice.info(`批量生成完成：成功 ${succeeded} 个，失败 ${failed} 个`)
-    else notice.success(`${succeeded} 个资产设定图已生成`)
+    if (failed) notice.info(tr('批量生成完成：成功 {p0} 个，失败 {p1} 个', { p0: succeeded, p1: failed }))
+    else notice.success(tr('{p0} 个资产设定图已生成', { p0: succeeded }))
   } catch (error) {
     for (const asset of targets) setAssetGenerating(asset.id, false)
     notice.error((error as Error).message)
@@ -693,23 +695,23 @@ onBeforeUnmount(() => {
             </template>
             <template v-else>
               <strong>{{ project.name }}</strong>
-              <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="编辑项目名称" @click="startRename"><Pencil :size="13" /></AppButton>
+              <AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="tr('编辑项目名称')" @click="startRename"><Pencil :size="13" /></AppButton>
             </template>
         </div>
       </template>
 
     <section class="manual-workspace">
       <header class="asset-toolbar">
-        <nav aria-label="项目资产类型">
+        <nav :aria-label="tr('项目资产类型')">
           <AppButton v-for="tab in tabs" :key="tab.value" type="button" variant="ghost" size="sm" :active="activeTab === tab.value" @click="activeTab = tab.value">
             <component :is="tab.icon" :size="17" />{{ tab.label }}
           </AppButton>
         </nav>
         <div class="asset-summary">
-          <span v-if="project.creationMode === 'agent'" class="chapter-context"><BookOpenText :size="13" />{{ selectedChapter ? `当前第 ${selectedChapter.number} 章` : '未选择章节' }}</span>
-          <div v-if="project.creationMode === 'agent' && selectedChapter" class="asset-scope-switch" role="group" aria-label="资产范围">
-            <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">全部项目</AppButton>
-            <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">当前章节</AppButton>
+          <span v-if="project.creationMode === 'agent'" class="chapter-context"><BookOpenText :size="13" />{{ selectedChapter ? tr('当前第 {p0} 章', { p0: selectedChapter.number }) : tr('未选择章节') }}</span>
+          <div v-if="project.creationMode === 'agent' && selectedChapter" class="asset-scope-switch" role="group" :aria-label="tr('资产范围')">
+            <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">{{ tr('全部项目') }}</AppButton>
+            <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">{{ tr('当前章节') }}</AppButton>
           </div>
           <AppButton
             v-if="project.creationMode === 'agent'"
@@ -718,22 +720,22 @@ onBeforeUnmount(() => {
             size="sm"
             :loading="extractionBusy"
             :disabled="!selectedChapter || extractionBusy"
-            aria-label="提取本章资产"
-            :title="selectedChapter ? `提取第 ${selectedChapter.number} 章资产` : '请先在剧本阶段选择章节'"
+            :aria-label="tr('提取本章资产')"
+            :title="selectedChapter ? tr('提取第 {p0} 章资产', { p0: selectedChapter.number }) : tr('请先在剧本阶段选择章节')"
             @click="extractSelectedChapterAssets"
           >
             <Boxes v-if="!extractionBusy" :size="15" />
-            {{ extractionBusy ? '正在提取本章' : '提取本章资产' }}
+            {{ extractionBusy ? tr('正在提取本章') : tr('提取本章资产') }}
           </AppButton>
           <i v-if="project.creationMode === 'agent'" />
-          <span>{{ activeTabConfig.label }}总计 <strong>{{ visibleAssets.length }}</strong></span>
+          <span>{{ activeTabConfig.label }}{{ tr('总计') }} <strong>{{ visibleAssets.length }}</strong></span>
           <i />
-          <span><Check :size="13" />已完成 {{ completedCount }}</span>
-          <span><i v-if="generatingCount" class="generating-summary-dot" />生成中 {{ generatingCount }}</span>
-          <span>失败 {{ failedCount }}</span>
-          <AppButton type="button" variant="secondary" size="sm" icon-only aria-label="刷新" @click="refreshAssets"><RefreshCw :size="14" /></AppButton>
-          <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
-          <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="assets.length ? showBatchDialog = true : notice.info('请先添加角色、场景或道具资产')"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? '批量生成中' : '批量生成' }}</AppButton>
+          <span><Check :size="13" />{{ tr('已完成') }} {{ completedCount }}</span>
+          <span><i v-if="generatingCount" class="generating-summary-dot" />{{ tr('生成中') }} {{ generatingCount }}</span>
+          <span>{{ tr('失败') }} {{ failedCount }}</span>
+          <AppButton type="button" variant="secondary" size="sm" icon-only :aria-label="tr('刷新')" @click="refreshAssets"><RefreshCw :size="14" /></AppButton>
+          <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
+          <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="assets.length ? showBatchDialog = true : notice.info(tr('请先添加角色、场景或道具资产'))"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? tr('批量生成中') : tr('批量生成') }}</AppButton>
         </div>
       </header>
 
@@ -749,18 +751,18 @@ onBeforeUnmount(() => {
           <RefreshCw v-else :size="19" />
         </span>
         <div>
-          <strong>第 {{ selectedChapter?.number || '-' }} 章资产提取 · {{ extractionStatusText }}</strong>
+          <strong>{{ tr('第') }} {{ selectedChapter?.number || '-' }} {{ tr('章资产提取 ·') }} {{ extractionStatusText }}</strong>
           <p>{{ extractionStatusMessage }}</p>
         </div>
       </div>
 
-      <div v-if="loading" class="workspace-state"><RefreshCw class="is-spinning" :size="28" /><span>正在加载项目…</span></div>
+      <div v-if="loading" class="workspace-state"><RefreshCw class="is-spinning" :size="28" /><span>{{ tr('正在加载项目…') }}</span></div>
       <div v-else-if="!visibleAssets.length" class="workspace-state empty-state">
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
-        <strong>暂无{{ activeTabConfig.label }}</strong>
-        <p>{{ project.creationMode === 'agent' ? '从本章正文提取角色、场景与道具，再和助手一起完善画面。' : `添加第一个${activeTabConfig.label}，开始搭建你的短剧世界。` }}</p>
-        <AppButton v-if="project.creationMode === 'agent'" type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />提取本章资产</AppButton>
-        <AppButton v-else type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />添加{{ activeTabConfig.label }}</AppButton>
+        <strong>{{ tr('暂无') }}{{ activeTabConfig.label }}</strong>
+        <p>{{ project.creationMode === 'agent' ? tr('从本章正文提取角色、场景与道具，再和助手一起完善画面。') : tr('添加第一个{p0}，开始搭建你的短剧世界。', { p0: activeTabConfig.label }) }}</p>
+        <AppButton v-if="project.creationMode === 'agent'" type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        <AppButton v-else type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
         <article
@@ -782,12 +784,12 @@ onBeforeUnmount(() => {
           @drop="dropAsset($event, asset)"
           @dragend="finishAssetDrag"
         >
-          <button class="asset-card-open" type="button" :aria-label="`查看并编辑${activeTabConfig.label}：${asset.canonical_name}`" @click="handleAssetClick(asset)">
+          <button class="asset-card-open" type="button" :aria-label="tr('查看并编辑{p0}：{p1}', { p0: activeTabConfig.label, p1: asset.canonical_name })" @click="handleAssetClick(asset)">
             <div class="asset-visual" :class="{ 'is-generating': generatingAssetIds.has(asset.id), 'is-empty': !asset.main_image }">
               <div v-if="generatingAssetIds.has(asset.id)" class="asset-generating-placeholder" role="status" aria-live="polite">
                 <span><LoaderCircle :size="24" /></span>
-                <strong>正在生成参考图</strong>
-                <small>完成后将在这里自动显示</small>
+                <strong>{{ tr('正在生成参考图') }}</strong>
+                <small>{{ tr('完成后将在这里自动显示') }}</small>
               </div>
               <img
                 v-else-if="asset.main_image"
@@ -798,22 +800,22 @@ onBeforeUnmount(() => {
                 @error="fallbackImage($event, asset.main_image)"
               />
               <component v-else :is="activeTabConfig.icon" :size="30" />
-              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
-              <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">生成失败</AppBadge>
+              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ tr('生成中') }}</AppBadge>
+              <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">{{ tr('生成失败') }}</AppBadge>
               <div v-if="!generatingAssetIds.has(asset.id)" class="asset-card-info">
                 <strong v-if="asset.main_image">{{ truncateText(asset.canonical_name, 16) }}</strong>
-                <p>{{ truncateText(asset.description || `尚未填写${activeTabConfig.label}描述`, 32) }}</p>
+                <p>{{ truncateText(asset.description || tr('尚未填写{p0}描述', { p0: activeTabConfig.label }), 32) }}</p>
               </div>
             </div>
           </button>
           <div class="asset-assistant-action">
             <span :title="asset.canonical_name">{{ asset.canonical_name }}</span>
-            <AppButton variant="soft" size="xs" :aria-label="`用助手修改${asset.canonical_name}`" @click="workspaceShell?.editWithAssistant([{ target: { kind: 'asset', id: asset.id }, label: asset.canonical_name }])"><Bot :size="14" />用助手修改</AppButton>
+            <AppButton variant="soft" size="xs" :aria-label="tr('用助手修改{p0}', { p0: asset.canonical_name })" @click="workspaceShell?.editWithAssistant([{ target: { kind: 'asset', id: asset.id }, label: asset.canonical_name }])"><Bot :size="14" />{{ tr('用助手修改') }}</AppButton>
           </div>
-          <div class="asset-card-actions" aria-label="资产操作">
-            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="编辑" title="编辑" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`编辑${asset.canonical_name}`" @click="openAssetDialog(asset)"><Pencil :size="14" /></AppButton>
-            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only data-tooltip="本地上传" title="本地上传" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`为${asset.canonical_name}本地上传图片`" @click="openAssetDialog(asset, 'upload')"><Upload :size="14" /></AppButton>
-            <AppButton class="asset-card-action is-danger" type="button" variant="ghost" size="xs" icon-only data-tooltip="删除" title="删除" :disabled="mergingAssetIds.has(asset.id)" :aria-label="`删除${asset.canonical_name}`" @click="removeAsset(asset)"><Trash2 :size="14" /></AppButton>
+          <div class="asset-card-actions" :aria-label="tr('资产操作')">
+            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only :data-tooltip="tr('编辑')" :title="tr('编辑')" :disabled="mergingAssetIds.has(asset.id)" :aria-label="tr('编辑{p0}', { p0: asset.canonical_name })" @click="openAssetDialog(asset)"><Pencil :size="14" /></AppButton>
+            <AppButton class="asset-card-action" type="button" variant="ghost" size="xs" icon-only :data-tooltip="tr('本地上传')" :title="tr('本地上传')" :disabled="mergingAssetIds.has(asset.id)" :aria-label="tr('为{p0}本地上传图片', { p0: asset.canonical_name })" @click="openAssetDialog(asset, 'upload')"><Upload :size="14" /></AppButton>
+            <AppButton class="asset-card-action is-danger" type="button" variant="ghost" size="xs" icon-only :data-tooltip="tr('删除')" :title="tr('删除')" :disabled="mergingAssetIds.has(asset.id)" :aria-label="tr('删除{p0}', { p0: asset.canonical_name })" @click="removeAsset(asset)"><Trash2 :size="14" /></AppButton>
           </div>
           <div
             v-if="mergeHoverTargetId === asset.id"
@@ -822,8 +824,8 @@ onBeforeUnmount(() => {
             aria-hidden="true"
           >
             <span><MergeIcon :size="22" /></span>
-            <strong>{{ mergeArmedTargetId === asset.id ? '释放鼠标，立即合并' : '停留 2 秒准备合并' }}</strong>
-            <small>{{ mergeArmedTargetId === asset.id ? '保留较新资料，并继承双方图片' : '继续停留即可进入合并状态' }}</small>
+            <strong>{{ mergeArmedTargetId === asset.id ? tr('释放鼠标，立即合并') : tr('停留 2 秒准备合并') }}</strong>
+            <small>{{ mergeArmedTargetId === asset.id ? tr('保留较新资料，并继承双方图片') : tr('继续停留即可进入合并状态') }}</small>
             <i />
           </div>
         </article>
@@ -834,17 +836,16 @@ onBeforeUnmount(() => {
       <aside v-if="mergeArmedTargetId && draggingAsset && mergeTargetAsset" class="asset-merge-ready" role="status" aria-live="assertive">
         <span><MergeIcon :size="20" /></span>
         <div>
-          <strong>释放后合并至「{{ mergeTargetAsset.canonical_name }}」</strong>
-          <p>资料采用「{{ mergeDataAsset?.canonical_name }}」的较新版本<span v-if="mergeImageCount">，保留双方 {{ mergeImageCount }} 张图片</span></p>
+          <strong>{{ tr('释放后合并至「') }}{{ mergeTargetAsset.canonical_name }}」</strong>
+          <p>{{ tr('资料采用「') }}{{ mergeDataAsset?.canonical_name }}{{ tr('」的较新版本') }}<span v-if="mergeImageCount">{{ tr('，保留双方') }} {{ mergeImageCount }} {{ tr('张图片') }}</span></p>
         </div>
       </aside>
     </Transition>
 
     <div class="manual-stage-footer">
-      <span>确认人物与场景设定后，继续制作本章分镜</span>
+      <span>{{ tr('确认人物与场景设定后，继续制作本章分镜') }}</span>
       <AppButton class="manual-next-step" type="button" variant="dark" size="lg" @click="goToStoryboard">
-        <Clapperboard :size="17" />前往分镜制作
-      </AppButton>
+        <Clapperboard :size="17" />{{ tr('前往分镜制作') }} </AppButton>
     </div>
 
     <AssetCreateDialog

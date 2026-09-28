@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from datetime import datetime
 from typing import Optional, Any
 from uuid import UUID
@@ -128,9 +130,9 @@ class AssetReferenceCreate(BaseModel):
         for raw in values:
             value = raw.strip()
             if not value or len(value) > 8192:
-                raise ValueError("参考图片地址不能为空且长度需在 8192 字符以内")
+                raise ValueError(localized_message('参考图片地址不能为空且长度需在 8192 字符以内'))
             if not value.startswith(("/media/", "uploads/", "http://", "https://")):
-                raise ValueError("参考图片必须是已上传图片或完整 URL")
+                raise ValueError(localized_message('参考图片必须是已上传图片或完整 URL'))
             if value not in normalized:
                 normalized.append(value)
         return normalized
@@ -177,10 +179,10 @@ class AssetImageEditCreate(BaseModel):
     @classmethod
     def validate_media_url(cls, value: str) -> str:
         if not value or len(value) > 2000:
-            raise ValueError("标注图地址不能为空且长度需在 2000 字符以内")
+            raise ValueError(localized_message('标注图地址不能为空且长度需在 2000 字符以内'))
         if value.startswith(("/media/", "uploads/", "http://", "https://", "data:")):
             return value
-        raise ValueError("标注图地址必须是本地媒体路径、OSS 对象 key 或完整 URL")
+        raise ValueError(localized_message('标注图地址必须是本地媒体路径、OSS 对象 key 或完整 URL'))
 
 
 # --- 输出 Schema (Out-bound) ---

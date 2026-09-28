@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, dateLocale } from '@/i18n'
+
 import { computed } from 'vue'
 import AgentDisclosure from './AgentDisclosure.vue'
 
@@ -10,21 +12,21 @@ const cacheRate = computed(() => number('input_tokens') > 0
 const rules = computed(() => Array.isArray(props.usage.remembered_rules)
   ? props.usage.remembered_rules.filter((item): item is { content: string; scope: { kind?: string } } =>
     typeof item === 'object' && item !== null && typeof item.content === 'string') : [])
-const scopeName = (scope: { kind?: string }) => ({ project: '项目', chapter: '本章', range: '指定章节', targets: '指定对象' })[scope.kind || ''] || '创作设定'
+const scopeName = (scope: { kind?: string }) => ({ get project() { return tr('项目') }, get chapter() { return tr('本章') }, get range() { return tr('指定章节') }, get targets() { return tr('指定对象') } })[scope.kind || ''] || tr('创作设定')
 </script>
 
 <template>
-  <AgentDisclosure v-if="number('requests')" class="agent-usage" title="本轮用量" :summary="number('compactions') ? '已整理上下文' : `${number('requests')} 次调用`">
+  <AgentDisclosure v-if="number('requests')" class="agent-usage" :title="tr('本轮用量')" :summary="number('compactions') ? tr('已整理上下文') : tr('{p0} 次调用', { p0: number('requests') })">
     <dl>
-      <dt>模型调用</dt><dd>{{ number('requests') }} 次<span v-if="number('summary_requests')">（含 {{ number('summary_requests') }} 次摘要）</span></dd>
-      <dt>输入 / 输出</dt><dd>{{ number('input_tokens').toLocaleString() }} / {{ number('output_tokens').toLocaleString() }} token</dd>
-      <dt>输入缓存命中</dt><dd>{{ reported ? cacheRate : '供应商未完整报告' }}</dd>
-      <template v-if="reported"><dt>缓存 / 非缓存输入</dt><dd>{{ number('cache_read_tokens').toLocaleString() }} / {{ Math.max(0, number('input_tokens') - number('cache_read_tokens')).toLocaleString() }} token</dd></template>
+      <dt>{{ tr('模型调用') }}</dt><dd>{{ number('requests') }} {{ tr('次') }}<span v-if="number('summary_requests')">{{ tr('（含') }} {{ number('summary_requests') }} {{ tr('次摘要）') }}</span></dd>
+      <dt>{{ tr('输入 / 输出') }}</dt><dd>{{ number('input_tokens').toLocaleString(dateLocale) }} / {{ number('output_tokens').toLocaleString(dateLocale) }} token</dd>
+      <dt>{{ tr('输入缓存命中') }}</dt><dd>{{ reported ? cacheRate : tr('供应商未完整报告') }}</dd>
+      <template v-if="reported"><dt>{{ tr('缓存 / 非缓存输入') }}</dt><dd>{{ number('cache_read_tokens').toLocaleString(dateLocale) }} / {{ Math.max(0, number('input_tokens') - number('cache_read_tokens')).toLocaleString(dateLocale) }} token</dd></template>
     </dl>
-    <p v-if="usage.cache_price_configured === false">尚未配置缓存输入单价，费用按当前模型价格计算。</p>
-    <p v-if="usage.missing_usage">部分请求未返回完整用量。</p>
+    <p v-if="usage.cache_price_configured === false">{{ tr('尚未配置缓存输入单价，费用按当前模型价格计算。') }}</p>
+    <p v-if="usage.missing_usage">{{ tr('部分请求未返回完整用量。') }}</p>
   </AgentDisclosure>
-  <AgentDisclosure v-if="rules.length" class="agent-usage" :title="`已记住 ${rules.length} 条设定`">
+  <AgentDisclosure v-if="rules.length" class="agent-usage" :title="tr('已记住 {p0} 条设定', { p0: rules.length })">
     <ul><li v-for="(rule, index) in rules" :key="index">{{ scopeName(rule.scope || {}) }}：{{ rule.content }}</li></ul>
   </AgentDisclosure>
 </template>

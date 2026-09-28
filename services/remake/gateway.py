@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import base64
 import json
@@ -36,7 +38,7 @@ class RemakeVideoAnalysisError(RuntimeError):
     ) -> None:
         self.error_code = error_code
         self.user_message = message
-        super().__init__(f"{message}（错误代码：{error_code}）")
+        super().__init__(localized_message("{p0}（错误代码：{p1}）", p0=localized_message(message), p1=error_code))
         self.usage = usage or {}
 
 
@@ -118,17 +120,10 @@ class RemakeVideoAnalysisGateway:
     ) -> dict[str, Any]:
         started_at = self.clock()
         video_input = await asyncio.to_thread(self._build_video_input, path)
-        instruction = prompt
-        if context:
-            instruction += f"\n\n{context}"
-        if include_segment_metadata:
-            instruction += f"\n\n当前片段序号：{index}。只返回约定 JSON。"
-        else:
-            instruction += "\n\n只返回约定 JSON。"
-        instruction += (
-            "\n\nJSON 必须严格符合以下 Schema，不要输出 Markdown、解释或思考过程：\n"
-            + json.dumps(response_schema, ensure_ascii=False, separators=(",", ":"))
-        )
+        from prompts.remake import render_remake_request
+        from utils.prompt_language import task_language
+        instruction = render_remake_request(prompt, context=context, index=index,
+            schema=response_schema, include_segment_metadata=include_segment_metadata, language=task_language.get() or "zh")
         messages = [
             {
                 "role": "user",
@@ -192,7 +187,7 @@ class RemakeVideoAnalysisGateway:
                         usage=dict(self.usage),
                     ) from None
                 await asyncio.sleep(self.retry_delays[attempt])
-        raise RemakeVideoAnalysisError("视频片段分析未完成", usage=dict(self.usage))
+        raise RemakeVideoAnalysisError(localized_message('视频片段分析未完成'), usage=dict(self.usage))
 
     def _record_timing(
         self,
@@ -226,13 +221,13 @@ class RemakeVideoAnalysisGateway:
     def _build_video_input(self, path: Path) -> dict[str, Any]:
         if not path.is_file():
             raise RemakeVideoAnalysisError(
-                "模型输入视频不存在",
+                localized_message('模型输入视频不存在'),
                 error_code="REMAKE_ANALYSIS_MEDIA_MISSING",
             )
         raw_size = path.stat().st_size
         if raw_size > MAX_MODEL_VIDEO_BYTES:
             raise RemakeVideoAnalysisError(
-                f"模型输入视频超过 {MAX_MODEL_VIDEO_BYTES} 字节上限",
+                localized_message('模型输入视频超过 {p1} 字节上限', p1=f'{MAX_MODEL_VIDEO_BYTES}'),
                 error_code="REMAKE_ANALYSIS_MEDIA_TOO_LARGE",
             )
         mime = "video/quicktime" if path.suffix.lower() == ".mov" else "video/mp4"
@@ -260,19 +255,19 @@ def _is_retryable(error: Exception) -> bool:
 def _provider_failure(error: Exception, *, index: int) -> tuple[str, str]:
     status_code = getattr(error, "status_code", None)
     if status_code == 400:
-        return "视频分析请求与当前模型能力不兼容", "REMAKE_ANALYSIS_REQUEST_INVALID"
+        return localized_message('视频分析请求与当前模型能力不兼容'), "REMAKE_ANALYSIS_REQUEST_INVALID"
     if status_code in {401, 403}:
-        return "视频分析模型鉴权失败或尚未开通", "REMAKE_ANALYSIS_AUTH_FAILED"
+        return localized_message('视频分析模型鉴权失败或尚未开通'), "REMAKE_ANALYSIS_AUTH_FAILED"
     if status_code == 404:
-        return "视频分析模型不存在或不可用", "REMAKE_ANALYSIS_MODEL_NOT_FOUND"
+        return localized_message('视频分析模型不存在或不可用'), "REMAKE_ANALYSIS_MODEL_NOT_FOUND"
     if status_code == 429:
-        return "视频分析模型请求过于频繁，请稍后重试", "REMAKE_ANALYSIS_RATE_LIMITED"
+        return localized_message('视频分析模型请求过于频繁，请稍后重试'), "REMAKE_ANALYSIS_RATE_LIMITED"
     if isinstance(status_code, int) and status_code >= 500:
-        return "视频分析服务暂时不可用", "REMAKE_ANALYSIS_PROVIDER_UNAVAILABLE"
+        return localized_message('视频分析服务暂时不可用'), "REMAKE_ANALYSIS_PROVIDER_UNAVAILABLE"
     error_type = type(error).__name__.lower()
     if "connection" in error_type or "timeout" in error_type:
-        return "无法连接视频分析服务", "REMAKE_ANALYSIS_CONNECTION_FAILED"
-    return f"第 {index} 个视频片段分析失败", ANALYSIS_ERROR_CODE
+        return localized_message('无法连接视频分析服务'), "REMAKE_ANALYSIS_CONNECTION_FAILED"
+    return localized_message("第 {p0} 个视频片段分析失败", p0=index), ANALYSIS_ERROR_CODE
 
 
 def _log_provider_failure(
@@ -308,10 +303,10 @@ def _log_provider_failure(
 def _completion_json(completion: Any) -> dict[str, Any]:
     choice = completion.choices[0]
     if getattr(choice, "finish_reason", None) == "length":
-        raise ValueError("模型输出被截断")
+        raise ValueError(localized_message('模型输出被截断'))
     message = choice.message
     if getattr(message, "refusal", None):
-        raise ValueError("模型拒绝生成")
+        raise ValueError(localized_message('模型拒绝生成'))
     text = str(getattr(message, "content", "") or "").strip()
     fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
     if fenced:
@@ -329,7 +324,7 @@ def _completion_json(completion: Any) -> dict[str, Any]:
             except json.JSONDecodeError:
                 continue
         else:
-            raise ValueError("模型未返回 JSON 对象") from None
+            raise ValueError(localized_message('模型未返回 JSON 对象')) from None
     if not isinstance(payload, dict):
-        raise ValueError("模型返回值不是 JSON 对象")
+        raise ValueError(localized_message('模型返回值不是 JSON 对象'))
     return payload

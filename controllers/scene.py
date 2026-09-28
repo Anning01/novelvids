@@ -1,3 +1,6 @@
+
+from utils.messages import localized_message
+from controllers.config import general_config_controller
 from utils.crud import CRUDBase
 from models.scene import Scene
 from pydantic import BaseModel
@@ -52,7 +55,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             data["metadata"] = _normalize_scene_metadata(data["metadata"])
         chapter = await Chapter.get_or_none(id=obj_in.chapter_id)
         if chapter is None:
-            raise HTTPException(404, '章节不存在')
+            raise HTTPException(404, localized_message('章节不存在'))
         async with creation_write(chapter.novel_id):
             objects = CreationObjects(chapter.novel_id)
             sequence = data.pop('sequence')
@@ -82,7 +85,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             data.pop('assets', None)
             chapter_id = data.pop('chapter_id', instance.chapter_id)
             if chapter_id != instance.chapter_id:
-                raise ValueError('分镜不能通过普通编辑转移章节')
+                raise ValueError(localized_message('分镜不能通过普通编辑转移章节'))
             sequence = data.pop('sequence', None)
             if isinstance(data.get("metadata"), dict):
                 data["metadata"] = _normalize_scene_metadata(data["metadata"])
@@ -162,7 +165,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "model": config.model,
             "supports_json_output": config.supports_json_output,
             "max_context_characters": config.max_context_characters,
-            "prompt_language": "zh",
+            "prompt_language": await general_config_controller.get_prompt_language(),
             "storyboard_strategy": strategy.key,
         }
         if getattr(config, "thinking", None):
@@ -181,7 +184,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 id=chapter_id
             ).using_db(connection).select_for_update().first()
             if locked_chapter is None:
-                raise HTTPException(status_code=404, detail="章节不存在")
+                raise HTTPException(status_code=404, detail=localized_message('章节不存在'))
 
             active_tasks = await AiTask.filter(
                 task_type=AiTaskTypeEnum.storyboard.value,

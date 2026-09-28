@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from uuid import UUID
 from datetime import datetime, timezone
 
@@ -25,7 +27,7 @@ class AiTaskController:
         ):
             raise HTTPException(
                 status_code=400,
-                detail=f"当前状态({TaskStatusEnum(task.status).nickname})不可取消",
+                detail=localized_message('当前状态({p1})不可取消', p1=localized_message(TaskStatusEnum(task.status).nickname)),
             )
         await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value, TaskStatusEnum.queued.value]).update(
             status=TaskStatusEnum.cancelled.value, finished_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))

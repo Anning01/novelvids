@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
@@ -13,7 +15,7 @@ const displayName = computed(() => auth.user?.nickname || auth.user?.username ||
 const avatarText = computed(() => displayName.value.slice(0, 1).toUpperCase())
 const totalCost = computed(() => Number(auth.totalCost ?? 0).toFixed(2))
 const registeredAt = computed(() => auth.user?.created_at || '—')
-const roleLabel = (role: string) => ({ admin: '团队管理员', creator: '创作者', viewer: '查看者' }[role] || role)
+const roleLabel = (role: string) => ({ get admin() { return tr('团队管理员') }, get creator() { return tr('创作者') }, get viewer() { return tr('查看者') } }[role] || role)
 const money = (value: number | string | null | undefined) => {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) ? parsed.toFixed(2) : '0.00'
@@ -23,16 +25,16 @@ async function changePassword() {
   const { oldPassword, newPassword, confirmPassword } = passwordForm.value
   if (!oldPassword || newPassword.length < 8) return
   if (newPassword !== confirmPassword) {
-    notice.error('两次输入的新密码不一致')
+    notice.error(tr('两次输入的新密码不一致'))
     return
   }
   changing.value = true
   try {
     await api.changePassword(oldPassword, newPassword)
-    notice.success('密码已修改')
+    notice.success(tr('密码已修改'))
     passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '修改密码失败')
+    notice.error(error instanceof Error ? error.message : tr('修改密码失败'))
   } finally {
     changing.value = false
   }
@@ -58,63 +60,63 @@ onMounted(async () => {
       <div class="profile-avatar">{{ avatarText }}</div>
       <div class="profile-identity">
         <h1>{{ displayName }}</h1>
-        <p>@{{ auth.user?.username }}<span v-if="auth.isSuperAdmin" class="profile-role">超级管理员</span></p>
+        <p>@{{ auth.user?.username }}<span v-if="auth.isSuperAdmin" class="profile-role">{{ tr('超级管理员') }}</span></p>
       </div>
     </header>
 
     <section class="profile-grid">
       <div class="profile-card">
-        <h2>我的信息</h2>
+        <h2>{{ tr('我的信息') }}</h2>
         <dl class="profile-stats">
           <div>
-            <dt>历史创作花费</dt>
+            <dt>{{ tr('历史创作花费') }}</dt>
             <dd class="cost">¥ {{ totalCost }}</dd>
           </div>
           <div>
-            <dt>注册时间</dt>
+            <dt>{{ tr('注册时间') }}</dt>
             <dd>{{ registeredAt }}</dd>
           </div>
         </dl>
       </div>
 
       <div class="profile-card">
-        <h2>加入的团队</h2>
-        <p v-if="!auth.memberships.length" class="dim">尚未加入任何团队</p>
+        <h2>{{ tr('加入的团队') }}</h2>
+        <p v-if="!auth.memberships.length" class="dim">{{ tr('尚未加入任何团队') }}</p>
         <ul v-else class="team-list">
           <li v-for="item in auth.memberships" :key="item.team_id">
             <div class="team-info">
               <strong>{{ item.team_name }}</strong>
-              <span>{{ roleLabel(item.role) }}<template v-if="item.status === 0"> · 已禁用</template></span>
+              <span>{{ roleLabel(item.role) }}<template v-if="item.status === 0"> {{ tr('· 已禁用') }}</template></span>
             </div>
             <div class="team-meta">
-              <span>累计 ¥{{ money(item.total_cost) }}</span>
-              <span v-if="item.joined_at">加入于 {{ item.joined_at }}</span>
+              <span>{{ tr('累计 ¥') }}{{ money(item.total_cost) }}</span>
+              <span v-if="item.joined_at">{{ tr('加入于') }} {{ item.joined_at }}</span>
             </div>
           </li>
         </ul>
       </div>
 
       <div class="profile-card">
-        <h2>修改密码</h2>
+        <h2>{{ tr('修改密码') }}</h2>
         <form class="password-form" @submit.prevent="changePassword">
           <label>
-            <span>当前密码</span>
+            <span>{{ tr('当前密码') }}</span>
             <input v-model="passwordForm.oldPassword" type="password" autocomplete="current-password" required />
           </label>
           <label>
-            <span>新密码（至少 8 位）</span>
+            <span>{{ tr('新密码（至少 8 位）') }}</span>
             <input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" required minlength="8" />
           </label>
           <label>
-            <span>确认新密码</span>
+            <span>{{ tr('确认新密码') }}</span>
             <input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" required minlength="8" />
           </label>
-          <button type="submit" class="primary-button" :disabled="changing">{{ changing ? '提交中…' : '修改密码' }}</button>
+          <button type="submit" class="primary-button" :disabled="changing">{{ changing ? tr('提交中…') : tr('修改密码') }}</button>
         </form>
       </div>
     </section>
 
-    <button type="button" class="logout-button" @click="logout">退出登录</button>
+    <button type="button" class="logout-button" @click="logout">{{ tr('退出登录') }}</button>
   </main>
 </template>
 

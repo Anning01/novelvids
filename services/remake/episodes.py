@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,14 +40,14 @@ def parse_episode_number(filename: str) -> int:
         raise RemakeError(
             422,
             "REMAKE_EPISODE_MISSING",
-            "视频文件名中缺少有效集数",
+            localized_message('视频文件名中缺少有效集数'),
             context={"filename": Path(filename).name},
         )
     if len(valid) > 1 or matches != valid:
         raise RemakeError(
             422,
             "REMAKE_EPISODE_AMBIGUOUS",
-            "视频文件名包含多个不同集数",
+            localized_message('视频文件名包含多个不同集数'),
             context={
                 "filename": Path(filename).name,
                 "episode_numbers": sorted(matches),
@@ -65,7 +67,7 @@ def validate_episode_batch(
             raise RemakeError(
                 422,
                 "REMAKE_SOURCE_MODE_MISMATCH",
-                "客户端集数与服务端文件名解析结果不一致",
+                localized_message('客户端集数与服务端文件名解析结果不一致'),
                 context={
                     "filename": Path(filename).name,
                     "claimed_episode_number": claimed_episode,
@@ -76,7 +78,7 @@ def validate_episode_batch(
             raise RemakeError(
                 409,
                 "REMAKE_EPISODE_DUPLICATED",
-                "文件夹中存在重复集数",
+                localized_message('文件夹中存在重复集数'),
                 context={
                     "episode_number": parsed,
                     "filenames": [seen[parsed], Path(filename).name],

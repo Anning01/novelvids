@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { ImageAnnotation, WorkbenchNode } from '../types/workbenchTypes'
@@ -116,8 +118,10 @@ const selectedDigitalHumanImage = computed(() => {
     url,
     isMain: url === asset.value.main_image,
     displayIndex: persistedAssetImages.value.length,
-    label: '数字人',
+    get label() { return tr('数字人') },
     source: 'digital_human' as const,
+    thumbnailUrl: undefined,
+    previewUrl: undefined,
   }
 })
 const assetImages = computed(() => {
@@ -194,12 +198,12 @@ const imageDownloadFilename = computed(() => {
     .replace(/[\\/:*?"<>|]+/g, '-')
   return `${safeName}.${extension}`
 })
-const assetTypeLabel = computed(() => assetTypePresentationOptions.find(option => option.value === String(assetType.value))?.label || '资产')
+const assetTypeLabel = computed(() => assetTypePresentationOptions.find(option => option.value === String(assetType.value))?.label || tr('资产'))
 const variantOptions = computed(() => [
-  { value: 'base', label: '基础形态' },
+  { value: 'base', get label() { return tr('基础形态') } },
   ...(asset.value.variants || []).map(variant => ({
     value: String(variant.id),
-    label: `${variant.name} · ${variant.images.length} 图`,
+    label: tr('{p0} · {p1} 图', { p0: variant.name, p1: variant.images.length }),
   })),
 ])
 const selectedVariantId = computed(() => selectedVariantValue.value === 'base' ? undefined : Number(selectedVariantValue.value))
@@ -240,7 +244,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
     return selectedImages.map(image => ({
       ...base,
       mentionKey: `${source.key}:image:${image.displayIndex}`,
-      name: `${base.name}-图${image.displayIndex + 1}`,
+      name: tr('{p0}-图{p1}', { p0: base.name, p1: image.displayIndex + 1 }),
       previewUrl: image.previewUrl || image.thumbnailUrl || image.url,
       hasImage: true,
     }))
@@ -375,8 +379,8 @@ async function deleteSelectedVariant() {
 
 registerWorkbenchPromptAction(props.id, {
   id: 'asset-image-generation',
-  label: '生成资产图片',
-  busyLabel: '生成中',
+  get label() { return tr('生成资产图片') },
+  get busyLabel() { return tr('生成中') },
   enabled: canGenerate,
   busy,
   cost: computed(() => estimateImageCost(
@@ -391,7 +395,7 @@ registerWorkbenchPromptAction(props.id, {
       component: markRaw(MediaGenerationModelSelector),
       props: computed(() => ({
         options: imageModelOptions.value,
-        label: '图片模型',
+        get label() { return tr('图片模型') },
       })),
       modelValue: computed(() => config.value.modelConfigId),
       updateModelValue(value) {
@@ -418,7 +422,7 @@ registerWorkbenchPromptAction(props.id, {
       component: markRaw(DigitalHumanGenerationControl),
       visible: personAsset,
       props: computed(() => ({
-        title: config.value.digitalHumanAssetId || '选择数字人',
+        title: config.value.digitalHumanAssetId || tr('选择数字人'),
         previewUrl: config.value.digitalHumanPreviewUrl,
         selected: Boolean(config.value.digitalHumanAssetId),
       })),
@@ -470,11 +474,11 @@ function imageIsPrimary(image: { url: string }) {
 }
 
 function imageRoleLabel(image: { key: string; url: string }) {
-  if (imageIsPrimary(image)) return '主图'
+  if (imageIsPrimary(image)) return tr('主图')
   const referenceIndex = assetImages.value
     .filter(candidate => !imageIsPrimary(candidate))
     .findIndex(candidate => candidate.key === image.key)
-  return `参考图 ${Math.max(0, referenceIndex) + 1}`
+  return tr('参考图 {p0}', { p0: Math.max(0, referenceIndex) + 1 })
 }
 
 function assetImageStackLayerStyle(image: { key: string; url: string }, layerIndex: number) {
@@ -505,7 +509,7 @@ async function replaceImage(event: Event) {
   try {
     await store.replaceAssetImage(asset.value.id, file)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '资产图片上传失败')
+    notice.error(error instanceof Error ? error.message : tr('资产图片上传失败'))
   } finally {
     uploadingImage.value = false
   }
@@ -533,7 +537,7 @@ async function downloadImage() {
   try {
     await downloadFile(asset.value.main_image, imageDownloadFilename.value)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '资产图片下载失败')
+    notice.error(error instanceof Error ? error.message : tr('资产图片下载失败'))
   } finally {
     downloadingImage.value = false
   }
@@ -547,7 +551,7 @@ async function downloadGalleryImage(image: { key: string; url: string }) {
   try {
     await downloadFile(image.url, `${safeName}.${extension}`)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '图片下载失败')
+    notice.error(error instanceof Error ? error.message : tr('图片下载失败'))
   } finally {
     downloadingGalleryImageKey.value = ''
   }
@@ -586,7 +590,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
       await store.applyPublicAssetToPlaceholder(asset.value.id, choice.asset)
     }
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '资产复用失败')
+    notice.error(error instanceof Error ? error.message : tr('资产复用失败'))
   }
 }
 </script>
@@ -612,9 +616,9 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           :class="{ 'is-placeholder-asset-type': reusablePlaceholder }"
           v-model="assetTypeValue"
           :options="assetTypeOptions"
-          label="资产类型"
-          placeholder="选择资产类型"
-          title="选择资产类型"
+          :label="tr('资产类型')"
+          :placeholder="tr('选择资产类型')"
+          :title="tr('选择资产类型')"
           :fallback-icon="assetTypeIconFor(assetTypeValue)"
           icon-only
         />
@@ -623,7 +627,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
         <input
           class="workbench-node-frame__title-input nodrag"
           v-model="nickname"
-          aria-label="资产昵称"
+          :aria-label="tr('资产昵称')"
           maxlength="80"
           @focusout="save"
           @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
@@ -637,8 +641,8 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
         <button
           v-if="reusablePlaceholder"
           type="button"
-          aria-label="选择可复用资产"
-          title="从公共资产或项目资产选择"
+          :aria-label="tr('选择可复用资产')"
+          :title="tr('从公共资产或项目资产选择')"
           @click="reusableAssetPickerOpen = true"
         >
           <Library :size="16" aria-hidden="true" />
@@ -646,52 +650,52 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
         <button
           type="button"
           :disabled="uploadingImage"
-          :aria-label="asset.main_image ? '替换资产图片' : '上传资产图片'"
-          :title="asset.main_image ? '替换图片' : '上传图片'"
+          :aria-label="asset.main_image ? tr('替换资产图片') : tr('上传资产图片')"
+          :title="asset.main_image ? tr('替换图片') : tr('上传图片')"
           @click="imageFileInput?.click()"
         >
           <LoaderCircle v-if="uploadingImage" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
           <ImageUp v-else :size="16" aria-hidden="true" />
         </button>
-        <input ref="imageFileInput" class="workbench-visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="uploadingImage" aria-label="上传资产图片" @change="replaceImage">
+        <input ref="imageFileInput" class="workbench-visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="uploadingImage" :aria-label="tr('上传资产图片')" @change="replaceImage">
         <button
           type="button"
-          aria-label="管理衍生形态"
-          title="衍生形态"
+          :aria-label="tr('管理衍生形态')"
+          :title="tr('衍生形态')"
           :class="{ 'is-active': variantToolbarOpen }"
           @click="variantToolbarOpen = !variantToolbarOpen"
         >
           <Layers3 :size="16" aria-hidden="true" />
         </button>
-        <button v-if="asset.main_image" type="button" aria-label="标注资产图片" title="标注图片" @click="annotationOpen = true">
+        <button v-if="asset.main_image" type="button" :aria-label="tr('标注资产图片')" :title="tr('标注图片')" @click="annotationOpen = true">
           <Pencil :size="16" aria-hidden="true" />
         </button>
         <button
           v-if="asset.main_image"
           type="button"
           :disabled="downloadingImage"
-          :aria-label="`下载图片，保存为 ${imageDownloadFilename}`"
-          :title="`下载 · ${imageDownloadFilename}`"
+          :aria-label="tr('下载图片，保存为 {p0}', { p0: imageDownloadFilename })"
+          :title="tr('下载 · {p0}', { p0: imageDownloadFilename })"
           @click="downloadImage"
         >
           <LoaderCircle v-if="downloadingImage" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
           <Download v-else :size="16" aria-hidden="true" />
         </button>
-        <section v-if="variantToolbarOpen" class="workbench-node-context__popover workbench-asset-variant-popover" role="dialog" aria-label="衍生形态管理">
+        <section v-if="variantToolbarOpen" class="workbench-node-context__popover workbench-asset-variant-popover" role="dialog" :aria-label="tr('衍生形态管理')">
           <header>
-            <strong>衍生形态</strong>
-            <button type="button" aria-label="关闭衍生形态管理" @click="variantToolbarOpen = false"><X :size="14" aria-hidden="true" /></button>
+            <strong>{{ tr('衍生形态') }}</strong>
+            <button type="button" :aria-label="tr('关闭衍生形态管理')" @click="variantToolbarOpen = false"><X :size="14" aria-hidden="true" /></button>
           </header>
           <div class="workbench-asset-variant-popover__row">
-            <WorkbenchSelect v-model="selectedVariantValue" :options="variantOptions" label="视觉形态" />
-            <button type="button" aria-label="新增视觉形态" title="新增形态" @click="addingVariant = !addingVariant"><Plus :size="14" aria-hidden="true" /></button>
-            <button v-if="selectedVariantId" type="button" class="is-danger" aria-label="删除当前视觉形态" title="删除当前形态" @click="deleteSelectedVariant"><Trash2 :size="14" aria-hidden="true" /></button>
+            <WorkbenchSelect v-model="selectedVariantValue" :options="variantOptions" :label="tr('视觉形态')" />
+            <button type="button" :aria-label="tr('新增视觉形态')" :title="tr('新增形态')" @click="addingVariant = !addingVariant"><Plus :size="14" aria-hidden="true" /></button>
+            <button v-if="selectedVariantId" type="button" class="is-danger" :aria-label="tr('删除当前视觉形态')" :title="tr('删除当前形态')" @click="deleteSelectedVariant"><Trash2 :size="14" aria-hidden="true" /></button>
           </div>
           <form v-if="addingVariant" class="workbench-asset-variant-popover__create" @submit.prevent="createVariant">
-            <input v-model="variantName" maxlength="100" :placeholder="personAsset ? '例如：红衣变装' : assetType === AssetTypeEnum.SCENE ? '例如：战后废墟' : '例如：展开形态'" aria-label="新形态名称">
-            <button type="submit" :disabled="creatingVariant || !variantName.trim()">{{ creatingVariant ? '保存中…' : '保存' }}</button>
+            <input v-model="variantName" maxlength="100" :placeholder="personAsset ? tr('例如：红衣变装') : assetType === AssetTypeEnum.SCENE ? tr('例如：战后废墟') : tr('例如：展开形态')" :aria-label="tr('新形态名称')">
+            <button type="submit" :disabled="creatingVariant || !variantName.trim()">{{ creatingVariant ? tr('保存中…') : tr('保存') }}</button>
           </form>
-          <small>选择当前生成形态，或新增人物变装、场景升级和道具形态。</small>
+          <small>{{ tr('选择当前生成形态，或新增人物变装、场景升级和道具形态。') }}</small>
         </section>
       </template>
       <div class="workbench-node-content" @focusout="handleNodeFocusOut">
@@ -711,7 +715,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           <img
             class="workbench-uploaded-image-preview"
             :src="asset.main_image_thumbnail || asset.main_image"
-            :alt="`${assetName}预览`"
+            :alt="tr('{p0}预览', { p0: assetName })"
             draggable="false"
             loading="lazy"
             decoding="async"
@@ -722,30 +726,30 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             type="button"
             class="workbench-asset-image-count nodrag"
             :aria-expanded="imageGalleryExpanded"
-            :aria-label="`展开${assetName}的 ${assetImages.length} 张图片`"
+            :aria-label="tr('展开{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
             @pointerdown.stop
             @click.stop="imageGalleryExpanded = true"
           >
             <Maximize2 :size="17" aria-hidden="true" />
-            <span>{{ assetImages.length }}张</span>
+            <span>{{ assetImages.length }}{{ tr('张') }}</span>
           </button>
         </div>
         <section
           v-if="hasMultipleImages && imageGalleryExpanded"
           class="workbench-asset-gallery nodrag"
           role="region"
-          :aria-label="`${assetName}图片列表`"
+          :aria-label="tr('{p0}图片列表', { p0: assetName })"
           @pointerdown.stop
         >
           <button
             type="button"
             class="workbench-asset-gallery__collapse"
-            :aria-label="`收起${assetName}的 ${assetImages.length} 张图片`"
+            :aria-label="tr('收起{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
             @pointerdown.stop
             @click.stop="imageGalleryExpanded = false"
           >
             <Minimize2 :size="17" aria-hidden="true" />
-            <span>收起</span>
+            <span>{{ tr('收起') }}</span>
           </button>
           <div v-for="row in assetGalleryRows" :key="row.map(image => image.key).join('|')" class="workbench-media-gallery__row">
             <article
@@ -756,7 +760,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
               :style="assetGalleryItemStyle(image)"
               role="button"
               :tabindex="imageIsPrimary(image) ? -1 : 0"
-              :aria-label="imageIsPrimary(image) ? `${assetName}主图` : `设${assetName}${imageRoleLabel(image)}为主图`"
+              :aria-label="imageIsPrimary(image) ? tr('{p0}主图', { p0: assetName }) : tr('设{p0}{p1}为主图', { p0: assetName, p1: imageRoleLabel(image) })"
               @click="setMainImage(image.url)"
               @keydown.enter.prevent="setMainImage(image.url)"
               @keydown.space.prevent="setMainImage(image.url)"
@@ -770,12 +774,12 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
                 <button
                   type="button"
                   :disabled="Boolean(downloadingGalleryImageKey)"
-                  :aria-label="`下载${imageRoleLabel(image)}`"
+                  :aria-label="tr('下载{p0}', { p0: imageRoleLabel(image) })"
                   @click.stop="downloadGalleryImage(image)"
                 >
                   <LoaderCircle v-if="downloadingGalleryImageKey === image.key" class="workbench-node-context__loading-icon" :size="15" aria-hidden="true" />
                   <Download v-else :size="15" aria-hidden="true" />
-                  <span>下载</span>
+                  <span>{{ tr('下载') }}</span>
                 </button>
               </div>
             </article>
@@ -785,7 +789,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           v-if="showDefaultVisualImage"
           :icon="assetTypeIconFor(assetTypeValue)"
           :preview-url="config.digitalHumanPreviewUrl"
-          :preview-label="config.digitalHumanPreviewUrl ? '数字人参考' : undefined"
+          :preview-label="config.digitalHumanPreviewUrl ? tr('数字人参考') : undefined"
           :title="assetName"
           :type-label="assetTypeLabel"
           :style="defaultVisualImageStyle"

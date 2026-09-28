@@ -5,9 +5,9 @@ const storyboardSource = readFileSync('src/pages/ShortDramaStoryboardPage.vue', 
 const settingsSource = readFileSync('src/pages/ShortDramaManualPage.vue', 'utf8')
 
 it('keeps chapter asset extraction in settings instead of the storyboard', () => {
-  expect(storyboardSource).not.toContain('aria-label="提取本章资产"')
+  expect(storyboardSource).not.toContain(`:aria-label="tr('提取本章资产')"`)
   expect(storyboardSource).not.toContain('api.latestExtraction(chapterId)')
-  expect(settingsSource).toContain('aria-label="提取本章资产"')
+  expect(settingsSource).toContain(`:aria-label="tr('提取本章资产')"`)
   expect(settingsSource).toContain('@click="extractSelectedChapterAssets"')
 })
 

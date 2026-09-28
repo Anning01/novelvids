@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import type { Asset } from '@/types'
 import type { ImageAnnotation } from '../types/workbenchTypes'
 import { AssetTypeEnum } from '@/types'
@@ -38,15 +40,15 @@ export interface AssetImageMediaMetadata {
 }
 
 export const ASSET_TYPE_OPTIONS = [
-  { value: AssetTypeEnum.PERSON, label: '人物' },
-  { value: AssetTypeEnum.ITEM, label: '物品' },
-  { value: AssetTypeEnum.SCENE, label: '场景' },
-  { value: AssetTypeEnum.PRODUCT, label: '商品' },
-  { value: AssetTypeEnum.STYLE, label: '风格' },
+  { value: AssetTypeEnum.PERSON, get label() { return tr('人物') } },
+  { value: AssetTypeEnum.ITEM, get label() { return tr('物品') } },
+  { value: AssetTypeEnum.SCENE, get label() { return tr('场景') } },
+  { value: AssetTypeEnum.PRODUCT, get label() { return tr('商品') } },
+  { value: AssetTypeEnum.STYLE, get label() { return tr('风格') } },
 ] as const
 
 export function assetTypeLabel(type: AssetTypeEnum) {
-  return ASSET_TYPE_OPTIONS.find(item => item.value === type)?.label || '资产'
+  return ASSET_TYPE_OPTIONS.find(item => item.value === type)?.label || tr('资产')
 }
 
 export const DEFAULT_ASSET_ASPECT_RATIO = '16:9'
@@ -191,7 +193,7 @@ export function assetImageCandidates(asset: Asset): AssetImageCandidate[] {
       ? [[
           `gallery-${index}`,
           url,
-          `生成图 ${index + 1}`,
+          tr('生成图 {p0}', { p0: index + 1 }),
           typeof galleryThumbnails[index] === 'string' ? galleryThumbnails[index] : undefined,
           typeof galleryPreviews[index] === 'string' ? galleryPreviews[index] : undefined,
         ] as [string, string, string, string?, string?]]

@@ -1,5 +1,7 @@
 """Snapshots and field restoration for durable, reversible creation changes."""
 
+from utils.messages import localized_message
+
 from copy import deepcopy
 from datetime import datetime, timezone
 
@@ -53,7 +55,7 @@ async def write_fields(objects: CreationObjects, target, fields: dict):
         values['updated_at'] = datetime.now(timezone.utc)
         changed = await type(target).filter(id=target.id).update(**values)
         if not changed:
-            raise ValueError('对象已被移除，请重新读取')
+            raise ValueError(localized_message('对象已被移除，请重新读取'))
     await target.refresh_from_db()
 
 

@@ -209,7 +209,7 @@ async def test_remake_projects_cannot_be_reused_as_history_sources(client):
     )
     assert created.json()["code"] == 422
     assert created.json()["data"]["error_code"] == "REMAKE_HISTORY_EPISODE_UNAVAILABLE"
-    assert "短剧制作" in created.json()["message"]
+    assert "short drama projects" in created.json()["message"]
 
 
 @pytest.mark.asyncio

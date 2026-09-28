@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import type { HttpAgent } from '@ag-ui/client'
 import { API_BASE, authHeaders, clearAuthToken, redirectToLogin, request } from '@/api'
 import type { SingleResponse } from '@/types'
@@ -40,7 +42,7 @@ export async function runSubscription(conversationId: number, taskId: string, af
       if (!response.headers.get('content-type')?.includes('text/event-stream')) {
         const body = await response.json() as { code?: number; message?: string }
         if (body.code === 401) { clearAuthToken(); redirectToLogin() }
-        throw new Error(body.message || '无法连接创作助手')
+        throw new Error(body.message || tr('无法连接创作助手'))
       }
       return response
     },

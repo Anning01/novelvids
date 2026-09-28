@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import type { VideoInputImageReference, VideoReferenceMedia } from '@/types'
 
 const BRACED_ASSET_MENTION_PATTERN = /@\{([^}]+)\}/gu
@@ -94,7 +96,7 @@ export function buildVideoInputImageReferences(
     references.push({
       number: references.length + 1,
       url: reference.url,
-      label: reference.name || `参考图片 ${mediaIndex + 1}`,
+      label: reference.name || tr('参考图片 {p0}', { p0: mediaIndex + 1 }),
       source: 'upload',
       mediaIndex,
     })

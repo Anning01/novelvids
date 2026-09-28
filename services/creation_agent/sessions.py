@@ -1,5 +1,7 @@
 """Private conversations and atomic admission into the existing task executor."""
 
+from utils.messages import localized_message
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -40,14 +42,14 @@ class AgentSessions:
         await ensure_novel_access(novel_id, ctx)
         novel = await Novel.get_or_none(id=novel_id)
         if novel is None:
-            raise HTTPException(404, "项目不存在")
+            raise HTTPException(404, localized_message('项目不存在'))
         return await AgentConversation.create(novel=novel, created_by=ctx.user.id if ctx.user else None, team_id=novel.team_id)
 
     async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False) -> AgentConversation:
         query = AgentConversation.filter(id=conversation_id, created_by=ctx.user.id if ctx.user else None)
         conversation = await (query if include_deleted else query.filter(deleted_at__isnull=True)).first()
         if conversation is None:
-            raise HTTPException(404, "会话不存在")
+            raise HTTPException(404, localized_message('会话不存在'))
         await ensure_novel_access(conversation.novel_id, ctx)
         return conversation
 
@@ -59,7 +61,7 @@ class AgentSessions:
             current = await AgentConversation.get(id=conversation.id).using_db(connection)
             if deleted and current.active_task_id and await AiTask.filter(
                 id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
-                raise HTTPException(409, '会话正在运行，请先停止后再删除')
+                raise HTTPException(409, localized_message('会话正在运行，请先停止后再删除'))
             if (current.deleted_at is not None) != deleted:
                 current.deleted_at = datetime.now(timezone.utc) if deleted else None
                 await current.save(using_db=connection, update_fields=['deleted_at'])
@@ -68,12 +70,12 @@ class AgentSessions:
     async def for_task(self, task_id, ctx: AuthContext) -> tuple[AgentConversation, AgentMessage]:
         message = await AgentMessage.get_or_none(task_id=task_id, role="assistant")
         if message is None:
-            raise HTTPException(404, "运行不存在")
+            raise HTTPException(404, localized_message('运行不存在'))
         return await self.get(message.conversation_id, ctx), message
 
     async def validate_scope(self, novel_id: int, request: AgentRunRequest | PromptStatusRequest) -> None:
         if request.chapter_id and not await Chapter.filter(id=request.chapter_id, novel_id=novel_id).exists():
-            raise HTTPException(404, "章节不存在")
+            raise HTTPException(404, localized_message('章节不存在'))
         for target in request.targets:
             if target.kind == "scene":
                 query = Scene.filter(id=target.id, chapter__novel_id=novel_id)
@@ -82,21 +84,21 @@ class AgentSessions:
             else:
                 query = AssetVariant.filter(id=target.id, asset__novel_id=novel_id)
             if not await query.exists():
-                raise HTTPException(404, "当前项目内不存在该目标")
+                raise HTTPException(404, localized_message('当前项目内不存在该目标'))
 
     async def submit(self, conversation: AgentConversation, request: AgentRunRequest, ctx: AuthContext) -> AiTask:
         conversation = await self.get(conversation.id, ctx)
         await require_roles("admin", "creator")(ctx)
         configuration = await agent_configuration()
         if not configuration.enabled:
-            raise HTTPException(403, "创作助手尚未启用")
+            raise HTTPException(403, localized_message('创作助手尚未启用'))
         if len(request.targets) > configuration.max_targets:
-            raise HTTPException(422, "选中目标超过本次运行上限")
+            raise HTTPException(422, localized_message('选中目标超过本次运行上限'))
         await self.validate_scope(conversation.novel_id, request)
         models = await agent_models(ctx)
         chosen = next((model for model in models if request.model_config_id is None or model.id == request.model_config_id), None)
         if chosen is None:
-            raise HTTPException(422, "请配置已启用且支持工具调用的创作助手模型")
+            raise HTTPException(422, localized_message('请配置已启用且支持工具调用的创作助手模型'))
         payload = request.model_dump(mode="json")
         if 'write_scope' not in request.model_fields_set:
             # Older clients retain their original selected-prompt contract.
@@ -107,14 +109,14 @@ class AgentSessions:
             await AgentConversation.filter(id=conversation.id).using_db(connection).update(updated_at=datetime.now(timezone.utc))
             current = await AgentConversation.get(id=conversation.id).using_db(connection)
             if current.deleted_at is not None:
-                raise HTTPException(404, '会话已删除，请先恢复后继续')
+                raise HTTPException(404, localized_message('会话已删除，请先恢复后继续'))
             previous = await AgentMessage.filter(conversation=current, request_id=request.request_id, role="user").using_db(connection).first()
             if previous:
                 if previous.request_hash != digest:
-                    raise HTTPException(409, "同一请求标识不能对应不同内容")
+                    raise HTTPException(409, localized_message('同一请求标识不能对应不同内容'))
                 return await AiTask.get(id=previous.task_id).using_db(connection)
             if current.active_task_id and await AiTask.filter(id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
-                raise HTTPException(409, "当前会话仍在执行，请等待完成或停止后继续")
+                raise HTTPException(409, localized_message('当前会话仍在执行，请等待完成或停止后继续'))
             task = await ai_task_executor.submit(AiTaskTypeEnum.creation_agent, {
                 "novel_id": conversation.novel_id, "conversation_id": conversation.id,
                 "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None,

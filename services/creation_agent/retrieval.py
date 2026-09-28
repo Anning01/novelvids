@@ -1,5 +1,7 @@
 """Private, paged recovery of context archives and conversation evidence."""
 
+from utils.messages import localized_message
+
 from tortoise.expressions import Q
 from models.creation_agent import AgentContextCheckpoint, AgentMessage
 from services.creation_agent.context_budget import encode
@@ -9,13 +11,13 @@ async def read_history(source, *, query='', before=None, archive_id=None, messag
     if source is None:
         return {'items': [], 'next_before': None}
     if archive_id is not None and message_id is not None:
-        raise ValueError('一次只读取一个历史消息或压缩引用')
+        raise ValueError(localized_message('一次只读取一个历史消息或压缩引用'))
     if message_id is not None:
         row = await AgentMessage.get_or_none(id=message_id, conversation_id=source.conversation_id, id__lt=source.id)
         if row is None:
-            raise ValueError('当前会话中没有该历史消息')
+            raise ValueError(localized_message('当前会话中没有该历史消息'))
         if offset > len(row.content):
-            raise ValueError('历史读取位置超出范围')
+            raise ValueError(localized_message('历史读取位置超出范围'))
         return {'message_id': row.id, 'role': row.role, 'content': row.content[offset:offset + limit],
                 'content_truncated': offset > 0 or offset + limit < len(row.content),
                 'next_offset': offset + limit if offset + limit < len(row.content) else None,
@@ -23,10 +25,10 @@ async def read_history(source, *, query='', before=None, archive_id=None, messag
     if archive_id is not None:
         row = await AgentContextCheckpoint.get_or_none(id=archive_id, conversation_id=source.conversation_id)
         if row is None:
-            raise ValueError('当前会话中没有该历史引用')
+            raise ValueError(localized_message('当前会话中没有该历史引用'))
         content = encode(row.payload)
         if offset > len(content):
-            raise ValueError('历史读取位置超出范围')
+            raise ValueError(localized_message('历史读取位置超出范围'))
         return {'archive_id': row.id, 'content': content[offset:offset + limit],
                 'content_truncated': offset > 0 or offset + limit < len(content),
                 'next_offset': offset + limit if offset + limit < len(content) else None,

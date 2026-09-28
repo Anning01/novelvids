@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import type { Chapter, Novel, StoryboardStrategy } from '@/types'
 import { stripChapterOrdinal } from './chapterTitle'
 
@@ -60,8 +62,8 @@ export function createProjectAnalysisDraft(
     name: novel.name,
     tagsText: tags.join('，'),
     storyOutline: novel.story_outline ?? analysis?.story_outline ?? '',
-    projectType: novel.project_type ?? DEFAULT_PROJECT_TYPE,
-    projectSetting: novel.project_setting ?? DEFAULT_PROJECT_SETTING,
+    projectType: novel.project_type ?? tr(DEFAULT_PROJECT_TYPE),
+    projectSetting: novel.project_setting ?? tr(DEFAULT_PROJECT_SETTING),
     storyboardStrategy: strategy?.key ?? novel.storyboard_strategy?.trim() ?? DEFAULT_STORYBOARD_STRATEGY,
     storyboardSetting: strategy?.description ?? novel.storyboard_setting ?? '',
     narratorAudioReferenceId: novel.narrator_audio_reference_id ?? null,
@@ -99,7 +101,7 @@ export function projectPatchFromDraft(draft: ProjectAnalysisDraft): Partial<Nove
 export function createChapterEditDraft(chapter: Chapter): ChapterEditDraft {
   return {
     id: chapter.id,
-    name: stripChapterOrdinal(chapter.name) || '未命名',
+    name: stripChapterOrdinal(chapter.name) || tr('未命名'),
     content: chapter.content ?? '',
   }
 }

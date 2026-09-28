@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import { reactive } from 'vue'
 
 export type AppConfirmTone = 'neutral' | 'warning' | 'danger'
@@ -14,8 +16,8 @@ export const appConfirmState = reactive({
   open: false,
   title: '',
   message: '',
-  confirmLabel: '确认',
-  cancelLabel: '取消',
+  confirmLabel: tr('确认'),
+  cancelLabel: tr('取消'),
   tone: 'danger' as AppConfirmTone,
 })
 
@@ -35,8 +37,8 @@ export function appConfirm(options: AppConfirmOptions) {
     open: true,
     title: options.title,
     message: options.message || '',
-    confirmLabel: options.confirmLabel || '确认',
-    cancelLabel: options.cancelLabel || '取消',
+    confirmLabel: options.confirmLabel || tr('确认'),
+    cancelLabel: options.cancelLabel || tr('取消'),
     tone: options.tone || 'danger',
   })
   return new Promise<boolean>(resolve => {

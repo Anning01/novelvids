@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { AlertTriangle, CheckCircle2, LoaderCircle, X } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { dismissWorkbenchNotice, isWorkbenchNoticeDismissed } from '../interaction/dismissedNotices';
@@ -23,12 +25,12 @@ function dismissFailure() {
 }
 const label = computed(() => {
   if (failed.value)
-    return props.error || '运行失败';
+    return props.error || tr('运行失败');
   if (running.value)
-    return `运行中 ${Math.round(props.progress ?? 0)}%`;
+    return tr('运行中 {p0}%', { p0: Math.round(props.progress ?? 0) });
   if (normalizedStatus.value === 'SUCCEEDED')
-    return '最近运行已完成';
-  return '画布已就绪';
+    return tr('最近运行已完成');
+  return tr('画布已就绪');
 });
 </script>
 
@@ -44,7 +46,7 @@ const label = computed(() => {
     <AlertTriangle v-else-if="failed" :size="17" aria-hidden="true" />
     <CheckCircle2 v-else :size="15" aria-hidden="true" />
     <span>{{ label }}</span>
-    <button v-if="failed" type="button" class="workbench-message-close" aria-label="关闭运行异常提示" @click="dismissFailure">
+    <button v-if="failed" type="button" class="workbench-message-close" :aria-label="tr('关闭运行异常提示')" @click="dismissFailure">
       <X :size="16" aria-hidden="true" />
     </button>
   </div>

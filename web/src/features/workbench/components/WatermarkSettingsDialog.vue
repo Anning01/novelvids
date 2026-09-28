@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Upload, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import {
@@ -40,54 +42,49 @@ function upload(event: Event) {
 <template>
   <Teleport to="body">
     <div v-if="open" class="workbench-dialog-backdrop" @mousedown.self="$emit('close')">
-      <section class="workbench-watermark-dialog" role="dialog" aria-modal="true" aria-label="设置成片水印">
+      <section class="workbench-watermark-dialog" role="dialog" aria-modal="true" :aria-label="tr('设置成片水印')">
         <header>
           <div>
-            <h2>设置成片水印</h2>
-            <p>选择组织模板或上传图片，并调整水印位置和大小。</p>
+            <h2>{{ tr('设置成片水印') }}</h2>
+            <p>{{ tr('选择组织模板或上传图片，并调整水印位置和大小。') }}</p>
           </div>
-          <button type="button" aria-label="关闭水印设置" title="Close" @click="$emit('close')"><X :size="18" aria-hidden="true" /></button>
+          <button type="button" :aria-label="tr('关闭水印设置')" title="Close" @click="$emit('close')"><X :size="18" aria-hidden="true" /></button>
         </header>
 
         <div class="workbench-watermark-dialog__template-row">
-          <label>组织模板
-            <select aria-label="组织模板" disabled><option>不使用模板</option></select>
+          <label>{{ tr('组织模板') }} <select :aria-label="tr('组织模板')" disabled><option>{{ tr('不使用模板') }}</option></select>
           </label>
-          <a href="/watermark-templates" target="_blank" rel="noopener">管理模板</a>
+          <a href="/watermark-templates" target="_blank" rel="noopener">{{ tr('管理模板') }}</a>
         </div>
 
-        <div class="workbench-watermark-dialog__preview" aria-label="水印预览">
+        <div class="workbench-watermark-dialog__preview" :aria-label="tr('水印预览')">
           <span>9:16</span>
           <img
             v-if="draft.resourceUrl"
             :src="draft.resourceUrl"
-            alt="水印预览图"
+            :alt="tr('水印预览图')"
             :style="{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%`, width: `${draft.scale * 100}%` }"
           >
           <label class="workbench-watermark-dialog__upload" :class="{ 'is-loading': uploading }">
             <Upload :size="19" aria-hidden="true" />
-            {{ uploading ? '上传中…' : '上传水印图片' }}
-            <input type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传水印图片" :disabled="uploading" @change="upload">
+            {{ uploading ? tr('上传中…') : tr('上传水印图片') }}
+            <input type="file" accept="image/png,image/jpeg,image/webp" :aria-label="tr('上传水印图片')" :disabled="uploading" @change="upload">
           </label>
         </div>
 
         <div class="workbench-watermark-dialog__fields">
-          <label>预设位置
-            <select aria-label="水印位置" :value="preset" @change="changePreset">
+          <label>{{ tr('预设位置') }} <select :aria-label="tr('水印位置')" :value="preset" @change="changePreset">
               <option v-for="item in WATERMARK_PRESETS" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>
           </label>
-          <label>横向位置
-            <span>{{ Math.round(draft.x * 100) }}%</span>
-            <input type="range" aria-label="横向位置" min="0" max="1" step="0.01" :value="draft.x" @change="changeNumber('x', $event)">
+          <label>{{ tr('横向位置') }} <span>{{ Math.round(draft.x * 100) }}%</span>
+            <input type="range" :aria-label="tr('横向位置')" min="0" max="1" step="0.01" :value="draft.x" @change="changeNumber('x', $event)">
           </label>
-          <label>纵向位置
-            <span>{{ Math.round(draft.y * 100) }}%</span>
-            <input type="range" aria-label="纵向位置" min="0" max="1" step="0.01" :value="draft.y" @change="changeNumber('y', $event)">
+          <label>{{ tr('纵向位置') }} <span>{{ Math.round(draft.y * 100) }}%</span>
+            <input type="range" :aria-label="tr('纵向位置')" min="0" max="1" step="0.01" :value="draft.y" @change="changeNumber('y', $event)">
           </label>
-          <label>缩放
-            <span>{{ Math.round(draft.scale * 100) }}%</span>
-            <input type="range" aria-label="缩放" min="0.05" max="1" step="0.01" :value="draft.scale" @change="changeNumber('scale', $event)">
+          <label>{{ tr('缩放') }} <span>{{ Math.round(draft.scale * 100) }}%</span>
+            <input type="range" :aria-label="tr('缩放')" min="0.05" max="1" step="0.01" :value="draft.scale" @change="changeNumber('scale', $event)">
           </label>
         </div>
       </section>

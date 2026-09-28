@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import {
   AudioLines,
   Box,
@@ -120,7 +122,7 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
 </script>
 
 <template>
-  <div class="workbench-toolbar nodrag nowheel" role="toolbar" aria-label="画布工具栏" @pointerdown.stop @click.stop @wheel.stop>
+  <div class="workbench-toolbar nodrag nowheel" role="toolbar" :aria-label="tr('画布工具栏')" @pointerdown.stop @click.stop @wheel.stop>
     <div ref="addMenuRoot" class="workbench-toolbar__add">
       <button
         ref="addMenuTrigger"
@@ -130,8 +132,8 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
         aria-haspopup="menu"
         :aria-expanded="addMenuOpen"
         aria-controls="workbench-add-node-menu"
-        :aria-label="addMenuOpen ? '关闭添加节点菜单' : '添加节点'"
-        :title="addMenuOpen ? '关闭添加节点菜单' : '添加节点'"
+        :aria-label="addMenuOpen ? tr('关闭添加节点菜单') : tr('添加节点')"
+        :title="addMenuOpen ? tr('关闭添加节点菜单') : tr('添加节点')"
         @click="toggleAddMenu"
       >
         <X v-if="addMenuOpen" :size="20" aria-hidden="true" />
@@ -139,70 +141,70 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
       </button>
 
       <Transition name="workbench-add-menu">
-        <div v-if="addMenuOpen" id="workbench-add-node-menu" class="workbench-add-menu" role="menu" aria-label="添加节点菜单">
-          <p class="workbench-add-menu__heading">添加节点</p>
-          <button type="button" role="menuitem" aria-label="新增资产" @click="addNode('addAsset')">
+        <div v-if="addMenuOpen" id="workbench-add-node-menu" class="workbench-add-menu" role="menu" :aria-label="tr('添加节点菜单')">
+          <p class="workbench-add-menu__heading">{{ tr('添加节点') }}</p>
+          <button type="button" role="menuitem" :aria-label="tr('新增资产')" @click="addNode('addAsset')">
             <Box :size="18" aria-hidden="true" />
-            <span>资产</span>
+            <span>{{ tr('资产') }}</span>
           </button>
-          <button type="button" role="menuitem" aria-label="新增视频" @click="addNode('addShot')">
+          <button type="button" role="menuitem" :aria-label="tr('新增视频')" @click="addNode('addShot')">
             <Video :size="18" aria-hidden="true" />
-            <span>视频</span>
+            <span>{{ tr('视频') }}</span>
           </button>
-          <button type="button" role="menuitem" aria-label="新增便签" @click="addNode('addNote')">
+          <button type="button" role="menuitem" :aria-label="tr('新增便签')" @click="addNode('addNote')">
             <StickyNote :size="18" aria-hidden="true" />
-            <span>便签</span>
+            <span>{{ tr('便签') }}</span>
           </button>
-          <button v-if="watermarkEnabled" type="button" role="menuitem" aria-label="新增水印" @click="addNode('addWatermark')">
+          <button v-if="watermarkEnabled" type="button" role="menuitem" :aria-label="tr('新增水印')" @click="addNode('addWatermark')">
             <Image :size="18" aria-hidden="true" />
-            <span>水印</span>
+            <span>{{ tr('水印') }}</span>
           </button>
-          <button v-if="composerEnabled" type="button" role="menuitem" aria-label="新增视频合成器" @click="addNode('addComposer')">
+          <button v-if="composerEnabled" type="button" role="menuitem" :aria-label="tr('新增视频合成器')" @click="addNode('addComposer')">
             <Film :size="18" aria-hidden="true" />
-            <span>视频合成器</span>
+            <span>{{ tr('视频合成器') }}</span>
           </button>
 
-          <p class="workbench-add-menu__heading workbench-add-menu__heading--resources">添加资源</p>
+          <p class="workbench-add-menu__heading workbench-add-menu__heading--resources">{{ tr('添加资源') }}</p>
           <button type="button" role="menuitem" @click="chooseFiles(imageInput)">
             <ImageUp :size="18" aria-hidden="true" />
-            <span>上传图片</span>
+            <span>{{ tr('上传图片') }}</span>
           </button>
           <button type="button" role="menuitem" @click="chooseFiles(videoInput)">
             <Video :size="18" aria-hidden="true" />
-            <span>上传视频</span>
+            <span>{{ tr('上传视频') }}</span>
           </button>
           <button type="button" role="menuitem" @click="chooseFiles(audioInput)">
             <AudioLines :size="18" aria-hidden="true" />
-            <span>上传音频</span>
+            <span>{{ tr('上传音频') }}</span>
           </button>
         </div>
       </Transition>
     </div>
 
-    <input ref="imageInput" class="workbench-toolbar__file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple aria-label="选择上传图片文件" @change="emitFiles('image', $event)">
-    <input ref="videoInput" class="workbench-toolbar__file-input" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple aria-label="选择上传视频文件" @change="emitFiles('video', $event)">
-    <input ref="audioInput" class="workbench-toolbar__file-input" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" multiple aria-label="选择上传音频文件" @change="emitFiles('audio', $event)">
+    <input ref="imageInput" class="workbench-toolbar__file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple :aria-label="tr('选择上传图片文件')" @change="emitFiles('image', $event)">
+    <input ref="videoInput" class="workbench-toolbar__file-input" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple :aria-label="tr('选择上传视频文件')" @change="emitFiles('video', $event)">
+    <input ref="audioInput" class="workbench-toolbar__file-input" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" multiple :aria-label="tr('选择上传音频文件')" @change="emitFiles('audio', $event)">
 
-    <div class="workbench-toolbar__scroll" tabindex="0" role="group" aria-label="画布节点与编辑工具，可横向滚动">
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="为所选节点添加背景分区" title="多选节点后添加背景分区" :disabled="running || !canCreateSection" @click="$emit('createSection')">
+    <div class="workbench-toolbar__scroll" tabindex="0" role="group" :aria-label="tr('画布节点与编辑工具，可横向滚动')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('为所选节点添加背景分区')" :title="tr('多选节点后添加背景分区')" :disabled="running || !canCreateSection" @click="$emit('createSection')">
         <Palette :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="自动整理布局" title="按连接关系分列并自动避让" :disabled="running" @click="$emit('auto-arrange')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('自动整理布局')" :title="tr('按连接关系分列并自动避让')" :disabled="running" @click="$emit('auto-arrange')">
         <LayoutGrid :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="删除所选" title="删除所选（Delete）" :disabled="running || !hasSelection" @click="$emit('deleteSelection')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('删除所选')" :title="tr('删除所选（Delete）')" :disabled="running || !hasSelection" @click="$emit('deleteSelection')">
         <Trash2 :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="复制所选" title="复制所选（Ctrl/Cmd+C）" :disabled="running || !canCopy" @click="$emit('copy')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('复制所选')" :title="tr('复制所选（Ctrl/Cmd+C）')" :disabled="running || !canCopy" @click="$emit('copy')">
         <Copy :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="粘贴" title="粘贴（Ctrl/Cmd+V）" :disabled="running || !canPaste" @click="$emit('paste')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('粘贴')" :title="tr('粘贴（Ctrl/Cmd+V）')" :disabled="running || !canPaste" @click="$emit('paste')">
         <ClipboardPaste :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="撤销" title="撤销（Ctrl/Cmd+Z）" :disabled="running || !canUndo" @click="$emit('undo')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('撤销')" :title="tr('撤销（Ctrl/Cmd+Z）')" :disabled="running || !canUndo" @click="$emit('undo')">
         <Undo2 :size="16" aria-hidden="true" />
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" aria-label="重做" title="重做（Ctrl/Cmd+Shift+Z）" :disabled="running || !canRedo" @click="$emit('redo')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('重做')" :title="tr('重做（Ctrl/Cmd+Shift+Z）')" :disabled="running || !canRedo" @click="$emit('redo')">
         <Redo2 :size="16" aria-hidden="true" />
       </button>
     </div>
@@ -211,12 +213,12 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
       class="workbench-toolbar__button workbench-toolbar__button--primary"
       type="button"
       :disabled="running || !runState.enabled"
-      :aria-label="!runState.enabled ? '请先选择可执行节点' : running ? '正在批量执行' : '运行所选配置'"
+      :aria-label="!runState.enabled ? tr('请先选择可执行节点') : running ? tr('正在批量执行') : tr('运行所选配置')"
       :title="runState.enabled ? undefined : runState.reason"
       @click="$emit('runSelected')"
     >
       <Play :size="16" aria-hidden="true" />
-      <span>{{ running ? '执行中' : '运行此配置' }}</span>
+      <span>{{ running ? tr('执行中') : tr('运行此配置') }}</span>
     </button>
   </div>
 </template>

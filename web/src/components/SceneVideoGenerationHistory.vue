@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref } from 'vue'
 import { LoaderCircle, RotateCcw, Sparkles, TriangleAlert, Video as VideoIcon, X } from 'lucide-vue-next'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
@@ -28,7 +30,7 @@ function errorMessage(record: Video) {
     const value = metadata[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
-  return record.status === TaskStatusEnum.CANCELLED ? '生成任务已取消' : '视频生成失败'
+  return record.status === TaskStatusEnum.CANCELLED ? tr('生成任务已取消') : tr('视频生成失败')
 }
 
 function displayTime(value: string) {
@@ -62,10 +64,10 @@ function selectVersion(record: Video) {
 }
 
 function versionLabel(record: Video, index: number) {
-  if (isFailed(record)) return '生成失败'
-  if (record.id === props.currentId) return '当前分镜'
-  if (isRunning(record)) return '生成中'
-  return `版本 ${sortedRecords.value.length - index}`
+  if (isFailed(record)) return tr('生成失败')
+  if (record.id === props.currentId) return tr('当前分镜')
+  if (isRunning(record)) return tr('生成中')
+  return tr('版本 {p0}', { p0: sortedRecords.value.length - index })
 }
 
 function closeError() {
@@ -79,7 +81,7 @@ function retryFailedRecord() {
 </script>
 
 <template>
-  <section class="video-history" aria-label="视频生成版本">
+  <section class="video-history" :aria-label="tr('视频生成版本')">
     <div v-if="sortedRecords.length" class="video-history__rail">
       <button
         v-for="(record, index) in sortedRecords"
@@ -92,7 +94,7 @@ function retryFailedRecord() {
           'is-running': isRunning(record),
         }"
         :disabled="(record.id === currentId && !isFailed(record)) || (!isSelectable(record) && !isFailed(record))"
-        :aria-label="isFailed(record) ? `查看视频版本 ${record.id} 的失败原因` : record.id === currentId ? '当前分镜视频' : `切换到视频版本 ${record.id}`"
+        :aria-label="isFailed(record) ? tr('查看视频版本 {p0} 的失败原因', { p0: record.id }) : record.id === currentId ? tr('当前分镜视频') : tr('切换到视频版本 {p0}', { p0: record.id })"
         :title="`${versionLabel(record, index)} · ${displayTime(record.created_at)}`"
         @click="selectVersion(record)"
       >
@@ -114,7 +116,7 @@ function retryFailedRecord() {
         </span>
       </button>
     </div>
-    <p v-else class="video-history__empty"><VideoIcon :size="15" />生成后会在这里保留视频版本</p>
+    <p v-else class="video-history__empty"><VideoIcon :size="15" />{{ tr('生成后会在这里保留视频版本') }}</p>
 
     <Teleport to="body">
       <div v-if="errorRecord" class="video-history-error-backdrop" @click.self="closeError">
@@ -123,15 +125,15 @@ function retryFailedRecord() {
             <span><TriangleAlert :size="18" /></span>
             <div>
               <strong id="video-history-error-title">{{ formatVideoGenerationError(errorMessage(errorRecord)).title }}</strong>
-              <small>视频版本 {{ errorRecord.id }} · {{ displayTime(errorRecord.created_at) }}</small>
+              <small>{{ tr('视频版本') }} {{ errorRecord.id }} · {{ displayTime(errorRecord.created_at) }}</small>
             </div>
-            <button type="button" aria-label="关闭失败原因" @click="closeError"><X :size="16" /></button>
+            <button type="button" :aria-label="tr('关闭失败原因')" @click="closeError"><X :size="16" /></button>
           </header>
           <p>{{ formatVideoGenerationError(errorMessage(errorRecord)).message }}</p>
           <p class="video-history-error-dialog__suggestion">{{ formatVideoGenerationError(errorMessage(errorRecord)).suggestion }}</p>
           <footer>
-            <button type="button" class="video-history-error-dialog__cancel" @click="closeError">关闭</button>
-            <button type="button" class="video-history-error-dialog__retry" :disabled="busy" @click="retryFailedRecord"><RotateCcw :size="13" />重新生成</button>
+            <button type="button" class="video-history-error-dialog__cancel" @click="closeError">{{ tr('关闭') }}</button>
+            <button type="button" class="video-history-error-dialog__retry" :disabled="busy" @click="retryFailedRecord"><RotateCcw :size="13" />{{ tr('重新生成') }}</button>
           </footer>
         </section>
       </div>

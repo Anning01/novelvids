@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, dateLocale } from '@/i18n'
+
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElPopover } from 'element-plus'
 import { Check, ChevronDown, History, MessageSquare, Plus, RotateCcw, Search, Trash2, X } from 'lucide-vue-next'
@@ -20,14 +22,14 @@ const confirming = ref<number | null>(null)
 const trigger = ref<InstanceType<typeof AppButton> | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
 const current = computed(() => props.conversations.find(item => item.id === props.currentId))
-const title = (item?: AgentConversation) => item?.title?.trim() || '新会话'
+const title = (item?: AgentConversation) => item?.title?.trim() || tr('新会话')
 const rows = computed(() => (deleted.value ? props.deletedConversations : props.conversations)
   .filter(item => title(item).toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
 const time = (value: string) => {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '刚刚'
+  if (Number.isNaN(date.getTime())) return tr('刚刚')
   const today = new Date().toDateString() === date.toDateString()
-  return new Intl.DateTimeFormat('zh-CN', today
+  return new Intl.DateTimeFormat(dateLocale.value, today
     ? { hour: '2-digit', minute: '2-digit', hour12: false }
     : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
 }
@@ -52,40 +54,40 @@ watch(() => props.conversations.map(item => item.id).join(','), () => { confirmi
 </script>
 
 <template>
-  <div class="agent-conversations" aria-label="对话管理">
+  <div class="agent-conversations" :aria-label="tr('对话管理')">
     <ElPopover :visible="open" :disabled="disabled && !open" trigger="click" placement="bottom-start" :width="380" :show-arrow="false"
       :popper-class="['agent-conversation-popover', { 'is-workflow': workflow }]" :popper-style="{ padding: '0', maxWidth: 'calc(100vw - 24px)' }"
       @update:visible="open = $event" @after-enter="searchInput?.focus()">
       <template #reference>
-        <AppButton ref="trigger" class="agent-conversations__trigger" size="sm" :disabled="disabled" aria-label="对话记录" title="查看对话记录" aria-haspopup="dialog" :aria-expanded="open">
+        <AppButton ref="trigger" class="agent-conversations__trigger" size="sm" :disabled="disabled" :aria-label="tr('对话记录')" :title="tr('查看对话记录')" aria-haspopup="dialog" :aria-expanded="open">
           <History :size="14" class="agent-conversations__history" />
           <span class="agent-conversations__current" :title="title(current)">{{ title(current) }}</span>
           <ChevronDown :size="13" class="agent-conversations__chevron" />
         </AppButton>
       </template>
-      <section class="agent-conversation-list" role="dialog" aria-label="会话列表" :aria-busy="disabled" @keydown.esc.stop.prevent="close">
-        <header><div><strong>{{ deleted ? '已删除会话' : '最近会话' }}</strong><span>{{ deleted ? '恢复后可继续查看和对话' : '选择一个会话，接着创作' }}</span></div><AppButton size="sm" icon-only aria-label="关闭会话列表" @click="close"><X :size="16" /></AppButton></header>
-        <label class="agent-conversation-list__search"><Search :size="15" /><input ref="searchInput" v-model="search" type="search" :placeholder="deleted ? '搜索已删除会话' : '搜索最近会话'" aria-label="搜索会话" /></label>
-        <ul aria-label="会话记录">
+      <section class="agent-conversation-list" role="dialog" :aria-label="tr('会话列表')" :aria-busy="disabled" @keydown.esc.stop.prevent="close">
+        <header><div><strong>{{ deleted ? tr('已删除会话') : tr('最近会话') }}</strong><span>{{ deleted ? tr('恢复后可继续查看和对话') : tr('选择一个会话，接着创作') }}</span></div><AppButton size="sm" icon-only :aria-label="tr('关闭会话列表')" @click="close"><X :size="16" /></AppButton></header>
+        <label class="agent-conversation-list__search"><Search :size="15" /><input ref="searchInput" v-model="search" type="search" :placeholder="deleted ? tr('搜索已删除会话') : tr('搜索最近会话')" :aria-label="tr('搜索会话')" /></label>
+        <ul :aria-label="tr('会话记录')">
           <li v-for="item in rows" :key="item.id" :class="{ 'is-current': !deleted && item.id === currentId }">
             <template v-if="confirming !== item.id">
-              <button class="agent-conversation-list__item" type="button" :disabled="disabled || deleted" :aria-current="!deleted && item.id === currentId ? 'true' : undefined" :aria-label="`打开会话：${title(item)}`" @click="select(item.id)">
-                <MessageSquare :size="16" /><span><strong :title="title(item)">{{ title(item) }}</strong><small><time :datetime="item.updated_at">{{ time(item.updated_at) }}</time><span v-if="!deleted && item.id === currentId"> · 当前会话</span></small></span><Check v-if="!deleted && item.id === currentId" :size="14" />
+              <button class="agent-conversation-list__item" type="button" :disabled="disabled || deleted" :aria-current="!deleted && item.id === currentId ? 'true' : undefined" :aria-label="tr('打开会话：{p0}', { p0: title(item) })" @click="select(item.id)">
+                <MessageSquare :size="16" /><span><strong :title="title(item)">{{ title(item) }}</strong><small><time :datetime="item.updated_at">{{ time(item.updated_at) }}</time><span v-if="!deleted && item.id === currentId"> {{ tr('· 当前会话') }}</span></small></span><Check v-if="!deleted && item.id === currentId" :size="14" />
               </button>
-              <AppButton v-if="deleted" size="sm" icon-only :disabled="disabled" :aria-label="`恢复会话：${title(item)}`" title="恢复会话" @click="emit('restore', item.id)"><RotateCcw :size="15" /></AppButton>
-              <AppButton v-else class="agent-conversation-list__delete" size="sm" icon-only :disabled="disabled" :aria-label="`删除会话：${title(item)}`" title="删除会话" @click="confirming = item.id"><Trash2 :size="15" /></AppButton>
+              <AppButton v-if="deleted" size="sm" icon-only :disabled="disabled" :aria-label="tr('恢复会话：{p0}', { p0: title(item) })" :title="tr('恢复会话')" @click="emit('restore', item.id)"><RotateCcw :size="15" /></AppButton>
+              <AppButton v-else class="agent-conversation-list__delete" size="sm" icon-only :disabled="disabled" :aria-label="tr('删除会话：{p0}', { p0: title(item) })" :title="tr('删除会话')" @click="confirming = item.id"><Trash2 :size="15" /></AppButton>
             </template>
-            <div v-else class="agent-conversation-list__confirm" role="group" aria-label="确认删除会话">
-              <strong>删除“{{ title(item) }}”？</strong><p>已保存的设定与分镜会保留，会话可恢复。</p>
-              <div><AppButton size="xs" :disabled="disabled" @click="confirming = null">取消</AppButton><AppButton size="xs" variant="danger" :disabled="disabled" @click="emit('delete', item.id)">删除会话</AppButton></div>
+            <div v-else class="agent-conversation-list__confirm" role="group" :aria-label="tr('确认删除会话')">
+              <strong>{{ tr('删除“') }}{{ title(item) }}”？</strong><p>{{ tr('已保存的设定与分镜会保留，会话可恢复。') }}</p>
+              <div><AppButton size="xs" :disabled="disabled" @click="confirming = null">{{ tr('取消') }}</AppButton><AppButton size="xs" variant="danger" :disabled="disabled" @click="emit('delete', item.id)">{{ tr('删除会话') }}</AppButton></div>
             </div>
           </li>
         </ul>
-        <div v-if="!rows.length" class="agent-conversation-list__empty"><MessageSquare :size="25" /><strong>{{ disabled ? '正在加载会话…' : search ? '没有找到相关会话' : deleted ? '没有已删除的会话' : '还没有对话记录' }}</strong><span v-if="!disabled">{{ search ? '换个关键词试试' : deleted ? '删除的会话会保留在这里' : '新建一个会话，开始这次创作' }}</span></div>
-        <footer><AppButton size="xs" :disabled="disabled" @click="switchView"><component :is="deleted ? History : Trash2" :size="13" />{{ deleted ? '返回最近会话' : '已删除' }}</AppButton><span>最近 30 条</span></footer>
+        <div v-if="!rows.length" class="agent-conversation-list__empty"><MessageSquare :size="25" /><strong>{{ disabled ? tr('正在加载会话…') : search ? tr('没有找到相关会话') : deleted ? tr('没有已删除的会话') : tr('还没有对话记录') }}</strong><span v-if="!disabled">{{ search ? tr('换个关键词试试') : deleted ? tr('删除的会话会保留在这里') : tr('新建一个会话，开始这次创作') }}</span></div>
+        <footer><AppButton size="xs" :disabled="disabled" @click="switchView"><component :is="deleted ? History : Trash2" :size="13" />{{ deleted ? tr('返回最近会话') : tr('已删除') }}</AppButton><span>{{ tr('最近 30 条') }}</span></footer>
       </section>
     </ElPopover>
-    <AppButton class="agent-conversations__new" size="sm" :disabled="disabled" aria-label="新建对话" @click="create"><Plus :size="14" />新会话</AppButton>
+    <AppButton class="agent-conversations__new" size="sm" :disabled="disabled" :aria-label="tr('新建对话')" @click="create"><Plus :size="14" />{{ tr('新会话') }}</AppButton>
   </div>
 </template>
 

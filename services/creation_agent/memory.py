@@ -1,5 +1,7 @@
 """Project-scoped creative constraints with source attribution and story-time selection."""
 
+from utils.messages import localized_message
+
 import hashlib
 
 from tortoise.transactions import in_transaction
@@ -39,20 +41,20 @@ class CreationMemory:
             if await CreationConstraint.filter(source_message_id=source.id, fingerprint=fingerprint).exists():
                 continue
             if proposal.source_quote not in source.content:
-                raise ValueError("长期创作约束必须引用本轮用户明确表达的原文，不能把模型推断当成设定")
+                raise ValueError(localized_message('长期创作约束必须引用本轮用户明确表达的原文，不能把模型推断当成设定'))
             scope = proposal.scope
             await agent_sessions.validate_scope(novel_id, AgentRunRequest(
                 request_id=source.request_id, message=source.content, chapter_id=scope.chapter_id, targets=scope.targets))
             if scope.asset_id and not await Asset.filter(id=scope.asset_id, novel_id=novel_id).exists():
-                raise ValueError("约束角色不属于当前项目")
+                raise ValueError(localized_message('约束角色不属于当前项目'))
             if scope.kind == "range":
                 numbers = set(await Chapter.filter(novel_id=novel_id, number__in=[scope.start_chapter, scope.end_chapter]).values_list("number", flat=True))
                 if numbers != {scope.start_chapter, scope.end_chapter}:
-                    raise ValueError("剧情区间必须使用当前项目已有章节")
+                    raise ValueError(localized_message('剧情区间必须使用当前项目已有章节'))
             if proposal.supersedes_id:
                 previous = await CreationConstraint.get_or_none(id=proposal.supersedes_id, novel_id=novel_id, superseded_by_id=None)
                 if previous is None or previous.scope != scope.model_dump():
-                    raise ValueError("要替代的约束已变化或作用范围不同，请先澄清")
+                    raise ValueError(localized_message('要替代的约束已变化或作用范围不同，请先澄清'))
 
     async def save(self, source: AgentMessage, proposals: list[CreationConstraintProposal]) -> list[CreationConstraint]:
         await self.validate(source, proposals)
@@ -78,7 +80,7 @@ class CreationMemory:
                 if proposal.supersedes_id:
                     updated = await CreationConstraint.filter(id=proposal.supersedes_id, superseded_by_id=None).using_db(connection).update(superseded_by_id=constraint.id)
                     if not updated:
-                        raise ValueError("约束已被其他会话修改，请重新读取后再保存")
+                        raise ValueError(localized_message('约束已被其他会话修改，请重新读取后再保存'))
                 saved.append(constraint)
             return saved
 

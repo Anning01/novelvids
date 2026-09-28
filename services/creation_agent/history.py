@@ -18,11 +18,12 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import UsageLimits
 
 from models.creation_agent import AgentConversation, AgentMessage, AgentContextCheckpoint
-from prompts.creation_agent import CREATION_SUMMARY_INSTRUCTIONS, render_creation_summary
+from prompts.creation_agent import render_summary_instructions, render_creation_summary
+from utils.prompt_language import task_language
 from schemas.creation_agent import AgentConfiguration
 
 
-summary_agent = Agent(instructions=CREATION_SUMMARY_INSTRUCTIONS, name='creation_history_summary')
+summary_agent = Agent(instructions=lambda: render_summary_instructions(task_language.get() or "zh"), name='creation_history_summary')
 
 
 def _compact_retry_content(content: list[dict] | str) -> str:

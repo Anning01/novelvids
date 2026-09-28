@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -25,19 +27,19 @@ function changePage(next: number) {
 
 <template>
   <footer v-if="total > 0" class="app-pagination">
-    <span class="app-pagination__total">共 {{ total }} 条</span>
+    <span class="app-pagination__total">{{ tr('共') }} {{ total }} {{ tr('条') }}</span>
     <div class="app-pagination__controls">
       <select
         class="app-pagination__size"
         :value="pageSize"
-        aria-label="每页条数"
+        :aria-label="tr('每页条数')"
         @change="emit('size-change', Number(($event.target as HTMLSelectElement).value))"
       >
-        <option v-for="option in pageSizeOptions" :key="option" :value="option">{{ option }} 条/页</option>
+        <option v-for="option in pageSizeOptions" :key="option" :value="option">{{ option }} {{ tr('条/页') }}</option>
       </select>
-      <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
+      <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">{{ tr('上一页') }}</button>
       <span>{{ page }} / {{ pages }}</span>
-      <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">下一页</button>
+      <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">{{ tr('下一页') }}</button>
     </div>
   </footer>
 </template>

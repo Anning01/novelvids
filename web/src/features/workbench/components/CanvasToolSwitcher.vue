@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Hand, MousePointer2 } from 'lucide-vue-next';
 
 defineProps<{ modelValue: 'select' | 'pan' }>();
@@ -6,14 +8,14 @@ const emit = defineEmits<{ 'update:modelValue': [value: 'select' | 'pan'] }>();
 </script>
 
 <template>
-  <div class="workbench-canvas-tools" role="toolbar" aria-label="画布操作模式">
+  <div class="workbench-canvas-tools" role="toolbar" :aria-label="tr('画布操作模式')">
     <button
       type="button"
       class="workbench-canvas-tools__button"
       :class="{ 'is-active': modelValue === 'select' }"
       :aria-pressed="modelValue === 'select'"
-      aria-label="选择工具"
-      title="选择工具"
+      :aria-label="tr('选择工具')"
+      :title="tr('选择工具')"
       @pointerdown.stop
       @click.stop="emit('update:modelValue', 'select')"
     >
@@ -24,8 +26,8 @@ const emit = defineEmits<{ 'update:modelValue': [value: 'select' | 'pan'] }>();
       class="workbench-canvas-tools__button"
       :class="{ 'is-active': modelValue === 'pan' }"
       :aria-pressed="modelValue === 'pan'"
-      aria-label="拖动画布工具"
-      title="拖动画布工具"
+      :aria-label="tr('拖动画布工具')"
+      :title="tr('拖动画布工具')"
       @pointerdown.stop
       @click.stop="emit('update:modelValue', 'pan')"
     >

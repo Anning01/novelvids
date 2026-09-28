@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth.deps import AuthContext, require_roles, require_team_access
@@ -92,4 +94,4 @@ async def get_billing_record_details(record_id: int, params: QueryParams = Depen
     try:
         return ResponseSchema(data=await billing_controller.records(params, team_id, user_id, record_id))
     except LookupError:
-        raise HTTPException(404, '当前范围内不存在该流水') from None
+        raise HTTPException(404, localized_message('当前范围内不存在该流水')) from None

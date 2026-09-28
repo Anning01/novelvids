@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref, watch } from 'vue'
 import { LoaderCircle, Search, X } from 'lucide-vue-next'
 import { api } from '@/api'
@@ -13,12 +15,12 @@ const pages = ref(1)
 const search = ref('')
 const loading = ref(false)
 const error = ref('')
-const title = computed(() => props.kind === 'audio' ? '选择参考音频' : '选择数字人')
+const title = computed(() => props.kind === 'audio' ? tr('选择参考音频') : tr('选择数字人'))
 let requestId = 0
 
 function assetId(item: LibraryItem) { return item.asset_id }
 function name(item: LibraryItem) { return 'nickname' in item ? item.nickname : `${item.country} · ${item.occupation}` }
-function detail(item: LibraryItem) { return 'audio_url' in item ? item.gender : `${item.age} 岁 · ${item.gender}` }
+function detail(item: LibraryItem) { return 'audio_url' in item ? item.gender : tr('{p0} 岁 · {p1}', { p0: item.age, p1: item.gender }) }
 function preview(item: LibraryItem) { return 'avatar_url' in item ? item.avatar_url : item.image_url }
 
 async function load(reset = false) {
@@ -34,7 +36,7 @@ async function load(reset = false) {
     items.value = reset ? response.data.items : [...items.value, ...response.data.items]
     pages.value = response.data.pagination.pages
   } catch (reason) {
-    if (currentRequestId === requestId) error.value = reason instanceof Error ? reason.message : '资源库加载失败'
+    if (currentRequestId === requestId) error.value = reason instanceof Error ? reason.message : tr('资源库加载失败')
   } finally {
     if (currentRequestId === requestId) loading.value = false
   }
@@ -54,17 +56,17 @@ watch(() => props.open, value => {
   <Teleport to="body">
     <div v-if="open" class="media-picker-backdrop" role="presentation" @mousedown.self="$emit('close')">
       <section class="media-picker" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="loading" @keydown.esc.stop="$emit('close')">
-        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? '从音频库选择稳定参考音色' : '仅展示纯数字人资产，不包含真人' }}</p></div><AppButton type="button" size="sm" icon-only aria-label="关闭" @click="$emit('close')"><X :size="20" aria-hidden="true" /></AppButton></header>
-        <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" aria-hidden="true" /><input v-model="search" :aria-label="kind === 'audio' ? '搜索参考音频' : '搜索数字人'" :placeholder="kind === 'audio' ? '搜索昵称、性别或资产 ID' : '搜索国家、职业、性别或资产 ID'" autofocus><AppButton type="submit" :disabled="loading">搜索</AppButton></form>
+        <header><div><h2>{{ title }}</h2><p>{{ kind === 'audio' ? tr('从音频库选择稳定参考音色') : tr('仅展示纯数字人资产，不包含真人') }}</p></div><AppButton type="button" size="sm" icon-only :aria-label="tr('关闭')" @click="$emit('close')"><X :size="20" aria-hidden="true" /></AppButton></header>
+        <form class="media-picker-search" @submit.prevent="submitSearch"><Search :size="16" aria-hidden="true" /><input v-model="search" :aria-label="kind === 'audio' ? tr('搜索参考音频') : tr('搜索数字人')" :placeholder="kind === 'audio' ? tr('搜索昵称、性别或资产 ID') : tr('搜索国家、职业、性别或资产 ID')" autofocus><AppButton type="submit" :disabled="loading">{{ tr('搜索') }}</AppButton></form>
         <p v-if="error" class="media-picker-error" role="alert">{{ error }}</p>
         <div class="media-picker-grid">
           <AppButton v-for="item in items" :key="assetId(item)" type="button" :class="{ 'is-selected': selectedAssetId === assetId(item) }" @click="$emit('choose', item)">
             <img :src="preview(item)" alt="" loading="lazy" decoding="async"><span><strong>{{ name(item) }}</strong><small>{{ detail(item) }}</small><code>{{ assetId(item) }}</code></span>
           </AppButton>
         </div>
-        <div v-if="loading && !items.length" class="media-picker-empty" role="status"><LoaderCircle class="is-spinning" :size="24" aria-hidden="true" /><span>正在加载资源…</span></div>
-        <div v-else-if="!items.length" class="media-picker-empty">没有匹配的资源</div>
-        <footer><span>第 {{ page }} / {{ pages || 1 }} 页</span><AppButton v-if="page < pages" type="button" :disabled="loading" @click="loadMore"><LoaderCircle v-if="loading" class="is-spinning" :size="15" aria-hidden="true" />加载更多</AppButton></footer>
+        <div v-if="loading && !items.length" class="media-picker-empty" role="status"><LoaderCircle class="is-spinning" :size="24" aria-hidden="true" /><span>{{ tr('正在加载资源…') }}</span></div>
+        <div v-else-if="!items.length" class="media-picker-empty">{{ tr('没有匹配的资源') }}</div>
+        <footer><span>{{ tr('第') }} {{ page }} / {{ pages || 1 }} {{ tr('页') }}</span><AppButton v-if="page < pages" type="button" :disabled="loading" @click="loadMore"><LoaderCircle v-if="loading" class="is-spinning" :size="15" aria-hidden="true" />{{ tr('加载更多') }}</AppButton></footer>
       </section>
     </div>
   </Teleport>

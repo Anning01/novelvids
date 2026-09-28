@@ -152,7 +152,7 @@ async def test_run_超时_标记失败():
 
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.failed.value
-    assert "超时" in task.error_message
+    assert "timed out" in task.error_message
 
 
 @pytest.mark.asyncio

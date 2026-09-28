@@ -21,8 +21,8 @@ it('uses shared theme tokens for reusable search and select surfaces', () => {
 it('keeps the asset library on shared light and dark surface tokens', () => {
   expect(assetPageStyles).toMatch(/\.assets-page\s*\{[^}]*background:\s*var\(--app-canvas\)/s)
   expect(assetPageStyles).toContain('<AppTabs class="asset-scope-tabs"')
-  expect(assetPageStyles).toContain('label="公共资产分类"')
-  expect(assetPageStyles).toContain('label="项目资产分类"')
+  expect(assetPageStyles).toContain(`:label="tr('公共资产分类')"`)
+  expect(assetPageStyles).toContain(`:label="tr('项目资产分类')"`)
   expect(assetPageStyles.match(/<AppTabs/g)).toHaveLength(3)
   expect(tabsStyles).toMatch(/\.app-tabs\s*\{[^}]*width:\s*100%/s)
   expect(tabsStyles).toMatch(/\.app-tabs\s*\{[^}]*border-bottom:\s*1px solid var\(--app-border\)/s)

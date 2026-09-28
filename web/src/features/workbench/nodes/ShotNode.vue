@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
@@ -167,7 +169,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
     return candidates.map(candidate => ({
       ...base,
       mentionKey: `${source.key}:image:${candidate.displayIndex}`,
-      name: `${base.name}-图${candidate.displayIndex + 1}`,
+      name: tr('{p0}-图{p1}', { p0: base.name, p1: candidate.displayIndex + 1 }),
       previewUrl: candidate.previewUrl || candidate.thumbnailUrl || candidate.url,
       hasImage: true,
       mediaKind: 'image' as const,
@@ -193,7 +195,7 @@ const referenceImageCount = computed(() => materialMentions.value.filter(item =>
 const referenceVideoCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_video').length)
 const referenceAudioCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_audio').length)
 const promptInjectionCount = computed(() => materialMentions.value.filter(item => item.mode === 'prompt_injection').length)
-const assetInputSummary = computed(() => `图片 ${referenceImageCount.value}/9 · 视频 ${referenceVideoCount.value}/3 · 音频 ${referenceAudioCount.value}/3 · 提示词 ${promptInjectionCount.value}`)
+const assetInputSummary = computed(() => tr('图片 {p0}/9 · 视频 {p1}/3 · 音频 {p2}/3 · 提示词 {p3}', { p0: referenceImageCount.value, p1: referenceVideoCount.value, p2: referenceAudioCount.value, p3: promptInjectionCount.value }))
 function normalizedDraftConfig(): ShotWorkbenchConfig {
   const duration = Math.max(1, Math.min(30, Number(config.value.duration) || 1))
   return {
@@ -235,8 +237,8 @@ async function generate() {
 
 registerWorkbenchPromptAction(props.id, {
   id: 'shot-video-generation',
-  label: '生成视频',
-  busyLabel: '提交生成中',
+  get label() { return tr('生成视频') },
+  get busyLabel() { return tr('提交生成中') },
   enabled: canGenerate,
   busy,
   cost: computed(() => estimateVideoCost(
@@ -254,7 +256,7 @@ registerWorkbenchPromptAction(props.id, {
       component: markRaw(MediaGenerationModelSelector),
       props: computed(() => ({
         options: videoModelOptions.value,
-        label: '视频模型',
+        get label() { return tr('视频模型') },
       })),
       modelValue: computed(() => config.value.modelType),
       updateModelValue(value) {
@@ -339,7 +341,7 @@ watch([selectedModel, generationMode], ([model]) => {
       :data="{
         ...data,
         kind: 'shot',
-        title: `视频 ${String(scene.sequence).padStart(2, '0')}`,
+        title: tr('视频 {p0}', { p0: String(scene.sequence).padStart(2, '0') }),
         status: busy ? 'running' : 'ready',
         body_flush: true,
         body_draggable: true,
@@ -349,9 +351,9 @@ watch([selectedModel, generationMode], ([model]) => {
     >
       <template #meta>
         <span class="workbench-node-frame__media-size">{{ mediaSizeLabel }}</span>
-        <span class="workbench-shot-media__asset-summary" :aria-label="`资产输入 ${referenceEdges.length} 个，${assetInputSummary}`">
-          <strong>资产输入</strong>
-          <small>{{ referenceEdges.length }} 个</small>
+        <span class="workbench-shot-media__asset-summary" :aria-label="tr('资产输入 {p0} 个，{p1}', { p0: referenceEdges.length, p1: assetInputSummary })">
+          <strong>{{ tr('资产输入') }}</strong>
+          <small>{{ referenceEdges.length }} {{ tr('个') }}</small>
           <span>{{ assetInputSummary }}</span>
         </span>
       </template>
@@ -359,12 +361,12 @@ watch([selectedModel, generationMode], ([model]) => {
         <WorkbenchVideoMedia
           :src="activeVideo?.url || ''"
           :poster="activeVideo ? videoCoverUrl(activeVideo) : ''"
-          :title="`视频 ${String(scene.sequence).padStart(2, '0')}`"
+          :title="tr('视频 {p0}', { p0: String(scene.sequence).padStart(2, '0') })"
           :ratio="displayedVideoRatio"
           :running="activeVideoRunning"
           :failed="activeVideoFailed"
-          :error="activeVideoFailed ? '视频生成失败' : ''"
-          empty-label="视频尚未生成"
+          :error="activeVideoFailed ? tr('视频生成失败') : ''"
+          :empty-label="tr('视频尚未生成')"
           @metadata="measuredVideoSize = $event"
         />
       </div>

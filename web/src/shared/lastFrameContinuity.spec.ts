@@ -18,3 +18,10 @@ describe('injectLastFrameContinuityInstruction', () => {
     )
   })
 })
+
+it('replaces an English continuity instruction without duplicating the section', () => {
+  const first = '[First-frame continuity]\nImage 1 is the opening frame.\n\nAlex: Stay here.'
+  const instruction = '[First-frame continuity]\nImage 2 is the opening frame.'
+  const result = injectLastFrameContinuityInstruction(first, instruction)
+  expect(result).toBe(instruction + '\n\nAlex: Stay here.')
+})

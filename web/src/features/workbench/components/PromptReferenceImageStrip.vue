@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { MaterialMention } from './materialMentionTypes';
 import { X } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
@@ -34,7 +36,7 @@ function assetNickname(mention: MaterialMention) {
     class="workbench-prompt-reference-strip"
     @mouseleave="hoveredKey = ''"
   >
-    <div class="workbench-prompt-references-viewport nowheel" role="region" aria-label="Prompt 参考图片">
+    <div class="workbench-prompt-references-viewport nowheel" role="region" :aria-label="tr('Prompt 参考图片')">
       <ol class="workbench-prompt-references">
         <li
           v-for="(mention, index) in images"
@@ -47,7 +49,7 @@ function assetNickname(mention: MaterialMention) {
           <button
             type="button"
             class="workbench-prompt-reference__thumbnail"
-            :aria-label="`参考图片 ${index + 1}：${mention.name}，双击聚焦来源节点`"
+            :aria-label="tr('参考图片 {p0}：{p1}，双击聚焦来源节点', { p0: index + 1, p1: mention.name })"
             @dblclick.stop="emit('focus', mention.nodeKey)"
             @keydown.enter.prevent="emit('focus', mention.nodeKey)"
           >
@@ -59,8 +61,8 @@ function assetNickname(mention: MaterialMention) {
             v-if="hoveredKey === mention.edgeKey && mention.connectionKey"
             type="button"
             class="workbench-prompt-reference__remove"
-            :aria-label="`移除参考图片 ${index + 1}：${mention.name}`"
-            title="移除参考图片"
+            :aria-label="tr('移除参考图片 {p0}：{p1}', { p0: index + 1, p1: mention.name })"
+            :title="tr('移除参考图片')"
             @click.stop="removeReference(mention)"
           >
             <X :size="14" aria-hidden="true" />
@@ -73,14 +75,14 @@ function assetNickname(mention: MaterialMention) {
       v-if="hoveredReference?.previewUrl"
       class="workbench-prompt-reference__preview"
       role="img"
-      :aria-label="`${assetNickname(hoveredReference)}大图预览`"
+      :aria-label="tr('{p0}大图预览', { p0: assetNickname(hoveredReference) })"
       @dblclick.stop="emit('focus', hoveredReference.nodeKey)"
     >
       <img :src="hoveredReference.previewUrl" :alt="assetNickname(hoveredReference)">
     </div>
     <span v-if="hoveredReference" class="workbench-prompt-reference__tip">
       <strong>{{ assetNickname(hoveredReference) }}</strong>
-      <span>双击可聚焦至节点</span>
+      <span>{{ tr('双击可聚焦至节点') }}</span>
     </span>
   </div>
 </template>

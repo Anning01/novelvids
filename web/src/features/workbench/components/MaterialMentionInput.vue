@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { MaterialMention, MaterialMentionOption } from './materialMentionTypes';
 import { AudioLines, FileText, Film, Image as ImageIcon, Search } from 'lucide-vue-next';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -235,8 +237,8 @@ function createMentionElement(mention: MaterialMention, marker = `@{${mention.na
     token.dataset.assetCategory = mention.assetCategory;
   token.setAttribute('role', 'button');
   token.setAttribute('tabindex', '-1');
-  token.setAttribute('aria-label', `素材引用 ${mention.name}`);
-  token.title = `${mention.mode === 'reference_image' ? '参考图' : mention.mode === 'reference_video' ? '参考视频' : mention.mode === 'reference_audio' ? '参考音频' : '文字素材'}：${mention.name}（点击后按 Backspace/Delete 删除）`;
+  token.setAttribute('aria-label', tr('素材引用 {p0}', { p0: mention.name }));
+  token.title = tr('{p0}：{p1}（点击后按 Backspace/Delete 删除）', { p0: mention.mode === 'reference_image' ? tr('参考图') : mention.mode === 'reference_video' ? tr('参考视频') : mention.mode === 'reference_audio' ? tr('参考音频') : tr('文字素材'), p1: mention.name });
 
   if (mention.mode === 'reference_audio') {
     if (mention.previewUrl) {
@@ -797,16 +799,15 @@ function closeAfterBlur() {
       @keydown="handleKeydown"
       @scroll="updateMentionMenuPosition"
     />
-    <span v-if="showHint !== false" class="workbench-mention-editor__hint">{{ hint || '输入 @ 引用图片、视频、音频或文字素材' }}</span>
+    <span v-if="showHint !== false" class="workbench-mention-editor__hint">{{ hint || tr('输入 @ 引用图片、视频、音频或文字素材') }}</span>
 
-    <div v-if="menuOpen" :id="listboxId" class="workbench-mention-menu" :style="menuStyle" role="listbox" :aria-label="`${label}素材选择`">
+    <div v-if="menuOpen" :id="listboxId" class="workbench-mention-menu" :style="menuStyle" role="listbox" :aria-label="tr('{p0}素材选择', { p0: label })">
       <div class="workbench-mention-menu__header">
         <Search :size="14" aria-hidden="true" />
-        <span>{{ trigger?.query ? `搜索“${trigger.query}”` : '选择素材' }}</span>
-        <small v-if="showReferenceCounts !== false">
-          图片 {{ mentions.filter(item => item.mode === 'reference_image').length }}/{{ imageLimit ?? 9 }}
-          <template v-if="(videoLimit ?? 3) > 0"> · 视频 {{ mentions.filter(item => item.mode === 'reference_video').length }}/{{ videoLimit ?? 3 }}</template>
-          <template v-if="(audioLimit ?? 0) > 0"> · 音频 {{ mentions.filter(item => item.mode === 'reference_audio').length }}/{{ audioLimit ?? 3 }}</template>
+        <span>{{ trigger?.query ? tr('搜索“{p0}”', { p0: trigger.query }) : tr('选择素材') }}</span>
+        <small v-if="showReferenceCounts !== false"> {{ tr('图片') }} {{ mentions.filter(item => item.mode === 'reference_image').length }}/{{ imageLimit ?? 9 }}
+          <template v-if="(videoLimit ?? 3) > 0"> {{ tr('· 视频') }} {{ mentions.filter(item => item.mode === 'reference_video').length }}/{{ videoLimit ?? 3 }}</template>
+          <template v-if="(audioLimit ?? 0) > 0"> {{ tr('· 音频') }} {{ mentions.filter(item => item.mode === 'reference_audio').length }}/{{ audioLimit ?? 3 }}</template>
         </small>
       </div>
       <div v-if="filteredMaterials.length" ref="optionList" class="workbench-mention-menu__options workbench-scroll-region">
@@ -839,16 +840,14 @@ function closeAfterBlur() {
           </span>
           <span class="workbench-mention-menu__copy">
             <strong>{{ material.name }}</strong>
-            <small>{{ material.disabledReason || (material.mediaKind === 'video' ? '视频素材 · 默认作为参考视频' : material.mediaKind === 'audio' ? '音频素材 · 默认作为参考音频' : material.hasImage ? '图片素材 · 默认作为参考图' : '文字素材 · 注入提示词') }}</small>
+            <small>{{ material.disabledReason || (material.mediaKind === 'video' ? tr('视频素材 · 默认作为参考视频') : material.mediaKind === 'audio' ? tr('音频素材 · 默认作为参考音频') : material.hasImage ? tr('图片素材 · 默认作为参考图') : tr('文字素材 · 注入提示词')) }}</small>
           </span>
           <Film v-if="material.mediaKind === 'video'" :size="15" aria-hidden="true" />
           <AudioLines v-else-if="material.mediaKind === 'audio'" :size="15" aria-hidden="true" />
           <ImageIcon v-else-if="material.hasImage" :size="15" aria-hidden="true" />
         </button>
       </div>
-      <p v-else>
-        没有可引用的素材
-      </p>
+      <p v-else> {{ tr('没有可引用的素材') }} </p>
     </div>
   </div>
 </template>

@@ -144,11 +144,9 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
 
     messages = llm_client.create.await_args.kwargs["messages"]
     system_prompt = messages[0]["content"]
-    assert "字段名和顺序不可改变、合并或省略" in system_prompt
-    assert all(label in system_prompt for label in (
-        "时代基底", "国家/朝代", "人种", "类型基底", "脸型", "发型", "耳饰",
-        "身材", "头身比", "上身着装", "下身着装", "鞋子", "性别", "年龄",
-    ))
+    assert "Do not merge, omit or add fields" in system_prompt
+    from prompts.extraction import trait_labels
+    assert all(label in system_prompt for label in trait_labels(False, 'en'))
 
     await novel.refresh_from_db()
     assert novel.cover == "/media/covers/test.png"
@@ -297,10 +295,10 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
 
 def test_project_analysis_templates_preserve_material_and_requested_language():
     from prompts.project_analysis import render_analysis_messages
-    for language, label in [('zh', '中文'), ('en', '英文')]:
+    for language, label in [('zh', '中文'), ('en', 'English')]:
         messages = render_analysis_messages(name='雨夜来信', chapter_count=2, material='第一章 车站\n第二章 咖啡馆', prompt_language=language)
         assert [message['role'] for message in messages] == ['system', 'user']
         assert label in messages[0]['content']
-        assert 'base_traits 必须严格使用该语言' in messages[0]['content']
-        assert '共 2 章' in messages[1]['content']
+        assert ('所有新生成的描述、题材标签、大纲、设定和 base_traits' if language == 'zh' else 'Write new descriptions, genre tags, outline, settings and base_traits') in messages[0]['content']
+        assert ('共 2 章' if language == 'zh' else 'Chapters: 2') in messages[1]['content']
         assert '第一章 车站\n第二章 咖啡馆' in messages[1]['content']

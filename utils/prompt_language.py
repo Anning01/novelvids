@@ -1,3 +1,4 @@
+from contextvars import ContextVar
 from typing import Literal
 
 PromptLanguage = Literal["zh", "en"]
@@ -11,3 +12,6 @@ def normalize_prompt_language(value: str | None) -> PromptLanguage:
 
 def prompt_language_name(value: str | None) -> str:
     return "简体中文" if normalize_prompt_language(value) == "zh" else "英文"
+
+# Task scopes are separate from request/display scopes.
+task_language: ContextVar[str | None] = ContextVar("task_language", default=None)

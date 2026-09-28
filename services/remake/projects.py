@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
+from services.language import configured_language
+
 import asyncio
 import hashlib
 import json
@@ -101,7 +105,7 @@ class RemakeProjectService:
             raise RemakeError(
                 422,
                 "REMAKE_SOURCE_MODE_MISMATCH",
-                "至少需要一个来源视频",
+                localized_message('至少需要一个来源视频'),
             )
         if payload.style_key and payload.custom_style_prompt and payload.custom_style_prompt.strip():
             raise RemakeError(
@@ -119,7 +123,7 @@ class RemakeProjectService:
                 }
             )
         except Exception as error:
-            detail = getattr(error, "detail", "项目配置无效")
+            detail = getattr(error, "detail", localized_message('项目配置无效'))
             raise RemakeError(422, "REMAKE_PROJECT_CONFIG_INVALID", str(detail)) from error
 
         await self.balance_checker(team_id, user_id)
@@ -211,6 +215,7 @@ class RemakeProjectService:
                             "team_id": team_id,
                             "user_id": user_id,
                             "attempt": 1,
+                            "prompt_language": await configured_language(),
                         },
                     )
                     task.request_params = {
@@ -248,7 +253,7 @@ class RemakeProjectService:
                     team_id=team_id,
                     user_id=user_id,
                 )
-            raise RemakeError(409, "REMAKE_PROJECT_CONFIG_INVALID", "项目名称已存在") from error
+            raise RemakeError(409, "REMAKE_PROJECT_CONFIG_INVALID", localized_message('项目名称已存在')) from error
         except Exception:
             await self._rollback_prepared(prepared)
             raise
@@ -264,10 +269,10 @@ class RemakeProjectService:
     ) -> tuple[list[dict], list[dict]]:
         if payload.source_mode == "single_upload":
             if len(payload.sources) != 1:
-                raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", "单视频模式只能选择一个来源")
+                raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('单视频模式只能选择一个来源'))
             source_input = payload.sources[0]
             if source_input.episode_number != 1 or source_input.upload_token is None or source_input.source_chapter_id is not None:
-                raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", "单视频来源必须使用上传 token 并创建为第1集")
+                raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('单视频来源必须使用上传 token 并创建为第1集'))
             upload = await self.upload_service.get_ready(source_input.upload_token, team_id=team_id, user_id=user_id)
             media = await self.upload_service.revalidate(upload)
             return [self._upload_item(upload, media, 1)], []
@@ -277,9 +282,9 @@ class RemakeProjectService:
             seen_tokens = set()
             for source_input in payload.sources:
                 if source_input.episode_number is None or source_input.upload_token is None or source_input.source_chapter_id is not None:
-                    raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", "文件夹来源必须提交集数和上传 token")
+                    raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('文件夹来源必须提交集数和上传 token'))
                 if source_input.upload_token in seen_tokens:
-                    raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", "同一上传 token 不能重复使用")
+                    raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('同一上传 token 不能重复使用'))
                 seen_tokens.add(source_input.upload_token)
                 upload = await self.upload_service.get_ready(source_input.upload_token, team_id=team_id, user_id=user_id)
                 uploads.append((upload.original_filename, source_input.episode_number, (upload, source_input)))
@@ -293,21 +298,21 @@ class RemakeProjectService:
             return prepared, warnings
 
         if payload.source_mode != "history" or len(payload.sources) != 1:
-            raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", "当前历史模式只能选择一个来源章节")
+            raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('当前历史模式只能选择一个来源章节'))
         source_input = payload.sources[0]
         if source_input.episode_number is not None or source_input.upload_token is not None or source_input.source_chapter_id is None:
-            raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", "历史项目来源只能提交来源章节 ID")
+            raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('历史项目来源只能提交来源章节 ID'))
         historical_chapter = await Chapter.get_or_none(id=source_input.source_chapter_id).select_related("novel")
         if historical_chapter is None:
-            raise RemakeError(422, "REMAKE_HISTORY_EPISODE_UNAVAILABLE", "历史剧集不存在或暂不可重制")
+            raise RemakeError(422, "REMAKE_HISTORY_EPISODE_UNAVAILABLE", localized_message('历史剧集不存在或暂不可重制'))
         if historical_chapter.novel.workflow_kind != "script":
             raise RemakeError(
                 422,
                 "REMAKE_HISTORY_EPISODE_UNAVAILABLE",
-                "历史来源只能选择短剧制作中的剧集",
+                localized_message('历史来源只能选择短剧制作中的剧集'),
             )
         if not allow_all_history and historical_chapter.novel.team_id != team_id:
-            raise RemakeError(403, "REMAKE_HISTORY_PROJECT_FORBIDDEN", "无权使用该历史项目")
+            raise RemakeError(403, "REMAKE_HISTORY_PROJECT_FORBIDDEN", localized_message('无权使用该历史项目'))
         snapshot = await self.history_snapshot_service.create(historical_chapter, team_id=team_id)
         return [{
             "episode_number": historical_chapter.number,
@@ -389,7 +394,7 @@ class RemakeProjectService:
                 raise RemakeError(
                     404,
                     "REMAKE_SOURCE_NOT_FOUND",
-                    "重制来源不存在",
+                    localized_message('重制来源不存在'),
                 )
             previous = None
             if source.analysis_task_id is not None:
@@ -404,7 +409,7 @@ class RemakeProjectService:
                 raise RemakeError(
                     409,
                     "REMAKE_ANALYSIS_NOT_RETRYABLE",
-                    "只有失败的拆解任务可以重试",
+                    localized_message('只有失败的拆解任务可以重试'),
                 )
             previous_params = previous.request_params or {}
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
@@ -421,6 +426,7 @@ class RemakeProjectService:
                     "team_id": team_id,
                     "user_id": user_id,
                     "attempt": attempt,
+                    "prompt_language": previous_params.get("prompt_language", "zh"),
                     "retry_of_task_id": str(previous.id),
                 },
             )
@@ -443,6 +449,7 @@ class RemakeProjectService:
             "task_id": task.id,
             "status": "queued",
             "attempt": attempt,
+                    "prompt_language": previous_params.get("prompt_language", "zh"),
         }
 
     async def _existing_result(
@@ -461,7 +468,7 @@ class RemakeProjectService:
             raise RemakeError(
                 409,
                 "REMAKE_IDEMPOTENCY_CONFLICT",
-                "相同幂等键已经用于不同的创建请求",
+                localized_message('相同幂等键已经用于不同的创建请求'),
             )
         sources = await RemakeSource.filter(novel=novel).order_by(
             "episode_number", "id"

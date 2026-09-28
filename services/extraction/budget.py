@@ -1,5 +1,7 @@
 """Deterministic character budgets for prepared extraction messages."""
 
+from utils.messages import localized_message
+
 from dataclasses import dataclass
 
 
@@ -18,7 +20,7 @@ class ContextBudgetPolicy:
 
     def __init__(self, max_context_characters: int | None):
         if max_context_characters is not None and max_context_characters < 1:
-            raise ValueError("上下文字符上限必须大于 0")
+            raise ValueError(localized_message('上下文字符上限必须大于 0'))
         self.max_context_characters = max_context_characters
 
     def validate(

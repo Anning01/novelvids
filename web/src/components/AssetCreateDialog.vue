@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, dateLocale } from '@/i18n'
+
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Boxes,
@@ -75,28 +77,28 @@ const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId
 const emit = defineEmits<{ close: []; created: [asset: Asset]; saved: [asset: Asset] }>()
 
 const config = computed(() => ({
-  character: { label: '角色', icon: UserRound, type: AssetTypeEnum.PERSON, library: '角色库' },
-  scene: { label: '场景', icon: ImagePlus, type: AssetTypeEnum.SCENE, library: '场景库' },
-  prop: { label: '道具', icon: Boxes, type: AssetTypeEnum.ITEM, library: '道具库' },
+  character: { get label() { return tr('角色') }, icon: UserRound, type: AssetTypeEnum.PERSON, get library() { return tr('角色库') } },
+  scene: { get label() { return tr('场景') }, icon: ImagePlus, type: AssetTypeEnum.SCENE, get library() { return tr('场景库') } },
+  prop: { get label() { return tr('道具') }, icon: Boxes, type: AssetTypeEnum.ITEM, get library() { return tr('道具库') } },
 })[props.kind])
 
 const genderOptions = [
-  { value: '', label: '请选择' },
-  { value: '男', label: '男' },
-  { value: '女', label: '女' },
-  { value: '其他（动物）', label: '其他（动物）' },
+  { value: '', get label() { return tr('请选择') } },
+  { value: '男', get label() { return tr('男') } },
+  { value: '女', get label() { return tr('女') } },
+  { value: '其他（动物）', get label() { return tr('其他（动物）') } },
 ]
 const ageOptions = [
-  { value: '', label: '请选择' },
-  { value: '儿童', label: '儿童' },
-  { value: '少年', label: '少年' },
-  { value: '青年', label: '青年' },
-  { value: '中年', label: '中年' },
-  { value: '老年', label: '老年' },
+  { value: '', get label() { return tr('请选择') } },
+  { value: '儿童', get label() { return tr('儿童') } },
+  { value: '少年', get label() { return tr('少年') } },
+  { value: '青年', get label() { return tr('青年') } },
+  { value: '中年', get label() { return tr('中年') } },
+  { value: '老年', get label() { return tr('老年') } },
 ]
 const referenceLayoutOptions = [
-  { value: 'character_turnaround', label: '单人多视图' },
-  { value: 'group_portrait', label: '人物群像' },
+  { value: 'character_turnaround', get label() { return tr('单人多视图') } },
+  { value: 'group_portrait', get label() { return tr('人物群像') } },
 ]
 
 const mode = ref<CreateMode>('ai')
@@ -220,28 +222,28 @@ const canAnnotateCurrentImage = computed(() => Boolean(
   && !generationBusy.value,
 ))
 const generationStatusText = computed(() => {
-  if (generationError.value) return '生成失败'
-  if (!generationTask.value) return '正在提交'
+  if (generationError.value) return tr('生成失败')
+  if (!generationTask.value) return tr('正在提交')
   return historyStatus(generationTask.value.status)
 })
 const generationStatusMessage = computed(() => {
   if (generationError.value) return generationError.value
-  if (!generationTask.value) return '正在保存当前配置并创建生成任务…'
-  if (generationTask.value.status === TaskStatusEnum.PENDING) return '任务已提交，正在等待模型执行。'
-  if (generationTask.value.status === TaskStatusEnum.QUEUED) return '当前任务正在队列中，轮到后会自动开始。'
-  if (generationTask.value.status === TaskStatusEnum.PROCESSING) return '正在生成图像，完成后这里会自动显示最新结果。'
+  if (!generationTask.value) return tr('正在保存当前配置并创建生成任务…')
+  if (generationTask.value.status === TaskStatusEnum.PENDING) return tr('任务已提交，正在等待模型执行。')
+  if (generationTask.value.status === TaskStatusEnum.QUEUED) return tr('当前任务正在队列中，轮到后会自动开始。')
+  if (generationTask.value.status === TaskStatusEnum.PROCESSING) return tr('正在生成图像，完成后这里会自动显示最新结果。')
   return ''
 })
 const historyStatus = (status: TaskStatusEnum) => ({
-  [TaskStatusEnum.PENDING]: '等待中',
-  [TaskStatusEnum.PROCESSING]: '生成中',
-  [TaskStatusEnum.COMPLETED]: '已完成',
-  [TaskStatusEnum.FAILED]: '失败',
-  [TaskStatusEnum.CANCELLED]: '已取消',
-  [TaskStatusEnum.QUEUED]: '排队中',
-}[status] || '未知')
+  get [TaskStatusEnum.PENDING]() { return tr('等待中') },
+  get [TaskStatusEnum.PROCESSING]() { return tr('生成中') },
+  get [TaskStatusEnum.COMPLETED]() { return tr('已完成') },
+  get [TaskStatusEnum.FAILED]() { return tr('失败') },
+  get [TaskStatusEnum.CANCELLED]() { return tr('已取消') },
+  get [TaskStatusEnum.QUEUED]() { return tr('排队中') },
+}[status] || tr('未知'))
 
-const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || `生图模型 ${item.config_id}` })))
+const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
 const estimatedCost = computed(() => estimateImageCost(
   selectedModel.value?.pricing,
@@ -258,8 +260,8 @@ const publicHasMore = computed(() => props.kind === 'character' && publicPage.va
 const projectHasMore = computed(() => projectPage.value < projectPages.value)
 const isGroupPortrait = computed(() => props.kind === 'character' && referenceLayout.value === 'group_portrait')
 const promptPlaceholder = computed(() => isGroupPortrait.value
-  ? '描述群像中的人物、各自固定特征、服装与人物关系'
-  : `描述${config.value.label}的外观、材质、光影和视角要求`)
+  ? tr('描述群像中的人物、各自固定特征、服装与人物关系')
+  : tr('描述{p0}的外观、材质、光影和视角要求', { p0: config.value.label }))
 const libraryHasMore = computed(() => {
   if (libraryScope.value === 'public') return publicHasMore.value
   if (libraryScope.value === 'project') return projectHasMore.value
@@ -514,7 +516,7 @@ async function saveAnnotatedImage(blob: Blob) {
       selectedVariant.value = updated
       variantStripRef.value?.upsertVariant(updated)
       annotationOpen.value = false
-      notice.success('衍生形象标注图已保存，原图已保留')
+      notice.success(tr('衍生形象标注图已保存，原图已保留'))
       return
     }
     const updated = (await api.recordAssetImageEdit(props.asset.id, {
@@ -526,7 +528,7 @@ async function saveAnnotatedImage(blob: Blob) {
     annotationOpen.value = false
     emit('saved', updated)
     await loadGenerationHistory()
-    notice.success('标注图已保存，并加入生成记录')
+    notice.success(tr('标注图已保存，并加入生成记录'))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -581,7 +583,7 @@ async function restoreGeneration(record: AssetGenerationRecord) {
       is_current: item.id === record.id,
     }))
     emit('saved', restored)
-    notice.success('已将这次生成结果设为当前图片')
+    notice.success(tr('已将这次生成结果设为当前图片'))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -590,7 +592,7 @@ async function restoreGeneration(record: AssetGenerationRecord) {
 }
 
 function formatHistoryTime(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(dateLocale.value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -607,7 +609,7 @@ async function loadGenerationHistory() {
   try {
     generationHistory.value = (await api.assetGenerationHistory(props.asset.id)).data
   } catch (error) {
-    notice.error(`生成记录加载失败：${(error as Error).message}`)
+    notice.error(tr('生成记录加载失败：{p0}', { p0: (error as Error).message }))
   } finally {
     loadingHistory.value = false
   }
@@ -666,7 +668,7 @@ async function generateAndTrack(assetId: number, variantId?: number, references:
     if (controller.signal.aborted) return
     generationTask.value = completed
     if (completed.status !== TaskStatusEnum.COMPLETED) {
-      generationError.value = completed.error_message || (completed.status === TaskStatusEnum.CANCELLED ? '生成任务已取消' : '图片生成失败，请查看生成记录')
+      generationError.value = completed.error_message || (completed.status === TaskStatusEnum.CANCELLED ? tr('生成任务已取消') : tr('图片生成失败，请查看生成记录'))
       await loadGenerationHistory()
       notice.error(generationError.value)
       return
@@ -674,10 +676,10 @@ async function generateAndTrack(assetId: number, variantId?: number, references:
 
     await refreshGeneratedResult(assetId, variantId)
     generationRequested.value = false
-    notice.success(variantId ? `「${currentImageName.value}」已生成` : `${config.value.label}参考图已生成`)
+    notice.success(variantId ? tr('「{p0}」已生成', { p0: currentImageName.value }) : tr('{p0}参考图已生成', { p0: config.value.label }))
   } catch (error) {
     if (isAbortError(error)) return
-    generationError.value = (error as Error).message || '生成任务提交失败'
+    generationError.value = (error as Error).message || tr('生成任务提交失败')
     generationTask.value = null
     notice.error(generationError.value)
   } finally {
@@ -712,7 +714,7 @@ async function loadReferencePrompt() {
       promptLanguage.value = preview.data.prompt_language
     }
   } catch (error) {
-    notice.error(`提示词预览失败：${(error as Error).message}`)
+    notice.error(tr('提示词预览失败：{p0}', { p0: (error as Error).message }))
   }
 }
 
@@ -728,8 +730,8 @@ async function loadPublicPage(page: number) {
   publicPages.value = response.data.pagination.pages
   appendLibraryItems(response.data.items.map(item => ({
     key: `public-${item.id}`,
-    name: item.occupation || '公共数字人',
-    detail: `${item.country} · ${item.gender} · ${item.age} 岁`,
+    name: item.occupation || tr('公共数字人'),
+    detail: tr('{p0} · {p1} · {p2} 岁', { p0: item.country, p1: item.gender, p2: item.age }),
     image: item.image_url,
     source: 'public' as const,
     human: item,
@@ -745,7 +747,7 @@ async function loadProjectPage(page: number) {
     .map(item => ({
       key: `project-${item.id}`,
       name: item.canonical_name,
-      detail: item.description || '其他项目资产',
+      detail: item.description || tr('其他项目资产'),
       image: item.main_image_thumbnail || item.main_image || '',
       source: 'project' as const,
       asset: item,
@@ -798,11 +800,11 @@ function onLibraryScroll(event: Event) {
 function acceptFile(file?: File) {
   if (!file) return
   if (!['image/jpeg', 'image/png'].includes(file.type)) {
-    notice.info('仅支持 JPG、PNG 格式')
+    notice.info(tr('仅支持 JPG、PNG 格式'))
     return
   }
   if (file.size > 20 * 1024 * 1024) {
-    notice.info('图片不能超过 20MB')
+    notice.info(tr('图片不能超过 20MB'))
     return
   }
   uploadFile.value = file
@@ -820,14 +822,14 @@ function acceptReferenceFiles(files?: FileList | File[]) {
   if (!files) return
   const available = Math.max(0, 10 - referenceImagePreviews.value.length)
   const accepted = Array.from(files).slice(0, available)
-  if (Array.from(files).length > available) notice.info('资产设定图最多支持 10 张参考图片')
+  if (Array.from(files).length > available) notice.info(tr('资产设定图最多支持 10 张参考图片'))
   accepted.forEach((file) => {
     if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      notice.info(`${file.name} 不是 JPG 或 PNG 图片`)
+      notice.info(tr('{p0} 不是 JPG 或 PNG 图片', { p0: file.name }))
       return
     }
     if (file.size > 15 * 1024 * 1024) {
-      notice.info(`${file.name} 不能超过 15MB`)
+      notice.info(tr('{p0} 不能超过 15MB', { p0: file.name }))
       return
     }
     pendingReferenceImages.value.push({ file, previewUrl: URL.createObjectURL(file) })
@@ -947,11 +949,11 @@ async function selectVoiceReference(reference: AudioReference) {
       emit('saved', updated)
     }
     voicePickerOpen.value = false
-    notice.success(`已为“${name.value || props.asset.canonical_name}”设置音色`)
+    notice.success(tr('已为“{p0}”设置音色', { p0: name.value || props.asset.canonical_name }))
   } catch (error) {
     voice.value = previousVoice
     voiceReferenceId.value = previousReferenceId
-    notice.error(`音色保存失败：${(error as Error).message}`)
+    notice.error(tr('音色保存失败：{p0}', { p0: (error as Error).message }))
   } finally {
     voiceSaving.value = false
   }
@@ -980,7 +982,7 @@ async function persistEdits() {
     const response = await api.updateAsset(props.asset.id, payload, (promptSourceAsset.value || props.asset).base_traits ?? null)
     promptSourceAsset.value = response.data
   } catch (error) {
-    notice.error((error as Error).message || '自动保存失败，草稿已保留')
+    notice.error((error as Error).message || tr('自动保存失败，草稿已保留'))
   } finally {
     autoSaving.value = false
   }
@@ -1061,7 +1063,7 @@ async function submit(regenerate = false) {
         await generateAndTrack(props.asset.id, updated.id, generationReferenceImages)
         return
       }
-      notice.success(`「${updated.name}」版本已保存`)
+      notice.success(tr('「{p0}」版本已保存', { p0: updated.name }))
       emit('close')
       return
     }
@@ -1135,13 +1137,13 @@ async function submit(regenerate = false) {
         await generateAndTrack(response.data.id, undefined, generationReferenceImages)
         return
       }
-      notice.success(`${config.value.label}已更新`)
+      notice.success(tr('{p0}已更新', { p0: config.value.label }))
     } else if (mode.value === 'ai') {
       await requestAssetGeneration(response.data.id, undefined, generationReferenceImages)
-      notice.success(`${config.value.label}已创建，正在生成参考图`)
+      notice.success(tr('{p0}已创建，正在生成参考图', { p0: config.value.label }))
       emit('created', response.data)
     } else {
-      notice.success(`${config.value.label}已添加`)
+      notice.success(tr('{p0}已添加', { p0: config.value.label }))
       emit('created', response.data)
     }
     emit('close')
@@ -1223,23 +1225,23 @@ onUnmounted(() => {
       <form v-if="open" class="asset-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-dialog-title" @submit.prevent="submit(false)">
         <header class="asset-dialog__header">
           <span class="asset-dialog__icon"><component :is="config.icon" :size="18" /></span>
-          <div><span>PROJECT ASSET</span><h2 id="asset-dialog-title">{{ isEditing ? '编辑' : '新增' }}{{ config.label }}</h2></div>
-          <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭" @click="emit('close')"><X :size="18" /></AppButton>
+          <div><span>PROJECT ASSET</span><h2 id="asset-dialog-title">{{ isEditing ? tr('编辑') : tr('新增') }}{{ config.label }}</h2></div>
+          <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭')" @click="emit('close')"><X :size="18" /></AppButton>
         </header>
 
         <div class="asset-dialog__body">
-          <section v-if="isEditing || generatedImage" class="asset-generated-preview" aria-label="当前图片">
+          <section v-if="isEditing || generatedImage" class="asset-generated-preview" :aria-label="tr('当前图片')">
             <header>
-              <strong>当前图片 · {{ currentImageName }}</strong>
+              <strong>{{ tr('当前图片 ·') }} {{ currentImageName }}</strong>
               <span v-if="generationBusy || generationError" class="asset-generated-preview__status" :class="{ 'is-error': generationError }">
                 <i aria-hidden="true" />{{ generationStatusText }}
               </span>
-              <span v-else>{{ generatedImage ? imageInfoLabel(generatedImage, currentImageFormat) : '尚未生成' }}</span>
+              <span v-else>{{ generatedImage ? imageInfoLabel(generatedImage, currentImageFormat) : tr('尚未生成') }}</span>
             </header>
             <div v-if="generatedImage" class="asset-generated-preview__canvas">
-              <button type="button" class="asset-generated-preview__viewer" :class="{ 'is-generating': generationBusy }" aria-label="放大查看当前图片" @click="openImageLightbox(generatedImage, `${currentImageName}的生成图片`, currentImageFormat)">
-                <img :src="generatedImagePreview" :alt="`${currentImageName}的生成图片`" />
-                <span class="asset-generated-preview__zoom"><Maximize2 :size="15" />放大查看</span>
+              <button type="button" class="asset-generated-preview__viewer" :class="{ 'is-generating': generationBusy }" :aria-label="tr('放大查看当前图片')" @click="openImageLightbox(generatedImage, tr('{p0}的生成图片', { p0: currentImageName }), currentImageFormat)">
+                <img :src="generatedImagePreview" :alt="tr('{p0}的生成图片', { p0: currentImageName })" />
+                <span class="asset-generated-preview__zoom"><Maximize2 :size="15" />{{ tr('放大查看') }}</span>
                 <span v-if="generationBusy" class="asset-generated-preview__overlay" aria-hidden="true">
                   <i><LoaderCircle :size="25" /></i>
                 </span>
@@ -1251,8 +1253,8 @@ onUnmounted(() => {
                 size="sm"
                 icon-only
                 class="asset-generated-preview__edit"
-                aria-label="编辑当前图片标注"
-                title="编辑图片"
+                :aria-label="tr('编辑当前图片标注')"
+                :title="tr('编辑图片')"
                 @click="openAnnotationEditor"
               ><Pencil :size="15" /></AppButton>
             </div>
@@ -1261,7 +1263,7 @@ onUnmounted(() => {
               <strong>{{ generationStatusText }}</strong>
               <span>{{ generationStatusMessage }}</span>
             </div>
-            <div v-else class="asset-generated-preview__empty" role="status"><ImagePlus :size="30" /><strong>暂无图片</strong><span>可以上传或生成该衍生形象</span></div>
+            <div v-else class="asset-generated-preview__empty" role="status"><ImagePlus :size="30" /><strong>{{ tr('暂无图片') }}</strong><span>{{ tr('可以上传或生成该衍生形象') }}</span></div>
             <Transition name="asset-generation-status">
               <div v-if="(generationBusy && generatedImage) || generationError" class="asset-generation-status" :class="{ 'is-error': generationError }" role="status" aria-live="polite">
                 <span><LoaderCircle v-if="!generationError" :size="17" /><CircleAlert v-else :size="17" /></span>
@@ -1272,32 +1274,31 @@ onUnmounted(() => {
 
           <section v-if="isEditing" class="asset-generation-history" aria-labelledby="asset-history-title">
             <header>
-              <div><Clock3 :size="15" /><strong id="asset-history-title">生成记录</strong><span>{{ visibleGenerationHistory.length }} 次</span></div>
-              <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="刷新生成记录" title="刷新生成记录" :loading="loadingHistory" @click="loadGenerationHistory"><RefreshCw v-if="!loadingHistory" :size="14" /></AppButton>
+              <div><Clock3 :size="15" /><strong id="asset-history-title">{{ tr('生成记录') }}</strong><span>{{ visibleGenerationHistory.length }} {{ tr('次') }}</span></div>
+              <AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="tr('刷新生成记录')" :title="tr('刷新生成记录')" :loading="loadingHistory" @click="loadGenerationHistory"><RefreshCw v-if="!loadingHistory" :size="14" /></AppButton>
             </header>
-            <div v-if="loadingHistory && !generationHistory.length" class="asset-generation-history__state">正在加载生成记录…</div>
-            <div v-else-if="!visibleGenerationHistory.length" class="asset-generation-history__state">暂无其他生成记录</div>
+            <div v-if="loadingHistory && !generationHistory.length" class="asset-generation-history__state">{{ tr('正在加载生成记录…') }}</div>
+            <div v-else-if="!visibleGenerationHistory.length" class="asset-generation-history__state">{{ tr('暂无其他生成记录') }}</div>
             <div v-else class="asset-generation-history__list">
               <article v-for="record in visibleGenerationHistory" :key="record.id" :class="`is-status-${record.status}`">
-                <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="`放大查看${formatHistoryTime(record.created_at)}的生成图片`" @click="openImageLightbox(record.images[0], `${name}的历史生成图片`, record.output_format)">
-                  <img :src="record.image_thumbnails?.[0] || imageDerivativeUrl(record.images[0])" :alt="`${name}的历史生成图片`" loading="lazy" decoding="async" />
+                <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="tr('放大查看{p0}的生成图片', { p0: formatHistoryTime(record.created_at) })" @click="openImageLightbox(record.images[0], tr('{p0}的历史生成图片', { p0: name }), record.output_format)">
+                  <img :src="record.image_thumbnails?.[0] || imageDerivativeUrl(record.images[0])" :alt="tr('{p0}的历史生成图片', { p0: name })" loading="lazy" decoding="async" />
                   <span>{{ imageInfoLabel(record.images[0], record.output_format) }}</span>
                 </button>
                 <span v-else class="asset-generation-history__placeholder"><LoaderCircle v-if="record.status === TaskStatusEnum.PROCESSING || record.status === TaskStatusEnum.PENDING || record.status === TaskStatusEnum.QUEUED" :size="18" /><ImagePlus v-else :size="18" /></span>
                 <div>
                   <strong>{{ historyStatus(record.status) }}</strong>
                   <small>{{ formatHistoryTime(record.created_at) }}</small>
-                  <p>{{ [record.model, record.aspect_ratio, record.clarity, record.output_format?.toUpperCase()].filter(Boolean).join(' / ') || '使用当前模型配置' }}</p>
+                  <p>{{ [record.model, record.aspect_ratio, record.clarity, record.output_format?.toUpperCase()].filter(Boolean).join(' / ') || tr('使用当前模型配置') }}</p>
                   <div v-if="record.error_message" class="asset-generation-history__error">
                     <span>{{ summarizedError(record.error_message) }}</span>
                     <button
                       v-if="isLongError(record.error_message)"
                       type="button"
                       :aria-expanded="selectedErrorRecordId === record.id"
-                      :aria-label="`查看${formatHistoryTime(record.created_at)}的失败详情`"
+                      :aria-label="tr('查看{p0}的失败详情', { p0: formatHistoryTime(record.created_at) })"
                       @click="toggleHistoryError(record.id)"
-                    >
-                      查看详情<ChevronDown :size="12" />
+                    > {{ tr('查看详情') }}<ChevronDown :size="12" />
                     </button>
                   </div>
                   <AppButton
@@ -1310,22 +1311,20 @@ onUnmounted(() => {
                     :loading="restoringRecordId === record.id"
                     @click="restoreGeneration(record)"
                   >
-                    <Undo2 v-if="restoringRecordId !== record.id" :size="12" />
-                    设为当前
-                  </AppButton>
+                    <Undo2 v-if="restoringRecordId !== record.id" :size="12" /> {{ tr('设为当前') }} </AppButton>
                 </div>
               </article>
             </div>
             <Transition name="asset-error-detail">
-              <section v-if="selectedErrorRecord?.error_message" class="asset-generation-error-detail" role="region" aria-label="生成失败详情">
+              <section v-if="selectedErrorRecord?.error_message" class="asset-generation-error-detail" role="region" :aria-label="tr('生成失败详情')">
                 <header>
                   <div>
-                    <strong>失败详情</strong>
+                    <strong>{{ tr('失败详情') }}</strong>
                     <span>{{ formatHistoryTime(selectedErrorRecord.created_at) }}</span>
                   </div>
-                  <AppButton type="button" variant="ghost" size="xs" icon-only aria-label="关闭失败详情" @click="selectedErrorRecordId = ''"><X :size="13" /></AppButton>
+                  <AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="tr('关闭失败详情')" @click="selectedErrorRecordId = ''"><X :size="13" /></AppButton>
                 </header>
-                <small>{{ [selectedErrorRecord.model, selectedErrorRecord.aspect_ratio, selectedErrorRecord.clarity, selectedErrorRecord.output_format?.toUpperCase()].filter(Boolean).join(' / ') || '使用当前模型配置' }}</small>
+                <small>{{ [selectedErrorRecord.model, selectedErrorRecord.aspect_ratio, selectedErrorRecord.clarity, selectedErrorRecord.output_format?.toUpperCase()].filter(Boolean).join(' / ') || tr('使用当前模型配置') }}</small>
                 <pre>{{ selectedErrorRecord.error_message }}</pre>
               </section>
             </Transition>
@@ -1344,89 +1343,89 @@ onUnmounted(() => {
           />
 
           <div class="asset-form-grid" :class="{ 'is-character': kind === 'character' && !isGroupPortrait }">
-            <label class="asset-field"><span><i>*</i>名称</span><input v-model="name" maxlength="100" placeholder="请输入" /></label>
-            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>性别</span><AppSelect v-model="gender" :options="genderOptions" ariaLabel="选择性别" menu-label="性别" /></label>
-            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>年龄</span><AppSelect v-model="age" :options="ageOptions" ariaLabel="选择年龄阶段" menu-label="年龄" /></label>
-            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span>音色选择</span><AppButton type="button" variant="secondary" block :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" />{{ voice || '选择音色' }}</AppButton></label>
+            <label class="asset-field"><span><i>*</i>{{ tr('名称') }}</span><input v-model="name" maxlength="100" :placeholder="tr('请输入')" /></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>{{ tr('性别') }}</span><AppSelect v-model="gender" :options="genderOptions" :ariaLabel="tr('选择性别')" :menu-label="tr('性别')" /></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>{{ tr('年龄') }}</span><AppSelect v-model="age" :options="ageOptions" :ariaLabel="tr('选择年龄阶段')" :menu-label="tr('年龄')" /></label>
+            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span>{{ tr('音色选择') }}</span><AppButton type="button" variant="secondary" block :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" />{{ voice || tr('选择音色') }}</AppButton></label>
           </div>
 
           <fieldset class="asset-mode">
-            <legend><i>*</i>形象生成方式</legend>
+            <legend><i>*</i>{{ tr('形象生成方式') }}</legend>
             <div>
-              <AppButton type="button" variant="ghost" :active="mode === 'ai'" @click="mode = 'ai'"><Sparkles :size="15" />AI 生成</AppButton>
-              <AppButton type="button" variant="ghost" :active="mode === 'library'" @click="mode = 'library'"><Library :size="15" />从{{ config.library }}选择</AppButton>
-              <AppButton type="button" variant="ghost" :active="mode === 'upload'" @click="mode = 'upload'"><Upload :size="15" />本地上传</AppButton>
+              <AppButton type="button" variant="ghost" :active="mode === 'ai'" @click="mode = 'ai'"><Sparkles :size="15" />{{ tr('AI 生成') }}</AppButton>
+              <AppButton type="button" variant="ghost" :active="mode === 'library'" @click="mode = 'library'"><Library :size="15" />{{ tr('从') }}{{ config.library }}{{ tr('选择') }}</AppButton>
+              <AppButton type="button" variant="ghost" :active="mode === 'upload'" @click="mode = 'upload'"><Upload :size="15" />{{ tr('本地上传') }}</AppButton>
             </div>
           </fieldset>
 
           <template v-if="mode === 'ai'">
-            <label v-if="kind === 'character'" class="asset-field"><span>参考图版式</span><AppSelect v-model="referenceLayout" :options="referenceLayoutOptions" ariaLabel="选择人物参考图版式" menu-label="参考图版式" /></label>
+            <label v-if="kind === 'character'" class="asset-field"><span>{{ tr('参考图版式') }}</span><AppSelect v-model="referenceLayout" :options="referenceLayoutOptions" :ariaLabel="tr('选择人物参考图版式')" :menu-label="tr('参考图版式')" /></label>
             <section class="asset-reference-input" aria-labelledby="asset-reference-input-title">
               <header>
-                <div><strong id="asset-reference-input-title">图生图参考图片</strong><small>可选 · 最多 10 张</small></div>
+                <div><strong id="asset-reference-input-title">{{ tr('图生图参考图片') }}</strong><small>{{ tr('可选 · 最多 10 张') }}</small></div>
                 <span>{{ referenceImagePreviews.length }}/10</span>
               </header>
               <div class="asset-reference-input__grid">
                 <figure v-for="(image, index) in referenceImagePreviews" :key="image.key">
-                  <img :src="imageDerivativeUrl(image.url)" :alt="`图生图参考图片 ${index + 1}`" />
-                  <AppButton type="button" variant="secondary" size="xs" icon-only :aria-label="`移除图生图参考图片 ${index + 1}`" @click="removeReferenceImage(index)"><X :size="13" /></AppButton>
+                  <img :src="imageDerivativeUrl(image.url)" :alt="tr('图生图参考图片 {p0}', { p0: index + 1 })" />
+                  <AppButton type="button" variant="secondary" size="xs" icon-only :aria-label="tr('移除图生图参考图片 {p0}', { p0: index + 1 })" @click="removeReferenceImage(index)"><X :size="13" /></AppButton>
                 </figure>
                 <label v-if="referenceImagePreviews.length < 10" class="asset-reference-input__add">
                   <input type="file" multiple accept="image/jpeg,image/png" @change="onReferenceFileInput" />
                   <ImagePlus :size="20" />
-                  <span>添加参考图</span>
+                  <span>{{ tr('添加参考图') }}</span>
                 </label>
               </div>
-              <p>生成时会参考主体、服装或画面风格；JPG/PNG，单张不超过 15MB。</p>
+              <p>{{ tr('生成时会参考主体、服装或画面风格；JPG/PNG，单张不超过 15MB。') }}</p>
             </section>
             <label class="asset-field">
-              <span><i>*</i>提示词<small v-if="isEditing">最终发送 · {{ promptLanguage === 'zh' ? '中文' : 'English' }}</small></span>
+              <span><i>*</i>{{ tr('提示词') }}<small v-if="isEditing">{{ tr('最终发送 ·') }} {{ promptLanguage === 'zh' ? tr('中文') : 'English' }}</small></span>
               <textarea v-model="prompt" rows="8" :placeholder="promptPlaceholder" @input="promptTouched = true" />
             </label>
           </template>
 
           <section v-else-if="mode === 'library'" class="asset-library">
             <header>
-              <label><Search :size="16" /><input v-model="search" type="search" :placeholder="`搜索${config.library}`" /></label>
+              <label><Search :size="16" /><input v-model="search" type="search" :placeholder="tr('搜索{p0}', { p0: config.library })" /></label>
               <nav v-if="kind === 'character'">
-                <AppButton v-for="item in [{ value: 'all', label: '全部' }, { value: 'public', label: '公共数字人' }, { value: 'project', label: '项目人物' }]" :key="item.value" type="button" variant="soft" size="sm" :active="libraryScope === item.value" @click="libraryScope = item.value as 'all' | 'public' | 'project'">{{ item.label }}</AppButton>
+                <AppButton v-for="item in [{ value: 'all', get label() { return tr('全部') } }, { value: 'public', get label() { return tr('公共数字人') } }, { value: 'project', get label() { return tr('项目人物') } }]" :key="item.value" type="button" variant="soft" size="sm" :active="libraryScope === item.value" @click="libraryScope = item.value as 'all' | 'public' | 'project'">{{ item.label }}</AppButton>
               </nav>
             </header>
             <div class="asset-library__grid" @scroll.passive="onLibraryScroll">
-              <div v-if="loadingLibrary" class="asset-library__state">正在加载资产库…</div>
+              <div v-if="loadingLibrary" class="asset-library__state">{{ tr('正在加载资产库…') }}</div>
               <AppButton v-for="item in filteredLibraryItems" v-else :key="item.key" type="button" class="asset-library__card" :active="selectedLibraryKey === item.key" @click="selectedLibraryKey = item.key">
                 <img :src="imageDerivativeUrl(item.image)" alt="" loading="lazy" decoding="async" />
                 <span><strong>{{ item.name }}</strong><small>{{ item.detail }}</small></span>
                 <Check v-if="selectedLibraryKey === item.key" :size="16" />
               </AppButton>
-              <div v-if="!loadingLibrary && !filteredLibraryItems.length" class="asset-library__state">暂无可用{{ config.label }}资产</div>
+              <div v-if="!loadingLibrary && !filteredLibraryItems.length" class="asset-library__state">{{ tr('暂无可用') }}{{ config.label }}{{ tr('资产') }}</div>
               <div v-if="!loadingLibrary && filteredLibraryItems.length" class="asset-library__paging" role="status" aria-live="polite">
-                <template v-if="loadingMoreLibrary"><LoaderCircle :size="15" />正在加载下一页…</template>
-                <template v-else-if="libraryHasMore">继续下滑加载更多</template>
-                <template v-else>已加载全部</template>
+                <template v-if="loadingMoreLibrary"><LoaderCircle :size="15" />{{ tr('正在加载下一页…') }}</template>
+                <template v-else-if="libraryHasMore">{{ tr('继续下滑加载更多') }}</template>
+                <template v-else>{{ tr('已加载全部') }}</template>
               </div>
             </div>
           </section>
 
           <label v-else class="asset-upload" :class="{ 'is-dragging': dragging, 'has-file': uploadPreview }" @dragenter.prevent="dragging = true" @dragover.prevent @dragleave.prevent="dragging = false" @drop.prevent="onDrop">
             <input type="file" accept="image/jpeg,image/png" @change="acceptFile(($event.target as HTMLInputElement).files?.[0])" />
-            <img v-if="uploadPreview" :src="uploadPreview" alt="上传预览" />
-            <template v-else><Upload :size="26" /><strong>点击或拖拽图片到此处上传</strong><span>仅支持 JPG、PNG，最大 20MB</span></template>
+            <img v-if="uploadPreview" :src="uploadPreview" :alt="tr('上传预览')" />
+            <template v-else><Upload :size="26" /><strong>{{ tr('点击或拖拽图片到此处上传') }}</strong><span>{{ tr('仅支持 JPG、PNG，最大 20MB') }}</span></template>
           </label>
 
-          <label class="asset-field"><span>{{ config.label }}描述</span><textarea v-model="description" rows="3" placeholder="请输入" /></label>
+          <label class="asset-field"><span>{{ config.label }}{{ tr('描述') }}</span><textarea v-model="description" rows="3" :placeholder="tr('请输入')" /></label>
         </div>
 
         <footer class="asset-dialog__footer">
           <div v-if="mode === 'ai'" class="asset-generation-options">
-            <AppSelect v-model="modelId" :options="modelOptions" ariaLabel="选择生图模型"><template #leading><Sparkles :size="14" /></template></AppSelect>
+            <AppSelect v-model="modelId" :options="modelOptions" :ariaLabel="tr('选择生图模型')"><template #leading><Sparkles :size="14" /></template></AppSelect>
             <ImageGenerationParameterPanel v-model="imageParameters" :capabilities="selectedModel?.capabilities" />
           </div>
           <span v-else />
           <div>
-            <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : '生成图片' }}<BillingPriceTag v-if="!generationBusy" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
-            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? '上传并保存' : mode === 'library' ? '选择并保存' : '保存此版本' : isEditing ? '保存修改' : mode === 'ai' ? '开始生成' : '确认添加' }}<BillingPriceTag v-if="!isEditing && mode === 'ai' && !saving" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
+            <AppButton type="button" variant="secondary" @click="emit('close')">{{ tr('取消') }}</AppButton>
+            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : tr('生成图片') }}<BillingPriceTag v-if="!generationBusy" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
+            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? tr('上传并保存') : mode === 'library' ? tr('选择并保存') : tr('保存此版本') : isEditing ? tr('保存修改') : mode === 'ai' ? tr('开始生成') : tr('确认添加') }}<BillingPriceTag v-if="!isEditing && mode === 'ai' && !saving" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
           </div>
         </footer>
       </form>

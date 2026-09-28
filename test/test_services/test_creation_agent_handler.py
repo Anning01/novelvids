@@ -136,7 +136,7 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
     await task.refresh_from_db()
     assistant = await AgentMessage.get(task=task, role='assistant')
     assert task.status == TaskStatusEnum.failed.value
-    assert '输出达到上限' in task.error_message
+    assert 'reached its output limit' in task.error_message
     assert 'synthetic-reasoning' not in task.error_message
     assert assistant.usage['calls'][-1]['finish_reason'] == 'length'
     assert assistant.usage['missing_usage'] is False

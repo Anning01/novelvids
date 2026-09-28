@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -30,13 +32,13 @@ let streamController: AbortController | null = null
 let redirecting = false
 
 const stages = [
-  { key: 'queued', label: '进入拆解队列', description: '后台任务已创建，可以安全离开页面。', threshold: 0 },
-  { key: 'preparing', label: '准备视频素材', description: '校验并转换为模型可分析的视频。', threshold: 10 },
-  { key: 'extracting_assets', label: '识别全局设定', description: '提取角色、场景与关键道具。', threshold: 20 },
-  { key: 'detecting_scenes', label: '检测并切分镜头', description: '分析转场和镜头边界。', threshold: 42 },
-  { key: 'generating_storyboards', label: '生成专业分镜', description: '逐镜头生成画面、动作与运镜描述。', threshold: 55 },
-  { key: 'persisting', label: '保存设定与分镜', description: '写入项目资产和分镜工作区。', threshold: 88 },
-  { key: 'completed', label: '拆解完成', description: '即将进入设定与分镜页面。', threshold: 100 },
+  { key: 'queued', get label() { return tr('进入拆解队列') }, get description() { return tr('后台任务已创建，可以安全离开页面。') }, threshold: 0 },
+  { key: 'preparing', get label() { return tr('准备视频素材') }, get description() { return tr('校验并转换为模型可分析的视频。') }, threshold: 10 },
+  { key: 'extracting_assets', get label() { return tr('识别全局设定') }, get description() { return tr('提取角色、场景与关键道具。') }, threshold: 20 },
+  { key: 'detecting_scenes', get label() { return tr('检测并切分镜头') }, get description() { return tr('分析转场和镜头边界。') }, threshold: 42 },
+  { key: 'generating_storyboards', get label() { return tr('生成专业分镜') }, get description() { return tr('逐镜头生成画面、动作与运镜描述。') }, threshold: 55 },
+  { key: 'persisting', get label() { return tr('保存设定与分镜') }, get description() { return tr('写入项目资产和分镜工作区。') }, threshold: 88 },
+  { key: 'completed', get label() { return tr('拆解完成') }, get description() { return tr('即将进入设定与分镜页面。') }, threshold: 100 },
 ] as const
 
 const isCompleted = computed(() => snapshot.value?.aggregate_status === 'completed')
@@ -48,16 +50,16 @@ const activeStage = computed(() => {
   return activeTask?.stage || (isCompleted.value ? 'completed' : 'queued')
 })
 const statusTitle = computed(() => {
-  if (isCompleted.value) return '视频拆解完成'
-  if (snapshot.value?.aggregate_status === 'failed') return '视频拆解失败'
-  if (snapshot.value?.aggregate_status === 'partial_failed') return '部分剧集拆解失败'
-  if (snapshot.value?.aggregate_status === 'queued') return '等待开始拆解'
-  return '正在拆解视频'
+  if (isCompleted.value) return tr('视频拆解完成')
+  if (snapshot.value?.aggregate_status === 'failed') return tr('视频拆解失败')
+  if (snapshot.value?.aggregate_status === 'partial_failed') return tr('部分剧集拆解失败')
+  if (snapshot.value?.aggregate_status === 'queued') return tr('等待开始拆解')
+  return tr('正在拆解视频')
 })
 const statusDescription = computed(() => {
-  if (isCompleted.value) return '设定和分镜已经生成，正在为你打开创作页面。'
-  if (hasFailures.value) return '已完成的剧集会保留，可单独重试失败剧集。'
-  return 'AI 正在识别设定、切分镜头并生成分镜。关闭或离开本页面不会中断后台任务。'
+  if (isCompleted.value) return tr('设定和分镜已经生成，正在为你打开创作页面。')
+  if (hasFailures.value) return tr('已完成的剧集会保留，可单独重试失败剧集。')
+  return tr('AI 正在识别设定、切分镜头并生成分镜。关闭或离开本页面不会中断后台任务。')
 })
 
 function isTerminalTask(source: RemakeProgressSource) {
@@ -66,14 +68,14 @@ function isTerminalTask(source: RemakeProgressSource) {
 
 function sourceStatusLabel(source: RemakeProgressSource) {
   const status = source.task?.status
-  if (status === TaskStatusEnum.COMPLETED) return '已完成'
-  if (status === TaskStatusEnum.FAILED || status === TaskStatusEnum.CANCELLED) return '拆解失败'
+  if (status === TaskStatusEnum.COMPLETED) return tr('已完成')
+  if (status === TaskStatusEnum.FAILED || status === TaskStatusEnum.CANCELLED) return tr('拆解失败')
   if (status === TaskStatusEnum.PROCESSING) return stageLabel(source.task?.stage)
-  return '队列中'
+  return tr('队列中')
 }
 
 function stageLabel(stage?: string | null) {
-  return stages.find(item => item.key === stage)?.label || '正在处理'
+  return stages.find(item => item.key === stage)?.label || tr('正在处理')
 }
 
 function stageState(key: string, threshold: number) {
@@ -112,12 +114,12 @@ function startStream() {
         connectionState.value = attempt ? 'reconnecting' : 'connecting'
         await api.streamRemakeProjectProgress(projectId.value, applySnapshot, controller.signal)
         if (snapshot.value?.terminal || controller.signal.aborted) return
-        throw new Error('进度连接已断开')
+        throw new Error(tr('进度连接已断开'))
       } catch (error) {
         if (controller.signal.aborted || !pageAlive || generation !== streamGeneration) return
         attempt += 1
         connectionState.value = 'reconnecting'
-        errorMessage.value = error instanceof Error ? error.message : '拆解进度连接中断'
+        errorMessage.value = error instanceof Error ? error.message : tr('拆解进度连接中断')
         await waitForReconnect(Math.min(5000, 1000 * attempt))
       }
     }
@@ -126,7 +128,7 @@ function startStream() {
 
 async function loadProgress() {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) {
-    errorMessage.value = '重制项目编号无效'
+    errorMessage.value = tr('重制项目编号无效')
     loading.value = false
     return
   }
@@ -135,7 +137,7 @@ async function loadProgress() {
     applySnapshot((await api.remakeProjectProgress(projectId.value)).data)
     if (!snapshot.value?.terminal) startStream()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '无法读取拆解进度'
+    errorMessage.value = error instanceof Error ? error.message : tr('无法读取拆解进度')
   } finally {
     loading.value = false
   }
@@ -151,7 +153,7 @@ async function retrySource(source: RemakeProgressSource) {
     applySnapshot((await api.remakeProjectProgress(projectId.value)).data)
     startStream()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '重试失败'
+    errorMessage.value = error instanceof Error ? error.message : tr('重试失败')
   } finally {
     const remaining = new Set(retryingSourceIds.value)
     remaining.delete(source.source_id)
@@ -170,25 +172,25 @@ onBeforeUnmount(() => {
 <template>
   <main class="remake-progress-page">
     <header class="progress-header">
-      <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="返回项目列表" @click="router.push('/projects')"><ArrowLeft :size="18" /></AppButton>
+      <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('返回项目列表')" @click="router.push('/projects')"><ArrowLeft :size="18" /></AppButton>
       <div>
         <small>AI REMAKE WORKSHOP</small>
-        <strong>{{ snapshot?.name || '重制拆解' }}</strong>
+        <strong>{{ snapshot?.name || tr('重制拆解') }}</strong>
       </div>
-      <span class="background-badge"><span />后台持续运行</span>
+      <span class="background-badge"><span />{{ tr('后台持续运行') }}</span>
     </header>
 
     <section v-if="loading" class="progress-loading" role="status" aria-live="polite">
       <LoaderCircle :size="30" />
-      <strong>正在连接拆解任务…</strong>
-      <p>正在读取后台保存的最新进度。</p>
+      <strong>{{ tr('正在连接拆解任务…') }}</strong>
+      <p>{{ tr('正在读取后台保存的最新进度。') }}</p>
     </section>
 
     <section v-else-if="!snapshot" class="progress-loading is-error" role="alert">
       <AlertTriangle :size="30" />
-      <strong>暂时无法读取拆解进度</strong>
+      <strong>{{ tr('暂时无法读取拆解进度') }}</strong>
       <p>{{ errorMessage }}</p>
-      <AppButton type="button" variant="primary" size="sm" @click="loadProgress"><RefreshCw :size="15" />重新连接</AppButton>
+      <AppButton type="button" variant="primary" size="sm" @click="loadProgress"><RefreshCw :size="15" />{{ tr('重新连接') }}</AppButton>
     </section>
 
     <div v-else class="progress-content">
@@ -199,21 +201,21 @@ onBeforeUnmount(() => {
           <Sparkles v-else :size="28" />
         </div>
         <div class="hero-copy">
-          <small>{{ connectionState === 'reconnecting' ? '正在重新连接实时进度' : 'AI VIDEO DECOMPOSITION' }}</small>
+          <small>{{ connectionState === 'reconnecting' ? tr('正在重新连接实时进度') : 'AI VIDEO DECOMPOSITION' }}</small>
           <h1>{{ statusTitle }}</h1>
           <p>{{ statusDescription }}</p>
         </div>
-        <div class="overall-progress" :aria-label="`总体进度 ${snapshot.overall_progress}%`">
+        <div class="overall-progress" :aria-label="tr('总体进度 {p0}%', { p0: snapshot.overall_progress })">
           <strong>{{ snapshot.overall_progress }}<small>%</small></strong>
-          <span>总体进度</span>
+          <span>{{ tr('总体进度') }}</span>
         </div>
         <div class="progress-track" aria-hidden="true"><span :style="{ width: `${snapshot.overall_progress}%` }" /></div>
-        <p v-if="connectionState === 'reconnecting'" class="connection-message"><RefreshCw :size="13" />实时连接中断，正在自动重连；后台任务不受影响。</p>
+        <p v-if="connectionState === 'reconnecting'" class="connection-message"><RefreshCw :size="13" />{{ tr('实时连接中断，正在自动重连；后台任务不受影响。') }}</p>
       </section>
 
       <section class="progress-grid">
         <article class="pipeline-card">
-          <header><div><small>PROCESS</small><h2>拆解过程</h2></div><span>{{ snapshot.source_summary.completed }}/{{ snapshot.source_summary.total }} 集完成</span></header>
+          <header><div><small>PROCESS</small><h2>{{ tr('拆解过程') }}</h2></div><span>{{ snapshot.source_summary.completed }}/{{ snapshot.source_summary.total }} {{ tr('集完成') }}</span></header>
           <ol class="pipeline-list">
             <li v-for="stage in stages" :key="stage.key" :class="`is-${stageState(stage.key, stage.threshold)}`">
               <span class="stage-marker">
@@ -227,12 +229,12 @@ onBeforeUnmount(() => {
         </article>
 
         <article class="episodes-card">
-          <header><div><small>EPISODES</small><h2>剧集进度</h2></div></header>
+          <header><div><small>EPISODES</small><h2>{{ tr('剧集进度') }}</h2></div></header>
           <div class="episode-list">
             <section v-for="source in snapshot.sources" :key="source.source_id" class="episode-item" :class="{ 'is-failed': source.task?.status === TaskStatusEnum.FAILED || source.task?.status === TaskStatusEnum.CANCELLED }">
               <span class="episode-icon"><Film :size="17" /></span>
               <div class="episode-copy">
-                <strong>第 {{ source.episode_number }} 集</strong>
+                <strong>{{ tr('第') }} {{ source.episode_number }} {{ tr('集') }}</strong>
                 <p>{{ source.original_filename }}</p>
                 <div><span :style="{ width: `${source.task?.progress || 0}%` }" /></div>
               </div>
@@ -247,7 +249,7 @@ onBeforeUnmount(() => {
                 size="xs"
                 :loading="retryingSourceIds.has(source.source_id)"
                 @click="retrySource(source)"
-              ><RotateCcw v-if="!retryingSourceIds.has(source.source_id)" :size="13" />重试</AppButton>
+              ><RotateCcw v-if="!retryingSourceIds.has(source.source_id)" :size="13" />{{ tr('重试') }}</AppButton>
               <p v-if="source.task?.error_message" class="episode-error">{{ source.task.error_message }}</p>
             </section>
           </div>
@@ -255,9 +257,9 @@ onBeforeUnmount(() => {
       </section>
 
       <footer class="progress-footer">
-        <p><strong>可以放心离开</strong><span>任务状态和结果保存在后台，稍后从项目列表回来会继续显示最新进度。</span></p>
-        <AppButton v-if="isCompleted" type="button" variant="primary" size="lg" @click="enterWorkspace()">进入设定与分镜</AppButton>
-        <AppButton v-else type="button" variant="secondary" size="lg" @click="router.push('/projects')">返回项目列表</AppButton>
+        <p><strong>{{ tr('可以放心离开') }}</strong><span>{{ tr('任务状态和结果保存在后台，稍后从项目列表回来会继续显示最新进度。') }}</span></p>
+        <AppButton v-if="isCompleted" type="button" variant="primary" size="lg" @click="enterWorkspace()">{{ tr('进入设定与分镜') }}</AppButton>
+        <AppButton v-else type="button" variant="secondary" size="lg" @click="router.push('/projects')">{{ tr('返回项目列表') }}</AppButton>
       </footer>
     </div>
   </main>

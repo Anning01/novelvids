@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Music2, Pause, Play, Volume2, VolumeX } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
@@ -10,7 +12,7 @@ const props = withDefaults(defineProps<{
   durationSeconds?: number;
 }>(), {
   previewUrl: '',
-  sourceLabel: '参考音频',
+  get sourceLabel() { return tr('参考音频') },
   durationSeconds: 0,
 });
 
@@ -110,7 +112,7 @@ function handleEnded() {
     <button
       type="button"
       class="workbench-audio-media__play"
-      :aria-label="playing ? `暂停 ${title}` : `播放 ${title}`"
+      :aria-label="playing ? tr('暂停 {p0}', { p0: title }) : tr('播放 {p0}', { p0: title })"
       @click="togglePlayback"
     >
       <Pause v-if="playing" :size="15" fill="currentColor" aria-hidden="true" />
@@ -133,7 +135,7 @@ function handleEnded() {
         step="0.01"
         :value="currentTime"
         :style="progressStyle"
-        :aria-label="`${title} 播放进度`"
+        :aria-label="tr('{p0} 播放进度', { p0: title })"
         @input="seek"
       >
     </div>
@@ -141,7 +143,7 @@ function handleEnded() {
     <button
       type="button"
       class="workbench-audio-media__volume"
-      :aria-label="muted ? '恢复声音' : '静音'"
+      :aria-label="muted ? tr('恢复声音') : tr('静音')"
       @click="toggleMuted"
     >
       <VolumeX v-if="muted" :size="16" aria-hidden="true" />

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import logging
 import os
@@ -98,14 +100,14 @@ class VideoMerger:
             RuntimeError: FFmpeg 执行失败
         """
         if not videos:
-            raise ValueError("当前没有可合并的视频")
+            raise ValueError(localized_message('当前没有可合并的视频'))
 
         # 收集所有视频文件路径
         video_paths = []
         for video in videos:
             path = self._get_video_path(video)
             if not path:
-                raise ValueError(f"视频文件不存在: video_id={video.id}")
+                raise ValueError(localized_message('视频文件不存在: video_id={p1}', p1=f'{video.id}'))
             # Windows 路径处理：转换为绝对路径并规范化
             abs_path = os.path.abspath(path)
             video_paths.append(abs_path)
@@ -128,7 +130,7 @@ class VideoMerger:
     ) -> str:
         """合并本地或 OSS 视频；OSS 读写始终使用 Provider 的服务端端点。"""
         if not videos:
-            raise ValueError("当前没有可合并的视频")
+            raise ValueError(localized_message('当前没有可合并的视频'))
 
         if not oss.enabled:
             return await asyncio.to_thread(self.merge_videos, videos, chapter_id)
@@ -147,7 +149,7 @@ class VideoMerger:
                 raw_url = str(video.url or "")
                 object_key = oss.normalize_media_ref(raw_url)
                 if not object_key or not object_key.startswith("uploads/"):
-                    raise ValueError(f"视频文件不存在: video_id={video.id}")
+                    raise ValueError(localized_message('视频文件不存在: video_id={p1}', p1=f'{video.id}'))
 
                 destination = temporary_dir / f"{index:04d}-{video.id}.mp4"
                 try:
@@ -155,7 +157,7 @@ class VideoMerger:
                 except Exception as exc:
                     logger.exception("OSS video download failed: video_id=%s", video.id)
                     raise RuntimeError(
-                        f"从 OSS 读取视频失败: video_id={video.id}"
+                        localized_message('从 OSS 读取视频失败: video_id={p1}', p1=f'{video.id}')
                     ) from exc
                 video_paths.append(str(destination))
 
@@ -173,14 +175,14 @@ class VideoMerger:
                 await oss.put_file(output_key, output_path, "video/mp4")
             except Exception as exc:
                 logger.exception("OSS merged video upload failed: chapter_id=%s", chapter_id)
-                raise RuntimeError("合并视频上传 OSS 失败") from exc
+                raise RuntimeError(localized_message('合并视频上传 OSS 失败')) from exc
 
             return oss.resolve_url(output_key) or output_key
 
     def _merge_video_paths(self, video_paths: list[str], output_path: str) -> None:
         """将已物化的本地视频合并到指定路径。"""
         if not video_paths:
-            raise ValueError("当前没有可合并的视频")
+            raise ValueError(localized_message('当前没有可合并的视频'))
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -255,7 +257,7 @@ class VideoMerger:
         # Windows 命令行长度限制检查 (约 8000 字符安全边界)
         cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd)
         if len(cmd_str) > 8000:
-            raise RuntimeError(f"视频数量过多（{len(video_paths)}个），命令行超过Windows限制，请分批合并")
+            raise RuntimeError(localized_message('视频数量过多（{p1}个），命令行超过Windows限制，请分批合并', p1=f'{len(video_paths)}'))
 
         # 执行合并
         result = subprocess.run(
@@ -270,14 +272,14 @@ class VideoMerger:
             logger.error(f"FFmpeg returncode: {result.returncode}")
             logger.error(f"FFmpeg stderr: {result.stderr}")
             logger.error(f"FFmpeg stdout: {result.stdout}")
-            raise RuntimeError(f"视频合并失败: {result.stderr}")
+            raise RuntimeError(localized_message('视频合并失败: {p1}', p1=f'{result.stderr}'))
 
         # 验证输出文件是否真的创建成功
         if not os.path.exists(output_path):
             logger.error(f"Output file not created: {output_path}")
             logger.error(f"FFmpeg stdout: {result.stdout}")
             logger.error(f"FFmpeg stderr: {result.stderr}")
-            raise RuntimeError(f"视频合并失败：输出文件未创建")
+            raise RuntimeError(localized_message('视频合并失败：输出文件未创建'))
 
     def merge_paths(self, video_paths: list[str], output_path: str) -> None:
         """合并调用方已物化的媒体文件，供不可变快照等服务复用。"""

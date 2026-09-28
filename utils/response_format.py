@@ -3,7 +3,8 @@ import random
 import string
 from typing import TypeVar, Generic, Optional, List
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+from utils.messages import localized_message
 
 from config import settings
 
@@ -25,7 +26,7 @@ class ResponseSchema(BaseModel, Generic[DataT]):
     # 会让 Pydantic 的 smart-union 优先保留原始容器，从而跳过嵌套模型的
     # 校验器与序列化逻辑（例如 OSS 对象 key 转公网 URL）。
     data: Optional[DataT] = None
-    message: str = "操作成功"
+    message: str = Field(default_factory=lambda: localized_message("操作成功"))
 
 
 # 统一响应格式

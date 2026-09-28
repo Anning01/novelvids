@@ -1,0 +1,72 @@
+{
+  "realistic-general": {
+    "label": "General realism",
+    "image": "Photographic realism with true skin texture, natural fabric folds and fine environmental materials. Physically plausible light, soft highlights and layered shadows. Restrained natural color without a filtered look. Realistic anatomy, proportions and perspective with photographic detail.",
+    "video": "Natural cinematography. Motion obeys weight, inertia and continuous physics without frame jumps. Keep handheld or stabilized camera character consistent within the scene. Environmental lighting changes continuously with movement. No cartoon deformation, liquid-metal effects or impossible physics."
+  },
+  "realistic-urban": {
+    "label": "Urban realism",
+    "image": "Contemporary urban realism with convincing glass facades, asphalt and neon materials. Layered atmospheric perspective and night lighting. Contemporary clothing, a slight documentary texture, neutral city colors and realistic neon and vehicle-light accents.",
+    "video": "Continuous traffic, pedestrian and wet-surface reflections. Natural shallow-focus tracking and breathing. Handheld following or tracking moves without excessive dramatic flares. Keep reflections and shadows consistent with motion."
+  },
+  "realistic-cinematic": {
+    "label": "Cinematic realism",
+    "image": "Cinematic realism with high-end lens characteristics, shallow depth of field and soft bokeh. Dramatic but credible lighting with clear key and rim light. Coherent warm/cool grading, film-still texture and realistic skin detail.",
+    "video": "Cinematic slow pushes, pulls, pans and restrained handheld movement. Physically plausible shutter blur, smooth focus transitions and naturally changing light. Consistent grading throughout, weighted action and believable rhythm."
+  },
+  "anime-japanese": {
+    "label": "2D anime",
+    "image": "Japanese 2D animation with crisp cel outlines, clean edges and flat colors with limited graded shadows. Anime proportions, expressive eyes and stylized expressions. Layered painted backgrounds, bright transparent colors, deliberate highlights and blush.",
+    "video": "Keyframe-based 2D anime motion with clear anticipation and follow-through. Favor pans, pushes, pulls and cuts. Consistent outline thickness and line character. Flat color areas without smeared gradients; natural stylized mouth shapes and expressions."
+  },
+  "manhwa-urban": {
+    "label": "2D Korean urban comic",
+    "image": "Korean urban webtoon illustration with refined digital linework, elongated proportions and carefully modeled features. Modern architecture and fashionable neighborhoods. Soft saturated digital color, delicate highlights and skin sheen, with an editorial fashion quality.",
+    "video": "Lightweight 2D animation with fluid elegant movement and subtle expressions. Pushes, pulls and gentle orbits around characters; slight clothing and hair movement. Stable color and sheen without rough deformation or color jumps."
+  },
+  "chinese-3d": {
+    "label": "3D Chinese style",
+    "image": "Chinese-inspired 3D animation with PBR rendering and convincing silk, metal and wood. Refined character modeling, East Asian features and classical hairstyles. Traditional architecture and landscaped courtyards, soft layered light, cinnabar, dark teal and gold accents.",
+    "video": "Smooth stable camera motion with dance-like rhythm and believable weight. Natural cloth and hair simulation. Restrained petals or dust, consistent rendering and stable character proportions."
+  },
+  "xianxia-3d": {
+    "label": "3D xianxia",
+    "image": "3D cultivation fantasy with monumental mountains, cloud seas and floating architecture. Refined immortal characters, detailed translucent garments and artifacts. Clear layered spiritual energy, sword trails and formations. Teal-white and violet-gold palette with ethereal haze.",
+    "video": "Fluid sword flight and spell trajectories with layered particles and light. Expansive rising, descending and orbiting camera moves; slowly moving clouds. Graceful characters and natural flowing cloth. Stable effects without flicker, preserving the cultivation-fantasy aesthetic."
+  },
+  "manhwa-2d": {
+    "label": "2D Korean comic",
+    "image": "Refined Korean comic illustration with delicate digital lines and soft gradient coloring. Elongated proportions, detailed features and layered eyes. Fashionable clothing with subtle material sheen, restrained atmospheric backgrounds and a soft cohesive palette.",
+    "video": "Light animation emphasizing localized movement and microexpressions. Pushes, pulls, pans and close-up cuts. Stable lines and soft gradients without abrupt deformation."
+  },
+  "otome-2d": {
+    "label": "2D otome",
+    "image": "Romantic Japanese illustration with graceful silhouettes and refined features. Detailed hair, garments, lace and jewelry. Soft pink-toned colors, gentle bloom and delicate petals or star accents for a dreamlike atmosphere.",
+    "video": "Gentle slow camera movement and elegant character actions. Fine falling petals and twinkling atmosphere, subtle hair and skirt motion. Maintain soft light and smooth dreamlike transitions."
+  },
+  "chinese-animation-2d": {
+    "label": "2D Chinese animation",
+    "image": "2D animation combining East Asian aesthetics with strong and delicate linework. Carefully designed characters and garment motifs. Layered colors blending ink washes and flat fills, traditional architecture and landscapes in an elegant palette.",
+    "video": "Clear rhythmic movement influenced by martial arts. Expansive staging and shot-size changes, restrained ink and particle effects. Consistent line style and visual identity."
+  },
+  "cg": {
+    "label": "CG style",
+    "image": "High-quality computer-generated rendering with global illumination, precise models and rich metal, glass and fabric materials. Natural depth of field and volumetric lighting. Professional grading, clean clarity and sharp detail balancing realism and art direction.",
+    "video": "Fluid 3D character and camera motion with natural blur. Detailed cloth and hair simulation. Continuous lighting and reflections with stable rendering, no flicker or noise."
+  },
+  "cartoon-3d": {
+    "label": "3D cartoon",
+    "image": "Rounded, exaggerated 3D characters with large eyes and simple facial structures. Bright saturated colors and clean soft clay-like or toy-like materials. Playful props with readable silhouettes and a warm childlike character.",
+    "video": "Exaggerated but coherent squash and stretch with elastic movement. Lively cameras, brisk cuts and playful compositions. Rich expressions and a consistent bright cartoon palette."
+  },
+  "cyberpunk-cg": {
+    "label": "CG cyberpunk",
+    "image": "Futuristic neon city nights with holograms and large billboards. Wet streets reflecting multicolored light. Mechanical augmentations and technological clothing, high-contrast cyan-violet and magenta lighting and an imposing technological atmosphere.",
+    "video": "Moving holograms, neon detail, continuous rain and steam. Low-angle tracking and fast traveling shots. Crisp mechanical movement, stable neon bloom and a high-contrast cool palette."
+  },
+  "gongbi": {
+    "label": "Gongbi painting",
+    "image": "Traditional Chinese meticulous brush painting with fine outline work and layered color washes. Silk or rice-paper texture, restrained mineral pigments such as azurite, malachite, cinnabar and ochre. Elegant figures, birds and flowers, even precise lines and deliberate negative space.",
+    "video": "Primarily 2D pans, pushes and pulls, like a slowly unfolding scroll. Keep brushwork and wash texture stable. Animate only restrained local details such as water, mist or petals. Stable muted colors and the character of an antique painting."
+  }
+}

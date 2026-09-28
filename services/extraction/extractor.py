@@ -4,7 +4,7 @@ import asyncio
 from typing import Literal
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 
 from prompts.extraction import (
     GROUP_PORTRAIT_TRAIT_LABELS,
@@ -38,8 +38,13 @@ class Person(BaseModel):
         default="人物",
         description="资产形态",
     )
-    description: str = Field(default="", description="中文剧情语义说明")
+    description: str = Field(default="", description="任务指定语言的剧情语义说明")
     base_traits: str = Field(description="目标提示词语言的稳定视觉描述")
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value):
+        return {"person": "人物", "animal": "动物", "group": "群像"}.get(value, value) if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def validate_visual_contract(self) -> "Person":
@@ -65,14 +70,14 @@ class Person(BaseModel):
 class Scene(BaseModel):
     name: str = Field(description="场景名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
-    description: str = Field(default="", description="中文剧情语义说明")
+    description: str = Field(default="", description="任务指定语言的剧情语义说明")
     base_traits: str = Field(description="目标提示词语言的稳定场景视觉描述")
 
 
 class Item(BaseModel):
     name: str = Field(description="道具名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
-    description: str = Field(default="", description="中文剧情语义说明")
+    description: str = Field(default="", description="任务指定语言的剧情语义说明")
     base_traits: str = Field(description="目标提示词语言的稳定道具视觉描述")
 
 
@@ -107,11 +112,13 @@ class AssetExtractor:
         client: AsyncOpenAI,
         model: str,
         supports_json_output: bool = False,
+        prompt_language: str = "zh",
     ) -> None:
         self.client = client
         self.model = model
         self.supports_json_output = supports_json_output
         self.last_usage: dict = {}
+        self.prompt_language = prompt_language
 
     async def extract(
         self,
@@ -124,6 +131,7 @@ class AssetExtractor:
                 messages=messages,
                 response_model=self.response_model,
                 supports_json_output=self.supports_json_output,
+                prompt_language=self.prompt_language,
             )
             self.last_usage = completion_usage(completion)
             return AssetExtractionResult.model_validate(parsed)

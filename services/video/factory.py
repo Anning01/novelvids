@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -48,7 +50,7 @@ class VideoGeneratorFactory:
             normalized = VideoGenerationModelTypeEnum(model_type)
             self._registry[normalized]
         except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="该视频模型尚未配置请求适配器") from exc
+            raise HTTPException(status_code=400, detail=localized_message('该视频模型尚未配置请求适配器')) from exc
 
     def create(self, config: AiModelConfig) -> BaseVideoGenerator:
         capabilities_for(config.video_model_type)

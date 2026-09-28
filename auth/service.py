@@ -1,5 +1,7 @@
 """账号密码认证与用户会话服务。"""
 
+from utils.messages import localized_message
+
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -27,9 +29,9 @@ class AuthService:
     async def login(self, data: LoginIn) -> LoginOut:
         user = await User.get_or_none(username=data.username.strip())
         if user is None or not verify_password(data.password, user.password_hash):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+            raise HTTPException(status_code=401, detail=localized_message('用户名或密码错误'))
         if user.status != UserStatusEnum.active.value:
-            raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
+            raise HTTPException(status_code=403, detail=localized_message('账号已停用，请联系管理员'))
         token = new_session_token()
         await UserSession.create(
             token_hash=hash_token(token),
@@ -92,7 +94,7 @@ class AuthService:
         self, user: User, old_password: str, new_password: str
     ) -> None:
         if not verify_password(old_password, user.password_hash):
-            raise HTTPException(status_code=400, detail="当前密码不正确")
+            raise HTTPException(status_code=400, detail=localized_message('当前密码不正确'))
         user.password_hash = hash_password(new_password)
         await user.save(update_fields=["password_hash", "updated_at"])
 

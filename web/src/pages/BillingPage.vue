@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onMounted, ref } from 'vue'
 import { Activity, Clapperboard, Coins, Image, Type, ChevronRight } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
@@ -21,8 +23,8 @@ const expandedRecordId = ref<number | null>(null)
 const auth = useAuthStore()
 const showSourceColumn = computed(() => auth.enabled === true)
 
-const billingTypeLabel = (value: string) => ({ text: '文本', image: '生图', video: '视频' }[value] || value)
-const taskTypeLabel = (value: number) => ({ 1: '提取', 2: '参考图', 3: '分镜', 4: '视频', 5: '项目分析', 6: '重制', 7: '创作助手' }[value] || `任务 ${value}`)
+const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') } }[value] || value)
+const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') } }[value] || tr('任务 {p0}', { p0: value }))
 
 function recordDiscount(item: BillingRecord): number {
   if (item.record_kind === 'agent_conversation') return 1
@@ -32,12 +34,12 @@ function recordDiscount(item: BillingRecord): number {
   return Number.isFinite(value) && value > 0 && value !== 1 ? value : 1
 }
 function discountText(discount: number): string {
-  if (discount < 1) return `${Math.round(discount * 100) / 10}折`
+  if (discount < 1) return tr('{p0}折', { p0: Math.round(discount * 100) / 10 })
   return `${discount}×`
 }
 
 const projectOptions = computed(() => [
-  { value: 'all', label: '全部项目' },
+  { value: 'all', get label() { return tr('全部项目') } },
   ...projects.value.map(item => ({ value: String(item.novel_id), label: item.novel_name })),
 ])
 const selectedProject = computed(() => (
@@ -49,7 +51,7 @@ const billingBreakdown = computed(() => {
   return map
 })
 const projectName = (novelId: number) => (
-  projects.value.find(item => item.novel_id === novelId)?.novel_name || `项目 ${novelId}`
+  projects.value.find(item => item.novel_id === novelId)?.novel_name || tr('项目 {p0}', { p0: novelId })
 )
 const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize.value)))
 
@@ -124,63 +126,63 @@ onMounted(load)
     <header class="billing-header">
       <div>
         <span>COST DASHBOARD</span>
-        <h1>成本看板</h1>
-        <p>每个模型的调用成本，按项目与维度汇总。</p>
+        <h1>{{ tr('成本看板') }}</h1>
+        <p>{{ tr('每个模型的调用成本，按项目与维度汇总。') }}</p>
       </div>
       <AppSelect
         v-model="selectedProjectId"
         class="billing-project-filter"
         :options="projectOptions"
-        ariaLabel="按项目过滤成本看板"
+        :ariaLabel="tr('按项目过滤成本看板')"
         @update:model-value="selectProject"
       />
     </header>
 
-    <div v-if="loading" class="billing-state">正在读取成本数据…</div>
+    <div v-if="loading" class="billing-state">{{ tr('正在读取成本数据…') }}</div>
     <template v-else>
-      <section class="summary-grid" aria-label="成本汇总">
+      <section class="summary-grid" :aria-label="tr('成本汇总')">
         <article class="stat-card is-primary">
-          <span class="stat-label"><Coins :size="15" />总成本</span>
+          <span class="stat-label"><Coins :size="15" />{{ tr('总成本') }}</span>
           <strong class="stat-value">{{ money(summary?.total_cost ?? 0) }}</strong>
-          <small class="stat-sub">{{ selectedProject ? selectedProject.novel_name : '全部项目累计' }}</small>
+          <small class="stat-sub">{{ selectedProject ? selectedProject.novel_name : tr('全部项目累计') }}</small>
         </article>
         <article class="stat-card">
-          <span class="stat-label"><Activity :size="15" />计费记录</span>
+          <span class="stat-label"><Activity :size="15" />{{ tr('计费记录') }}</span>
           <strong class="stat-value">{{ summary?.total_records ?? 0 }}</strong>
-          <small class="stat-sub">条原始用量记录</small>
+          <small class="stat-sub">{{ tr('条原始用量记录') }}</small>
         </article>
         <article class="stat-card is-text">
-          <span class="stat-label"><Type :size="15" />文本</span>
+          <span class="stat-label"><Type :size="15" />{{ tr('文本') }}</span>
           <strong class="stat-value">{{ money(billingBreakdown.text) }}</strong>
         </article>
         <article class="stat-card is-image">
-          <span class="stat-label"><Image :size="15" />生图</span>
+          <span class="stat-label"><Image :size="15" />{{ tr('生图') }}</span>
           <strong class="stat-value">{{ money(billingBreakdown.image) }}</strong>
         </article>
         <article class="stat-card is-video">
-          <span class="stat-label"><Clapperboard :size="15" />视频</span>
+          <span class="stat-label"><Clapperboard :size="15" />{{ tr('视频') }}</span>
           <strong class="stat-value">{{ money(billingBreakdown.video) }}</strong>
         </article>
       </section>
 
       <section class="table-card">
         <header class="table-card__header">
-          <div><h2>调用流水</h2><p>创作助手按会话汇总，展开可查看明细。</p></div>
-          <small>{{ selectedProject?.novel_name || '全部项目' }}</small>
+          <div><h2>{{ tr('调用流水') }}</h2><p>{{ tr('创作助手按会话汇总，展开可查看明细。') }}</p></div>
+          <small>{{ selectedProject?.novel_name || tr('全部项目') }}</small>
         </header>
         <table class="data-table">
           <thead>
             <tr>
-              <th>时间</th>
-              <th>项目</th>
-              <th>维度</th>
-              <th>任务</th>
-              <th>模型</th>
-              <th>用量</th>
-              <th>时长</th>
-              <th>状态</th>
-              <th v-if="showSourceColumn">来源</th>
-              <th class="is-num">成本</th>
+              <th>{{ tr('时间') }}</th>
+              <th>{{ tr('项目') }}</th>
+              <th>{{ tr('维度') }}</th>
+              <th>{{ tr('任务') }}</th>
+              <th>{{ tr('模型') }}</th>
+              <th>{{ tr('用量') }}</th>
+              <th>{{ tr('时长') }}</th>
+              <th>{{ tr('状态') }}</th>
+              <th v-if="showSourceColumn">{{ tr('来源') }}</th>
+              <th class="is-num">{{ tr('成本') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -189,9 +191,8 @@ onMounted(load)
               <td>{{ projectName(item.novel_id) }}</td>
               <td>{{ billingTypeLabel(item.billing_type) }}</td>
               <td><template v-if="item.record_kind === 'agent_conversation'">
-                <button class="conversation-record-toggle" type="button" :aria-label="`查看会话 ${item.conversation_id} 费用明细`" :aria-expanded="expandedRecordId === item.id" :aria-controls="`billing-details-${item.id}`" @click="expandedRecordId = expandedRecordId === item.id ? null : item.id">
-                  <ChevronRight :size="13" :class="{ 'is-expanded': expandedRecordId === item.id }" />创作助手
-                </button><small class="conversation-record-meta">会话 {{ item.conversation_id }} · {{ item.turn_count }} 轮对话</small>
+                <button class="conversation-record-toggle" type="button" :aria-label="tr('查看会话 {p0} 费用明细', { p0: item.conversation_id })" :aria-expanded="expandedRecordId === item.id" :aria-controls="`billing-details-${item.id}`" @click="expandedRecordId = expandedRecordId === item.id ? null : item.id">
+                  <ChevronRight :size="13" :class="{ 'is-expanded': expandedRecordId === item.id }" />{{ tr('创作助手') }} </button><small class="conversation-record-meta">{{ tr('会话') }} {{ item.conversation_id }} · {{ item.turn_count }} {{ tr('轮对话') }}</small>
               </template><template v-else>{{ taskTypeLabel(item.task_type) }}</template></td>
               <td>{{ item.model_name || item.model }}</td>
               <td class="cell-muted">{{ usageLabel(item) }}</td>
@@ -211,20 +212,20 @@ onMounted(load)
             <tr v-if="expandedRecordId === item.id" :id="`billing-details-${item.id}`" class="conversation-record-detail"><td :colspan="showSourceColumn ? 10 : 9">
               <BillingRecordDetails :record-id="item.id" :novel-id="item.novel_id" :show-source="showSourceColumn" />
             </td></tr></template>
-            <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">暂无调用记录</td></tr>
+            <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">{{ tr('暂无调用记录') }}</td></tr>
           </tbody>
         </table>
         <footer v-if="totalRecords > 0" class="pager">
-          <span class="pager-total">共 {{ totalRecords }} 条</span>
+          <span class="pager-total">{{ tr('共') }} {{ totalRecords }} {{ tr('条') }}</span>
           <div class="pager-controls">
-            <select v-model.number="pageSize" class="pager-size" aria-label="每页条数" @change="changePageSize">
-              <option :value="20">20 条/页</option>
-              <option :value="50">50 条/页</option>
-              <option :value="100">100 条/页</option>
+            <select v-model.number="pageSize" class="pager-size" :aria-label="tr('每页条数')" @change="changePageSize">
+              <option :value="20">{{ tr('20 条/页') }}</option>
+              <option :value="50">{{ tr('50 条/页') }}</option>
+              <option :value="100">{{ tr('100 条/页') }}</option>
             </select>
-            <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
+            <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">{{ tr('上一页') }}</button>
             <span>{{ page }} / {{ pages }}</span>
-            <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">下一页</button>
+            <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">{{ tr('下一页') }}</button>
           </div>
         </footer>
       </section>

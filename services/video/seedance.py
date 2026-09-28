@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import json
 import logging
 from typing import Any
@@ -111,7 +113,7 @@ class SeedanceGenerator(BaseVideoGenerator):
             > capabilities.max_request_size_mb * 1024 * 1024
         ):
             raise SeedanceGenerationError(
-                f"Seedance 请求体不能超过 {capabilities.max_request_size_mb}MB，请将大文件上传 OSS 后使用公网 URL"
+                localized_message('Seedance 请求体不能超过 {p1}MB，请将大文件上传 OSS 后使用公网 URL', p1=f'{capabilities.max_request_size_mb}')
             )
 
         url = f"{self.config.base_url.rstrip('/')}/contents/generations/tasks"
@@ -141,7 +143,7 @@ class SeedanceGenerator(BaseVideoGenerator):
                     safe_url,
                     type(exc).__name__,
                 )
-                raise SeedanceGenerationError("视频供应商网络请求失败") from exc
+                raise SeedanceGenerationError(localized_message('视频供应商网络请求失败')) from exc
 
         request_id = _request_id(resp)
         if resp.status_code >= 400:
@@ -156,20 +158,20 @@ class SeedanceGenerator(BaseVideoGenerator):
             suffix = f"，request_id={request_id}" if request_id else ""
             if provider_error:
                 raise SeedanceGenerationError(
-                    f"视频供应商请求失败：{provider_error}（HTTP {resp.status_code}{suffix}）"
+                    localized_message('视频供应商请求失败：{p1}（HTTP {p3}{p4}）', p1=f'{provider_error}', p3=f'{resp.status_code}', p4=f'{suffix}')
                 )
-            raise SeedanceGenerationError(f"视频供应商请求失败（HTTP {resp.status_code}{suffix}）")
+            raise SeedanceGenerationError(localized_message('视频供应商请求失败（HTTP {p1}{p2}）', p1=f'{resp.status_code}', p2=f'{suffix}'))
         try:
             data = resp.json()
         except ValueError as exc:
-            raise SeedanceGenerationError("视频供应商返回了无法解析的响应") from exc
+            raise SeedanceGenerationError(localized_message('视频供应商返回了无法解析的响应')) from exc
         if error := _provider_error(data):
             suffix = f"，request_id={request_id}" if request_id else ""
-            raise SeedanceGenerationError(f"视频供应商返回错误：{error}{suffix}")
+            raise SeedanceGenerationError(localized_message('视频供应商返回错误：{p1}{p2}', p1=f'{error}', p2=f'{suffix}'))
 
         task_id = data.get("id")
         if not isinstance(task_id, str) or not task_id.strip():
-            raise SeedanceGenerationError("视频供应商未返回任务 ID")
+            raise SeedanceGenerationError(localized_message('视频供应商未返回任务 ID'))
         logger.info("Seedance submit: task_id=%s, images=%d", task_id, prepared.reference_image_count)
         return task_id.strip()
 
@@ -190,20 +192,20 @@ class SeedanceGenerator(BaseVideoGenerator):
                     safe_url,
                     type(exc).__name__,
                 )
-                raise SeedanceGenerationError("查询视频任务时网络请求失败") from exc
+                raise SeedanceGenerationError(localized_message('查询视频任务时网络请求失败')) from exc
         request_id = _request_id(resp)
         if resp.status_code >= 400:
             provider_error = _http_provider_error(resp)
             suffix = f"，request_id={request_id}" if request_id else ""
             if provider_error:
                 raise SeedanceGenerationError(
-                    f"查询视频任务失败：{provider_error}（HTTP {resp.status_code}{suffix}）"
+                    localized_message('查询视频任务失败：{p1}（HTTP {p3}{p4}）', p1=f'{provider_error}', p3=f'{resp.status_code}', p4=f'{suffix}')
                 )
-            raise SeedanceGenerationError(f"查询视频任务失败（HTTP {resp.status_code}{suffix}）")
+            raise SeedanceGenerationError(localized_message('查询视频任务失败（HTTP {p1}{p2}）', p1=f'{resp.status_code}', p2=f'{suffix}'))
         try:
             data = resp.json()
         except ValueError as exc:
-            raise SeedanceGenerationError("视频供应商返回了无法解析的任务状态") from exc
+            raise SeedanceGenerationError(localized_message('视频供应商返回了无法解析的任务状态')) from exc
 
         status = data.get("status", "")
         logger.info("Seedance query: task=%s, status=%s, keys=%s", external_task_id, status, list(data.keys()))
@@ -230,10 +232,7 @@ class SeedanceGenerator(BaseVideoGenerator):
             )
 
         if status in ("failed", "expired", "cancelled", "canceled"):
-            error_msg = _provider_error(data) or "视频生成任务失败"
-            # 翻译常见错误为中文
-            if isinstance(error_msg, str) and "sensitive" in error_msg.lower():
-                error_msg = "生成的视频可能包含敏感内容，请修改提示词后重试"
+            error_msg = _provider_error(data) or localized_message("视频生成任务失败")
             return self._build_result(
                 TaskStatusEnum.failed,
                 error=error_msg,

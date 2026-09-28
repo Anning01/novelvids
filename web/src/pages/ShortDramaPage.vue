@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, dateLocale } from '@/i18n'
+
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -37,21 +39,21 @@ const aspectRatios = ['16:9', '4:3', '3:4', '9:16', '21:9']
 const resolutions = ['480p', '720p', '1080p', '4k']
 // 本地缩略图与回退列表；后端 /api/config/visual-styles 是风格唯一事实来源
 const localVisualStyles: VisualStyle[] = [
-  { value: 'realistic-general', label: '写实通用', image: '/style-thumbnails/realistic-general.png' },
-  { value: 'realistic-urban', label: '写实都市', image: '/style-thumbnails/realistic-urban.png' },
-  { value: 'realistic-cinematic', label: '写实电影感', image: '/style-thumbnails/realistic-cinematic.png' },
-  { value: 'anime-japanese', label: '2D日漫', image: '/style-thumbnails/anime-japanese.png' },
-  { value: 'manhwa-urban', label: '2D韩漫都市', image: '/style-thumbnails/manhwa-urban.png' },
-  { value: 'chinese-3d', label: '3D国风', image: '/style-thumbnails/chinese-3d.png' },
-  { value: 'xianxia-3d', label: '3D仙侠', image: '/style-thumbnails/xianxia-3d.png' },
-  { value: 'manhwa-2d', label: '2D韩漫', image: '/style-thumbnails/manhwa-2d.png' },
-  { value: 'otome-2d', label: '2D乙女', image: '/style-thumbnails/otome-2d.png' },
-  { value: 'chinese-animation-2d', label: '2D国漫', image: '/style-thumbnails/chinese-animation-2d.png' },
-  { value: 'cg', label: 'CG风格', image: '/style-thumbnails/cg.png' },
-  { value: 'cartoon-3d', label: '3D卡通', image: '/style-thumbnails/cartoon-3d.png' },
-  { value: 'cyberpunk-cg', label: 'CG赛博朋克', image: '/style-thumbnails/cyberpunk-cg.png' },
-  { value: 'gongbi', label: '工笔画', image: '/style-thumbnails/gongbi.png' },
-  { value: 'custom', label: '自定义风格', separator: true },
+  { value: 'realistic-general', get label() { return tr('写实通用') }, image: '/style-thumbnails/realistic-general.png' },
+  { value: 'realistic-urban', get label() { return tr('写实都市') }, image: '/style-thumbnails/realistic-urban.png' },
+  { value: 'realistic-cinematic', get label() { return tr('写实电影感') }, image: '/style-thumbnails/realistic-cinematic.png' },
+  { value: 'anime-japanese', get label() { return tr('2D日漫') }, image: '/style-thumbnails/anime-japanese.png' },
+  { value: 'manhwa-urban', get label() { return tr('2D韩漫都市') }, image: '/style-thumbnails/manhwa-urban.png' },
+  { value: 'chinese-3d', get label() { return tr('3D国风') }, image: '/style-thumbnails/chinese-3d.png' },
+  { value: 'xianxia-3d', get label() { return tr('3D仙侠') }, image: '/style-thumbnails/xianxia-3d.png' },
+  { value: 'manhwa-2d', get label() { return tr('2D韩漫') }, image: '/style-thumbnails/manhwa-2d.png' },
+  { value: 'otome-2d', get label() { return tr('2D乙女') }, image: '/style-thumbnails/otome-2d.png' },
+  { value: 'chinese-animation-2d', get label() { return tr('2D国漫') }, image: '/style-thumbnails/chinese-animation-2d.png' },
+  { value: 'cg', get label() { return tr('CG风格') }, image: '/style-thumbnails/cg.png' },
+  { value: 'cartoon-3d', get label() { return tr('3D卡通') }, image: '/style-thumbnails/cartoon-3d.png' },
+  { value: 'cyberpunk-cg', get label() { return tr('CG赛博朋克') }, image: '/style-thumbnails/cyberpunk-cg.png' },
+  { value: 'gongbi', get label() { return tr('工笔画') }, image: '/style-thumbnails/gongbi.png' },
+  { value: 'custom', get label() { return tr('自定义风格') }, separator: true },
 ]
 
 const visualStyles = ref<VisualStyle[]>(localVisualStyles)
@@ -80,7 +82,7 @@ const selectedStoryboardStrategy = computed(() => storyboardStrategies.value.fin
 ))
 const storyboardStrategyOptions = computed(() => storyboardStrategies.value.map(item => ({
   value: item.key,
-  label: item.name,
+  get label() { return tr(item.name) },
 })))
 const isAgentMode = computed(() => mode.value === 'agent')
 const formattedFileSize = computed(() => {
@@ -95,10 +97,10 @@ async function loadVisualStyles() {
     const thumbnails = new Map(localVisualStyles.map(item => [item.value, item.image]))
     const merged: VisualStyle[] = response.data.map(item => ({
       value: item.key,
-      label: item.label,
+      get label() { return tr(item.label) },
       image: thumbnails.get(item.key),
     }))
-    merged.push({ value: 'custom', label: '自定义风格', separator: true })
+    merged.push({ value: 'custom', get label() { return tr('自定义风格') }, separator: true })
     visualStyles.value = merged
     // 若当前选中风格已被后端移除，回退到第一项
     if (!merged.some(item => item.value === styleId.value)) styleId.value = merged[0].value
@@ -132,11 +134,11 @@ function chooseFile() {
 function validateFile(file: File) {
   const extension = file.name.split('.').pop()?.toLowerCase()
   if (!extension || !['doc', 'docx', 'txt', 'pdf', 'md'].includes(extension)) {
-    notice.error('仅支持 doc、docx、txt、pdf 和 md 格式')
+    notice.error(tr('仅支持 doc、docx、txt、pdf 和 md 格式'))
     return false
   }
   if (file.size > 20 * 1024 * 1024) {
-    notice.error('剧本文件不能超过 20 MB')
+    notice.error(tr('剧本文件不能超过 20 MB'))
     return false
   }
   return true
@@ -167,22 +169,22 @@ async function createProject() {
   if (importedProjectId.value) { await resumeImport(); return }
   createError.value = ''
   if (isAgentMode.value && (sourceMode.value === 'file' ? !selectedFile.value : !storyText.value.trim())) {
-    notice.info(sourceMode.value === 'file' ? '请先上传剧本文件' : '请先粘贴小说或剧本正文')
+    notice.info(sourceMode.value === 'file' ? tr('请先上传剧本文件') : tr('请先粘贴小说或剧本正文'))
     return
   }
   if (styleId.value === 'custom' && !customPrompt.value.trim()) {
-    notice.info('请填写自定义画面风格')
+    notice.info(tr('请填写自定义画面风格'))
     return
   }
-  const modeLabel = mode.value === 'agent' ? 'Agent 模式' : '人工模式'
+  const modeLabel = mode.value === 'agent' ? tr('Agent 模式') : tr('人工模式')
   if (isAgentMode.value) {
-    const projectName = sourceMode.value === 'text' ? storyTitle.value.trim() || '未命名短剧' : selectedFile.value!.name.replace(/\.[^.]+$/, '') || '未命名短剧'
+    const projectName = sourceMode.value === 'text' ? storyTitle.value.trim() || tr('未命名短剧') : selectedFile.value!.name.replace(/\.[^.]+$/, '') || tr('未命名短剧')
     creating.value = true
     try {
-      createProgress.value = sourceMode.value === 'file' ? '正在上传并读取书稿…' : '正在保存小说正文…'
+      createProgress.value = sourceMode.value === 'file' ? tr('正在上传并读取书稿…') : tr('正在保存小说正文…')
       const uploaded = sourceMode.value === 'file' ? await api.upload(selectedFile.value!) : null
       const sourceName = uploaded?.filename || `${projectName}.txt`
-      const description = `${modeLabel} · 源剧本：${sourceName}`
+      const description = tr('{p0} · 源剧本：{p1}', { p0: modeLabel, p1: sourceName })
       const createPayload: Parameters<typeof api.createNovel>[0] = {
         name: projectName,
         author: 'Agent 创建',
@@ -200,7 +202,7 @@ async function createProject() {
         createPayload.source_filename = selectedFile.value!.name
       } else if (uploaded) {
         const textContent = uploaded.text_content?.trim() || ''
-        if (!textContent) throw new Error('未能从文件中读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试')
+        if (!textContent) throw new Error(tr('未能从文件中读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试'))
         if (uploaded.chapter_validation && !uploaded.chapter_validation.valid) {
           throw new Error(uploaded.chapter_validation.message)
         }
@@ -208,11 +210,11 @@ async function createProject() {
       } else {
         createPayload.content = storyText.value.trim()
       }
-      createProgress.value = '正在创建项目…'
+      createProgress.value = tr('正在创建项目…')
       const response = await api.createNovel(createPayload)
       importedProjectId.value = response.data.id
       let chapterCount = 0
-      createProgress.value = '正在识别章节，请稍候…'
+      createProgress.value = tr('正在识别章节，请稍候…')
       const splitResult = await api.splitNovel(response.data.id)
       chapterCount = splitResult.data.total_chapters || 0
       sessionStorage.setItem('short-drama-agent-project', JSON.stringify({
@@ -226,10 +228,10 @@ async function createProject() {
         fileName: sourceName,
         sourcePath: uploaded?.file_path,
       }))
-      notice.success(chapterCount ? `书稿已成功拆分为 ${chapterCount} 章，正在进入 Agent 工作区` : '书稿已上传并完成章节拆分，正在进入 Agent 工作区')
+      notice.success(chapterCount ? tr('书稿已成功拆分为 {p0} 章，正在进入 Agent 工作区', { p0: chapterCount }) : tr('书稿已上传并完成章节拆分，正在进入 Agent 工作区'))
       await router.push({ name: 'short-drama-agent', params: { projectId: response.data.id } })
     } catch (error) {
-      createError.value = error instanceof Error ? error.message : '创建失败，请重试'
+      createError.value = error instanceof Error ? error.message : tr('创建失败，请重试')
       notice.error(createError.value)
     } finally {
       creating.value = false
@@ -239,7 +241,7 @@ async function createProject() {
   creating.value = true
   try {
     const response = await api.createNovel({
-      name: '新项目',
+      name: tr('新项目'),
       author: '人工创建',
       description: modeLabel,
       content: '',
@@ -259,7 +261,7 @@ async function createProject() {
       styleKey: styleId.value,
       storyboardStrategy: storyboardStrategy.value,
     }))
-    notice.success('人工短剧项目已创建，正在进入设定工作区')
+    notice.success(tr('人工短剧项目已创建，正在进入设定工作区'))
     await router.push({ name: 'short-drama-manual', params: { projectId: response.data.id } })
   } catch (error) {
     notice.error((error as Error).message)
@@ -273,18 +275,18 @@ async function resumeImport() {
   if (!projectId || creating.value) return
   creating.value = true
   createError.value = ''
-  createProgress.value = '正在恢复已保存项目…'
+  createProgress.value = tr('正在恢复已保存项目…')
   try {
     // A lost response may hide a successful split. Inspect the same project
     // before retrying so neither the book nor its chapters are duplicated.
     const chapters = await api.chaptersPage(projectId, 1, 1)
     if (!chapters.data.pagination.total) {
-      createProgress.value = '正在继续识别章节…'
+      createProgress.value = tr('正在继续识别章节…')
       await api.splitNovel(projectId)
     }
     await router.push({ name: 'short-drama-agent', params: { projectId } })
   } catch (error) {
-    createError.value = error instanceof Error ? error.message : '暂时无法继续识别，请重试'
+    createError.value = error instanceof Error ? error.message : tr('暂时无法继续识别，请重试')
   } finally { creating.value = false }
 }
 </script>
@@ -292,13 +294,13 @@ async function resumeImport() {
 <template>
   <CreationEntryShell
     eyebrow="AI SHORT DRAMA"
-    :description="isAgentMode ? '上传或粘贴故事，逐章提取资产、生成分镜，和助手一起完善画面。' : '从空白项目开始，手动掌控角色、场景、分镜和镜头细节。'"
+    :description="isAgentMode ? tr('上传或粘贴故事，逐章提取资产、生成分镜，和助手一起完善画面。') : tr('从空白项目开始，手动掌控角色、场景、分镜和镜头细节。')"
   >
-    <template #title>翻开剧本，创作<span class="creation-entry-accent">精品短剧</span></template>
+    <template #title>{{ tr('翻开剧本，创作') }}<span class="creation-entry-accent">{{ tr('精品短剧') }}</span></template>
       <form class="short-drama-form" :aria-busy="creating" @submit.prevent="createProject">
-        <nav v-if="isAgentMode" class="story-source-tabs" aria-label="正文导入方式">
-          <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'file'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'file'"><UploadCloud :size="15" />上传文件</AppButton>
-          <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'text'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'text'"><PencilLine :size="15" />粘贴正文</AppButton>
+        <nav v-if="isAgentMode" class="story-source-tabs" :aria-label="tr('正文导入方式')">
+          <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'file'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'file'"><UploadCloud :size="15" />{{ tr('上传文件') }}</AppButton>
+          <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'text'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'text'"><PencilLine :size="15" />{{ tr('粘贴正文') }}</AppButton>
         </nav>
         <Transition name="mode-panel" mode="out-in">
           <AppButton
@@ -320,69 +322,67 @@ async function resumeImport() {
             <template v-if="selectedFile">
               <span class="dropzone-icon has-file"><FileText :size="25" /></span>
               <strong>{{ selectedFile.name }}</strong>
-              <small>{{ formattedFileSize }} · 点击重新选择文件</small>
-              <span class="remove-file" role="button" aria-label="移除剧本" tabindex="0" @click="removeFile"><X :size="15" /></span>
+              <small>{{ formattedFileSize }} {{ tr('· 点击重新选择文件') }}</small>
+              <span class="remove-file" role="button" :aria-label="tr('移除剧本')" tabindex="0" @click="removeFile"><X :size="15" /></span>
             </template>
             <template v-else>
               <span class="dropzone-icon"><UploadCloud :size="27" /></span>
-              <strong>点击或拖拽剧本至此</strong>
-              <small>支持 doc、docx、txt、pdf 和 md 格式，文件大小不超过 20 MB</small>
+              <strong>{{ tr('点击或拖拽剧本至此') }}</strong>
+              <small>{{ tr('支持 doc、docx、txt、pdf 和 md 格式，文件大小不超过 20 MB') }}</small>
             </template>
           </AppButton>
 
           <section v-else-if="isAgentMode" key="agent-text" class="story-text-source">
-            <label for="story-title">项目名称</label><input id="story-title" v-model="storyTitle" :disabled="creating || Boolean(importedProjectId)" maxlength="80" placeholder="给这个故事起个名字" />
-            <label for="story-content">小说或剧本正文</label><textarea id="story-content" v-model="storyText" :disabled="creating || Boolean(importedProjectId)" rows="9" maxlength="2000000" placeholder="将正文粘贴到这里，保留“第一章”“第二章”等章节标题，便于逐章创作。" />
-            <small>{{ storyText.length.toLocaleString() }} 字 · 长篇小说建议使用文件导入</small>
+            <label for="story-title">{{ tr('项目名称') }}</label><input id="story-title" v-model="storyTitle" :disabled="creating || Boolean(importedProjectId)" maxlength="80" :placeholder="tr('给这个故事起个名字')" />
+            <label for="story-content">{{ tr('小说或剧本正文') }}</label><textarea id="story-content" v-model="storyText" :disabled="creating || Boolean(importedProjectId)" rows="9" maxlength="2000000" :placeholder="tr('将正文粘贴到这里，保留“第一章”“第二章”等章节标题，便于逐章创作。')" />
+            <small>{{ storyText.length.toLocaleString(dateLocale) }} {{ tr('字 · 长篇小说建议使用文件导入') }}</small>
           </section>
           <section v-else key="manual-start" class="manual-mode-card" aria-labelledby="manual-mode-title">
             <span class="manual-mode-icon"><PencilLine :size="25" /></span>
             <div class="manual-mode-copy">
               <p>MANUAL WORKSPACE</p>
-              <h2 id="manual-mode-title">从空白项目开始</h2>
-              <span>不上传剧本，进入工作台后手动建立创作内容与生产流程。</span>
+              <h2 id="manual-mode-title">{{ tr('从空白项目开始') }}</h2>
+              <span>{{ tr('不上传剧本，进入工作台后手动建立创作内容与生产流程。') }}</span>
             </div>
-            <div class="manual-mode-features" aria-label="人工模式能力">
-              <span><Layers3 :size="15" />自由搭建</span>
-              <span><PencilLine :size="15" />逐步编辑</span>
-              <span><SlidersHorizontal :size="15" />精细控制</span>
+            <div class="manual-mode-features" :aria-label="tr('人工模式能力')">
+              <span><Layers3 :size="15" />{{ tr('自由搭建') }}</span>
+              <span><PencilLine :size="15" />{{ tr('逐步编辑') }}</span>
+              <span><SlidersHorizontal :size="15" />{{ tr('精细控制') }}</span>
             </div>
           </section>
         </Transition>
 
-        <CreationConfigBar modes-label="创作模式">
+        <CreationConfigBar :modes-label="tr('创作模式')">
           <template #modes>
             <AppButton type="button" variant="soft" size="sm" :disabled="creating || Boolean(importedProjectId)" :active="mode === 'agent'" @click="mode = 'agent'">
-              <Bot :size="15" />Agent 模式
-            </AppButton>
+              <Bot :size="15" />{{ tr('Agent 模式') }} </AppButton>
             <AppButton type="button" variant="soft" size="sm" :disabled="creating || Boolean(importedProjectId)" :active="mode === 'manual'" @click="mode = 'manual'">
-              <UserRound :size="15" />人工模式
-            </AppButton>
+              <UserRound :size="15" />{{ tr('人工模式') }} </AppButton>
           </template>
 
           <AppSelect
             v-model="storyboardStrategy"
             class="strategy-select"
-            ariaLabel="分镜策略"
-            menu-label="分镜策略"
+            :ariaLabel="tr('分镜策略')"
+            :menu-label="tr('分镜策略')"
             :menu-width="220"
             :options="storyboardStrategyOptions"
             :disabled="creating || Boolean(importedProjectId) || !storyboardStrategyOptions.length"
           >
             <template #leading><Clapperboard :size="15" /></template>
           </AppSelect>
-          <AppSelect :disabled="creating || Boolean(importedProjectId)" v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="aspectRatios">
+          <AppSelect :disabled="creating || Boolean(importedProjectId)" v-model="aspectRatio" class="format-select" :ariaLabel="tr('画面比例')" :options="aspectRatios">
             <template #leading><Film :size="15" /></template>
           </AppSelect>
-          <AppSelect :disabled="creating || Boolean(importedProjectId)" v-model="resolution" class="format-select" ariaLabel="分辨率" :options="resolutions">
+          <AppSelect :disabled="creating || Boolean(importedProjectId)" v-model="resolution" class="format-select" :ariaLabel="tr('分辨率')" :options="resolutions">
             <template #leading><Monitor :size="15" /></template>
           </AppSelect>
           <AppSelect
             v-model="styleId"
             :disabled="creating || Boolean(importedProjectId)"
             class="style-select"
-            ariaLabel="视觉风格"
-            menu-label="风格"
+            :ariaLabel="tr('视觉风格')"
+            :menu-label="tr('风格')"
             :menu-width="230"
             :max-menu-height="404"
             align="end"
@@ -400,25 +400,25 @@ async function resumeImport() {
         </CreationConfigBar>
 
         <div v-if="styleId === 'custom'" class="custom-prompt-panel">
-          <label for="custom-style-prompt">自定义画面风格</label>
+          <label for="custom-style-prompt">{{ tr('自定义画面风格') }}</label>
           <textarea
             id="custom-style-prompt"
             v-model="customPrompt"
             :disabled="creating || Boolean(importedProjectId)"
             maxlength="2000"
             rows="4"
-            placeholder="描述画面质感、色彩、人物造型、灯光和镜头语言，例如：东方电影感，低饱和青绿色调，自然光，细腻皮肤质感……"
+            :placeholder="tr('描述画面质感、色彩、人物造型、灯光和镜头语言，例如：东方电影感，低饱和青绿色调，自然光，细腻皮肤质感……')"
           />
           <small>{{ customPrompt.length }} / 2000</small>
         </div>
 
-        <p v-if="createError" class="story-import-error" role="alert">{{ createError }}。{{ importedProjectId ? '书稿和项目已保存，可以继续识别章节。' : '正文和选择已保留，可以调整后重试。' }}</p>
-        <p v-if="isAgentMode" class="story-import-guide">导入正文 → 理解故事 → 提取本章资产 → 生成分镜 → 对话调整画面</p>
+        <p v-if="createError" class="story-import-error" role="alert">{{ createError }}。{{ importedProjectId ? tr('书稿和项目已保存，可以继续识别章节。') : tr('正文和选择已保留，可以调整后重试。') }}</p>
+        <p v-if="isAgentMode" class="story-import-guide">{{ tr('导入正文 → 理解故事 → 提取本章资产 → 生成分镜 → 对话调整画面') }}</p>
         <AppButton class="create-short-drama" variant="primary" size="lg" block type="submit" :loading="creating">
           <span>
             <Sparkles v-if="!creating && isAgentMode" :size="18" />
             <PencilLine v-else-if="!creating" :size="18" />
-            {{ creating ? createProgress || '正在创建项目…' : importedProjectId ? '继续识别章节' : isAgentMode ? '创建 Agent 短剧项目' : '创建人工短剧项目' }}
+            {{ creating ? createProgress || tr('正在创建项目…') : importedProjectId ? tr('继续识别章节') : isAgentMode ? tr('创建 Agent 短剧项目') : tr('创建人工短剧项目') }}
           </span>
           <ArrowRight class="create-arrow" :size="18" />
         </AppButton>

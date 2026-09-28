@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { WorkbenchNode } from '../types/workbenchTypes'
 import { FileJson2, Image as ImageIcon, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted } from 'vue'
@@ -44,7 +46,7 @@ const incomingReferences = computed(() => store.edges
     const source = store.nodeByKey(edge.source)
     return source ? [{ edge, node: source, url: mediaUrl(source) }] : []
   }))
-const sizeLabel = computed(() => props.node.size ? `${Math.round(props.node.size.width)} × ${Math.round(props.node.size.height)}` : '自动')
+const sizeLabel = computed(() => props.node.size ? `${Math.round(props.node.size.width)} × ${Math.round(props.node.size.height)}` : tr('自动'))
 const payloadJson = computed(() => JSON.stringify(payload.value, null, 2))
 
 function closeOnEscape(event: KeyboardEvent) {
@@ -58,29 +60,29 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
 <template>
   <Teleport to="body">
     <div class="workbench-node-info-backdrop viral-workbench-surface-theme" @pointerdown.self="emit('close')">
-      <aside class="workbench-node-info nodrag nowheel workbench-scroll-region" role="dialog" aria-modal="true" :aria-label="`${node.title}节点信息`">
+      <aside class="workbench-node-info nodrag nowheel workbench-scroll-region" role="dialog" aria-modal="true" :aria-label="tr('{p0}节点信息', { p0: node.title })">
         <header class="workbench-node-info__header">
-          <div><span>节点信息</span><strong>{{ node.title }}</strong></div>
-          <button type="button" aria-label="关闭节点信息" title="关闭（Esc）" @click="emit('close')"><X :size="19" aria-hidden="true" /></button>
+          <div><span>{{ tr('节点信息') }}</span><strong>{{ node.title }}</strong></div>
+          <button type="button" :aria-label="tr('关闭节点信息')" :title="tr('关闭（Esc）')" @click="emit('close')"><X :size="19" aria-hidden="true" /></button>
         </header>
 
         <section class="workbench-node-info__summary">
-          <div><span>节点类型</span><strong>{{ node.kind }}</strong></div>
-          <div><span>节点状态</span><strong>{{ node.status }}</strong></div>
-          <div><span>节点位置</span><strong>{{ Math.round(node.position.x) }}, {{ Math.round(node.position.y) }}</strong></div>
-          <div><span>节点尺寸</span><strong>{{ sizeLabel }}</strong></div>
+          <div><span>{{ tr('节点类型') }}</span><strong>{{ node.kind }}</strong></div>
+          <div><span>{{ tr('节点状态') }}</span><strong>{{ node.status }}</strong></div>
+          <div><span>{{ tr('节点位置') }}</span><strong>{{ Math.round(node.position.x) }}, {{ Math.round(node.position.y) }}</strong></div>
+          <div><span>{{ tr('节点尺寸') }}</span><strong>{{ sizeLabel }}</strong></div>
         </section>
 
         <p v-if="actionError" class="workbench-node-info__error" role="alert">{{ actionError }}</p>
 
         <section class="workbench-node-info__section">
-          <h3>节点 Prompt</h3>
+          <h3>{{ tr('节点 Prompt') }}</h3>
           <pre v-if="prompt">{{ prompt }}</pre>
-          <p v-else class="workbench-node-info__empty">该节点没有文本 Prompt。</p>
+          <p v-else class="workbench-node-info__empty">{{ tr('该节点没有文本 Prompt。') }}</p>
         </section>
 
         <section class="workbench-node-info__section">
-          <h3>输入节点 <span>{{ incomingReferences.length }}</span></h3>
+          <h3>{{ tr('输入节点') }} <span>{{ incomingReferences.length }}</span></h3>
           <div v-if="incomingReferences.length" class="workbench-node-info__references">
             <article v-for="reference in incomingReferences" :key="reference.edge.key">
               <img v-if="reference.url && reference.node.kind !== 'video_result'" :src="reference.url" :alt="reference.node.title" loading="lazy" decoding="async">
@@ -92,17 +94,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
               </div>
             </article>
           </div>
-          <p v-else class="workbench-node-info__empty">暂无输入节点。</p>
+          <p v-else class="workbench-node-info__empty">{{ tr('暂无输入节点。') }}</p>
         </section>
 
         <details class="workbench-node-info__raw">
-          <summary><FileJson2 :size="15" aria-hidden="true" />查看节点数据</summary>
+          <summary><FileJson2 :size="15" aria-hidden="true" />{{ tr('查看节点数据') }}</summary>
           <pre>{{ payloadJson }}</pre>
         </details>
 
         <footer>
-          <span>节点 ID：{{ node.key }}</span>
-          <span>层级：{{ node.zIndex }}</span>
+          <span>{{ tr('节点 ID：') }}{{ node.key }}</span>
+          <span>{{ tr('层级：') }}{{ node.zIndex }}</span>
         </footer>
       </aside>
     </div>

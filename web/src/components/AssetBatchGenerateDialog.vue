@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref, watch } from 'vue'
 import { Check, ImageIcon, ListChecks, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import AppBadge from '@/components/AppBadge.vue'
@@ -37,13 +39,13 @@ const selectedIds = ref<number[]>([])
 const loadingModels = ref(false)
 
 const assetTypes = [
-  { value: AssetTypeEnum.PERSON, label: '角色' },
-  { value: AssetTypeEnum.SCENE, label: '场景' },
-  { value: AssetTypeEnum.ITEM, label: '道具' },
+  { value: AssetTypeEnum.PERSON, get label() { return tr('角色') } },
+  { value: AssetTypeEnum.SCENE, get label() { return tr('场景') } },
+  { value: AssetTypeEnum.ITEM, get label() { return tr('道具') } },
 ] as const
 
 const eligibleAssets = computed(() => props.assets.filter(asset => !asset.main_image && !props.generatingIds.has(asset.id)))
-const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || `生图模型 ${item.config_id}` })))
+const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
 const estimatedCost = computed(() => estimateImageCost(
   selectedModel.value?.pricing,
@@ -113,7 +115,7 @@ function toggleType(type: AssetTypeEnum) {
 }
 
 function assetTypeLabel(type: AssetTypeEnum) {
-  return assetTypes.find(item => item.value === type)?.label || '资产'
+  return assetTypes.find(item => item.value === type)?.label || tr('资产')
 }
 
 function submit() {
@@ -151,16 +153,16 @@ watch(selectedModel, model => {
 <template>
   <Teleport to="body">
     <div v-if="open" class="batch-dialog-backdrop" @click.self="emit('close')">
-      <section class="batch-dialog" role="dialog" aria-modal="true" aria-label="批量生成资产设定图">
+      <section class="batch-dialog" role="dialog" aria-modal="true" :aria-label="tr('批量生成资产设定图')">
         <header class="batch-dialog__header">
           <span><ListChecks :size="21" /></span>
-          <div><small>BATCH GENERATION</small><h2>批量生成资产设定图</h2></div>
-          <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭" @click="emit('close')"><X :size="18" /></AppButton>
+          <div><small>BATCH GENERATION</small><h2>{{ tr('批量生成资产设定图') }}</h2></div>
+          <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭')" @click="emit('close')"><X :size="18" /></AppButton>
         </header>
 
         <div class="batch-dialog__body">
-          <p>可同时选择角色、场景和道具三种类型，也可以继续单独调整具体资产；已完成的资产不会重复生成。</p>
-          <div class="batch-types" role="group" aria-label="按资产类型选择">
+          <p>{{ tr('可同时选择角色、场景和道具三种类型，也可以继续单独调整具体资产；已完成的资产不会重复生成。') }}</p>
+          <div class="batch-types" role="group" :aria-label="tr('按资产类型选择')">
             <AppButton
               v-for="type in assetTypes"
               :key="type.value"
@@ -173,8 +175,8 @@ watch(selectedModel, model => {
               @click="toggleType(type.value)"
             >
               <span class="batch-checkbox"><Check v-if="selectedCountForType(type.value)" :size="13" /></span>
-              <span><strong>{{ type.label }}</strong><small>{{ selectedCountForType(type.value) }}/{{ eligibleAssetsForType(type.value).length }} 待生成</small></span>
-              <AppBadge tone="neutral" size="sm">共 {{ assetsForType(type.value).length }} 个</AppBadge>
+              <span><strong>{{ type.label }}</strong><small>{{ selectedCountForType(type.value) }}/{{ eligibleAssetsForType(type.value).length }} {{ tr('待生成') }}</small></span>
+              <AppBadge tone="neutral" size="sm">{{ tr('共') }} {{ assetsForType(type.value).length }} {{ tr('个') }}</AppBadge>
             </AppButton>
           </div>
           <div class="batch-assets">
@@ -191,24 +193,24 @@ watch(selectedModel, model => {
             >
               <span class="batch-checkbox"><Check v-if="selectedIds.includes(asset.id)" :size="13" /></span>
               <span class="batch-thumb"><img v-if="asset.main_image" :src="asset.main_image_thumbnail || asset.main_image" alt="" /><ImageIcon v-else :size="18" /></span>
-              <span class="batch-copy"><strong>{{ asset.canonical_name }}</strong><small>{{ assetTypeLabel(asset.asset_type) }} · {{ asset.description || '尚未填写描述' }}</small></span>
-              <AppBadge v-if="asset.main_image" class="batch-status" tone="warning" size="sm">已完成，不重复生成</AppBadge>
-              <AppBadge v-else-if="generatingIds.has(asset.id)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />生成中</AppBadge>
-              <AppBadge v-else-if="failedIds.has(asset.id)" class="batch-status" tone="danger" size="sm">上次失败，可重试</AppBadge>
-              <AppBadge v-else class="batch-status" tone="accent" size="sm">待生成</AppBadge>
+              <span class="batch-copy"><strong>{{ asset.canonical_name }}</strong><small>{{ assetTypeLabel(asset.asset_type) }} · {{ asset.description || tr('尚未填写描述') }}</small></span>
+              <AppBadge v-if="asset.main_image" class="batch-status" tone="warning" size="sm">{{ tr('已完成，不重复生成') }}</AppBadge>
+              <AppBadge v-else-if="generatingIds.has(asset.id)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ tr('生成中') }}</AppBadge>
+              <AppBadge v-else-if="failedIds.has(asset.id)" class="batch-status" tone="danger" size="sm">{{ tr('上次失败，可重试') }}</AppBadge>
+              <AppBadge v-else class="batch-status" tone="accent" size="sm">{{ tr('待生成') }}</AppBadge>
             </AppButton>
           </div>
         </div>
 
         <footer class="batch-dialog__footer">
           <div class="batch-options">
-            <AppSelect v-model="modelId" :options="modelOptions" :disabled="loadingModels" ariaLabel="选择生图模型"><template #leading><Sparkles :size="14" /></template></AppSelect>
+            <AppSelect v-model="modelId" :options="modelOptions" :disabled="loadingModels" :ariaLabel="tr('选择生图模型')"><template #leading><Sparkles :size="14" /></template></AppSelect>
             <ImageGenerationParameterPanel v-model="imageParameters" :capabilities="selectedModel?.capabilities" />
           </div>
           <div class="batch-actions">
-            <AppButton type="button" variant="soft" :disabled="!eligibleAssets.length" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</AppButton>
-            <AppButton type="button" variant="secondary" @click="emit('close')">取消</AppButton>
-            <AppButton type="button" variant="primary" :disabled="!canGenerate" :loading="submitting" @click="submit"><Sparkles v-if="!submitting" :size="15" />生成 {{ selectedIds.length }} 个<BillingPriceTag v-if="!submitting" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
+            <AppButton type="button" variant="soft" :disabled="!eligibleAssets.length" @click="toggleAll">{{ allSelected ? tr('取消全选') : tr('全选') }}</AppButton>
+            <AppButton type="button" variant="secondary" @click="emit('close')">{{ tr('取消') }}</AppButton>
+            <AppButton type="button" variant="primary" :disabled="!canGenerate" :loading="submitting" @click="submit"><Sparkles v-if="!submitting" :size="15" />{{ tr('生成') }} {{ selectedIds.length }} {{ tr('个') }}<BillingPriceTag v-if="!submitting" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
           </div>
         </footer>
       </section>

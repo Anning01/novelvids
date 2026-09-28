@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -55,15 +57,15 @@ const uploadingFolder = ref(false)
 
 const customStyleSelected = computed(() => styleKey.value === 'custom')
 const visualStyleOptions = computed(() => [
-  { value: 'auto', label: 'AI 识别风格' },
+  { value: 'auto', get label() { return tr('AI 识别风格') } },
   ...(capabilities.value?.styles ?? [])
     .filter(style => style.key !== 'auto')
     .map(style => ({
       value: style.key,
-      label: style.label,
+      get label() { return tr(style.label) },
       image: `/style-thumbnails/${style.key}.png`,
     })),
-  { value: 'custom', label: '自定义风格', separator: true },
+  { value: 'custom', get label() { return tr('自定义风格') }, separator: true },
 ])
 const sourceReady = computed(() => {
   if (sourceMode.value === 'single_upload') {
@@ -116,12 +118,12 @@ function formatFileSize(bytes: number): string {
 
 function folderStateLabel(entry: FolderVideoEntry): string {
   return {
-    pending: '待上传',
-    uploading: `上传中 ${entry.progress}%`,
-    ready: '已就绪',
-    failed: '上传失败',
-    invalid: '需处理',
-    ignored: '已忽略',
+    get pending() { return tr('待上传') },
+    uploading: tr('上传中 {p0}%', { p0: entry.progress }),
+    get ready() { return tr('已就绪') },
+    get failed() { return tr('上传失败') },
+    get invalid() { return tr('需处理') },
+    get ignored() { return tr('已忽略') },
   }[entry.state]
 }
 
@@ -139,7 +141,7 @@ async function loadCapabilities() {
     capabilities.value = response.data
     setDefaults(response.data)
   } catch (error) {
-    capabilityError.value = (error as Error).message || '重制能力加载失败'
+    capabilityError.value = (error as Error).message || tr('重制能力加载失败')
   } finally {
     loadingCapabilities.value = false
   }
@@ -148,10 +150,10 @@ async function loadCapabilities() {
 function validateFile(file: File): string {
   const allowed = capabilities.value?.media.extensions ?? ['mp4', 'mov']
   const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-  if (!allowed.includes(extension)) return '仅支持 MP4 或 MOV 格式的视频'
+  if (!allowed.includes(extension)) return tr('仅支持 MP4 或 MOV 格式的视频')
   const maxBytes = capabilities.value?.media.max_bytes ?? 500 * 1024 * 1024
-  if (file.size > maxBytes) return '单视频不能超过 500 MB'
-  if (file.size <= 0) return '视频文件不能为空'
+  if (file.size > maxBytes) return tr('单视频不能超过 500 MB')
+  if (file.size <= 0) return tr('视频文件不能为空')
   return ''
 }
 
@@ -188,7 +190,7 @@ async function uploadFile(file: File) {
     uploadState.value = 'ready'
   } catch (error) {
     uploadState.value = 'failed'
-    errorMessage.value = (error as Error).message || '视频上传失败'
+    errorMessage.value = (error as Error).message || tr('视频上传失败')
   }
 }
 
@@ -213,7 +215,7 @@ async function loadHistoryProjects() {
     const response = await api.remakeHistoryProjects('', 1, 50)
     historyProjects.value = response.data.items
   } catch (error) {
-    errorMessage.value = (error as Error).message || '历史项目加载失败'
+    errorMessage.value = (error as Error).message || tr('历史项目加载失败')
   } finally {
     loadingHistory.value = false
   }
@@ -259,7 +261,7 @@ async function uploadFolderEntries(entries: FolderVideoEntry[]) {
         entry.state = 'ready'
       } catch (error) {
         entry.state = 'failed'
-        entry.issue = (error as Error).message || '上传失败'
+        entry.issue = (error as Error).message || tr('上传失败')
       }
     }
   }
@@ -283,7 +285,7 @@ async function handleFolderChange(event: Event) {
   missingFolderEpisodes.value = batch.missingEpisodes
   const firstPath = batch.entries[0]?.relativePath ?? ''
   const folderName = firstPath.includes('/') ? firstPath.split('/')[0] : ''
-  if (!projectName.value.trim() && folderName) projectName.value = `${folderName}重制版`
+  if (!projectName.value.trim() && folderName) projectName.value = tr('{p0}重制版', { p0: folderName })
   if (!batch.hasBlockingIssues) await uploadFolderEntries(folderEntries.value)
 }
 
@@ -299,12 +301,12 @@ async function selectHistoryProject(project: RemakeHistoryProject) {
   historyEpisodes.value = []
   loadingEpisodes.value = true
   errorMessage.value = ''
-  if (!projectName.value.trim()) projectName.value = `${project.name}重制版`
+  if (!projectName.value.trim()) projectName.value = tr('{p0}重制版', { p0: project.name })
   try {
     const response = await api.remakeHistoryEpisodes(project.id)
     historyEpisodes.value = response.data
   } catch (error) {
-    errorMessage.value = (error as Error).message || '历史剧集加载失败'
+    errorMessage.value = (error as Error).message || tr('历史剧集加载失败')
   } finally {
     loadingEpisodes.value = false
   }
@@ -339,7 +341,7 @@ async function createProject() {
     projectCommitted.value = true
     await router.push(response.data.entry_path)
   } catch (error) {
-    errorMessage.value = (error as Error).message || '重制项目创建失败'
+    errorMessage.value = (error as Error).message || tr('重制项目创建失败')
   } finally {
     creating.value = false
   }
@@ -355,41 +357,40 @@ onBeforeUnmount(() => {
 <template>
   <CreationEntryShell
     eyebrow="AI REMAKE WORKSHOP"
-    description="上传成片或选择历史项目，让 AI 自动拆出设定与分镜并开启新一轮创作。"
+    :description="tr('上传成片或选择历史项目，让 AI 自动拆出设定与分镜并开启新一轮创作。')"
     width="wide"
   >
-    <template #title>拆解成片，重制<span class="creation-entry-accent">精品短剧</span></template>
+    <template #title>{{ tr('拆解成片，重制') }}<span class="creation-entry-accent">{{ tr('精品短剧') }}</span></template>
     <section v-if="loadingCapabilities" class="state-card" aria-live="polite">
-      <RefreshCcw class="spin" :size="20" /> 正在加载重制能力…
-    </section>
+      <RefreshCcw class="spin" :size="20" /> {{ tr('正在加载重制能力…') }} </section>
     <section v-else-if="capabilityError" class="state-card state-card--error" role="alert">
       <span>{{ capabilityError }}</span>
-      <AppButton variant="secondary" size="sm" @click="loadCapabilities">重新加载</AppButton>
+      <AppButton variant="secondary" size="sm" @click="loadCapabilities">{{ tr('重新加载') }}</AppButton>
     </section>
 
     <form v-else-if="capabilities" class="remake-form" @submit.prevent="createProject">
       <Transition name="source-panel" mode="out-in">
         <label v-if="sourceMode === 'single_upload' && uploadState !== 'ready'" key="single-upload" class="source-stage upload-zone" :class="{ 'is-uploading': uploadState === 'uploading' }">
           <span class="source-stage-icon"><UploadCloud :size="27" /></span>
-          <strong>{{ uploadState === 'uploading' ? '正在上传并校验视频…' : '选择 MP4 / MOV 视频' }}</strong>
-          <span>单视频不超过 500 MB，时长不超过 20 分钟</span>
+          <strong>{{ uploadState === 'uploading' ? tr('正在上传并校验视频…') : tr('选择 MP4 / MOV 视频') }}</strong>
+          <span>{{ tr('单视频不超过 500 MB，时长不超过 20 分钟') }}</span>
           <input type="file" accept="video/mp4,video/quicktime,.mp4,.mov" :disabled="uploadState === 'uploading'" @change="handleFileChange" />
         </label>
         <article v-else-if="sourceMode === 'single_upload' && stagedUpload" key="single-ready" class="source-stage uploaded-file">
           <span class="source-stage-icon is-ready"><CheckCircle2 :size="25" /></span>
           <div><strong>{{ stagedUpload.original_filename }}</strong><small>{{ fileMeta }}</small></div>
-          <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="移除视频" @click="removeFile"><X :size="17" /></AppButton>
+          <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('移除视频')" @click="removeFile"><X :size="17" /></AppButton>
         </article>
 
         <div v-else-if="sourceMode === 'folder_upload'" key="folder-upload" class="source-stage folder-selector">
           <label class="folder-zone" :class="{ 'is-uploading': uploadingFolder }">
             <span class="source-stage-icon"><FolderUp :size="25" /></span>
-            <span><strong>{{ folderEntries.length ? '重新选择文件夹' : '选择包含多集视频的文件夹' }}</strong><small>文件名需包含“第12集 / EP12 / E12”等集数信息</small></span>
+            <span><strong>{{ folderEntries.length ? tr('重新选择文件夹') : tr('选择包含多集视频的文件夹') }}</strong><small>{{ tr('文件名需包含“第12集 / EP12 / E12”等集数信息') }}</small></span>
             <input data-folder-input type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple webkitdirectory="" :disabled="uploadingFolder" @change="handleFolderChange" />
           </label>
           <div v-if="folderEntries.length" class="folder-table-wrap">
             <table class="folder-table">
-              <thead><tr><th>集数</th><th>文件名</th><th>大小</th><th>状态 / 进度</th><th>问题</th><th>操作</th></tr></thead>
+              <thead><tr><th>{{ tr('集数') }}</th><th>{{ tr('文件名') }}</th><th>{{ tr('大小') }}</th><th>{{ tr('状态 / 进度') }}</th><th>{{ tr('问题') }}</th><th>{{ tr('操作') }}</th></tr></thead>
               <tbody>
                 <tr v-for="entry in folderEntries" :key="entry.id" :data-folder-episode="entry.episodeNumber ?? undefined">
                   <td>{{ entry.episodeNumber ?? '—' }}</td>
@@ -397,22 +398,22 @@ onBeforeUnmount(() => {
                   <td>{{ formatFileSize(entry.file.size) }}</td>
                   <td><span class="folder-status" :class="`is-${entry.state}`">{{ folderStateLabel(entry) }}</span><progress v-if="entry.state === 'uploading'" :value="entry.progress" max="100" /></td>
                   <td class="folder-issue">{{ entry.issue || '—' }}</td>
-                  <td><AppButton v-if="entry.state === 'failed'" type="button" variant="secondary" size="sm" @click="retryFolderEntry(entry)">重试</AppButton><span v-else>—</span></td>
+                  <td><AppButton v-if="entry.state === 'failed'" type="button" variant="secondary" size="sm" @click="retryFolderEntry(entry)">{{ tr('重试') }}</AppButton><span v-else>—</span></td>
                 </tr>
               </tbody>
             </table>
           </div>
           <label v-if="missingFolderEpisodes.length" class="gap-warning">
             <input v-model="gapConfirmed" type="checkbox" />
-            <span><strong>检测到断集：缺少第 {{ missingFolderEpisodes.join('、') }} 集</strong><small>断集不会阻止创建，但需要确认后继续。</small></span>
+            <span><strong>{{ tr('检测到断集：缺少第') }} {{ missingFolderEpisodes.join('、') }} {{ tr('集') }}</strong><small>{{ tr('断集不会阻止创建，但需要确认后继续。') }}</small></span>
           </label>
         </div>
 
         <div v-else-if="sourceMode === 'history'" key="history" class="source-stage history-selector">
           <div class="history-column">
-            <strong>短剧制作项目</strong>
-            <span v-if="loadingHistory" class="history-state"><RefreshCcw class="spin" :size="15" /> 正在加载…</span>
-            <span v-else-if="!historyProjects.length" class="history-state">暂无至少一集全部分镜已有视频的短剧项目</span>
+            <strong>{{ tr('短剧制作项目') }}</strong>
+            <span v-if="loadingHistory" class="history-state"><RefreshCcw class="spin" :size="15" /> {{ tr('正在加载…') }}</span>
+            <span v-else-if="!historyProjects.length" class="history-state">{{ tr('暂无至少一集全部分镜已有视频的短剧项目') }}</span>
             <button
               v-for="project in historyProjects"
               :key="project.id"
@@ -422,14 +423,14 @@ onBeforeUnmount(() => {
               :data-history-project="project.id"
               @click="selectHistoryProject(project)"
             >
-              <span><strong>{{ project.name }}</strong><small>{{ project.available_episode_count }} 集可重制</small></span>
+              <span><strong>{{ project.name }}</strong><small>{{ project.available_episode_count }} {{ tr('集可重制') }}</small></span>
               <ChevronRight :size="16" />
             </button>
           </div>
           <div class="history-column">
-            <strong>选择剧集</strong>
-            <span v-if="selectedHistoryProjectId === null" class="history-state">请先选择短剧制作项目</span>
-            <span v-else-if="loadingEpisodes" class="history-state"><RefreshCcw class="spin" :size="15" /> 正在检查完整性…</span>
+            <strong>{{ tr('选择剧集') }}</strong>
+            <span v-if="selectedHistoryProjectId === null" class="history-state">{{ tr('请先选择短剧制作项目') }}</span>
+            <span v-else-if="loadingEpisodes" class="history-state"><RefreshCcw class="spin" :size="15" /> {{ tr('正在检查完整性…') }}</span>
             <button
               v-for="episode in historyEpisodes"
               v-else
@@ -441,33 +442,30 @@ onBeforeUnmount(() => {
               :disabled="!episode.available"
               @click="selectHistoryEpisode(episode)"
             >
-              <span><strong>{{ episode.name }}</strong><small v-if="episode.available">{{ episode.scene_count }} 个镜头 · {{ formatDuration(episode.duration_seconds) }}</small><small v-else>{{ episode.unavailable_reason }}</small></span>
+              <span><strong>{{ episode.name }}</strong><small v-if="episode.available">{{ episode.scene_count }} {{ tr('个镜头 ·') }} {{ formatDuration(episode.duration_seconds) }}</small><small v-else>{{ episode.unavailable_reason }}</small></span>
               <CheckCircle2 v-if="selectedHistoryChapterId === episode.chapter_id" :size="17" />
             </button>
           </div>
         </div>
       </Transition>
 
-      <CreationConfigBar modes-label="来源类型">
+      <CreationConfigBar :modes-label="tr('来源类型')">
         <template #modes>
           <AppButton type="button" variant="soft" size="sm" :active="sourceMode === 'single_upload'" data-source-mode="single_upload" :aria-pressed="sourceMode === 'single_upload'" :disabled="!capabilities.source_modes.single_upload" @click="selectSourceMode('single_upload')">
-            <Film :size="15" />单视频
-          </AppButton>
+            <Film :size="15" />{{ tr('单视频') }} </AppButton>
           <AppButton type="button" variant="soft" size="sm" :active="sourceMode === 'folder_upload'" data-source-mode="folder_upload" :aria-pressed="sourceMode === 'folder_upload'" :disabled="!capabilities.source_modes.folder_upload" @click="selectSourceMode('folder_upload')">
-            <FolderUp :size="15" />文件夹
-          </AppButton>
+            <FolderUp :size="15" />{{ tr('文件夹') }} </AppButton>
           <AppButton type="button" variant="soft" size="sm" :active="sourceMode === 'history'" data-source-mode="history" :aria-pressed="sourceMode === 'history'" :disabled="!capabilities.source_modes.history" @click="selectSourceMode('history')">
-            <History :size="15" />历史项目
-          </AppButton>
+            <History :size="15" />{{ tr('历史项目') }} </AppButton>
         </template>
 
-        <AppSelect v-model="aspectRatio" class="format-select" ariaLabel="画面比例" :options="capabilities.aspect_ratios">
+        <AppSelect v-model="aspectRatio" class="format-select" :ariaLabel="tr('画面比例')" :options="capabilities.aspect_ratios">
           <template #leading><Film :size="15" /></template>
         </AppSelect>
-        <AppSelect v-model="resolution" class="format-select" ariaLabel="清晰度" :options="capabilities.resolutions">
+        <AppSelect v-model="resolution" class="format-select" :ariaLabel="tr('清晰度')" :options="capabilities.resolutions">
           <template #leading><Monitor :size="15" /></template>
         </AppSelect>
-        <AppSelect v-model="styleKey" class="style-select" ariaLabel="视觉风格" menu-label="风格" :menu-width="230" :max-menu-height="404" align="end" :options="visualStyleOptions">
+        <AppSelect v-model="styleKey" class="style-select" :ariaLabel="tr('视觉风格')" :menu-label="tr('风格')" :menu-width="230" :max-menu-height="404" align="end" :options="visualStyleOptions">
           <template #leading="{ option }">
             <img v-if="option.image" class="select-thumbnail" :src="option.image" alt="" />
             <span v-else class="custom-style-icon"><Sparkles :size="16" /></span>
@@ -480,20 +478,20 @@ onBeforeUnmount(() => {
       </CreationConfigBar>
 
       <label class="project-name-field">
-        <span>项目名称</span>
-        <input v-model="projectName" name="projectName" required maxlength="255" placeholder="例如：都市短剧重制版" />
+        <span>{{ tr('项目名称') }}</span>
+        <input v-model="projectName" name="projectName" required maxlength="255" :placeholder="tr('例如：都市短剧重制版')" />
       </label>
 
       <div v-if="customStyleSelected" class="custom-prompt-panel">
-        <label for="remake-custom-style">自定义风格 Prompt</label>
-        <textarea id="remake-custom-style" v-model="customStylePrompt" required maxlength="2000" rows="4" placeholder="描述材质、光影、色彩与镜头运动风格" />
+        <label for="remake-custom-style">{{ tr('自定义风格 Prompt') }}</label>
+        <textarea id="remake-custom-style" v-model="customStylePrompt" required maxlength="2000" rows="4" :placeholder="tr('描述材质、光影、色彩与镜头运动风格')" />
         <small>{{ customStylePrompt.length }} / 2000</small>
       </div>
 
       <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
 
       <AppButton class="create-remake" variant="primary" size="lg" block type="submit" :disabled="!canSubmit" :loading="creating">
-        <span><Sparkles v-if="!creating" :size="18" />{{ creating ? '正在创建重制项目…' : '开始重制' }}</span>
+        <span><Sparkles v-if="!creating" :size="18" />{{ creating ? tr('正在创建重制项目…') : tr('开始重制') }}</span>
         <ArrowRight v-if="!creating" class="create-arrow" :size="18" />
       </AppButton>
     </form>

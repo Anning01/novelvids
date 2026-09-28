@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { EnumItem } from '@/types'
 import { computed } from 'vue'
 import WorkbenchSelect from './WorkbenchSelect.vue'
@@ -36,8 +38,8 @@ function select(value: string) {
     <WorkbenchSelect
       :model-value="selectedValue"
       :options="selectOptions"
-      :label="label || '视频模型'"
-      :placeholder="`选择${label || '视频模型'}`"
+      :label="label || tr('视频模型')"
+      :placeholder="tr('选择{p0}', { p0: label || '视频模型' })"
       @update:model-value="select"
     />
   </div>

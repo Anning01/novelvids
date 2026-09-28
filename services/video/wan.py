@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import logging
 import re
 from typing import Any
@@ -309,7 +311,7 @@ class Wan3Generator(BaseVideoGenerator):
         if status == "FAILED":
             return self._build_result(
                 TaskStatusEnum.failed,
-                error=provider_error(output) or "Wan 3 视频生成任务失败",
+                error=provider_error(output) or localized_message('Wan 3 视频生成任务失败'),
             )
         if status == "CANCELED":
             return self._build_result(

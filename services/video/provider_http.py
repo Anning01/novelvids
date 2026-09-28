@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -29,7 +31,7 @@ def provider_error(data: Any) -> str | None:
     error = data.get("error")
     if isinstance(error, dict):
         code = str(error.get("code") or error.get("type") or "PROVIDER_ERROR")[:80]
-        message = str(error.get("message") or "视频生成任务失败")[:500]
+        message = str(error.get("message") or localized_message('视频生成任务失败'))[:500]
         return f"{message}（{code}）"
     if isinstance(error, str) and error.strip():
         return error.strip()[:500]

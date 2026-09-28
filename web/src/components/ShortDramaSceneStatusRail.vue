@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ref } from 'vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
 import type { SceneGenerationState, SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
@@ -13,9 +15,9 @@ const emit = defineEmits<{
 }>()
 
 const stateLabels: Record<SceneGenerationState, string> = {
-  completed: '已完成',
-  error: '生成异常',
-  pending: '待生成',
+  get completed() { return tr('已完成') },
+  get error() { return tr('生成异常') },
+  get pending() { return tr('待生成') },
 }
 
 const railElement = ref<HTMLElement | null>(null)
@@ -43,8 +45,8 @@ function selectScene(sceneId: number) {
 </script>
 
 <template>
-  <aside ref="railElement" class="scene-status-rail" aria-label="分镜生成状态">
-    <AppScrollArea class="scene-status-rail__list" aria-label="本集分镜状态列表" @scroll="hideTooltip">
+  <aside ref="railElement" class="scene-status-rail" :aria-label="tr('分镜生成状态')">
+    <AppScrollArea class="scene-status-rail__list" :aria-label="tr('本集分镜状态列表')" @scroll="hideTooltip">
       <button
         v-for="item in items"
         :key="item.sceneId"
@@ -52,7 +54,7 @@ function selectScene(sceneId: number) {
         class="scene-status-rail__item"
         :class="[`is-${item.state}`, { 'is-active': activeSceneId === item.sceneId }]"
         :aria-current="activeSceneId === item.sceneId ? 'location' : undefined"
-        :aria-label="`分镜 ${item.sequence}，${stateLabels[item.state]}`"
+        :aria-label="tr('分镜 {p0}，{p1}', { p0: item.sequence, p1: stateLabels[item.state] })"
         :aria-describedby="tooltipItem?.sceneId === item.sceneId ? `scene-status-tooltip-${item.sceneId}` : undefined"
         @mouseenter="showTooltip($event, item)"
         @mouseleave="hideTooltip"
@@ -71,8 +73,7 @@ function selectScene(sceneId: number) {
         class="scene-status-rail__tooltip"
         role="tooltip"
         :style="{ top: `${tooltipTop}px` }"
-      >
-        分镜 {{ tooltipItem.sequence }} · {{ stateLabels[tooltipItem.state] }}
+      > {{ tr('分镜') }} {{ tooltipItem.sequence }} · {{ stateLabels[tooltipItem.state] }}
       </span>
     </Transition>
   </aside>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ref } from 'vue'
 import AppButton from '@/components/AppButton.vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
@@ -40,9 +42,9 @@ function selectChapter(chapter: Chapter) {
 </script>
 
 <template>
-  <aside ref="railElement" class="episode-rail" aria-label="集数导航">
-    <strong>集数</strong>
-    <AppScrollArea class="episode-rail__list" aria-label="项目集数列表" @scroll="hideTooltip">
+  <aside ref="railElement" class="episode-rail" :aria-label="tr('集数导航')">
+    <strong>{{ tr('集数') }}</strong>
+    <AppScrollArea class="episode-rail__list" :aria-label="tr('项目集数列表')" @scroll="hideTooltip">
       <AppButton
         v-for="chapter in chapters"
         :key="chapter.id"
@@ -71,7 +73,7 @@ function selectChapter(chapter: Chapter) {
         role="tooltip"
         :style="{ top: `${tooltipTop}px` }"
       >
-        <strong>第 {{ tooltipChapter.number }} 集</strong>
+        <strong>{{ tr('第') }} {{ tooltipChapter.number }} {{ tr('集') }}</strong>
         <span v-if="stripChapterOrdinal(tooltipChapter.name)">{{ stripChapterOrdinal(tooltipChapter.name) }}</span>
       </div>
     </Transition>

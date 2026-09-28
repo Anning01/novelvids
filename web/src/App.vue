@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
+import { ElConfigProvider } from 'element-plus'
+import { elementLocale } from '@/i18n'
 import { BarChart3, Building2, Clapperboard, FolderKanban, Images, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
@@ -22,27 +26,27 @@ const isWorkflowSurface = computed(() => isWorkflowThemeSurface({
 }))
 const confirmDialogDark = computed(() => isWorkflowSurface.value || resolvedTheme.value === 'dark')
 const creationItems = [
-  { path: '/create/short-drama', label: '短剧制作', icon: Clapperboard, active: () => route.path.startsWith('/create/short-drama') },
-  { path: '/create/remake', label: '重制工坊', icon: RefreshCcw, active: () => route.path.startsWith('/create/remake') },
+  { path: '/create/short-drama', get label() { return tr('短剧制作') }, icon: Clapperboard, active: () => route.path.startsWith('/create/short-drama') },
+  { path: '/create/remake', get label() { return tr('重制工坊') }, icon: RefreshCcw, active: () => route.path.startsWith('/create/remake') },
 ]
 // 按角色渲染「我的」导航：成本（管理员/创作者/超管）、设置（管理员/超管）；
 // AUTH_ENABLED=false 时全部可见（vanilla 体验）
 const personalItems = computed(() => {
   const items = [
-    { path: '/projects', label: '项目', icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
-    { path: '/assets', label: '资产', icon: Images, active: () => route.path.startsWith('/assets') },
+    { path: '/projects', get label() { return tr('项目') }, icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
+    { path: '/assets', get label() { return tr('资产') }, icon: Images, active: () => route.path.startsWith('/assets') },
   ]
-  if (auth.canAccessBilling) items.push({ path: '/billing', label: '成本', icon: BarChart3, active: () => route.path.startsWith('/billing') })
-  if (auth.canAccessSettings) items.push({ path: '/settings', label: '设置', icon: Settings, active: () => route.path.startsWith('/settings') })
+  if (auth.canAccessBilling) items.push({ path: '/billing', get label() { return tr('成本') }, icon: BarChart3, active: () => route.path.startsWith('/billing') })
+  if (auth.canAccessSettings) items.push({ path: '/settings', get label() { return tr('设置') }, icon: Settings, active: () => route.path.startsWith('/settings') })
   return items
 })
 // 组织治理导航：仅开启登录且具备管理权限时显示（团队管理员/超管）
 const adminItems = computed(() => {
   const items = []
-  if (auth.enabled === true && auth.canManageMembers) items.push({ path: '/members', label: '成员管理', icon: Users, active: () => route.path.startsWith('/members') })
+  if (auth.enabled === true && auth.canManageMembers) items.push({ path: '/members', get label() { return tr('成员管理') }, icon: Users, active: () => route.path.startsWith('/members') })
   if (auth.enabled === true && auth.canManageTeams) {
-    items.push({ path: '/teams', label: '团队管理', icon: Building2, active: () => route.path.startsWith('/teams') })
-    items.push({ path: '/users', label: '用户管理', icon: UserRound, active: () => route.path.startsWith('/users') })
+    items.push({ path: '/teams', get label() { return tr('团队管理') }, icon: Building2, active: () => route.path.startsWith('/teams') })
+    items.push({ path: '/users', get label() { return tr('用户管理') }, icon: UserRound, active: () => route.path.startsWith('/users') })
   }
   return items
 })
@@ -57,9 +61,9 @@ const walletLabel = computed(() => {
   if (auth.enabled !== true || !auth.isLoggedIn || auth.role === 'super') return ''
   const membership = auth.membership
   if (!membership) return ''
-  if (auth.role === 'admin') return `余额 ¥${money(membership.team_balance)}`
-  if (membership.cost_limit !== null && membership.cost_limit !== undefined) return `限额 ¥${money(membership.cost_limit)}`
-  return `余额 ¥${money(membership.team_balance)}`
+  if (auth.role === 'admin') return tr('余额 ¥{p0}', { p0: money(membership.team_balance) })
+  if (membership.cost_limit !== null && membership.cost_limit !== undefined) return tr('限额 ¥{p0}', { p0: money(membership.cost_limit) })
+  return tr('余额 ¥{p0}', { p0: money(membership.team_balance) })
 })
 function handleTeamSwitch(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
@@ -70,12 +74,13 @@ function handleTeamSwitch(event: Event) {
 }
 </script>
 <template>
+  <ElConfigProvider :locale="elementLocale">
   <div class="app-shell" :class="{ 'is-workflow-surface': isWorkflowSurface }">
     <aside v-if="!isFullscreen" class="app-sidebar">
-      <RouterLink to="/" class="app-brand" aria-label="猫影首页">
+      <RouterLink to="/" class="app-brand" :aria-label="tr('猫影首页')">
         <img src="/logo.png" alt="" />
         <span>
-          <strong>猫影</strong>
+          <strong>{{ tr('猫影') }}</strong>
           <small>NOVEL STUDIO</small>
         </span>
       </RouterLink>
@@ -83,7 +88,7 @@ function handleTeamSwitch(event: Event) {
         v-if="auth.enabled === true && auth.isLoggedIn && auth.memberships.length"
         class="app-team-selector"
       >
-        <select :value="auth.activeTeamId ?? ''" aria-label="切换团队" @change="handleTeamSwitch">
+        <select :value="auth.activeTeamId ?? ''" :aria-label="tr('切换团队')" @change="handleTeamSwitch">
           <option v-for="item in auth.memberships" :key="item.team_id" :value="item.team_id">
             {{ item.team_name }}
           </option>
@@ -92,34 +97,32 @@ function handleTeamSwitch(event: Event) {
       <div
         v-else-if="auth.enabled === true && auth.isLoggedIn && auth.isSuperAdmin"
         class="app-team-selector app-team-selector--super"
-      >
-        平台管理员 · 全部团队
-      </div>
-      <nav aria-label="主导航">
-        <RouterLink to="/" class="app-nav-item app-home-item" :class="{ 'is-active': route.path === '/' }">
+      > {{ tr('平台管理员 · 全部团队') }} </div>
+      <nav :aria-label="tr('主导航')">
+        <RouterLink to="/" :aria-label="tr('首页')" class="app-nav-item app-home-item" :class="{ 'is-active': route.path === '/' }">
           <Sparkles :size="18" />
-          <span>首页</span>
+          <span>{{ tr('首页') }}</span>
         </RouterLink>
 
         <section class="app-nav-group" aria-labelledby="creation-nav-title">
-          <h2 id="creation-nav-title">创作</h2>
-          <RouterLink v-for="item in creationItems" :key="item.path" :to="item.path" class="app-nav-item" :class="{ 'is-active': item.active() }">
+          <h2 id="creation-nav-title">{{ tr('创作') }}</h2>
+          <RouterLink v-for="item in creationItems" :key="item.path" :to="item.path" :aria-label="item.label" class="app-nav-item" :class="{ 'is-active': item.active() }">
             <component :is="item.icon" :size="18" />
             <span>{{ item.label }}</span>
           </RouterLink>
         </section>
 
         <section class="app-nav-group" aria-labelledby="personal-nav-title">
-          <h2 id="personal-nav-title">我的</h2>
-          <RouterLink v-for="item in personalItems" :key="item.path" :to="item.path" class="app-nav-item" :class="{ 'is-active': item.active() }">
+          <h2 id="personal-nav-title">{{ tr('我的') }}</h2>
+          <RouterLink v-for="item in personalItems" :key="item.path" :to="item.path" :aria-label="item.label" class="app-nav-item" :class="{ 'is-active': item.active() }">
             <component :is="item.icon" :size="18" />
             <span>{{ item.label }}</span>
           </RouterLink>
         </section>
 
         <section v-if="adminItems.length" class="app-nav-group" aria-labelledby="admin-nav-title">
-          <h2 id="admin-nav-title">管理</h2>
-          <RouterLink v-for="item in adminItems" :key="item.path" :to="item.path" class="app-nav-item" :class="{ 'is-active': item.active() }">
+          <h2 id="admin-nav-title">{{ tr('管理') }}</h2>
+          <RouterLink v-for="item in adminItems" :key="item.path" :to="item.path" :aria-label="item.label" class="app-nav-item" :class="{ 'is-active': item.active() }">
             <component :is="item.icon" :size="18" />
             <span>{{ item.label }}</span>
           </RouterLink>
@@ -130,7 +133,7 @@ function handleTeamSwitch(event: Event) {
         to="/profile"
         class="app-user-block"
         :class="{ 'is-active': route.path === '/profile' }"
-        :title="`用户中心：${userLabel}`"
+        :title="tr('用户中心：{p0}', { p0: userLabel })"
       >
         <span class="app-user-avatar">{{ avatarText }}</span>
         <span class="app-user-copy">
@@ -145,6 +148,7 @@ function handleTeamSwitch(event: Event) {
     <AppConfirmDialog :dark="confirmDialogDark" />
     <TransitionGroup name="notice" tag="div" class="notice-stack" aria-live="polite"><AppNotice v-for="item in notice.state.notices" :key="item.id" :item="item" /></TransitionGroup>
   </div>
+  </ElConfigProvider>
 </template>
 
 <style scoped>

@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from auth.deps import AuthContext, ensure_novel_access, get_auth_context
@@ -38,12 +40,12 @@ async def get_workbench_bootstrap(
     await ensure_novel_access(novel_id, ctx)
     novel = await Novel.get_or_none(id=novel_id)
     if novel is None:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise HTTPException(status_code=404, detail=localized_message('项目不存在'))
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
-        raise HTTPException(status_code=404, detail="章节不存在")
+        raise HTTPException(status_code=404, detail=localized_message('章节不存在'))
     if chapter.novel_id != novel_id:
-        raise HTTPException(status_code=400, detail="章节不属于当前项目")
+        raise HTTPException(status_code=400, detail=localized_message('章节不属于当前项目'))
 
     scenes = await Scene.filter(chapter_id=chapter.id).order_by("sequence").prefetch_related("assets")
     linked_asset_ids = {

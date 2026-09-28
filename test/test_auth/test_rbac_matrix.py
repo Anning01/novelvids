@@ -267,3 +267,20 @@ async def test_creator_cannot_write_other_team_novel(client, rbac_world):
         f"/api/novel/{novel_b.id}", json={"author": "hack"}, headers=_auth(token)
     )
     assert response.json()["code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_public_locale_does_not_expose_or_unlock_admin_configuration(client, rbac_world):
+    from models.config import GeneralConfig
+    await GeneralConfig.create(id=1, prompt_language='en')
+    public = (await client.get('/api/config/locale')).json()
+    assert public['data'] == {'locale': 'en'}
+    assert (await client.get('/api/config/general')).json()['code'] == 401
+    viewer = _auth(await _login(client, 'rbac_viewer'))
+    assert (await client.get('/api/config/locale', headers=viewer)).json()['data'] == {'locale': 'en'}
+    assert (await client.put('/api/config/general', headers=viewer, json={'prompt_language': 'zh'})).json()['code'] == 403
+    assert (await GeneralConfig.get(id=1)).prompt_language == 'en'
+    admin = _auth(await _login(client, 'rbac_admin'))
+    assert (await client.put('/api/config/general', headers=admin, json={'prompt_language': 'zh'})).json()['code'] == 0
+    assert (await client.get('/api/config/locale')).json()['data'] == {'locale': 'zh'}
+    assert (await client.put('/api/config/general', headers=admin, json={'prompt_language': 'fr'})).json()['code'] == 422

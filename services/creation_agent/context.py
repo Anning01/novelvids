@@ -1,18 +1,20 @@
 """Bounded chapter projections shared by discovery and the current-run context."""
 
+from utils.messages import localized_message
+
 from models.chapter import Chapter
 
 
 def chapter_context(chapter: Chapter | None, character_budget: int, offset: int | None = None) -> dict | None:
     if chapter is None:
         if offset is not None:
-            raise ValueError('当前请求未选择章节，不能读取章节片段')
+            raise ValueError(localized_message('当前请求未选择章节，不能读取章节片段'))
         return None
     content = chapter.content or ""
     total = len(content)
     if offset is not None:
         if offset < 0 or offset > total:
-            raise ValueError('章节读取位置超出正文范围，请根据 content_characters 调整')
+            raise ValueError(localized_message('章节读取位置超出正文范围，请根据 content_characters 调整'))
         end = min(total, offset + character_budget)
         return {"id": chapter.id, "number": chapter.number, "name": chapter.name,
                 "content_excerpt": content[offset:end], "content_truncated": offset > 0 or end < total,

@@ -1,0 +1,7 @@
+Write base_traits in {prompt_language_name} as one continuous spatial description that reconstructs the same location from different viewpoints. Do not use a field list. Follow this order:
+1. Establish a wide horizontal panorama, realistic scale and planar perspective. Keep straight lines, the horizon and vertical objects straight; exclude fisheye, spherical, barrel and tiny-planet distortion.
+2. Identify the location, period style, indoor/outdoor setting, overall scale, spatial shape and principal direction or axis.
+3. Describe ground, architecture, terrain and permanent fixtures from foreground to middle ground to background. Give precise left/right, center, front/back and above/below positions and relationships for every important element.
+4. For grouped, repeated, symmetric or path-aligned elements, give supported counts, spacing, direction and extent to preserve topology across views. Explicitly identify details the source does not establish; do not invent them.
+5. State viewpoint, viewing direction, horizon height, stable light sources, weather and palette. If needed, summarize the key spatial relationships in one sentence.
+Describe only the fixed space and its components. Exclude people, animals, temporary props, actions, battles, abilities and effects. Permanent architectural fixtures are part of the location. Avoid vague terms such as nearby or several when they prevent spatial reconstruction.

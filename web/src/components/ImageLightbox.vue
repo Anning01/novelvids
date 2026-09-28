@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref, watch } from 'vue'
 import { Maximize2, Minus, Plus, RotateCcw, X } from 'lucide-vue-next'
 
@@ -58,24 +60,24 @@ watch(() => props.open, open => {
 <template>
   <Teleport to="body">
     <Transition name="image-lightbox">
-      <div v-if="open" class="image-lightbox" role="dialog" aria-modal="true" aria-label="图片放大查看" @click.self="emit('close')">
+      <div v-if="open" class="image-lightbox" role="dialog" aria-modal="true" :aria-label="tr('图片放大查看')" @click.self="emit('close')">
         <header class="image-lightbox__toolbar">
           <div>
             <Maximize2 :size="16" />
             <span>{{ metadata }}</span>
           </div>
-          <nav aria-label="图片缩放控制">
-            <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="缩小图片" title="缩小" :disabled="zoom <= 0.5" @click="zoomOut"><Minus :size="16" /></AppButton>
+          <nav :aria-label="tr('图片缩放控制')">
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('缩小图片')" :title="tr('缩小')" :disabled="zoom <= 0.5" @click="zoomOut"><Minus :size="16" /></AppButton>
             <output aria-live="polite">{{ zoomLabel }}</output>
-            <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="放大图片" title="放大" :disabled="zoom >= 3" @click="zoomIn"><Plus :size="16" /></AppButton>
-            <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="恢复适应窗口" title="恢复适应窗口" @click="resetZoom"><RotateCcw :size="15" /></AppButton>
-            <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭大图" title="关闭" @click="emit('close')"><X :size="18" /></AppButton>
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('放大图片')" :title="tr('放大')" :disabled="zoom >= 3" @click="zoomIn"><Plus :size="16" /></AppButton>
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('恢复适应窗口')" :title="tr('恢复适应窗口')" @click="resetZoom"><RotateCcw :size="15" /></AppButton>
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭大图')" :title="tr('关闭')" @click="emit('close')"><X :size="18" /></AppButton>
           </nav>
         </header>
         <div class="image-lightbox__stage">
           <img :src="src" :alt="alt" :style="{ transform: `scale(${zoom})` }" @click="toggleZoom" @load="onImageLoad" />
         </div>
-        <p>点击图片可在适应窗口和 200% 之间切换</p>
+        <p>{{ tr('点击图片可在适应窗口和 200% 之间切换') }}</p>
       </div>
     </Transition>
   </Teleport>

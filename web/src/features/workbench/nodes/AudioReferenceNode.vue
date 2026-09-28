@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import { computed, ref } from 'vue'
 import { Library, Volume2 } from 'lucide-vue-next'
@@ -15,11 +17,11 @@ const resource = computed(() => props.data.resource as AudioReference | undefine
 function choose(item: AudioReference | DigitalHuman) { store.setMediaResource(props.id, item); pickerOpen.value = false }
 </script>
 <template>
-  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'audio_reference', title: resource?.nickname || '参考音频', status: resource ? 'ready' : '未选择' }">
+  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'audio_reference', title: resource?.nickname || tr('参考音频'), status: resource ? 'ready' : tr('未选择') }">
     <div class="workbench-node-content media-resource-node">
       <WorkbenchAudioMedia v-if="resource" :src="resource.audio_url" :title="resource.nickname" :preview-url="resource.avatar_url" :source-label="`${resource.gender} · ${resource.asset_id}`" />
-      <div v-else class="media-resource-placeholder"><Volume2 :size="24" aria-hidden="true" /><span>选择一段库内参考音频</span></div>
-      <AppButton type="button" class="media-resource-select" @click="pickerOpen = true"><Library :size="15" aria-hidden="true" />{{ resource ? '更换音频' : '从音频库选择' }}</AppButton>
+      <div v-else class="media-resource-placeholder"><Volume2 :size="24" aria-hidden="true" /><span>{{ tr('选择一段库内参考音频') }}</span></div>
+      <AppButton type="button" class="media-resource-select" @click="pickerOpen = true"><Library :size="15" aria-hidden="true" />{{ resource ? tr('更换音频') : tr('从音频库选择') }}</AppButton>
     </div>
     <MediaLibraryPicker :open="pickerOpen" kind="audio" :selected-asset-id="resource?.asset_id" @close="pickerOpen = false" @choose="choose" />
   </WorkbenchNodeFrame>

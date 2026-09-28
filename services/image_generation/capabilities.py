@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -102,7 +104,7 @@ def capabilities_for(model_type: str | ImageModelTypeEnum | None) -> ImageModelC
     try:
         return CAPABILITIES[ImageModelTypeEnum(model_type)]
     except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="该生图配置未选择受支持的模型类型") from exc
+        raise HTTPException(status_code=400, detail=localized_message('该生图配置未选择受支持的模型类型')) from exc
 
 
 def validate_protocol(model_type: str | ImageModelTypeEnum, protocol: str) -> None:
@@ -111,7 +113,7 @@ def validate_protocol(model_type: str | ImageModelTypeEnum, protocol: str) -> No
     if protocol not in {item.value for item in allowed}:
         raise HTTPException(
             status_code=400,
-            detail=f"{normalized.nickname} 不支持当前接口协议",
+            detail=localized_message('{p0} 不支持当前接口协议', p0=f'{normalized.nickname}'),
         )
 
 
@@ -131,7 +133,7 @@ def validate_selection(
     try:
         selected_count = int(generation_count or capabilities.default_generation_count)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="生成数量无效") from exc
+        raise HTTPException(status_code=400, detail=localized_message('生成数量无效')) from exc
 
     checks = (
         (selected_clarity in capabilities.clarities, "所选清晰度不受当前模型支持"),

@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { computed, markRaw, ref } from 'vue'
 import { getActiveTeamId, getAuthToken } from '@/api'
@@ -57,8 +59,8 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [] })
     reportChanges(run.changes)
     if (!isAgentRunning(run.status)) {
-      statusText.value = run.status === 3 ? (run.usage.turn_limited ? '本轮处理已结束，可以继续对话' : run.changes.length ? '修改已保存' : '回复已完成')
-        : run.status === 5 ? '已停止，已保存的修改仍保留' : '运行未完成，已保存的修改仍可查看'
+      statusText.value = run.status === 3 ? (run.usage.turn_limited ? tr('本轮处理已结束，可以继续对话') : run.changes.length ? tr('修改已保存') : tr('回复已完成'))
+        : run.status === 5 ? tr('已停止，已保存的修改仍保留') : tr('运行未完成，已保存的修改仍可查看')
       error.value = run.error_message || ''
     }
   }
@@ -85,7 +87,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     let handle: HttpAgent
     try { handle = markRaw(await runSubscription(id, taskId)) }
     catch {
-      if (revision === epoch && attempt === subscriptionAttempt) error.value = '连接中断，可重新连接查看结果'
+      if (revision === epoch && attempt === subscriptionAttempt) error.value = tr('连接中断，可重新连接查看结果')
       return
     }
     if (revision !== epoch || attempt !== subscriptionAttempt) { handle.abortRun(); return }
@@ -100,14 +102,14 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         },
         onCustomEvent({ event }) {
           if (revision !== epoch || subscription !== handle) return
-          if (event.name === 'context_compaction') statusText.value = '正在整理上下文'
+          if (event.name === 'context_compaction') statusText.value = tr('正在整理上下文')
         },
         onToolCallStartEvent({ event }) {
           if (revision !== epoch || subscription !== handle) return
-          const labels: Record<string, string> = { get_creation_context: '正在读取创作上下文', query_creation_objects: '正在查找对象',
-            create_creation_setting: '正在创建新设定', patch_creation_prompts: '正在保存提示词调整',
-            read_creation_objects: '正在查看设定和引用', apply_creation_changes: '正在保存创作调整', undo_creation_change: '正在撤销操作' }
-          statusText.value = labels[event.toolCallName] || '正在调整提示词'
+          const labels: Record<string, string> = { get get_creation_context() { return tr('正在读取创作上下文') }, get query_creation_objects() { return tr('正在查找对象') },
+            get create_creation_setting() { return tr('正在创建新设定') }, get patch_creation_prompts() { return tr('正在保存提示词调整') },
+            get read_creation_objects() { return tr('正在查看设定和引用') }, get apply_creation_changes() { return tr('正在保存创作调整') }, get undo_creation_change() { return tr('正在撤销操作') } }
+          statusText.value = labels[event.toolCallName] || tr('正在调整提示词')
         },
         async onToolCallResultEvent() {
           const result = await agentApi.snapshot(taskId)
@@ -115,7 +117,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         },
       })
     } catch (caught) {
-      if (revision === epoch && subscription === handle) error.value = caught instanceof Error ? caught.message : '连接中断，可重新连接查看结果'
+      if (revision === epoch && subscription === handle) error.value = caught instanceof Error ? caught.message : tr('连接中断，可重新连接查看结果')
     } finally {
       if (revision === epoch && subscription === handle) {
         streamConnected.value = false
@@ -123,7 +125,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         try {
           const response = await agentApi.snapshot(taskId)
           if (revision === epoch) applySnapshot(response.data)
-        } catch { if (revision === epoch) error.value = '连接中断，请重新连接核对实际结果' }
+        } catch { if (revision === epoch) error.value = tr('连接中断，请重新连接核对实际结果') }
       }
     }
   }
@@ -154,7 +156,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         if (isAgentRunning(response.data.status)) void follow(latestTaskId)
       }
     } catch (caught) {
-      if (revision === epoch) error.value = caught instanceof Error ? caught.message : '无法恢复当前对话'
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('无法恢复当前对话')
     } finally { if (revision === epoch) loading.value = false }
   }
 
@@ -182,7 +184,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       const selected = listed.data.find(item => item.id === conversationId.value) ?? listed.data[0]
       await selectConversation(selected?.id ?? null)
     } catch (caught) {
-      if (revision === epoch) error.value = caught instanceof Error ? caught.message : '加载助手失败'
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('加载助手失败')
     } finally { if (revision === epoch) loading.value = false }
   }
 
@@ -263,7 +265,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
           { id: localId, role: 'user', content: frozenInput.message, task_id: response.data.task_id, status: response.data.status, changes: [], usage: {}, created_at: new Date().toISOString() },
           { id: localId - 1, role: 'assistant', content: response.data.content, task_id: response.data.task_id, status: response.data.status, changes: response.data.changes, usage: response.data.usage, created_at: new Date().toISOString() },
         )
-        error.value = '要求已提交，对话记录暂时未同步。可重新连接核对结果。'
+        error.value = tr('要求已提交，对话记录暂时未同步。可重新连接核对结果。')
       }
       if (revision !== epoch) return false
       applySnapshot(response.data)
@@ -275,12 +277,12 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         conversations.value = [conversation, ...conversations.value.filter(item => item.id !== id)]
       }
       if (isAgentRunning(response.data.status)) {
-        statusText.value = '正在处理你的创作要求'
+        statusText.value = tr('正在处理你的创作要求')
         void follow(response.data.task_id)
       }
       return true
     } catch (caught) {
-      if (revision === epoch) error.value = caught instanceof Error ? caught.message : '提交失败，请重试以核对结果'
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('提交失败，请重试以核对结果')
       return false
     } finally { submitting.value = false }
   }

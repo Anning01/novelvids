@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { EdgeProps } from '@vue-flow/core';
 import { BaseEdge, getBezierPath } from '@vue-flow/core';
 import { computed } from 'vue';
@@ -11,5 +13,5 @@ const edgeClass = computed(() => props.sourceHandleId === 'watermark-output'
 </script>
 
 <template>
-  <BaseEdge :id="id" :path="path" :class="edgeClass" :aria-label="label || '输出绑定连线'" />
+  <BaseEdge :id="id" :path="path" :class="edgeClass" :aria-label="label || tr('输出绑定连线')" />
 </template>

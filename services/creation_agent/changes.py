@@ -1,5 +1,7 @@
 """Atomic creative change sets, scoped discovery and conflict-aware undo."""
 
+from utils.messages import localized_message
+
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -75,7 +77,7 @@ class CreationChanges:
         target = await self.objects.get(kind, object_id)
         asset = target if isinstance(target, Asset) else await self.objects.get('asset', target.asset_id) if isinstance(target, AssetVariant) else None
         if asset is not None and asset.asset_type not in {1, 2, 3}:
-            raise ValueError('助手仅管理人物、场景、道具及其形态')
+            raise ValueError(localized_message('助手仅管理人物、场景、道具及其形态'))
         return target
 
     async def read_creation_context(self, chapter_id: int) -> dict:
@@ -91,7 +93,7 @@ class CreationChanges:
     async def read(self, targets: list[AgentTarget], *, use_cache: bool = False) -> list[dict]:
         await self.authorize()
         if not 1 <= len(targets) <= self.max_batch_size:
-            raise ValueError('读取对象数量超出本轮上限')
+            raise ValueError(localized_message('读取对象数量超出本轮上限'))
         # Content, references and the observed version must be one snapshot.
         # Otherwise a page write between two reads could authorize stale content
         # against a newer version. The lock is released before any model call.
@@ -162,7 +164,7 @@ class CreationChanges:
             await self.scope.target(kind, target, new=key in created)
         if key not in created:
             if key not in self.observed:
-                raise ValueError(f'写入或引用前请先读取对象详情，不能使用未经读取的 ID：{kind} {object_id}（{await object_label(target)}）')
+                raise ValueError(localized_message('写入或引用前请先读取对象详情，不能使用未经读取的 ID：{p1} {p3}（{p5}）', p1=f'{kind}', p3=f'{object_id}', p5=f'{await object_label(target)}'))
             if self.observed[key] != await object_version(target):
                 raise PromptEditConflict('对象已有变化，请重新读取后重试')
             if key in self.observed_dependencies and self.observed_dependencies[key] != await self._dependency_version(target):
@@ -176,14 +178,14 @@ class CreationChanges:
         assets = await Asset.filter(novel_id=self.novel_id, asset_type__in=[1, 2, 3])
         current = await creation_memory.for_generation(chapter, assets)
         if self.creation_rules.get(chapter_id) != current:
-            raise ValueError('新增或调整关系前请读取当前章节创作上下文和适用约束')
+            raise ValueError(localized_message('新增或调整关系前请读取当前章节创作上下文和适用约束'))
 
     @staticmethod
     def resolve(value, refs: dict[str, tuple[str, int]], kind: str):
         if isinstance(value, str):
             result = refs.get(value)
             if result is None or result[0] != kind:
-                raise ValueError('临时引用不存在或类型不匹配；只能引用同批次已创建对象')
+                raise ValueError(localized_message('临时引用不存在或类型不匹配；只能引用同批次已创建对象'))
             return result[1]
         return value
 
@@ -193,18 +195,18 @@ class CreationChanges:
     async def require_running(self):
         task = await AiTask.get_or_none(id=self.task_id)
         if task is None or (task.request_params or {}).get('novel_id') != self.novel_id:
-            raise ValueError('运行不属于当前项目')
+            raise ValueError(localized_message('运行不属于当前项目'))
         locked = await AiTask.filter(id=task.id, status=TaskStatusEnum.running).update(status=TaskStatusEnum.running)
         if not locked:
-            raise ValueError('运行已停止或结束，不能继续写入')
+            raise ValueError(localized_message('运行已停止或结束，不能继续写入'))
 
     async def apply(self, change_set: CreationChangeSet, *, tool_call_id: str):
         from services.creation_agent.operations import CreationOperations
 
         if not tool_call_id or len(tool_call_id) > 200:
-            raise ValueError('工具调用标识无效')
+            raise ValueError(localized_message('工具调用标识无效'))
         if not 1 <= len(change_set.operations) <= self.max_batch_size:
-            raise ValueError('本批次对象数量超过配置上限')
+            raise ValueError(localized_message('本批次对象数量超过配置上限'))
         digest = _digest(change_set.model_dump(mode='json'))
         # Internal snapshots change only after the DB transaction commits.
         observed_before, rules_before = dict(self.observed), deepcopy(self.rules)
@@ -224,14 +226,14 @@ class CreationChanges:
                 for operation in change_set.operations:
                     changes.extend(await executor.execute(operation))
                     if len(changes) > self.max_batch_size:
-                        raise ValueError('关联对象变化超过本批次上限，请缩小范围或分批处理')
+                        raise ValueError(localized_message('关联对象变化超过本批次上限，请缩小范围或分批处理'))
                 result = await PromptChange.create(novel_id=self.novel_id, task_id=self.task_id,
                     tool_call_id=tool_call_id, request_hash=digest, changes=changes)
             return result
         except IntegrityError:
             self.observed, self.rules = observed_before, rules_before
             self.observed_dependencies = dependencies_before
-            raise ValueError('对象名称或位置已存在，可能位于已移除记录中；请查询或恢复原对象') from None
+            raise ValueError(localized_message('对象名称或位置已存在，可能位于已移除记录中；请查询或恢复原对象')) from None
         except Exception:
             self.observed, self.rules = observed_before, rules_before
             self.observed_dependencies = dependencies_before
@@ -246,7 +248,7 @@ class CreationChanges:
             change = await PromptChange.get_or_none(id=change_id, novel_id=self.novel_id)
             if change is None or source is None or not await AgentMessage.filter(
                 task_id=change.task_id, conversation_id=source.conversation_id).exists():
-                raise ValueError('本会话不存在该操作记录')
+                raise ValueError(localized_message('本会话不存在该操作记录'))
             if change.reverted_at:
                 return change
             for item in change.changes:
@@ -269,7 +271,7 @@ class CreationChanges:
             await self.authorize()
             change = await PromptChange.get_or_none(id=change_id, novel_id=self.novel_id, task_id=self.task_id)
             if change is None:
-                raise ValueError('当前运行不存在该操作记录')
+                raise ValueError(localized_message('当前运行不存在该操作记录'))
             if change.reverted_at:
                 return change
             for item in reversed(change.changes):

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ref, watch } from 'vue'
 
 const props = defineProps<{ name: string; chapterNumber: number; saving?: boolean }>()
@@ -34,18 +36,18 @@ function cancel() {
       type="button"
       class="workbench-identity__trigger"
       :aria-expanded="expanded"
-      aria-label="展开画布信息"
-      title="展开或收起画布信息"
+      :aria-label="tr('展开画布信息')"
+      :title="tr('展开或收起画布信息')"
       @click="expanded = !expanded"
     >
-      <span aria-hidden="true">画</span>
+      <span aria-hidden="true">{{ tr('画') }}</span>
     </button>
     <label>
-      <span class="sr-only">画布名称</span>
+      <span class="sr-only">{{ tr('画布名称') }}</span>
       <input
         v-model="draft"
         maxlength="120"
-        aria-label="画布名称"
+        :aria-label="tr('画布名称')"
         :disabled="saving"
         @focus="beginEditing"
         @blur="save"
@@ -53,7 +55,7 @@ function cancel() {
         @keydown.esc.prevent.stop="cancel"
         @keydown.stop
       >
-      <small>{{ saving ? '保存中…' : `第 ${chapterNumber} 章 · 点击修改名称` }}</small>
+      <small>{{ saving ? tr('保存中…') : tr('第 {p0} 章 · 点击修改名称', { p0: chapterNumber }) }}</small>
     </label>
   </div>
 </template>

@@ -1,6 +1,8 @@
+
+import { tr } from '@/i18n'
 const ASSET_REFERENCE_TITLE = '【角色 / 道具 / 场景引用】'
 const VOICE_REFERENCE_LABEL = '角色音色参考：'
-const VOICE_REFERENCE_LABEL_PATTERN = /^角色音色参考[：:]/mu
+const VOICE_REFERENCE_LABEL_PATTERN = /^(?:角色音色参考|Voice references)[：:]/mu
 const LEGACY_VOICE_REFERENCE_PATTERN = /(?:^|\n{2,})【音色参考】\n[\s\S]*$/u
 
 export interface VoiceReferenceAsset {
@@ -30,10 +32,10 @@ function escapePattern(value: string) {
 function hasNarrator(context: VoiceReferenceContext) {
   if (!context.narratorReferenceId || context.narratorReferenceId < 1) return false
   const narration = context.promptParams?.narration
-  if (Array.isArray(narration) && narration.some(line => typeof line === 'string' && line.includes('旁白'))) {
+  if (Array.isArray(narration) && narration.some(line => typeof line === 'string' && /(?:旁白|\bNarrator\b|\bVoice[ -]?over\b)\s*(?:[（(][^\n）)]*[）)])?\s*[:：]/iu.test(line))) {
     return true
   }
-  return context.prompt.includes('旁白（') || context.prompt.includes('旁白：')
+  return /(?:旁白|\bNarrator\b|\bVoice[ -]?over\b)\s*(?:[（(][^\n）)]*[）)])?\s*[:：]/iu.test(context.prompt)
 }
 
 function characterHasDialogue(prompt: string, asset: VoiceReferenceAsset) {
@@ -68,7 +70,7 @@ export function buildVoiceReferenceMappings(context: VoiceReferenceContext): Voi
     assignments.push({
       referenceId: Number(context.narratorReferenceId),
       kind: 'narrator',
-      subject: '旁白',
+      get subject() { return tr('旁白') },
     })
   }
 
@@ -89,7 +91,7 @@ export function buildVoiceReferenceMappings(context: VoiceReferenceContext): Voi
     })
   }
   for (const asset of context.assets) {
-    if (assignedAssetIds.has(asset.assetId) || !characterHasDialogue(context.prompt, asset)) continue
+    if (assignedAssetIds.has(asset.assetId) || !characterHasDialogue([context.prompt, ...(['dialogue', 'narration'].flatMap(key => Array.isArray(context.promptParams?.[key]) ? context.promptParams[key] as string[] : []))].join('\n'), asset)) continue
     assignedAssetIds.add(asset.assetId)
     assignments.push({
       referenceId: asset.referenceId,
@@ -119,13 +121,13 @@ export function renderVoiceReferenceInstruction(mappings: VoiceReferenceMapping[
   const lines = [VOICE_REFERENCE_LABEL]
   mappings.forEach((mapping, index) => {
     const target = mapping.kind === 'narrator'
-      ? '对应旁白'
-      : `对应角色 ${mapping.subjects.map(name => `@{${name}}`).join('、')}`
-    const referenceTarget = mapping.kind === 'narrator' ? '旁白' : '对应角色'
-    const content = mapping.kind === 'narrator' ? '实际旁白内容' : '实际台词内容'
+      ? tr('对应旁白')
+      : tr('对应角色 {p0}', { p0: mapping.subjects.map(name => `@{${name}}`).join('、') })
+    const referenceTarget = mapping.kind === 'narrator' ? tr('旁白') : tr('对应角色')
+    const content = mapping.kind === 'narrator' ? tr('实际旁白内容') : tr('实际台词内容')
     lines.push(
-      `@音频${index + 1} ${target}；该音频仅用于参考${referenceTarget}的音色、音域、语速和说话质感；` +
-      `不得复述样本原话，${content}严格按本镜头提示词生成。`,
+      tr('@音频{p0} {p1}；该音频仅用于参考{p2}的音色、音域、语速和说话质感；', { p0: index + 1, p1: target, p2: referenceTarget }) +
+      tr('不得复述样本原话，{p0}严格按本镜头提示词生成。', { p0: content }),
     )
   })
   return lines.join('\n')
@@ -143,30 +145,30 @@ function synchronizeExistingVoiceReferences(
     const current = lines[lineIndex]!.trim()
       .replace(new RegExp(`^(?:\\[音频${number}\\]|@音频${number})\\s*`, 'u'), '')
     if (current.includes('对应角色') || current.includes('对应旁白')) {
-      lines[lineIndex] = `@音频${number} ${current}`
+      lines[lineIndex] = tr('@音频{p0} {p1}', { p0: number, p1: current })
       return
     }
     const target = mapping.kind === 'narrator'
-      ? '对应旁白'
-      : `对应角色 ${mapping.subjects.map(name => `@{${name}}`).join('、')}`
+      ? tr('对应旁白')
+      : tr('对应角色 {p0}', { p0: mapping.subjects.map(name => `@{${name}}`).join('、') })
     const normalized = current
       .replace(/^仅用于参考旁白的/u, '该音频仅用于参考旁白的')
       .replace(/^仅用于参考角色“[^\n”]+”(?:、角色“[^\n”]+”)*的/u, '该音频仅用于参考对应角色的')
-    lines[lineIndex] = `@音频${number} ${target}；${normalized}`
+    lines[lineIndex] = tr('@音频{p0} {p1}；{p2}', { p0: number, p1: target, p2: normalized })
   })
   return lines.join('\n')
 }
 
 function insertIntoAssetReferenceSection(prompt: string, instruction: string) {
   const lines = prompt.split('\n')
-  const sectionIndex = lines.findIndex(line => line.trim() === ASSET_REFERENCE_TITLE)
+  const sectionIndex = lines.findIndex(line => [ASSET_REFERENCE_TITLE, '[Character / Prop / Location references]'].includes(line.trim()))
   if (sectionIndex < 0) {
     return `${ASSET_REFERENCE_TITLE}\n${instruction}\n\n${prompt}`.trim()
   }
 
   let sectionEnd = lines.length
   for (let index = sectionIndex + 1; index < lines.length; index += 1) {
-    if (/^【[^\n]+】$/u.test(lines[index]?.trim() || '')) {
+    if (/^(?:【[^\n]+】|\[[^\n]+\])$/u.test(lines[index]?.trim() || '')) {
       sectionEnd = index
       break
     }

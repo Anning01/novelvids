@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import os
 from dataclasses import dataclass
@@ -59,7 +61,7 @@ class RemakeHistorySnapshotService:
             raise RemakeError(
                 422,
                 "REMAKE_HISTORY_EPISODE_UNAVAILABLE",
-                inspection.unavailable_reason or "该剧集暂不可重制",
+                inspection.unavailable_reason or localized_message('该剧集暂不可重制'),
                 context={"source_chapter_id": chapter.id},
             )
 
@@ -134,7 +136,7 @@ class RemakeHistorySnapshotService:
             raise RemakeError(
                 500,
                 "REMAKE_HISTORY_SNAPSHOT_FAILED",
-                "历史剧集快照生成失败，请重试",
+                localized_message('历史剧集快照生成失败，请重试'),
                 context={"source_chapter_id": chapter.id},
                 retryable=True,
             ) from error
@@ -162,12 +164,12 @@ class RemakeHistorySnapshotService:
             if object_key and object_key.startswith(("uploads/", "remake/")):
                 await self.provider.download_to_file(object_key, destination)
                 return destination
-        raise FileNotFoundError("历史分镜视频文件不存在")
+        raise FileNotFoundError(localized_message('历史分镜视频文件不存在'))
 
     def _local_path(self, object_key: str) -> Path:
         path = (self.media_root / object_key).resolve()
         if path != self.media_root and not path.is_relative_to(self.media_root):
-            raise ValueError("媒体路径越界")
+            raise ValueError(localized_message('媒体路径越界'))
         return path
 
 

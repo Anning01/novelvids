@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import subprocess
 from hashlib import sha256
 from pathlib import Path
@@ -15,13 +17,13 @@ def prepare_video_for_model_input(
 ) -> Path:
     """返回全时长模型输入；仅超限时压缩，规则与参考复刻流水线一致。"""
     if not path.is_file():
-        raise RuntimeError(f"视频文件不存在: {path}")
+        raise RuntimeError(localized_message('视频文件不存在: {p1}', p1=f'{path}'))
     if max_bytes <= 1024 * 1024:
-        raise ValueError("模型视频输入上限必须大于 1 MiB")
+        raise ValueError(localized_message('模型视频输入上限必须大于 1 MiB'))
     if max_width < 320:
-        raise ValueError("模型视频输入最大宽度不能小于 320")
+        raise ValueError(localized_message('模型视频输入最大宽度不能小于 320'))
     if fps <= 0:
-        raise ValueError("模型视频输入帧率必须大于 0")
+        raise ValueError(localized_message('模型视频输入帧率必须大于 0'))
     if path.stat().st_size <= max_bytes:
         return path
 
@@ -55,11 +57,11 @@ def prepare_video_for_model_input(
         )
         duration = float(probe.stdout.strip())
     except FileNotFoundError as error:
-        raise RuntimeError("找不到 ffprobe，无法准备模型视频输入") from error
+        raise RuntimeError(localized_message('找不到 ffprobe，无法准备模型视频输入')) from error
     except (subprocess.CalledProcessError, ValueError) as error:
-        raise RuntimeError(f"读取模型视频输入时长失败: {path}") from error
+        raise RuntimeError(localized_message('读取模型视频输入时长失败: {p1}', p1=f'{path}')) from error
     if duration <= 0:
-        raise RuntimeError(f"模型视频输入时长无效: {path}")
+        raise RuntimeError(localized_message('模型视频输入时长无效: {p1}', p1=f'{path}'))
 
     audio_bitrate = 96_000
     total_bitrate = int(max_bytes * 8 / duration * 0.92)
@@ -105,10 +107,10 @@ def prepare_video_for_model_input(
         try:
             subprocess.run(command, check=True, capture_output=True, text=True)
         except FileNotFoundError as error:
-            raise RuntimeError("找不到 ffmpeg，无法压缩模型视频输入") from error
+            raise RuntimeError(localized_message('找不到 ffmpeg，无法压缩模型视频输入')) from error
         except subprocess.CalledProcessError as error:
             temporary.unlink(missing_ok=True)
-            raise RuntimeError(f"压缩模型视频输入失败: {error.stderr}") from error
+            raise RuntimeError(localized_message('压缩模型视频输入失败: {p1}', p1=f'{error.stderr}')) from error
         actual_bytes = temporary.stat().st_size
         if actual_bytes <= max_bytes:
             temporary.replace(output)
@@ -119,4 +121,4 @@ def prepare_video_for_model_input(
         )
 
     temporary.unlink(missing_ok=True)
-    raise RuntimeError("模型视频输入压缩 3 次后仍超过配置上限")
+    raise RuntimeError(localized_message('模型视频输入压缩 3 次后仍超过配置上限'))

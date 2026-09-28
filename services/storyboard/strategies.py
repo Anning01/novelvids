@@ -1,5 +1,7 @@
 """Storyboard strategy registry and runtime factory."""
 
+from utils.messages import localized_message
+
 from collections.abc import Iterable
 
 from prompts.storyboard_strategies import (
@@ -20,14 +22,14 @@ class StoryboardStrategyFactory:
     ) -> None:
         registered = tuple(strategies)
         if not registered:
-            raise ValueError("至少需要注册一个分镜策略")
+            raise ValueError(localized_message('至少需要注册一个分镜策略'))
         self._strategies = registered
         default = next(
             (strategy for strategy in registered if strategy.key == default_key),
             None,
         )
         if default is None:
-            raise ValueError(f"默认分镜策略未注册：{default_key}")
+            raise ValueError(localized_message('默认分镜策略未注册：{p1}', p1=f'{default_key}'))
         self._default = default
         self._lookup: dict[str, StoryboardStrategyPrompt] = {}
         for strategy in registered:
@@ -35,7 +37,7 @@ class StoryboardStrategyFactory:
                 normalized = self._normalize(value)
                 existing = self._lookup.get(normalized)
                 if existing is not None and existing.key != strategy.key:
-                    raise ValueError(f"分镜策略标识重复：{value}")
+                    raise ValueError(localized_message('分镜策略标识重复：{p1}', p1=f'{value}'))
                 self._lookup[normalized] = strategy
 
     @staticmethod

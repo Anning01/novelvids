@@ -1,5 +1,7 @@
 """Execute validated creative operations inside one caller-owned transaction."""
 
+from utils.messages import localized_message
+
 from copy import deepcopy
 import re
 
@@ -32,7 +34,7 @@ class CreationOperations:
     async def chapters(self, chapter_ids: list[int] | None):
         ids = chapter_ids if chapter_ids is not None else [self.service.request.chapter_id]
         if not ids or None in ids or len(ids) != len(set(ids)):
-            raise ValueError('请指定不重复的适用章节')
+            raise ValueError(localized_message('请指定不重复的适用章节'))
         result = []
         for chapter_id in ids:
             chapter = await self.service.scope.chapter(chapter_id)
@@ -82,14 +84,14 @@ class CreationOperations:
             item = await self.record(operation.target.kind, target, 'delete', before, recovery)
             item['target_label'] = label
             return [item]
-        raise ValueError('不支持的创作操作')
+        raise ValueError(localized_message('不支持的创作操作'))
 
     async def create_setting(self, operation: CreateSetting):
         chapters = await self.chapters(operation.chapter_ids)
         parent_id = await self.ref(operation.parent, 'asset') if isinstance(operation, CreateVariantSetting) else None
         await self.service.scope.creation(kind=operation.kind, chapter_ids=[c.id for c in chapters], parent_id=parent_id)
         if isinstance(operation, CreateAssetSetting) and operation.is_global and self.service.request.write_scope != 'project':
-            raise ValueError('全书共用设定需要项目操作范围')
+            raise ValueError(localized_message('全书共用设定需要项目操作范围'))
         validate_image_prompt_edit(operation.prompt, '')
         if isinstance(operation, CreateAssetSetting):
             asset_type, layout = operation.asset_type, operation.reference_layout
@@ -125,7 +127,7 @@ class CreationOperations:
                 variant_id = await self.ref(value, 'variant')
                 variant = await self.objects.get('variant', variant_id)
                 if variant.asset_id not in asset_ids or str(variant.asset_id) in bindings:
-                    raise ValueError('形态必须属于出镜设定，且同一设定只能选择一个形态')
+                    raise ValueError(localized_message('形态必须属于出镜设定，且同一设定只能选择一个形态'))
                 bindings[str(variant.asset_id)] = variant.id
         return {'asset_ids': asset_ids, 'variant_bindings': bindings}
 
@@ -133,6 +135,11 @@ class CreationOperations:
         entities = await PromptEditService._entities(scene)
         strategy = storyboard_strategy_factory.resolve(scene.chapter.novel.storyboard_strategy)
         legacy_params = scene.prompt_params or {}
+        # Local edits retain the document's stored rendering language. New
+        # structures use this turn's language snapshot.
+        language = ((await self.service.prompt_standards.context())['language']
+                    if previous is None else legacy_params.get('prompt_language', 'zh'))
+        legacy_params = {**legacy_params, 'prompt_language': language}
         if structure is not None:
             candidate = SoraScenePromptConfig.model_validate({**structure.model_dump(), 'sequence': scene.sequence,
                 **(visual.model_dump(exclude_unset=True) if visual else {}),
@@ -150,7 +157,7 @@ class CreationOperations:
                     prompt = scene.prompt or ''
                     legacy_params = {**legacy_params, **visual.model_dump(exclude_unset=True)}
                 else:
-                    raise ValueError('当前为手工文本或引用已变化，请提交完整 prompt 保留当前画面')
+                    raise ValueError(localized_message('当前为手工文本或引用已变化，请提交完整 prompt 保留当前画面'))
         else:
             candidate = None
         if prompt is not None:
@@ -165,8 +172,8 @@ class CreationOperations:
             for key, value in candidate.model_dump(exclude={'dialogue', 'narration'}).items():
                 if key not in {'sequence', 'duration'}:
                     validate_prompt_dependencies(str(value), entities)
-            values = {'prompt': format_storyboard_prompt(candidate, entities=entities, strategy=strategy),
-                      'prompt_params': candidate.model_dump(exclude={'sequence', 'description', 'duration'})}
+            values = {'prompt': format_storyboard_prompt(candidate, language, entities=entities, strategy=strategy),
+                      'prompt_params': {**candidate.model_dump(exclude={'sequence', 'description', 'duration'}), 'prompt_language': language}}
             self.validate_timing(values['prompt'], scene.duration)
         else:
             values = prepare_storyboard_edit(edit=StoryboardPromptEdit(scene_id=scene.id, legacy_prompt=scene.prompt or ''),
@@ -179,7 +186,7 @@ class CreationOperations:
     def validate_timing(prompt: str, duration: float):
         intervals = re.findall(r'(\d+(?:\.\d+)?)\s*s?\s*[-–~]\s*(\d+(?:\.\d+)?)\s*s', prompt)
         if any(float(start) < 0 or float(end) <= float(start) or float(end) > duration + .001 for start, end in intervals):
-            raise ValueError('提示词中的动作时间轴超出分镜时长，请同步调整时间轴')
+            raise ValueError(localized_message('提示词中的动作时间轴超出分镜时长，请同步调整时间轴'))
 
     async def create_scene(self, operation: CreateScene):
         chapter = await self.service.scope.chapter(operation.chapter_id)
@@ -208,7 +215,7 @@ class CreationOperations:
             entities=old_entities, strategy=old_strategy)
         fields = operation.fields
         if fields.prompt is not None and ('scene', target.id) in self.service.partial_prompts:
-            raise ValueError('当前提示词只读取了片段，请使用精确片段替换以保留未读取的内容')
+            raise ValueError(localized_message('当前提示词只读取了片段，请使用精确片段替换以保留未读取的内容'))
         if fields.prompt_replacements is not None:
             fields = fields.model_copy(update={'prompt': replace_prompt_fragments(target.prompt or '', fields.prompt_replacements)})
         updates = fields.model_dump(exclude_unset=True, include={'description', 'duration'})
@@ -216,7 +223,7 @@ class CreationOperations:
             await self.service._check_creation_context(target.chapter_id)
             updates.update(await self.bindings(target, fields.assets, fields.variant_refs))
             if old_structure is None and fields.prompt is None:
-                raise ValueError('当前是历史手工提示词；改变出镜关系时请同时提交完整 prompt，移除旧引用并保留当前画面和声音')
+                raise ValueError(localized_message('当前是历史手工提示词；改变出镜关系时请同时提交完整 prompt，移除旧引用并保留当前画面和声音'))
         await write_fields(self.objects, target, updates)
         if fields.model_fields_set - {'after'}:
             await self.scene_prompt(target, prompt=fields.prompt, structure=old_structure, visual=fields.visual, previous=previous)
@@ -235,12 +242,12 @@ class CreationOperations:
         before = await object_state(target)
         fields = operation.fields
         if fields.prompt is not None and (kind, target.id) in self.service.partial_prompts:
-            raise ValueError('当前提示词只读取了片段，请使用精确片段替换以保留未读取的内容')
+            raise ValueError(localized_message('当前提示词只读取了片段，请使用精确片段替换以保留未读取的内容'))
         if fields.prompt_replacements is not None:
             fields = fields.model_copy(update={'prompt': replace_prompt_fragments(target.base_traits or '', fields.prompt_replacements)})
         updates = fields.model_dump(exclude_unset=True, include={'description', 'aliases', 'is_global'})
         if fields.is_global is not None and self.service.request.write_scope != 'project':
-            raise ValueError('改变全书共用关系需要项目操作范围')
+            raise ValueError(localized_message('改变全书共用关系需要项目操作范围'))
         if fields.prompt is not None:
             validate_image_prompt_edit(fields.prompt, target.base_traits or '')
             asset = target if isinstance(target, Asset) else await self.objects.get('asset', target.asset_id)
@@ -256,12 +263,12 @@ class CreationOperations:
             if kind == 'asset':
                 used = await Scene.filter(assets__id=target.id).prefetch_related('chapter')
                 if any(scene.chapter.number not in numbers for scene in used):
-                    raise ValueError('移出章节前请先处理仍引用该设定的分镜')
+                    raise ValueError(localized_message('移出章节前请先处理仍引用该设定的分镜'))
                 updates.update(source_chapters=numbers, last_updated_chapter=max(numbers))
             else:
                 used = await self.objects.variant_references(target)
                 if any(scene.chapter.number not in numbers for scene in used):
-                    raise ValueError('形态仍被未包含的章节引用，不能直接移除适用关系')
+                    raise ValueError(localized_message('形态仍被未包含的章节引用，不能直接移除适用关系'))
                 await self.objects.ensure_variant_chapters(target.asset_id, numbers, exclude_id=target.id)
                 updates['chapter_numbers'] = numbers
         # Keep canonical references resolvable during a rename; actual text

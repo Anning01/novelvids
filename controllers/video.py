@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+from services.language import configured_language
+from prompts.video import render_voice_reference_instruction
+
+
+
 import asyncio
 import logging
 import os
@@ -136,7 +142,7 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         size_bytes += len(chunk)
                         if size_bytes > 30 * 1024 * 1024:
-                            raise ValueError("尾帧图片超过 30MB")
+                            raise ValueError(localized_message('尾帧图片超过 30MB'))
                         target.write(chunk)
         os.replace(temporary, destination)
     except Exception:
@@ -159,10 +165,11 @@ def _compose_video_prompt(
     referenced_media,
     style_key: str | None,
     custom_style_prompt: str | None = None,
+    language: str = "zh",
 ) -> str:
     """组合视频生成提示词：分镜提示词 + 参考素材提及 + 风格定调。"""
     prompt = render_reference_mentions(scene_prompt, referenced_media)
-    style_suffix = video_project_style_suffix(style_key, custom_style_prompt)
+    style_suffix = video_project_style_suffix(style_key, custom_style_prompt, language)
     if style_suffix:
         prompt = f"{prompt}\n\n{style_suffix}".strip()
     return prompt
@@ -215,10 +222,12 @@ async def _inject_last_frame_reference(video: Video, last_frame_url: str) -> dic
         )
     ]
     mention = reference_mention_syntax("image", last_frame_url)
-    prompt_instruction = render_last_frame_continuity_instruction(mention)
+    language = (target_scene.prompt_params or {}).get("prompt_language", (video.metadata or {}).get("prompt_language", "zh"))
+    prompt_instruction = render_last_frame_continuity_instruction(mention, language)
     target_scene.prompt = inject_last_frame_continuity_prompt(
         target_scene.prompt or "",
         mention,
+        language,
     )
     target_scene.metadata = {
         **target_metadata,
@@ -251,14 +260,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
     async def generation_history(self, scene_id: int) -> list[Video]:
         """返回分镜的全部视频生成版本，最新记录在前。"""
         if not await Scene.exists(id=scene_id):
-            raise HTTPException(404, detail=f"分镜 {scene_id} 不存在")
+            raise HTTPException(404, detail=localized_message('分镜 {p1} 不存在', p1=f'{scene_id}'))
         return await Video.filter(scene_id=scene_id).order_by("-id")
 
     async def select_current(self, video_id: int) -> Video:
         """将已完成的视频历史版本恢复为分镜当前版本。"""
         video = await self.get(video_id)
         if video.status != TaskStatusEnum.completed.value or not video.url:
-            raise HTTPException(400, detail="只有已完成且包含视频文件的记录可以设为当前版本")
+            raise HTTPException(400, detail=localized_message('只有已完成且包含视频文件的记录可以设为当前版本'))
         scene = await Scene.get(id=video.scene_id)
         await self._set_scene_current_video(scene, video.id)
         return video
@@ -280,7 +289,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         """
         scene = await Scene.get_or_none(id=req.scene_id)
         if not scene:
-            raise HTTPException(404, detail=f"分镜 {req.scene_id} 不存在")
+            raise HTTPException(404, detail=localized_message('分镜 {p1} 不存在', p1=f'{req.scene_id}'))
 
         # 获取 novel_id (通过 chapter)
         # SQLite 测试和开发环境使用单连接；分开预取，避免并发 relation 查询争用连接。
@@ -328,9 +337,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             return_last_frame=req.return_last_frame,
         )
         if req.generation_mode == "keyframes" and not (req.first_frame_url and req.last_frame_url):
-            raise HTTPException(400, detail="首尾帧模式必须同时上传首帧和尾帧")
+            raise HTTPException(400, detail=localized_message('首尾帧模式必须同时上传首帧和尾帧'))
         if req.generation_mode == "keyframes" and req.reference_media:
-            raise HTTPException(400, detail="首尾帧模式不能同时使用全模态参考素材")
+            raise HTTPException(400, detail=localized_message('首尾帧模式不能同时使用全模态参考素材'))
         first_frame = req.first_frame_url
         last_frame = req.last_frame_url
         if req.generation_mode == "keyframes":
@@ -341,7 +350,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 first_frame = resolve_image_source(first_frame)
                 last_frame = resolve_image_source(last_frame)
             except FileNotFoundError as error:
-                raise HTTPException(400, detail=f"首尾帧图片不存在：{error}") from error
+                raise HTTPException(400, detail=localized_message('首尾帧图片不存在：{p1}', p1=f'{error}')) from error
         capabilities = capabilities_for(config.video_model_type)
         reference_images: list[str] = []
         reference_videos: list[str] = []
@@ -349,6 +358,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
         novel = await Novel.get_or_none(id=novel_id)
+        prompt_language = await configured_language()
         voice_references = await resolve_voice_references(
             scene=scene,
             novel=novel,
@@ -360,6 +370,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             referenced_media,
             novel.style_key if novel else None,
             novel.custom_style_prompt if novel else None,
+            language=prompt_language,
         )
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
@@ -379,17 +390,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         resolve_image_source(resolve_media_url(reference.url) or reference.url)
                     )
                 except FileNotFoundError as error:
-                    raise HTTPException(400, detail=f"参考图片不存在：{error}") from error
+                    raise HTTPException(400, detail=localized_message('参考图片不存在：{p1}', p1=f'{error}')) from error
                 continue
             duration_value = (verified or {}).get("duration") or reference.duration
             if not duration_value:
-                raise HTTPException(400, detail="无法校验参考视频时长，请重新上传该视频")
+                raise HTTPException(400, detail=localized_message('无法校验参考视频时长，请重新上传该视频'))
             reference_video_duration += float(duration_value)
             if reference.url.startswith("/media/"):
                 if capabilities.supports_temporary_file_upload:
                     reference_videos.append(reference.url)
                 elif not media_base_url:
-                    raise HTTPException(400, detail="本地参考视频缺少可访问的媒体地址")
+                    raise HTTPException(400, detail=localized_message('本地参考视频缺少可访问的媒体地址'))
                 else:
                     reference_videos.append(f"{media_base_url}{reference.url}")
             else:
@@ -400,16 +411,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
             raise HTTPException(
                 400,
                 detail=(
-                    f"当前模型最多接收 {capabilities.max_reference_images} 张参考图片，"
-                    "已包含分镜所选资产图"
+                    localized_message('当前模型最多接收 {p1} 张参考图片，已包含分镜所选资产图', p1=f'{capabilities.max_reference_images}')
                 ),
             )
         if len(reference_videos) > capabilities.max_reference_videos:
-            raise HTTPException(400, detail=f"当前模型最多接收 {capabilities.max_reference_videos} 个参考视频")
+            raise HTTPException(400, detail=localized_message('当前模型最多接收 {p1} 个参考视频', p1=f'{capabilities.max_reference_videos}'))
         if reference_video_duration > capabilities.reference_video_total_duration_max + 0.001:
             raise HTTPException(
                 400,
-                detail=f"当前模型参考视频总时长不能超过 {capabilities.reference_video_total_duration_max} 秒",
+                detail=localized_message('当前模型参考视频总时长不能超过 {p1} 秒', p1=f'{capabilities.reference_video_total_duration_max}'),
             )
         if (
             capabilities.input_output_video_duration_max is not None
@@ -420,8 +430,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             raise HTTPException(
                 400,
                 detail=(
-                    f"当前模型要求输入参考视频与输出视频总时长不超过 "
-                    f"{capabilities.input_output_video_duration_max} 秒"
+                    localized_message('当前模型要求输入参考视频与输出视频总时长不超过 {p1} 秒', p1=f'{capabilities.input_output_video_duration_max}')
                 ),
             )
         if req.generation_mode == "keyframes":
@@ -432,7 +441,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 for subject in subjects
                 for image in subject.get("images", [])
             }.union(reference_images))
+        # Audio URLs are deduplicated by the shared content builder. Use the same
+        # order here, including two asset records that resolve to the same URL.
+        audio_urls = list(dict.fromkeys(item.url for item in voice_references))
+        voice_instruction = render_voice_reference_instruction([
+            {"index": audio_urls.index(item.url) + 1, "kind": item.kind, "subjects": list(item.subjects)}
+            for item in voice_references
+        ], language=prompt_language) if selection.generate_audio else ""
+        if voice_instruction:
+            provider_prompt += "\n\n" + voice_instruction
         video_metadata = {
+            "prompt_language": prompt_language,
             "generation_mode": req.generation_mode,
             "first_frame_url": req.first_frame_url,
             "last_frame_url": req.last_frame_url,
@@ -488,7 +507,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 last_frame_url=last_frame,
                 reference_images=reference_images,
                 reference_videos=reference_videos,
-                reference_audios=[item.url for item in voice_references],
+                reference_audios=audio_urls,
                 return_last_frame=selection.return_last_frame,
             )
         except VideoProviderError as error:
@@ -544,7 +563,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         if not video.external_task_id:
             if (video.metadata or {}).get('submission_pending'):
                 return video
-            raise HTTPException(400, detail="该视频无外部任务ID，无法查询")
+            raise HTTPException(400, detail=localized_message('该视频无外部任务ID，无法查询'))
 
         # 新记录保存了配置 ID：即使管理员之后停用它，也要用原配置完成状态查询。
         # 历史记录没有配置 ID 时，继续回退到当前启用配置。
@@ -628,7 +647,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 video_source = video.url or remote_url
                 try:
                     if not isinstance(video_source, str) or not video_source:
-                        raise ValueError("生成视频没有可读取的文件地址")
+                        raise ValueError(localized_message('生成视频没有可读取的文件地址'))
                     persisted_last_frame_url = await last_frame_service.extract_and_store(
                         video_source,
                         video.id,
@@ -883,13 +902,13 @@ class VideoController(CRUDBase[Video, dict, dict]):
             labels = "、".join(f"镜头 {sequence}" for sequence in missing_sequences)
             raise HTTPException(
                 400,
-                detail=f"{labels} 的当前视频尚未全部生成完成，无法合成",
+                detail=localized_message('{p0} 的当前视频尚未全部生成完成，无法合成', p0=f'{labels}'),
             )
 
         if not videos_to_merge:
             raise HTTPException(
                 400,
-                detail="当前章节还没有已生成的视频，无法合并",
+                detail=localized_message('当前章节还没有已生成的视频，无法合并'),
             )
 
         # 调用合并服务

@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import HTTPException
 
 from controllers.config import ai_model_config_controller, general_config_controller
@@ -85,7 +87,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             if t.request_params.get("chapter_id") == chapter_id:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"该章节已有进行中的提取任务（{t.id}）",
+                    detail=localized_message('该章节已有进行中的提取任务（{p1}）', p1=f'{t.id}'),
                 )
 
         # 3. 提交任务（BackgroundTask 中执行）

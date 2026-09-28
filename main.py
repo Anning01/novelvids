@@ -126,6 +126,9 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.API_DOCS_ENABLED else None,
 )
 
+from services.locale_middleware import LocaleMiddleware
+
+app.add_middleware(LocaleMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,

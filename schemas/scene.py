@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 # 生成视频分镜
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
@@ -53,14 +55,22 @@ class ScenePromptSegment(BaseModel):
         import re
         text = "\n".join((self.description, self.visual_prose, *self.actions))
         if re.search(r"镜头\s*[0-9一二三四五六七八九十]+", text):
-            raise ValueError("内部小镜头不能自行填写编号，编号由渲染器产生")
+            raise ValueError(localized_message('内部小镜头不能自行填写编号，编号由渲染器产生'))
         if re.search(r"(?:外貌|服装|衣着|人物描述|环境描述|设定)\s*(?:同上|同前|照旧)", text):
-            raise ValueError("内部小镜头必须写明当前可见状态，不能依赖同上")
+            raise ValueError(localized_message('内部小镜头必须写明当前可见状态，不能依赖同上'))
         return self
 
 
 class SoraScenePromptConfig(BaseModel):
     """专业视频分镜提示词的结构化内容。"""
+
+    @field_validator("reference_only_types", mode="before")
+    @classmethod
+    def normalize_reference_types(cls, value):
+        if not isinstance(value, list):
+            return value
+        aliases = {"person": "人物", "scene": "场景", "item": "物品"}
+        return [aliases.get(item, item) if isinstance(item, str) else item for item in value]
 
     reference_only_types: list[Literal['人物', '场景', '物品']] = Field(
         default_factory=list, max_length=3,
@@ -182,9 +192,9 @@ class SoraScenePromptConfig(BaseModel):
         try:
             seconds = float(raw)
         except ValueError as exc:
-            raise ValueError("duration 必须是 1-30 秒的数值，如 4s") from exc
+            raise ValueError(localized_message('duration 必须是 1-30 秒的数值，如 4s')) from exc
         if not 1 <= seconds <= 30:
-            raise ValueError("duration 必须在 1-30 秒之间")
+            raise ValueError(localized_message('duration 必须在 1-30 秒之间'))
         normalized = str(int(seconds)) if seconds.is_integer() else str(seconds)
         return f"{normalized}s"
 
@@ -195,7 +205,7 @@ class SoraScenePromptConfig(BaseModel):
             float(self.duration.removesuffix("s")),
             abs_tol=0.001,
         ):
-            raise ValueError("内部小镜头时长之和必须等于当前生成请求总时长")
+            raise ValueError(localized_message('内部小镜头时长之和必须等于当前生成请求总时长'))
         return self
 
 class Storyboard(BaseModel):

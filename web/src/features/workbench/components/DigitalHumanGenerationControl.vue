@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ChevronDown, UserRoundSearch, X } from 'lucide-vue-next'
 
 withDefaults(defineProps<{
@@ -8,7 +10,7 @@ withDefaults(defineProps<{
   selected?: boolean
 }>(), {
   modelValue: undefined,
-  title: '选择数字人',
+  get title() { return tr('选择数字人') },
   previewUrl: '',
   selected: false,
 })
@@ -24,21 +26,21 @@ const emit = defineEmits<{
     <button
       type="button"
       class="digital-human-generation-control__trigger nodrag"
-      :aria-label="selected ? `更换数字人 ${title}` : '选择数字人'"
-      title="人物资产展示（非参考图）"
+      :aria-label="selected ? tr('更换数字人 {p0}', { p0: title }) : tr('选择数字人')"
+      :title="tr('人物资产展示（非参考图）')"
       @click="emit('open')"
     >
       <img v-if="previewUrl" :src="previewUrl" alt="">
       <UserRoundSearch v-else :size="16" aria-hidden="true" />
-      <span>选择数字人</span>
+      <span>{{ tr('选择数字人') }}</span>
       <ChevronDown :size="14" aria-hidden="true" />
     </button>
     <button
       v-if="selected"
       type="button"
       class="digital-human-generation-control__clear"
-      aria-label="移除数字人人物"
-      title="移除数字人人物"
+      :aria-label="tr('移除数字人人物')"
+      :title="tr('移除数字人人物')"
       @click="emit('clear')"
     >
       <X :size="13" aria-hidden="true" />

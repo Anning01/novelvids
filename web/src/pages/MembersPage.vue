@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api'
@@ -55,7 +57,7 @@ async function loadMembers() {
       await loadMembers()
     }
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '加载成员失败')
+    notice.error(error instanceof Error ? error.message : tr('加载成员失败'))
   } finally {
     loading.value = false
   }
@@ -78,9 +80,9 @@ async function createInvite() {
   try {
     const response = await api.createTeamInvite(inviteRole.value, teamId.value)
     inviteLink.value = `${window.location.origin}/#/invite/${response.data.token}`
-    notice.success('邀请链接已生成（24 小时内有效）')
+    notice.success(tr('邀请链接已生成（24 小时内有效）'))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '生成邀请链接失败')
+    notice.error(error instanceof Error ? error.message : tr('生成邀请链接失败'))
   } finally {
     creatingInvite.value = false
   }
@@ -90,18 +92,18 @@ async function copyInvite() {
   if (!inviteLink.value) return
   try {
     await navigator.clipboard.writeText(inviteLink.value)
-    notice.success('链接已复制')
+    notice.success(tr('链接已复制'))
   } catch {
-    notice.error('复制失败，请手动复制')
+    notice.error(tr('复制失败，请手动复制'))
   }
 }
 
 async function changeRole(member: MemberItem) {
   try {
     await api.updateTeamMember(member.user_id, { role: member.role }, teamId.value)
-    notice.success('角色已更新')
+    notice.success(tr('角色已更新'))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '更新角色失败')
+    notice.error(error instanceof Error ? error.message : tr('更新角色失败'))
     await loadMembers()
   }
 }
@@ -109,16 +111,16 @@ async function changeRole(member: MemberItem) {
 async function toggleStatus(member: MemberItem) {
   try {
     await api.updateTeamMember(member.user_id, { status: member.status === 1 ? 0 : 1 }, teamId.value)
-    notice.success(member.status === 1 ? '成员已禁用' : '成员已启用')
+    notice.success(member.status === 1 ? tr('成员已禁用') : tr('成员已启用'))
     await loadMembers()
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '操作失败')
+    notice.error(error instanceof Error ? error.message : tr('操作失败'))
   }
 }
 
 async function setLimit(member: MemberItem) {
   const raw = window.prompt(
-    `为「${member.nickname || member.username}」设置累计消费限额（元），留空或 0 表示不限：`,
+    tr('为「{p0}」设置累计消费限额（元），留空或 0 表示不限：', { p0: member.nickname || member.username }),
     member.cost_limit === null || member.cost_limit === undefined ? '' : String(member.cost_limit),
   )
   if (raw === null) return
@@ -126,32 +128,32 @@ async function setLimit(member: MemberItem) {
   if (value !== null && (Number.isNaN(value) || value < 0)) return
   try {
     await api.setTeamMemberLimit(member.user_id, value === 0 ? null : value, teamId.value)
-    notice.success('限额已更新')
+    notice.success(tr('限额已更新'))
     await loadMembers()
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '设置限额失败')
+    notice.error(error instanceof Error ? error.message : tr('设置限额失败'))
   }
 }
 
 async function removeMember(member: MemberItem) {
-  if (!window.confirm(`确认将「${member.nickname || member.username}」移出团队？`)) return
+  if (!window.confirm(tr('确认将「{p0}」移出团队？', { p0: member.nickname || member.username }))) return
   try {
     await api.removeTeamMember(member.user_id, teamId.value)
-    notice.success('成员已移除')
+    notice.success(tr('成员已移除'))
     await loadMembers()
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '移除成员失败')
+    notice.error(error instanceof Error ? error.message : tr('移除成员失败'))
   }
 }
 
 async function resetPassword(member: MemberItem) {
-  const newPassword = window.prompt(`为「${member.nickname || member.username}」设置新密码（至少 8 位）：`)
+  const newPassword = window.prompt(tr('为「{p0}」设置新密码（至少 8 位）：', { p0: member.nickname || member.username }))
   if (!newPassword || newPassword.length < 8) return
   try {
     await api.resetTeamMemberPassword(member.user_id, { new_password: newPassword }, teamId.value)
-    notice.success('密码已重置')
+    notice.success(tr('密码已重置'))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '重置密码失败')
+    notice.error(error instanceof Error ? error.message : tr('重置密码失败'))
   }
 }
 
@@ -164,9 +166,9 @@ onMounted(async () => {
 <template>
   <main class="members-page">
     <header class="page-header">
-      <h1>成员管理</h1>
+      <h1>{{ tr('成员管理') }}</h1>
       <label v-if="auth.role === 'super'" class="team-picker">
-        <span>团队</span>
+        <span>{{ tr('团队') }}</span>
         <select v-model="selectedTeamId" @change="page = 1; loadMembers()">
           <option v-for="team in teams" :key="team.id" :value="team.id">{{ team.name }}</option>
         </select>
@@ -174,61 +176,61 @@ onMounted(async () => {
     </header>
 
     <section class="panel">
-      <h2>邀请成员</h2>
-      <p class="dim">成员加入团队的唯一方式是通过邀请链接（24 小时有效）。新用户经链接注册加入，老用户登录后经链接加入。</p>
+      <h2>{{ tr('邀请成员') }}</h2>
+      <p class="dim">{{ tr('成员加入团队的唯一方式是通过邀请链接（24 小时有效）。新用户经链接注册加入，老用户登录后经链接加入。') }}</p>
       <div class="invite-row">
         <select v-model="inviteRole">
-          <option value="creator">创作者</option>
-          <option value="viewer">查看者</option>
-          <option value="admin">团队管理员</option>
+          <option value="creator">{{ tr('创作者') }}</option>
+          <option value="viewer">{{ tr('查看者') }}</option>
+          <option value="admin">{{ tr('团队管理员') }}</option>
         </select>
         <button type="button" class="primary-button" :disabled="creatingInvite" @click="createInvite">
-          {{ creatingInvite ? '生成中…' : '生成邀请链接' }}
+          {{ creatingInvite ? tr('生成中…') : tr('生成邀请链接') }}
         </button>
       </div>
       <div v-if="inviteLink" class="invite-link-row">
         <input :value="inviteLink" type="text" readonly />
-        <button type="button" class="ghost-button" @click="copyInvite">复制</button>
+        <button type="button" class="ghost-button" @click="copyInvite">{{ tr('复制') }}</button>
       </div>
     </section>
 
     <section class="panel">
-      <h2>成员列表（{{ totalMembers }}）</h2>
-      <p v-if="loading" class="dim">加载中…</p>
+      <h2>{{ tr('成员列表（') }}{{ totalMembers }}）</h2>
+      <p v-if="loading" class="dim">{{ tr('加载中…') }}</p>
       <table v-else class="member-table">
         <thead>
           <tr>
-            <th>用户名</th><th>昵称</th><th>角色</th><th>状态</th>
-            <th>历史消耗（元）</th><th>消费限额（元）</th><th class="actions">操作</th>
+            <th>{{ tr('用户名') }}</th><th>{{ tr('昵称') }}</th><th>{{ tr('角色') }}</th><th>{{ tr('状态') }}</th>
+            <th>{{ tr('历史消耗（元）') }}</th><th>{{ tr('消费限额（元）') }}</th><th class="actions">{{ tr('操作') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="member in members" :key="member.user_id" :class="{ 'is-disabled': member.status !== 1 }">
-            <td>{{ member.username }}<span v-if="isSelf(member)" class="self-mark">本人</span></td>
+            <td>{{ member.username }}<span v-if="isSelf(member)" class="self-mark">{{ tr('本人') }}</span></td>
             <td>{{ member.nickname || '—' }}</td>
             <td>
               <select :value="member.role" :disabled="isSelf(member)" @change="member.role = ($event.target as HTMLSelectElement).value as TeamRole; changeRole(member)">
-                <option value="admin">团队管理员</option>
-                <option value="creator">创作者</option>
-                <option value="viewer">查看者</option>
+                <option value="admin">{{ tr('团队管理员') }}</option>
+                <option value="creator">{{ tr('创作者') }}</option>
+                <option value="viewer">{{ tr('查看者') }}</option>
               </select>
             </td>
             <td>
               <span class="status-badge" :class="member.status === 1 ? 'is-active' : 'is-stopped'">
-                {{ member.status === 1 ? '正常' : '已禁用' }}
+                {{ member.status === 1 ? tr('正常') : tr('已禁用') }}
               </span>
             </td>
             <td class="cost">{{ money(member.total_cost) }}</td>
-            <td>{{ member.cost_limit === null || member.cost_limit === undefined ? '不限' : money(member.cost_limit) }}</td>
+            <td>{{ member.cost_limit === null || member.cost_limit === undefined ? tr('不限') : money(member.cost_limit) }}</td>
             <td class="actions">
               <template v-if="isSelf(member)">
-                <span class="dim">不可操作本人</span>
+                <span class="dim">{{ tr('不可操作本人') }}</span>
               </template>
               <template v-else>
-                <button type="button" class="ghost-button" @click="toggleStatus(member)">{{ member.status === 1 ? '禁用' : '启用' }}</button>
-                <button type="button" class="ghost-button" @click="setLimit(member)">限额</button>
-                <button type="button" class="ghost-button" @click="resetPassword(member)">重置密码</button>
-                <button type="button" class="danger-button" @click="removeMember(member)">移除</button>
+                <button type="button" class="ghost-button" @click="toggleStatus(member)">{{ member.status === 1 ? tr('禁用') : tr('启用') }}</button>
+                <button type="button" class="ghost-button" @click="setLimit(member)">{{ tr('限额') }}</button>
+                <button type="button" class="ghost-button" @click="resetPassword(member)">{{ tr('重置密码') }}</button>
+                <button type="button" class="danger-button" @click="removeMember(member)">{{ tr('移除') }}</button>
               </template>
             </td>
           </tr>

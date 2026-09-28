@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, dateLocale } from '@/i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -77,10 +79,10 @@ interface ProjectAnalysisResult {
 }
 
 const fallbackProject: AgentProjectMeta = {
-  name: '短剧项目',
+  name: tr('短剧项目'),
   aspectRatio: '9:16',
   resolution: '720p',
-  style: '写实通用',
+  style: tr('写实通用'),
   fileName: '',
 }
 
@@ -147,7 +149,7 @@ const narrationStrategyActive = computed(() => (
 ) === 'narration')
 const storyboardStrategyOptions = computed(() => storyboardStrategies.value.map(strategy => ({
   value: strategy.key,
-  label: strategy.name,
+  get label() { return tr(strategy.name) },
 })))
 const displayedProjectName = computed(() => editing.value && projectDraft.value
   ? projectDraft.value.name
@@ -170,11 +172,11 @@ const selectedEpisodeLoading = computed(() => {
 })
 const selectedEpisodeCharacters = computed(() => {
   const chapter = selectedEpisodeBrief.value
-  if (!chapter) return '暂无当前章节角色'
+  if (!chapter) return tr('暂无当前章节角色')
   return (chapterAssets.value[chapter.id] || [])
     .filter(asset => asset.asset_type === AssetTypeEnum.PERSON)
     .map(asset => asset.canonical_name)
-    .join('、') || '暂无当前章节角色'
+    .join('、') || tr('暂无当前章节角色')
 })
 const canEdit = computed(() => (
   auth.enabled !== true
@@ -192,11 +194,11 @@ const analysisRunning = computed(() => {
   return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
 })
 const analysisStatus = computed(() => {
-  if (startingAnalysis.value || analysisRunning.value) return '正在理解故事并准备封面'
-  if (analysisTask.value?.status === TaskStatusEnum.FAILED) return '分析失败'
-  if (analysisResult.value) return '剧本分析完成'
-  if (hasScriptPreview.value) return '剧本已载入'
-  return '准备分析'
+  if (startingAnalysis.value || analysisRunning.value) return tr('正在理解故事并准备封面')
+  if (analysisTask.value?.status === TaskStatusEnum.FAILED) return tr('分析失败')
+  if (analysisResult.value) return tr('剧本分析完成')
+  if (hasScriptPreview.value) return tr('剧本已载入')
+  return tr('准备分析')
 })
 const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', '#8d73db']
 async function loadProject(): Promise<boolean> {
@@ -212,7 +214,7 @@ async function loadProject(): Promise<boolean> {
     }
     const contentLength = response.data.content_length || 0
     if (contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
-      notice.error(`书稿约 ${contentLength.toLocaleString()} 字但只拆分出 ${response.data.total_chapters || 0} 章，已阻止进入。请重新上传并检查文件编码或章节标题。`)
+      notice.error(tr('书稿约 {p0} 字但只拆分出 {p1} 章，已阻止进入。请重新上传并检查文件编码或章节标题。', { p0: contentLength.toLocaleString(dateLocale.value), p1: response.data.total_chapters || 0 }))
       await router.replace('/create/short-drama')
       return false
     }
@@ -302,7 +304,7 @@ async function pollAnalysis(taskId: string) {
       await Promise.all([loadProject(), loadChapters()])
     }
   } catch (error) {
-    analysisError.value = '进度连接中断，可以重新连接。后台任务会继续处理。'
+    analysisError.value = tr('进度连接中断，可以重新连接。后台任务会继续处理。')
     notice.error((error as Error).message)
   }
 }
@@ -314,10 +316,10 @@ async function startAnalysis() {
   try {
     const response = await api.analyzeNovel(projectId.value)
     analysisTask.value = response.data
-    notice.success('AI 已开始提取类型、大纲和关键人物，并生成 1K 封面')
+    notice.success(tr('AI 已开始提取类型、大纲和关键人物，并生成 1K 封面'))
     await pollAnalysis(response.data.id)
   } catch (error) {
-    analysisError.value = error instanceof Error ? error.message : '分析未能开始，请重试'
+    analysisError.value = error instanceof Error ? error.message : tr('分析未能开始，请重试')
     notice.error((error as Error).message)
   } finally {
     startingAnalysis.value = false
@@ -336,7 +338,7 @@ async function loadAnalysis() {
       await pollAnalysis(response.data.id)
     }
   } catch (error) {
-    analysisError.value = error instanceof Error ? error.message : '无法读取分析进度'
+    analysisError.value = error instanceof Error ? error.message : tr('无法读取分析进度')
     notice.error((error as Error).message)
   }
 }
@@ -396,7 +398,7 @@ async function saveEdits() {
   if (!novel.value || !projectDraft.value || savingEdits.value) return
   const projectPatch = projectPatchFromDraft(projectDraft.value)
   if (!projectPatch.name) {
-    notice.error('小说昵称不能为空')
+    notice.error(tr('小说昵称不能为空'))
     return
   }
 
@@ -405,7 +407,7 @@ async function saveEdits() {
     return chapter ? chapterDraftChanged(draft, chapter) : false
   })
   if (changedChapterDrafts.some(draft => !draft.name.trim())) {
-    notice.error('章节标题不能为空')
+    notice.error(tr('章节标题不能为空'))
     return
   }
 
@@ -433,7 +435,7 @@ async function saveEdits() {
         : chapter)
     }
     cancelEditing(false)
-    notice.success(`修改已保存${changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : ''}`)
+    notice.success(tr('修改已保存{p0}', { p0: changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : '' }))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -442,7 +444,7 @@ async function saveEdits() {
 }
 
 function continueToSettings() {
-  notice.success('剧本分析已确认，正在进入角色与场景设定')
+  notice.success(tr('剧本分析已确认，正在进入角色与场景设定'))
   void router.push({
     path: `/create/short-drama/manual/${projectId.value}`,
     query: selectedEpisodeBrief.value ? { chapter: String(selectedEpisodeBrief.value.id) } : undefined,
@@ -503,16 +505,16 @@ onBeforeUnmount(() => {
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
     >
       <section class="agent-content">
-      <section class="creation-stage-guide" aria-label="当前创作步骤">
-        <div><strong>第一步 · 理解故事</strong><p>查看本章正文和故事设定，再提取角色、场景与道具。之后可以在助手里用日常语言调整画面。</p></div>
-        <AppButton variant="soft" size="sm" :disabled="!selectedEpisodeBrief" @click="continueToSettings">前往资产提取<ArrowRight :size="15" /></AppButton>
+      <section class="creation-stage-guide" :aria-label="tr('当前创作步骤')">
+        <div><strong>{{ tr('第一步 · 理解故事') }}</strong><p>{{ tr('查看本章正文和故事设定，再提取角色、场景与道具。之后可以在助手里用日常语言调整画面。') }}</p></div>
+        <AppButton variant="soft" size="sm" :disabled="!selectedEpisodeBrief" @click="continueToSettings">{{ tr('前往资产提取') }}<ArrowRight :size="15" /></AppButton>
       </section>
       <div class="analysis-hero">
-        <div class="project-cover-art" aria-label="项目封面">
+        <div class="project-cover-art" :aria-label="tr('项目封面')">
           <img
             v-if="project.cover || analysisResult?.cover"
             :src="project.coverPreview || project.cover || analysisResult?.cover || undefined"
-            :alt="`${displayedProjectName}封面`"
+            :alt="tr('{p0}封面', { p0: displayedProjectName })"
             width="640"
             height="960"
             decoding="async"
@@ -535,12 +537,12 @@ onBeforeUnmount(() => {
             <FileText v-else :size="13" />
             {{ analysisStatus }}
           </AppBadge>
-          <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" aria-label="小说昵称" maxlength="255" />
+          <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" :aria-label="tr('小说昵称')" maxlength="255" />
           <h1 v-else>{{ project.name }}</h1>
-          <p><FileText :size="14" />{{ analysisResult?.chapter_count || chaptersTotal || 0 }} 章 <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
+          <p><FileText :size="14" />{{ analysisResult?.chapter_count || chaptersTotal || 0 }} {{ tr('章') }} <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
           <label v-if="editing && projectDraft" class="tag-editor">
-            <span>项目标签</span>
-            <input v-model="projectDraft.tagsText" placeholder="使用逗号分隔，例如：都市，热血，成长" />
+            <span>{{ tr('项目标签') }}</span>
+            <input v-model="projectDraft.tagsText" :placeholder="tr('使用逗号分隔，例如：都市，热血，成长')" />
           </label>
           <div v-else-if="displayedTags.length" class="genre-tags">
             <AppBadge v-for="(genre, index) in displayedTags" :key="genre" :tone="index % 2 ? 'success' : 'accent'" size="sm">{{ genre }}</AppBadge>
@@ -548,12 +550,12 @@ onBeforeUnmount(() => {
         </div>
         <div class="analysis-hero-actions">
           <template v-if="editing">
-            <AppButton variant="ghost" size="sm" type="button" :disabled="savingEdits" @click="cancelEditing"><X :size="15" />取消</AppButton>
-            <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />保存修改</AppButton>
+            <AppButton variant="ghost" size="sm" type="button" :disabled="savingEdits" @click="cancelEditing"><X :size="15" />{{ tr('取消') }}</AppButton>
+            <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />{{ tr('保存修改') }}</AppButton>
           </template>
           <template v-else>
-            <AppButton v-if="canEdit" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />重新分析</AppButton>
-            <AppButton v-if="canEdit && analysisResult" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />编辑内容</AppButton>
+            <AppButton v-if="canEdit" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
+            <AppButton v-if="canEdit && analysisResult" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
       </div>
@@ -563,26 +565,26 @@ onBeforeUnmount(() => {
         <div>
           <h2>{{ analysisStatus }}</h2>
           <p v-if="analysisError">{{ analysisError }}</p>
-          <p v-else-if="analysisRunning || startingAnalysis">正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。</p>
-          <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || '模型调用失败，请检查模型配置后重试。' }}</p>
-          <p v-else>开始分析后，结果会自动保存在当前项目中。</p>
+          <p v-else-if="analysisRunning || startingAnalysis">{{ tr('正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。') }}</p>
+          <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
+          <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>
         </div>
-        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" @click="startAnalysis">开始分析</AppButton>
-        <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">重新连接</AppButton>
+        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
+        <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">{{ tr('重新连接') }}</AppButton>
       </section>
 
       <p v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status">{{ analysisResult.cover_warning }}</p>
       <template v-if="hasScriptPreview">
       <section class="analysis-section">
-        <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>项目设定</h2></div></header>
+        <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>{{ tr('项目设定') }}</h2></div></header>
         <div class="profile-grid">
           <article class="profile-card">
             <span><Bot :size="18" /></span>
             <div>
-              <small>剧本类型</small>
+              <small>{{ tr('剧本类型') }}</small>
               <template v-if="editing && projectDraft">
-                <input v-model="projectDraft.projectType" aria-label="剧本类型" maxlength="120" />
-                <textarea v-model="projectDraft.projectSetting" aria-label="项目设定说明" rows="3" />
+                <input v-model="projectDraft.projectType" :aria-label="tr('剧本类型')" maxlength="120" />
+                <textarea v-model="projectDraft.projectSetting" :aria-label="tr('项目设定说明')" rows="3" />
               </template>
               <template v-else><strong>{{ projectView.projectType }}</strong><p>{{ projectView.projectSetting }}</p></template>
             </div>
@@ -590,25 +592,25 @@ onBeforeUnmount(() => {
           <article class="profile-card">
             <span><Clapperboard :size="18" /></span>
             <div>
-              <small>分镜策略</small>
+              <small>{{ tr('分镜策略') }}</small>
               <template v-if="editing && projectDraft">
                 <AppSelect
                   class="storyboard-strategy-select"
                   :model-value="projectDraft.storyboardStrategy"
-                  ariaLabel="分镜策略"
-                  menu-label="分镜策略"
+                  :ariaLabel="tr('分镜策略')"
+                  :menu-label="tr('分镜策略')"
                   :menu-width="230"
                   :options="storyboardStrategyOptions"
                   @update:model-value="selectStoryboardStrategy"
                 />
                 <p>{{ projectDraft.storyboardSetting }}</p>
                 <button v-if="narrationStrategyActive" type="button" class="narrator-voice-button" @click="narratorPickerOpen = true">
-                  <Volume2 :size="14" /><span><small>旁白声音</small><strong>{{ narratorVoice?.nickname || '选择旁白音色' }}</strong></span>
+                  <Volume2 :size="14" /><span><small>{{ tr('旁白声音') }}</small><strong>{{ narratorVoice?.nickname || tr('选择旁白音色') }}</strong></span>
                 </button>
               </template>
               <template v-else>
                 <strong>{{ projectStrategyView?.name || projectView.storyboardStrategy }}</strong><p>{{ projectStrategyView?.description || projectView.storyboardSetting }}</p>
-                <div v-if="narrationStrategyActive" class="narrator-voice-summary"><Volume2 :size="13" />旁白音色：{{ narratorVoice?.nickname || '未选择' }}</div>
+                <div v-if="narrationStrategyActive" class="narrator-voice-summary"><Volume2 :size="13" />{{ tr('旁白音色：') }}{{ narratorVoice?.nickname || tr('未选择') }}</div>
               </template>
             </div>
           </article>
@@ -616,36 +618,36 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="analysis-section">
-        <header><div><span class="section-kicker">STORY OVERVIEW</span><h2>故事大纲</h2></div></header>
+        <header><div><span class="section-kicker">STORY OVERVIEW</span><h2>{{ tr('故事大纲') }}</h2></div></header>
         <article class="outline-card">
           <span><BookOpenText :size="20" /></span>
-          <textarea v-if="editing && projectDraft" v-model="projectDraft.storyOutline" aria-label="故事大纲" rows="8" />
+          <textarea v-if="editing && projectDraft" v-model="projectDraft.storyOutline" :aria-label="tr('故事大纲')" rows="8" />
           <p v-else>{{ projectView.storyOutline }}</p>
         </article>
       </section>
 
       <section class="analysis-section">
-        <header><div><span class="section-kicker">CHARACTER BIBLE</span><h2>人物小传</h2></div><span>{{ characters.length }} 位主要人物</span></header>
+        <header><div><span class="section-kicker">CHARACTER BIBLE</span><h2>{{ tr('人物小传') }}</h2></div><span>{{ characters.length }} {{ tr('位主要人物') }}</span></header>
         <div class="character-grid">
           <article v-for="(character, index) in visibleCharacters" :key="character.name" class="character-card">
             <div class="character-title"><span :style="{ '--character-accent': characterColors[index % characterColors.length] }">{{ character.name.slice(0, 1) }}</span><div><h3>{{ character.name }}</h3><small>{{ character.role }}</small></div></div>
             <p>{{ character.description }}</p>
-            <div class="episode-appearances"><small>出场章节</small><AppBadge v-for="chapterNumber in character.chapter_numbers" :key="chapterNumber" size="sm">第 {{ chapterNumber }} 章</AppBadge></div>
+            <div class="episode-appearances"><small>{{ tr('出场章节') }}</small><AppBadge v-for="chapterNumber in character.chapter_numbers" :key="chapterNumber" size="sm">{{ tr('第') }} {{ chapterNumber }} {{ tr('章') }}</AppBadge></div>
           </article>
         </div>
         <AppButton v-if="characters.length > 4" class="show-more" variant="ghost" size="sm" block type="button" @click="showingAllCharacters = !showingAllCharacters">
-          {{ showingAllCharacters ? '收起人物' : '查看全部人物' }}<ChevronDown :class="{ 'is-up': showingAllCharacters }" :size="15" />
+          {{ showingAllCharacters ? tr('收起人物') : tr('查看全部人物') }}<ChevronDown :class="{ 'is-up': showingAllCharacters }" :size="15" />
         </AppButton>
       </section>
 
       <section class="analysis-section episode-section">
         <header>
-          <div><span class="section-kicker">EPISODE CHAPTERS</span><h2>分集剧情</h2><p>复用项目的分章节结构，每一集对应一个章节。</p></div>
-          <span>{{ chaptersTotal }} 章</span>
+          <div><span class="section-kicker">EPISODE CHAPTERS</span><h2>{{ tr('分集剧情') }}</h2><p>{{ tr('复用项目的分章节结构，每一集对应一个章节。') }}</p></div>
+          <span>{{ chaptersTotal }} {{ tr('章') }}</span>
         </header>
-        <div ref="episodeTabs" class="episode-tabs" role="tablist" aria-label="分集剧情" tabindex="0">
+        <div ref="episodeTabs" class="episode-tabs" role="tablist" :aria-label="tr('分集剧情')" tabindex="0">
           <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only type="button" role="tab" :active="activeEpisode === chapter.number" :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</AppButton>
-          <span v-if="chaptersHasMore" class="episode-load-more">{{ chaptersLoading ? '加载中…' : '继续滚动加载' }}</span>
+          <span v-if="chaptersHasMore" class="episode-load-more">{{ chaptersLoading ? tr('加载中…') : tr('继续滚动加载') }}</span>
         </div>
         <div ref="episodeSentinel" class="episode-sentinel" aria-hidden="true"></div>
         <article v-if="selectedEpisode" class="episode-content">
@@ -654,21 +656,21 @@ onBeforeUnmount(() => {
             <div>
               <small>EPISODE {{ selectedEpisode.number }}</small>
               <label v-if="editing && selectedEpisodeDraft" class="chapter-title-editor">
-                <span>第 {{ selectedEpisode.number }} 集</span>
-                <input v-model="selectedEpisodeDraft.name" aria-label="章节标题" maxlength="255" />
+                <span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('集') }}</span>
+                <input v-model="selectedEpisodeDraft.name" :aria-label="tr('章节标题')" maxlength="255" />
               </label>
               <h3 v-else>{{ episodeDisplayLabel(selectedEpisode) }}</h3>
             </div>
           </header>
-          <p v-if="selectedEpisodeLoading" class="episode-content-state">正在加载章节正文…</p>
-          <textarea v-else-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" aria-label="章节内容" />
+          <p v-if="selectedEpisodeLoading" class="episode-content-state">{{ tr('正在加载章节正文…') }}</p>
+          <textarea v-else-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" :aria-label="tr('章节内容')" />
           <p v-else-if="selectedEpisode.content">{{ selectedEpisode.content }}</p>
-          <p v-else class="episode-content-state">该章节暂无正文内容</p>
-          <footer><span><UsersRound :size="14" />{{ selectedEpisodeCharacters }}</span><span>第 {{ selectedEpisode.number }} 章</span></footer>
+          <p v-else class="episode-content-state">{{ tr('该章节暂无正文内容') }}</p>
+          <footer><span><UsersRound :size="14" />{{ selectedEpisodeCharacters }}</span><span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('章') }}</span></footer>
         </article>
       </section>
 
-      <AppButton class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />确认分析，进入设定</span><ArrowRight :size="18" /></AppButton>
+      <AppButton class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />{{ tr('确认分析，进入设定') }}</span><ArrowRight :size="18" /></AppButton>
       </template>
       </section>
     <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />

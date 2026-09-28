@@ -213,7 +213,7 @@ async def test_api_生成视频_未选择可用配置(client: AsyncClient):
     })
     body = resp.json()
     assert body["code"] == 400
-    assert "未启用或已被删除" in body["message"]
+    assert "disabled or deleted" in body["message"]
     print(f"    API 无配置: code={body['code']}, message={body['message']}")
 
 

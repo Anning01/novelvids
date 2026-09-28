@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../features/auth/authStore'
@@ -14,7 +16,7 @@ const submitting = ref(false)
 
 async function submit() {
   if (!username.value.trim() || !password.value) {
-    errorMessage.value = '请输入用户名和密码'
+    errorMessage.value = tr('请输入用户名和密码')
     return
   }
   submitting.value = true
@@ -24,7 +26,7 @@ async function submit() {
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     await router.replace(redirect)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '登录失败，请重试'
+    errorMessage.value = error instanceof Error ? error.message : tr('登录失败，请重试')
   } finally {
     submitting.value = false
   }
@@ -34,20 +36,20 @@ async function submit() {
 <template>
   <main class="login-page">
     <form class="login-card" @submit.prevent="submit">
-      <img class="login-logo" src="/logo.png" alt="猫影" />
-      <h1>登录</h1>
-      <p class="login-subtitle">登录后继续使用猫影短剧</p>
+      <img class="login-logo" src="/logo.png" :alt="tr('猫影')" />
+      <h1>{{ tr('登录') }}</h1>
+      <p class="login-subtitle">{{ tr('登录后继续使用猫影短剧') }}</p>
       <label class="login-field">
-        <span>用户名</span>
-        <input v-model="username" type="text" autocomplete="username" placeholder="请输入用户名" />
+        <span>{{ tr('用户名') }}</span>
+        <input v-model="username" type="text" autocomplete="username" :placeholder="tr('请输入用户名')" />
       </label>
       <label class="login-field">
-        <span>密码</span>
-        <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+        <span>{{ tr('密码') }}</span>
+        <input v-model="password" type="password" autocomplete="current-password" :placeholder="tr('请输入密码')" />
       </label>
       <p v-if="errorMessage" class="login-error" role="alert">{{ errorMessage }}</p>
       <button class="login-submit" type="submit" :disabled="submitting">
-        {{ submitting ? '登录中…' : '登 录' }}
+        {{ submitting ? tr('登录中…') : tr('登 录') }}
       </button>
     </form>
   </main>

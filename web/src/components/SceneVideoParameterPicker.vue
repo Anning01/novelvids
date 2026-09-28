@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { Check, ChevronDown, ChevronUp, Monitor, TimerReset } from 'lucide-vue-next'
 import type { VideoGenerationModel } from '@/types'
@@ -48,7 +50,7 @@ const selectedDuration = computed(() => {
   const maximum = capabilities.value?.duration_max || 30
   return Math.max(minimum, Math.min(maximum, Math.round(props.duration || minimum)))
 })
-const summary = computed(() => `${selectedDuration.value}秒 · ${selectedRatio.value === 'adaptive' ? '自适应' : selectedRatio.value} · ${selectedResolution.value}`)
+const summary = computed(() => tr('{p0}秒 · {p1} · {p2}', { p0: selectedDuration.value, p1: selectedRatio.value === 'adaptive' ? tr('自适应') : selectedRatio.value, p2: selectedResolution.value }))
 const summaryIconStyle = computed(() => {
   if (selectedRatio.value === 'adaptive') return { width: '20px', height: '12px' }
   const [rawWidth, rawHeight] = selectedRatio.value.split(':').map(Number)
@@ -169,7 +171,7 @@ onBeforeUnmount(close)
     :disabled="!model"
     :aria-expanded="open"
     aria-haspopup="dialog"
-    :aria-label="showReturnLastFrame ? '设置视频时长、比例、分辨率和尾帧衔接' : '设置视频时长、比例和分辨率'"
+    :aria-label="showReturnLastFrame ? tr('设置视频时长、比例、分辨率和尾帧衔接') : tr('设置视频时长、比例和分辨率')"
     @click="toggle"
   >
     <span
@@ -191,11 +193,11 @@ onBeforeUnmount(close)
         class="video-parameter-panel"
         :style="panelStyle"
         role="dialog"
-        aria-label="视频生成参数"
+        :aria-label="tr('视频生成参数')"
       >
         <header>
-          <div><TimerReset :size="15" /><strong>视频时长</strong></div>
-          <b>当前 {{ selectedDuration }} 秒</b>
+          <div><TimerReset :size="15" /><strong>{{ tr('视频时长') }}</strong></div>
+          <b>{{ tr('当前') }} {{ selectedDuration }} {{ tr('秒') }}</b>
         </header>
         <input
           class="duration-slider"
@@ -203,16 +205,16 @@ onBeforeUnmount(close)
           :min="capabilities?.duration_min || 4"
           :max="capabilities?.duration_max || 30"
           :value="selectedDuration"
-          :aria-label="`视频时长 ${selectedDuration} 秒`"
+          :aria-label="tr('视频时长 {p0} 秒', { p0: selectedDuration })"
           @input="updateDuration"
         />
         <div class="duration-limits">
-          <span>最短 {{ capabilities?.duration_min || 4 }} 秒</span>
-          <span>最长 {{ capabilities?.duration_max || 30 }} 秒</span>
+          <span>{{ tr('最短') }} {{ capabilities?.duration_min || 4 }} {{ tr('秒') }}</span>
+          <span>{{ tr('最长') }} {{ capabilities?.duration_max || 30 }} {{ tr('秒') }}</span>
         </div>
 
         <div class="parameter-section">
-          <h3>画面比例</h3>
+          <h3>{{ tr('画面比例') }}</h3>
           <div class="option-grid ratio-grid">
             <button
               v-for="ratio in ratios"
@@ -223,13 +225,13 @@ onBeforeUnmount(close)
             >
               <span v-if="ratio === 'adaptive'" class="adaptive-ratio">AUTO</span>
               <i v-else :style="ratioShape(ratio)" />
-              <span>{{ ratio === 'adaptive' ? '自适应' : ratio }}</span>
+              <span>{{ ratio === 'adaptive' ? tr('自适应') : ratio }}</span>
             </button>
           </div>
         </div>
 
         <div class="parameter-section">
-          <h3>分辨率</h3>
+          <h3>{{ tr('分辨率') }}</h3>
           <div class="option-grid resolution-grid">
             <button
               v-for="resolution in capabilities?.resolutions || []"
@@ -253,7 +255,7 @@ onBeforeUnmount(close)
           :aria-checked="returnLastFrame"
           @click="emit('update:returnLastFrame', !returnLastFrame)"
         >
-          <span><strong>返回尾帧</strong><small>完成后自动作为下一镜头的参考图，章节末尾会衔接下一章</small></span>
+          <span><strong>{{ tr('返回尾帧') }}</strong><small>{{ tr('完成后自动作为下一镜头的参考图，章节末尾会衔接下一章') }}</small></span>
           <i><Check v-if="returnLastFrame" :size="13" /></i>
         </button>
       </section>

@@ -1,14 +1,15 @@
 """Resolve current project standards and prepare validated prompts before persistence."""
 
+from utils.messages import localized_message
+
 from models.asset import Asset
 from models.asset_variant import AssetVariant
-from models.config import GeneralConfig
+from services.language import generation_language
 from models.novel import Novel
 from prompts.creation_standards import ASSET_PROMPT_KINDS, validate_person_visual_traits, validate_reference_kind, visual_contract
 from prompts.reference import CHARACTER_TURNAROUND, is_complete_reference_prompt, render_default_asset_prompt
 from prompts.styles import image_project_style_suffix, video_project_style_suffix
 from services.storyboard.strategies import storyboard_strategy_factory
-from utils.prompt_language import DEFAULT_PROMPT_LANGUAGE
 
 
 class CreationPromptStandards:
@@ -17,8 +18,7 @@ class CreationPromptStandards:
 
     async def context(self) -> dict:
         project = await Novel.get(id=self.novel_id)
-        config = await GeneralConfig.first()
-        return {'language': config.prompt_language if config else DEFAULT_PROMPT_LANGUAGE,
+        return {'language': await generation_language(),
                 'aspect_ratio': project.aspect_ratio or '16:9',
                 'strategy': storyboard_strategy_factory.resolve(project.storyboard_strategy)}
 
@@ -26,7 +26,7 @@ class CreationPromptStandards:
         contract = visual_contract(kind, layout=layout, **await self.context())
         project = await Novel.get(id=self.novel_id)
         style = video_project_style_suffix if kind == 'storyboard' else image_project_style_suffix
-        return {**contract, 'project_style': style(project.style_key, project.custom_style_prompt)}
+        return {**contract, 'project_style': style(project.style_key, project.custom_style_prompt, language=contract['language'])}
 
     async def asset_kind(self, target) -> tuple[str, str]:
         asset = await Asset.get(id=target.asset_id, novel_id=self.novel_id) if isinstance(target, AssetVariant) else target
@@ -38,7 +38,7 @@ class CreationPromptStandards:
         kind = ASSET_PROMPT_KINDS[asset_type]
         validate_reference_kind(text, kind)
         if local_edit and previous and is_complete_reference_prompt(previous) and not is_complete_reference_prompt(text):
-            raise ValueError('局部修改不能删除参考图任务，请保留原有构图规范')
+            raise ValueError(localized_message('局部修改不能删除参考图任务，请保留原有构图规范'))
         if kind == 'person':
             if local_edit and previous is not None:
                 try:

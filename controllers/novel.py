@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 import asyncio
 
 from fastapi import HTTPException
@@ -70,20 +72,20 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         source_filename = data.pop("source_filename", None) or "书稿.txt"
         if source_key:
             if not oss.enabled:
-                raise HTTPException(status_code=400, detail="未启用对象存储")
+                raise HTTPException(status_code=400, detail=localized_message('未启用对象存储'))
             try:
                 analysis = await analyze_oss_document(source_key, source_filename)
             except HTTPException:
                 raise
             except Exception as error:  # 读取/解析失败统一转 400
                 raise HTTPException(
-                    status_code=400, detail=f"从对象存储读取书稿失败：{error}"
+                    status_code=400, detail=localized_message('从对象存储读取书稿失败：{p1}', p1=f'{error}')
                 ) from error
             text = (analysis["text_content"] or "").strip()
             if not text:
                 raise HTTPException(
                     status_code=400,
-                    detail="未能从上传文件读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试",
+                    detail=localized_message('未能从上传文件读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试'),
                 )
             validation = analysis["chapter_validation"]
             if validation and not validation["valid"]:
@@ -103,7 +105,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                     created_by=created_by,
                 )
             ):
-                raise HTTPException(400, detail="选择的旁白音色不存在或不可用")
+                raise HTTPException(400, detail=localized_message('选择的旁白音色不存在或不可用'))
         return await super().create(data, team_id=team_id, created_by=created_by)
 
     async def list(
@@ -166,13 +168,13 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             return
         reference = await AudioReference.get_or_none(id=reference_id, is_active=True)
         if reference is None:
-            raise HTTPException(400, detail="选择的旁白音色不存在或已停用")
+            raise HTTPException(400, detail=localized_message('选择的旁白音色不存在或已停用'))
         if not audio_reference_accessible(
             reference,
             team_id=instance.team_id,
             created_by=instance.created_by,
         ):
-            raise HTTPException(404, detail="选择的旁白音色不存在")
+            raise HTTPException(404, detail=localized_message('选择的旁白音色不存在'))
 
     async def remove(self, novel_id: int) -> None:
         instance = await self.get(novel_id)
@@ -185,7 +187,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
 
         # 如果已经有章节了，禁止使用此方法
         if await novel.chapters:
-            raise HTTPException(400, detail="已有章节，不支持分章。")
+            raise HTTPException(400, detail=localized_message('已有章节，不支持分章。'))
 
         # 章节识别 + 质量校验是 CPU 密集操作，放到线程池执行，
         # 避免在单 worker 的 uvicorn 事件循环里阻塞其他请求（如 /api/auth/status）。
@@ -253,7 +255,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
         novel = await self.get(novel_id)
         if not (novel.content or "").strip():
-            raise HTTPException(status_code=400, detail="项目没有可分析的书稿内容")
+            raise HTTPException(status_code=400, detail=localized_message('项目没有可分析的书稿内容'))
 
         await ai_model_config_controller.get_active_with_legacy_fallback(
             AiTaskTypeEnum.project_analysis.value,

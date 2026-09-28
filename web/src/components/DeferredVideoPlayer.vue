@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { nextTick, ref, watch } from 'vue'
 import { Film, Play } from 'lucide-vue-next'
 
@@ -49,11 +51,11 @@ defineExpose({ activate, element: video })
       v-if="src && !activated"
       type="button"
       class="deferred-video-player__poster"
-      :aria-label="`播放${title}`"
+      :aria-label="tr('播放{p0}', { p0: title })"
       @click="activate"
     >
-      <img v-if="poster" :src="poster" :alt="`${title}封面`" loading="lazy" decoding="async">
-      <span v-else class="deferred-video-player__empty"><Film :size="30" /><small>点击加载视频</small></span>
+      <img v-if="poster" :src="poster" :alt="tr('{p0}封面', { p0: title })" loading="lazy" decoding="async">
+      <span v-else class="deferred-video-player__empty"><Film :size="30" /><small>{{ tr('点击加载视频') }}</small></span>
       <i aria-hidden="true"><Play :size="22" fill="currentColor" /></i>
     </button>
     <video

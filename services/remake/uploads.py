@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import logging
 import os
@@ -39,7 +41,7 @@ class RemakeUploadService:
     def _path(self, object_key: str) -> Path:
         path = (self.media_root / object_key).resolve()
         if path != self.media_root and self.media_root not in path.parents:
-            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", "暂存视频不存在")
+            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", localized_message('暂存视频不存在'))
         return path
 
     @staticmethod
@@ -58,7 +60,7 @@ class RemakeUploadService:
             raise RemakeError(
                 409,
                 "REMAKE_UPLOAD_DIRECT_REQUIRED",
-                "当前环境需要浏览器直传对象存储",
+                localized_message('当前环境需要浏览器直传对象存储'),
                 retryable=True,
             )
         original_filename = self._safe_name(file.filename or "video.mp4")
@@ -87,7 +89,7 @@ class RemakeUploadService:
                         raise RemakeError(
                             413,
                             "REMAKE_MEDIA_SIZE_EXCEEDED",
-                            "单个来源视频不能超过500MB",
+                            localized_message('单个来源视频不能超过500MB'),
                             context={"filename": original_filename, "limit_bytes": self.max_bytes},
                         )
                     await asyncio.to_thread(target.write, chunk)
@@ -112,7 +114,7 @@ class RemakeUploadService:
                 upload.error_message = error.message
             else:
                 upload.error_code = "REMAKE_MEDIA_INVALID_CONTAINER"
-                upload.error_message = "来源视频上传失败"
+                upload.error_message = localized_message('来源视频上传失败')
             await upload.save(
                 update_fields=["status", "error_code", "error_message", "updated_at"]
             )
@@ -130,14 +132,14 @@ class RemakeUploadService:
         user_id: int | None,
     ) -> tuple[RemakeUpload, dict]:
         if not self.provider.enabled:
-            raise RemakeError(409, "REMAKE_UPLOAD_NOT_READY", "当前环境使用本地上传")
+            raise RemakeError(409, "REMAKE_UPLOAD_NOT_READY", localized_message('当前环境使用本地上传'))
         original_filename = self._safe_name(filename)
         self.validator.validate_extension(original_filename)
         if size_bytes <= 0 or size_bytes > self.max_bytes:
             raise RemakeError(
                 413,
                 "REMAKE_MEDIA_SIZE_EXCEEDED",
-                "单个来源视频不能超过500MB",
+                localized_message('单个来源视频不能超过500MB'),
                 context={"filename": original_filename, "limit_bytes": self.max_bytes},
             )
         token = uuid4()
@@ -169,7 +171,7 @@ class RemakeUploadService:
         if upload.status == "ready":
             return upload
         if upload.status != "uploading" or upload.original_filename != self._safe_name(original_filename):
-            raise RemakeError(409, "REMAKE_UPLOAD_NOT_READY", "暂存视频状态无效")
+            raise RemakeError(409, "REMAKE_UPLOAD_NOT_READY", localized_message('暂存视频状态无效'))
         upload.status = "validating"
         await upload.save(update_fields=["status", "updated_at"])
         validate_dir = self.media_root / "remake" / ".validate"
@@ -198,7 +200,7 @@ class RemakeUploadService:
                 upload.error_message = error.message
             else:
                 upload.error_code = "REMAKE_MEDIA_INVALID_CONTAINER"
-                upload.error_message = "对象存储视频校验失败"
+                upload.error_message = localized_message('对象存储视频校验失败')
             await upload.save(
                 update_fields=["status", "error_code", "error_message", "updated_at"]
             )
@@ -248,7 +250,7 @@ class RemakeUploadService:
             created_by=user_id,
         )
         if upload is None:
-            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", "暂存视频不存在")
+            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", localized_message('暂存视频不存在'))
         return upload
 
     async def get_ready(
@@ -264,18 +266,18 @@ class RemakeUploadService:
             created_by=user_id,
         )
         if upload is None:
-            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", "暂存视频不存在")
+            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", localized_message('暂存视频不存在'))
         now = datetime.now(timezone.utc)
         if upload.expires_at <= now and upload.status != "committed":
             await self._expire(upload)
-            raise RemakeError(410, "REMAKE_UPLOAD_EXPIRED", "暂存视频已过期，请重新上传")
+            raise RemakeError(410, "REMAKE_UPLOAD_EXPIRED", localized_message('暂存视频已过期，请重新上传'))
         if upload.status == "committed":
-            raise RemakeError(409, "REMAKE_UPLOAD_ALREADY_COMMITTED", "暂存视频已经绑定项目")
+            raise RemakeError(409, "REMAKE_UPLOAD_ALREADY_COMMITTED", localized_message('暂存视频已经绑定项目'))
         if upload.status != "ready":
             raise RemakeError(
                 409,
                 "REMAKE_UPLOAD_NOT_READY",
-                "暂存视频尚未完成校验",
+                localized_message('暂存视频尚未完成校验'),
                 retryable=upload.status in {"uploading", "validating"},
             )
         return upload
@@ -284,7 +286,7 @@ class RemakeUploadService:
         if upload.storage_provider == "local":
             path = self._path(upload.object_key)
             if not path.is_file():
-                raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", "暂存视频不存在")
+                raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", localized_message('暂存视频不存在'))
             media = await asyncio.to_thread(
                 self.validator.validate_path,
                 path,
@@ -312,7 +314,7 @@ class RemakeUploadService:
             finally:
                 temporary.unlink(missing_ok=True)
         if media.checksum != upload.checksum or media.size_bytes != upload.size_bytes:
-            raise RemakeError(409, "REMAKE_UPLOAD_NOT_READY", "暂存视频内容已经变化")
+            raise RemakeError(409, "REMAKE_UPLOAD_NOT_READY", localized_message('暂存视频内容已经变化'))
         return media
 
     async def promote_local(self, upload: RemakeUpload) -> tuple[str, str] | None:
@@ -351,9 +353,9 @@ class RemakeUploadService:
             created_by=user_id,
         )
         if upload is None:
-            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", "暂存视频不存在")
+            raise RemakeError(404, "REMAKE_UPLOAD_NOT_FOUND", localized_message('暂存视频不存在'))
         if upload.status == "committed":
-            raise RemakeError(409, "REMAKE_UPLOAD_ALREADY_COMMITTED", "暂存视频已经绑定项目")
+            raise RemakeError(409, "REMAKE_UPLOAD_ALREADY_COMMITTED", localized_message('暂存视频已经绑定项目'))
         await self._delete_media(upload)
         await upload.delete()
 

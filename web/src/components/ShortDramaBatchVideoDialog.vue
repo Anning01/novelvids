@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, Link2, ListChecks, Sparkles, X } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
@@ -64,8 +66,8 @@ const aspectRatioOptions = computed(() => {
 })
 function sceneDisabledReason(scene: BatchVideoSceneOption) {
   if (scene.disabledReason) return scene.disabledReason
-  if (!selectedModel.value) return '未选择视频模型'
-  if (!selectedModel.value.capabilities.generation_modes.includes(scene.mode)) return '所选模型不支持该生成方式'
+  if (!selectedModel.value) return tr('未选择视频模型')
+  if (!selectedModel.value.capabilities.generation_modes.includes(scene.mode)) return tr('所选模型不支持该生成方式')
   return ''
 }
 const eligibleScenes = computed(() => props.scenes.filter(scene => !sceneDisabledReason(scene)))
@@ -182,15 +184,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <header class="batch-video-dialog__header">
             <span class="batch-video-dialog__icon" aria-hidden="true"><ListChecks :size="22" /></span>
             <div>
-              <h2 id="batch-video-dialog-title">批量生视频</h2>
+              <h2 id="batch-video-dialog-title">{{ tr('批量生视频') }}</h2>
             </div>
-            <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭批量生视频" @click="close"><X :size="18" /></AppButton>
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭批量生视频')" @click="close"><X :size="18" /></AppButton>
           </header>
 
-          <section class="batch-video-dialog__settings" aria-label="统一生成设置">
-            <label><span>统一模型</span><AppSelect v-model="selectedModelId" :options="modelOptions" ariaLabel="批量视频模型" density="compact" /></label>
-            <label><span>统一比例</span><AppSelect v-model="selectedAspectRatio" :options="aspectRatioOptions" ariaLabel="批量视频比例" density="compact" /></label>
-            <label><span>统一分辨率</span><AppSelect v-model="selectedResolution" :options="resolutionOptions" ariaLabel="批量视频分辨率" density="compact" /></label>
+          <section class="batch-video-dialog__settings" :aria-label="tr('统一生成设置')">
+            <label><span>{{ tr('统一模型') }}</span><AppSelect v-model="selectedModelId" :options="modelOptions" :ariaLabel="tr('批量视频模型')" density="compact" /></label>
+            <label><span>{{ tr('统一比例') }}</span><AppSelect v-model="selectedAspectRatio" :options="aspectRatioOptions" :ariaLabel="tr('批量视频比例')" density="compact" /></label>
+            <label><span>{{ tr('统一分辨率') }}</span><AppSelect v-model="selectedResolution" :options="resolutionOptions" :ariaLabel="tr('批量视频分辨率')" density="compact" /></label>
             <button
               type="button"
               class="batch-video-last-frame"
@@ -201,12 +203,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               @click="returnLastFrame = !returnLastFrame"
             >
               <Link2 :size="16" />
-              <span><strong>尾帧连续生成</strong><small>{{ returnLastFrame ? '按分镜顺序逐个执行，完成后自动衔接下一镜头' : '开启后无需值守，上一镜头尾帧会注入下一镜头' }}</small></span>
+              <span><strong>{{ tr('尾帧连续生成') }}</strong><small>{{ returnLastFrame ? tr('按分镜顺序逐个执行，完成后自动衔接下一镜头') : tr('开启后无需值守，上一镜头尾帧会注入下一镜头') }}</small></span>
               <i><Check v-if="returnLastFrame" :size="13" /></i>
             </button>
           </section>
 
-          <AppScrollArea class="batch-video-dialog__scroller" aria-label="可选择的分镜列表">
+          <AppScrollArea class="batch-video-dialog__scroller" :aria-label="tr('可选择的分镜列表')">
             <div class="batch-video-dialog__grid">
               <label
                 v-for="scene in scenes"
@@ -222,11 +224,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
                   type="checkbox"
                   :checked="selectedIds.includes(scene.id)"
                   :disabled="Boolean(sceneDisabledReason(scene))"
-                  :aria-label="`选择分镜 ${scene.sequence}${sceneDisabledReason(scene) ? `，${sceneDisabledReason(scene)}` : ''}`"
+                  :aria-label="tr('选择分镜 {p0}{p1}', { p0: scene.sequence, p1: sceneDisabledReason(scene) ? `，${sceneDisabledReason(scene)}` : '' })"
                   @change="toggleScene(scene)"
                 >
                 <span class="batch-video-scene__checkbox" aria-hidden="true"><Check :size="15" /></span>
-                <strong>分镜{{ scene.sequence }}</strong>
+                <strong>{{ tr('分镜') }}{{ scene.sequence }}</strong>
                 <span v-if="sceneDisabledReason(scene)" class="visually-hidden">{{ sceneDisabledReason(scene) }}</span>
               </label>
             </div>
@@ -234,19 +236,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 
           <footer class="batch-video-dialog__footer">
             <AppButton type="button" class="batch-video-dialog__select-all" variant="soft" :disabled="!eligibleScenes.length" @click="toggleAll">
-              {{ allSelected ? '取消全选' : '全选' }}
+              {{ allSelected ? tr('取消全选') : tr('全选') }}
             </AppButton>
             <div>
-              <AppButton type="button" variant="soft" @click="close">取消</AppButton>
+              <AppButton type="button" variant="soft" @click="close">{{ tr('取消') }}</AppButton>
               <AppButton
                 type="button"
                 class="batch-video-dialog__submit"
                 variant="primary"
                 :disabled="!selectedIds.length"
-                :aria-label="`生成所选 ${selectedIds.length} 条分镜视频`"
+                :aria-label="tr('生成所选 {p0} 条分镜视频', { p0: selectedIds.length })"
                 @click="submit"
               >
-                <Sparkles :size="15" />开始<BillingPriceTag :cost="estimatedTotal" :pricing="selectedModel?.pricing" />
+                <Sparkles :size="15" />{{ tr('开始') }}<BillingPriceTag :cost="estimatedTotal" :pricing="selectedModel?.pricing" />
               </AppButton>
             </div>
           </footer>

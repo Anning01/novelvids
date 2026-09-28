@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed } from 'vue'
 import { CheckCircle2, CircleAlert, Info, X } from 'lucide-vue-next'
 import { notice, type Notice } from '@/shared/notice'
@@ -20,7 +22,7 @@ function dismiss() {
   <div class="app-notice" :class="`is-${item.tone}`" role="status">
     <component :is="icon" class="app-notice__icon" :size="16" aria-hidden="true" />
     <p class="app-notice__message">{{ item.message }}</p>
-    <button type="button" class="app-notice__close" aria-label="关闭通知" @click="dismiss"><X :size="14" /></button>
+    <button type="button" class="app-notice__close" :aria-label="tr('关闭通知')" @click="dismiss"><X :size="14" /></button>
   </div>
 </template>
 

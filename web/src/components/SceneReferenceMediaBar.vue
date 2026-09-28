@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, X } from 'lucide-vue-next'
 import type { VideoGenerationModel, VideoReferenceMedia } from '@/types'
@@ -69,14 +71,14 @@ function closeImagePreview() {
       type="button"
       class="reference-add"
       :disabled="unavailable"
-      :title="disabled ? '首尾帧模式不能同时使用参考素材' : '上传参考图片或视频'"
-      aria-label="上传参考图片或视频"
+      :title="disabled ? tr('首尾帧模式不能同时使用参考素材') : tr('上传参考图片或视频')"
+      :aria-label="tr('上传参考图片或视频')"
       @click="chooseFiles"
     >
       <LoaderCircle v-if="uploading" :size="16" />
       <Plus v-else :size="16" />
     </button>
-    <div v-if="media.length" class="reference-list" aria-label="已上传参考素材">
+    <div v-if="media.length" class="reference-list" :aria-label="tr('已上传参考素材')">
       <article
         v-for="(item, index) in media"
         :key="`${item.type}:${item.url}`"
@@ -88,44 +90,44 @@ function closeImagePreview() {
           v-if="item.type === 'image'"
           type="button"
           class="reference-image-preview"
-          :aria-label="`放大查看 ${item.name || '参考图片'}`"
-          title="点击放大"
+          :aria-label="tr('放大查看 {p0}', { p0: item.name || '参考图片' })"
+          :title="tr('点击放大')"
           @click="openImagePreview(item)"
         >
           <ImageIcon :size="16" aria-hidden="true" />
-          <img :src="item.url" :alt="item.name || '参考图片'" @error="fallbackImage($event)" />
+          <img :src="item.url" :alt="item.name || tr('参考图片')" @error="fallbackImage($event)" />
         </button>
         <video
           v-else
           class="reference-video"
           :src="item.url"
-          :aria-label="item.name || '参考视频第一帧'"
+          :aria-label="item.name || tr('参考视频第一帧')"
           preload="metadata"
           muted
           playsinline
           @loadedmetadata="showFirstFrame"
         />
         <span class="reference-name">
-          <strong>{{ item.name || (item.type === 'image' ? '参考图片' : '参考视频') }}</strong>
+          <strong>{{ item.name || (item.type === 'image' ? tr('参考图片') : tr('参考视频')) }}</strong>
         </span>
-        <button type="button" class="reference-remove" :aria-label="`移除 ${item.name || '参考素材'}`" title="移除" @click="emit('remove', index)"><X :size="10" /></button>
+        <button type="button" class="reference-remove" :aria-label="tr('移除 {p0}', { p0: item.name || '参考素材' })" :title="tr('移除')" @click="emit('remove', index)"><X :size="10" /></button>
       </article>
     </div>
     <div class="reference-summary">
       <ImageIcon :size="13" />
-      <span>图片 {{ assetImageCount + uploadedImages }}/{{ model?.capabilities.max_reference_images || 0 }}</span>
+      <span>{{ tr('图片') }} {{ assetImageCount + uploadedImages }}/{{ model?.capabilities.max_reference_images || 0 }}</span>
       <i>·</i>
       <Film :size="13" />
-      <span>视频 {{ uploadedVideos }}/{{ model?.capabilities.max_reference_videos || 0 }}</span>
+      <span>{{ tr('视频') }} {{ uploadedVideos }}/{{ model?.capabilities.max_reference_videos || 0 }}</span>
       <small v-if="uploadedVideos">{{ totalVideoDuration.toFixed(1) }}/{{ model?.capabilities.reference_video_total_duration_max || 0 }}s</small>
-      <small v-if="assetImageCount">资产图已计入</small>
-      <small v-else-if="!model">请先启用视频模型</small>
-      <small v-else>支持图片与 MP4/MOV</small>
+      <small v-if="assetImageCount">{{ tr('资产图已计入') }}</small>
+      <small v-else-if="!model">{{ tr('请先启用视频模型') }}</small>
+      <small v-else>{{ tr('支持图片与 MP4/MOV') }}</small>
     </div>
     <ImageLightbox
       :open="Boolean(previewImage)"
       :src="previewImage?.url || ''"
-      :alt="previewImage?.name || '参考图片'"
+      :alt="previewImage?.name || tr('参考图片')"
       @close="closeImagePreview"
     />
   </section>

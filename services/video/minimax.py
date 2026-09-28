@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import json
 import logging
 from typing import Any
@@ -225,7 +227,7 @@ class MiniMaxH3Generator(BaseVideoGenerator):
         if status == "failed":
             return self._build_result(
                 TaskStatusEnum.failed,
-                error=provider_error(task) or "MiniMax 视频生成任务失败",
+                error=provider_error(task) or localized_message('MiniMax 视频生成任务失败'),
             )
         if status == "cancelled":
             return self._build_result(

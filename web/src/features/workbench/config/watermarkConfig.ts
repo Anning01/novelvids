@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 export type WatermarkPreset = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'
 
 export interface WatermarkConfig {
@@ -8,11 +10,11 @@ export interface WatermarkConfig {
 }
 
 export const WATERMARK_PRESETS: ReadonlyArray<{ value: WatermarkPreset; label: string }> = [
-  { value: 'top-left', label: '左上角' },
-  { value: 'top-right', label: '右上角' },
-  { value: 'bottom-left', label: '左下角' },
-  { value: 'bottom-right', label: '右下角' },
-  { value: 'center', label: '居中' },
+  { value: 'top-left', get label() { return tr('左上角') } },
+  { value: 'top-right', get label() { return tr('右上角') } },
+  { value: 'bottom-left', get label() { return tr('左下角') } },
+  { value: 'bottom-right', get label() { return tr('右下角') } },
+  { value: 'center', get label() { return tr('居中') } },
 ]
 
 const PRESET_POSITIONS: Record<WatermarkPreset, Pick<WatermarkConfig, 'x' | 'y'>> = {

@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 import asyncio
 import base64
 import logging
@@ -22,6 +24,7 @@ from prompts.extraction import (
     ensure_ordered_trait_labels,
 )
 from prompts.reference import render_default_asset_prompt
+from prompts.catalog import text as prompt_text
 from prompts.project_analysis import render_analysis_messages, render_cover_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
@@ -45,7 +48,7 @@ class KeyCharacter(BaseModel):
     name: str = Field(description="人物标准名称")
     aliases: list[str] = Field(default_factory=list, description="人物别名")
     role: str = Field(description="人物在故事中的身份和作用")
-    description: str = Field(description="人物性格、背景、动机与人物弧光的中文概述")
+    description: str = Field(description="人物性格、背景、动机与人物弧光的任务指定语言的概述")
     base_traits: str = Field(description="按任务指定语言撰写的详细人物外观描述")
     chapter_numbers: list[int] = Field(default_factory=list, description="人物出现的章节序号")
 
@@ -60,12 +63,12 @@ class KeyCharacter(BaseModel):
 
 
 class BookAnalysis(BaseModel):
-    book_types: list[str] = Field(description="3 至 6 个准确、简短的中文题材或类型标签")
+    book_types: list[str] = Field(description="3 至 6 个准确、简短的任务指定语言的题材或类型标签")
     story_outline: str = Field(description="完整故事大纲，包含主线冲突、关键转折和结局走向")
     key_characters: list[KeyCharacter] = Field(description="推动主线的关键人物，通常为 3 至 10 位")
 
 
-def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
+def _build_analysis_material(novel: Novel, chapters: list[Chapter], language: str = "zh") -> str:
     """优先使用完整书稿；超长时按章节均匀取样，避免只分析故事开头。"""
     content = (novel.content or "").strip()
     if len(content) <= MAX_ANALYSIS_TEXT_LENGTH:
@@ -74,7 +77,7 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
     if not chapters:
         head = content[: MAX_ANALYSIS_TEXT_LENGTH // 2]
         tail = content[-MAX_ANALYSIS_TEXT_LENGTH // 2 :]
-        return f"【书稿开头】\n{head}\n\n【书稿结尾】\n{tail}"
+        return prompt_text("analysis_head_tail", language, head=head, tail=tail)
 
     sample_count = min(len(chapters), 24)
     if sample_count == 1:
@@ -98,7 +101,7 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter]) -> str:
             first = allowance * 2 // 3
             chapter_text = f"{chapter_text[:first]}\n……\n{chapter_text[-(allowance - first):]}"
         chapter_title = strip_chapter_ordinal(chapter.name)
-        heading = f"第 {chapter.number} 章"
+        heading = prompt_text("chapter_heading", language, number=chapter.number)
         if chapter_title:
             heading = f"{heading}：{chapter_title}"
         block = f"【{heading}】\n{chapter_text}"
@@ -124,7 +127,7 @@ async def _save_cover(image: Any, novel_id: int) -> str:
     elif b64_json:
         image_bytes = base64.b64decode(b64_json)
     else:
-        raise ValueError("生图模型未返回可用的封面图片")
+        raise ValueError(localized_message('生图模型未返回可用的封面图片'))
 
     filename = f"novel-{novel_id}-{uuid4().hex}{suffix}"
     from services.oss import make_upload_key, oss
@@ -227,7 +230,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
         novel = await Novel.get(id=novel_id)
         if not (novel.content or "").strip():
-            raise ValueError("项目没有可分析的书稿内容")
+            raise ValueError(localized_message('项目没有可分析的书稿内容'))
 
         chapters = await Chapter.filter(novel_id=novel_id).order_by("number")
         if not chapters:
@@ -240,13 +243,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             team_id=request_params.get("team_id"),
         )
 
-        material = _build_analysis_material(novel, chapters)
+        material = _build_analysis_material(novel, chapters, prompt_language)
         llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
         analysis, completion = await create_json_completion(
             llm_client,
             model=llm_config.model,
             messages=render_analysis_messages(name=novel.name, chapter_count=len(chapters), material=material, prompt_language=prompt_language),
             response_model=BookAnalysis,
+            prompt_language=prompt_language,
             supports_json_output=llm_config.supports_json_output,
         )
         token_usage = completion_usage(completion)

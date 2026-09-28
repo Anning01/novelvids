@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed } from 'vue'
 import { Filter, RotateCcw, Search, X } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
@@ -22,8 +24,8 @@ const props = withDefaults(defineProps<{
   resultLabel?: string
 }>(), {
   filters: () => [],
-  placeholder: '搜索',
-  searchAriaLabel: '搜索',
+  get placeholder() { return tr('搜索') },
+  get searchAriaLabel() { return tr('搜索') },
   resultLabel: '',
 })
 
@@ -35,7 +37,7 @@ const emit = defineEmits<{
 const activeFilterCount = computed(() => props.filters.filter(filter => !filter.required && props.filterValues[filter.key]).length)
 
 function optionsFor(filter: SearchFilterDefinition): AppSelectOption[] {
-  return filter.required ? filter.options : [{ value: '', label: filter.allLabel || `全部${filter.label}` }, ...filter.options]
+  return filter.required ? filter.options : [{ value: '', label: filter.allLabel || tr('全部{p0}', { p0: filter.label }) }, ...filter.options]
 }
 
 function updateFilter(key: string, value: string) {
@@ -61,23 +63,23 @@ function clearFilters() {
         :aria-label="searchAriaLabel"
         @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       />
-      <AppButton v-if="modelValue" type="button" aria-label="清除搜索" title="清除搜索" @click="$emit('update:modelValue', '')"><X :size="15" /></AppButton>
+      <AppButton v-if="modelValue" type="button" :aria-label="tr('清除搜索')" :title="tr('清除搜索')" @click="$emit('update:modelValue', '')"><X :size="15" /></AppButton>
     </label>
 
-    <div v-if="filters.length" class="search-filter-bar__filters" aria-label="过滤条件">
+    <div v-if="filters.length" class="search-filter-bar__filters" :aria-label="tr('过滤条件')">
       <AppSelect
         v-for="filter in filters"
         :key="filter.key"
         :model-value="filterValues[filter.key] || ''"
         :options="optionsFor(filter)"
-        :ariaLabel="`${filter.label}过滤`"
+        :ariaLabel="tr('{p0}过滤', { p0: filter.label })"
         :menu-label="filter.label"
         :menu-width="filter.width"
         @update:model-value="updateFilter(filter.key, $event)"
       >
         <template #leading><Filter :size="14" /></template>
       </AppSelect>
-      <AppButton v-if="activeFilterCount" class="search-filter-bar__reset" type="button" title="清除全部过滤" @click="clearFilters"><RotateCcw :size="14" /><span>清除 {{ activeFilterCount }}</span></AppButton>
+      <AppButton v-if="activeFilterCount" class="search-filter-bar__reset" type="button" :title="tr('清除全部过滤')" @click="clearFilters"><RotateCcw :size="14" /><span>{{ tr('清除') }} {{ activeFilterCount }}</span></AppButton>
     </div>
 
     <span v-if="resultLabel" class="search-filter-bar__result">{{ resultLabel }}</span>

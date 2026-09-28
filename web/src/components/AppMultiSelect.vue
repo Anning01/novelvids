@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Check, ChevronDown } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
@@ -16,7 +18,7 @@ const props = withDefaults(defineProps<{
   maxMenuHeight?: number
   disabled?: boolean
 }>(), {
-  placeholder: '请选择',
+  get placeholder() { return tr('请选择') },
   maxMenuHeight: 320,
   disabled: false,
 })

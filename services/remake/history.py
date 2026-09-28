@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,7 +53,7 @@ class RemakeHistoryCatalog:
     async def inspect(self, chapter: Chapter) -> HistoryEpisodeInspection:
         scenes = await Scene.filter(chapter_id=chapter.id).order_by("sequence", "id")
         if not scenes:
-            return HistoryEpisodeInspection(chapter, (), 0.0, 0, 0, "章节暂无分镜")
+            return HistoryEpisodeInspection(chapter, (), 0.0, 0, 0, localized_message('章节暂无分镜'))
 
         selected: list[HistorySelectedVideo] = []
         missing: list[int] = []
@@ -71,9 +73,9 @@ class RemakeHistoryCatalog:
             labels = "、".join(f"镜头 {sequence}" for sequence in missing)
             reason = f"{labels} 尚无已完成视频"
         elif total_duration > MAX_REMAKE_DURATION_SECONDS:
-            reason = "章节成片超过20分钟"
+            reason = localized_message('章节成片超过20分钟')
         elif total_size > MAX_REMAKE_BYTES:
-            reason = "章节成片预计超过500MB"
+            reason = localized_message('章节成片预计超过500MB')
         return HistoryEpisodeInspection(
             chapter=chapter,
             selected=tuple(selected),

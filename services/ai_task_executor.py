@@ -1,3 +1,4 @@
+from utils.messages import localized_message
 import abc
 import asyncio
 import logging
@@ -98,7 +99,7 @@ class AiTaskExecutor:
             baseline = task.started_at if task.started_at else task.created_at
             if baseline and (now - baseline).total_seconds() > timeout:
                 logger.warning("Cleaning stale task #%s (status=%s)", task.id, task.status)
-                await self._fail(task, f"异常任务清理：超时（{timeout}s）")
+                await self._fail(task, localized_message("异常任务清理：超时（{p0}s）", p0=timeout))
 
     async def submit(
         self,
@@ -119,6 +120,11 @@ class AiTaskExecutor:
         await ensure_solvent(
             request_params.get("team_id"), request_params.get("user_id")
         )
+        from services.language import generation_language
+
+        request_params = dict(request_params)
+        if "prompt_language" not in request_params:
+            request_params["prompt_language"] = await generation_language()
         task = await AiTask.create(
             task_type=task_type.value,
             request_params=request_params,
@@ -146,7 +152,7 @@ class AiTaskExecutor:
         task_type = AiTaskTypeEnum(task.task_type)
         handler = self._handlers.get(task_type)
         if handler is None:
-            await self._fail(task, f"未注册的任务类型: {task_type.nickname}")
+            await self._fail(task, localized_message("未注册的任务类型: {p0}", p0=localized_message(task_type.nickname)))
             return
 
         # 执行前清理同类型异常任务
@@ -170,6 +176,9 @@ class AiTaskExecutor:
             return
         await task.refresh_from_db()
 
+        from services.language import task_language
+        legacy_language = "zh" if task_type in {AiTaskTypeEnum.creation_agent, AiTaskTypeEnum.remake_decomposition} else "en"
+        token = task_language.set(task.request_params.get("prompt_language", legacy_language))
         try:
             result = await asyncio.wait_for(
                 handler.execute(task.request_params),
@@ -177,10 +186,12 @@ class AiTaskExecutor:
             )
             await self._complete(task, result)
         except asyncio.TimeoutError:
-            await self._fail(task, f"任务超时（{timeout}s）")
+            await self._fail(task, localized_message("任务超时（{p0}s）", p0=timeout))
         except Exception as e:
             logger.exception("AI task #%s failed", task.id)
             await self._fail(task, str(e), error=e)
+        finally:
+            task_language.reset(token)
 
     async def submit_and_run(
         self, task_type: AiTaskTypeEnum, request_params: dict

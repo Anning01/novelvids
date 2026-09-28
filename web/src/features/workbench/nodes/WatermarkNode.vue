@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import { Droplet, LoaderCircle, Settings2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
@@ -31,10 +33,10 @@ const videoUrl = computed(() => {
   return ''
 })
 const disabledReason = computed(() => {
-  if (!props.data.apply_capability) return '当前服务未启用水印执行'
-  if (!videoUrl.value) return '请先连接视频'
-  if (!config.value.resourceUrl) return '请先上传水印图片'
-  return '水印执行接口尚未接入'
+  if (!props.data.apply_capability) return tr('当前服务未启用水印执行')
+  if (!videoUrl.value) return tr('请先连接视频')
+  if (!config.value.resourceUrl) return tr('请先上传水印图片')
+  return tr('水印执行接口尚未接入')
 })
 
 function saveConfig(value: WatermarkConfig) {
@@ -49,7 +51,7 @@ async function uploadWatermark(file: File) {
       resourceUrl: uploaded.url || mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`),
     })
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '水印图片上传失败')
+    notice.error(error instanceof Error ? error.message : tr('水印图片上传失败'))
   } finally {
     uploading.value = false
   }
@@ -57,26 +59,26 @@ async function uploadWatermark(file: File) {
 </script>
 
 <template>
-  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'watermark', title: data.title || '新水印', status: 'watermark' }">
+  <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'watermark', title: data.title || tr('新水印'), status: 'watermark' }">
     <div class="workbench-watermark-node">
-      <div class="workbench-watermark-node__preview" aria-label="水印视频预览">
-        <DeferredVideoPlayer v-if="videoUrl" :src="videoUrl" title="水印输入视频" />
-        <div v-else class="workbench-media-placeholder">连接视频后预览</div>
+      <div class="workbench-watermark-node__preview" :aria-label="tr('水印视频预览')">
+        <DeferredVideoPlayer v-if="videoUrl" :src="videoUrl" :title="tr('水印输入视频')" />
+        <div v-else class="workbench-media-placeholder">{{ tr('连接视频后预览') }}</div>
         <img
           v-if="config.resourceUrl"
           :src="config.resourceUrl"
-          alt="水印预览图"
+          :alt="tr('水印预览图')"
           :style="{ left: `${config.x * 100}%`, top: `${config.y * 100}%`, width: `${config.scale * 100}%` }"
         >
       </div>
       <div class="workbench-watermark-node__summary">
-        <strong>水印配置</strong>
-        <span>{{ config.resourceUrl ? '已选择水印图片' : '新水印' }}</span>
-        <button type="button" aria-label="设置水印" @click="settingsOpen = true"><Settings2 :size="14" aria-hidden="true" />设置</button>
+        <strong>{{ tr('水印配置') }}</strong>
+        <span>{{ config.resourceUrl ? tr('已选择水印图片') : tr('新水印') }}</span>
+        <button type="button" :aria-label="tr('设置水印')" @click="settingsOpen = true"><Settings2 :size="14" aria-hidden="true" />{{ tr('设置') }}</button>
       </div>
       <div class="workbench-watermark-node__mode">
         <Droplet :size="15" aria-hidden="true" />
-        <span><strong>水印配置模式</strong><small>连接视频；配置完成后可由已启用的服务执行。</small></span>
+        <span><strong>{{ tr('水印配置模式') }}</strong><small>{{ tr('连接视频；配置完成后可由已启用的服务执行。') }}</small></span>
       </div>
       <button type="button" class="workbench-watermark-node__run" :aria-label="disabledReason" :title="disabledReason" disabled>
         <LoaderCircle v-if="uploading" :size="15" aria-hidden="true" />

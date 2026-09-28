@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed } from 'vue'
 import { LocateFixed, RefreshCw, TriangleAlert } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
@@ -20,20 +22,20 @@ const details = computed(() => formatVideoGenerationError(props.error))
 
 const title = computed(() => {
   if (!props.reference) return details.value.title
-  if (details.value.category === 'privacy') return `参考图「${props.reference.label}」包含真人信息`
-  if (details.value.category === 'download') return `参考图「${props.reference.label}」下载失败`
-  return `参考图「${props.reference.label}」异常`
+  if (details.value.category === 'privacy') return tr('参考图「{p0}」包含真人信息', { p0: props.reference.label })
+  if (details.value.category === 'download') return tr('参考图「{p0}」下载失败', { p0: props.reference.label })
+  return tr('参考图「{p0}」异常', { p0: props.reference.label })
 })
 
 const message = computed(() => {
   if (!props.reference) return details.value.message
   if (details.value.category === 'privacy') {
-    return `参考图「${props.reference.label}」可能包含真实人物，供应商因隐私保护拒绝了本次生成。`
+    return tr('参考图「{p0}」可能包含真实人物，供应商因隐私保护拒绝了本次生成。', { p0: props.reference.label })
   }
   if (details.value.category === 'download') {
-    return `参考图「${props.reference.label}」地址无效或无法被供应商下载，请检查该素材是否可正常访问。`
+    return tr('参考图「{p0}」地址无效或无法被供应商下载，请检查该素材是否可正常访问。', { p0: props.reference.label })
   }
-  return `参考图「${props.reference.label}」触发异常：${details.value.message}`
+  return tr('参考图「{p0}」触发异常：{p1}', { p0: props.reference.label, p1: details.value.message })
 })
 </script>
 
@@ -48,33 +50,32 @@ const message = computed(() => {
       v-if="reference"
       type="button"
       class="video-generation-error__reference"
-      :aria-label="`定位参考图 ${reference.label}`"
+      :aria-label="tr('定位参考图 {p0}', { p0: reference.label })"
       @click="emit('locateReference', reference.number)"
     >
       <img :src="reference.url" :alt="reference.label" />
-      <span><small>问题素材</small><strong>{{ reference.label }}</strong></span>
+      <span><small>{{ tr('问题素材') }}</small><strong>{{ reference.label }}</strong></span>
       <LocateFixed :size="14" />
     </button>
 
     <details class="video-generation-error__technical">
-      <summary>技术详情</summary>
+      <summary>{{ tr('技术详情') }}</summary>
       <dl>
         <template v-if="details.errorCode">
-          <dt>错误码</dt><dd>{{ details.errorCode }}</dd>
+          <dt>{{ tr('错误码') }}</dt><dd>{{ details.errorCode }}</dd>
         </template>
         <template v-if="details.httpStatus">
           <dt>HTTP</dt><dd>{{ details.httpStatus }}</dd>
         </template>
         <template v-if="details.requestId">
-          <dt>请求编号</dt><dd>{{ details.requestId }}</dd>
+          <dt>{{ tr('请求编号') }}</dt><dd>{{ details.requestId }}</dd>
         </template>
       </dl>
       <p>{{ details.raw }}</p>
     </details>
 
     <AppButton variant="soft" size="sm" :disabled="busy" @click="emit('retry')">
-      <RefreshCw :size="13" />重新生成
-    </AppButton>
+      <RefreshCw :size="13" />{{ tr('重新生成') }} </AppButton>
   </div>
 </template>
 
