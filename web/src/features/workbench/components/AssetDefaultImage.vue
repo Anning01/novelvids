@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { Component } from 'vue'
 
 defineProps<{
@@ -14,11 +16,11 @@ defineProps<{
   <div
     class="workbench-asset-default-image"
     role="img"
-    :aria-label="previewUrl ? `${title}${previewLabel || '参考图片'}预览` : `${title}默认图片`"
+    :aria-label="previewUrl ? tr('{p0}{p1}预览', { p0: title, p1: previewLabel || '参考图片' }) : tr('{p0}默认图片', { p0: title })"
   >
     <template v-if="previewUrl">
       <img class="workbench-asset-default-image__preview-backdrop" :src="previewUrl" alt="" aria-hidden="true">
-      <img class="workbench-asset-default-image__preview" :src="previewUrl" :alt="`${title}${previewLabel || '参考图片'}`">
+      <img class="workbench-asset-default-image__preview" :src="previewUrl" :alt="tr('{p0}{p1}', { p0: title, p1: previewLabel || '参考图片' })">
     </template>
     <svg v-else viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <defs>
@@ -51,7 +53,7 @@ defineProps<{
       </span>
       <div>
         <strong>{{ title }}</strong>
-        <small>{{ typeLabel }}资产 · {{ previewUrl ? (previewLabel || '已选参考图片') : '等待生成图片' }}</small>
+        <small>{{ typeLabel }}{{ tr('资产 ·') }} {{ previewUrl ? (previewLabel || tr('已选参考图片')) : tr('等待生成图片') }}</small>
       </div>
     </div>
   </div>

@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from schemas._base import BaseResponse
@@ -37,7 +39,7 @@ class AudioReferenceOssFinalizeIn(BaseModel):
     def _validate_nickname(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("音色名称不能为空")
+            raise ValueError(localized_message('音色名称不能为空'))
         return stripped
 
     @field_validator("gender")
@@ -55,9 +57,9 @@ class AudioReferenceTrimIn(BaseModel):
     def _validate_range(self):
         duration = self.end - self.start
         if duration < 1:
-            raise ValueError("裁剪片段不能少于 1 秒")
+            raise ValueError(localized_message('裁剪片段不能少于 1 秒'))
         if duration > 30:
-            raise ValueError("裁剪片段不能超过 30 秒")
+            raise ValueError(localized_message('裁剪片段不能超过 30 秒'))
         return self
 
 

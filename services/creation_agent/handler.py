@@ -1,5 +1,7 @@
 """Run a private creation conversation inside the existing AI task executor."""
 
+from utils.messages import localized_message
+
 import json
 import time
 from datetime import datetime, timezone
@@ -38,7 +40,7 @@ async def authorize_run(params: dict) -> AuthContext:
         from auth.models import User
         user = await User.get_or_none(id=params.get("user_id"), status=UserStatusEnum.active.value)
         if user is None:
-            raise HTTPException(403, "运行用户已不可用")
+            raise HTTPException(403, localized_message('运行用户已不可用'))
         headers = [(b"x-team-id", str(params["team_id"]).encode())] if params.get("team_id") else []
         ctx = await get_auth_context(Request({"type": "http", "headers": headers}), user=user)
     await require_roles("admin", "creator")(ctx)
@@ -60,18 +62,18 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
     """Return actionable fixed copy without disclosing a provider's error payload."""
     if turn_limited and ('Unknown tool name' in message or 'Exceeded maximum retries' in message):
         message = '本轮模型调用次数已达到配置上限'
-    if '上下文超过配置上限' in message:
+    if any(marker in message for marker in ('上下文超过配置上限', 'Context exceeds the limit', 'Context limit exceeded')):
         if calls:
-            return '本轮多次校验重试后超过了上下文额度。已保存的修改仍然有效，请编辑要求后重试。'
-        return '当前内容超过助手的上下文额度。请减少选中的对象，或在助手设置提高上下文额度后重试。'
-    if '本轮模型调用次数已达到配置上限' in message or 'request_limit' in message:
-        return '本轮处理次数已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。'
-    if '本轮 token 消耗已达到配置上限' in message or 'total_tokens_limit' in message:
-        return '本轮用量已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。'
+            return localized_message('本轮多次校验重试后超过了上下文额度。已保存的修改仍然有效，请编辑要求后重试。')
+        return localized_message('当前内容超过助手的上下文额度。请减少选中的对象，或在助手设置提高上下文额度后重试。')
+    if '本轮模型调用次数已达到配置上限' in message or localized_message('本轮模型调用次数已达到配置上限') in message or 'request_limit' in message:
+        return localized_message('本轮处理次数已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。')
+    if '本轮 token 消耗已达到配置上限' in message or localized_message('本轮 token 消耗已达到配置上限') in message or 'total_tokens_limit' in message:
+        return localized_message('本轮用量已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。')
     last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason')), None)
     if last_finish == 'length':
-        return '模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'
-    return '创作助手执行失败。请查看已保存的修改，确认模型可用后重试。'
+        return localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。')
+    return localized_message('创作助手执行失败。请查看已保存的修改，确认模型可用后重试。')
 
 
 class CreationAgentTaskHandler(BaseTaskHandler):
@@ -89,12 +91,12 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         async def before_request():
             ctx = await authorize_run(request_params)
             if not (await agent_configuration()).enabled:
-                raise ValueError("创作助手已停用")
+                raise ValueError(localized_message('创作助手已停用'))
             if not await AiTask.filter(id=task_id, status=TaskStatusEnum.running.value).exists():
-                raise ValueError("运行已停止，不能继续请求模型或写入")
+                raise ValueError(localized_message('运行已停止，不能继续请求模型或写入'))
             chosen = next((config for config in await agent_models(ctx) if config.id == request_params["model_config_id"]), None)
             if chosen is None:
-                raise ValueError("运行模型已停用或不可访问，请重新选择模型")
+                raise ValueError(localized_message('运行模型已停用或不可访问，请重新选择模型'))
             return chosen
 
         chosen = await before_request()
@@ -127,7 +129,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         async def check_context():
             if await creation_memory.applicable(novel.id, request) != context['constraints']:
-                raise ValueError('适用的创作约束已被更新，请重新读取上下文后再修改')
+                raise ValueError(localized_message('适用的创作约束已被更新，请重新读取上下文后再修改'))
             return context['constraints']
 
         service.context_check = check_context

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from pathlib import Path
 from typing import Any
 
@@ -27,13 +29,13 @@ class RemakeMediaMaterializer:
         if source.storage_provider == "local":
             resolved = (self.media_root / str(source.object_key)).resolve()
             if not resolved.is_relative_to(self.media_root):
-                raise RemakeMaterializationError("本地来源路径越界")
+                raise RemakeMaterializationError(localized_message('本地来源路径越界'))
             if not resolved.is_file():
-                raise RemakeMaterializationError("来源视频文件不存在")
+                raise RemakeMaterializationError(localized_message('来源视频文件不存在'))
             return resolved
         if source.storage_provider in {"oss", "aliyun"}:
             if not self.provider.enabled:
-                raise RemakeMaterializationError("对象存储当前不可用")
+                raise RemakeMaterializationError(localized_message('对象存储当前不可用'))
             suffix = Path(str(source.original_filename)).suffix.lower()
             if suffix not in {".mp4", ".mov"}:
                 suffix = ".mp4"
@@ -43,10 +45,10 @@ class RemakeMediaMaterializer:
                 await self.provider.download_to_file(str(source.object_key), destination)
             except Exception:
                 destination.unlink(missing_ok=True)
-                raise RemakeMaterializationError("下载来源视频失败") from None
+                raise RemakeMaterializationError(localized_message('下载来源视频失败')) from None
             if not destination.is_file() or destination.stat().st_size <= 0:
                 destination.unlink(missing_ok=True)
-                raise RemakeMaterializationError("下载的来源视频为空")
+                raise RemakeMaterializationError(localized_message('下载的来源视频为空'))
             return destination
         raise RemakeMaterializationError(
             f"不支持的来源存储类型: {source.storage_provider}"

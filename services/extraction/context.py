@@ -1,5 +1,7 @@
 """Immutable database snapshots used to prepare asset extraction requests."""
 
+from utils.messages import localized_message
+
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -94,7 +96,7 @@ class ExtractionContextLoader:
     async def load(self, *, novel_id: int, chapter_id: int) -> ExtractionContext:
         chapter = await Chapter.get(id=chapter_id)
         if chapter.novel_id != novel_id:
-            raise ValueError(f"章节 {chapter_id} 不属于小说 {novel_id}")
+            raise ValueError(localized_message('章节 {p1} 不属于小说 {p3}', p1=f'{chapter_id}', p3=f'{novel_id}'))
 
         novel = await Novel.get(id=novel_id)
         assets = await Asset.filter(

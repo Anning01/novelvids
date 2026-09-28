@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
+import { applySavedLocale } from '@/i18n'
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import {
   Bot,
@@ -47,32 +50,32 @@ interface ModelCategory {
 const categories: ModelCategory[] = [
   {
     id: 'llm',
-    label: 'LLM 大模型',
+    get label() { return tr('LLM 大模型') },
     eyebrow: 'LANGUAGE',
-    description: '负责剧本理解、人物提取、分镜文本生成与来源视频拆解。',
+    get description() { return tr('负责剧本理解、人物提取、分镜文本生成与来源视频拆解。') },
     taskTypes: [1, 3, 5, 6, 7],
     icon: Bot,
   },
   {
     id: 'image',
-    label: '生图模型',
+    get label() { return tr('生图模型') },
     eyebrow: 'IMAGE',
-    description: '负责角色定妆、场景概念图和一致性参考图生成。',
+    get description() { return tr('负责角色定妆、场景概念图和一致性参考图生成。') },
     taskTypes: [2],
     icon: Image,
   },
   {
     id: 'video',
-    label: '视频模型',
+    get label() { return tr('视频模型') },
     eyebrow: 'VIDEO',
-    description: '负责分镜片段生成、动态镜头和最终视频合成。',
+    get description() { return tr('负责分镜片段生成、动态镜头和最终视频合成。') },
     taskTypes: [4],
     icon: Video,
   },
 ]
 const settingsTabs: AppTabItem[] = [
-  { value: 'models', label: '模型配置', icon: Bot },
-  { value: 'general', label: '通用配置', icon: Settings2 },
+  { value: 'models', get label() { return tr('模型配置') }, icon: Bot },
+  { value: 'general', get label() { return tr('通用配置') }, icon: Settings2 },
 ]
 
 const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; model: string; protocol: ImageApiProtocol }> = {
@@ -116,7 +119,7 @@ const isEditing = computed(() => editingConfigId.value !== null)
 const selectedConfigs = computed(() => configs.value.filter(item => configTaskTypes(item).some(value => selectedCategory.value.taskTypes.includes(value))))
 const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value => ({
   value: String(value),
-  label: taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解与人物提取', 2: '角色与场景参考图', 3: '分镜规划与提示词', 4: '视频片段生成', 5: '项目分析', 6: '重制', 7: '创作助手' }[value] ?? `任务 ${value}`),
+  label: tr(taskTypes.value.find(item => item.value === value)?.label || '') || ({ get 1() { return tr('内容理解与人物提取') }, get 2() { return tr('角色与场景参考图') }, get 3() { return tr('分镜规划与提示词') }, get 4() { return tr('视频片段生成') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') } }[value] ?? tr('任务 {p0}', { p0: value })),
 })))
 
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
@@ -166,15 +169,15 @@ function activeCount(category: ModelCategory) {
 }
 
 function taskLabel(value: number) {
-  return taskTypes.value.find(item => item.value === value)?.label || ({ 1: '内容理解', 2: '参考图生成', 3: '分镜规划', 4: '视频生成', 5: '项目分析', 6: '重制', 7: '创作助手' }[value] ?? `任务 ${value}`)
+  return tr(taskTypes.value.find(item => item.value === value)?.label || '') || ({ get 1() { return tr('内容理解') }, get 2() { return tr('参考图生成') }, get 3() { return tr('分镜规划') }, get 4() { return tr('视频生成') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') } }[value] ?? tr('任务 {p0}', { p0: value }))
 }
 
 function protocolLabel(value: ImageApiProtocol) {
-  if (value === 'minimax') return 'MiniMax 官方'
-  if (value === 'dashscope') return '阿里云百炼 DashScope'
-  if (value === 'volcengine_ark') return '火山方舟 Seedream'
-  if (value === 'openrouter_compatible') return 'OpenRouter 兼容'
-  return 'OpenAI 兼容'
+  if (value === 'minimax') return tr('MiniMax 官方')
+  if (value === 'dashscope') return tr('阿里云百炼 DashScope')
+  if (value === 'volcengine_ark') return tr('火山方舟 Seedream')
+  if (value === 'openrouter_compatible') return tr('OpenRouter 兼容')
+  return tr('OpenAI 兼容')
 }
 
 function videoProtocolFor(modelType: VideoGenerationModelType | ''): ImageApiProtocol {
@@ -184,16 +187,16 @@ function videoProtocolFor(modelType: VideoGenerationModelType | ''): ImageApiPro
 const selectedVideoProtocolLabel = computed(() => protocolLabel(videoProtocolFor(form.value.video_model_type)))
 const selectedVideoProtocolHint = computed(() => {
   if (form.value.video_model_type === 'minimax_h3') {
-    return '提交到 /v2/video_generation，并从 /v2/query/video_generation/{task_id} 查询结果。'
+    return tr('提交到 /v2/video_generation，并从 /v2/query/video_generation/{task_id} 查询结果。')
   }
   if (form.value.video_model_type === 'wan_3') {
-    return '请将 YOUR_WORKSPACE_ID 替换为百炼业务空间 ID；提交到 video-synthesis，并从 /api/v1/tasks/{task_id} 查询。'
+    return tr('请将 YOUR_WORKSPACE_ID 替换为百炼业务空间 ID；提交到 video-synthesis，并从 /api/v1/tasks/{task_id} 查询。')
   }
-  return '提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。'
+  return tr('提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。')
 })
 
 function providerHost(baseUrl?: string) {
-  if (!baseUrl) return '未设置接口'
+  if (!baseUrl) return tr('未设置接口')
   try {
     return new URL(baseUrl).host
   } catch {
@@ -229,8 +232,9 @@ async function saveGeneralConfig() {
   try {
     const response = await api.updateGeneralConfig({ prompt_language: promptLanguage.value })
     generalConfig.value = response.data
+    applySavedLocale(response.data.prompt_language)
     promptLanguage.value = response.data.prompt_language
-    notice.success('通用配置已保存，新提交的生成任务将使用该语言')
+    notice.success(tr('通用配置已保存，新提交的生成任务将使用该语言'))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -315,7 +319,7 @@ function changeVideoModelType() {
 
 async function saveConfig() {
   if (!form.value.task_types.length) {
-    notice.error('请至少选择一个能力用途')
+    notice.error(tr('请至少选择一个能力用途'))
     return
   }
   creating.value = true
@@ -384,7 +388,7 @@ async function saveConfig() {
     }
     showCreate.value = false
     await load()
-    notice.success(isEditing.value ? '模型配置已更新' : '模型配置已创建')
+    notice.success(isEditing.value ? tr('模型配置已更新') : tr('模型配置已创建'))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -396,7 +400,7 @@ async function activate(item: AiModelConfig) {
   try {
     await api.activateConfig(item.id)
     await load()
-    notice.success(`已启用 ${item.name}`)
+    notice.success(tr('已启用 {p0}', { p0: item.name }))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -406,7 +410,7 @@ async function deactivate(item: AiModelConfig) {
   try {
     await api.deactivateConfig(item.id)
     await load()
-    notice.success(`已停用 ${item.name}`)
+    notice.success(tr('已停用 {p0}', { p0: item.name }))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -414,15 +418,15 @@ async function deactivate(item: AiModelConfig) {
 
 async function remove(item: AiModelConfig) {
   if (!await appConfirm({
-    title: `删除模型配置「${item.name}」？`,
-    message: '删除后该模型将无法继续用于新的生成任务。',
-    confirmLabel: '删除配置',
+    title: tr('删除模型配置「{p0}」？', { p0: item.name }),
+    get message() { return tr('删除后该模型将无法继续用于新的生成任务。') },
+    get confirmLabel() { return tr('删除配置') },
     tone: 'danger',
   })) return
   try {
     await api.deleteConfig(item.id)
     await load()
-    notice.success('模型配置已删除')
+    notice.success(tr('模型配置已删除'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -436,22 +440,22 @@ onMounted(load)
     <header class="model-settings-header">
       <div>
         <span>APPLICATION SETTINGS</span>
-        <h1>设置</h1>
-        <p>统一管理生成模型与全局创作偏好。</p>
+        <h1>{{ tr('设置') }}</h1>
+        <p>{{ tr('统一管理生成模型与全局创作偏好。') }}</p>
       </div>
-      <AppButton v-if="activeSection === 'models'" variant="primary" size="lg" type="button" @click="openCreate()"><Plus :size="16" />添加模型</AppButton>
+      <AppButton v-if="activeSection === 'models'" variant="primary" size="lg" type="button" @click="openCreate()"><Plus :size="16" />{{ tr('添加模型') }}</AppButton>
     </header>
 
-    <AppTabs class="settings-section-tabs" :model-value="activeSection" :items="settingsTabs" label="设置分类" @update:model-value="changeSettingsSection" />
+    <AppTabs class="settings-section-tabs" :model-value="activeSection" :items="settingsTabs" :label="tr('设置分类')" @update:model-value="changeSettingsSection" />
 
     <template v-if="activeSection === 'models'">
     <section v-if="isTeamAdmin" class="model-source-banner">
       <div class="model-source-copy">
-        <strong>{{ configs.length ? `本团队已配置 ${configs.length} 个模型` : '尚未配置团队模型' }}</strong>
-        <p>此处只管理本团队自己的模型配置；平台模型不对团队显示。未配置时，生成任务将使用平台模型，费用从团队余额扣除。</p>
+        <strong>{{ configs.length ? tr('本团队已配置 {p0} 个模型', { p0: configs.length }) : tr('尚未配置团队模型') }}</strong>
+        <p>{{ tr('此处只管理本团队自己的模型配置；平台模型不对团队显示。未配置时，生成任务将使用平台模型，费用从团队余额扣除。') }}</p>
       </div>
     </section>
-    <section class="model-category-grid" aria-label="模型能力分类">
+    <section class="model-category-grid" :aria-label="tr('模型能力分类')">
       <AppButton
         v-for="category in categories"
         :key="category.id"
@@ -465,7 +469,7 @@ onMounted(load)
       >
         <AppIconTile :tone="iconTone(category.id)" size="lg"><component :is="category.icon" :size="22" /></AppIconTile>
         <span class="category-copy"><small>{{ category.eyebrow }}</small><strong>{{ category.label }}</strong><p>{{ category.description }}</p></span>
-        <span class="category-status"><i :class="{ 'is-ready': activeCount(category) }" />{{ activeCount(category) ? `${activeCount(category)} 个模型运行中` : '尚未启用' }}</span>
+        <span class="category-status"><i :class="{ 'is-ready': activeCount(category) }" />{{ activeCount(category) ? tr('{p0} 个模型运行中', { p0: activeCount(category) }) : tr('尚未启用') }}</span>
       </AppButton>
     </section>
 
@@ -476,51 +480,51 @@ onMounted(load)
           <h2>{{ selectedCategory.label }}</h2>
           <p>{{ selectedCategory.description }}</p>
         </div>
-        <AppButton variant="secondary" size="sm" type="button" @click="openCreate(selectedCategory.id)"><Plus :size="15" />添加{{ selectedCategory.label }}</AppButton>
+        <AppButton variant="secondary" size="sm" type="button" @click="openCreate(selectedCategory.id)"><Plus :size="15" />{{ tr('添加 {p0}', { p0: selectedCategory.label }) }}</AppButton>
       </header>
 
-      <div v-if="loading" class="model-state">正在读取模型配置…</div>
+      <div v-if="loading" class="model-state">{{ tr('正在读取模型配置…') }}</div>
       <div v-else-if="selectedConfigs.length" class="model-config-list">
         <article v-for="item in selectedConfigs" :key="item.id" class="model-config-card" :class="{ 'is-active': item.is_active }">
           <AppIconTile :tone="iconTone(selectedCategory.id)"><component :is="selectedCategory.icon" :size="19" /></AppIconTile>
           <div class="config-main">
             <div class="config-title">
               <h3>{{ item.name }}</h3>
-              <span v-if="!isTeamAdmin && item.scope" class="scope-badge" :class="item.scope === 'official' ? 'is-official' : 'is-team'">{{ item.scope === 'official' ? '平台配置' : '团队配置' }}</span>
-              <span :class="{ 'is-active': item.is_active }">{{ item.is_active ? '已启动' : '未启动' }}</span>
+              <span v-if="!isTeamAdmin && item.scope" class="scope-badge" :class="item.scope === 'official' ? 'is-official' : 'is-team'">{{ item.scope === 'official' ? tr('平台配置') : tr('团队配置') }}</span>
+              <span :class="{ 'is-active': item.is_active }">{{ item.is_active ? tr('已启动') : tr('未启动') }}</span>
             </div>
             <p>{{ configTaskTypes(item).filter(taskType => selectedCategory.taskTypes.includes(taskType)).map(taskLabel).join(' · ') }}</p>
             <div class="config-metadata">
-              <span><Settings2 :size="13" />{{ item.model || '未设置模型名称' }}</span>
+              <span><Settings2 :size="13" />{{ item.model || tr('未设置模型名称') }}</span>
               <span><Server :size="13" />{{ providerHost(item.base_url) }}</span>
-              <span><Zap :size="13" />并发 {{ item.concurrency }}</span>
+              <span><Zap :size="13" />{{ tr('并发') }} {{ item.concurrency }}</span>
               <span v-if="selectedCategory.id === 'image'">{{ protocolLabel(item.api_protocol) }}</span>
-              <span v-if="selectedCategory.id === 'image'">{{ imageModelTypes.find(type => type.value === item.image_model_type)?.label || '未选择受支持类型' }}</span>
-              <span v-if="selectedCategory.id === 'video'">{{ videoModelTypes.find(type => type.value === item.video_model_type)?.label || '未选择受支持类型' }}</span>
-              <span v-if="selectedCategory.id === 'llm'">{{ item.supports_json_output ? 'JSON 格式化' : '提示词 JSON' }}</span>
+              <span v-if="selectedCategory.id === 'image'">{{ imageModelTypes.find(type => type.value === item.image_model_type)?.label || tr('未选择受支持类型') }}</span>
+              <span v-if="selectedCategory.id === 'video'">{{ videoModelTypes.find(type => type.value === item.video_model_type)?.label || tr('未选择受支持类型') }}</span>
+              <span v-if="selectedCategory.id === 'llm'">{{ item.supports_json_output ? tr('JSON 格式化') : tr('提示词 JSON') }}</span>
             </div>
           </div>
           <div class="config-actions">
             <template v-if="canManage(item)">
-              <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" title="启用配置" @click="activate(item)"><Power :size="15" /><span>启用</span></AppButton>
+              <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" :title="tr('启用配置')" @click="activate(item)"><Power :size="15" /><span>{{ tr('启用') }}</span></AppButton>
               <template v-else>
-                <span class="active-check"><CheckCircle2 :size="16" />运行中</span>
-                <AppButton variant="soft" size="sm" type="button" title="停用配置" @click="deactivate(item)"><Power :size="15" /><span>停用</span></AppButton>
+                <span class="active-check"><CheckCircle2 :size="16" />{{ tr('运行中') }}</span>
+                <AppButton variant="soft" size="sm" type="button" :title="tr('停用配置')" @click="deactivate(item)"><Power :size="15" /><span>{{ tr('停用') }}</span></AppButton>
               </template>
               <span class="config-icon-actions">
-                <AppButton variant="secondary" size="sm" icon-only type="button" aria-label="编辑配置" title="编辑配置" @click="openEdit(item)"><Pencil :size="15" /></AppButton>
-                <AppButton variant="danger" size="sm" icon-only type="button" aria-label="删除配置" title="删除配置" @click="remove(item)"><Trash2 :size="15" /></AppButton>
+                <AppButton variant="secondary" size="sm" icon-only type="button" :aria-label="tr('编辑配置')" :title="tr('编辑配置')" @click="openEdit(item)"><Pencil :size="15" /></AppButton>
+                <AppButton variant="danger" size="sm" icon-only type="button" :aria-label="tr('删除配置')" :title="tr('删除配置')" @click="remove(item)"><Trash2 :size="15" /></AppButton>
               </span>
             </template>
-            <span v-else class="official-badge" title="官方配置由平台维护，团队管理员只读">只读</span>
+            <span v-else class="official-badge" :title="tr('官方配置由平台维护，团队管理员只读')">{{ tr('只读') }}</span>
           </div>
         </article>
       </div>
       <div v-else class="model-empty-state">
         <span><component :is="selectedCategory.icon" :size="25" /></span>
-        <h3>还没有{{ selectedCategory.label }}</h3>
+        <h3>{{ tr('还没有') }}{{ selectedCategory.label }}</h3>
         <p>{{ selectedCategory.description }}</p>
-        <AppButton variant="primary" size="sm" type="button" @click="openCreate(selectedCategory.id)"><Plus :size="15" />添加第一个配置</AppButton>
+        <AppButton variant="primary" size="sm" type="button" @click="openCreate(selectedCategory.id)"><Plus :size="15" />{{ tr('添加第一个配置') }}</AppButton>
       </div>
     </section>
     </template>
@@ -528,16 +532,16 @@ onMounted(load)
     <section v-else class="general-settings-section">
       <header>
         <div>
-          <h2>创作偏好</h2>
-          <p>设置输出语言与助手的工作方式。</p>
+          <h2>{{ tr('创作偏好') }}</h2>
+          <p>{{ tr('设置输出语言与助手的工作方式。') }}</p>
         </div>
       </header>
 
-      <AppSettingsCard class="general-setting-card" title="提示词语言" description="统一图片、资产视觉特征与分镜提示词的输出语言。">
+      <AppSettingsCard class="general-setting-card" :title="tr('系统语言')" :description="tr('统一所有用户的界面语言与后续生成内容的语言。')">
         <template #icon><Languages :size="20" /></template>
-        <template #status><span class="general-setting-status">生成偏好</span></template>
+        <template #status><span class="general-setting-status">{{ tr('生成偏好') }}</span></template>
 
-        <div class="prompt-language-options" role="radiogroup" aria-label="提示词语言">
+        <div class="prompt-language-options" role="radiogroup" :aria-label="tr('系统语言')">
           <button
             type="button"
             role="radio"
@@ -545,8 +549,8 @@ onMounted(load)
             :class="{ 'is-selected': promptLanguage === 'zh' }"
             @click="promptLanguage = 'zh'"
           >
-            <span class="language-mark">中</span>
-            <span><strong>中文</strong><small>生成简体中文图片与镜头提示词</small></span>
+            <span class="language-mark">ZH</span>
+            <span><strong>{{ tr('中文') }}</strong><small>{{ tr('界面与新生成内容使用简体中文') }}</small></span>
             <Check v-if="promptLanguage === 'zh'" :size="17" />
           </button>
           <button
@@ -557,17 +561,17 @@ onMounted(load)
             @click="promptLanguage = 'en'"
           >
             <span class="language-mark">EN</span>
-            <span><strong>English</strong><small>Generate image and shot prompts in English</small></span>
+            <span><strong>English</strong><small>Use English for the interface and generated content</small></span>
             <Check v-if="promptLanguage === 'en'" :size="17" />
           </button>
         </div>
 
-        <p class="general-setting-note">用于之后新生成的内容，已有资产与分镜保持不变。</p>
+        <p class="general-setting-note">{{ tr('由管理员统一设置。切换后影响全站界面和后续任务；已有内容及运行中的任务保持不变。') }}</p>
 
         <template #footer>
-          <span v-if="generalConfig">当前已保存：{{ generalConfig.prompt_language === 'zh' ? '中文' : 'English' }}</span>
+          <span v-if="generalConfig">{{ tr('当前已保存：') }}{{ generalConfig.prompt_language === 'zh' ? tr('中文') : 'English' }}</span>
           <AppButton variant="primary" size="sm" type="button" :loading="savingGeneral" @click="saveGeneralConfig">
-            {{ savingGeneral ? '保存中…' : '保存通用配置' }}
+            {{ savingGeneral ? tr('保存中…') : tr('保存通用配置') }}
           </AppButton>
         </template>
       </AppSettingsCard>
@@ -577,163 +581,163 @@ onMounted(load)
     <div v-if="showCreate" class="model-modal-backdrop" @click.self="showCreate = false">
       <form class="model-modal" autocomplete="off" @submit.prevent="saveConfig">
         <header>
-          <div><AppIconTile :tone="iconTone(selectedCategory.id)" size="sm"><component :is="selectedCategory.icon" :size="18" /></AppIconTile><div><small>{{ isEditing ? 'EDIT MODEL' : 'ADD MODEL' }}</small><h2>{{ isEditing ? '编辑' : '添加' }}{{ selectedCategory.label }}</h2></div></div>
-          <AppButton variant="soft" size="sm" icon-only type="button" aria-label="关闭" @click="showCreate = false"><X :size="18" /></AppButton>
+          <div><AppIconTile :tone="iconTone(selectedCategory.id)" size="sm"><component :is="selectedCategory.icon" :size="18" /></AppIconTile><div><small>{{ isEditing ? 'EDIT MODEL' : 'ADD MODEL' }}</small><h2>{{ isEditing ? tr('编辑') : tr('添加') }}{{ selectedCategory.label }}</h2></div></div>
+          <AppButton variant="soft" size="sm" icon-only type="button" :aria-label="tr('关闭')" @click="showCreate = false"><X :size="18" /></AppButton>
         </header>
 
         <div class="model-form-grid">
           <label v-if="selectedCategory.taskTypes.length > 1" class="is-full">
-            <span>能力用途</span>
-            <AppMultiSelect v-model="form.task_types" ariaLabel="能力用途" :options="taskOptions" />
-            <small>可同时选择多个用途；勾选“重制”表示该模型支持视频输入并可用于来源视频拆解。</small>
+            <span>{{ tr('能力用途') }}</span>
+            <AppMultiSelect v-model="form.task_types" :ariaLabel="tr('能力用途')" :options="taskOptions" />
+            <small>{{ tr('可同时选择多个用途；勾选“重制”表示该模型支持视频输入并可用于来源视频拆解。') }}</small>
           </label>
-          <label class="is-full"><span>配置名称</span><input v-model="form.name" name="model-config-name" required autocomplete="off" placeholder="例如：豆包 Seed 1.6" /></label>
+          <label class="is-full"><span>{{ tr('配置名称') }}</span><input v-model="form.name" name="model-config-name" required autocomplete="off" :placeholder="tr('例如：豆包 Seed 1.6')" /></label>
           <label class="is-full"><span>Base URL</span><span class="input-with-icon"><Server :size="15" /><input v-model="form.base_url" name="model-service-base-url" required autocomplete="off" inputmode="url" spellcheck="false" placeholder="https://api.example.com/v1" /></span></label>
           <label class="is-full">
             <span>API Key</span>
             <span class="input-with-icon secret-input">
               <KeyRound :size="15" />
-              <input v-model="form.api_key" name="model-service-api-key" :type="showApiKey ? 'text' : 'password'" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="输入模型服务密钥" />
-              <AppButton variant="ghost" size="sm" icon-only type="button" :aria-label="showApiKey ? '隐藏 API Key' : '显示 API Key'" :title="showApiKey ? '隐藏 API Key' : '显示 API Key'" @click="showApiKey = !showApiKey">
+              <input v-model="form.api_key" name="model-service-api-key" :type="showApiKey ? 'text' : 'password'" required autocomplete="new-password" autocapitalize="none" spellcheck="false" :placeholder="tr('输入模型服务密钥')" />
+              <AppButton variant="ghost" size="sm" icon-only type="button" :aria-label="showApiKey ? tr('隐藏 API Key') : tr('显示 API Key')" :title="showApiKey ? tr('隐藏 API Key') : tr('显示 API Key')" @click="showApiKey = !showApiKey">
                 <EyeOff v-if="showApiKey" :size="16" />
                 <Eye v-else :size="16" />
               </AppButton>
             </span>
           </label>
-          <label><span>模型名称</span><input v-model="form.model" name="model-id" required autocomplete="off" spellcheck="false" placeholder="模型 ID" /></label>
-          <label><span>并发数</span><input v-model.number="form.concurrency" name="model-concurrency" type="number" min="1" required /></label>
+          <label><span>{{ tr('模型名称') }}</span><input v-model="form.model" name="model-id" required autocomplete="off" spellcheck="false" :placeholder="tr('模型 ID')" /></label>
+          <label><span>{{ tr('并发数') }}</span><input v-model.number="form.concurrency" name="model-concurrency" type="number" min="1" required /></label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">
-            <span>生图模型类型</span>
+            <span>{{ tr('生图模型类型') }}</span>
             <select v-model="form.image_model_type" name="image-model-type" required @change="changeImageModelType">
-              <option disabled value="">请选择受支持的模型</option>
-              <option v-for="item in imageModelTypes" :key="String(item.value)" :value="item.value">{{ item.label }}</option>
+              <option disabled value="">{{ tr('请选择受支持的模型') }}</option>
+              <option v-for="item in imageModelTypes" :key="String(item.value)" :value="item.value">{{ tr(item.label) }}</option>
             </select>
-            <small>仅支持 Lite、Pro 和 GPT Image 2；清晰度、比例与格式由所选类型的后台能力定义。</small>
+            <small>{{ tr('仅支持 Lite、Pro 和 GPT Image 2；清晰度、比例与格式由所选类型的后台能力定义。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
-            <span>视频模型类型</span>
+            <span>{{ tr('视频模型类型') }}</span>
             <select v-model="form.video_model_type" name="video-model-type" required @change="changeVideoModelType">
-              <option disabled value="">请选择受支持的视频模型</option>
-              <option v-for="item in videoModelTypes" :key="String(item.value)" :value="item.value">{{ item.label }}</option>
+              <option disabled value="">{{ tr('请选择受支持的视频模型') }}</option>
+              <option v-for="item in videoModelTypes" :key="String(item.value)" :value="item.value">{{ tr(item.label) }}</option>
             </select>
-            <small>支持 Seedance 系列与 MiniMax H3；分辨率、比例、时长和请求格式由后台能力与适配器定义。</small>
+            <small>{{ tr('支持 Seedance 系列与 MiniMax H3；分辨率、比例、时长和请求格式由后台能力与适配器定义。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
-            <span>接口协议</span>
-            <output class="model-readonly-value" aria-label="视频接口协议">{{ selectedVideoProtocolLabel }}</output>
+            <span>{{ tr('接口协议') }}</span>
+            <output class="model-readonly-value" :aria-label="tr('视频接口协议')">{{ selectedVideoProtocolLabel }}</output>
             <small>{{ selectedVideoProtocolHint }}</small>
           </label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">
-            <span>接口协议</span>
+            <span>{{ tr('接口协议') }}</span>
             <select v-model="form.api_protocol" name="image-api-protocol">
-              <option value="openai_compatible">OpenAI 兼容（GPT Image / 中转服务）</option>
-              <option value="openrouter_compatible">OpenRouter 兼容（/images）</option>
-              <option value="volcengine_ark">火山方舟 Seedream</option>
+              <option value="openai_compatible">{{ tr('OpenAI 兼容（GPT Image / 中转服务）') }}</option>
+              <option value="openrouter_compatible">{{ tr('OpenRouter 兼容（/images）') }}</option>
+              <option value="volcengine_ark">{{ tr('火山方舟 Seedream') }}</option>
             </select>
-            <small>协议决定请求字段与尺寸适配，不依赖模型名称猜测供应商。</small>
+            <small>{{ tr('协议决定请求字段与尺寸适配，不依赖模型名称猜测供应商。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'llm'">
-            <span>上下文字符上限</span>
+            <span>{{ tr('上下文字符上限') }}</span>
             <input
               v-model.number="form.max_context_characters"
               name="model-max-context-characters"
               type="number"
               min="1"
-              placeholder="留空表示不预检"
+              :placeholder="tr('留空表示不预检')"
             />
           </label>
           <label v-if="selectedCategory.id === 'llm'">
-            <span>思考模式</span>
+            <span>{{ tr('思考模式') }}</span>
             <select v-model="form.thinking" name="model-thinking">
-              <option value="">按模型默认</option>
-              <option value="enabled">开启思考（enabled）</option>
-              <option value="disabled">关闭思考（disabled）</option>
+              <option value="">{{ tr('按模型默认') }}</option>
+              <option value="enabled">{{ tr('开启思考（enabled）') }}</option>
+              <option value="disabled">{{ tr('关闭思考（disabled）') }}</option>
             </select>
-            <small>深度思考/推理模型可关闭思考以提速并避免正文被 reasoning 挤占。</small>
+            <small>{{ tr('深度思考/推理模型可关闭思考以提速并避免正文被 reasoning 挤占。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'llm'">
-            <span>最大输出 token</span>
+            <span>{{ tr('最大输出 token') }}</span>
             <input
               v-model.number="form.max_tokens"
               name="model-max-tokens"
               type="number"
               min="1"
-              placeholder="留空按模型默认"
+              :placeholder="tr('留空按模型默认')"
             />
-            <small>限制单次请求输出，避免 JSON 因达到 token 上限被截断。</small>
+            <small>{{ tr('限制单次请求输出，避免 JSON 因达到 token 上限被截断。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'llm'" class="is-full json-capability-field">
             <span class="json-capability-copy">
-              <strong>结构化 JSON 输出</strong>
-              <small>开启后发送 response_format=json_object；关闭后仅使用提示词约束 JSON。</small>
+              <strong>{{ tr('结构化 JSON 输出') }}</strong>
+              <small>{{ tr('开启后发送 response_format=json_object；关闭后仅使用提示词约束 JSON。') }}</small>
             </span>
-            <input v-model="form.supports_json_output" type="checkbox" role="switch" aria-label="结构化 JSON 输出" />
+            <input v-model="form.supports_json_output" type="checkbox" role="switch" :aria-label="tr('结构化 JSON 输出')" />
           </label>
         </div>
 
         <label v-if="selectedCategoryId === 'llm'" class="model-toggle">
-          <input v-model="form.supports_tool_calls" type="checkbox" role="switch" aria-label="多轮工具调用" />
-          <span>支持多轮工具调用（创作助手必需）</span>
+          <input v-model="form.supports_tool_calls" type="checkbox" role="switch" :aria-label="tr('多轮工具调用')" />
+          <span>{{ tr('支持多轮工具调用（创作助手必需）') }}</span>
         </label>
         <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
-          <span class="pricing-title">费用设置（元 / 百万 token）</span>
+          <span class="pricing-title">{{ tr('费用设置（元 / 百万 token）') }}</span>
           <div class="pricing-grid">
-            <label><span>输入单价</span><input v-model.number="textPricing.input_price_per_1m" type="number" min="0" step="0.01" /></label>
-            <label><span>输出单价</span><input v-model.number="textPricing.output_price_per_1m" type="number" min="0" step="0.01" /></label>
+            <label><span>{{ tr('输入单价') }}</span><input v-model.number="textPricing.input_price_per_1m" type="number" min="0" step="0.01" /></label>
+            <label><span>{{ tr('输出单价') }}</span><input v-model.number="textPricing.output_price_per_1m" type="number" min="0" step="0.01" /></label>
           </div>
         </section>
         <section v-else-if="selectedCategoryId === 'image' && pricingTierOptions.length" class="pricing-editor">
-          <span class="pricing-title">输出图费用（元 / 张）</span>
+          <span class="pricing-title">{{ tr('输出图费用（元 / 张）') }}</span>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
-              <span>清晰度 {{ tier }}</span>
+              <span>{{ tr('清晰度') }} {{ tier }}</span>
               <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
             </label>
           </div>
           <div class="pricing-sub">
-            <span class="pricing-title">输入图费用（图生图）</span>
+            <span class="pricing-title">{{ tr('输入图费用（图生图）') }}</span>
             <div class="pricing-grid">
-              <label><span>免费张数</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
-              <label><span>超出单价（元 / 张）</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
+              <label><span>{{ tr('免费张数') }}</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
+              <label><span>{{ tr('超出单价（元 / 张）') }}</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
             </div>
           </div>
         </section>
         <section v-else-if="selectedCategoryId === 'video' && pricingTierOptions.length" class="pricing-editor">
-          <span class="pricing-title">{{ isSecondBillingVideo ? '生成视频（元 / 秒）' : '无视频参考（元 / 百万 token）' }}</span>
+          <span class="pricing-title">{{ isSecondBillingVideo ? tr('生成视频（元 / 秒）') : tr('无视频参考（元 / 百万 token）') }}</span>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
-              <span>分辨率 {{ tier }}</span>
+              <span>{{ tr('分辨率') }} {{ tier }}</span>
               <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
             </label>
           </div>
           <div class="pricing-sub">
-            <span class="pricing-title">{{ isSecondBillingVideo ? '输入参考视频（元 / 秒，按输入时长）' : '有视频参考（元 / 百万 token）' }}</span>
+            <span class="pricing-title">{{ isSecondBillingVideo ? tr('输入参考视频（元 / 秒，按输入时长）') : tr('有视频参考（元 / 百万 token）') }}</span>
             <div class="pricing-grid">
               <label v-for="tier in pricingTierOptions" :key="tier">
-                <span>分辨率 {{ tier }}</span>
+                <span>{{ tr('分辨率') }} {{ tier }}</span>
                 <input v-model.number="videoRefPrices[tier]" type="number" min="0" step="0.01" />
               </label>
             </div>
           </div>
           <div v-if="isSecondBillingVideo" class="pricing-sub">
-            <span class="pricing-title">输入参考图片</span>
+            <span class="pricing-title">{{ tr('输入参考图片') }}</span>
             <div class="pricing-grid">
-              <label><span>免费张数</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
-              <label><span>超出单价（元 / 张）</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
+              <label><span>{{ tr('免费张数') }}</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>
+              <label><span>{{ tr('超出单价（元 / 张）') }}</span><input v-model.number="inputImagePricing.price_per_image" type="number" min="0" step="0.01" /></label>
             </div>
-            <small>输入音频免费，不计入费用。</small>
+            <small>{{ tr('输入音频免费，不计入费用。') }}</small>
           </div>
         </section>
 
         <section class="pricing-editor">
-          <span class="pricing-title">折扣设置（1=无折扣，0.9=9折，大于 1=加价倍数）</span>
+          <span class="pricing-title">{{ tr('折扣设置（1=无折扣，0.9=9折，大于 1=加价倍数）') }}</span>
           <div class="pricing-grid">
-            <label><span>折扣倍数</span><input v-model.number="discountPricing.discount" type="number" min="0.01" step="0.01" /></label>
-            <label><span>折扣描述（可选）</span><input v-model="discountPricing.description" type="text" placeholder="例如：限时9折" /></label>
+            <label><span>{{ tr('折扣倍数') }}</span><input v-model.number="discountPricing.discount" type="number" min="0.01" step="0.01" /></label>
+            <label><span>{{ tr('折扣描述（可选）') }}</span><input v-model="discountPricing.description" type="text" :placeholder="tr('例如：限时9折')" /></label>
           </div>
         </section>
 
-        <footer><AppButton variant="secondary" size="sm" type="button" @click="showCreate = false">取消</AppButton><AppButton variant="primary" size="sm" type="submit" :loading="creating">{{ creating ? '保存中…' : (isEditing ? '保存修改' : '创建配置') }}</AppButton></footer>
+        <footer><AppButton variant="secondary" size="sm" type="button" @click="showCreate = false">{{ tr('取消') }}</AppButton><AppButton variant="primary" size="sm" type="submit" :loading="creating">{{ creating ? tr('保存中…') : (isEditing ? tr('保存修改') : tr('创建配置')) }}</AppButton></footer>
       </form>
     </div>
   </main>

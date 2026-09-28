@@ -1,5 +1,7 @@
 """Pydantic AI runtime; the framework owns the tool loop and AG-UI encoding."""
 
+from utils.messages import localized_message
+
 from dataclasses import dataclass, field, replace
 from collections.abc import AsyncIterator, Sequence, Callable, Awaitable
 from typing import Annotated, Literal
@@ -16,7 +18,9 @@ from pydantic_ai.usage import UsageLimits
 from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.settings import ModelSettings
 
-from prompts.creation_agent import CREATION_AGENT_INSTRUCTIONS, CREATION_CRUD_INSTRUCTIONS, render_creation_request, render_turn_limit_instruction
+from prompts.creation_agent import render_creation_instructions, render_creation_request
+from services.language import task_language
+from prompts.schema import localized_schema, schema_annotation
 from schemas.creation_agent import AgentConfiguration, ImagePromptEdit, StoryboardPromptEdit, CreationReply, AgentTarget
 from schemas.creation_objects import CreationObjectQuery, CreationChangeSet, CreationPromptPatch
 from models.creation_agent import AgentMessage, PromptChange
@@ -167,12 +171,21 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
             ) if definition.name == 'apply_creation_changes' else definition
             for definition in prepared
         ]
-    return prepared
+    return localize_tool_definitions(prepared, task_language.get() or "zh")
+
+
+def localize_tool_definitions(definitions, language: str):
+    return [replace(definition, description=schema_annotation(definition.description, language),
+                    parameters_json_schema=localized_schema(definition.parameters_json_schema, language))
+            for definition in definitions]
+
+
+async def prepare_creation_output_tools(ctx, definitions):
+    return localize_tool_definitions(definitions, task_language.get() or "zh")
 
 
 def creation_instructions(ctx: RunContext[CreationAgentDeps]):
-    instructions = CREATION_CRUD_INSTRUCTIONS if ctx.deps.changes else CREATION_AGENT_INSTRUCTIONS
-    return instructions + render_turn_limit_instruction() if final_reply_due(ctx) else instructions
+    return render_creation_instructions(language=task_language.get() or "zh", crud=bool(ctx.deps.changes), turn_limited=final_reply_due(ctx))
 
 
 async def process_working_history(ctx: RunContext[CreationAgentDeps], messages: list[ModelMessage]):
@@ -184,6 +197,7 @@ creation_agent = Agent(
     deps_type=CreationAgentDeps,
     instructions=creation_instructions,
     prepare_tools=prepare_creation_tools,
+    prepare_output_tools=prepare_creation_output_tools,
     name="creation_assistant",
     output_type=[str, CreationReply],
     retries=2,
@@ -200,11 +214,11 @@ _TECHNICAL_REPLY_REFERENCE = re.compile(
 async def validate_creative_memory(ctx: RunContext[CreationAgentDeps], output: str | CreationReply):
     message = output.message if isinstance(output, CreationReply) else output
     if _TECHNICAL_REPLY_REFERENCE.search(message) and not final_reply_due(ctx):
-        raise ModelRetry("最终回复请使用用户可见的对象名称和人物、场景、道具等中文类别，不展示内部ID或字段名")
+        raise ModelRetry(localized_message('最终回复请使用用户可见的对象名称和任务指定语言的人物、场景、道具等类别，不展示内部ID或字段名'))
     if isinstance(output, CreationReply) and output.constraints:
         from services.creation_agent.memory import creation_memory
         if ctx.deps.source_message is None:
-            raise ModelRetry("当前运行没有可验证的用户消息来源，不能保存长期约束")
+            raise ModelRetry(localized_message('当前运行没有可验证的用户消息来源，不能保存长期约束'))
         try:
             await creation_memory.validate(ctx.deps.source_message, output.constraints)
         except ValueError as exc:
@@ -282,7 +296,7 @@ def _inject_observed_versions(ctx: RunContext[CreationAgentDeps], edits):
                else (edit.target_kind, edit.target_id))
         version = ctx.deps.observed_versions.get(key)
         if version is None:
-            raise ModelRetry("写入前请先调用 get_creation_context 读取当前目标")
+            raise ModelRetry(localized_message('写入前请先调用 get_creation_context 读取当前目标'))
         versioned.append(edit.model_copy(update={"expected_version": version}))
     return versioned
 
@@ -328,7 +342,7 @@ def change_receipt(change: PromptChange) -> dict:
 
 def crud_service(ctx: RunContext[CreationAgentDeps]) -> CreationChanges:
     if ctx.deps.changes is None:
-        raise ModelRetry('当前运行不支持对象管理')
+        raise ModelRetry(localized_message('当前运行不支持对象管理'))
     return ctx.deps.changes
 
 
@@ -362,7 +376,7 @@ def project_read_items(ctx, items, fields=None, prompt_offset=0):
         if isinstance(prompt, str):
             length = ctx.deps.limits.context_page_characters
             if prompt_offset > len(prompt):
-                raise ValueError('提示词读取位置超出范围')
+                raise ValueError(localized_message('提示词读取位置超出范围'))
             item['prompt'] = prompt[prompt_offset:prompt_offset + length]
             item['prompt_truncated'] = prompt_offset > 0 or prompt_offset + length < len(prompt)
             item['prompt_next_offset'] = prompt_offset + length if prompt_offset + length < len(prompt) else None
@@ -422,7 +436,7 @@ async def read_creation_objects(ctx: RunContext[CreationAgentDeps], targets: lis
         if chapter_id:
             prospective['chapter'] = await service.catalog.read_chapter(chapter_id, service.chapter_character_budget, chapter_offset)
         elif chapter_offset is not None:
-            raise ValueError('读取正文片段时请指定章节')
+            raise ValueError(localized_message('读取正文片段时请指定章节'))
         items = await service.read(targets, use_cache=True) if targets else []
         items = project_read_items(ctx, items, fields, prompt_offset)
         return {'targets': items, **prospective}
@@ -522,7 +536,7 @@ async def apply_creation_changes(ctx: RunContext[CreationAgentDeps], changes: Cr
                 for operation in required
             )
             if not allowed:
-                raise ValueError('本轮未启用所需写入能力，请重新读取上下文并声明具体的新增、修改或删除能力')
+                raise ValueError(localized_message('本轮未启用所需写入能力，请重新读取上下文并声明具体的新增、修改或删除能力'))
         return change_receipt(await crud_service(ctx).apply(changes, tool_call_id=ctx.tool_call_id or ''))
     except CreationNameConflict as exc:
         return exc.result()

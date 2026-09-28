@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { CSSProperties } from 'vue';
 import type { WorkbenchPromptAction, WorkbenchPromptActionControl } from '../prompt/promptActionRegistry';
 import type { WorkbenchPromptEditor } from '../types/workbenchTypes';
@@ -182,7 +184,7 @@ onBeforeUnmount(() => {
       :style="panelStyle"
       role="dialog"
       :aria-modal="expanded"
-      :aria-label="`${config.label}编辑器`"
+      :aria-label="tr('{p0}编辑器', { p0: config.label })"
       @pointerdown.stop
       @click.stop
       @wheel.stop
@@ -191,15 +193,15 @@ onBeforeUnmount(() => {
       <div class="workbench-prompt-panel__actions">
         <button
           type="button"
-          :aria-label="expanded ? '退出 Prompt 专注模式' : '进入 Prompt 专注模式'"
-          :title="expanded ? '退出专注模式' : '进入专注模式'"
+          :aria-label="expanded ? tr('退出 Prompt 专注模式') : tr('进入 Prompt 专注模式')"
+          :title="expanded ? tr('退出专注模式') : tr('进入专注模式')"
           :aria-pressed="expanded"
           @click="expanded = !expanded"
         >
           <Minimize2 v-if="expanded" :size="18" aria-hidden="true" />
           <Maximize2 v-else :size="18" aria-hidden="true" />
         </button>
-        <button type="button" aria-label="关闭 Prompt 编辑器" title="关闭" @click="emit('close')">
+        <button type="button" :aria-label="tr('关闭 Prompt 编辑器')" :title="tr('关闭')" @click="emit('close')">
           <X :size="18" aria-hidden="true" />
         </button>
       </div>
@@ -227,7 +229,7 @@ onBeforeUnmount(() => {
 
       <footer class="workbench-prompt-panel__footer">
         <div class="workbench-prompt-panel__footer-start">
-          <span class="workbench-prompt-panel__count">{{ promptLength }} 字</span>
+          <span class="workbench-prompt-panel__count">{{ promptLength }} {{ tr('字') }}</span>
           <component
             :is="control.component"
             v-for="control in promptControls"
@@ -238,7 +240,7 @@ onBeforeUnmount(() => {
             @update:model-value="control.updateModelValue"
           />
         </div>
-        <div v-if="promptActions.length" class="workbench-prompt-panel__footer-actions" aria-label="Prompt 操作">
+        <div v-if="promptActions.length" class="workbench-prompt-panel__footer-actions" :aria-label="tr('Prompt 操作')">
           <button
             v-for="action in promptActions"
             :key="action.id"
@@ -253,7 +255,7 @@ onBeforeUnmount(() => {
           >
             <LoaderCircle v-if="actionBusy(action)" class="workbench-prompt-panel__action-spinner" :size="15" aria-hidden="true" />
             <Play v-else :size="14" aria-hidden="true" />
-            <span>{{ actionBusy(action) ? (action.busyLabel || '处理中') : action.label }}</span>
+            <span>{{ actionBusy(action) ? (action.busyLabel || tr('处理中')) : action.label }}</span>
             <BillingPriceTag v-if="!actionBusy(action)" :cost="actionCost(action)" :pricing="actionCostPricing(action)" />
             <i v-if="actionProgress(action) !== null" aria-hidden="true">
               <b :style="{ width: `${actionProgress(action)}%` }" />

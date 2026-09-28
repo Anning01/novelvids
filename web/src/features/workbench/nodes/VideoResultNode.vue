@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import { Download, LoaderCircle, RefreshCw } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
@@ -21,9 +23,9 @@ const failureMessage = computed(() => {
   for (const value of [metadata.error_message, metadata.error, metadata.message, metadata.detail]) {
     if (typeof value === 'string' && value.trim()) return value
   }
-  return video.value.status === TaskStatusEnum.CANCELLED ? '生成任务已取消' : '视频生成失败'
+  return video.value.status === TaskStatusEnum.CANCELLED ? tr('生成任务已取消') : tr('视频生成失败')
 })
-const title = computed(() => `视频结果 · #${video.value.id}`)
+const title = computed(() => tr('视频结果 · #{p0}', { p0: video.value.id }))
 const filename = computed(() => videoDownloadFilename(video.value, title.value))
 const downloading = ref(false)
 const downloadError = ref('')
@@ -44,7 +46,7 @@ async function downloadVideo() {
   try {
     await downloadFile(video.value.url, filename.value)
   } catch (error) {
-    downloadError.value = error instanceof Error ? error.message : '视频下载失败'
+    downloadError.value = error instanceof Error ? error.message : tr('视频下载失败')
   } finally {
     downloading.value = false
   }
@@ -63,8 +65,8 @@ async function downloadVideo() {
       <button
         type="button"
         :disabled="!video.url || downloading"
-        :aria-label="`下载视频，保存为 ${filename}`"
-        :title="`下载 · ${filename}`"
+        :aria-label="tr('下载视频，保存为 {p0}', { p0: filename })"
+        :title="tr('下载 · {p0}', { p0: filename })"
         @click="downloadVideo"
       >
         <LoaderCircle v-if="downloading" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
@@ -84,8 +86,7 @@ async function downloadVideo() {
         @metadata="measuredVideoSize = $event"
       />
       <AppButton v-if="processing" class="workbench-inline-action" type="button" @click="store.refreshVideo(video.id)">
-        <RefreshCw :size="14" aria-hidden="true" />刷新状态
-      </AppButton>
+        <RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新状态') }} </AppButton>
       <p v-if="downloadError" role="alert">{{ downloadError }}</p>
     </div>
   </WorkbenchNodeFrame>

@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 export type VideoGenerationErrorCategory = 'privacy' | 'download' | 'other'
 
 export interface VideoGenerationErrorInfo {
@@ -60,12 +62,12 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
 
   if (isPrivacyError) {
     const target = referenceNumber && referenceNumber > 0
-      ? `第 ${referenceNumber} 张参考图`
-      : '参考图片'
+      ? tr('第 {p0} 张参考图', { p0: referenceNumber })
+      : tr('参考图片')
     return {
-      title: `${target}包含真人信息`,
-      message: `${target}可能包含真实人物，供应商因隐私保护拒绝了本次生成。`,
-      suggestion: '请删除或替换这张参考图，确认素材已获授权，或改用非真人形象后重试。',
+      title: tr('{p0}包含真人信息', { p0: target }),
+      message: tr('{p0}可能包含真实人物，供应商因隐私保护拒绝了本次生成。', { p0: target }),
+      get suggestion() { return tr('请删除或替换这张参考图，确认素材已获授权，或改用非真人形象后重试。') },
       raw,
       errorCode: errorCode || PRIVACY_ERROR_CODE,
       requestId,
@@ -77,12 +79,12 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
 
   if (isDownloadError) {
     const target = referenceNumber && referenceNumber > 0
-      ? `第 ${referenceNumber} 张参考图`
-      : '参考图片'
+      ? tr('第 {p0} 张参考图', { p0: referenceNumber })
+      : tr('参考图片')
     return {
-      title: `${target}下载失败`,
-      message: `${target}地址无效或无法被供应商下载，请检查该素材是否可正常访问。`,
-      suggestion: '请尝试重新上传参考素材，或在素材列表替换为有效图片后重新生成。',
+      title: tr('{p0}下载失败', { p0: target }),
+      message: tr('{p0}地址无效或无法被供应商下载，请检查该素材是否可正常访问。', { p0: target }),
+      get suggestion() { return tr('请尝试重新上传参考素材，或在素材列表替换为有效图片后重新生成。') },
       raw,
       errorCode,
       requestId,
@@ -93,9 +95,9 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
   }
 
   return {
-    title: '视频生成失败',
-    message: readableProviderMessage(raw) || '供应商未能完成本次视频生成。',
-    suggestion: '请检查参考素材与生成参数后重试；若仍然失败，可在技术详情中复制请求编号进行排查。',
+    get title() { return tr('视频生成失败') },
+    message: readableProviderMessage(raw) || tr('供应商未能完成本次视频生成。'),
+    get suggestion() { return tr('请检查参考素材与生成参数后重试；若仍然失败，可在技术详情中复制请求编号进行排查。') },
     raw,
     errorCode,
     requestId,

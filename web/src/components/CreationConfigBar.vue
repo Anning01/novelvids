@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 withDefaults(defineProps<{
   modesLabel?: string
 }>(), {
-  modesLabel: '创作模式',
+  get modesLabel() { return tr('创作模式') },
 })
 </script>
 

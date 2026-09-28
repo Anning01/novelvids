@@ -1,5 +1,7 @@
 """Bounded wire projections; compact model context without deleting the audit trail."""
 
+from utils.messages import localized_message
+
 from dataclasses import replace
 import json
 import math
@@ -8,6 +10,7 @@ from pydantic_ai.messages import ModelRequest, ModelMessagesTypeAdapter, RetryPr
 
 from models.creation_agent import AgentContextCheckpoint
 from prompts.creation_agent import render_working_checkpoint
+from utils.prompt_language import task_language
 
 
 def encode(value) -> str:
@@ -129,7 +132,7 @@ class ContextBudget:
         self.last_report = self.report(result, parameters)
         self.last_report['compactions'] = self.compactions
         if self.last_report['total_characters'] > self.limits.max_context_characters:
-            raise ValueError('上下文超过配置上限：当前要求或必要约束无法在预算内完整处理')
+            raise ValueError(localized_message('上下文超过配置上限：当前要求或必要约束无法在预算内完整处理'))
         return result
 
     def restore_projection(self, messages):
@@ -176,7 +179,7 @@ class ContextBudget:
             self.recovery['archive_refs'].append(archive_id)
         for key in ('requests', 'outcomes', 'archive_refs'):
             self.recovery[key] = self.recovery[key][-4:]
-        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery))
+        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery, task_language.get() or "zh"))
 
     def _with_recovery(self, messages):
         result = []

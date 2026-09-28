@@ -1,0 +1,35 @@
+{
+  "single": [
+    "Era",
+    "Country/Dynasty",
+    "Ethnicity/Species",
+    "World type",
+    "Face",
+    "Hair/Fur",
+    "Ear accessories",
+    "Build",
+    "Head-to-body ratio",
+    "Upper clothing",
+    "Lower clothing",
+    "Footwear",
+    "Gender",
+    "Age"
+  ],
+  "group": [
+    "Group identity",
+    "Age range",
+    "Gender",
+    "Ethnicity/Species",
+    "Group size",
+    "Build",
+    "Face",
+    "Eyebrows",
+    "Eyewear",
+    "Nose",
+    "Lips",
+    "Skin",
+    "Distinctive marks",
+    "Hair/Fur",
+    "Clothing and props"
+  ]
+}

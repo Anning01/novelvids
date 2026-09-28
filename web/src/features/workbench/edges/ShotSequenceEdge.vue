@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { EdgeProps } from '@vue-flow/core';
 import { BaseEdge, getBezierPath } from '@vue-flow/core';
 import { computed } from 'vue';
@@ -8,5 +10,5 @@ const path = computed(() => getBezierPath(props)[0]);
 </script>
 
 <template>
-  <BaseEdge :id="id" :path="path" class="workbench-edge workbench-edge--sequence" :aria-label="label || '视频顺序连线'" />
+  <BaseEdge :id="id" :path="path" class="workbench-edge workbench-edge--sequence" :aria-label="label || tr('视频顺序连线')" />
 </template>

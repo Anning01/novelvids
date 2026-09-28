@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Check, ChevronDown, Search, Sparkles, X } from 'lucide-vue-next'
 
@@ -43,7 +45,7 @@ const activePageSelectedCount = computed(() => visibleEpisodes.value.filter(item
 const summary = computed(() => formatEpisodeRanges(selectedEpisodes.value))
 
 function formatEpisodeRanges(episodes: number[]) {
-  if (!episodes.length) return '请选择适用集数'
+  if (!episodes.length) return tr('请选择适用集数')
   const ranges: string[] = []
   let start = episodes[0]!
   let previous = start
@@ -52,11 +54,11 @@ function formatEpisodeRanges(episodes: number[]) {
       previous = episode
       continue
     }
-    ranges.push(start === previous ? `第 ${start} 集` : `第 ${start}–${previous} 集`)
+    ranges.push(start === previous ? tr('第 {p0} 集', { p0: start }) : tr('第 {p0}–{p1} 集', { p0: start, p1: previous }))
     start = episode
     previous = episode
   }
-  ranges.push(start === previous ? `第 ${start} 集` : `第 ${start}–${previous} 集`)
+  ranges.push(start === previous ? tr('第 {p0} 集', { p0: start }) : tr('第 {p0}–{p1} 集', { p0: start, p1: previous }))
   return ranges.join('、')
 }
 
@@ -176,39 +178,39 @@ onBeforeUnmount(() => {
       @click="toggleOpen"
     >
       <span :class="{ 'is-placeholder': !selectedEpisodes.length }">{{ summary }}</span>
-      <small v-if="selectedEpisodes.length">{{ selectedEpisodes.length }} 集</small>
+      <small v-if="selectedEpisodes.length">{{ selectedEpisodes.length }} {{ tr('集') }}</small>
       <ChevronDown :size="14" />
     </button>
 
     <Teleport to="body">
-      <section v-if="open" ref="panel" class="episode-picker__panel" :style="{ left: `${panelPosition.left}px`, top: `${panelPosition.top}px` }" role="dialog" aria-label="选择适用集数">
+      <section v-if="open" ref="panel" class="episode-picker__panel" :style="{ left: `${panelPosition.left}px`, top: `${panelPosition.top}px` }" role="dialog" :aria-label="tr('选择适用集数')">
       <header>
         <div>
-          <strong>选择适用集数</strong>
-          <small><Sparkles :size="10" />AI 已预选，可批量调整</small>
+          <strong>{{ tr('选择适用集数') }}</strong>
+          <small><Sparkles :size="10" />{{ tr('AI 已预选，可批量调整') }}</small>
         </div>
-        <button type="button" aria-label="关闭集数选择" @click="open = false"><X :size="15" /></button>
+        <button type="button" :aria-label="tr('关闭集数选择')" @click="open = false"><X :size="15" /></button>
       </header>
 
       <div class="episode-picker__toolbar">
-        <button v-if="currentEpisode" type="button" @click="useCurrentEpisode">当前集</button>
-        <button v-if="availableEpisodes.length" type="button" @click="updateSelection(availableEpisodes)">全部</button>
-        <button type="button" :disabled="!selectedEpisodes.length" @click="updateSelection([])">清空</button>
+        <button v-if="currentEpisode" type="button" @click="useCurrentEpisode">{{ tr('当前集') }}</button>
+        <button v-if="availableEpisodes.length" type="button" @click="updateSelection(availableEpisodes)">{{ tr('全部') }}</button>
+        <button type="button" :disabled="!selectedEpisodes.length" @click="updateSelection([])">{{ tr('清空') }}</button>
         <label>
           <Search :size="13" />
-          <input v-model.number="jumpEpisode" type="number" min="1" placeholder="跳到集数" @keyup.enter="jumpToEpisode()" />
+          <input v-model.number="jumpEpisode" type="number" min="1" :placeholder="tr('跳到集数')" @keyup.enter="jumpToEpisode()" />
         </label>
       </div>
 
       <div class="episode-picker__range">
-        <span>连续区间</span>
-        <label>从<input v-model.number="rangeStart" type="number" min="1" aria-label="区间开始集数" /></label>
+        <span>{{ tr('连续区间') }}</span>
+        <label>{{ tr('从') }}<input v-model.number="rangeStart" type="number" min="1" :aria-label="tr('区间开始集数')" /></label>
         <i>—</i>
-        <label>到<input v-model.number="rangeEnd" type="number" min="1" aria-label="区间结束集数" /></label>
-        <button type="button" :disabled="!rangeStart" @click="addRange">加入选择</button>
+        <label>{{ tr('到') }}<input v-model.number="rangeEnd" type="number" min="1" :aria-label="tr('区间结束集数')" /></label>
+        <button type="button" :disabled="!rangeStart" @click="addRange">{{ tr('加入选择') }}</button>
       </div>
 
-      <nav v-if="pages.length > 1" class="episode-picker__pages" aria-label="集数分段">
+      <nav v-if="pages.length > 1" class="episode-picker__pages" :aria-label="tr('集数分段')">
         <button
           v-for="(page, index) in pages"
           :key="page[0]"
@@ -219,10 +221,10 @@ onBeforeUnmount(() => {
       </nav>
 
       <div v-if="visibleEpisodes.length" class="episode-picker__grid-heading">
-        <span>逐集微调 <small>Shift 点击可连续选择</small></span>
+        <span>{{ tr('逐集微调') }} <small>{{ tr('Shift 点击可连续选择') }}</small></span>
         <button type="button" @click="toggleVisiblePage">
           <Check v-if="activePageSelectedCount === visibleEpisodes.length" :size="12" />
-          {{ activePageSelectedCount === visibleEpisodes.length ? '取消本段' : '选择本段' }}
+          {{ activePageSelectedCount === visibleEpisodes.length ? tr('取消本段') : tr('选择本段') }}
         </button>
       </div>
       <div v-if="visibleEpisodes.length" class="episode-picker__grid">
@@ -235,12 +237,12 @@ onBeforeUnmount(() => {
           @click="toggleEpisode(episode, $event)"
         >{{ episode }}</button>
       </div>
-      <p v-else>暂未读取到项目集数，可使用上方连续区间添加。</p>
+      <p v-else>{{ tr('暂未读取到项目集数，可使用上方连续区间添加。') }}</p>
 
       <footer>
-        <span v-if="selectedEpisodes.length"><strong>{{ selectedEpisodes.length }}</strong> 集已选</span>
-        <span v-else>尚未选择</span>
-        <button type="button" @click="open = false">完成</button>
+        <span v-if="selectedEpisodes.length"><strong>{{ selectedEpisodes.length }}</strong> {{ tr('集已选') }}</span>
+        <span v-else>{{ tr('尚未选择') }}</span>
+        <button type="button" @click="open = false">{{ tr('完成') }}</button>
       </footer>
       </section>
     </Teleport>

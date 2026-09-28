@@ -234,6 +234,7 @@ async def test_handler_orchestrates_injected_collaborators_once(caplog):
         llm_client,
         model="mock-model",
         supports_json_output=True,
+        prompt_language="zh",
     )
     case.extractor.extract.assert_awaited_once_with(case.messages)
     case.prompt_preparer.prepare.assert_called_once_with(

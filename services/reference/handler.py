@@ -1,4 +1,6 @@
 
+from utils.messages import localized_message
+
 import base64
 import binascii
 import logging
@@ -47,7 +49,7 @@ def _image_extension(content: bytes) -> str:
         return ".jpg"
     if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
         return ".webp"
-    raise RuntimeError("生图供应商返回了不支持的图片格式")
+    raise RuntimeError(localized_message('生图供应商返回了不支持的图片格式'))
 
 
 async def _store_asset_image(content: bytes, extension: str, asset_id: int, suffix: str = "") -> str:
@@ -107,7 +109,7 @@ def _save_base64_image(encoded: str, asset_id: int, suffix: str = "") -> str:
     try:
         content = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as error:
-        raise RuntimeError("生图供应商返回了无效的 base64 图片") from error
+        raise RuntimeError(localized_message('生图供应商返回了无效的 base64 图片')) from error
     extension = _image_extension(content)
     # 与 _store_asset_image 的本地分支保持一致（OSS 场景由异步包装处理）
     asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
@@ -186,7 +188,7 @@ async def _persist_generated_image(image, asset_id: int, suffix: str) -> str:
             content = _decode_base64_image(encoded)
             return await _store_asset_image(content, _image_extension(content), asset_id, suffix)
         return _save_base64_image(encoded, asset_id, suffix)
-    raise RuntimeError("生图供应商返回的图片缺少 URL 和 base64 内容")
+    raise RuntimeError(localized_message('生图供应商返回的图片缺少 URL 和 base64 内容'))
 
 
 async def _fetch_image_bytes(remote_url: str) -> bytes:
@@ -207,7 +209,7 @@ def _decode_base64_image(encoded: str) -> bytes:
     try:
         return base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as error:
-        raise RuntimeError("生图供应商返回了无效的 base64 图片") from error
+        raise RuntimeError(localized_message('生图供应商返回了无效的 base64 图片')) from error
 
 
 class AssetReferenceHandler(BaseTaskHandler):
@@ -233,7 +235,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         try:
             reference_images = resolve_reference_images(raw_reference_images)
         except FileNotFoundError as error:
-            raise RuntimeError("参考图片不存在或已失效") from error
+            raise RuntimeError(localized_message('参考图片不存在或已失效')) from error
 
         asset = await Asset.get(id=asset_id)
         variant = None
@@ -245,6 +247,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         style_prompt = image_project_style_suffix(
             novel.style_key if novel else None,
             novel.custom_style_prompt if novel else None,
+            language=prompt_language,
         )
 
         # 构造生成所需的数据
@@ -365,7 +368,7 @@ class AssetReferenceHandler(BaseTaskHandler):
                     )
 
             if not result_urls:
-                raise RuntimeError("参考图生成完成，但没有可持久化的图片")
+                raise RuntimeError(localized_message('参考图生成完成，但没有可持久化的图片'))
 
             result = {"images": result_urls, "variant_id": variant.id if variant else None}
             if reference_images:
@@ -376,6 +379,6 @@ class AssetReferenceHandler(BaseTaskHandler):
             error_str = str(error)
             if "OutputImageSensitiveContentDetected" in error_str:
                 raise RuntimeError(
-                    "生成图像描述词过于血腥或者暴力，请修改提示词再次尝试"
+                    localized_message('生成图像描述词过于血腥或者暴力，请修改提示词再次尝试')
                 ) from error
             raise

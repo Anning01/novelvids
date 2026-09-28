@@ -349,7 +349,7 @@ async def test_生成视频_解析资产引用():
 
 
 @pytest.mark.asyncio
-async def test_生成视频_提交角色与旁白音频但不在后端改写prompt():
+async def test_生成视频_提交角色与旁白音频并添加显式映射():
     character_voice = await AudioReference.create(
         nickname="张三音色", gender="男",
         audio_url="https://example.com/zhangsan.mp3", avatar_url="",
@@ -404,7 +404,10 @@ async def test_生成视频_提交角色与旁白音频但不在后端改写prom
     assert kwargs["reference_audios"] == [
         "asset://voice-narrator", "asset://voice-zhangsan",
     ]
-    assert kwargs["prompt"] == "@张三（低声）：天亮了。"
+    assert kwargs["prompt"].startswith("@张三（低声）：天亮了。")
+    assert "Narrator: use [音频1]" in kwargs["prompt"]
+    assert "张三: use [音频2]" in kwargs["prompt"]
+    assert video.metadata["prompt_language"] == "en"
     assert "【音色参考】" not in kwargs["prompt"]
     assert [item["reference_id"] for item in video.metadata["voice_references"]] == [
         narrator_voice.id, character_voice.id,

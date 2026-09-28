@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
@@ -25,7 +27,7 @@ async function load(next = 1) {
     pages.value = response.data.pagination.pages
     total.value = response.data.pagination.total
   } catch (reason) {
-    if (current === epoch) error.value = reason instanceof Error ? reason.message : '费用明细加载失败'
+    if (current === epoch) error.value = reason instanceof Error ? reason.message : tr('费用明细加载失败')
   } finally {
     if (current === epoch) loading.value = false
   }
@@ -35,21 +37,21 @@ onBeforeUnmount(() => { epoch += 1 })
 </script>
 
 <template>
-  <section class="billing-record-details" aria-label="会话费用明细" :aria-busy="loading">
-    <p>按原始计费记录核对，包含各轮模型调用与摘要消耗。</p>
-    <p v-if="loading" role="status">正在读取明细…</p>
-    <p v-else-if="error" role="alert">{{ error }} <AppButton size="xs" @click="load(page)">重试</AppButton></p>
+  <section class="billing-record-details" :aria-label="tr('会话费用明细')" :aria-busy="loading">
+    <p>{{ tr('按原始计费记录核对，包含各轮模型调用与摘要消耗。') }}</p>
+    <p v-if="loading" role="status">{{ tr('正在读取明细…') }}</p>
+    <p v-else-if="error" role="alert">{{ error }} <AppButton size="xs" @click="load(page)">{{ tr('重试') }}</AppButton></p>
     <template v-else>
-      <table><thead><tr><th>时间</th><th>模型 / 用量</th><th>状态</th><th v-if="showSource">来源</th><th class="is-num">成本</th></tr></thead>
+      <table><thead><tr><th>{{ tr('时间') }}</th><th>{{ tr('模型 / 用量') }}</th><th>{{ tr('状态') }}</th><th v-if="showSource">{{ tr('来源') }}</th><th class="is-num">{{ tr('成本') }}</th></tr></thead>
         <tbody><tr v-for="record in records" :key="record.id">
           <td>{{ record.created_at }}</td><td>{{ record.model_name || record.model }}<small>{{ usageLabel(record) }}</small></td>
           <td>{{ recordStatus(record) }}</td><td v-if="showSource">{{ costSourceLabel(record.cost_source) }}</td>
           <td class="is-num">{{ money(record.cost, record.currency) }}</td>
         </tr></tbody>
       </table>
-      <footer><span>共 {{ total }} 条原始记录</span><div v-if="pages > 1">
-        <AppButton size="xs" :disabled="page <= 1" @click="load(page - 1)">上一页明细</AppButton>
-        <span>{{ page }} / {{ pages }}</span><AppButton size="xs" :disabled="page >= pages" @click="load(page + 1)">下一页明细</AppButton>
+      <footer><span>{{ tr('共') }} {{ total }} {{ tr('条原始记录') }}</span><div v-if="pages > 1">
+        <AppButton size="xs" :disabled="page <= 1" @click="load(page - 1)">{{ tr('上一页明细') }}</AppButton>
+        <span>{{ page }} / {{ pages }}</span><AppButton size="xs" :disabled="page >= pages" @click="load(page + 1)">{{ tr('下一页明细') }}</AppButton>
       </div></footer>
     </template>
   </section>

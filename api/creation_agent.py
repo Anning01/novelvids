@@ -1,5 +1,7 @@
 """Private assistant REST resources and replayable official AG-UI events."""
 
+from utils.messages import localized_message
+
 import asyncio
 from uuid import UUID
 
@@ -101,9 +103,9 @@ async def stream(task_id: UUID, request: Request, body: RunAgentInput | None = B
     conversation, assistant = await agent_sessions.for_task(task_id, ctx)
     if body is not None:
         if body.run_id != str(task_id) or body.thread_id != str(conversation.id):
-            raise HTTPException(404, '运行不存在')
+            raise HTTPException(404, localized_message('运行不存在'))
         if body.messages or body.tools or body.state or body.context or body.forwarded_props:
-            raise HTTPException(422, '事件订阅不接受客户端历史、工具或状态')
+            raise HTTPException(422, localized_message('事件订阅不接受客户端历史、工具或状态'))
     encoder = EventEncoder()
 
     async def events():

@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 
 from auth.deps import (
@@ -36,7 +38,7 @@ _EDITOR = Depends(require_roles("admin", "creator"))
 async def restore_scene(scene_id: int, ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
     scene = await Scene.with_deleted().filter(id=scene_id).prefetch_related('chapter').first()
     if scene is None:
-        raise HTTPException(404, '分镜不存在')
+        raise HTTPException(404, localized_message('分镜不存在'))
     await ensure_novel_access(scene.chapter.novel_id, ctx)
     async with creation_write(scene.chapter.novel_id):
         restored = await CreationObjects(scene.chapter.novel_id).restore('scene', scene.id)
@@ -47,7 +49,7 @@ async def restore_scene(scene_id: int, ctx: AuthContext = Depends(get_auth_conte
 async def _ensure_chapter_team_access(chapter_id: int, ctx: AuthContext) -> None:
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
-        raise HTTPException(status_code=404, detail="章节不存在")
+        raise HTTPException(status_code=404, detail=localized_message('章节不存在'))
     await ensure_novel_access(chapter.novel_id, ctx)
 
 

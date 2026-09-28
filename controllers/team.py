@@ -1,5 +1,7 @@
 """团队管理控制器：余额（见 services/balance）、成员管理、邀请链接、团队 CRUD。"""
 
+from utils.messages import localized_message
+
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -63,13 +65,13 @@ class TeamController:
     async def _ensure_team(self, team_id: int) -> Team:
         team = await Team.get_or_none(id=team_id)
         if team is None:
-            raise HTTPException(status_code=404, detail="团队不存在")
+            raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
         return team
 
     async def _get_membership(self, team_id: int, user_id: int) -> TeamMember:
         membership = await TeamMember.get_or_none(team_id=team_id, user_id=user_id)
         if membership is None:
-            raise HTTPException(status_code=404, detail="成员不存在")
+            raise HTTPException(status_code=404, detail=localized_message('成员不存在'))
         return membership
 
     async def members(
@@ -97,11 +99,11 @@ class TeamController:
         status: int | None = None,
     ) -> dict:
         if role is not None and role not in _ROLES:
-            raise HTTPException(status_code=422, detail="角色必须是 admin/creator/viewer")
+            raise HTTPException(status_code=422, detail=localized_message('角色必须是 admin/creator/viewer'))
         if status is not None and status not in (0, 1):
-            raise HTTPException(status_code=422, detail="成员状态必须是 0 或 1")
+            raise HTTPException(status_code=422, detail=localized_message('成员状态必须是 0 或 1'))
         if user_id == operator_user_id:
-            raise HTTPException(status_code=400, detail="不能修改自己的角色或状态")
+            raise HTTPException(status_code=400, detail=localized_message('不能修改自己的角色或状态'))
         membership = await self._get_membership(team_id, user_id)
         update_fields = ["updated_at"]
         if role is not None:
@@ -122,10 +124,10 @@ class TeamController:
         operator_user_id: int,
     ) -> dict:
         if user_id == operator_user_id:
-            raise HTTPException(status_code=400, detail="不能设置自己的限额")
+            raise HTTPException(status_code=400, detail=localized_message('不能设置自己的限额'))
         membership = await self._get_membership(team_id, user_id)
         if cost_limit is not None and cost_limit < 0:
-            raise HTTPException(status_code=422, detail="限额不能为负数")
+            raise HTTPException(status_code=422, detail=localized_message('限额不能为负数'))
         membership.cost_limit = cost_limit
         await membership.save(update_fields=["cost_limit", "updated_at"])
         user = await membership.user
@@ -135,7 +137,7 @@ class TeamController:
         self, team_id: int, user_id: int, operator_user_id: int
     ) -> None:
         if user_id == operator_user_id:
-            raise HTTPException(status_code=400, detail="不能移除自己")
+            raise HTTPException(status_code=400, detail=localized_message('不能移除自己'))
         membership = await self._get_membership(team_id, user_id)
         await membership.delete()
 
@@ -144,7 +146,7 @@ class TeamController:
     ) -> None:
         if user_id == operator_user_id:
             raise HTTPException(
-                status_code=400, detail="请到用户中心修改自己的密码"
+                status_code=400, detail=localized_message('请到用户中心修改自己的密码')
             )
         from auth.models import User
         from auth.security import hash_password
@@ -204,14 +206,14 @@ class TeamController:
     ) -> Team:
         name = name.strip()
         if not name:
-            raise HTTPException(status_code=422, detail="团队名称不能为空")
+            raise HTTPException(status_code=422, detail=localized_message('团队名称不能为空'))
         if await Team.filter(name=name).exists():
-            raise HTTPException(status_code=400, detail="团队名称已存在")
+            raise HTTPException(status_code=400, detail=localized_message('团队名称已存在'))
         if member_limit is not None and member_limit < 1:
-            raise HTTPException(status_code=422, detail="人员上限必须为正整数")
+            raise HTTPException(status_code=422, detail=localized_message('人员上限必须为正整数'))
         owner = await User.get_or_none(id=owner_user_id)
         if owner is None:
-            raise HTTPException(status_code=404, detail="所有人用户不存在")
+            raise HTTPException(status_code=404, detail=localized_message('所有人用户不存在'))
         team = await Team.create(
             name=name,
             member_limit=member_limit,
@@ -235,20 +237,20 @@ class TeamController:
         if name is not None:
             name = name.strip()
             if not name:
-                raise HTTPException(status_code=422, detail="团队名称不能为空")
+                raise HTTPException(status_code=422, detail=localized_message('团队名称不能为空'))
             duplicated = await Team.filter(name=name).exclude(id=team_id).exists()
             if duplicated:
-                raise HTTPException(status_code=400, detail="团队名称已存在")
+                raise HTTPException(status_code=400, detail=localized_message('团队名称已存在'))
             team.name = name
             update_fields.append("name")
         if status is not None:
             if status not in (0, 1):
-                raise HTTPException(status_code=422, detail="团队状态必须是 0 或 1")
+                raise HTTPException(status_code=422, detail=localized_message('团队状态必须是 0 或 1'))
             team.status = status
             update_fields.append("status")
         if member_limit is not None:
             if member_limit < 1:
-                raise HTTPException(status_code=422, detail="人员上限必须为正整数")
+                raise HTTPException(status_code=422, detail=localized_message('人员上限必须为正整数'))
             team.member_limit = member_limit
             update_fields.append("member_limit")
         await team.save(update_fields=update_fields)

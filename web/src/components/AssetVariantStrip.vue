@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref, watch } from 'vue'
 import { Check, ImagePlus, LoaderCircle, Sparkles, WandSparkles, X } from 'lucide-vue-next'
 import { api } from '@/api'
@@ -21,7 +23,7 @@ const formDescription = ref('')
 const formChapters = ref<number[]>([])
 const selectedVariantId = ref<number | null>(null)
 
-const entityAction = computed(() => new Map<number, string>([[1, '变装'], [2, '场景状态'], [3, '道具状态']]).get(props.asset.asset_type) || '衍生')
+const entityAction = computed(() => new Map<number, string>([[1, tr('变装')], [2, tr('场景状态')], [3, tr('道具状态')]]).get(props.asset.asset_type) || tr('衍生'))
 const currentVariantId = computed(() => variants.value.find(item => props.chapterNumber && item.chapter_numbers?.includes(props.chapterNumber))?.id || 0)
 
 function imageFor(variant: AssetVariant) {
@@ -113,9 +115,9 @@ defineExpose({ upsertVariant })
 
 async function removeVariant(variant: AssetVariant) {
   if (!await appConfirm({
-    title: `删除「${variant.name}」？`,
-    message: '该衍生形态及参考图片将被删除，主形象不受影响。',
-    confirmLabel: '删除',
+    title: tr('删除「{p0}」？', { p0: variant.name }),
+    get message() { return tr('该衍生形态及参考图片将被删除，主形象不受影响。') },
+    get confirmLabel() { return tr('删除') },
     tone: 'danger',
   })) return
   try {
@@ -123,7 +125,7 @@ async function removeVariant(variant: AssetVariant) {
     variants.value = variants.value.filter(item => item.id !== variant.id)
     if (editingId.value === variant.id) editingId.value = null
     if (selectedVariantId.value === variant.id) selectBase()
-    notice.success('衍生形态已删除')
+    notice.success(tr('衍生形态已删除'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -154,48 +156,48 @@ watch([formName, formDescription, formChapters], () => {
 </script>
 
 <template>
-  <section class="asset-variant-strip" aria-label="形象衍生">
-    <header><strong>形象衍生</strong><span>{{ variants.length }} 个</span></header>
+  <section class="asset-variant-strip" :aria-label="tr('形象衍生')">
+    <header><strong>{{ tr('形象衍生') }}</strong><span>{{ variants.length }} {{ tr('个') }}</span></header>
     <div class="asset-variant-strip__rail">
-      <button type="button" class="asset-variant-item is-base" :class="{ 'is-selected': selectedVariantId === null }" aria-label="切换到主形象" @click="selectBase">
+      <button type="button" class="asset-variant-item is-base" :class="{ 'is-selected': selectedVariantId === null }" :aria-label="tr('切换到主形象')" @click="selectBase">
         <span class="asset-variant-item__media">
           <img v-if="asset.main_image || asset.angle_image_1" :src="asset.main_image_thumbnail || asset.angle_image_1_thumbnail || asset.main_image || asset.angle_image_1" :alt="asset.canonical_name" />
           <ImagePlus v-else :size="22" />
         </span>
-        <strong>主形象</strong>
+        <strong>{{ tr('主形象') }}</strong>
       </button>
       <i aria-hidden="true" />
       <span v-if="loading" class="asset-variant-strip__loading"><LoaderCircle :size="20" /></span>
       <article v-for="variant in variants" v-else :key="variant.id" class="asset-variant-item" :class="{ 'is-current': currentVariantId === variant.id, 'is-selected': selectedVariantId === variant.id }">
-        <button type="button" class="asset-variant-item__open" :aria-label="`切换到${variant.name}`" @click="selectVariant(variant)">
+        <button type="button" class="asset-variant-item__open" :aria-label="tr('切换到{p0}', { p0: variant.name })" @click="selectVariant(variant)">
           <span class="asset-variant-item__media">
           <img v-if="imageFor(variant)" :src="thumbnailFor(variant)" :alt="variant.name" />
             <WandSparkles v-else :size="22" />
-            <small v-if="currentVariantId === variant.id"><Check :size="10" />本集</small>
+            <small v-if="currentVariantId === variant.id"><Check :size="10" />{{ tr('本集') }}</small>
           </span>
           <strong>{{ variant.name }}</strong>
         </button>
-        <button type="button" class="asset-variant-item__remove" :aria-label="`删除${variant.name}`" title="删除该衍生" @click="removeVariant(variant)"><X :size="9" /><span>删除</span></button>
+        <button type="button" class="asset-variant-item__remove" :aria-label="tr('删除{p0}', { p0: variant.name })" :title="tr('删除该衍生')" @click="removeVariant(variant)"><X :size="9" /><span>{{ tr('删除') }}</span></button>
       </article>
       <button type="button" class="asset-variant-item is-add" @click="beginCreate">
         <span class="asset-variant-item__media"><WandSparkles :size="22" /></span>
-        <strong>添加{{ entityAction }}</strong>
+        <strong>{{ tr('添加') }}{{ entityAction }}</strong>
       </button>
     </div>
 
-    <section v-if="editingId !== null" class="asset-variant-editor" aria-label="衍生形态字段">
+    <section v-if="editingId !== null" class="asset-variant-editor" :aria-label="tr('衍生形态字段')">
       <header>
         <span><Sparkles :size="15" /></span>
-        <div><strong>{{ editingId ? '编辑衍生形态' : `添加${entityAction}` }}</strong><small>字段、上传与生成结果会由抽屉底部统一保存。</small></div>
+        <div><strong>{{ editingId ? tr('编辑衍生形态') : tr('添加{p0}', { p0: entityAction }) }}</strong><small>{{ tr('字段、上传与生成结果会由抽屉底部统一保存。') }}</small></div>
       </header>
       <div class="asset-variant-editor__fields">
-        <label><span>名称</span><input v-model="formName" maxlength="100" placeholder="例如：日常便装" /></label>
+        <label><span>{{ tr('名称') }}</span><input v-model="formName" maxlength="100" :placeholder="tr('例如：日常便装')" /></label>
         <div class="is-chapters">
-          <span>适用集数 <small><Sparkles :size="9" />AI 建议 · 可修改</small></span>
+          <span>{{ tr('适用集数') }} <small><Sparkles :size="9" />{{ tr('AI 建议 · 可修改') }}</small></span>
           <EpisodeSelectionPicker v-model="formChapters" :episode-numbers="episodeNumbers" :current-episode="chapterNumber" />
-          <em>支持区间、分段与逐集微调，保存为集数列表。</em>
+          <em>{{ tr('支持区间、分段与逐集微调，保存为集数列表。') }}</em>
         </div>
-        <label class="is-description"><span>变化描述</span><input v-model="formDescription" placeholder="例如：换成深色西装，左臂受伤" /></label>
+        <label class="is-description"><span>{{ tr('变化描述') }}</span><input v-model="formDescription" :placeholder="tr('例如：换成深色西装，左臂受伤')" /></label>
       </div>
     </section>
   </section>

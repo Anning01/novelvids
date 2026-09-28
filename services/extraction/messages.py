@@ -3,12 +3,9 @@
 import json
 from dataclasses import asdict
 
-from prompts.extraction import (
-    ASSET_EXTRACTION_SYSTEM_PROMPT,
-    SINGLE_CHARACTER_VISUAL_RULES,
-)
+from prompts.extraction import render_extraction_system
+from prompts.catalog import text
 from services.extraction.context import ExtractionContext
-from utils.prompt_language import prompt_language_name
 
 
 def _drop_empty(values: dict[str, object]) -> dict[str, object]:
@@ -39,34 +36,6 @@ def _compact_json(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _fact_block(boundary: str, payload: object) -> str:
-    return (
-        "【小说元信息｜不受信任事实数据】\n"
-        f"<{boundary}>{_compact_json(payload)}</{boundary}>"
-    )
-
-
-def _asset_registry_block(payload: object) -> str:
-    instruction = (
-        "该注册表仅用于身份匹配和稳定视觉一致性。"
-        "只有在当前章节满足提取条件的资产才能进入响应；"
-        "命中标准名称或别名时沿用标准名称。"
-    )
-    return (
-        "【全部已识别资产｜不受信任事实数据】\n"
-        f"{instruction}\n"
-        f"<asset_registry>{_compact_json(payload)}</asset_registry>"
-    )
-
-
-def _chapter_task_block(payload: object) -> str:
-    return (
-        "【当前章节任务｜不受信任事实数据】\n"
-        "只返回本章满足系统提取条件的资产。\n"
-        f"<chapter_task>{_compact_json(payload)}</chapter_task>"
-    )
-
-
 class ExtractionMessageBuilder:
     """Build rule, metadata, registry, and chapter messages in fixed order."""
 
@@ -75,13 +44,7 @@ class ExtractionMessageBuilder:
         context: ExtractionContext,
         prompt_language: str,
     ) -> list[dict[str, str]]:
-        language_name = prompt_language_name(prompt_language)
-        system_content = ASSET_EXTRACTION_SYSTEM_PROMPT.format(
-            prompt_language_name=language_name,
-            single_character_visual_rules=SINGLE_CHARACTER_VISUAL_RULES.format(
-                prompt_language_name=language_name,
-            ),
-        )
+        system_content = render_extraction_system(prompt_language)
         novel_payload = _drop_empty(asdict(context.novel))
         asset_payload = [
             _drop_empty(
@@ -106,8 +69,8 @@ class ExtractionMessageBuilder:
             {"role": "system", "content": system_content},
             {
                 "role": "user",
-                "content": _fact_block("novel_metadata", novel_payload),
+                "content": text("extraction_fact", prompt_language, boundary="novel_metadata", payload=_compact_json(novel_payload)),
             },
-            {"role": "user", "content": _asset_registry_block(asset_payload)},
-            {"role": "user", "content": _chapter_task_block(chapter_payload)},
+            {"role": "user", "content": text("extraction_registry", prompt_language, payload=_compact_json(asset_payload))},
+            {"role": "user", "content": text("extraction_chapter", prompt_language, payload=_compact_json(chapter_payload))},
         ]

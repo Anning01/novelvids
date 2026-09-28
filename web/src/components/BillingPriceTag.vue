@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed } from 'vue'
 import { BadgePercent } from 'lucide-vue-next'
 import { pricingDiscount, pricingDiscountDescription } from '@/shared/modelPricing'
@@ -9,7 +11,7 @@ const props = withDefaults(defineProps<{
   pricing?: ModelPricing | null
   prefix?: string
 }>(), {
-  prefix: '约',
+  get prefix() { return tr('约') },
 })
 
 const discount = computed(() => pricingDiscount(props.pricing))
@@ -23,7 +25,7 @@ const description = computed(() => pricingDiscountDescription(props.pricing))
     {{ prefix }}
     <s v-if="isDiscounted" class="billing-price-tag__original">¥{{ cost.toFixed(2) }}</s>
     <span class="billing-price-tag__final">¥{{ final.toFixed(2) }}</span>
-    <span v-if="isDiscounted" class="billing-price-tag__badge" :title="description || undefined" aria-label="优惠"><BadgePercent :size="14" /></span>
+    <span v-if="isDiscounted" class="billing-price-tag__badge" :title="description || undefined" :aria-label="tr('优惠')"><BadgePercent :size="14" /></span>
   </span>
 </template>
 

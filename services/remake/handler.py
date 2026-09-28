@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Awaitable, Callable
@@ -32,7 +34,7 @@ class RemakeDecompositionError(RuntimeError):
         usage: dict[str, int] | None = None,
     ) -> None:
         self.error_code = error_code
-        super().__init__(f"{message}（错误代码：{error_code}）")
+        super().__init__(localized_message("{p0}（错误代码：{p1}）", p0=localized_message(message), p1=error_code))
         self.usage = usage or {}
 
 
@@ -132,7 +134,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
             if error.status_code == 404:
                 raise RemakeDecompositionError(
                     error_code=REMAKE_MODEL_UNAVAILABLE_ERROR_CODE,
-                    message="未配置可用的重制拆解模型",
+                    message=localized_message('未配置可用的重制拆解模型'),
                 ) from None
             raise RemakeDecompositionError() from None
         except Exception as error:

@@ -303,7 +303,7 @@ async def test_chapter_variant_and_structured_scenes_keep_independent_identity_a
     ]}), tool_call_id='two-independent')
     for item in saved.changes:
         created = await Scene.get(id=item['target_id'])
-        assert re.findall(r'【镜头(\d+)', created.prompt) == ['1', '2', '3']
+        assert re.findall(r'\[Shot (\d+)', created.prompt) == ['1', '2', '3']
         assert '深蓝色长款连帽雨衣' in created.prompt
         assert created.metadata['asset_variant_ids'] == {str(asset.id): variant.id}
     await asset.refresh_from_db(); await other.refresh_from_db()

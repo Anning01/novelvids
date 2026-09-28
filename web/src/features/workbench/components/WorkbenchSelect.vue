@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Check, ChevronDown } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
@@ -119,7 +121,7 @@ onBeforeUnmount(close)
         :size="18"
         aria-hidden="true"
       />
-      <span v-else :class="{ 'is-placeholder': !selectedOption }">{{ selectedOption?.label || placeholder || '请选择' }}</span>
+      <span v-else :class="{ 'is-placeholder': !selectedOption }">{{ selectedOption?.label || placeholder || tr('请选择') }}</span>
       <ChevronDown v-if="!iconOnly" :size="15" aria-hidden="true" />
     </button>
     <div
@@ -127,7 +129,7 @@ onBeforeUnmount(close)
       class="workbench-select__content workbench-scroll-region nowheel"
       :class="{ 'is-above': openAbove }"
       role="listbox"
-      :aria-label="`${label}选项`"
+      :aria-label="tr('{p0}选项', { p0: label })"
       @keydown.down="moveOptionFocus($event, 1)"
       @keydown.up="moveOptionFocus($event, -1)"
       @keydown.home.prevent="openAndFocus()"

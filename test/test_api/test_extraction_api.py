@@ -252,7 +252,7 @@ async def test_extract_duplicate_task_blocked(client: AsyncClient):
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
     assert body["code"] == 400
-    assert "进行中" in body["message"]
+    assert "active extraction task" in body["message"]
 
 
 @pytest.mark.asyncio
@@ -315,7 +315,7 @@ async def test_extract_stale_task_cleaned(client: AsyncClient):
     # 旧任务应被标记为 failed
     await stale_task.refresh_from_db()
     assert stale_task.status == TaskStatusEnum.failed.value
-    assert "异常任务清理" in stale_task.error_message
+    assert "Stale task expired" in stale_task.error_message
 
 
 @pytest.mark.asyncio
@@ -329,7 +329,7 @@ async def test_extract_no_config_returns_404(client: AsyncClient):
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
     assert body["code"] == 404
-    assert "启用一个模型" in body["message"]
+    assert "Enable a model" in body["message"]
 
 
 @pytest.mark.asyncio
@@ -505,7 +505,7 @@ async def test_cancel_completed_task_rejected(client: AsyncClient):
     response = await client.post(f"/api/task/{task.id}/cancel")
     body = response.json()
     assert body["code"] == 400
-    assert "不可取消" in body["message"]
+    assert "Cannot cancel" in body["message"]
 
 
 # =====================================================================

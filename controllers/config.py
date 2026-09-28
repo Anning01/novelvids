@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import HTTPException
 
 from models.config import AiModelConfig, GeneralConfig
@@ -19,25 +21,25 @@ from utils.enums import AiTaskTypeEnum, ImageModelTypeEnum, VideoGenerationModel
 
 def _validate_text_pricing(pricing: dict) -> None:
     if pricing.get("type") != "text":
-        raise HTTPException(status_code=400, detail="文本模型的费用配置 type 必须为 text")
+        raise HTTPException(status_code=400, detail=localized_message('文本模型的费用配置 type 必须为 text'))
     for key in ("input_price_per_1m", "output_price_per_1m"):
         value = pricing.get(key)
         if value is None or not isinstance(value, (int, float)) or value < 0:
-            raise HTTPException(status_code=400, detail=f"文本费用缺少合法的 {key}")
+            raise HTTPException(status_code=400, detail=localized_message('文本费用缺少合法的 {p1}', p1=f'{key}'))
 
 
 def _validate_image_pricing(pricing: dict, model_type) -> None:
     if pricing.get("type") != "image":
-        raise HTTPException(status_code=400, detail="生图模型的费用配置 type 必须为 image")
+        raise HTTPException(status_code=400, detail=localized_message('生图模型的费用配置 type 必须为 image'))
     prices = pricing.get("prices")
     if not isinstance(prices, dict):
-        raise HTTPException(status_code=400, detail="生图费用需要 prices 档位对象")
+        raise HTTPException(status_code=400, detail=localized_message('生图费用需要 prices 档位对象'))
     allowed = set(image_capabilities_for(model_type).clarities)
     for tier, value in prices.items():
         if tier not in allowed:
-            raise HTTPException(status_code=400, detail=f"生图费用包含不支持的清晰度档位：{tier}")
+            raise HTTPException(status_code=400, detail=localized_message('生图费用包含不支持的清晰度档位：{p1}', p1=f'{tier}'))
         if not isinstance(value, (int, float)) or value < 0:
-            raise HTTPException(status_code=400, detail=f"清晰度档位 {tier} 的费用必须为非负数字")
+            raise HTTPException(status_code=400, detail=localized_message('清晰度档位 {p1} 的费用必须为非负数字', p1=f'{tier}'))
     _validate_input_image_pricing(pricing, "生图")
 
 
@@ -45,42 +47,42 @@ def _validate_input_image_pricing(pricing: dict, label: str) -> None:
     input_fee = pricing.get("input_image")
     if input_fee is not None:
         if not isinstance(input_fee, dict):
-            raise HTTPException(status_code=400, detail=f"{label}输入图费用必须是对象")
+            raise HTTPException(status_code=400, detail=localized_message('{p0}输入图费用必须是对象', p0=f'{label}'))
         if not isinstance(input_fee.get("first_free"), (int, float)) or input_fee["first_free"] < 0:
-            raise HTTPException(status_code=400, detail="输入图免费张数 first_free 必须为非负数字")
+            raise HTTPException(status_code=400, detail=localized_message('输入图免费张数 first_free 必须为非负数字'))
         if not isinstance(input_fee.get("price_per_image"), (int, float)) or input_fee["price_per_image"] < 0:
-            raise HTTPException(status_code=400, detail="输入图超出单价 price_per_image 必须为非负数字")
+            raise HTTPException(status_code=400, detail=localized_message('输入图超出单价 price_per_image 必须为非负数字'))
 
 
 def _validate_video_pricing(pricing: dict, model_type) -> None:
     if pricing.get("type") != "video":
-        raise HTTPException(status_code=400, detail="视频模型的费用配置 type 必须为 video")
+        raise HTTPException(status_code=400, detail=localized_message('视频模型的费用配置 type 必须为 video'))
     prices = pricing.get("prices")
     if not isinstance(prices, dict):
-        raise HTTPException(status_code=400, detail="视频费用需要 prices 档位对象")
+        raise HTTPException(status_code=400, detail=localized_message('视频费用需要 prices 档位对象'))
     allowed = set(video_capabilities_for(model_type).resolutions)
     for tier, value in prices.items():
         if tier not in allowed:
-            raise HTTPException(status_code=400, detail=f"视频费用包含不支持的分辨率档位：{tier}")
+            raise HTTPException(status_code=400, detail=localized_message('视频费用包含不支持的分辨率档位：{p1}', p1=f'{tier}'))
         if not isinstance(value, (int, float)) or value < 0:
-            raise HTTPException(status_code=400, detail=f"分辨率档位 {tier} 的费用必须为非负数字")
+            raise HTTPException(status_code=400, detail=localized_message('分辨率档位 {p1} 的费用必须为非负数字', p1=f'{tier}'))
     ref_prices = pricing.get("video_reference_prices")
     if ref_prices is not None:
         if not isinstance(ref_prices, dict):
-            raise HTTPException(status_code=400, detail="视频参考价格必须是档位对象")
+            raise HTTPException(status_code=400, detail=localized_message('视频参考价格必须是档位对象'))
         for tier, value in ref_prices.items():
             if tier not in allowed:
-                raise HTTPException(status_code=400, detail=f"视频参考价格包含不支持的分辨率档位：{tier}")
+                raise HTTPException(status_code=400, detail=localized_message('视频参考价格包含不支持的分辨率档位：{p1}', p1=f'{tier}'))
             if not isinstance(value, (int, float)) or value < 0:
-                raise HTTPException(status_code=400, detail=f"视频参考分辨率档位 {tier} 的费用必须为非负数字")
+                raise HTTPException(status_code=400, detail=localized_message('视频参考分辨率档位 {p1} 的费用必须为非负数字', p1=f'{tier}'))
     model_key = str(model_type)
     expected_unit = VIDEO_PRICING.get(model_key, {}).get("billing_unit", "token")
     billing_unit = pricing.get("billing_unit", "token")
     if billing_unit not in {"token", "second"}:
-        raise HTTPException(status_code=400, detail="视频计费单位 billing_unit 仅支持 token 或 second")
+        raise HTTPException(status_code=400, detail=localized_message('视频计费单位 billing_unit 仅支持 token 或 second'))
     if billing_unit != expected_unit:
         unit_label = "按秒" if expected_unit == "second" else "按 token"
-        raise HTTPException(status_code=400, detail=f"当前视频模型必须使用{unit_label}计费")
+        raise HTTPException(status_code=400, detail=localized_message('当前视频模型必须使用{p1}计费', p1=f'{unit_label}'))
     _validate_input_image_pricing(pricing, "视频")
 
 
@@ -144,13 +146,13 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         if pricing is None:
             return
         if not isinstance(pricing, dict):
-            raise HTTPException(status_code=400, detail="费用配置必须是对象")
+            raise HTTPException(status_code=400, detail=localized_message('费用配置必须是对象'))
         discount = pricing.get("discount")
         if discount is not None and (not isinstance(discount, (int, float)) or discount <= 0):
-            raise HTTPException(status_code=400, detail="折扣倍数 discount 必须为正数")
+            raise HTTPException(status_code=400, detail=localized_message('折扣倍数 discount 必须为正数'))
         description = pricing.get("discount_description")
         if description is not None and not isinstance(description, str):
-            raise HTTPException(status_code=400, detail="折扣描述 discount_description 必须是字符串")
+            raise HTTPException(status_code=400, detail=localized_message('折扣描述 discount_description 必须是字符串'))
         task_types = data.get("task_types")
         if task_types is None and instance is not None:
             task_types = instance.task_types or [instance.task_type]
@@ -333,16 +335,16 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 id=config_id, is_active=True
             )
             if selected is None:
-                raise HTTPException(status_code=400, detail="所选模型未启用或已被删除")
+                raise HTTPException(status_code=400, detail=localized_message('所选模型未启用或已被删除'))
             # 团队只能显式使用官方配置或本团队配置
             if (
                 team_id is not None
                 and selected.team_id is not None
                 and selected.team_id != team_id
             ):
-                raise HTTPException(status_code=400, detail="所选模型不可用")
+                raise HTTPException(status_code=400, detail=localized_message('所选模型不可用'))
             if task_type not in self._capabilities(selected):
-                raise HTTPException(status_code=400, detail="所选模型不支持当前生成任务")
+                raise HTTPException(status_code=400, detail=localized_message('所选模型不支持当前生成任务'))
             if task_type == AiTaskTypeEnum.reference_image.value:
                 self._validate_image_payload({}, selected)
             if task_type == AiTaskTypeEnum.video.value:
@@ -370,7 +372,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 name = str(task_type)
             raise HTTPException(
                 status_code=404,
-                detail=f"请先在「配置」中为「{name}」启用一个模型",
+                detail=localized_message('请先在「配置」中为「{p1}」启用一个模型', p1=f'{name}'),
             )
         return config
 
@@ -404,9 +406,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             and selected.team_id is not None
             and selected.team_id != team_id
         ):
-            raise HTTPException(status_code=400, detail="所选模型不可用")
+            raise HTTPException(status_code=400, detail=localized_message('所选模型不可用'))
         if task_type not in self._capabilities(selected):
-            raise HTTPException(status_code=400, detail="所选模型不支持当前生成任务")
+            raise HTTPException(status_code=400, detail=localized_message('所选模型不支持当前生成任务'))
         if task_type == AiTaskTypeEnum.reference_image.value:
             self._validate_image_payload({}, selected)
         if task_type == AiTaskTypeEnum.video.value:
@@ -419,7 +421,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
 
         team = await Team.get_or_none(id=team_id)
         if team is None:
-            raise HTTPException(status_code=404, detail="团队不存在")
+            raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
         return team.model_config_source
 
     async def set_model_config_source(self, team_id: int, source: str) -> str:
@@ -427,10 +429,10 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         from auth.models import Team
 
         if source not in ("official", "custom"):
-            raise HTTPException(status_code=422, detail="配置来源必须是 official 或 custom")
+            raise HTTPException(status_code=422, detail=localized_message('配置来源必须是 official 或 custom'))
         team = await Team.get_or_none(id=team_id)
         if team is None:
-            raise HTTPException(status_code=404, detail="团队不存在")
+            raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
         team.model_config_source = source
         await team.save(update_fields=["model_config_source", "updated_at"])
         return team.model_config_source

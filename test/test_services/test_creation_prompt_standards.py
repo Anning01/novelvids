@@ -1,3 +1,4 @@
+from prompts.extraction import trait_labels
 from types import SimpleNamespace
 
 import pytest
@@ -39,7 +40,7 @@ def test_type_specific_contracts_reuse_templates_without_extraction_selection_ru
     assert '至少出现两次' not in result['writing_rules']
     assert '至少出现2次' not in result['writing_rules']
     if kind == 'person':
-        assert result['required_fields'] == list(SINGLE_CHARACTER_TRAIT_LABELS)
+        assert result['required_fields'] == list(trait_labels(False, language))
         assert '9:16' in result['rendering']
     else:
         assert SINGLE_CHARACTER_VISUAL_RULES not in result['writing_rules']
@@ -64,7 +65,7 @@ async def test_invalid_character_cannot_be_persisted_or_emit_success(bad):
                                           (3, '圆形铜表，白色表盘，黑色指针，表壳边缘磨损。')])
 async def test_creation_persists_same_reference_template_as_normal_generation(asset_type, text):
     service, _, _, _, _ = await crud()
-    await GeneralConfig.create(prompt_language='zh')
+    await GeneralConfig.create(id=1, prompt_language='zh')
     await Novel.filter(id=service.novel_id).update(aspect_ratio='9:16')
     saved = await service.apply(create_setting(text, asset_type), tool_call_id='create')
     target = await Asset.get(id=saved.changes[0]['target_id'])
@@ -86,7 +87,7 @@ async def test_group_contract_and_metadata_survive_creation_and_reading():
     target = await Asset.get(id=saved.changes[0]['target_id'])
     assert await service.prompt_standards.asset_kind(target) == ('person', GROUP_PORTRAIT)
     assert target.base_traits == text  # Existing group policy has no turnaround wrapper.
-    assert (await service.prompt_standards.contract('person', GROUP_PORTRAIT))['required_fields'] == list(GROUP_PORTRAIT_TRAIT_LABELS)
+    assert (await service.prompt_standards.contract('person', GROUP_PORTRAIT))['required_fields'] == list(trait_labels(True, 'en'))
 
 
 @pytest.mark.asyncio
@@ -149,7 +150,7 @@ async def test_new_raw_storyboard_requires_complete_sections_and_edit_cannot_dro
 @pytest.mark.asyncio
 async def test_rules_tool_uses_actual_type_and_project_language_and_rejects_other_project():
     service, _, asset, _, _ = await crud()
-    await GeneralConfig.create(prompt_language='zh')
+    await GeneralConfig.create(id=1, prompt_language='zh')
     await Novel.filter(id=service.novel_id).update(style_key='realistic-general')
     ctx = SimpleNamespace(deps=CreationAgentDeps(service=None, changes=service, context={}),
                           model=None, tool_call_id='rules')
@@ -200,7 +201,7 @@ async def test_agent_loads_one_contract_then_creates_complete_prompt_in_three_ca
             return ModelResponse(parts=[ToolCallPart('get_creation_prompt_rules', {'kind': 'person'}, tool_call_id='rules')])
         result = [part.content for message in messages for part in message.parts if isinstance(part, ToolReturnPart)][-1]
         if calls == 2:
-            assert result['prompt_rules']['required_fields'] == list(SINGLE_CHARACTER_TRAIT_LABELS)
+            assert result['prompt_rules']['required_fields'] == list(trait_labels(False, 'en'))
             return ModelResponse(parts=[ToolCallPart('create_creation_setting', {
                 'name': '胖子', 'asset_type': 1, 'description': '主角的死党',
                 'prompt': person_traits(脸型='round face, dark eyes, round glasses', 身材='stocky build'),

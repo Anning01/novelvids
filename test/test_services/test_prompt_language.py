@@ -14,6 +14,7 @@ from models.asset import Asset
 from models.chapter import Chapter
 from models.config import AiModelConfig, GeneralConfig
 from models.novel import Novel
+from prompts.extraction import trait_labels
 from prompts.extraction import (
     GROUP_PORTRAIT_TRAIT_LABELS,
     SINGLE_CHARACTER_TRAIT_LABELS,
@@ -67,9 +68,9 @@ def _shot() -> SoraScenePromptConfig:
 
 @pytest.mark.parametrize(
     ("prompt_language", "language_name"),
-    [("zh", "简体中文"), ("en", "英文")],
+    [("zh", "简体中文"), ("en", "English")],
 )
-def test_extraction_system_rules_keep_fixed_labels_in_both_languages(
+def test_extraction_system_rules_use_locale_specific_labels(
     prompt_language: str,
     language_name: str,
 ):
@@ -95,10 +96,13 @@ def test_extraction_system_rules_keep_fixed_labels_in_both_languages(
     messages = ExtractionMessageBuilder().build(context, prompt_language)
     system_prompt = messages[0]["content"]
 
-    assert f"目标提示词语言：{language_name}" in system_prompt
-    assert f"base_traits 必须使用{language_name}" in system_prompt
-    assert all(label in system_prompt for label in SINGLE_CHARACTER_TRAIT_LABELS)
-    assert all(label in system_prompt for label in GROUP_PORTRAIT_TRAIT_LABELS)
+    if prompt_language == "zh":
+        assert f"目标提示词语言：{language_name}" in system_prompt
+        assert f"base_traits 必须使用{language_name}" in system_prompt
+    else:
+        assert "Target language: English" in system_prompt
+    assert all(label in system_prompt for label in trait_labels(False, prompt_language))
+    assert all(label in system_prompt for label in trait_labels(True, prompt_language))
     assert "唯一章节事实。" not in system_prompt
     assert "严格返回以下 JSON" not in system_prompt
     assert "```json" not in system_prompt
@@ -253,7 +257,11 @@ def test_storyboard_prompt_uses_professional_chinese_structure():
     assert "【转场方式】" in chinese
     assert "【特效规范】" in chinese
     assert "总时长：@{镜头时长:4s}" in chinese
-    assert english == chinese
+    assert english.startswith("[Restrictions]")
+    assert "[Character / Prop / Location references]" in english
+    assert "Total duration: @{镜头时长:4s}" in english
+    # Renderer localizes fixed labels without translating stored user prose.
+    assert _shot().visual_prose in english
     assert "['" not in chinese
 
 

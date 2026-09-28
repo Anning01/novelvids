@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { onMounted, ref } from 'vue'
 import { api } from '@/api'
 import AppPagination from '@/components/AppPagination.vue'
@@ -36,7 +38,7 @@ async function load() {
       await load()
     }
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '加载用户失败')
+    notice.error(error instanceof Error ? error.message : tr('加载用户失败'))
   } finally {
     loading.value = false
   }
@@ -51,12 +53,12 @@ async function createUser() {
       nickname: createForm.value.nickname,
       password: createForm.value.password,
     })
-    notice.success('用户已创建')
+    notice.success(tr('用户已创建'))
     showCreateDialog.value = false
     createForm.value = { username: '', nickname: '', password: '' }
     await load()
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '创建用户失败')
+    notice.error(error instanceof Error ? error.message : tr('创建用户失败'))
   } finally {
     creating.value = false
   }
@@ -65,21 +67,21 @@ async function createUser() {
 async function toggleStatus(user: UserItem) {
   try {
     await api.updateUser(user.id, { status: user.status === 1 ? 0 : 1 })
-    notice.success(user.status === 1 ? '已禁用登录' : '已恢复登录')
+    notice.success(user.status === 1 ? tr('已禁用登录') : tr('已恢复登录'))
     await load()
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '操作失败')
+    notice.error(error instanceof Error ? error.message : tr('操作失败'))
   }
 }
 
 async function removeUser(user: UserItem) {
-  if (!window.confirm(`确认删除用户「${user.nickname || user.username}」？其团队关系与会话将一并删除。`)) return
+  if (!window.confirm(tr('确认删除用户「{p0}」？其团队关系与会话将一并删除。', { p0: user.nickname || user.username }))) return
   try {
     await api.deleteUser(user.id)
-    notice.success('用户已删除')
+    notice.success(tr('用户已删除'))
     await load()
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '删除失败')
+    notice.error(error instanceof Error ? error.message : tr('删除失败'))
   }
 }
 
@@ -100,36 +102,36 @@ onMounted(load)
 <template>
   <main class="users-page">
     <header class="page-header">
-      <h1>用户管理</h1>
-      <button type="button" class="primary-button" @click="showCreateDialog = true">创建用户</button>
+      <h1>{{ tr('用户管理') }}</h1>
+      <button type="button" class="primary-button" @click="showCreateDialog = true">{{ tr('创建用户') }}</button>
     </header>
 
     <section class="stats-row">
       <div class="stat-card">
-        <span class="stat-label">用户总数</span>
+        <span class="stat-label">{{ tr('用户总数') }}</span>
         <strong class="stat-value">{{ stats.user_count }}</strong>
       </div>
       <div class="stat-card">
-        <span class="stat-label">用户总消耗金额</span>
+        <span class="stat-label">{{ tr('用户总消耗金额') }}</span>
         <strong class="stat-value is-cost">¥ {{ money(stats.user_total_cost) }}</strong>
       </div>
       <div class="stat-card">
-        <span class="stat-label">团队总数</span>
+        <span class="stat-label">{{ tr('团队总数') }}</span>
         <strong class="stat-value">{{ stats.team_count }}</strong>
       </div>
       <div class="stat-card">
-        <span class="stat-label">团队未消耗总金额</span>
+        <span class="stat-label">{{ tr('团队未消耗总金额') }}</span>
         <strong class="stat-value is-balance">¥ {{ money(stats.team_balance_total) }}</strong>
       </div>
     </section>
 
     <section class="panel">
-      <p v-if="loading" class="dim">加载中…</p>
+      <p v-if="loading" class="dim">{{ tr('加载中…') }}</p>
       <table v-else class="user-table">
         <thead>
           <tr>
-            <th>用户名</th><th>昵称</th><th>类型</th><th>登录状态</th>
-            <th>注册时间</th><th>累计消耗（元）</th><th>团队数</th><th class="actions">操作</th>
+            <th>{{ tr('用户名') }}</th><th>{{ tr('昵称') }}</th><th>{{ tr('类型') }}</th><th>{{ tr('登录状态') }}</th>
+            <th>{{ tr('注册时间') }}</th><th>{{ tr('累计消耗（元）') }}</th><th>{{ tr('团队数') }}</th><th class="actions">{{ tr('操作') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -137,12 +139,12 @@ onMounted(load)
             <td>{{ user.username }}</td>
             <td>{{ user.nickname || '—' }}</td>
             <td>
-              <span v-if="user.is_super_admin" class="kind-badge is-super">超管</span>
-              <span v-else class="kind-badge">普通</span>
+              <span v-if="user.is_super_admin" class="kind-badge is-super">{{ tr('超管') }}</span>
+              <span v-else class="kind-badge">{{ tr('普通') }}</span>
             </td>
             <td>
               <span class="status-badge" :class="user.status === 1 ? 'is-active' : 'is-stopped'">
-                {{ user.status === 1 ? '正常' : '已禁用' }}
+                {{ user.status === 1 ? tr('正常') : tr('已禁用') }}
               </span>
             </td>
             <td>{{ user.created_at || '—' }}</td>
@@ -151,9 +153,9 @@ onMounted(load)
             <td class="actions">
               <template v-if="!user.is_super_admin">
                 <button type="button" class="ghost-button" @click="toggleStatus(user)">
-                  {{ user.status === 1 ? '禁用登录' : '恢复登录' }}
+                  {{ user.status === 1 ? tr('禁用登录') : tr('恢复登录') }}
                 </button>
-                <button type="button" class="danger-button" @click="removeUser(user)">删除</button>
+                <button type="button" class="danger-button" @click="removeUser(user)">{{ tr('删除') }}</button>
               </template>
               <span v-else class="dim">—</span>
             </td>
@@ -171,23 +173,23 @@ onMounted(load)
 
     <div v-if="showCreateDialog" class="dialog-mask" @click.self="showCreateDialog = false">
       <form class="dialog-card" @submit.prevent="createUser">
-        <h2>创建用户</h2>
-        <p class="dim">创建后该用户暂无团队，可经邀请链接加入团队。</p>
+        <h2>{{ tr('创建用户') }}</h2>
+        <p class="dim">{{ tr('创建后该用户暂无团队，可经邀请链接加入团队。') }}</p>
         <label>
-          <span>用户名</span>
+          <span>{{ tr('用户名') }}</span>
           <input v-model="createForm.username" type="text" autocomplete="off" required />
         </label>
         <label>
-          <span>昵称（可选）</span>
+          <span>{{ tr('昵称（可选）') }}</span>
           <input v-model="createForm.nickname" type="text" />
         </label>
         <label>
-          <span>初始密码（至少 8 位）</span>
+          <span>{{ tr('初始密码（至少 8 位）') }}</span>
           <input v-model="createForm.password" type="password" autocomplete="new-password" required minlength="8" />
         </label>
         <div class="dialog-actions">
-          <button type="button" class="ghost-button" @click="showCreateDialog = false">取消</button>
-          <button type="submit" class="primary-button" :disabled="creating">{{ creating ? '创建中…' : '创建' }}</button>
+          <button type="button" class="ghost-button" @click="showCreateDialog = false">{{ tr('取消') }}</button>
+          <button type="submit" class="primary-button" :disabled="creating">{{ creating ? tr('创建中…') : tr('创建') }}</button>
         </div>
       </form>
     </div>

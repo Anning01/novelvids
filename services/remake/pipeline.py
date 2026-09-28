@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
-import json
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
@@ -11,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from prompts.remake import ASSET_PROMPT, ASSET_SCHEMA, PROMPT_SCHEMA, PROMPT_TEMPLATE
+from prompts.remake import ASSET_SCHEMA, PROMPT_SCHEMA, render_remake_prompt, render_remake_catalog
+from services.language import task_language
 from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisGateway
 from services.remake.media_prepare import prepare_video_for_model_input
 from services.remake.prompt_render import (
@@ -63,7 +65,7 @@ class RemakeDecompositionPipeline:
     ) -> RemakePipelineResult:
         pipeline_started_at = self.clock()
         if not source_path.is_file():
-            raise RemakePipelineError("来源视频不存在")
+            raise RemakePipelineError(localized_message('来源视频不存在'))
         work_dir.mkdir(parents=True, exist_ok=True)
         await _report(progress, 10, "preparing")
         model_source_path = await asyncio.to_thread(
@@ -78,12 +80,12 @@ class RemakeDecompositionPipeline:
         raw_assets = await gateway.analyze_one(
             index=1,
             path=model_source_path,
-            prompt=ASSET_PROMPT,
+            prompt=render_remake_prompt("assets", task_language.get() or "zh"),
             schema_name="global_key_assets",
             response_schema=ASSET_SCHEMA,
             include_segment_metadata=False,
         )
-        assets = normalize_global_assets(raw_assets)
+        assets = normalize_global_assets(raw_assets, task_language.get() or "zh")
 
         await _report(progress, 42, "detecting_scenes")
         scene_paths = await asyncio.to_thread(
@@ -92,16 +94,12 @@ class RemakeDecompositionPipeline:
             work_dir / "scenes",
         )
         if not scene_paths:
-            raise RemakePipelineError("来源视频没有可分析的镜头")
+            raise RemakePipelineError(localized_message('来源视频没有可分析的镜头'))
         durations = await asyncio.gather(
             *(asyncio.to_thread(self.probe_duration, path) for path in scene_paths)
         )
 
-        catalog_context = "以下是当前片段允许引用的关键资产：\n" + json.dumps(
-            compact_catalog(assets),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
+        catalog_context = render_remake_catalog(compact_catalog(assets), task_language.get() or "zh")
         await _report(progress, 55, "generating_storyboards")
 
         async def report_scene_progress(completed: int, total: int) -> None:
@@ -114,7 +112,7 @@ class RemakeDecompositionPipeline:
 
         raw_prompts = await gateway.analyze_many(
             scene_paths,
-            prompt=PROMPT_TEMPLATE,
+            prompt=render_remake_prompt("shots", task_language.get() or "zh"),
             schema_name="professional_video_prompt_material",
             response_schema=PROMPT_SCHEMA,
             context_builder=lambda _index: catalog_context,
@@ -125,6 +123,7 @@ class RemakeDecompositionPipeline:
                 raw,
                 assets,
                 duration_seconds=durations[index],
+                language=task_language.get() or "zh",
             )
             for index, raw in enumerate(raw_prompts)
         ]
@@ -183,11 +182,11 @@ def _probe_media_duration(path: Path) -> float:
         )
         duration = float(process.stdout.strip())
     except FileNotFoundError as error:
-        raise RemakePipelineError("找不到 ffprobe，无法读取镜头时长") from error
+        raise RemakePipelineError(localized_message('找不到 ffprobe，无法读取镜头时长')) from error
     except (subprocess.CalledProcessError, ValueError) as error:
-        raise RemakePipelineError(f"无法读取镜头时长: {path.name}") from error
+        raise RemakePipelineError(localized_message('无法读取镜头时长: {p1}', p1=f'{path.name}')) from error
     if duration <= 0:
-        raise RemakePipelineError(f"镜头时长无效: {path.name}")
+        raise RemakePipelineError(localized_message('镜头时长无效: {p1}', p1=f'{path.name}'))
     return duration
 
 

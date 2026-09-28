@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth.deps import AuthContext, get_auth_context, require_roles
@@ -10,6 +12,7 @@ from schemas.config import (
     AiModelConfigUpdate,
     GeneralConfigOut,
     GeneralConfigUpdate,
+    LocaleOut,
     ImageGenerationModelOut,
     ModelConfigSourceOut,
     ModelConfigSourceUpdate,
@@ -41,7 +44,7 @@ def _check_config_ownership(instance: AiModelConfig, ctx: AuthContext) -> None:
     if ctx.user is None or ctx.is_super_admin:
         return
     if instance.team_id is None or instance.team_id != ctx.team_id:
-        raise HTTPException(status_code=404, detail="配置不存在或无权操作")
+        raise HTTPException(status_code=404, detail=localized_message('配置不存在或无权操作'))
 
 
 def _check_config_read_access(instance: AiModelConfig, ctx: AuthContext) -> None:
@@ -49,7 +52,7 @@ def _check_config_read_access(instance: AiModelConfig, ctx: AuthContext) -> None
     if ctx.user is None or ctx.is_super_admin:
         return
     if instance.team_id != ctx.team_id:
-        raise HTTPException(status_code=404, detail="配置不存在或无权操作")
+        raise HTTPException(status_code=404, detail=localized_message('配置不存在或无权操作'))
 
 
 def _mask_official_key(item: AiModelConfigOut, ctx: AuthContext) -> AiModelConfigOut:
@@ -152,6 +155,13 @@ async def get_config_list(
     return ResponseSchema(data=result)
 
 
+@router.get("/locale", response_model=ResponseSchema[LocaleOut])
+async def get_locale():
+    """Public display preference only; never expose the admin configuration."""
+    from services.language import configured_language
+    return ResponseSchema(data=LocaleOut(locale=await configured_language()))
+
+
 @router.get(
     "/general",
     summary="获取通用配置",
@@ -184,7 +194,7 @@ async def get_model_source(ctx: AuthContext = _ADMIN):
     if ctx.user is None:
         return ResponseSchema(data={"source": "official"})
     if ctx.is_super_admin:
-        raise HTTPException(status_code=403, detail="超级管理员无团队配置模式")
+        raise HTTPException(status_code=403, detail=localized_message('超级管理员无团队配置模式'))
     return ResponseSchema(
         data={
             "source": await ai_model_config_controller.get_model_config_source(
@@ -203,7 +213,7 @@ async def set_model_source(payload: ModelConfigSourceUpdate, ctx: AuthContext = 
     if ctx.user is None:
         return ResponseSchema(data={"source": payload.source})
     if ctx.is_super_admin:
-        raise HTTPException(status_code=403, detail="超级管理员无团队配置模式")
+        raise HTTPException(status_code=403, detail=localized_message('超级管理员无团队配置模式'))
     source = await ai_model_config_controller.set_model_config_source(
         ctx.team_id, payload.source
     )

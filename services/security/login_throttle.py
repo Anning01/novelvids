@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import hashlib
 import ipaddress
@@ -111,7 +113,7 @@ class LoginThrottle:
         retry_after = max(1, math.ceil(window_seconds - (now - events[0])))
         raise HTTPException(
             status_code=429,
-            detail="登录尝试过于频繁，请稍后重试",
+            detail=localized_message('登录尝试过于频繁，请稍后重试'),
             headers={"Retry-After": str(retry_after)},
         )
 

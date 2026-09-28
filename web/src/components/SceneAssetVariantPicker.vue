@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Check, ChevronRight, ImageIcon, Search, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { mediaUrl } from '@/api'
@@ -223,18 +225,18 @@ onBeforeUnmount(() => {
         class="scene-asset-variant-picker"
         :style="panelStyle"
         role="dialog"
-        :aria-label="`${selectionMode === 'replace' ? '替换' : '选择'}${label}及衍生状态`"
+        :aria-label="tr('{p0}{p1}及衍生状态', { p0: selectionMode === 'replace' ? '替换' : '选择', p1: label })"
       >
         <header class="scene-asset-variant-picker__header">
           <label>
             <Search :size="17" />
-            <input ref="searchInput" v-model="query" type="search" :placeholder="`搜索${selectionMode === 'replace' ? '替换' : ''}${label}或衍生状态`" @keydown.esc.stop="emit('close')">
+            <input ref="searchInput" v-model="query" type="search" :placeholder="tr('搜索{p0}{p1}或衍生状态', { p0: selectionMode === 'replace' ? '替换' : '', p1: label })" @keydown.esc.stop="emit('close')">
           </label>
-          <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭资产选择器" @click="emit('close')"><X :size="16" /></AppButton>
+          <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭资产选择器')" @click="emit('close')"><X :size="16" /></AppButton>
         </header>
 
         <div v-if="filteredAssets.length" class="scene-asset-variant-picker__body">
-          <nav :aria-label="`${label}主体`">
+          <nav :aria-label="tr('{p0}主体', { p0: label })">
             <button
               v-for="asset in filteredAssets"
               :key="asset.id"
@@ -243,20 +245,20 @@ onBeforeUnmount(() => {
               @click="selectAsset(asset.id)"
             >
               <span class="scene-asset-variant-picker__thumb"><ImageIcon :size="16" /><img v-if="assetThumbnail(asset)" :src="assetThumbnail(asset)" alt="" loading="lazy" decoding="async" @error="fallbackImage($event, assetOriginal(asset))"></span>
-              <span><strong>{{ asset.canonical_name }}</strong><small v-if="asset.variants?.length">{{ asset.variants.length }} 个衍生状态</small><small v-else>仅基础形态</small></span>
+              <span><strong>{{ asset.canonical_name }}</strong><small v-if="asset.variants?.length">{{ asset.variants.length }} {{ tr('个衍生状态') }}</small><small v-else>{{ tr('仅基础形态') }}</small></span>
               <Check v-if="selectedAssetIds.includes(asset.id)" class="scene-asset-variant-picker__selected-mark" :size="14" />
               <ChevronRight v-else :size="15" />
             </button>
           </nav>
 
-          <div v-if="activeAsset" class="scene-asset-variant-picker__variants" :aria-label="`${activeAsset.canonical_name}的衍生状态`">
+          <div v-if="activeAsset" class="scene-asset-variant-picker__variants" :aria-label="tr('{p0}的衍生状态', { p0: activeAsset.canonical_name })">
             <button
               type="button"
               :class="{ 'is-selected': isSelected(activeAsset.id, null) }"
               @click="selectVariant(activeAsset.id, null)"
             >
               <span class="scene-asset-variant-picker__thumb"><ImageIcon :size="16" /><img v-if="variantThumbnail(activeAsset)" :src="variantThumbnail(activeAsset)" alt="" loading="lazy" decoding="async" @error="fallbackImage($event, variantOriginal(activeAsset))"></span>
-              <span><strong>{{ activeAsset.canonical_name }}</strong><small>基础形态</small></span>
+              <span><strong>{{ activeAsset.canonical_name }}</strong><small>{{ tr('基础形态') }}</small></span>
               <span class="scene-asset-variant-picker__check"><Check v-if="isSelected(activeAsset.id, null)" :size="14" /></span>
             </button>
             <button
@@ -269,13 +271,13 @@ onBeforeUnmount(() => {
               @click="selectVariant(activeAsset.id, variant.id)"
             >
               <span class="scene-asset-variant-picker__thumb" :class="{ 'is-empty': !variantIsAvailable(variant) }"><ImageIcon :size="16" /><img v-if="variantThumbnail(activeAsset, variant)" :src="variantThumbnail(activeAsset, variant)" alt="" loading="lazy" decoding="async" @error="fallbackImage($event, variantOriginal(activeAsset, variant))"></span>
-              <span><strong>{{ activeAsset.canonical_name }} · {{ variant.name }}</strong><small>{{ variantIsAvailable(variant) ? (variant.description || '衍生形态') : '尚未生成' }}</small></span>
+              <span><strong>{{ activeAsset.canonical_name }} · {{ variant.name }}</strong><small>{{ variantIsAvailable(variant) ? (variant.description || tr('衍生形态')) : tr('尚未生成') }}</small></span>
               <span class="scene-asset-variant-picker__check"><Check v-if="variantIsAvailable(variant) && isSelected(activeAsset.id, variant.id)" :size="14" /></span>
             </button>
-            <p v-if="normalizedQuery && !visibleVariants.length">该主体没有匹配的衍生状态，可选择基础形态。</p>
+            <p v-if="normalizedQuery && !visibleVariants.length">{{ tr('该主体没有匹配的衍生状态，可选择基础形态。') }}</p>
           </div>
         </div>
-        <p v-else class="scene-asset-variant-picker__empty">没有匹配的资产或衍生状态</p>
+        <p v-else class="scene-asset-variant-picker__empty">{{ tr('没有匹配的资产或衍生状态') }}</p>
       </section>
     </Transition>
   </Teleport>

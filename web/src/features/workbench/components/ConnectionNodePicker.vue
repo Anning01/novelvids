@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { CompatibleNodeCreation } from '../graph/nodeCreationRules';
 import { Box, Clapperboard, ImageUp, Sparkles, Stamp } from 'lucide-vue-next';
 import { computed } from 'vue';
@@ -35,14 +37,14 @@ function optionIcon(id: string) {
 
 <template>
   <Teleport to="body">
-    <div class="workbench-connection-picker" :class="accentClass" :style="style" role="dialog" aria-label="选择兼容节点" @pointerdown.stop @click.stop>
+    <div class="workbench-connection-picker" :class="accentClass" :style="style" role="dialog" :aria-label="tr('选择兼容节点')" @pointerdown.stop @click.stop>
       <header>
-        <strong>添加兼容节点</strong>
-        <button type="button" aria-label="关闭节点选择" @click="$emit('close')">
+        <strong>{{ tr('添加兼容节点') }}</strong>
+        <button type="button" :aria-label="tr('关闭节点选择')" @click="$emit('close')">
           ×
         </button>
       </header>
-      <div class="workbench-connection-picker__options workbench-scroll-region" role="listbox" aria-label="兼容节点列表">
+      <div class="workbench-connection-picker__options workbench-scroll-region" role="listbox" :aria-label="tr('兼容节点列表')">
         <button v-for="option in options" :key="option.candidate.id" type="button" role="option" @click="$emit('select', option)">
           <component :is="optionIcon(option.candidate.id)" :size="17" aria-hidden="true" />
           <span><strong>{{ option.candidate.label }}</strong><small>{{ option.candidate.description }}</small></span>

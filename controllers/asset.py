@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional, Type
@@ -191,9 +193,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         if chapter_id is not None:
             chapter = await Chapter.get_or_none(id=chapter_id)
             if chapter is None:
-                raise HTTPException(status_code=404, detail="章节不存在")
+                raise HTTPException(status_code=404, detail=localized_message('章节不存在'))
             if chapter.novel_id != data["novel_id"]:
-                raise HTTPException(status_code=400, detail="章节不属于当前项目")
+                raise HTTPException(status_code=400, detail=localized_message('章节不属于当前项目'))
             source_chapters = list(data.get("source_chapters") or [])
             if chapter.number not in source_chapters:
                 source_chapters.append(chapter.number)
@@ -218,7 +220,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         async with creation_write(instance.novel_id):
             instance = await self.get(asset_id)
             if data.pop('novel_id', instance.novel_id) != instance.novel_id:
-                raise ValueError('设定不能通过普通编辑转移项目')
+                raise ValueError(localized_message('设定不能通过普通编辑转移项目'))
             data.pop('chapter_id', None)
             old_name = instance.canonical_name
             name = data.get('canonical_name', old_name)
@@ -250,9 +252,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             asset = await self.get(asset_id)
             chapter = await Chapter.get_or_none(id=chapter_id)
             if chapter is None:
-                raise HTTPException(status_code=404, detail="章节不存在")
+                raise HTTPException(status_code=404, detail=localized_message('章节不存在'))
             if chapter.novel_id != asset.novel_id:
-                raise HTTPException(status_code=400, detail="资产与章节不属于同一项目")
+                raise HTTPException(status_code=400, detail=localized_message('资产与章节不属于同一项目'))
             source_chapters = list(asset.source_chapters or [])
             if chapter.number not in source_chapters:
                 source_chapters.append(chapter.number)
@@ -284,7 +286,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
     async def _merge_locked(self, source_asset_id: int, target_asset_id: int) -> dict[str, Any]:
         """Merge source into target, preserving target identity and every useful field."""
         if source_asset_id == target_asset_id:
-            raise HTTPException(status_code=400, detail="不能合并同一个资产")
+            raise HTTPException(status_code=400, detail=localized_message('不能合并同一个资产'))
 
         locked_assets = await Asset.filter(
             id__in=[source_asset_id, target_asset_id]
@@ -293,15 +295,15 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         source = by_id.get(source_asset_id)
         target = by_id.get(target_asset_id)
         if source is None or target is None:
-            raise HTTPException(status_code=404, detail="待合并资产不存在")
+            raise HTTPException(status_code=404, detail=localized_message('待合并资产不存在'))
         if source.novel_id != target.novel_id:
-            raise HTTPException(status_code=400, detail="只能合并同一项目内的资产")
+            raise HTTPException(status_code=400, detail=localized_message('只能合并同一项目内的资产'))
         if source.asset_type != target.asset_type:
-            raise HTTPException(status_code=400, detail="只能合并相同类型的资产")
+            raise HTTPException(status_code=400, detail=localized_message('只能合并相同类型的资产'))
 
         if (await Scene.with_deleted().filter(assets__id__in=[source.id, target.id], deleted_at__not_isnull=True).exists()
             or await AssetVariant.with_deleted().filter(asset_id__in=[source.id, target.id], deleted_at__not_isnull=True).exists()):
-            raise HTTPException(409, '资产关联了已移除的分镜或形态，请先恢复相关对象再合并，以保留恢复关系')
+            raise HTTPException(409, localized_message('资产关联了已移除的分镜或形态，请先恢复相关对象再合并，以保留恢复关系'))
 
         active_tasks = await AiTask.filter(
             task_type=AiTaskTypeEnum.reference_image.value,
@@ -319,7 +321,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         if source.id in busy_ids or target.id in busy_ids:
             raise HTTPException(
                 status_code=409,
-                detail="资产正在生成参考图，请等待任务完成后再合并",
+                detail=localized_message('资产正在生成参考图，请等待任务完成后再合并'),
             )
 
         newer, older = sorted((source, target), key=_asset_rank, reverse=True)
@@ -495,7 +497,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         async with creation_write(asset.novel_id):
             variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
             if variant is None:
-                raise HTTPException(status_code=404, detail="资产形态不存在")
+                raise HTTPException(status_code=404, detail=localized_message('资产形态不存在'))
             if 'chapter_numbers' in data:
                 await CreationObjects(asset.novel_id).ensure_variant_chapters(asset_id, data['chapter_numbers'] or [], exclude_id=variant_id)
             if data.get('name', variant.name) != variant.name:
@@ -527,7 +529,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             variants = await AssetVariant.filter(asset_id=asset_id).order_by("id")
             target = next((variant for variant in variants if variant.id == variant_id), None)
             if target is None:
-                raise HTTPException(status_code=404, detail="资产形态不存在")
+                raise HTTPException(status_code=404, detail=localized_message('资产形态不存在'))
 
             for variant in variants:
                 chapters = {
@@ -550,7 +552,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         async with creation_write(asset.novel_id):
             variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
             if variant is None:
-                raise HTTPException(status_code=404, detail="资产形态不存在")
+                raise HTTPException(status_code=404, detail=localized_message('资产形态不存在'))
             await CreationObjects(asset.novel_id).archive('variant', variant_id)
 
     async def generation_history(self, asset_id: int) -> list[dict[str, Any]]:
@@ -638,7 +640,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                 await oss.get_bytes(image_url)
             except Exception as error:  # noqa: BLE001 - 统一转为用户可读错误
                 logger.warning("annotation oss object unreadable: %s (%s)", image_url, error)
-                raise HTTPException(400, detail="标注图对象不存在或无法读取，请重新上传后再保存") from error
+                raise HTTPException(400, detail=localized_message('标注图对象不存在或无法读取，请重新上传后再保存')) from error
         task = await AiTask.create(
             task_type=AiTaskTypeEnum.reference_image.value,
             status=TaskStatusEnum.completed.value,
@@ -689,9 +691,9 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             or request_params.get("asset_id") != asset_id
             or request_params.get("variant_id") is not None
         ):
-            raise HTTPException(status_code=404, detail="该生成记录不存在")
+            raise HTTPException(status_code=404, detail=localized_message('该生成记录不存在'))
         if task.status != TaskStatusEnum.completed.value:
-            raise HTTPException(status_code=400, detail="只有生成成功的记录可以设为当前图片")
+            raise HTTPException(status_code=400, detail=localized_message('只有生成成功的记录可以设为当前图片'))
         response_data = task.response_data or {}
         raw_images = response_data.get("images", [])
         images = (
@@ -700,7 +702,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             else []
         )
         if not images:
-            raise HTTPException(status_code=400, detail="该生成记录没有可恢复的图片")
+            raise HTTPException(status_code=400, detail=localized_message('该生成记录没有可恢复的图片'))
 
         await _ensure_asset_image_derivatives(images)
 
@@ -734,7 +736,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         if variant_id is not None:
             variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset.id)
             if variant is None:
-                raise HTTPException(status_code=404, detail="资产形态不存在")
+                raise HTTPException(status_code=404, detail=localized_message('资产形态不存在'))
 
         # 1. 获取任务配置
         metadata = asset.metadata or {}
@@ -794,7 +796,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             ):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"该资产已有进行中的生成任务（{t.id}）",
+                    detail=localized_message('该资产已有进行中的生成任务（{p1}）', p1=f'{t.id}'),
                 )
 
         # 4. 提交任务
@@ -817,7 +819,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         }
         normalized_reference_images = list(dict.fromkeys(reference_images or []))
         if len(normalized_reference_images) > 10:
-            raise HTTPException(status_code=400, detail="资产设定图最多支持 10 张参考图片")
+            raise HTTPException(status_code=400, detail=localized_message('资产设定图最多支持 10 张参考图片'))
         if normalized_reference_images:
             request_params["reference_images"] = normalized_reference_images
         if team_id is not None:

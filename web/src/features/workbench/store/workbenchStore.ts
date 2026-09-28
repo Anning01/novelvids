@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { api, mediaUrl, persistedMediaRef } from '@/api'
@@ -206,7 +208,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     rebuildGraph() {
       if (!this.chapter) return
-      const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', `第 ${this.chapter.number} 章 · ${this.chapter.name}`, { x: 80, y: 80 }, { chapter: this.chapter, presentation: 'note', layout_family: 'note', layout_lane: 'note' })]
+      const nodes: WorkbenchNode[] = [node(this.chapter.id, 'chapter', 'chapter', tr('第 {p0} 章 · {p1}', { p0: this.chapter.number, p1: this.chapter.name }), { x: 80, y: 80 }, { chapter: this.chapter, presentation: 'note', layout_family: 'note', layout_lane: 'note' })]
       const edges: WorkbenchEdge[] = []
       const projectDefaults = {
         aspectRatio: this.projectConfig.aspect_ratio || '9:16',
@@ -214,7 +216,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }
       if (this.remakeSource) {
         const sourceKey = `remake-source-${this.remakeSource.id}`
-        nodes.push(node(this.remakeSource.id, sourceKey, 'source_video', `来源视频 · 第 ${this.remakeSource.episode_number} 集`, { x: 80, y: 420 }, {
+        nodes.push(node(this.remakeSource.id, sourceKey, 'source_video', tr('来源视频 · 第 {p0} 集', { p0: this.remakeSource.episode_number }), { x: 80, y: 420 }, {
           source: this.remakeSource,
           url: mediaUrl(this.remakeSource.media_url),
           layout_family: 'source',
@@ -224,7 +226,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const task = this.remakeSource.analysis_task
         if (task && task.status !== TaskStatusEnum.COMPLETED) {
           const taskKey = `remake-analysis-${task.id}`
-          const taskNode = node(-this.remakeSource.id, taskKey, 'ai_decomposition', 'AI 视频拆解', { x: 500, y: 420 }, {
+          const taskNode = node(-this.remakeSource.id, taskKey, 'ai_decomposition', tr('AI 视频拆解'), { x: 500, y: 420 }, {
             sourceId: this.remakeSource.id,
             task,
             layout_family: 'operation',
@@ -243,14 +245,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.scenes.forEach((scene, index) => {
         const sceneKey = `shot-${scene.id}`
         const sceneVideos = this.videos[scene.id] || []
-        const sceneNode = node(scene.id, sceneKey, 'shot', `镜头 ${String(scene.sequence).padStart(2, '0')}`, { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
+        const sceneNode = node(scene.id, sceneKey, 'shot', tr('镜头 {p0}', { p0: String(scene.sequence).padStart(2, '0') }), { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
         sceneNode.status = sceneHasRunningVideo(sceneVideos) ? 'running' : 'ready'
         nodes.push(sceneNode)
         sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
         const activeVideo = activeVideoForScene(scene, sceneVideos)
         if (activeVideo) {
           const resultKey = `video-${activeVideo.id}`
-          nodes.push(node(activeVideo.id, resultKey, 'video_result', `视频结果 · #${activeVideo.id}`, { x: 1400, y: index * 520 }, { video: activeVideo, sceneId: scene.id, layout_family: 'result', ui: {} }))
+          nodes.push(node(activeVideo.id, resultKey, 'video_result', tr('视频结果 · #{p0}', { p0: activeVideo.id }), { x: 1400, y: index * 520 }, { video: activeVideo, sceneId: scene.id, layout_family: 'result', ui: {} }))
           edges.push(edge(300000 + activeVideo.id, `${sceneKey}-${resultKey}`, sceneKey, resultKey, 'output_binding'))
         }
       })
@@ -309,10 +311,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         if (controller.signal.aborted) return
         if (current.status === TaskStatusEnum.COMPLETED) {
           await this.refreshRemakeWorkingSet()
-          notice.success('视频拆解完成，设定和分镜已加载')
+          notice.success(tr('视频拆解完成，设定和分镜已加载'))
         }
       } catch (error) {
-        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : '拆解状态刷新失败')
+        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : tr('拆解状态刷新失败'))
       } finally {
         this.finishPendingWork(controller)
         if (this.pollingRemakeTaskId === task.id) this.pollingRemakeTaskId = null
@@ -375,7 +377,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const updated = (await api.updateChapter(this.chapter.id, patch)).data
       this.chapter = updated
       this.rebuildGraph()
-      notice.success('章节已保存')
+      notice.success(tr('章节已保存'))
       return updated
     },
     async flushLayout() { this.persistLayout() },
@@ -385,14 +387,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (this.clipboardNode.kind === 'note') {
         const created = this.addNote({ x: this.clipboardNode.position.x + 48, y: this.clipboardNode.position.y + 48 })
         created.data = { ...created.data, content: this.clipboardNode.data.content || '', color: this.clipboardNode.data.color || '#8d793d' }
-        this.persistLayout(); notice.success('已复制便签'); return
+        this.persistLayout(); notice.success(tr('已复制便签')); return
       }
       if (this.clipboardNode.kind !== 'shot') return
       const source = this.clipboardNode.data.scene as Scene
       const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: source.description, prompt: source.prompt || '', duration: source.duration, asset_ids: sceneAssetIds(source) })).data
       this.scenes.push(created); this.videos[created.id] = []; this.rebuildGraph()
       const item = this.nodeByKey(`shot-${created.id}`); if (item) item.position = { x: this.clipboardNode.position.x + 48, y: this.clipboardNode.position.y + 48 }
-      notice.success('已复制镜头')
+      notice.success(tr('已复制镜头'))
     },
     async deleteNodeKeys(keys: string[]) {
       const selected = [...new Set(keys)]
@@ -425,7 +427,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.selectedNodeKeys = this.selectedNodeKeys.filter(key => !affectedKeys.has(key))
       this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
       this.rebuildGraph(); this.persistLayout()
-      if (affectedKeys.size) notice.success(`已删除 ${affectedKeys.size} 个节点`)
+      if (affectedKeys.size) notice.success(tr('已删除 {p0} 个节点', { p0: affectedKeys.size }))
       return affectedKeys.size
     },
     async deleteSelection() { return this.deleteNodeKeys([...this.selectedNodeKeys]) },
@@ -433,7 +435,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.checkpoint()
       const stamp = Date.now()
       const key = `${kind}-${stamp}`
-      const item = node(-stamp, key, kind, kind === 'audio_reference' ? '参考音频' : '数字人', { x: 520, y: 120 + this.manualNodes.length * 340 }, {
+      const item = node(-stamp, key, kind, kind === 'audio_reference' ? tr('参考音频') : tr('数字人'), { x: 520, y: 120 + this.manualNodes.length * 340 }, {
         resource: null,
         asset_type: kind === 'audio_reference' ? 'audio' : 'digital_human',
         layout_family: 'asset',
@@ -456,7 +458,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         originalFilename: uploaded.original_filename || uploaded.filename,
         mimeType: uploaded.content_type,
       }
-      const label = kind === 'image_media' ? '图片' : kind === 'video_media' ? '视频' : '音频'
+      const label = kind === 'image_media' ? tr('图片') : kind === 'video_media' ? tr('视频') : tr('音频')
       const item = node(-stamp, key, kind, mediaTitle(mediaData.originalFilename), position || { x: 560, y: 120 + this.manualNodes.length * 300 }, {
         ...mediaData,
         media_type: label,
@@ -466,7 +468,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })
       item.size = kind === 'audio_media' ? { width: 420, height: 170 } : { width: 360, height: 340 }
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
-      notice.success(`${label}上传完成`)
+      notice.success(tr('{p0}上传完成', { p0: label }))
       return item
     },
     async uploadMedia(kind: 'image_media' | 'video_media' | 'audio_media', file: File, position?: Point) {
@@ -502,7 +504,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (item && position) item.position = position
       if (item) this.selectNode(item.key)
       this.persistLayout()
-      notice.success('图片已作为资产添加')
+      notice.success(tr('图片已作为资产添加'))
       return item
     },
     async replaceUploadedMedia(key: string, file: File) {
@@ -524,7 +526,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
-      notice.success('媒体已重新上传')
+      notice.success(tr('媒体已重新上传'))
       return item
     },
     updateUploadedMediaMetadata(key: string, patch: Pick<UploadedMediaData, 'width' | 'height' | 'durationSeconds'>) {
@@ -545,7 +547,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       item.data = { ...item.data, annotations: cloneValue(annotations) }
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
-      notice.success('图片标注已保存')
+      notice.success(tr('图片标注已保存'))
       return true
     },
     setMediaResource(key: string, resource: AudioReference | DigitalHuman) {
@@ -556,12 +558,12 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       item.title = item.kind === 'audio_reference' && 'nickname' in resource ? resource.nickname : 'occupation' in resource ? `${resource.country} · ${resource.occupation}` : item.title
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
-      notice.success(item.kind === 'audio_reference' ? '参考音频已选择' : '数字人已选择')
+      notice.success(item.kind === 'audio_reference' ? tr('参考音频已选择') : tr('数字人已选择'))
     },
     addNote(position?: Point) {
       this.checkpoint()
       const stamp = Date.now(); const key = `note-${stamp}`
-      const item = node(-stamp, key, 'note', '便签', position || { x: 560, y: 120 + this.manualNodes.length * 260 }, { content: '', color: '#8d793d', layout_family: 'note', ui: {} })
+      const item = node(-stamp, key, 'note', tr('便签'), position || { x: 560, y: 120 + this.manualNodes.length * 260 }, { content: '', color: '#8d793d', layout_family: 'note', ui: {} })
       item.size = { width: 320, height: 220 }
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
       return item
@@ -569,7 +571,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     addWatermark(position?: Point) {
       this.checkpoint()
       const stamp = Date.now(); const key = `watermark-${stamp}`
-      const item = node(-stamp, key, 'watermark', '新水印', position || { x: 560, y: 120 + this.manualNodes.length * 320 }, {
+      const item = node(-stamp, key, 'watermark', tr('新水印'), position || { x: 560, y: 120 + this.manualNodes.length * 320 }, {
         config: normalizeWatermarkConfig(null),
         capability_key: 'apply_watermark',
         layout_family: 'result',
@@ -587,16 +589,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       item.data = { ...item.data, config: normalizeWatermarkConfig(config) }
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
       this.persistLayout()
-      notice.success('水印配置已保存')
+      notice.success(tr('水印配置已保存'))
       return true
     },
     addVideoComposer(position?: Point) {
       this.checkpoint()
       const stamp = Date.now(); const key = `video-composer-${stamp}`
       const count = this.nodes.filter(item => item.kind === 'video_composer').length + 1
-      const item = node(-stamp, key, 'video_composer', '视频合成器', position || { x: 980, y: 120 + this.manualNodes.length * 440 }, {
+      const item = node(-stamp, key, 'video_composer', tr('视频合成器'), position || { x: 980, y: 120 + this.manualNodes.length * 440 }, {
         config: normalizeComposerConfig({
-          name: count === 1 ? '视频合成器' : `视频合成器 ${count}`,
+          name: count === 1 ? tr('视频合成器') : tr('视频合成器 {p0}', { p0: count }),
           aspectRatio: this.projectConfig.aspect_ratio || undefined,
           resolution: this.projectConfig.resolution || undefined,
         } as Partial<ComposerConfig>),
@@ -629,11 +631,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         item.status = 'completed'
         this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
         this.persistLayout()
-        notice.success('当前集成片合成完成')
+        notice.success(tr('当前集成片合成完成'))
         return result
       } catch (error) {
         item.status = 'failed'
-        notice.error(error instanceof Error ? error.message : '视频合成失败')
+        notice.error(error instanceof Error ? error.message : tr('视频合成失败'))
         throw error
       } finally {
         this.busyComposerKeys = this.busyComposerKeys.filter(itemKey => itemKey !== key)
@@ -658,7 +660,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const stamp = Date.now(); const key = `section-${stamp}`
       const count = this.nodes.filter(item => item.kind === 'section').length + 1
       const memberZ = memberKeys.map(keyValue => this.nodeByKey(keyValue)?.zIndex ?? 1)
-      const item = node(-stamp, key, 'section', `分区 ${count}`, position, { color, description: '', node_keys: memberKeys, layout_family: 'section', ui: {} })
+      const item = node(-stamp, key, 'section', tr('分区 {p0}', { p0: count }), position, { color, description: '', node_keys: memberKeys, layout_family: 'section', ui: {} })
       item.size = size; item.zIndex = Math.min(-1, ...memberZ.map(value => value - 1))
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
       return item
@@ -737,16 +739,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }
       this.mediaEdges.push(item); this.edges.push(item); this.persistLayout()
       notice.success(isAssetReference
-        ? '参考图片已连接到资产'
+        ? tr('参考图片已连接到资产')
         : isShotSequence
-          ? '视频顺序已连接'
+          ? tr('视频顺序已连接')
           : isWatermarkVideo
-            ? '视频已连接到水印'
+            ? tr('视频已连接到水印')
             : isComposerWatermark
-              ? '水印已连接到视频合成器'
+              ? tr('水印已连接到视频合成器')
               : isComposerShot || isComposerVideo
-                ? '视频已加入成片输入'
-                : '参考资源已连接到视频')
+                ? tr('视频已加入成片输入')
+                : tr('参考资源已连接到视频'))
       return true
     },
     deleteMediaEdge(edgeKey: string) {
@@ -756,7 +758,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.edges = this.edges.filter(item => item.key !== edgeKey)
       this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => key !== edgeKey)
       this.persistLayout()
-      notice.success('已移除参考资源')
+      notice.success(tr('已移除参考资源'))
       return true
     },
     updateMediaEdgeConfig(edgeKey: string, patch: Record<string, unknown>) {
@@ -787,7 +789,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const source = this.nodes.find(item => item.kind === 'shot' && item.id === sceneId)?.data.scene as Scene | undefined
       const expected = Object.hasOwn(patch, 'prompt') ? (source ?? this.scenes.find(item => item.id === sceneId))?.prompt ?? null : undefined
       const updated = (await api.updateScene(sceneId, patch, expected)).data
-      this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item); this.rebuildGraph(); notice.success('镜头已保存')
+      this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item); this.rebuildGraph(); notice.success(tr('镜头已保存'))
     },
     async refreshAgentPrompts(targets: { kind: string; target_id: number }[]) {
       const epoch = this.loadEpoch.snapshot()
@@ -844,7 +846,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.removedAgentDrafts = Object.fromEntries(drafts)
       this.selectedNodeKeys = this.selectedNodeKeys.filter(key => this.nodes.some(item => item.key === key))
       this.selectedEdgeKeys = this.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
-      if (conflicts.length) notice.info(`助手调整已保存；${conflicts.join('、')} 的本地草稿已保留。`)
+      if (conflicts.length) notice.info(tr('助手调整已保存；{p0} 的本地草稿已保留。', { p0: conflicts.join('、') }))
     },
     async setActiveVideo(sceneId: number, videoId: number) {
       const scene = this.scenes.find(item => item.id === sceneId)
@@ -853,7 +855,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const updated = (await api.updateScene(sceneId, { metadata: nextMetadata })).data
       this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item)
       this.rebuildGraph()
-      notice.success('已切换镜头视频版本')
+      notice.success(tr('已切换镜头视频版本'))
       return updated
     },
     async saveAsset(assetId: number, patch: Partial<Asset>) {
@@ -862,17 +864,17 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const updated = (await api.updateAsset(assetId, patch, expected)).data
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
       this.rebuildGraph()
-      notice.success('资产描述已保存')
+      notice.success(tr('资产描述已保存'))
     },
     async addEmptyAsset(position?: Point) {
       const names = new Set(this.assets.map(item => item.canonical_name))
       let suffix = 1
-      while (names.has(`资产 ${suffix}`)) suffix += 1
+      while (names.has(tr('资产 {p0}', { p0: suffix }))) suffix += 1
       const created = (await api.createAsset({
         novel_id: this.novelId,
         chapter_id: this.chapterId,
         asset_type: AssetTypeEnum.PERSON,
-        canonical_name: `资产 ${suffix}`,
+        canonical_name: tr('资产 {p0}', { p0: suffix }),
         metadata: {
           [REUSABLE_ASSET_PLACEHOLDER_KEY]: true,
           aspect_ratio: DEFAULT_ASSET_ASPECT_RATIO,
@@ -885,11 +887,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (item && position) item.position = position
       if (item) this.selectNode(item.key)
       this.persistLayout()
-      notice.success('已添加空资产')
+      notice.success(tr('已添加空资产'))
       return item
     },
     reusableAssetName(name: string, targetAssetId: number) {
-      const base = name.trim() || '复用资产'
+      const base = name.trim() || tr('复用资产')
       const usedNames = new Set(this.assets.filter(asset => asset.id !== targetAssetId).map(asset => `${asset.asset_type}:${asset.canonical_name}`))
       const target = this.assets.find(asset => asset.id === targetAssetId)
       if (!target || !usedNames.has(`${target.asset_type}:${base}`)) return base
@@ -899,8 +901,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     async applyPublicAssetToPlaceholder(placeholderId: number, source: Asset) {
       const placeholder = this.assets.find(asset => asset.id === placeholderId)
-      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error('请从新建的空资产选择公共资产')
-      if (placeholder.asset_type !== source.asset_type) throw new Error('只能选择与当前节点类型一致的公共资产')
+      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error(tr('请从新建的空资产选择公共资产'))
+      if (placeholder.asset_type !== source.asset_type) throw new Error(tr('只能选择与当前节点类型一致的公共资产'))
       const sourceMetadata = source.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata)
         ? source.metadata as Record<string, unknown>
         : {}
@@ -923,13 +925,13 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })).data
       this.assets = this.assets.map(asset => asset.id === placeholderId ? updated : asset)
       this.rebuildGraph()
-      notice.success(`已应用公共资产「${updated.canonical_name}」`)
+      notice.success(tr('已应用公共资产「{p0}」', { p0: updated.canonical_name }))
       return this.nodeByKey(`asset-${updated.id}`) || null
     },
     async applyPublicDigitalHumanToPlaceholder(placeholderId: number, human: DigitalHuman) {
       const placeholder = this.assets.find(asset => asset.id === placeholderId)
-      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error('请从新建的空资产选择公共人物')
-      if (placeholder.asset_type !== AssetTypeEnum.PERSON) throw new Error('公共人物只能用于人物资产')
+      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error(tr('请从新建的空资产选择公共人物'))
+      if (placeholder.asset_type !== AssetTypeEnum.PERSON) throw new Error(tr('公共人物只能用于人物资产'))
       const currentMetadata = placeholder.metadata && typeof placeholder.metadata === 'object' && !Array.isArray(placeholder.metadata)
         ? placeholder.metadata as Record<string, unknown>
         : {}
@@ -937,8 +939,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         ? currentMetadata.workbench as Record<string, unknown>
         : {}
       const updated = (await api.updateAsset(placeholderId, {
-        canonical_name: this.reusableAssetName(human.occupation || '公共人物', placeholderId),
-        description: `${human.country} · ${human.gender} · ${human.age} 岁${human.occupation ? ` · ${human.occupation}` : ''}`,
+        canonical_name: this.reusableAssetName(human.occupation || tr('公共人物'), placeholderId),
+        description: tr('{p0} · {p1} · {p2} 岁{p3}', { p0: human.country, p1: human.gender, p2: human.age, p3: human.occupation ? ` · ${human.occupation}` : '' }),
         main_image: human.image_url,
         is_global: false,
         metadata: {
@@ -959,14 +961,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })).data
       this.assets = this.assets.map(asset => asset.id === placeholderId ? updated : asset)
       this.rebuildGraph()
-      notice.success(`已应用公共人物「${updated.canonical_name}」`)
+      notice.success(tr('已应用公共人物「{p0}」', { p0: updated.canonical_name }))
       return this.nodeByKey(`asset-${updated.id}`) || null
     },
     async reuseProjectAssetInPlaceholder(placeholderId: number, source: Asset) {
       const placeholder = this.assets.find(asset => asset.id === placeholderId)
-      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error('请从新建的空资产选择项目资产')
-      if (placeholder.asset_type !== source.asset_type) throw new Error('只能选择与当前节点类型一致的项目资产')
-      if (placeholder.novel_id !== source.novel_id || source.novel_id !== this.novelId) throw new Error('只能复用当前项目的资产')
+      if (!placeholder || !isReusableAssetPlaceholder(placeholder)) throw new Error(tr('请从新建的空资产选择项目资产'))
+      if (placeholder.asset_type !== source.asset_type) throw new Error(tr('只能选择与当前节点类型一致的项目资产'))
+      if (placeholder.novel_id !== source.novel_id || source.novel_id !== this.novelId) throw new Error(tr('只能复用当前项目的资产'))
       const placeholderNode = this.nodeByKey(`asset-${placeholderId}`)
       const position = placeholderNode ? { ...placeholderNode.position } : null
       const zIndex = placeholderNode?.zIndex
@@ -979,7 +981,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (item && zIndex !== undefined) item.zIndex = zIndex
       if (item) this.selectNode(item.key)
       this.persistLayout()
-      notice.success(`已复用项目资产「${merged.canonical_name}」`)
+      notice.success(tr('已复用项目资产「{p0}」', { p0: merged.canonical_name }))
       return item
     },
     async reuseAsset(assetId: number, position?: Point) {
@@ -995,14 +997,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (item && position) item.position = position
       if (item) this.selectNode(item.key)
       this.persistLayout()
-      notice.success(`已复用资产「${reused.canonical_name}」`)
+      notice.success(tr('已复用资产「{p0}」', { p0: reused.canonical_name }))
       return item
     },
     async setAssetMainImage(assetId: number, url: string | null) {
       const updated = (await api.updateAsset(assetId, { main_image: url } as Partial<Asset>)).data
       this.assets = this.assets.map(item => item.id === assetId ? updated : item)
       this.rebuildGraph()
-      notice.success(url ? '已设为主图' : '已清除主图')
+      notice.success(url ? tr('已设为主图') : tr('已清除主图'))
       return updated
     },
     async replaceAssetImage(assetId: number, file: File) {
@@ -1028,7 +1030,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })).data
       this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
       this.rebuildGraph()
-      notice.success('资产图片已更新')
+      notice.success(tr('资产图片已更新'))
       return updated
     },
     async updateAssetImageMetadata(assetId: number, patch: { width?: number; height?: number }) {
@@ -1054,7 +1056,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })).data
       this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
       this.rebuildGraph()
-      notice.success('图片标注已保存')
+      notice.success(tr('图片标注已保存'))
       return updated
     },
     async createAssetVariant(assetId: number, data: { name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; metadata?: Record<string, unknown> }) {
@@ -1063,7 +1065,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         ? { ...asset, variants: [...(asset.variants || []), created] }
         : asset)
       this.rebuildGraph()
-      notice.success(`已新增形态「${created.name}」`)
+      notice.success(tr('已新增形态「{p0}」', { p0: created.name }))
       return created
     },
     async deleteAssetVariant(assetId: number, variantId: number) {
@@ -1072,7 +1074,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         ? { ...asset, variants: (asset.variants || []).filter(variant => variant.id !== variantId) }
         : asset)
       this.rebuildGraph()
-      notice.success('资产形态已删除')
+      notice.success(tr('资产形态已删除'))
     },
     assetGenerationReferenceImages(assetId: number) {
       const target = this.nodes.find(item => item.kind === 'asset' && item.id === assetId)
@@ -1107,27 +1109,27 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
             { signal: controller.signal, intervalMs: 2500, terminalStatuses: terminal },
           )
         }
-        if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || '资产图片生成失败')
+        if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || tr('资产图片生成失败'))
         const updated = (await api.asset(assetId)).data
         if (controller.signal.aborted) return
         this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
         this.rebuildGraph()
-        notice.success('资产图片生成完成')
+        notice.success(tr('资产图片生成完成'))
       } catch (error) {
-        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : '资产图片生成失败')
+        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : tr('资产图片生成失败'))
       } finally {
         this.finishPendingWork(controller)
         this.busyAssetIds = this.busyAssetIds.filter(id => id !== assetId)
       }
     },
     async addShot(position?: Point) {
-      const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, description: '新镜头', prompt: '', duration: 6 })).data
+      const created = (await api.createScene({ chapter_id: this.chapterId, sequence: Math.max(0, ...this.scenes.map(item => item.sequence)) + 1, get description() { return tr('新镜头') }, prompt: '', duration: 6 })).data
       this.scenes.push(created); this.videos[created.id] = []; this.rebuildGraph()
       const item = this.nodeByKey(`shot-${created.id}`) || null
       if (item && position) item.position = position
       if (item) this.selectNode(item.key)
       this.persistLayout()
-      notice.success('已添加镜头')
+      notice.success(tr('已添加镜头'))
       return item
     },
     async generateScenes() {
@@ -1140,10 +1142,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
               async () => (await api.task(task.id)).data,
               { signal: controller.signal, intervalMs: 2500, terminalStatuses: terminal },
             )
-        if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || '分镜生成失败')
+        if (current.status !== TaskStatusEnum.COMPLETED) throw new Error(current.error_message || tr('分镜生成失败'))
         if (controller.signal.aborted) return
         await this.load(this.novelId, this.chapterId)
-        notice.success('分镜生成完成')
+        notice.success(tr('分镜生成完成'))
       } catch (error) {
         if (!isAbortError(error)) throw error
       } finally {
@@ -1167,7 +1169,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
             const updated = (await api.updateScene(sceneId, { metadata: adopted.metadata })).data
             this.scenes = this.scenes.map(item => item.id === sceneId ? updated : item)
           } catch {
-            notice.error('视频已提交，但采用状态保存失败；刷新后可重新选择该版本')
+            notice.error(tr('视频已提交，但采用状态保存失败；刷新后可重新选择该版本'))
           }
         }
         this.rebuildGraph()
@@ -1182,7 +1184,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
             return current
           }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal })
         }
-        video.status === TaskStatusEnum.COMPLETED ? notice.success('视频生成完成') : notice.error(String(video.metadata?.error || '视频生成失败'))
+        video.status === TaskStatusEnum.COMPLETED ? notice.success(tr('视频生成完成')) : notice.error(String(video.metadata?.error || tr('视频生成失败')))
       } catch (error) {
         if (!isAbortError(error)) throw error
       } finally {
@@ -1212,11 +1214,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal })
         if (!controller.signal.aborted) {
           video.status === TaskStatusEnum.COMPLETED
-            ? notice.success('视频生成完成')
-            : notice.error(String(video.metadata?.error || '视频生成失败'))
+            ? notice.success(tr('视频生成完成'))
+            : notice.error(String(video.metadata?.error || tr('视频生成失败')))
         }
       } catch (error) {
-        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : '视频状态刷新失败')
+        if (!isAbortError(error)) notice.error(error instanceof Error ? error.message : tr('视频状态刷新失败'))
       } finally {
         this.finishPendingWork(controller)
         this.pollingVideoIds = this.pollingVideoIds.filter(id => id !== videoId)

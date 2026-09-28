@@ -5,7 +5,7 @@ import videoPageSource from './ShortDramaVideoPage.vue?raw'
 describe('short drama video timeline', () => {
   it('renders a scalable ruler and uses a black stage for missing clips', () => {
     expect(videoPageSource).toContain('class="video-timeline-ruler"')
-    expect(videoPageSource).toContain('aria-label="时间轴刻度尺寸"')
+    expect(videoPageSource).toContain(`:aria-label="tr('时间轴刻度尺寸')"`)
     expect(videoPageSource).toContain('timelineScale')
     expect(videoPageSource).toContain('class="video-stage-blackout"')
     expect(videoPageSource).toContain('@ended="advanceTimeline(true)"')

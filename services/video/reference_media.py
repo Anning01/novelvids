@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import json
 import re
@@ -85,7 +87,7 @@ def _media_kind(extension: str, capabilities: VideoModelCapabilities) -> MediaKi
         return "image"
     if normalized in capabilities.reference_video_formats:
         return "video"
-    raise HTTPException(400, detail="仅支持当前视频模型允许的参考图片或 MP4/MOV 视频")
+    raise HTTPException(400, detail=localized_message('仅支持当前视频模型允许的参考图片或 MP4/MOV 视频'))
 
 
 def _probe(path: Path) -> dict[str, Any]:
@@ -102,11 +104,11 @@ def _probe(path: Path) -> dict[str, Any]:
             timeout=30,
         )
     except (FileNotFoundError, subprocess.SubprocessError) as exc:
-        raise HTTPException(400, detail="无法读取媒体信息，请确认文件没有损坏且编码受支持") from exc
+        raise HTTPException(400, detail=localized_message('无法读取媒体信息，请确认文件没有损坏且编码受支持')) from exc
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise HTTPException(400, detail="无法解析媒体信息") from exc
+        raise HTTPException(400, detail=localized_message('无法解析媒体信息')) from exc
 
 
 def _positive_float(value: Any) -> float:
@@ -143,7 +145,7 @@ def _validate_geometry(
     capabilities: VideoModelCapabilities,
 ) -> None:
     if not width or not height:
-        raise HTTPException(400, detail="无法读取媒体宽高")
+        raise HTTPException(400, detail=localized_message('无法读取媒体宽高'))
     side_min = (
         capabilities.reference_video_side_min
         if kind == "video" and capabilities.reference_video_side_min is not None
@@ -158,12 +160,12 @@ def _validate_geometry(
         raise HTTPException(
             400,
             detail=(
-                f"参考媒体宽高必须在 {side_min}-{side_max}px 之间"
+                localized_message('参考媒体宽高必须在 {p1}-{p3}px 之间', p1=f'{side_min}', p3=f'{side_max}')
             ),
         )
     ratio = width / height
     if not capabilities.reference_media_ratio_min <= ratio <= capabilities.reference_media_ratio_max:
-        raise HTTPException(400, detail="参考媒体宽高比必须在 0.4-2.5 之间")
+        raise HTTPException(400, detail=localized_message('参考媒体宽高比必须在 0.4-2.5 之间'))
 
 
 def _validate_probe(
@@ -178,29 +180,28 @@ def _validate_probe(
     _validate_geometry(kind, width, height, capabilities)
     if kind == "image":
         if size_bytes > capabilities.reference_image_max_size_mb * 1024 * 1024:
-            raise HTTPException(400, detail=f"单张参考图片不能超过 {capabilities.reference_image_max_size_mb}MB")
+            raise HTTPException(400, detail=localized_message('单张参考图片不能超过 {p1}MB', p1=f'{capabilities.reference_image_max_size_mb}'))
         return {"width": width, "height": height}
 
     if size_bytes > capabilities.reference_video_max_size_mb * 1024 * 1024:
-        raise HTTPException(400, detail=f"单个参考视频不能超过 {capabilities.reference_video_max_size_mb}MB")
+        raise HTTPException(400, detail=localized_message('单个参考视频不能超过 {p1}MB', p1=f'{capabilities.reference_video_max_size_mb}'))
     container_names = {
         value.strip().lower()
         for value in str(probe.get("format", {}).get("format_name") or "").split(",")
     }
     if not container_names.intersection({"mov", "mp4"}):
-        raise HTTPException(400, detail="参考视频仅支持 MP4 或 MOV 容器格式")
+        raise HTTPException(400, detail=localized_message('参考视频仅支持 MP4 或 MOV 容器格式'))
     pixels = width * height
     if not capabilities.reference_video_pixels_min <= pixels <= capabilities.reference_video_pixels_max:
         raise HTTPException(
             400,
             detail=(
-                f"参考视频总像素数必须在 {capabilities.reference_video_pixels_min}-"
-                f"{capabilities.reference_video_pixels_max} 之间"
+                localized_message('参考视频总像素数必须在 {p1}-{p3} 之间', p1=f'{capabilities.reference_video_pixels_min}', p3=f'{capabilities.reference_video_pixels_max}')
             ),
         )
     codec = str(stream.get("codec_name") or "").lower()
     if capabilities.reference_video_codecs and codec not in capabilities.reference_video_codecs:
-        raise HTTPException(400, detail="参考视频仅支持 H.264/AVC 或 H.265/HEVC 编码")
+        raise HTTPException(400, detail=localized_message('参考视频仅支持 H.264/AVC 或 H.265/HEVC 编码'))
     audio_codecs = {
         str(item.get("codec_name") or "").lower()
         for item in probe.get("streams", [])
@@ -212,14 +213,13 @@ def _validate_probe(
         else set()
     )
     if unsupported_audio:
-        raise HTTPException(400, detail="参考视频音轨仅支持 AAC 或 MP3 编码")
+        raise HTTPException(400, detail=localized_message('参考视频音轨仅支持 AAC 或 MP3 编码'))
     duration = _positive_float(probe.get("format", {}).get("duration")) or _positive_float(stream.get("duration"))
     if not capabilities.reference_media_duration_min <= duration <= capabilities.reference_video_duration_max:
         raise HTTPException(
             400,
             detail=(
-                f"当前模型要求单个参考视频时长为 {capabilities.reference_media_duration_min}-"
-                f"{capabilities.reference_video_duration_max} 秒"
+                localized_message('当前模型要求单个参考视频时长为 {p1}-{p3} 秒', p1=f'{capabilities.reference_media_duration_min}', p3=f'{capabilities.reference_video_duration_max}')
             ),
         )
     fps = _fps(stream)
@@ -227,8 +227,7 @@ def _validate_probe(
         raise HTTPException(
             400,
             detail=(
-                f"参考视频帧率必须在 {capabilities.reference_video_fps_min}-"
-                f"{capabilities.reference_video_fps_max} FPS 之间"
+                localized_message('参考视频帧率必须在 {p1}-{p3} FPS 之间', p1=f'{capabilities.reference_video_fps_min}', p3=f'{capabilities.reference_video_fps_max}')
             ),
         )
     return {
@@ -264,7 +263,7 @@ async def save_reference_upload(
                 size_bytes += len(chunk)
                 if size_bytes > max_bytes:
                     label = "图片" if kind == "image" else "视频"
-                    raise HTTPException(400, detail=f"单个参考{label}不能超过 {max_bytes // 1024 // 1024}MB")
+                    raise HTTPException(400, detail=localized_message('单个参考{p1}不能超过 {p3}MB', p1=f'{label}', p3=f'{max_bytes // 1024 // 1024}'))
                 target.write(chunk)
         probe = await asyncio.to_thread(_probe, temporary)
         metadata = _validate_probe(kind, probe, size_bytes, capabilities)
@@ -292,7 +291,7 @@ def local_reference_path(url: str) -> Path | None:
     filename = Path(url[len(prefix):]).name
     path = Path(settings.MEDIA_PATH) / "video-references" / filename
     if not path.is_file():
-        raise HTTPException(400, detail=f"参考素材不存在：{filename}")
+        raise HTTPException(400, detail=localized_message('参考素材不存在：{p1}', p1=f'{filename}'))
     return path
 
 
@@ -306,6 +305,6 @@ async def verify_local_reference(
         return None
     extension_kind = _media_kind(path.suffix, capabilities)
     if extension_kind != kind:
-        raise HTTPException(400, detail="参考素材类型与文件格式不一致")
+        raise HTTPException(400, detail=localized_message('参考素材类型与文件格式不一致'))
     probe = await asyncio.to_thread(_probe, path)
     return _validate_probe(kind, probe, path.stat().st_size, capabilities)

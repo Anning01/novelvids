@@ -1,6 +1,7 @@
 import { enableAutoUnmount } from '@vue/test-utils'
 import '@testing-library/jest-dom/vitest'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
+import { setLocale } from '@/i18n'
 
 enableAutoUnmount(afterEach)
 
@@ -43,3 +44,7 @@ class IntersectionObserverStub implements IntersectionObserver {
 if (typeof globalThis.IntersectionObserver === 'undefined') {
   globalThis.IntersectionObserver = IntersectionObserverStub
 }
+
+// Existing behavior tests exercise the Chinese interface explicitly.
+setLocale('zh')
+beforeEach(() => setLocale('zh'))

@@ -6,6 +6,8 @@
 - 加入与注册都校验团队人数上限与团队状态。
 """
 
+from utils.messages import localized_message
+
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -26,9 +28,9 @@ async def create_invite(
 ) -> TeamInvite:
     team = await Team.get_or_none(id=team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="团队不存在")
+        raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
     if role not in ("admin", "creator", "viewer"):
-        raise HTTPException(status_code=422, detail="角色必须是 admin/creator/viewer")
+        raise HTTPException(status_code=422, detail=localized_message('角色必须是 admin/creator/viewer'))
     token = secrets.token_urlsafe(24)
     return await TeamInvite.create(
         token=token,
@@ -56,7 +58,7 @@ async def join_team_via_invite(user: User, token: str) -> dict:
     invite = await _valid_invite(token)
     await _enforce_member_limit(invite.team)
     if await TeamMember.filter(team=invite.team, user=user).exists():
-        raise HTTPException(status_code=400, detail="你已是该团队成员")
+        raise HTTPException(status_code=400, detail=localized_message('你已是该团队成员'))
     membership = await TeamMember.create(team=invite.team, user=user, role=invite.role)
     invite.used_count += 1
     await invite.save(update_fields=["used_count", "updated_at"])
@@ -75,7 +77,7 @@ async def register_via_invite(
     invite = await _valid_invite(token)
     username = username.strip()
     if await User.filter(username=username).exists():
-        raise HTTPException(status_code=400, detail="用户名已被使用")
+        raise HTTPException(status_code=400, detail=localized_message('用户名已被使用'))
     await _enforce_member_limit(invite.team)
     user = await User.create(
         username=username,
@@ -97,9 +99,9 @@ async def register_via_invite(
 async def _valid_invite(token: str) -> TeamInvite:
     invite = await TeamInvite.get_or_none(token=token).select_related("team")
     if invite is None or invite.expires_at <= _now():
-        raise HTTPException(status_code=404, detail="邀请链接不存在或已过期")
+        raise HTTPException(status_code=404, detail=localized_message('邀请链接不存在或已过期'))
     if invite.team.status != 1:
-        raise HTTPException(status_code=403, detail="团队已停用")
+        raise HTTPException(status_code=403, detail=localized_message('团队已停用'))
     return invite
 
 
@@ -109,5 +111,5 @@ async def _enforce_member_limit(team: Team) -> None:
     count = await TeamMember.filter(team=team).count()
     if count >= team.member_limit:
         raise HTTPException(
-            status_code=403, detail=f"团队人数已达上限（{team.member_limit} 人）"
+            status_code=403, detail=localized_message('团队人数已达上限（{p1} 人）', p1=f'{team.member_limit}')
         )

@@ -192,12 +192,16 @@ class VideoGenerationModelOut(BaseModel):
     capabilities: VideoGenerationCapabilitiesOut = Field(..., description="视频生成参数能力")
 
 
+class LocaleOut(BaseModel):
+    locale: Literal["zh", "en"]
+
+
 class GeneralConfigUpdate(BaseModel):
     """应用级通用配置更新请求。"""
 
     prompt_language: Literal["zh", "en"] = Field(
         ...,
-        description="新生成的图片提示词与镜头提示词语言",
+        description="全站界面与后续生成任务的语言；不翻译已有内容",
     )
 
 

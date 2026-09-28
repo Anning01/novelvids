@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
 from uuid import UUID
 
@@ -50,7 +52,7 @@ _EDITOR = Depends(require_roles("admin", "creator"))
 async def restore_asset(asset_id: int, ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
     asset = await Asset.with_deleted().filter(id=asset_id).first()
     if asset is None:
-        raise HTTPException(404, '设定不存在')
+        raise HTTPException(404, localized_message('设定不存在'))
     await ensure_novel_access(asset.novel_id, ctx)
     async with creation_write(asset.novel_id):
         restored = await CreationObjects(asset.novel_id).restore('asset', asset.id)
@@ -61,12 +63,12 @@ async def restore_asset(asset_id: int, ctx: AuthContext = Depends(get_auth_conte
 async def restore_asset_variant(asset_id: int, variant_id: int, ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
     asset = await Asset.get_or_none(id=asset_id)
     if asset is None:
-        raise HTTPException(404, '请先恢复所属设定')
+        raise HTTPException(404, localized_message('请先恢复所属设定'))
     await ensure_novel_access(asset.novel_id, ctx)
     from models.asset_variant import AssetVariant
     variant = await AssetVariant.with_deleted().filter(id=variant_id, asset_id=asset_id).first()
     if variant is None:
-        raise HTTPException(404, '形态不存在')
+        raise HTTPException(404, localized_message('形态不存在'))
     async with creation_write(asset.novel_id):
         restored = await CreationObjects(asset.novel_id).restore('variant', variant.id)
     return ResponseSchema(data=restored)

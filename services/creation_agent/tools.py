@@ -1,5 +1,7 @@
 """Two scoped prompt writers with transactional history and optimistic concurrency."""
 
+from utils.messages import localized_message
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -45,7 +47,7 @@ class PromptEditService:
                  authorization_check: Callable[[], Awaitable[None]] | None = None,
                  context_check: Callable[[], Awaitable[list[dict] | None]] | None = None):
         if max_batch_size < 1:
-            raise ValueError("批次上限必须大于0")
+            raise ValueError(localized_message('批次上限必须大于0'))
         self.novel_id = novel_id
         self.task_id = task_id
         self.allowed_targets = frozenset(allowed_targets)
@@ -57,7 +59,7 @@ class PromptEditService:
         if self.authorization_check:
             await self.authorization_check()
         if (kind, target_id) not in self.allowed_targets:
-            raise ValueError("目标不在当前请求授权范围内")
+            raise ValueError(localized_message('目标不在当前请求授权范围内'))
         if kind == "scene":
             query = Scene.filter(id=target_id, chapter__novel_id=self.novel_id)
         elif kind == "asset":
@@ -65,10 +67,10 @@ class PromptEditService:
         elif kind == "variant":
             query = AssetVariant.filter(id=target_id, asset__novel_id=self.novel_id)
         else:
-            raise ValueError("不支持的 Prompt 目标")
+            raise ValueError(localized_message('不支持的 Prompt 目标'))
         target = await query.using_db(connection).first()
         if target is None:
-            raise ValueError("当前项目内不存在该目标")
+            raise ValueError(localized_message('当前项目内不存在该目标'))
         return target
 
     @staticmethod
@@ -82,7 +84,7 @@ class PromptEditService:
             variant = select_asset_variant(asset, scene.chapter.number, selected)
             explicit_id = selected.get(asset.id)
             if explicit_id is not None and variant is None:
-                raise ValueError("已选择的资产形态不存在，请先修复素材绑定")
+                raise ValueError(localized_message('已选择的资产形态不存在，请先修复素材绑定'))
             source = variant or asset
             name = asset.canonical_name
             aliases = list(asset.aliases or [])
@@ -135,9 +137,9 @@ class PromptEditService:
 
     async def _apply(self, edits: list[ImagePromptEdit] | list[StoryboardPromptEdit], *, tool_call_id: str):
         if not tool_call_id or len(tool_call_id) > 200:
-            raise ValueError("工具调用标识无效")
+            raise ValueError(localized_message('工具调用标识无效'))
         if not 1 <= len(edits) <= self.max_batch_size:
-            raise ValueError("修改目标数量超出当前批次上限")
+            raise ValueError(localized_message('修改目标数量超出当前批次上限'))
         request_hash = _digest([edit.model_dump(mode="json") for edit in edits])
         try:
             async with project_write(self.novel_id) as connection:
@@ -146,7 +148,7 @@ class PromptEditService:
                     return replay
                 task = await AiTask.filter(id=self.task_id).using_db(connection).select_for_update().first()
                 if task is None or (task.request_params or {}).get("novel_id") != self.novel_id:
-                    raise ValueError("运行不属于当前项目")
+                    raise ValueError(localized_message('运行不属于当前项目'))
                 if task.status != TaskStatusEnum.running.value:
                     raise PromptEditConflict("运行已停止或结束，不能继续写入")
                 # The conditional write also acquires SQLite's write lock before targets change.
@@ -160,10 +162,10 @@ class PromptEditService:
                     kind = "scene" if isinstance(edit, StoryboardPromptEdit) else edit.target_kind
                     target_id = edit.scene_id if isinstance(edit, StoryboardPromptEdit) else edit.target_id
                     if (kind, target_id) in seen:
-                        raise ValueError("同一批次不能重复修改同一目标")
+                        raise ValueError(localized_message('同一批次不能重复修改同一目标'))
                     seen.add((kind, target_id))
                     if not edit.expected_version:
-                        raise ValueError("写入请求缺少服务端并发版本")
+                        raise ValueError(localized_message('写入请求缺少服务端并发版本'))
                     target = await self._target(kind, target_id, connection)
                     if prompt_version(target) != edit.expected_version:
                         raise PromptEditConflict("目标已被修改，请重新读取最新 Prompt")
@@ -228,7 +230,7 @@ class PromptEditService:
         async with project_write(self.novel_id) as connection:
             change = await PromptChange.filter(id=change_id, novel_id=self.novel_id, task_id=self.task_id).using_db(connection).select_for_update().first()
             if change is None:
-                raise ValueError("当前运行中不存在该修改记录")
+                raise ValueError(localized_message('当前运行中不存在该修改记录'))
             if change.reverted_at:
                 return change
             for item in change.changes:

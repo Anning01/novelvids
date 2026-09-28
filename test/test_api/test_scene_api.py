@@ -404,7 +404,7 @@ async def test_generate_stale_task_cleaned(client: AsyncClient):
     # 旧任务应被标记为 failed
     await stale_task.refresh_from_db()
     assert stale_task.status == TaskStatusEnum.failed.value
-    assert "异常任务清理" in stale_task.error_message
+    assert "Stale task expired" in stale_task.error_message
     print(f"    超时任务 id={stale_task.id} 已清理: '{stale_task.error_message}'")
     print(f"    新任务提交成功: {response.json()['data']['id']}")
 

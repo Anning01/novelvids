@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { LoaderCircle, Play } from 'lucide-vue-next';
 
 withDefaults(defineProps<{
@@ -11,7 +13,7 @@ withDefaults(defineProps<{
 }>(), {
   ariaLabel: '',
   busy: false,
-  busyLabel: '处理中…',
+  get busyLabel() { return tr('处理中…') },
   progress: null,
   disabled: false,
 });

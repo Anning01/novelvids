@@ -5,6 +5,8 @@
 - MLChapterRecognitionStrategy: 基于机器学习的识别
 """
 
+from utils.messages import localized_message
+
 import re
 from abc import ABC, abstractmethod
 from decimal import Decimal, getcontext
@@ -64,7 +66,7 @@ class NovelText:
     def from_string(cls, content: str) -> Self:
         """从字符串创建实例。"""
         if not content:
-            raise ValueError("小说内容不能为空")
+            raise ValueError(localized_message('小说内容不能为空'))
         return cls(content=content)
 
 
@@ -81,11 +83,11 @@ class ParsedChapterResult:
     def __post_init__(self):
         """验证索引值。"""
         if self.start_index < 0:
-            raise ValueError("起始索引不能为负数")
+            raise ValueError(localized_message('起始索引不能为负数'))
         if self.end_index <= self.start_index:
-            raise ValueError("结束索引必须大于起始索引")
+            raise ValueError(localized_message('结束索引必须大于起始索引'))
         if not (0.0 <= self.confidence <= 1.0):
-            raise ValueError("置信度必须在 0.0 到 1.0 之间")
+            raise ValueError(localized_message('置信度必须在 0.0 到 1.0 之间'))
 
 
 # 中文数字映射表
@@ -229,7 +231,7 @@ class RegexChapterRecognitionStrategy(ChapterRecognitionStrategy):
     # 匹配 "第X章"，X 可以是中文数字或阿拉伯数字
     # 捕获组: (完整匹配), (数字部分), (标题部分)
     CHAPTER_PATTERN = re.compile(
-        r"^\s*(第\s*([0-9零一二三四五六七八九十百千万亿]+)\s*章)(.*)", re.MULTILINE
+        r"^[ \t]*(?:#{1,6}[ \t]+)?((?:第[ \t]*([0-9零一二三四五六七八九十百千万亿]+)[ \t]*章)|(?:(?:Chapter|Episode)[ \t]+(?:[0-9]+|[IVXLCDM]+)\b))(.*)$", re.MULTILINE | re.IGNORECASE
     )
 
     def recognize(self, text: NovelText) -> list[ParsedChapterResult]:

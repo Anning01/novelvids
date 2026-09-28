@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, ref } from 'vue'
 import { ElPopover } from 'element-plus'
 import { Check, Clapperboard, Image, MapPin, Package, Plus, Search, UsersRound, X } from 'lucide-vue-next'
@@ -28,7 +30,7 @@ const search = ref('')
 const filter = ref('all')
 const searchInput = ref<HTMLInputElement | null>(null)
 const trigger = ref<InstanceType<typeof AppButton> | null>(null)
-const filters = [{ key: 'all', label: '全部' }, { key: 'character', label: '角色' }, { key: 'setting', label: '场景' }, { key: 'prop', label: '道具' }, { key: 'scene', label: '分镜' }, { key: 'selected', label: '已选' }]
+const filters = [{ key: 'all', get label() { return tr('全部') } }, { key: 'character', get label() { return tr('角色') } }, { key: 'setting', get label() { return tr('场景') } }, { key: 'prop', get label() { return tr('道具') } }, { key: 'scene', get label() { return tr('分镜') } }, { key: 'selected', get label() { return tr('已选') } }]
 function category(option: AgentTargetOption) {
   if (option.target.kind === 'scene') return 'scene'
   if (option.assetType === AssetTypeEnum.PERSON) return 'character'
@@ -53,23 +55,23 @@ function opened() { search.value = ''; void nextTick(() => searchInput.value?.fo
 
 <template>
   <ElPopover :visible="open" trigger="click" placement="top-start" :width="380" :show-arrow="false" popper-class="agent-target-popover" :popper-style="{ padding: '0', maxWidth: 'calc(100vw - 24px)' }" @update:visible="emit('update:open', $event)" @after-enter="opened">
-    <template #reference><AppButton ref="trigger" size="xs" class="agent-target-trigger" :disabled="disabled" :aria-expanded="open" aria-label="选择修改对象" aria-haspopup="dialog"><Plus :size="15" />{{ modelValue.length ? `修改对象 · ${modelValue.length}` : '指定对象' }}</AppButton></template>
-    <section class="agent-target-picker" role="dialog" aria-label="选择修改对象" @keydown.esc.stop.prevent="close">
-      <header><div><strong>选择修改对象</strong><span>可多选，最多 {{ limit }} 个</span></div><AppButton icon-only size="sm" aria-label="关闭对象选择" @click="close"><X :size="16" /></AppButton></header>
-      <label class="agent-target-picker__search"><Search :size="16" /><input ref="searchInput" v-model="search" type="search" aria-label="搜索修改对象" placeholder="搜索名称或分镜内容" /></label>
-      <nav aria-label="对象类型"><button v-for="tab in filters" :key="tab.key" type="button" :aria-pressed="filter === tab.key" @click="filter = tab.key">{{ tab.label }}<span v-if="tab.key === 'selected'"> {{ modelValue.length }}</span></button></nav>
+    <template #reference><AppButton ref="trigger" size="xs" class="agent-target-trigger" :disabled="disabled" :aria-expanded="open" :aria-label="tr('选择修改对象')" aria-haspopup="dialog"><Plus :size="15" />{{ modelValue.length ? tr('修改对象 · {p0}', { p0: modelValue.length }) : tr('指定对象') }}</AppButton></template>
+    <section class="agent-target-picker" role="dialog" :aria-label="tr('选择修改对象')" @keydown.esc.stop.prevent="close">
+      <header><div><strong>{{ tr('选择修改对象') }}</strong><span>{{ tr('可多选，最多') }} {{ limit }} {{ tr('个') }}</span></div><AppButton icon-only size="sm" :aria-label="tr('关闭对象选择')" @click="close"><X :size="16" /></AppButton></header>
+      <label class="agent-target-picker__search"><Search :size="16" /><input ref="searchInput" v-model="search" type="search" :aria-label="tr('搜索修改对象')" :placeholder="tr('搜索名称或分镜内容')" /></label>
+      <nav :aria-label="tr('对象类型')"><button v-for="tab in filters" :key="tab.key" type="button" :aria-pressed="filter === tab.key" @click="filter = tab.key">{{ tab.label }}<span v-if="tab.key === 'selected'"> {{ modelValue.length }}</span></button></nav>
       <div class="agent-target-picker__list">
         <label v-for="option in visibleOptions" :key="targetKey(option.target)" class="agent-target-row" :class="{ 'is-selected': modelValue.includes(targetKey(option.target)), 'is-variant': option.target.kind === 'variant' }">
           <input type="checkbox" :value="targetKey(option.target)" :checked="modelValue.includes(targetKey(option.target))" :disabled="disabled || (!modelValue.includes(targetKey(option.target)) && modelValue.length >= limit)" @change="toggle(targetKey(option.target))" />
           <span class="agent-target-row__icon"><component :is="icon(option)" :size="17" /></span>
-          <span class="agent-target-row__copy"><span :title="displayLabel(option)">{{ displayLabel(option) }}</span><small v-if="option.target.kind === 'variant'">衍生形象</small><details v-if="pending[targetKey(option.target)]?.length" @click.stop><summary>待核对约束</summary><p v-for="rule in pending[targetKey(option.target)]" :key="rule.id">{{ rule.content }}</p></details></span>
+          <span class="agent-target-row__copy"><span :title="displayLabel(option)">{{ displayLabel(option) }}</span><small v-if="option.target.kind === 'variant'">{{ tr('衍生形象') }}</small><details v-if="pending[targetKey(option.target)]?.length" @click.stop><summary>{{ tr('待核对约束') }}</summary><p v-for="rule in pending[targetKey(option.target)]" :key="rule.id">{{ rule.content }}</p></details></span>
           <Check v-if="modelValue.includes(targetKey(option.target))" :size="17" class="agent-target-row__check" />
         </label>
-        <p v-if="loading" class="agent-target-picker__empty">正在加载对象…</p>
-        <p v-else-if="!visibleOptions.length" class="agent-target-picker__empty">{{ filter === 'selected' ? '还没有选中对象' : search ? '没有找到匹配对象' : '当前分类还没有对象' }}</p>
-        <AppButton v-if="hasMore" size="sm" :loading="loading" @click="emit('more')">加载更多对象</AppButton>
+        <p v-if="loading" class="agent-target-picker__empty">{{ tr('正在加载对象…') }}</p>
+        <p v-else-if="!visibleOptions.length" class="agent-target-picker__empty">{{ filter === 'selected' ? tr('还没有选中对象') : search ? tr('没有找到匹配对象') : tr('当前分类还没有对象') }}</p>
+        <AppButton v-if="hasMore" size="sm" :loading="loading" @click="emit('more')">{{ tr('加载更多对象') }}</AppButton>
       </div>
-      <footer><div><span role="status">{{ modelValue.length >= limit ? '已达到选择上限' : `已选 ${modelValue.length} 个对象` }}</span><AppButton v-if="modelValue.length" size="xs" :disabled="disabled" @click="emit('update:modelValue', [])">清空</AppButton><AppButton v-else size="xs" :loading="loading" @click="emit('refresh')">刷新</AppButton></div><AppButton variant="primary" size="sm" @click="done">完成</AppButton></footer>
+      <footer><div><span role="status">{{ modelValue.length >= limit ? tr('已达到选择上限') : tr('已选 {p0} 个对象', { p0: modelValue.length }) }}</span><AppButton v-if="modelValue.length" size="xs" :disabled="disabled" @click="emit('update:modelValue', [])">{{ tr('清空') }}</AppButton><AppButton v-else size="xs" :loading="loading" @click="emit('refresh')">{{ tr('刷新') }}</AppButton></div><AppButton variant="primary" size="sm" @click="done">{{ tr('完成') }}</AppButton></footer>
     </section>
   </ElPopover>
 </template>

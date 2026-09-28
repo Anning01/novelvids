@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ArrowUpRight, Circle, Grid3X3, Move, Pencil, RotateCcw, Square, Trash2, Undo2, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { faceGridPolylines } from '@/shared/imageAnnotationGeometry'
@@ -10,7 +12,7 @@ interface Mark { tool: DrawingTool; color: string; brushSize: number; points: Po
 interface MarkDrag { index: number; pointerStart: Point; originalPoints: Point[] }
 
 const props = withDefaults(defineProps<{ open: boolean; imageUrl: string; title?: string; saving?: boolean }>(), {
-  title: '图片',
+  get title() { return tr('图片') },
   saving: false,
 })
 const emit = defineEmits<{ close: []; save: [blob: Blob] }>()
@@ -64,7 +66,7 @@ watch(() => [props.open, props.imageUrl] as const, async ([open, url]) => {
   }
   sourceImage.onerror = () => {
     loading.value = false
-    error.value = '图片加载失败，请检查图片是否仍可访问'
+    error.value = tr('图片加载失败，请检查图片是否仍可访问')
   }
   sourceImage.crossOrigin = /^(data:|blob:)/.test(url) ? null : 'anonymous'
   sourceImage.src = url
@@ -231,8 +233,8 @@ function clear() { markDrag.value = null; marks.value = []; render() }
 function save() {
   if (!canSave.value) return
   canvas.value?.toBlob(blob => {
-    if (!blob) error.value = '标注图导出失败'
-    else if (blob.size > 30 * 1024 * 1024) error.value = '标注图超过 30MB，请减少涂鸦或使用较小原图'
+    if (!blob) error.value = tr('标注图导出失败')
+    else if (blob.size > 30 * 1024 * 1024) error.value = tr('标注图超过 30MB，请减少涂鸦或使用较小原图')
     else emit('save', blob)
   }, 'image/png')
 }
@@ -240,28 +242,28 @@ function save() {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" ref="root" class="image-annotation" role="dialog" aria-modal="true" :aria-label="`${title}图片标注`" tabindex="-1" @keydown.esc.stop="emit('close')">
+    <div v-if="open" ref="root" class="image-annotation" role="dialog" aria-modal="true" :aria-label="tr('{p0}图片标注', { p0: title })" tabindex="-1" @keydown.esc.stop="emit('close')">
       <div class="image-annotation__panel">
-        <header><strong>{{ title }} · 图片标注</strong><button type="button" aria-label="关闭图片标注" @click="emit('close')"><X :size="18" /></button></header>
-        <div class="image-annotation__toolbar" role="toolbar" aria-label="图片标注工具">
-          <button type="button" :class="{ 'is-active': tool === 'move' }" title="拖动已绘制标注" @click="tool = 'move'"><Move :size="17" />移动</button>
-          <button type="button" :class="{ 'is-active': tool === 'rectangle' }" @click="tool = 'rectangle'"><Square :size="17" />矩形</button>
-          <button type="button" :class="{ 'is-active': tool === 'ellipse' }" title="按住 Shift 绘制正圆" @click="tool = 'ellipse'"><Circle :size="17" />椭圆</button>
-          <button type="button" :class="{ 'is-active': tool === 'face-grid' }" title="拖出椭圆范围生成人脸网格" @click="tool = 'face-grid'"><Grid3X3 :size="17" />网格</button>
-          <button type="button" :class="{ 'is-active': tool === 'arrow' }" @click="tool = 'arrow'"><ArrowUpRight :size="17" />箭头</button>
-          <button type="button" :class="{ 'is-active': tool === 'pen' }" @click="tool = 'pen'"><Pencil :size="17" />涂鸦</button>
-          <label><span>粗细</span><input v-model.number="brushSize" type="range" min="0.5" max="6" step="0.5" aria-label="画笔粗细"><output>{{ brushSize }}</output></label>
-          <label class="image-annotation__color"><span>颜色</span><input v-model="color" type="color" aria-label="标注颜色"></label>
-          <span class="image-annotation__zoom"><button type="button" :disabled="zoom <= .5" aria-label="缩小" @click="setZoom(zoom - .25)"><ZoomOut :size="17" /></button><output>{{ zoomLabel }}</output><button type="button" :disabled="zoom >= 3" aria-label="放大" @click="setZoom(zoom + .25)"><ZoomIn :size="17" /></button><button type="button" :disabled="zoom === 1" aria-label="重置缩放" @click="setZoom(1)"><RotateCcw :size="16" /></button></span>
-          <button type="button" :disabled="!marks.length" @click="undo"><Undo2 :size="17" />撤销</button>
-          <button type="button" :disabled="!marks.length" @click="clear"><Trash2 :size="17" />清空</button>
+        <header><strong>{{ title }} {{ tr('· 图片标注') }}</strong><button type="button" :aria-label="tr('关闭图片标注')" @click="emit('close')"><X :size="18" /></button></header>
+        <div class="image-annotation__toolbar" role="toolbar" :aria-label="tr('图片标注工具')">
+          <button type="button" :class="{ 'is-active': tool === 'move' }" :title="tr('拖动已绘制标注')" @click="tool = 'move'"><Move :size="17" />{{ tr('移动') }}</button>
+          <button type="button" :class="{ 'is-active': tool === 'rectangle' }" @click="tool = 'rectangle'"><Square :size="17" />{{ tr('矩形') }}</button>
+          <button type="button" :class="{ 'is-active': tool === 'ellipse' }" :title="tr('按住 Shift 绘制正圆')" @click="tool = 'ellipse'"><Circle :size="17" />{{ tr('椭圆') }}</button>
+          <button type="button" :class="{ 'is-active': tool === 'face-grid' }" :title="tr('拖出椭圆范围生成人脸网格')" @click="tool = 'face-grid'"><Grid3X3 :size="17" />{{ tr('网格') }}</button>
+          <button type="button" :class="{ 'is-active': tool === 'arrow' }" @click="tool = 'arrow'"><ArrowUpRight :size="17" />{{ tr('箭头') }}</button>
+          <button type="button" :class="{ 'is-active': tool === 'pen' }" @click="tool = 'pen'"><Pencil :size="17" />{{ tr('涂鸦') }}</button>
+          <label><span>{{ tr('粗细') }}</span><input v-model.number="brushSize" type="range" min="0.5" max="6" step="0.5" :aria-label="tr('画笔粗细')"><output>{{ brushSize }}</output></label>
+          <label class="image-annotation__color"><span>{{ tr('颜色') }}</span><input v-model="color" type="color" :aria-label="tr('标注颜色')"></label>
+          <span class="image-annotation__zoom"><button type="button" :disabled="zoom <= .5" :aria-label="tr('缩小')" @click="setZoom(zoom - .25)"><ZoomOut :size="17" /></button><output>{{ zoomLabel }}</output><button type="button" :disabled="zoom >= 3" :aria-label="tr('放大')" @click="setZoom(zoom + .25)"><ZoomIn :size="17" /></button><button type="button" :disabled="zoom === 1" :aria-label="tr('重置缩放')" @click="setZoom(1)"><RotateCcw :size="16" /></button></span>
+          <button type="button" :disabled="!marks.length" @click="undo"><Undo2 :size="17" />{{ tr('撤销') }}</button>
+          <button type="button" :disabled="!marks.length" @click="clear"><Trash2 :size="17" />{{ tr('清空') }}</button>
         </div>
         <div ref="stage" class="image-annotation__stage">
           <div class="image-annotation__viewport" :style="viewportStyle"><canvas ref="canvas" :style="canvasStyle" :class="{ 'is-move': tool === 'move' }" @pointerdown="start" @pointermove="move" @pointerup="finish" @pointercancel="finish" /></div>
-          <span v-if="loading">图片加载中…</span>
+          <span v-if="loading">{{ tr('图片加载中…') }}</span>
         </div>
         <p v-if="error" role="alert">{{ error }}</p>
-        <footer><small>保存后会生成一条新的图片记录，原图仍保留在历史记录中。</small><button type="button" :disabled="!canSave" @click="save">{{ saving ? '保存中…' : '保存标注图' }}</button></footer>
+        <footer><small>{{ tr('保存后会生成一条新的图片记录，原图仍保留在历史记录中。') }}</small><button type="button" :disabled="!canSave" @click="save">{{ saving ? tr('保存中…') : tr('保存标注图') }}</button></footer>
       </div>
     </div>
   </Teleport>

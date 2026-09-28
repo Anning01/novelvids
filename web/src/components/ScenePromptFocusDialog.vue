@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, dateLocale } from '@/i18n'
+
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Focus, X } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
@@ -11,7 +13,7 @@ const props = withDefaults(defineProps<{
   options: ScenePromptMentionOption[]
   placeholder?: string
 }>(), {
-  placeholder: '请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。',
+  get placeholder() { return tr('请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。') },
 })
 
 const emit = defineEmits<{
@@ -152,10 +154,10 @@ onBeforeUnmount(() => {
             <span class="scene-prompt-focus__icon"><Focus :size="19" /></span>
             <div>
               <span>FOCUS MODE</span>
-              <h2 id="scene-prompt-focus-title">分镜 {{ sceneSequence }} · 专注编辑</h2>
+              <h2 id="scene-prompt-focus-title">{{ tr('分镜') }} {{ sceneSequence }} {{ tr('· 专注编辑') }}</h2>
             </div>
             <kbd>Esc</kbd>
-            <AppButton type="button" variant="ghost" size="sm" icon-only aria-label="退出专注编辑" title="退出专注编辑" @click="close"><X :size="18" /></AppButton>
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('退出专注编辑')" :title="tr('退出专注编辑')" @click="close"><X :size="18" /></AppButton>
           </header>
 
           <main class="scene-prompt-focus__body">
@@ -169,8 +171,8 @@ onBeforeUnmount(() => {
           </main>
 
           <footer class="scene-prompt-focus__footer">
-            <span>输入 <kbd>@</kbd> 可继续引用角色、场景、道具与素材</span>
-            <span>{{ modelValue.length.toLocaleString() }} 字符 · 修改自动保存</span>
+            <span>{{ tr('输入') }} <kbd>@</kbd> {{ tr('可继续引用角色、场景、道具与素材') }}</span>
+            <span>{{ modelValue.length.toLocaleString(dateLocale) }} {{ tr('字符 · 修改自动保存') }}</span>
           </footer>
         </section>
       </div>

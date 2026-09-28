@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import { BookOpenText } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -12,7 +14,7 @@ const saving = ref(false)
 const error = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const chapter = computed(() => props.data.chapter as Chapter)
-const title = computed(() => props.label || `第 ${chapter.value.number} 章`)
+const title = computed(() => props.label || tr('第 {p0} 章', { p0: chapter.value.number }))
 const content = computed(() => chapter.value.content || '')
 const draft = ref(content.value)
 
@@ -35,7 +37,7 @@ async function saveContent() {
   try {
     await store.saveChapter({ content: draft.value })
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '章节保存失败'
+    error.value = reason instanceof Error ? reason.message : tr('章节保存失败')
   } finally {
     saving.value = false
   }
@@ -52,20 +54,20 @@ watch(content, (value) => {
   <article
     class="workbench-note workbench-chapter-note"
     :class="{ 'is-selected': selected }"
-    :aria-label="`${title}章节便签`"
+    :aria-label="tr('{p0}章节便签', { p0: title })"
   >
     <header class="workbench-node-drag-handle">
       <BookOpenText :size="16" aria-hidden="true" />
       <strong>{{ title }}</strong>
-      <span v-if="saving">保存中…</span>
+      <span v-if="saving">{{ tr('保存中…') }}</span>
     </header>
     <textarea
       ref="textareaRef"
       class="nodrag nowheel"
       :value="draft"
       maxlength="100000"
-      aria-label="章节正文"
-      placeholder="本章暂无正文"
+      :aria-label="tr('章节正文')"
+      :placeholder="tr('本章暂无正文')"
       @input="updateContent"
       @blur="saveContent"
       @keydown.stop

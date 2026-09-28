@@ -1,5 +1,7 @@
 """Creation-assistant application flows and private response projections."""
 
+from utils.messages import localized_message
+
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -107,7 +109,7 @@ class CreationAgentController:
     async def undo(self, change_id: int, ctx: AuthContext):
         change = await PromptChange.get_or_none(id=change_id)
         if change is None:
-            raise HTTPException(404, '修改记录不存在')
+            raise HTTPException(404, localized_message('修改记录不存在'))
         await agent_sessions.for_task(change.task_id, ctx)
         await require_roles('admin', 'creator')(ctx)
         task = await AiTask.get(id=change.task_id)

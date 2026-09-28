@@ -1,5 +1,7 @@
 """Check execution limits and checkpoint each real model request's usage."""
 
+from utils.messages import localized_message
+
 import dataclasses
 import time
 from contextlib import asynccontextmanager
@@ -29,13 +31,13 @@ class RecordedAgentModel(WrapperModel):
     async def _begin(self, messages, parameters):
         await self.before_request()
         if self.request_limit is not None and len(self.calls) >= self.request_limit:
-            raise ValueError("本轮模型调用次数已达到配置上限")
+            raise ValueError(localized_message('本轮模型调用次数已达到配置上限'))
         used = sum(call.get('usage', {}).get('input_tokens', 0) + call.get('usage', {}).get('output_tokens', 0) for call in self.calls)
         if self.total_tokens_limit is not None and used >= self.total_tokens_limit:
-            raise ValueError("本轮 token 消耗已达到配置上限")
+            raise ValueError(localized_message('本轮 token 消耗已达到配置上限'))
         report = wire_size(messages, parameters)
         if report['total_characters'] > self.max_characters:
-            raise ValueError("上下文超过配置上限，请分段读取当前对象")
+            raise ValueError(localized_message('上下文超过配置上限，请分段读取当前对象'))
         call = {"index": len(self.calls) + 1, "status": "in_progress", "usage_reported": False,
                 "phase": self.phase, "context": self.budget.report(messages, parameters)}
         self.calls.append(call)

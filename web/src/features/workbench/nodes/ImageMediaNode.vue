@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core'
 import { Image, Pencil, Upload } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
@@ -13,7 +15,7 @@ const store = useWorkbenchStore()
 const uploading = ref(false)
 const annotationOpen = ref(false)
 const url = computed(() => typeof props.data.url === 'string' ? props.data.url : '')
-const title = computed(() => String(props.data.title || props.data.originalFilename || '上传图片'))
+const title = computed(() => String(props.data.title || props.data.originalFilename || tr('上传图片')))
 const annotations = computed(() => Array.isArray(props.data.annotations) ? props.data.annotations as ImageAnnotation[] : [])
 const dimensions = computed(() => {
   const width = Number(props.data.width)
@@ -30,7 +32,7 @@ async function replace(event: Event) {
   try {
     await store.replaceUploadedMedia(props.id, file)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '图片上传失败')
+    notice.error(error instanceof Error ? error.message : tr('图片上传失败'))
   } finally {
     uploading.value = false
   }
@@ -48,19 +50,19 @@ function saveAnnotations(next: ImageAnnotation[]) {
 
 <template>
   <div class="workbench-node-component">
-    <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'image_media', title, status: uploading ? '上传中' : 'ready' }">
+    <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'image_media', title, status: uploading ? tr('上传中') : 'ready' }">
       <div class="workbench-uploaded-media-node workbench-uploaded-image-node">
-        <span class="workbench-uploaded-media-node__type"><Image :size="14" aria-hidden="true" />图片</span>
-        <img v-if="url" :src="url" :alt="`${title}预览`" @load="captureDimensions">
-        <div v-else class="workbench-media-placeholder">图片不可用</div>
+        <span class="workbench-uploaded-media-node__type"><Image :size="14" aria-hidden="true" />{{ tr('图片') }}</span>
+        <img v-if="url" :src="url" :alt="tr('{p0}预览', { p0: title })" @load="captureDimensions">
+        <div v-else class="workbench-media-placeholder">{{ tr('图片不可用') }}</div>
         <small v-if="dimensions">{{ dimensions }}</small>
         <label class="workbench-uploaded-media-node__replace" :class="{ 'is-disabled': uploading }">
-          <Upload :size="14" aria-hidden="true" />{{ uploading ? '上传中…' : '重新上传' }}
-          <input type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传资产图片" :disabled="uploading" @change="replace">
+          <Upload :size="14" aria-hidden="true" />{{ uploading ? tr('上传中…') : tr('重新上传') }}
+          <input type="file" accept="image/png,image/jpeg,image/webp" :aria-label="tr('上传资产图片')" :disabled="uploading" @change="replace">
         </label>
-        <section class="workbench-uploaded-image-node__annotations" aria-label="图片标注操作">
-          <span>{{ annotations.length ? `已保存 ${annotations.length} 个标注` : '尚未添加标注' }}</span>
-          <button type="button" aria-label="标注图片" :disabled="!url" @click="annotationOpen = true"><Pencil :size="14" aria-hidden="true" />标注图片</button>
+        <section class="workbench-uploaded-image-node__annotations" :aria-label="tr('图片标注操作')">
+          <span>{{ annotations.length ? tr('已保存 {p0} 个标注', { p0: annotations.length }) : tr('尚未添加标注') }}</span>
+          <button type="button" :aria-label="tr('标注图片')" :disabled="!url" @click="annotationOpen = true"><Pencil :size="14" aria-hidden="true" />{{ tr('标注图片') }}</button>
         </section>
       </div>
     </WorkbenchNodeFrame>

@@ -1,5 +1,7 @@
 """兼容不同 OpenAI-compatible 服务的 JSON 输出调用。"""
 
+from utils.messages import localized_message
+
 import json
 import re
 from typing import Any
@@ -39,7 +41,7 @@ def _extract_json(content: str) -> Any:
     """从纯 JSON、Markdown 代码块或带说明的文本中提取首个 JSON 值。"""
     text = (content or "").strip()
     if not text:
-        raise ValueError("LLM 未返回内容")
+        raise ValueError(localized_message('LLM 未返回内容'))
 
     fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
     if fenced:
@@ -57,16 +59,12 @@ def _extract_json(content: str) -> Any:
                 return value
             except json.JSONDecodeError:
                 continue
-    raise ValueError("LLM 返回内容中没有可解析的 JSON")
+    raise ValueError(localized_message('LLM 返回内容中没有可解析的 JSON'))
 
 
-def _json_instruction(response_model: type[BaseModel]) -> str:
-    schema = json.dumps(response_model.model_json_schema(), ensure_ascii=False)
-    return (
-        "请只返回一个合法的 JSON 对象，不要输出 Markdown 代码块、解释、思考过程或其他文字。"
-        "JSON 必须严格符合以下 JSON Schema：\n"
-        f"{schema}"
-    )
+def _json_instruction(response_model: type[BaseModel], prompt_language: str = "zh") -> str:
+    from prompts.schema import json_instruction
+    return json_instruction(response_model.model_json_schema(), prompt_language)
 
 
 async def create_json_completion(
@@ -79,6 +77,7 @@ async def create_json_completion(
     timeout: float | None = None,
     thinking: str | None = None,
     max_tokens: int | None = None,
+    prompt_language: str = "zh",
 ) -> tuple[BaseModel, Any]:
     """调用模型并返回经 Pydantic 校验的对象及原始 completion。
 
@@ -89,7 +88,7 @@ async def create_json_completion(
     关闭思考可显著降低 latency 并避免 reasoning 耗尽正文空间。
     """
     controlled_messages = [dict(message) for message in messages]
-    instruction = _json_instruction(response_model)
+    instruction = _json_instruction(response_model, prompt_language)
     system_index = next(
         (index for index, message in enumerate(controlled_messages) if message["role"] == "system"),
         None,

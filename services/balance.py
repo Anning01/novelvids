@@ -5,6 +5,8 @@
 计费/扣减是旁路副作用：消费失败只记日志，绝不打断生成主流程。
 """
 
+from utils.messages import localized_message
+
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -30,7 +32,7 @@ def _money(value) -> Decimal:
 async def get_balance(team_id: int) -> Decimal:
     team = await Team.get_or_none(id=team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="团队不存在")
+        raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
     return team.balance
 
 
@@ -45,10 +47,10 @@ async def ensure_solvent(
         return
     team = await Team.get_or_none(id=team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="团队不存在")
+        raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
     if team.balance <= 0:
         raise HTTPException(
-            status_code=402, detail="团队余额不足，请联系团队管理员充值"
+            status_code=402, detail=localized_message('团队余额不足，请联系团队管理员充值')
         )
     if user_id is not None:
         membership = await TeamMember.get_or_none(team_id=team_id, user_id=user_id)
@@ -56,7 +58,7 @@ async def ensure_solvent(
             if membership.total_cost >= membership.cost_limit:
                 raise HTTPException(
                     status_code=402,
-                    detail="你已达到个人消费限额，请联系团队管理员调整",
+                    detail=localized_message('你已达到个人消费限额，请联系团队管理员调整'),
                 )
 
 
@@ -92,11 +94,11 @@ async def top_up(
     """超管充值；事务内加锁更新余额并落流水。"""
     amount_dec = _money(amount)
     if amount_dec <= 0:
-        raise HTTPException(status_code=400, detail="充值金额必须为正数")
+        raise HTTPException(status_code=400, detail=localized_message('充值金额必须为正数'))
     async with in_transaction():
         team = await Team.filter(id=team_id).select_for_update().first()
         if team is None:
-            raise HTTPException(status_code=404, detail="团队不存在")
+            raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
         team.balance = _money(team.balance + amount_dec)
         await team.save(update_fields=["balance", "updated_at"])
         await BalanceTransaction.create(

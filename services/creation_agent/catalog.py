@@ -1,5 +1,7 @@
 """Bounded project discovery without loading every prompt into model context."""
 
+from utils.messages import localized_message
+
 from functools import partial
 import json
 
@@ -40,7 +42,7 @@ class CreationCatalog:
         chapter_id = request.chapter_id or (self.chapter_id if request.scope == 'chapter' else None)
         chapter = await self.objects.chapter(chapter_id) if chapter_id else None
         if request.scope == 'chapter' and chapter is None:
-            raise ValueError('当前没有章节；请先查询项目章节，再指定需要的章节')
+            raise ValueError(localized_message('当前没有章节；请先查询项目章节，再指定需要的章节'))
         assets = Asset.filter(novel_id=self.novel_id, asset_type__in=[1, 2, 3])
         variants = AssetVariant.filter(asset__novel_id=self.novel_id, asset__deleted_at__isnull=True,
                                       asset__asset_type__in=[1, 2, 3])
@@ -128,7 +130,7 @@ class CreationCatalog:
     async def references(self, kind: str, object_id: int, *, page: int = 1, page_size: int = 20) -> dict:
         target = await self.objects.get(kind, object_id)
         if not 1 <= page_size <= 30 or page < 1:
-            raise ValueError('引用分页参数无效')
+            raise ValueError(localized_message('引用分页参数无效'))
         if kind == 'scene':
             query = Asset.filter(scenes__id=target.id, novel_id=self.novel_id).order_by('id')
             count = await query.count()

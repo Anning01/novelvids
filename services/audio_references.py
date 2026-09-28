@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import asyncio
 import json
 import shutil
@@ -64,7 +66,7 @@ def audio_reference_scope_query(
 def _validate_extension(filename: str) -> str:
     extension = Path(filename).suffix.lower()
     if extension not in SUPPORTED_AUDIO_EXTENSIONS:
-        raise HTTPException(400, detail="参考音频仅支持 MP3 或 WAV")
+        raise HTTPException(400, detail=localized_message('参考音频仅支持 MP3 或 WAV'))
     return extension
 
 
@@ -82,24 +84,24 @@ def _probe_audio(path: Path) -> float:
         )
         payload = json.loads(result.stdout)
     except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, detail="无法读取参考音频，请确认文件没有损坏") from exc
+        raise HTTPException(400, detail=localized_message('无法读取参考音频，请确认文件没有损坏')) from exc
     if not any(stream.get("codec_type") == "audio" for stream in payload.get("streams", [])):
-        raise HTTPException(400, detail="上传文件中没有可用音轨")
+        raise HTTPException(400, detail=localized_message('上传文件中没有可用音轨'))
     try:
         duration = float(payload.get("format", {}).get("duration") or 0)
     except (TypeError, ValueError):
         duration = 0
     if duration <= 0:
-        raise HTTPException(400, detail="无法读取参考音频时长")
+        raise HTTPException(400, detail=localized_message('无法读取参考音频时长'))
     return round(duration, 3)
 
 
 async def _validate_audio_file(path: Path) -> float:
     if path.stat().st_size > MAX_AUDIO_BYTES:
-        raise HTTPException(400, detail="参考音频不能超过 15MB")
+        raise HTTPException(400, detail=localized_message('参考音频不能超过 15MB'))
     duration = await asyncio.to_thread(_probe_audio, path)
     if not MIN_AUDIO_DURATION <= duration <= MAX_AUDIO_DURATION:
-        raise HTTPException(400, detail="参考音频时长必须为 1-30 秒")
+        raise HTTPException(400, detail=localized_message('参考音频时长必须为 1-30 秒'))
     return duration
 
 
@@ -113,12 +115,12 @@ async def _download_external_audio(url: str, destination: Path) -> None:
                     async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                         size += len(chunk)
                         if size > MAX_TRIM_SOURCE_BYTES:
-                            raise HTTPException(400, detail="原音频过大，无法在线裁剪")
+                            raise HTTPException(400, detail=localized_message('原音频过大，无法在线裁剪'))
                         target.write(chunk)
     except HTTPException:
         raise
     except httpx.HTTPError as exc:
-        raise HTTPException(400, detail="原音频下载失败，无法在线裁剪") from exc
+        raise HTTPException(400, detail=localized_message('原音频下载失败，无法在线裁剪')) from exc
 
 
 async def _materialize_reference_audio(reference: AudioReference, destination: Path) -> None:
@@ -131,13 +133,13 @@ async def _materialize_reference_audio(reference: AudioReference, destination: P
         media_root = Path(settings.MEDIA_PATH).resolve()
         source = (media_root / raw.removeprefix("/media/")).resolve()
         if media_root not in source.parents or not source.is_file():
-            raise HTTPException(404, detail="原音频文件不存在")
+            raise HTTPException(404, detail=localized_message('原音频文件不存在'))
         await asyncio.to_thread(shutil.copyfile, source, destination)
         return
     if raw.startswith("http://") or raw.startswith("https://"):
         await _download_external_audio(raw, destination)
         return
-    raise HTTPException(400, detail="原音频地址无法裁剪")
+    raise HTTPException(400, detail=localized_message('原音频地址无法裁剪'))
 
 
 def _trim_audio_file(source: Path, destination: Path, *, start: float, duration: float) -> None:
@@ -154,9 +156,9 @@ def _trim_audio_file(source: Path, destination: Path, *, start: float, duration:
             timeout=120,
         )
     except FileNotFoundError as exc:
-        raise HTTPException(500, detail="服务器未安装 ffmpeg，无法裁剪音频") from exc
+        raise HTTPException(500, detail=localized_message('服务器未安装 ffmpeg，无法裁剪音频')) from exc
     except (subprocess.SubprocessError, OSError) as exc:
-        raise HTTPException(400, detail="音频裁剪失败，请确认原文件未损坏") from exc
+        raise HTTPException(400, detail=localized_message('音频裁剪失败，请确认原文件未损坏')) from exc
 
 
 async def _create_reference(
@@ -170,7 +172,7 @@ async def _create_reference(
 ) -> AudioReference:
     normalized_nickname = nickname.strip()
     if not normalized_nickname:
-        raise HTTPException(400, detail="音色名称不能为空")
+        raise HTTPException(400, detail=localized_message('音色名称不能为空'))
     return await AudioReference.create(
         nickname=normalized_nickname,
         gender=gender.strip() or "未设置",
@@ -206,7 +208,7 @@ async def save_uploaded_audio_reference(
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_AUDIO_BYTES:
-                    raise HTTPException(400, detail="参考音频不能超过 15MB")
+                    raise HTTPException(400, detail=localized_message('参考音频不能超过 15MB'))
                 target.write(chunk)
         duration = await _validate_audio_file(temporary)
         shutil.move(str(temporary), destination)
@@ -236,10 +238,10 @@ async def finalize_oss_audio_reference(
     created_by: int | None,
 ) -> AudioReference:
     if not oss.enabled:
-        raise HTTPException(400, detail="未启用对象存储")
+        raise HTTPException(400, detail=localized_message('未启用对象存储'))
     expected_prefix = f"uploads/{team_id or 0}/"
     if not key.startswith(expected_prefix):
-        raise HTTPException(400, detail="参考音频对象不属于当前团队")
+        raise HTTPException(400, detail=localized_message('参考音频对象不属于当前团队'))
     extension = _validate_extension(filename)
     temporary_dir = Path(settings.MEDIA_PATH) / "audio-references" / ".validate"
     temporary_dir.mkdir(parents=True, exist_ok=True)
@@ -270,10 +272,10 @@ async def trim_audio_reference(
 ) -> AudioReference:
     """裁剪用户上传的音色并创建新副本，原音色与已有引用均不受影响。"""
     if reference.source != "upload":
-        raise HTTPException(400, detail="系统音色不支持裁剪")
+        raise HTTPException(400, detail=localized_message('系统音色不支持裁剪'))
     duration = end - start
     if start < 0 or duration < MIN_AUDIO_DURATION or duration > MAX_AUDIO_DURATION:
-        raise HTTPException(400, detail="裁剪片段必须为 1-30 秒")
+        raise HTTPException(400, detail=localized_message('裁剪片段必须为 1-30 秒'))
 
     temporary_dir = Path(settings.MEDIA_PATH) / "audio-references" / ".trim"
     temporary_dir.mkdir(parents=True, exist_ok=True)
@@ -282,10 +284,10 @@ async def trim_audio_reference(
     try:
         await _materialize_reference_audio(reference, source)
         if source.stat().st_size > MAX_TRIM_SOURCE_BYTES:
-            raise HTTPException(400, detail="原音频过大，无法在线裁剪")
+            raise HTTPException(400, detail=localized_message('原音频过大，无法在线裁剪'))
         source_duration = await asyncio.to_thread(_probe_audio, source)
         if start >= source_duration or end > source_duration + 0.05:
-            raise HTTPException(400, detail=f"裁剪范围超出原音频时长 {source_duration:g} 秒")
+            raise HTTPException(400, detail=localized_message('裁剪范围超出原音频时长 {p1} 秒', p1=f'{source_duration:g}'))
         await asyncio.to_thread(
             _trim_audio_file,
             source,

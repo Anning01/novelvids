@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from auth.deps import AuthContext, ensure_novel_access, get_auth_context, require_roles
@@ -37,7 +39,7 @@ async def _audio_project_scope(
     if novel is None:
         from fastapi import HTTPException
 
-        raise HTTPException(404, detail="项目不存在")
+        raise HTTPException(404, detail=localized_message('项目不存在'))
     return novel.team_id, novel.created_by
 
 
@@ -138,7 +140,7 @@ async def trim_uploaded_audio_reference(
     ):
         from fastapi import HTTPException
 
-        raise HTTPException(404, detail="音色不存在")
+        raise HTTPException(404, detail=localized_message('音色不存在'))
     clipped = await trim_audio_reference(
         reference,
         start=payload.start,

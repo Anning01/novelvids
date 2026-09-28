@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -218,7 +220,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
             const timer = sceneAutoSaveTimers.get(scene.id)
             if (timer) clearTimeout(timer)
             sceneAutoSaveTimers.delete(scene.id)
-            conflicts.push(`分镜 ${scene.sequence}`)
+            conflicts.push(tr('分镜 {p0}', { p0: scene.sequence }))
           }
         } else sceneDrafts.value[scene.id] = makeSceneDraft(scene)
       }
@@ -231,7 +233,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       }
       assets.value = result.assets; scenes.value = result.scenes; videos.value = result.videos
       if (!scenes.value.some(scene => scene.id === activeSceneId.value)) activeSceneId.value = scenes.value[0]?.id || 0
-      if (conflicts.length) notice.info(`${conflicts.join('、')} 的调整已保存，本地编辑草稿已保留，请核对后再保存。`)
+      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请核对后再保存。', { p0: conflicts.join('、') }))
       if (workspaceView.value === 'workflow') await workbenchStore.refreshAgentObjects()
       void nextTick(setupSceneTracking)
       return
@@ -245,7 +247,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
         const timer = sceneAutoSaveTimers.get(id)
         if (timer) clearTimeout(timer)
         sceneAutoSaveTimers.delete(id)
-        notice.info(`镜头 ${current.sequence} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。`)
+        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。', { p0: current.sequence }))
       } else if (draft) { draft.prompt = updated.prompt || ''; draft.basePrompt = updated.prompt ?? null }
       scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
     }
@@ -258,7 +260,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
     }
     if (workspaceView.value === 'workflow') {
       const conflicts = await workbenchStore.refreshAgentPrompts(targets)
-      if (conflicts?.length) notice.info(`助手修改已保存；${conflicts.join('、')} 正在编辑，本地草稿已保留。`)
+      if (conflicts?.length) notice.info(tr('助手修改已保存；{p0} 正在编辑，本地草稿已保留。', { p0: conflicts.join('、') }))
     }
   } catch (error) { notice.error((error as Error).message) }
 }
@@ -277,7 +279,7 @@ async function waitForAnalysisThenGenerate(chapterId: number) {
       const gate = analysisGate(task?.status)
       if (gate === 'generate') break
       if (gate === 'failed') {
-        throw new Error(task?.error_message || '项目分析失败，请回到剧本页重新分析')
+        throw new Error(task?.error_message || tr('项目分析失败，请回到剧本页重新分析'))
       }
       await sleep(3000)
     }
@@ -351,9 +353,9 @@ const batchVideoSceneOptions = computed<BatchVideoSceneOption[]>(() => scenes.va
   }
 }))
 const assetGroups = computed(() => [
-  { type: AssetTypeEnum.PERSON, label: '出镜角色', icon: UsersRound, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.PERSON) },
-  { type: AssetTypeEnum.SCENE, label: '分镜场景', icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
-  { type: AssetTypeEnum.ITEM, label: '场景道具', icon: Boxes, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.ITEM) },
+  { type: AssetTypeEnum.PERSON, get label() { return tr('出镜角色') }, icon: UsersRound, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.PERSON) },
+  { type: AssetTypeEnum.SCENE, get label() { return tr('分镜场景') }, icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
+  { type: AssetTypeEnum.ITEM, get label() { return tr('场景道具') }, icon: Boxes, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.ITEM) },
 ])
 
 async function persistVideoModelPreference(modelId: number) {
@@ -366,7 +368,7 @@ async function persistVideoModelPreference(modelId: number) {
       const persisted = videoModels.value.find(item => item.config_id === persistedVideoModelId.value)
       selectedVideoModel.value = String(persisted?.config_id || videoModels.value[0]?.config_id || '')
     }
-    notice.error(error instanceof Error ? error.message : '视频模型偏好保存失败')
+    notice.error(error instanceof Error ? error.message : tr('视频模型偏好保存失败'))
   }
 }
 
@@ -477,7 +479,7 @@ function sceneVideoError(scene: Scene) {
     const value = metadata[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
-  return video.status === TaskStatusEnum.CANCELLED ? '视频生成任务已取消' : '视频生成失败，请检查生成参数后重试'
+  return video.status === TaskStatusEnum.CANCELLED ? tr('视频生成任务已取消') : tr('视频生成失败，请检查生成参数后重试')
 }
 
 function canGenerateSceneVideo(scene: Scene) {
@@ -608,15 +610,15 @@ function saveEditedAsset(asset: Asset) {
 
 async function removeAssetFromScene(scene: Scene, asset: Asset) {
   const confirmed = await appConfirm({
-    title: `移除「${asset.canonical_name}」？`,
-    message: '只会从当前分镜移除，不会删除项目资产及其衍生状态。',
-    confirmLabel: '确认移除',
+    title: tr('移除「{p0}」？', { p0: asset.canonical_name }),
+    get message() { return tr('只会从当前分镜移除，不会删除项目资产及其衍生状态。') },
+    get confirmLabel() { return tr('确认移除') },
     tone: 'danger',
   })
   if (!confirmed) return
   updateAssetSelection(scene, { assetId: asset.id, variantId: null, selected: false })
   openAssetActionKey.value = ''
-  notice.success(`已从当前分镜移除「${asset.canonical_name}」`)
+  notice.success(tr('已从当前分镜移除「{p0}」', { p0: asset.canonical_name }))
 }
 
 function editingAssetKind(asset: Asset | null): 'character' | 'scene' | 'prop' {
@@ -806,7 +808,7 @@ function selectedAssetVoiceLabel(scene: Scene, asset: Asset) {
   const metadata = assetVoiceMetadata(scene, asset)
   return typeof metadata?.voice === 'string' && metadata.voice.trim()
     ? metadata.voice.trim()
-    : '未配置音色'
+    : tr('未配置音色')
 }
 
 function assetVoicePickerKey(scene: Scene, asset: Asset) {
@@ -851,7 +853,7 @@ async function selectAssetVoiceReference(reference: AudioReference) {
   if (!target || savingAssetVoiceKey.value) return
   const asset = assets.value.find(item => item.id === target.assetId)
   if (!asset) {
-    notice.error('角色资产不存在，请刷新后重试')
+    notice.error(tr('角色资产不存在，请刷新后重试'))
     assetVoicePickerTarget.value = null
     return
   }
@@ -862,7 +864,7 @@ async function selectAssetVoiceReference(reference: AudioReference) {
     cacheAudioReference(reference)
     if (target.variantId) {
       const variant = asset.variants?.find(item => item.id === target.variantId)
-      if (!variant) throw new Error('当前衍生形态不存在，请重新选择')
+      if (!variant) throw new Error(tr('当前衍生形态不存在，请重新选择'))
       const metadata = metadataRecord(variant.metadata)
       const editorForm = metadataRecord(metadata.editor_form)
       const updated = (await api.updateAssetVariant(asset.id, variant.id, {
@@ -893,9 +895,9 @@ async function selectAssetVoiceReference(reference: AudioReference) {
       })
     }
     assetVoicePickerTarget.value = null
-    notice.success(`已为“${asset.canonical_name}”设置音色`)
+    notice.success(tr('已为“{p0}”设置音色', { p0: asset.canonical_name }))
   } catch (error) {
-    notice.error(`音色保存失败：${error instanceof Error ? error.message : '未知错误'}`)
+    notice.error(tr('音色保存失败：{p0}', { p0: error instanceof Error ? error.message : '未知错误' }))
   } finally {
     savingAssetVoiceKey.value = ''
   }
@@ -1011,7 +1013,7 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
         : 'item' as const,
     label: selectedAssetLabel(scene, asset),
     syntax: `@{${asset.canonical_name}}`,
-    group: asset.asset_type === AssetTypeEnum.PERSON ? '角色' : asset.asset_type === AssetTypeEnum.SCENE ? '场景' : '道具',
+    group: asset.asset_type === AssetTypeEnum.PERSON ? tr('角色') : asset.asset_type === AssetTypeEnum.SCENE ? tr('场景') : tr('道具'),
     previewUrl: selectedAssetImage(scene, asset) || undefined,
     thumbnailUrl: selectedAssetThumbnail(scene, asset) || undefined,
     fallbackUrl: selectedAssetImage(scene, asset) || undefined,
@@ -1021,24 +1023,24 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
   const mediaOptions: ScenePromptMentionOption[] = draftFor(scene).referenceMedia.map((reference, index) => ({
     id: `reference-${reference.type}-${reference.url}`,
     kind: reference.type,
-    label: reference.name || `${reference.type === 'image' ? '参考图片' : '参考视频'} ${index + 1}`,
+    label: reference.name || tr('{p0} {p1}', { p0: reference.type === 'image' ? '参考图片' : '参考视频', p1: index + 1 }),
     syntax: videoReferenceMentionSyntax(reference),
-    group: reference.type === 'image' ? '参考图片' : '参考视频',
+    group: reference.type === 'image' ? tr('参考图片') : tr('参考视频'),
     previewUrl: reference.url,
     thumbnailUrl: reference.url,
-    description: reference.type === 'image' ? '已上传参考图片' : '已上传参考视频',
+    description: reference.type === 'image' ? tr('已上传参考图片') : tr('已上传参考视频'),
   }))
   const audioOptions: ScenePromptMentionOption[] = sceneVoiceReferenceMappings(scene).map((mapping, index) => {
     const reference = audioReferencesById.value[mapping.referenceId]
-    const subject = mapping.kind === 'narrator' ? '旁白' : mapping.subjects.join('、')
+    const subject = mapping.kind === 'narrator' ? tr('旁白') : mapping.subjects.join('、')
     return {
       id: `audio-${scene.id}-${mapping.referenceId}-${index + 1}`,
       kind: 'audio',
-      label: reference?.nickname ? `音频${index + 1} · ${reference.nickname}` : `音频${index + 1}`,
-      syntax: `@音频${index + 1}`,
-      group: '角色音色参考',
+      label: reference?.nickname ? tr('音频{p0} · {p1}', { p0: index + 1, p1: reference.nickname }) : tr('音频{p0}', { p0: index + 1 }),
+      syntax: tr('@音频{p0}', { p0: index + 1 }),
+      get group() { return tr('角色音色参考') },
       audioUrl: reference?.audio_url ? mediaUrl(reference.audio_url) : undefined,
-      description: `仅用于参考${subject}的音色，点击播放`,
+      description: tr('仅用于参考{p0}的音色，点击播放', { p0: subject }),
     }
   })
   return [
@@ -1048,10 +1050,10 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     {
       id: `duration-${scene.id}`,
       kind: 'duration',
-      label: '请设置时长',
-      syntax: '@{镜头时长}',
-      group: '镜头参数',
-      description: '设置 1–30 秒',
+      get label() { return tr('请设置时长') },
+      get syntax() { return tr('@{镜头时长}') },
+      get group() { return tr('镜头参数') },
+      get description() { return tr('设置 1–30 秒') },
     },
   ]
 }
@@ -1063,9 +1065,9 @@ function referenceLimitError(scene: Scene, model = selectedVideoModelConfig.valu
   const imageCount = selectedAssetReferenceImageCount(scene) + referencedMedia.filter(item => item.type === 'image').length
   const videos = referencedMedia.filter(item => item.type === 'video')
   const duration = videos.reduce((total, item) => total + (item.duration || 0), 0)
-  if (imageCount > model.capabilities.max_reference_images) return `参考图片超过 ${model.capabilities.max_reference_images} 张（包含资产图）`
-  if (videos.length > model.capabilities.max_reference_videos) return `参考视频超过 ${model.capabilities.max_reference_videos} 个`
-  if (duration > model.capabilities.reference_video_total_duration_max + 0.001) return `参考视频总时长超过 ${model.capabilities.reference_video_total_duration_max} 秒`
+  if (imageCount > model.capabilities.max_reference_images) return tr('参考图片超过 {p0} 张（包含资产图）', { p0: model.capabilities.max_reference_images })
+  if (videos.length > model.capabilities.max_reference_videos) return tr('参考视频超过 {p0} 个', { p0: model.capabilities.max_reference_videos })
+  if (duration > model.capabilities.reference_video_total_duration_max + 0.001) return tr('参考视频总时长超过 {p0} 秒', { p0: model.capabilities.reference_video_total_duration_max })
   return ''
 }
 
@@ -1086,7 +1088,7 @@ function inspectVideoFile(file: File): Promise<{ duration: number; width: number
     }
     video.onerror = () => {
       cleanup()
-      reject(new Error(`无法读取视频“${file.name}”，请确认文件未损坏且编码受支持`))
+      reject(new Error(tr('无法读取视频“{p0}”，请确认文件未损坏且编码受支持', { p0: file.name })))
     }
     video.src = url
   })
@@ -1098,22 +1100,22 @@ async function validateReferenceFiles(scene: Scene, files: File[], model: VideoG
   const existingVideos = draftFor(scene).referenceMedia.filter(item => item.type === 'video')
   const imageFiles = files.filter(file => capabilities.reference_image_formats.includes(fileExtension(file)))
   const videoFiles = files.filter(file => capabilities.reference_video_formats.includes(fileExtension(file)))
-  if (imageFiles.length + videoFiles.length !== files.length) throw new Error('仅支持当前模型配置允许的参考图片及 MP4/MOV 视频')
+  if (imageFiles.length + videoFiles.length !== files.length) throw new Error(tr('仅支持当前模型配置允许的参考图片及 MP4/MOV 视频'))
   if (existingImages + imageFiles.length > capabilities.max_reference_images) {
-    throw new Error(`当前模型最多接收 ${capabilities.max_reference_images} 张参考图片，已包含分镜所选资产图`)
+    throw new Error(tr('当前模型最多接收 {p0} 张参考图片，已包含分镜所选资产图', { p0: capabilities.max_reference_images }))
   }
   if (existingVideos.length + videoFiles.length > capabilities.max_reference_videos) {
-    throw new Error(`当前模型最多接收 ${capabilities.max_reference_videos} 个参考视频`)
+    throw new Error(tr('当前模型最多接收 {p0} 个参考视频', { p0: capabilities.max_reference_videos }))
   }
   for (const file of imageFiles) {
-    if (file.size > capabilities.reference_image_max_size_mb * 1024 * 1024) throw new Error(`单张参考图片不能超过 ${capabilities.reference_image_max_size_mb}MB`)
+    if (file.size > capabilities.reference_image_max_size_mb * 1024 * 1024) throw new Error(tr('单张参考图片不能超过 {p0}MB', { p0: capabilities.reference_image_max_size_mb }))
   }
   let totalDuration = existingVideos.reduce((total, item) => total + (item.duration || 0), 0)
   for (const file of videoFiles) {
-    if (file.size > capabilities.reference_video_max_size_mb * 1024 * 1024) throw new Error(`单个参考视频不能超过 ${capabilities.reference_video_max_size_mb}MB`)
+    if (file.size > capabilities.reference_video_max_size_mb * 1024 * 1024) throw new Error(tr('单个参考视频不能超过 {p0}MB', { p0: capabilities.reference_video_max_size_mb }))
     const metadata = await inspectVideoFile(file)
     if (metadata.duration < capabilities.reference_media_duration_min || metadata.duration > capabilities.reference_video_duration_max) {
-      throw new Error(`当前模型要求单个参考视频时长为 ${capabilities.reference_media_duration_min}-${capabilities.reference_video_duration_max} 秒`)
+      throw new Error(tr('当前模型要求单个参考视频时长为 {p0}-{p1} 秒', { p0: capabilities.reference_media_duration_min, p1: capabilities.reference_video_duration_max }))
     }
     const ratio = metadata.width / metadata.height
     const pixels = metadata.width * metadata.height
@@ -1123,12 +1125,12 @@ async function validateReferenceFiles(scene: Scene, files: File[], model: VideoG
       || metadata.height < sideMin || metadata.height > sideMax
       || ratio < capabilities.reference_media_ratio_min || ratio > capabilities.reference_media_ratio_max
       || pixels < capabilities.reference_video_pixels_min || pixels > capabilities.reference_video_pixels_max) {
-      throw new Error(`视频“${file.name}”的尺寸或宽高比不符合当前模型要求`)
+      throw new Error(tr('视频“{p0}”的尺寸或宽高比不符合当前模型要求', { p0: file.name }))
     }
     totalDuration += metadata.duration
   }
   if (totalDuration > capabilities.reference_video_total_duration_max + 0.001) {
-    throw new Error(`当前模型参考视频总时长不能超过 ${capabilities.reference_video_total_duration_max} 秒`)
+    throw new Error(tr('当前模型参考视频总时长不能超过 {p0} 秒', { p0: capabilities.reference_video_total_duration_max }))
   }
 }
 
@@ -1142,7 +1144,7 @@ async function uploadReferenceMedia(scene: Scene, files: File[]) {
     for (const file of files) uploaded.push(await api.uploadVideoReference(file, model.config_id))
     draftFor(scene).referenceMedia.push(...uploaded)
     await saveScene(scene, false)
-    notice.success(`已添加 ${uploaded.length} 个参考素材`)
+    notice.success(tr('已添加 {p0} 个参考素材', { p0: uploaded.length }))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -1161,11 +1163,11 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
   input.value = ''
   if (!file) return
   if (!file.type.startsWith('image/')) {
-    notice.error('首尾帧仅支持图片文件')
+    notice.error(tr('首尾帧仅支持图片文件'))
     return
   }
   if (file.size > 20 * 1024 * 1024) {
-    notice.error('图片大小不能超过 20MB')
+    notice.error(tr('图片大小不能超过 20MB'))
     return
   }
   const uploadKey = `${scene.id}:${kind}`
@@ -1177,7 +1179,7 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
     if (kind === 'first') draft.firstFrameUrl = url
     else draft.lastFrameUrl = url
     await saveScene(scene, false)
-    notice.success(kind === 'first' ? '首帧已上传' : '尾帧已上传')
+    notice.success(kind === 'first' ? tr('首帧已上传') : tr('尾帧已上传'))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -1234,7 +1236,7 @@ async function ensureFirstChapter() {
   const created = (await api.createChapter({
     novel_id: projectId.value,
     number: 1,
-    name: '第一章',
+    get name() { return tr('第一章') },
     content: '',
   })).data
   chapters.value = [created]
@@ -1262,7 +1264,7 @@ async function createManualScene(chapterId = activeChapterId.value) {
     const created = (await api.createScene({
       chapter_id: chapter.id,
       sequence: nextManualSceneSequence(scenes.value),
-      description: stripChapterOrdinal(chapter.name) || '新分镜',
+      description: stripChapterOrdinal(chapter.name) || tr('新分镜'),
       prompt: '',
       duration: 6,
     })).data
@@ -1309,31 +1311,31 @@ async function pollStoryboardTask(chapterId: number, taskId: string) {
     let current = await fetchTaskOrNull(taskId)
     if (current === null) {
       clearPersistedStoryboardTask(chapterId)
-      throw new Error('生成任务已不可用，请重新生成分镜')
+      throw new Error(tr('生成任务已不可用，请重新生成分镜'))
     }
     while (alive && !terminalTaskStatuses.has(current.status)) {
       await sleep(2200)
       current = await fetchTaskOrNull(taskId)
       if (current === null) {
         clearPersistedStoryboardTask(chapterId)
-        throw new Error('生成任务已不可用，请重新生成分镜')
+        throw new Error(tr('生成任务已不可用，请重新生成分镜'))
       }
     }
     if (!alive) return // 组件卸载：任务可能仍在跑，保留持久化，下次进入自动恢复
     if (current.status !== TaskStatusEnum.COMPLETED) {
       clearPersistedStoryboardTask(chapterId)
-      throw new Error(current.error_message || 'Agent 分镜生成失败')
+      throw new Error(current.error_message || tr('Agent 分镜生成失败'))
     }
     const result = await fetchChapterScenes(chapterId)
     clearPersistedStoryboardTask(chapterId)
     if (activeChapterId.value === chapterId) showChapterScenes(result)
     const chapterNumber = chapters.value.find(item => item.id === chapterId)?.number || ''
-    notice.success(`第 ${chapterNumber} 集分镜已生成`)
+    notice.success(tr('第 {p0} 集分镜已生成', { p0: chapterNumber }))
   } catch (error) {
     if (!alive) return
     const pendingTask = readPersistedStoryboardTasks()[chapterId]
     if (pendingTask) disconnectedStoryboardTasks.value[chapterId] = pendingTask
-    const message = pendingTask ? '暂时无法获取生成进度，已保留这次任务。重新连接后继续查看结果。' : (error as Error).message
+    const message = pendingTask ? tr('暂时无法获取生成进度，已保留这次任务。重新连接后继续查看结果。') : (error as Error).message
     setGenerationError(chapterId, message)
     notice.error(message)
   } finally {
@@ -1380,19 +1382,19 @@ async function regenerateStoryboard() {
   const analysis = (await api.novelAnalysis(projectId.value)).data
   const gate = analysisGate(analysis?.status)
   if (gate === 'failed') {
-    notice.error(analysis?.error_message || '项目分析失败，请回到剧本页重新分析')
+    notice.error(analysis?.error_message || tr('项目分析失败，请回到剧本页重新分析'))
     return
   }
   if (gate === 'wait') {
-    notice.info('项目分析尚未完成，完成后将自动生成本集分镜')
+    notice.info(tr('项目分析尚未完成，完成后将自动生成本集分镜'))
     await waitForAnalysisThenGenerate(chapterId)
     return
   }
   const chapterScenes = [...scenes.value]
   if (!await appConfirm({
-    title: '重新生成本集分镜？',
-    message: `本集现有 ${chapterScenes.length} 个分镜将被替换，此操作无法撤销。`,
-    confirmLabel: '重新生成',
+    get title() { return tr('重新生成本集分镜？') },
+    message: tr('本集现有 {p0} 个分镜将被替换，此操作无法撤销。', { p0: chapterScenes.length }),
+    get confirmLabel() { return tr('重新生成') },
     tone: 'warning',
   })) return
   setChapterGenerating(chapterId, true)
@@ -1457,7 +1459,7 @@ async function load() {
       ...novelResponse.data,
       aspectRatio: settings.aspectRatio || '9:16',
       resolution: settings.resolution || '720p',
-      style: settings.style || '写实通用',
+      style: settings.style || tr('写实通用'),
       creationMode: novelResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     chapters.value = chapterResponse.data.items
@@ -1660,9 +1662,9 @@ async function saveScene(
       }, draft.basePrompt)).data
       draft.basePrompt = updated.prompt ?? null
       scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
-      if (showNotice) notice.success('分镜已保存')
+      if (showNotice) notice.success(tr('分镜已保存'))
     } catch (error) {
-      notice.error(`自动保存失败：${(error as Error).message}`)
+      notice.error(tr('自动保存失败：{p0}', { p0: (error as Error).message }))
     }
   })
   sceneSaveQueues.set(scene.id, queued)
@@ -1695,7 +1697,7 @@ async function insertSceneAfter(scene: Scene) {
     await nextTick()
     setupSceneTracking()
     selectScene(created)
-    notice.success(`已在分镜 ${scene.sequence} 下方添加新分镜`)
+    notice.success(tr('已在分镜 {p0} 下方添加新分镜', { p0: scene.sequence }))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -1730,7 +1732,7 @@ async function duplicateScene(scene: Scene) {
     await nextTick()
     setupSceneTracking()
     selectScene(created)
-    notice.success('分镜已复制')
+    notice.success(tr('分镜已复制'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -1738,9 +1740,9 @@ async function duplicateScene(scene: Scene) {
 
 async function removeScene(scene: Scene) {
   if (!scene || !await appConfirm({
-    title: `删除分镜 ${scene.sequence}？`,
-    message: '删除后无法恢复，后续分镜序号不会自动调整。',
-    confirmLabel: '删除分镜',
+    title: tr('删除分镜 {p0}？', { p0: scene.sequence }),
+    get message() { return tr('删除后无法恢复，后续分镜序号不会自动调整。') },
+    get confirmLabel() { return tr('删除分镜') },
     tone: 'danger',
   })) return
   try {
@@ -1754,7 +1756,7 @@ async function removeScene(scene: Scene) {
     await nextTick()
     setupSceneTracking()
     if (next) selectScene(next)
-    notice.success('分镜已删除')
+    notice.success(tr('分镜已删除'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -1768,7 +1770,7 @@ async function generateVideo(
   const draft = draftFor(scene)
   const selectedModel = settings?.model || selectedVideoModelConfig.value
   if (!selectedModel) {
-    if (showNotice) notice.error('请先在设置中启用一个视频模型')
+    if (showNotice) notice.error(tr('请先在设置中启用一个视频模型'))
     return false
   }
   if (generatingVideoSceneIds.value.has(scene.id)) return false
@@ -1808,14 +1810,14 @@ async function generateVideo(
     }
     if (showNotice) {
       completed
-        ? notice.success('分镜视频生成完成')
-        : notice.error('视频生成失败，详情已显示在预览区')
+        ? notice.success(tr('分镜视频生成完成'))
+        : notice.error(tr('视频生成失败，详情已显示在预览区'))
     }
     return completed
   } catch (error) {
-    const message = error instanceof Error ? error.message : '视频生成失败'
+    const message = error instanceof Error ? error.message : tr('视频生成失败')
     setSceneVideoError(scene.id, message)
-    if (showNotice) notice.error('视频生成失败，详情已显示在预览区')
+    if (showNotice) notice.error(tr('视频生成失败，详情已显示在预览区'))
     return false
   } finally {
     setSceneBusy(generatingVideoSceneIds, scene.id, false)
@@ -1834,7 +1836,7 @@ async function refreshVideoHistory(scene: Scene) {
     videos.value[scene.id] = (await api.videoGenerationHistory(scene.id)).data
     setSceneVideoError(scene.id)
   } catch (error) {
-    notice.error(`刷新生成记录失败：${(error as Error).message}`)
+    notice.error(tr('刷新生成记录失败：{p0}', { p0: (error as Error).message }))
   } finally {
     setSceneBusy(refreshingVideoHistorySceneIds, scene.id, false)
   }
@@ -1846,7 +1848,7 @@ async function selectVideoHistoryRecord(scene: Scene, record: VideoResult) {
     await api.selectCurrentVideo(record.id)
     scene.metadata = { ...(scene.metadata || {}), current_video_id: record.id }
     setSceneVideoError(scene.id)
-    notice.success('已切换为该次视频生成结果')
+    notice.success(tr('已切换为该次视频生成结果'))
   } catch (error) {
     notice.error((error as Error).message)
   }
@@ -1880,10 +1882,10 @@ function syncInjectedLastFrame(result: VideoResult) {
 function batchVideoBaseDisabledReason(scene: Scene) {
   const draft = draftFor(scene)
   const video = selectedVideoFor(scene)
-  if (video?.status === TaskStatusEnum.COMPLETED) return '已完成'
-  if (generatingVideoSceneIds.value.has(scene.id)) return '正在生成'
-  if (!draft.prompt.trim()) return '提示词不完整'
-  if (draft.videoGenerationMode === 'keyframes' && (!draft.firstFrameUrl || !draft.lastFrameUrl)) return '请先补全首尾帧'
+  if (video?.status === TaskStatusEnum.COMPLETED) return tr('已完成')
+  if (generatingVideoSceneIds.value.has(scene.id)) return tr('正在生成')
+  if (!draft.prompt.trim()) return tr('提示词不完整')
+  if (draft.videoGenerationMode === 'keyframes' && (!draft.firstFrameUrl || !draft.lastFrameUrl)) return tr('请先补全首尾帧')
   return ''
 }
 
@@ -1895,22 +1897,22 @@ function batchVideoDisabledReason(
   const baseReason = batchVideoBaseDisabledReason(scene)
   if (baseReason) return baseReason
   const draft = draftFor(scene)
-  if (!model) return '未配置视频模型'
-  if (!model.capabilities.generation_modes.includes(draft.videoGenerationMode)) return '所选模型不支持该生成方式'
-  if (settings && !model.capabilities.resolutions.includes(settings.resolution)) return '所选模型不支持该分辨率'
+  if (!model) return tr('未配置视频模型')
+  if (!model.capabilities.generation_modes.includes(draft.videoGenerationMode)) return tr('所选模型不支持该生成方式')
+  if (settings && !model.capabilities.resolutions.includes(settings.resolution)) return tr('所选模型不支持该分辨率')
   const ratios = model.capabilities.aspect_ratios_by_mode[draft.videoGenerationMode] || model.capabilities.aspect_ratios
-  if (settings && !ratios.includes(settings.aspectRatio)) return '所选模型不支持该画面比例'
+  if (settings && !ratios.includes(settings.aspectRatio)) return tr('所选模型不支持该画面比例')
   if (referenceLimitError(scene, model)) return referenceLimitError(scene, model)
   return ''
 }
 
 function openBatchVideoDialog() {
   if (!videoModels.value.length || batchGeneratingVideos.value) {
-    if (!videoModels.value.length) notice.error('请先在设置中启用一个视频模型')
+    if (!videoModels.value.length) notice.error(tr('请先在设置中启用一个视频模型'))
     return
   }
   if (!batchVideoSceneOptions.value.some(scene => !scene.disabled)) {
-    notice.info('当前没有需要批量生成的视频')
+    notice.info(tr('当前没有需要批量生成的视频'))
     return
   }
   batchVideoDialogOpen.value = true
@@ -1924,7 +1926,7 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     .filter(scene => selectedIdSet.has(scene.id) && !batchVideoDisabledReason(scene, model, request))
     .sort((left, right) => left.sequence - right.sequence)
   if (!targets.length) {
-    notice.info('所选分镜当前无法生成视频')
+    notice.info(tr('所选分镜当前无法生成视频'))
     return
   }
 
@@ -1951,8 +1953,8 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     )
     const failedCount = targets.length - completedCount
     failedCount
-      ? notice.error(`批量生成完成：成功 ${completedCount} 条，失败 ${failedCount} 条`)
-      : notice.success(`批量生成完成：成功 ${completedCount} 条`)
+      ? notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
+      : notice.success(tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
   } finally {
     batchGeneratingVideos.value = false
   }
@@ -1973,9 +1975,9 @@ async function renameCanvas(name: string) {
     const updated = (await api.updateChapter(activeChapter.value.id, { name })).data
     activeChapter.value = updated
     chapters.value = chapters.value.map(chapter => chapter.id === updated.id ? updated : chapter)
-    notice.success('画布名称已保存')
+    notice.success(tr('画布名称已保存'))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '画布名称保存失败')
+    notice.error(error instanceof Error ? error.message : tr('画布名称保存失败'))
   } finally {
     savingCanvasIdentity.value = false
   }
@@ -1993,9 +1995,9 @@ async function saveChapterDetails(value: { name: string; content: string }) {
     activeChapter.value = updated
     chapters.value = chapters.value.map(chapter => chapter.id === updated.id ? updated : chapter)
     chapterDetailOpen.value = false
-    notice.success('章节详情已保存')
+    notice.success(tr('章节详情已保存'))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '章节详情保存失败')
+    notice.error(error instanceof Error ? error.message : tr('章节详情保存失败'))
   } finally {
     savingChapterDetails.value = false
   }
@@ -2023,10 +2025,10 @@ onBeforeUnmount(() => {
     <ShortDramaWorkspaceShell
       ref="workspaceShell"
       :project-id="projectId"
-      :project-name="project?.name || '短剧项目'"
+      :project-name="project?.name || tr('短剧项目')"
       :aspect-ratio="project?.aspectRatio || '9:16'"
       :resolution="project?.resolution || '720p'"
-      :style-name="project?.style || '写实通用'"
+      :style-name="project?.style || tr('写实通用')"
       active-phase="storyboard"
       :creation-mode="project?.creationMode || 'agent'"
       :chapters="chapters"
@@ -2040,12 +2042,12 @@ onBeforeUnmount(() => {
       @prompts-changed="refreshAgentChanges"
     >
       <template v-if="workspaceView === 'workflow' && activeChapter" #project-name>
-        <WorkbenchCanvasIdentity :name="stripChapterOrdinal(activeChapter.name) || '未命名'" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
+        <WorkbenchCanvasIdentity :name="stripChapterOrdinal(activeChapter.name) || tr('未命名')" :chapter-number="activeChapter.number" :saving="savingCanvasIdentity" @rename="renameCanvas" />
       </template>
       <template #header-end>
-        <nav class="workspace-view-switch" aria-label="工作区视图切换">
-          <AppButton variant="ghost" size="sm" :active="workspaceView === 'workflow'" :aria-pressed="workspaceView === 'workflow'" @click="selectWorkspaceView('workflow')"><Workflow :size="14" />工作流</AppButton>
-          <AppButton variant="ghost" size="sm" :active="workspaceView === 'storyboard'" :aria-pressed="workspaceView === 'storyboard'" @click="selectWorkspaceView('storyboard')"><PanelsTopLeft :size="14" />故事板</AppButton>
+        <nav class="workspace-view-switch" :aria-label="tr('工作区视图切换')">
+          <AppButton variant="ghost" size="sm" :active="workspaceView === 'workflow'" :aria-pressed="workspaceView === 'workflow'" @click="selectWorkspaceView('workflow')"><Workflow :size="14" />{{ tr('工作流') }}</AppButton>
+          <AppButton variant="ghost" size="sm" :active="workspaceView === 'storyboard'" :aria-pressed="workspaceView === 'storyboard'" @click="selectWorkspaceView('storyboard')"><PanelsTopLeft :size="14" />{{ tr('故事板') }}</AppButton>
         </nav>
       </template>
 
@@ -2060,24 +2062,24 @@ onBeforeUnmount(() => {
           @select="selectSceneById"
         />
         <header v-if="workspaceView === 'storyboard'" class="chapter-toolbar">
-          <button type="button" class="chapter-summary" :disabled="!activeChapter" aria-label="查看并编辑当前章节详情" @click="openChapterDetails">
+          <button type="button" class="chapter-summary" :disabled="!activeChapter" :aria-label="tr('查看并编辑当前章节详情')" @click="openChapterDetails">
             <span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span>
-            <h1>{{ activeChapter ? episodeDisplayLabel(activeChapter) : '分镜制作' }}</h1>
+            <h1>{{ activeChapter ? episodeDisplayLabel(activeChapter) : tr('分镜制作') }}</h1>
             <p>{{ activeChapter?.content?.slice(0, 120) }}</p>
-            <small>点击查看详情</small>
+            <small>{{ tr('点击查看详情') }}</small>
           </button>
           <div class="chapter-actions">
-            <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="300" align="end" />
-            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : canReconnectStoryboard ? '重新连接' : scenes.length ? '重新生成分镜' : '生成本章分镜' }}</AppButton>
-            <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建分镜" }}</AppButton>
-            <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? '批量生成中' : '批量生视频' }}</AppButton>
+            <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
+            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
+            <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建分镜') }}</AppButton>
+            <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
           </div>
         </header>
 
-        <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? `Agent 正在生成第 ${activeChapter?.number || '-'} 集的全部分镜` : waitingAnalysis ? '项目分析尚未完成' : `正在读取第 ${activeChapter?.number || '-'} 集分镜` }}</strong><p>{{ generatingStoryboard ? '仅处理当前选中的这一集，不会自动生成其他集。' : waitingAnalysis ? 'AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…' : '正在准备本集章节、资产和视频信息。' }}</p></div>
-        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? '生成进度暂时断开' : '暂时无法生成分镜' }}</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? '重新连接' : '重试' }}</AppButton><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">返回剧本</AppButton></div>
-        <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>从第一个分镜开始，逐步搭建你的镜头列表。</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? "创建中" : "创建第一个分镜" }}</AppButton></div>
-        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>还没有分镜</strong><p>点击下方按钮，AI 将生成本集全部分镜。</p><AppButton variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? 'Agent 生成中' : waitingAnalysis ? '等待项目分析' : '生成全部分镜' }}</AppButton></div>
+        <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
+        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
+        <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('从第一个分镜开始，逐步搭建你的镜头列表。') }}</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建第一个分镜') }}</AppButton></div>
+        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><AppButton variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>
@@ -2085,26 +2087,26 @@ onBeforeUnmount(() => {
           <article v-for="scene in scenes" :id="`scene-${scene.id}`" :key="scene.id" class="shot-editor" :class="{ 'is-active': activeSceneId === scene.id }" :data-scene-id="scene.id">
             <header class="shot-editor-header">
               <div class="shot-editor-heading">
-                <GripVertical class="drag-mark" :size="16" /><strong>分镜 {{ scene.sequence }}</strong>
-                <nav aria-label="视频生成方式">
-                  <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'reference'" :aria-pressed="draftFor(scene).videoGenerationMode === 'reference'" @click="setVideoGenerationMode(scene, 'reference')"><span class="mode-dot" />全能参考生视频</AppButton>
-                  <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')"><span class="mode-dot" />首尾帧生视频</AppButton>
+                <GripVertical class="drag-mark" :size="16" /><strong>{{ tr('分镜') }} {{ scene.sequence }}</strong>
+                <nav :aria-label="tr('视频生成方式')">
+                  <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'reference'" :aria-pressed="draftFor(scene).videoGenerationMode === 'reference'" @click="setVideoGenerationMode(scene, 'reference')"><span class="mode-dot" />{{ tr('全能参考生视频') }}</AppButton>
+                  <AppButton variant="soft" size="sm" :active="draftFor(scene).videoGenerationMode === 'keyframes'" :aria-pressed="draftFor(scene).videoGenerationMode === 'keyframes'" @click="setVideoGenerationMode(scene, 'keyframes')"><span class="mode-dot" />{{ tr('首尾帧生视频') }}</AppButton>
                 </nav>
               </div>
               <div>
-                <AppButton variant="soft" size="sm" :aria-label="`用助手修改分镜 ${scene.sequence}`" @click="workspaceShell?.editWithAssistant([{ target: { kind: 'scene', id: scene.id }, label: `分镜 ${scene.sequence} · ${scene.description || '未命名'}` }])"><Bot :size="14" />用助手修改</AppButton>
-                <AppButton variant="ghost" size="sm" icon-only :aria-label="`在分镜 ${scene.sequence} 下方添加分镜`" title="在下方添加分镜" @click="insertSceneAfter(scene)"><Plus :size="15" /></AppButton>
-                <AppButton variant="ghost" size="sm" icon-only aria-label="复制分镜" title="复制分镜" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton>
-                <AppButton variant="danger" size="sm" icon-only aria-label="删除分镜" title="删除分镜" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton>
+                <AppButton variant="soft" size="sm" :aria-label="tr('用助手修改分镜 {p0}', { p0: scene.sequence })" @click="workspaceShell?.editWithAssistant([{ target: { kind: 'scene', id: scene.id }, label: tr('分镜 {p0} · {p1}', { p0: scene.sequence, p1: scene.description || '未命名' }) }])"><Bot :size="14" />{{ tr('用助手修改') }}</AppButton>
+                <AppButton variant="ghost" size="sm" icon-only :aria-label="tr('在分镜 {p0} 下方添加分镜', { p0: scene.sequence })" :title="tr('在下方添加分镜')" @click="insertSceneAfter(scene)"><Plus :size="15" /></AppButton>
+                <AppButton variant="ghost" size="sm" icon-only :aria-label="tr('复制分镜')" :title="tr('复制分镜')" @click="duplicateScene(scene)"><Copy :size="15" /></AppButton>
+                <AppButton variant="danger" size="sm" icon-only :aria-label="tr('删除分镜')" :title="tr('删除分镜')" @click="removeScene(scene)"><Trash2 :size="15" /></AppButton>
               </div>
             </header>
 
             <div class="shot-editor-grid">
               <aside class="shot-info-panel">
-                <h2>分镜信息</h2>
-                <label><span>分镜描述</span><textarea :value="draftFor(scene).description" rows="5" placeholder="请输入分镜描述" @input="updateSceneText(scene, 'description', $event)" /></label>
+                <h2>{{ tr('分镜信息') }}</h2>
+                <label><span>{{ tr('分镜描述') }}</span><textarea :value="draftFor(scene).description" rows="5" :placeholder="tr('请输入分镜描述')" @input="updateSceneText(scene, 'description', $event)" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
-                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.length }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="`选择${group.label}及衍生状态`" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
+                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.length }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="tr('选择{p0}及衍生状态', { p0: group.label })" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
                   <div
                     v-if="selectedAssetsFor(scene, group).length"
                     class="selected-assets"
@@ -2127,8 +2129,8 @@ onBeforeUnmount(() => {
                         class="asset-name-button"
                         :active="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id"
                         :aria-expanded="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id"
-                        :aria-label="`替换${selectedAssetLabel(scene, asset)}`"
-                        :title="`替换${selectedAssetLabel(scene, asset)}`"
+                        :aria-label="tr('替换{p0}', { p0: selectedAssetLabel(scene, asset) })"
+                        :title="tr('替换{p0}', { p0: selectedAssetLabel(scene, asset) })"
                         @click="toggleAssetReplacementPicker(scene, group.type, asset)"
                       ><span>{{ selectedAssetLabel(scene, asset) }}</span></AppButton>
                       <AppButton
@@ -2139,8 +2141,8 @@ onBeforeUnmount(() => {
                         :active="assetVoicePickerTarget?.sceneId === scene.id && assetVoicePickerTarget?.assetId === asset.id"
                         :loading="savingAssetVoiceKey === assetVoicePickerKey(scene, asset)"
                         :disabled="Boolean(savingAssetVoiceKey)"
-                        :aria-label="`为${selectedAssetLabel(scene, asset)}更换音色`"
-                        :title="`更换${selectedAssetLabel(scene, asset)}的音色`"
+                        :aria-label="tr('为{p0}更换音色', { p0: selectedAssetLabel(scene, asset) })"
+                        :title="tr('更换{p0}的音色', { p0: selectedAssetLabel(scene, asset) })"
                         @click="openAssetVoicePicker(scene, asset)"
                       ><Volume2 :size="13" /><span>{{ selectedAssetVoiceLabel(scene, asset) }}</span></AppButton>
                       <SceneAssetActionMenu
@@ -2152,7 +2154,7 @@ onBeforeUnmount(() => {
                       />
                     </article>
                   </div>
-                  <p v-else>暂未选择{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
+                  <p v-else>{{ tr('暂未选择') }}{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
                   <SceneAssetVariantPicker
                     :open="openAssetPickerKey === assetPickerKey(scene, group.type)"
                     :anchor-id="assetPickerAnchorId(scene, group.type)"
@@ -2171,21 +2173,21 @@ onBeforeUnmount(() => {
 
               <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
                 <header>
-                  <div><span><strong>分镜视频生成</strong><small>组合角色、场景和动作，生成连续镜头</small></span></div>
+                  <div><span><strong>{{ tr('分镜视频生成') }}</strong><small>{{ tr('组合角色、场景和动作，生成连续镜头') }}</small></span></div>
                   <AppButton
                     variant="ghost"
                     size="sm"
                     icon-only
                     class="prompt-focus-trigger"
-                    :aria-label="`放大编辑分镜 ${scene.sequence} 提示词`"
-                    title="专注编辑"
+                    :aria-label="tr('放大编辑分镜 {p0} 提示词', { p0: scene.sequence })"
+                    :title="tr('专注编辑')"
                     @click="openPromptFocus(scene)"
                   ><Maximize2 :size="16" /></AppButton>
                 </header>
                 <div v-if="draftFor(scene).videoGenerationMode === 'keyframes'" class="keyframe-inputs">
-                  <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" alt="首帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>上传首帧</strong><small>视频开始画面</small></span><i>首帧</i></label>
+                  <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" :alt="tr('首帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传首帧') }}</strong><small>{{ tr('视频开始画面') }}</small></span><i>{{ tr('首帧') }}</i></label>
                   <span>→</span>
-                  <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="draftFor(scene).lastFrameUrl" alt="尾帧" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>上传尾帧</strong><small>视频结束画面</small></span><i>尾帧</i></label>
+                  <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="draftFor(scene).lastFrameUrl" :alt="tr('尾帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传尾帧') }}</strong><small>{{ tr('视频结束画面') }}</small></span><i>{{ tr('尾帧') }}</i></label>
                 </div>
                 <SceneReferenceMediaBar
                   :model="selectedVideoModelConfig"
@@ -2205,7 +2207,7 @@ onBeforeUnmount(() => {
                 />
                 <footer>
                   <div>
-                    <AppSelect v-model="selectedVideoModelInput" class="video-model-select" density="compact" ariaLabel="视频模型" :options="videoModelOptions" :menu-width="videoModelSelectWidth" :style="{ width: `${videoModelSelectWidth}px`, minWidth: `${videoModelSelectWidth}px` }" />
+                    <AppSelect v-model="selectedVideoModelInput" class="video-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="videoModelSelectWidth" :style="{ width: `${videoModelSelectWidth}px`, minWidth: `${videoModelSelectWidth}px` }" />
                     <SceneVideoParameterPicker
                       :model="selectedVideoModelConfig"
                       :mode="draftFor(scene).videoGenerationMode"
@@ -2219,12 +2221,12 @@ onBeforeUnmount(() => {
                       @update:return-last-frame="updateSceneDraft(scene, 'returnLastFrame', $event)"
                     />
                   </div>
-                  <AppButton variant="primary" size="md" aria-label="生成视频" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? '生成中' : '生成' }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
+                  <AppButton variant="primary" size="md" :aria-label="tr('生成视频')" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? tr('生成中') : tr('生成') }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
                 </footer>
               </section>
 
               <aside class="preview-panel">
-                <header><strong>视频预览</strong><RefreshCw :size="15" /></header>
+                <header><strong>{{ tr('视频预览') }}</strong><RefreshCw :size="15" /></header>
                 <div class="preview-stage">
                   <VideoGenerationErrorState
                     v-if="sceneVideoError(scene)"
@@ -2238,10 +2240,10 @@ onBeforeUnmount(() => {
                     v-else-if="selectedVideoFor(scene)?.url"
                     :src="selectedVideoFor(scene)?.url"
                     :poster="videoCoverUrl(selectedVideoFor(scene)!)"
-                    :title="`分镜 ${scene.sequence} 视频预览`"
+                    :title="tr('分镜 {p0} 视频预览', { p0: scene.sequence })"
                   />
-                  <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>视频生成中</strong><span>完成后将在这里自动播放</span></div>
-                  <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>等待生成视频</strong><span>完善提示词后点击“生成视频”</span></div>
+                  <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>{{ tr('视频生成中') }}</strong><span>{{ tr('完成后将在这里自动播放') }}</span></div>
+                  <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>{{ tr('等待生成视频') }}</strong><span>{{ tr('完善提示词后点击“生成视频”') }}</span></div>
                 </div>
                 <SceneVideoGenerationHistory
                   :records="videos[scene.id] || []"

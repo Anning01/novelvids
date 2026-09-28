@@ -4,6 +4,8 @@
 行为与无鉴权版本完全一致；`true` 时执行严格鉴权与角色检查。
 """
 
+from utils.messages import localized_message
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -54,7 +56,7 @@ async def get_current_user(request: Request) -> Optional[User]:
         return None
     token = extract_bearer_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="未登录")
+        raise HTTPException(status_code=401, detail=localized_message('未登录'))
     session = await UserSession.get_or_none(
         token_hash=hash_token(token)
     ).select_related("user")
@@ -62,9 +64,9 @@ async def get_current_user(request: Request) -> Optional[User]:
     if session is None or session.expires_at <= now:
         if session is not None:
             await session.delete()
-        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+        raise HTTPException(status_code=401, detail=localized_message('登录已失效，请重新登录'))
     if session.user.status != UserStatusEnum.active.value:
-        raise HTTPException(status_code=403, detail="账号已停用")
+        raise HTTPException(status_code=403, detail=localized_message('账号已停用'))
     session.last_seen_at = now
     await session.save(update_fields=["last_seen_at", "updated_at"])
     return session.user
@@ -89,7 +91,7 @@ async def get_auth_context(
     else:
         membership = await query.select_related("team").first()
     if membership is None:
-        raise HTTPException(status_code=403, detail="没有加入任何可用团队")
+        raise HTTPException(status_code=403, detail=localized_message('没有加入任何可用团队'))
     return AuthContext(
         user=user,
         membership=membership,
@@ -115,7 +117,7 @@ def require_roles(*roles: str):
         if auth_disabled() or ctx.user is None or ctx.is_super_admin:
             return ctx
         if ctx.membership is None or ctx.membership.role not in roles:
-            raise HTTPException(status_code=403, detail="没有权限执行此操作")
+            raise HTTPException(status_code=403, detail=localized_message('没有权限执行此操作'))
         return ctx
 
     return dependency
@@ -128,7 +130,7 @@ async def require_super_admin(
     if auth_disabled():
         return ctx
     if not ctx.is_super_admin:
-        raise HTTPException(status_code=403, detail="仅超级管理员可执行此操作")
+        raise HTTPException(status_code=403, detail=localized_message('仅超级管理员可执行此操作'))
     return ctx
 
 
@@ -152,7 +154,7 @@ async def ensure_novel_access(novel_id: int, ctx: AuthContext) -> None:
         return
     novel = await Novel.get_or_none(id=novel_id)
     if novel is None or novel.team_id != ctx.team_id:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise HTTPException(status_code=404, detail=localized_message('项目不存在'))
 
 
 async def require_chapter_access(
@@ -164,7 +166,7 @@ async def require_chapter_access(
     if chapter is not None:
         await ensure_novel_access(chapter.novel_id, ctx)
     elif not auth_disabled() and ctx.user is not None and not ctx.is_super_admin:
-        raise HTTPException(status_code=404, detail="章节不存在")
+        raise HTTPException(status_code=404, detail=localized_message('章节不存在'))
     return ctx
 
 
@@ -179,7 +181,7 @@ async def require_scene_access(
     if scene is not None:
         await ensure_novel_access(scene.chapter.novel_id, ctx)
     elif not auth_disabled() and ctx.user is not None and not ctx.is_super_admin:
-        raise HTTPException(status_code=404, detail="分镜不存在")
+        raise HTTPException(status_code=404, detail=localized_message('分镜不存在'))
     return ctx
 
 
@@ -194,7 +196,7 @@ async def require_video_access(
     if video is not None:
         await ensure_novel_access(video.scene.chapter.novel_id, ctx)
     elif not auth_disabled() and ctx.user is not None and not ctx.is_super_admin:
-        raise HTTPException(status_code=404, detail="视频不存在")
+        raise HTTPException(status_code=404, detail=localized_message('视频不存在'))
     return ctx
 
 
@@ -207,7 +209,7 @@ async def require_asset_access(
     if asset is not None:
         await ensure_novel_access(asset.novel_id, ctx)
     elif not auth_disabled() and ctx.user is not None and not ctx.is_super_admin:
-        raise HTTPException(status_code=404, detail="资产不存在")
+        raise HTTPException(status_code=404, detail=localized_message('资产不存在'))
     return ctx
 
 
@@ -219,7 +221,7 @@ async def require_task_access(
     task = await AiTask.get_or_none(id=task_id)
     if task is None:
         if not auth_disabled() and ctx.user is not None and not ctx.is_super_admin:
-            raise HTTPException(status_code=404, detail="任务不存在")
+            raise HTTPException(status_code=404, detail=localized_message('任务不存在'))
         return ctx
     if task.task_type == AiTaskTypeEnum.creation_agent.value:
         from services.creation_agent.sessions import agent_sessions

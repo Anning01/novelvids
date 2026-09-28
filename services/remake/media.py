@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 import hashlib
 import json
 import subprocess
@@ -74,7 +76,7 @@ class RemakeMediaValidator:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_EXTENSION_UNSUPPORTED",
-                "来源视频仅支持 MP4 或 MOV 格式",
+                localized_message('来源视频仅支持 MP4 或 MOV 格式'),
                 context={"filename": Path(filename).name},
             )
 
@@ -90,12 +92,12 @@ class RemakeMediaValidator:
     ) -> ValidatedRemakeMedia:
         cls.validate_extension(original_filename)
         if size_bytes <= 0:
-            raise RemakeError(422, "REMAKE_MEDIA_INVALID_CONTAINER", "来源视频为空或无法读取")
+            raise RemakeError(422, "REMAKE_MEDIA_INVALID_CONTAINER", localized_message('来源视频为空或无法读取'))
         if size_bytes > MAX_REMAKE_BYTES:
             raise RemakeError(
                 413,
                 "REMAKE_MEDIA_SIZE_EXCEEDED",
-                "单个来源视频不能超过500MB",
+                localized_message('单个来源视频不能超过500MB'),
                 context={"filename": Path(original_filename).name, "limit_bytes": MAX_REMAKE_BYTES},
             )
 
@@ -108,7 +110,7 @@ class RemakeMediaValidator:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_INVALID_CONTAINER",
-                "文件不是有效的 MP4/MOV 视频或已经损坏",
+                localized_message('文件不是有效的 MP4/MOV 视频或已经损坏'),
                 context={"filename": Path(original_filename).name},
             )
 
@@ -124,7 +126,7 @@ class RemakeMediaValidator:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_VIDEO_STREAM_MISSING",
-                "来源文件中没有有效视频流",
+                localized_message('来源文件中没有有效视频流'),
                 context={"filename": Path(original_filename).name},
             )
         width = int(video_stream.get("width") or 0)
@@ -133,7 +135,7 @@ class RemakeMediaValidator:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_INVALID_CONTAINER",
-                "无法读取来源视频画面尺寸",
+                localized_message('无法读取来源视频画面尺寸'),
                 context={"filename": Path(original_filename).name},
             )
 
@@ -144,14 +146,14 @@ class RemakeMediaValidator:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_DURATION_INVALID",
-                "无法读取来源视频时长",
+                localized_message('无法读取来源视频时长'),
                 context={"filename": Path(original_filename).name},
             )
         if duration > MAX_REMAKE_DURATION_SECONDS:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_DURATION_EXCEEDED",
-                "视频时长不能超过20分钟",
+                localized_message('视频时长不能超过20分钟'),
                 context={
                     "filename": Path(original_filename).name,
                     "limit_seconds": MAX_REMAKE_DURATION_SECONDS,
@@ -184,7 +186,7 @@ class RemakeMediaValidator:
                 raise RemakeError(
                     413,
                     "REMAKE_MEDIA_SIZE_EXCEEDED",
-                    "单个来源视频不能超过500MB",
+                    localized_message('单个来源视频不能超过500MB'),
                     context={"filename": Path(original_filename).name, "limit_bytes": MAX_REMAKE_BYTES},
                 )
             probe = _run_ffprobe(path)
@@ -195,7 +197,7 @@ class RemakeMediaValidator:
             raise RemakeError(
                 422,
                 "REMAKE_MEDIA_INVALID_CONTAINER",
-                "文件不是有效的 MP4/MOV 视频或已经损坏",
+                localized_message('文件不是有效的 MP4/MOV 视频或已经损坏'),
                 context={"filename": Path(original_filename).name},
             ) from error
         return self.validate_probe(

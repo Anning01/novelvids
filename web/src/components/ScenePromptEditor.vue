@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue'
 import { AtSign, Boxes, Clock3, Film, Image as ImageIcon, Map as MapIcon, Pause, UserRound, Volume2, X } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
@@ -28,7 +30,7 @@ const props = withDefaults(defineProps<{
   embedded?: boolean
   focusMode?: boolean
 }>(), {
-  placeholder: '请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。',
+  get placeholder() { return tr('请输入分镜视频提示词。描述镜头、主体动作、运镜、光线、画面风格和声音。') },
   embedded: false,
   focusMode: false,
 })
@@ -112,10 +114,10 @@ function createMentionNode(option: ScenePromptMentionOption) {
   const interactive = Boolean(option.previewUrl || option.audioUrl) || option.kind === 'duration'
   mention.setAttribute('role', interactive ? 'button' : 'note')
   mention.setAttribute('aria-label', option.kind === 'duration'
-    ? `${option.label}，点击更改时间`
+    ? tr('{p0}，点击更改时间', { p0: option.label })
     : option.kind === 'audio' && option.audioUrl
-      ? `${option.label}，点击播放音色参考`
-      : option.previewUrl ? `${option.label}，点击预览` : option.label)
+      ? tr('{p0}，点击播放音色参考', { p0: option.label })
+      : option.previewUrl ? tr('{p0}，点击预览', { p0: option.label }) : option.label)
   if (interactive) mention.tabIndex = 0
 
   const thumbnail = option.thumbnailUrl || option.previewUrl
@@ -182,10 +184,10 @@ function findNextMention(value: string, start: number) {
       option: {
         id: `duration-${durationMatch.index}-${durationMatch[0]}`,
         kind: 'duration',
-        label: seconds ? `${Number(seconds)}s` : '请设置时长',
+        label: seconds ? `${Number(seconds)}s` : tr('请设置时长'),
         syntax: durationMatch[0],
-        group: configured?.group || '镜头参数',
-        description: configured?.description || '设置 1–30 秒',
+        group: configured?.group || tr('镜头参数'),
+        description: configured?.description || tr('设置 1–30 秒'),
       },
     }
   }
@@ -457,9 +459,9 @@ function confirmDuration() {
   if (!durationIsValid.value || !durationAnchor.value) return
   const anchor = durationAnchor.value
   const normalized = Number(durationNumber.value.toFixed(1))
-  anchor.dataset.syntax = `@{镜头时长:${normalized}s}`
+  anchor.dataset.syntax = tr('@{镜头时长:{p0}s}', { p0: normalized })
   anchor.dataset.mentionId = `duration-${normalized}`
-  anchor.setAttribute('aria-label', `${normalized}s，点击更改时间`)
+  anchor.setAttribute('aria-label', tr('{p0}s，点击更改时间', { p0: normalized }))
   const label = anchor.querySelector(':scope > span:last-child')
   if (label) label.textContent = `${normalized}s`
   emitEditorValue()
@@ -600,7 +602,7 @@ onBeforeUnmount(() => {
       contenteditable="true"
       role="textbox"
       aria-multiline="true"
-      aria-label="分镜视频提示词，输入艾特符号可添加引用"
+      :aria-label="tr('分镜视频提示词，输入艾特符号可添加引用')"
       :data-placeholder="placeholder"
       spellcheck="true"
       @input="handleInput"
@@ -622,7 +624,7 @@ onBeforeUnmount(() => {
           :class="`is-${hoverPreviewOption.kind}`"
           :style="hoverPreviewStyle"
           role="tooltip"
-          :aria-label="`${hoverPreviewOption.label}预览`"
+          :aria-label="tr('{p0}预览', { p0: hoverPreviewOption.label })"
         >
           <video v-if="hoverPreviewOption.kind === 'video'" :src="hoverPreviewSource" muted autoplay loop playsinline preload="metadata" />
           <img v-else :src="hoverPreviewSource" :alt="hoverPreviewOption.label" />
@@ -632,8 +634,8 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <Transition name="scene-prompt-menu">
-        <section v-if="menuOpen" class="scene-prompt-mentions" :style="menuStyle" role="listbox" aria-label="选择提示词引用" @pointerdown.stop>
-          <header><AtSign :size="14" /><span>选择引用</span><small>输入名称筛选</small></header>
+        <section v-if="menuOpen" class="scene-prompt-mentions" :style="menuStyle" role="listbox" :aria-label="tr('选择提示词引用')" @pointerdown.stop>
+          <header><AtSign :size="14" /><span>{{ tr('选择引用') }}</span><small>{{ tr('输入名称筛选') }}</small></header>
           <div v-if="filteredOptions.length" class="scene-prompt-mentions__groups">
             <section v-for="group in groupedOptions" :key="group.label">
               <h3>{{ group.label }}</h3>
@@ -663,12 +665,12 @@ onBeforeUnmount(() => {
                 @pointerdown.prevent="selectMention(durationMentionOption)"
               >
                 <span class="scene-prompt-mentions__action-icon"><Clock3 :size="17" /></span>
-                <span><strong>添加镜头时长</strong><small>插入后可点击修改 1–30 秒</small></span>
+                <span><strong>{{ tr('添加镜头时长') }}</strong><small>{{ tr('插入后可点击修改 1–30 秒') }}</small></span>
               </button>
             </section>
           </div>
-          <p v-else>没有匹配的引用</p>
-          <footer><kbd>↑</kbd><kbd>↓</kbd>选择 <kbd>Enter</kbd>插入 <kbd>Esc</kbd>关闭</footer>
+          <p v-else>{{ tr('没有匹配的引用') }}</p>
+          <footer><kbd>↑</kbd><kbd>↓</kbd>{{ tr('选择') }} <kbd>Enter</kbd>{{ tr('插入') }} <kbd>Esc</kbd>{{ tr('关闭') }}</footer>
         </section>
       </Transition>
     </Teleport>
@@ -676,14 +678,14 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <Transition name="scene-prompt-menu">
         <form v-if="durationEditorOpen" class="scene-duration-editor" :style="durationStyle" @submit.prevent="confirmDuration" @pointerdown.stop>
-          <strong>更改时间</strong>
+          <strong>{{ tr('更改时间') }}</strong>
           <label>
-            <input ref="durationInput" v-model="durationValue" type="number" min="1" max="30" step="0.5" inputmode="decimal" placeholder="请输入时长（1-30）" aria-label="镜头时长，1 到 30 秒" />
+            <input ref="durationInput" v-model="durationValue" type="number" min="1" max="30" step="0.5" inputmode="decimal" :placeholder="tr('请输入时长（1-30）')" :aria-label="tr('镜头时长，1 到 30 秒')" />
             <span>s</span>
           </label>
           <div>
-            <AppButton type="button" variant="secondary" size="sm" @click="closeDurationEditor">取消</AppButton>
-            <AppButton type="submit" variant="primary" size="sm" :disabled="!durationIsValid">确认</AppButton>
+            <AppButton type="button" variant="secondary" size="sm" @click="closeDurationEditor">{{ tr('取消') }}</AppButton>
+            <AppButton type="submit" variant="primary" size="sm" :disabled="!durationIsValid">{{ tr('确认') }}</AppButton>
           </div>
         </form>
       </Transition>
@@ -692,14 +694,14 @@ onBeforeUnmount(() => {
     <ImageLightbox
       :open="Boolean(imagePreview?.previewUrl)"
       :src="imagePreview?.previewUrl || ''"
-      :alt="imagePreview?.label || '引用图片'"
+      :alt="imagePreview?.label || tr('引用图片')"
       @close="closePreview"
     />
     <Teleport to="body">
       <Transition name="scene-prompt-preview">
-        <div v-if="previewOption?.kind === 'video' && previewOption.previewUrl" class="scene-prompt-video-preview" role="dialog" aria-modal="true" :aria-label="`${previewOption.label}视频预览`" @click.self="closePreview">
+        <div v-if="previewOption?.kind === 'video' && previewOption.previewUrl" class="scene-prompt-video-preview" role="dialog" aria-modal="true" :aria-label="tr('{p0}视频预览', { p0: previewOption.label })" @click.self="closePreview">
           <section>
-            <header><div><Film :size="17" /><strong>{{ previewOption.label }}</strong></div><AppButton type="button" variant="ghost" size="sm" icon-only aria-label="关闭视频预览" @click="closePreview"><X :size="18" /></AppButton></header>
+            <header><div><Film :size="17" /><strong>{{ previewOption.label }}</strong></div><AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭视频预览')" @click="closePreview"><X :size="18" /></AppButton></header>
             <video :src="previewOption.previewUrl" controls autoplay playsinline />
           </section>
         </div>

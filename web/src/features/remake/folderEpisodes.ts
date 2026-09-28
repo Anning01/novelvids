@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 export type FolderEntryState = 'pending' | 'uploading' | 'ready' | 'failed' | 'invalid' | 'ignored'
 
 export interface FolderVideoEntry {
@@ -61,23 +63,23 @@ export function prepareFolderBatch(
     }
     if (!allowedExtensions.includes(extension)) {
       entry.state = 'ignored'
-      entry.issue = '非 MP4/MOV 文件，已忽略'
+      entry.issue = tr('非 MP4/MOV 文件，已忽略')
       return entry
     }
     if (file.size <= 0 || file.size > maxBytes) {
       entry.state = 'invalid'
-      entry.issue = file.size <= 0 ? '视频文件为空' : '单视频不能超过 500 MB'
+      entry.issue = file.size <= 0 ? tr('视频文件为空') : tr('单视频不能超过 500 MB')
       return entry
     }
     const parsed = parseFolderEpisode(file.name)
     if (parsed === 'ambiguous') {
       entry.state = 'invalid'
-      entry.issue = '文件名包含多个不同集数'
+      entry.issue = tr('文件名包含多个不同集数')
       return entry
     }
     if (parsed === null) {
       entry.state = 'invalid'
-      entry.issue = '文件名缺少集数信息'
+      entry.issue = tr('文件名缺少集数信息')
       return entry
     }
     entry.episodeNumber = parsed
@@ -91,7 +93,7 @@ export function prepareFolderBatch(
     if (duplicates.length < 2) continue
     duplicates.forEach(entry => {
       entry.state = 'invalid'
-      entry.issue = `第 ${episode} 集重复`
+      entry.issue = tr('第 {p0} 集重复', { p0: episode })
     })
   }
   entries.sort((left, right) => {

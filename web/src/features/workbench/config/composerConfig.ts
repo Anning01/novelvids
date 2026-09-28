@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import type { Scene, Video } from '@/types'
 import { TaskStatusEnum } from '@/types'
 import { videoDurationSeconds } from '../graph/videoMedia'
@@ -30,7 +32,7 @@ function includesValue<T extends readonly string[]>(values: T, value: unknown): 
 
 export function normalizeComposerConfig(value: Partial<ComposerConfig> | null | undefined): ComposerConfig {
   return {
-    name: typeof value?.name === 'string' && value.name.trim() ? value.name.trim() : '视频合成器',
+    name: typeof value?.name === 'string' && value.name.trim() ? value.name.trim() : tr('视频合成器'),
     resolution: includesValue(COMPOSER_RESOLUTIONS, value?.resolution) ? value.resolution : '720p',
     aspectRatio: includesValue(COMPOSER_ASPECT_RATIOS, value?.aspectRatio) ? value.aspectRatio : '9:16',
   }
@@ -112,18 +114,18 @@ export function chapterComposerDisabledReason(
   edges: WorkbenchEdge[],
 ) {
   const shots = nodes.filter(node => node.kind === 'shot')
-  if (!shots.length) return '当前集还没有可合成的镜头'
+  if (!shots.length) return tr('当前集还没有可合成的镜头')
   const connectedKeys = new Set(edges
     .filter(edge => edge.target === nodeKey && edge.type === 'output_binding' && edge.targetHandle !== 'watermark-input')
     .map(edge => edge.source))
   const hasUnsupportedInput = [...connectedKeys].some(key => nodes.find(node => node.key === key)?.kind !== 'shot')
-  if (hasUnsupportedInput) return '章节成片仅支持连接当前集的生成视频镜头'
+  if (hasUnsupportedInput) return tr('章节成片仅支持连接当前集的生成视频镜头')
   if (shots.some(shot => !connectedKeys.has(shot.key)) || connectedKeys.size !== shots.length) {
-    return `请连接当前集全部 ${shots.length} 个镜头`
+    return tr('请连接当前集全部 {p0} 个镜头', { p0: shots.length })
   }
   const incomplete = shots.some((shot) => {
     const video = shotVideo(shot)
     return !video?.url || video.status !== TaskStatusEnum.COMPLETED
   })
-  return incomplete ? '镜头视频尚未全部生成完成' : ''
+  return incomplete ? tr('镜头视频尚未全部生成完成') : ''
 }

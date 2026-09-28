@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { NodeProps } from '@vue-flow/core';
 import { Palette, StickyNote, Trash2 } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
@@ -48,7 +50,7 @@ async function saveContent() {
     }
   }
   catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '便签保存失败';
+    error.value = reason instanceof Error ? reason.message : tr('便签保存失败');
   }
   finally {
     saving.value = false;
@@ -75,34 +77,34 @@ async function deleteNote() {
     await store.deleteSelection();
   }
   catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '便签删除失败';
+    error.value = reason instanceof Error ? reason.message : tr('便签删除失败');
   }
 }
 </script>
 
 <template>
-  <article class="workbench-note" :class="{ 'is-selected': selected }" :style="noteStyle" :aria-label="String(data.title || '便签')">
-    <div v-if="selected" class="workbench-note__toolbar nodrag nowheel" role="toolbar" aria-label="便签操作" @pointerdown.stop @click.stop>
-      <button type="button" aria-label="删除便签" title="删除便签" @click="deleteNote">
+  <article class="workbench-note" :class="{ 'is-selected': selected }" :style="noteStyle" :aria-label="String(data.title || tr('便签'))">
+    <div v-if="selected" class="workbench-note__toolbar nodrag nowheel" role="toolbar" :aria-label="tr('便签操作')" @pointerdown.stop @click.stop>
+      <button type="button" :aria-label="tr('删除便签')" :title="tr('删除便签')" @click="deleteNote">
         <Trash2 :size="17" aria-hidden="true" />
       </button>
-      <label title="便签背景颜色">
+      <label :title="tr('便签背景颜色')">
         <Palette :size="17" aria-hidden="true" />
-        <input type="color" :value="color" :disabled="saving" aria-label="修改便签背景颜色" @input="previewColor" @change="saveColor">
+        <input type="color" :value="color" :disabled="saving" :aria-label="tr('修改便签背景颜色')" @input="previewColor" @change="saveColor">
       </label>
     </div>
     <header>
       <StickyNote :size="16" aria-hidden="true" />
-      <strong>{{ data.title || '便签' }}</strong>
-      <span v-if="saving">保存中…</span>
+      <strong>{{ data.title || tr('便签') }}</strong>
+      <span v-if="saving">{{ tr('保存中…') }}</span>
     </header>
     <textarea
       ref="textareaRef"
       class="nodrag nowheel"
       :value="content"
       maxlength="10000"
-      aria-label="便签内容"
-      placeholder="输入说明、备注或待办事项…"
+      :aria-label="tr('便签内容')"
+      :placeholder="tr('输入说明、备注或待办事项…')"
       @input="updateContent"
       @blur="saveContent"
       @keydown.stop

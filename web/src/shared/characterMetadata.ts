@@ -6,7 +6,9 @@ export interface CharacterFormMetadata {
 }
 
 function traitValue(baseTraits: string | undefined, label: string) {
-  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const aliases: Record<string, string[]> = { '性别': ['Gender'], '年龄': ['Age'] }
+  const labels = [label, ...(aliases[label] || [])]
+  const escapedLabel = '(?:' + labels.map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')'
   const match = (baseTraits || '').match(
     new RegExp(
       `(?:^|\\n)\\s*(?:[-*]\\s*)?\\**${escapedLabel}\\**\\s*[:：]\\s*(.+?)(?=\\r?\\n|$)`,

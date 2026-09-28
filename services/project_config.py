@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import HTTPException
 
 from prompts.styles import AUTO_STYLE_KEY, get_style
@@ -58,16 +60,16 @@ def validate_project_config(
     )
 
     if aspect_ratio is not None and aspect_ratio not in project_aspect_ratios():
-        raise HTTPException(status_code=422, detail="项目画面比例不受支持")
+        raise HTTPException(status_code=422, detail=localized_message('项目画面比例不受支持'))
     if resolution is not None and resolution not in project_resolutions():
-        raise HTTPException(status_code=422, detail="项目清晰度不受支持")
+        raise HTTPException(status_code=422, detail=localized_message('项目清晰度不受支持'))
     if requested_style_key and custom_style_prompt:
-        raise HTTPException(status_code=422, detail="系统风格与自定义风格只能选择一种")
+        raise HTTPException(status_code=422, detail=localized_message('系统风格与自定义风格只能选择一种'))
     style_key = None if requested_style_key == AUTO_STYLE_KEY else requested_style_key
     if requested_style_key == AUTO_STYLE_KEY:
         normalized["style_key"] = None
     if style_key and get_style(style_key) is None:
-        raise HTTPException(status_code=422, detail="视觉风格不存在")
+        raise HTTPException(status_code=422, detail=localized_message('视觉风格不存在'))
     if blank_custom_style:
-        raise HTTPException(status_code=422, detail="自定义风格不能为空")
+        raise HTTPException(status_code=422, detail=localized_message('自定义风格不能为空'))
     return normalized

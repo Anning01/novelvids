@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, ref } from 'vue';
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue';
 import { parseMediaAspectRatio } from '../graph/mediaAspectRatio';
@@ -24,9 +26,9 @@ const props = withDefaults(defineProps<{
   failed: false,
   error: '',
   progress: 0,
-  emptyLabel: '视频结果尚未就绪',
-  runningLabel: '正在生成视频',
-  failureLabel: '视频生成失败',
+  get emptyLabel() { return tr('视频结果尚未就绪') },
+  get runningLabel() { return tr('正在生成视频') },
+  get failureLabel() { return tr('视频生成失败') },
 });
 const emit = defineEmits<{
   metadata: [value: { width: number; height: number }];

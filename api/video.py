@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from pydantic import BaseModel, Field
@@ -69,7 +71,7 @@ async def finalize_video_reference_oss(
     if not oss.enabled:
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=400, detail="未启用对象存储")
+        raise HTTPException(status_code=400, detail=localized_message('未启用对象存储'))
     config = await ai_model_config_controller.get_active(
         AiTaskTypeEnum.video.value,
         payload.model_config_id,

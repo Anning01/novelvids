@@ -174,7 +174,7 @@ async def test_running_conversation_must_be_stopped_before_delete(client):
     path = f'/api/creation-agent/conversations/{conversation.id}'
     response = await client.delete(path)
     assert response.json()['code'] == 409
-    assert '先停止' in response.json()['message']
+    assert 'Stop it before deleting' in response.json()['message']
     await client.post(f'/api/creation-agent/runs/{task.id}/stop')
     assert (await client.delete(path)).json()['code'] == 0
 

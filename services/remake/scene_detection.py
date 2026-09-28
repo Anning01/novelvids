@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -44,7 +46,7 @@ class SceneDetector:
         )
         paths = sorted(output_dir.glob("scene-*.mp4"))
         if len(paths) != len(scenes):
-            raise RemakeSceneDetectionError("视频镜头切分结果不完整")
+            raise RemakeSceneDetectionError(localized_message('视频镜头切分结果不完整'))
         return paths
 
 

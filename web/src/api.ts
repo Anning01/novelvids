@@ -1,3 +1,5 @@
+
+import { tr } from '@/i18n'
 import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
@@ -64,7 +66,7 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
       clearAuthToken()
       redirectToLogin()
     }
-    throw new Error(payload.message || payload.detail || '请求失败')
+    throw new Error(payload.message || payload.detail || tr('请求失败'))
   }
   return payload
 }
@@ -90,8 +92,8 @@ function uploadWithProgress(
         onProgress?.(Math.round((event.loaded / event.total) * 100))
       }
     }
-    xhr.onerror = () => reject(new Error('视频上传失败，请检查网络后重试'))
-    xhr.onabort = () => reject(new Error('视频上传已取消'))
+    xhr.onerror = () => reject(new Error(tr('视频上传失败，请检查网络后重试')))
+    xhr.onabort = () => reject(new Error(tr('视频上传已取消')))
     xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText })
     xhr.send(body)
   })
@@ -138,9 +140,9 @@ async function streamRemakeProgress(
       clearAuthToken()
       redirectToLogin()
     }
-    throw new Error(`拆解进度连接失败（${response.status}）`)
+    throw new Error(tr('拆解进度连接失败（{p0}）', { p0: response.status }))
   }
-  if (!response.body) throw new Error('浏览器无法读取拆解进度事件流')
+  if (!response.body) throw new Error(tr('浏览器无法读取拆解进度事件流'))
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -186,12 +188,12 @@ export const api = {
     })}`)
     if (policyResponse.data.direct) {
       const policy = policyResponse.data
-      if (!policy.upload_url || !policy.object_key) throw new Error('对象存储上传策略不完整')
+      if (!policy.upload_url || !policy.object_key) throw new Error(tr('对象存储上传策略不完整'))
       const form = new FormData()
       Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, value))
       form.append('file', file)
       const uploaded = await uploadWithProgress(policy.upload_url, form, {}, onProgress)
-      if (uploaded.status < 200 || uploaded.status >= 300) throw new Error('视频直传失败，请稍后重试')
+      if (uploaded.status < 200 || uploaded.status >= 300) throw new Error(tr('视频直传失败，请稍后重试'))
       const finalized = await request<SingleResponse<RemakeUpload>>('/remake/uploads/finalize', {
         method: 'POST',
         body: JSON.stringify({ object_key: policy.object_key, original_filename: file.name }),
@@ -207,7 +209,7 @@ export const api = {
         clearAuthToken()
         redirectToLogin()
       }
-      throw new Error(payload.message || payload.detail || '视频上传失败')
+      throw new Error(payload.message || payload.detail || tr('视频上传失败'))
     }
     return payload.data as RemakeUpload
   },
@@ -307,7 +309,7 @@ export const api = {
       Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, String(value)))
       form.append('file', file)
       const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
-      if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
+      if (!uploadResponse.ok) throw new Error(tr('直传对象存储失败，请稍后重试'))
       const finalized = await request<SingleResponse<VideoReferenceMedia>>('/video/reference/oss-finalize', {
         method: 'POST',
         body: JSON.stringify({ model_config_id: modelConfigId, key: policy.key, filename: file.name }),
@@ -324,7 +326,7 @@ export const api = {
         clearAuthToken()
         redirectToLogin()
       }
-      throw new Error(payload.message || payload.detail || '参考素材上传失败')
+      throw new Error(payload.message || payload.detail || tr('参考素材上传失败'))
     }
     return payload.data as VideoReferenceMedia
   },
@@ -338,9 +340,9 @@ export const api = {
   }),
   async uploadAudioReference(file: File, nickname: string, gender: string, novelId?: number) {
     if (!['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav'].includes(file.type) && !/\.(mp3|wav)$/i.test(file.name)) {
-      throw new Error('参考音频仅支持 MP3 或 WAV')
+      throw new Error(tr('参考音频仅支持 MP3 或 WAV'))
     }
-    if (file.size > 15 * 1024 * 1024) throw new Error('参考音频不能超过 15MB')
+    if (file.size > 15 * 1024 * 1024) throw new Error(tr('参考音频不能超过 15MB'))
     const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream', novel_id: novelId })}`)
     if (policyResponse.data.direct) {
       const policy = policyResponse.data
@@ -348,7 +350,7 @@ export const api = {
       Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, String(value)))
       form.append('file', file)
       const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
-      if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
+      if (!uploadResponse.ok) throw new Error(tr('直传对象存储失败，请稍后重试'))
       return request<SingleResponse<AudioReference>>('/media-library/audio-references/oss-finalize', {
         method: 'POST',
         body: JSON.stringify({ key: policy.key, filename: file.name, nickname, gender, novel_id: novelId }),
@@ -361,7 +363,7 @@ export const api = {
     if (novelId) form.append('novel_id', String(novelId))
     const response = await fetch(`${BASE}/media-library/audio-references/upload`, { method: 'POST', body: form, headers: authHeaders() })
     const payload = await response.json()
-    if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || '参考音频上传失败')
+    if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || tr('参考音频上传失败'))
     return payload as SingleResponse<AudioReference>
   },
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
@@ -392,7 +394,7 @@ export const api = {
       Object.entries(policy.fields ?? {}).forEach(([name, value]) => form.append(name, String(value)))
       form.append('file', file)
       const uploadResponse = await fetch(policy.upload_url!, { method: 'POST', body: form })
-      if (!uploadResponse.ok) throw new Error('直传对象存储失败，请稍后重试')
+      if (!uploadResponse.ok) throw new Error(tr('直传对象存储失败，请稍后重试'))
       // 直传成功后不再把书稿正文经浏览器中转：只回传 key，由服务端经内网读取解析。
       return {
         filename: file.name,
@@ -401,7 +403,7 @@ export const api = {
         file_path: policy.public_url || '',
         url: policy.public_url || '',
         key: policy.key,
-        message: '文件上传成功',
+        get message() { return tr('文件上传成功') },
       }
     }
     const data = new FormData(); data.append('files', file)
@@ -412,11 +414,11 @@ export const api = {
         clearAuthToken()
         redirectToLogin()
       }
-      throw new Error(payload.message || '上传失败')
+      throw new Error(payload.message || tr('上传失败'))
     }
     return payload.data.files[0] as UploadResult
   },
 }
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-export const statusLabel = (status?: number) => ({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' }[status || 0] || '未知')
+export const statusLabel = (status?: number) => ({ get 1() { return tr('等待中') }, get 2() { return tr('处理中') }, get 3() { return tr('已完成') }, get 4() { return tr('失败') }, get 5() { return tr('已取消') }, get 6() { return tr('排队中') } }[status || 0] || tr('未知'))

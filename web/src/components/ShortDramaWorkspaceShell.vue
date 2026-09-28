@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, BookOpenText, Clapperboard, Film, Settings2, Video, Bot } from 'lucide-vue-next'
@@ -58,10 +60,10 @@ onMounted(async () => {
   catch { /* Keep the project's saved style visible while settings are unavailable. */ }
 })
 const phases = computed(() => [
-  ...(props.creationMode === 'agent' ? [{ key: 'script' as const, label: '剧本', icon: BookOpenText }] : []),
-  { key: 'settings' as const, label: '设定', icon: Settings2 },
-  { key: 'storyboard' as const, label: '分镜', icon: Clapperboard },
-  { key: 'video' as const, label: '视频', icon: Video, disabled: !props.videoEnabled },
+  ...(props.creationMode === 'agent' ? [{ key: 'script' as const, get label() { return tr('剧本') }, icon: BookOpenText }] : []),
+  { key: 'settings' as const, get label() { return tr('设定') }, icon: Settings2 },
+  { key: 'storyboard' as const, get label() { return tr('分镜') }, icon: Clapperboard },
+  { key: 'video' as const, get label() { return tr('视频') }, icon: Video, disabled: !props.videoEnabled },
 ])
 const hasEpisodeRail = computed(() => props.showEpisodeRail && !props.immersive && props.activePhase !== 'script')
 
@@ -105,8 +107,8 @@ defineExpose({ editWithAssistant })
           variant="ghost"
           size="sm"
           icon-only
-          aria-label="返回项目"
-          title="返回项目"
+          :aria-label="tr('返回项目')"
+          :title="tr('返回项目')"
           @click="router.push('/projects')"
         >
           <ArrowLeft :size="18" />
@@ -119,7 +121,7 @@ defineExpose({ editWithAssistant })
         </div>
       </div>
 
-      <nav v-if="!immersive" class="short-drama-phase-nav" aria-label="短剧制作流程">
+      <nav v-if="!immersive" class="short-drama-phase-nav" :aria-label="tr('短剧制作流程')">
         <template v-for="(phase, index) in phases" :key="phase.key">
           <span v-if="index" class="short-drama-phase-line" />
           <AppButton
@@ -136,7 +138,7 @@ defineExpose({ editWithAssistant })
       </nav>
 
       <div class="short-drama-header-end"><slot name="header-end" />
-        <AppButton v-if="projectId > 0" ref="assistantButton" size="sm" :active="assistantOpen" :aria-expanded="assistantOpen" @click="assistantOpen = !assistantOpen"><Bot :size="16" />创作助手</AppButton>
+        <AppButton v-if="projectId > 0" ref="assistantButton" size="sm" :active="assistantOpen" :aria-expanded="assistantOpen" @click="assistantOpen = !assistantOpen"><Bot :size="16" />{{ tr('创作助手') }}</AppButton>
         <AppThemeToggle v-if="!immersive" placement="inline" />
       </div>
     </header>
@@ -150,7 +152,7 @@ defineExpose({ editWithAssistant })
 
     <div class="short-drama-workspace-content">
       <div class="short-drama-workspace-body"><slot /></div>
-      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :chapter-label="activeChapter ? `第 ${activeChapter.number} 章 · ${activeChapter.name}` : '当前项目'" :phase="activePhase" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" />
+      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :chapter-label="activeChapter ? tr('第 {p0} 章 · {p1}', { p0: activeChapter.number, p1: activeChapter.name }) : tr('当前项目')" :phase="activePhase" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" />
     </div>
   </div>
 </template>

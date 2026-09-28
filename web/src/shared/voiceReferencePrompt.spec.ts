@@ -83,3 +83,16 @@ describe('可编辑音色参考 Prompt', () => {
     expect(migrated).not.toContain('[音频1]')
   })
 })
+
+it('recognizes English narrator and names with spaces from structured tracks', () => {
+  const mappings = buildVoiceReferenceMappings({
+    prompt: 'A quiet room.',
+    promptParams: {
+      narration: ['0s-1s: Narrator (calm): It was late.'],
+      dialogue: ['1s-3s: @{Alex Reed} (quiet): Stay here.'],
+    },
+    narratorReferenceId: 9,
+    assets: [{ assetId: 1, name: 'Alex Reed', aliases: [], referenceId: 10 }],
+  })
+  expect(mappings.map(item => [item.referenceId, item.kind])).toEqual([[9, 'narrator'], [10, 'character']])
+})

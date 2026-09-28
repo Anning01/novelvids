@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { LocateFixed, Plus } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import AgentDisclosure from './AgentDisclosure.vue'
@@ -9,16 +11,16 @@ defineEmits<{ locate: [target: AgentQueryItem]; select: [target: AgentQueryItem]
 </script>
 
 <template>
-  <section class="agent-query-results" aria-label="查询结果">
-    <AgentDisclosure :title="`找到 ${result.total} 个对象`" :summary="result.has_more ? `显示 ${result.items.length} 个` : '查询结果'">
+  <section class="agent-query-results" :aria-label="tr('查询结果')">
+    <AgentDisclosure :title="tr('找到 {p0} 个对象', { p0: result.total })" :summary="result.has_more ? tr('显示 {p0} 个', { p0: result.items.length }) : tr('查询结果')">
     <ul>
       <li v-for="item in result.items" :key="`${item.kind}:${item.id}`">
         <AppButton class="agent-query-results__name" size="xs" :title="item.name" @click="$emit('locate', item)"><LocateFixed :size="13" /><span>{{ item.name }}</span></AppButton>
-        <AppButton v-if="item.kind !== 'chapter'" size="xs" icon-only :disabled="disabled" :aria-label="`指定${item.name}`" @click="$emit('select', item)"><Plus :size="14" /></AppButton>
+        <AppButton v-if="item.kind !== 'chapter'" size="xs" icon-only :disabled="disabled" :aria-label="tr('指定{p0}', { p0: item.name })" @click="$emit('select', item)"><Plus :size="14" /></AppButton>
       </li>
     </ul>
-    <p v-if="!result.items.length">当前条件下没有匹配对象。</p>
-    <p v-if="result.has_more">可以继续说“查看下一页”，或描述更具体的查找条件。</p>
+    <p v-if="!result.items.length">{{ tr('当前条件下没有匹配对象。') }}</p>
+    <p v-if="result.has_more">{{ tr('可以继续说“查看下一页”，或描述更具体的查找条件。') }}</p>
     </AgentDisclosure>
   </section>
 </template>

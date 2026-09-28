@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { Ellipsis, Pencil, Trash2 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 
@@ -24,16 +26,16 @@ const emit = defineEmits<{
       icon-only
       aria-haspopup="menu"
       :aria-expanded="open"
-      :aria-label="`${label}更多操作`"
+      :aria-label="tr('{p0}更多操作', { p0: label })"
       @click.stop="emit('toggle')"
     >
       <Ellipsis :size="16" />
     </AppButton>
 
     <Transition name="scene-asset-actions-menu">
-      <div v-if="open" class="scene-asset-actions__menu" role="menu" :aria-label="`${label}操作`" @click.stop>
-        <button type="button" role="menuitem" @click="emit('edit')"><Pencil :size="14" /><span>编辑</span></button>
-        <button type="button" class="is-danger" role="menuitem" @click="emit('remove')"><Trash2 :size="14" /><span>删除</span></button>
+      <div v-if="open" class="scene-asset-actions__menu" role="menu" :aria-label="tr('{p0}操作', { p0: label })" @click.stop>
+        <button type="button" role="menuitem" @click="emit('edit')"><Pencil :size="14" /><span>{{ tr('编辑') }}</span></button>
+        <button type="button" class="is-danger" role="menuitem" @click="emit('remove')"><Trash2 :size="14" /><span>{{ tr('删除') }}</span></button>
       </div>
     </Transition>
   </div>

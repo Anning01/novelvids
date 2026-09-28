@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Pause, Play } from 'lucide-vue-next'
 
@@ -154,7 +156,7 @@ onBeforeUnmount(pausePreview)
   <section
     class="audio-range"
     role="group"
-    :aria-label="`音频裁剪区间，已选 ${selectedDuration.toFixed(1)} 秒`"
+    :aria-label="tr('音频裁剪区间，已选 {p0} 秒', { p0: selectedDuration.toFixed(1) })"
   >
     <audio
       ref="audioRef"
@@ -169,7 +171,7 @@ onBeforeUnmount(pausePreview)
       <button
         type="button"
         class="audio-range__play"
-        :aria-label="isPlaying ? '暂停裁剪片段' : '从裁剪起点播放'"
+        :aria-label="isPlaying ? tr('暂停裁剪片段') : tr('从裁剪起点播放')"
         :disabled="!safeDuration || end <= start"
         @click="togglePreview"
       >
@@ -177,12 +179,12 @@ onBeforeUnmount(pausePreview)
         <Play v-else :size="14" fill="currentColor" />
       </button>
       <span><strong>{{ formatTime(currentTime) }}</strong><small>/ {{ formatTime(end) }}</small></span>
-      <span class="audio-range__preview-label">从裁剪起点试听</span>
+      <span class="audio-range__preview-label">{{ tr('从裁剪起点试听') }}</span>
     </div>
     <header>
-      <span><small>开始</small><strong>{{ formatTime(start) }}</strong></span>
-      <span class="audio-range__selected">已选 {{ selectedDuration.toFixed(1) }}s</span>
-      <span><small>结束</small><strong>{{ formatTime(end) }}</strong></span>
+      <span><small>{{ tr('开始') }}</small><strong>{{ formatTime(start) }}</strong></span>
+      <span class="audio-range__selected">{{ tr('已选') }} {{ selectedDuration.toFixed(1) }}s</span>
+      <span><small>{{ tr('结束') }}</small><strong>{{ formatTime(end) }}</strong></span>
     </header>
     <div class="audio-range__control" @pointerdown="seekFromTimeline">
       <div class="audio-range__track" aria-hidden="true">
@@ -196,7 +198,7 @@ onBeforeUnmount(pausePreview)
         :max="safeDuration"
         :step="step"
         :value="start"
-        aria-label="裁剪开始时间"
+        :aria-label="tr('裁剪开始时间')"
         :aria-valuetext="formatTime(start)"
         @pointerdown.stop
         @input="updateStart"
@@ -208,7 +210,7 @@ onBeforeUnmount(pausePreview)
         :max="safeDuration"
         :step="step"
         :value="end"
-        aria-label="裁剪结束时间"
+        :aria-label="tr('裁剪结束时间')"
         :aria-valuetext="formatTime(end)"
         @pointerdown.stop
         @input="updateEnd"

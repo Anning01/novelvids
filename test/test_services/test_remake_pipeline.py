@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from prompts.language import output_language_rule
 from prompts.remake import ASSET_PROMPT, ASSET_SCHEMA, PROMPT_SCHEMA, PROMPT_TEMPLATE
 from services.remake.pipeline import RemakeDecompositionPipeline, RemakePipelineError
 
@@ -96,12 +97,12 @@ async def test_pipeline_calls_global_assets_once_then_one_prompt_per_scene_in_or
     )
 
     assert len(gateway.one_calls) == 1
-    assert gateway.one_calls[0]["prompt"] == ASSET_PROMPT
+    assert gateway.one_calls[0]["prompt"] == ASSET_PROMPT + "\n" + output_language_rule("zh")
     assert gateway.one_calls[0]["response_schema"] == ASSET_SCHEMA
     assert gateway.one_calls[0]["include_segment_metadata"] is False
     assert len(gateway.many_calls) == 1
     assert gateway.many_calls[0][0] == scenes
-    assert gateway.many_calls[0][1]["prompt"] == PROMPT_TEMPLATE
+    assert gateway.many_calls[0][1]["prompt"] == PROMPT_TEMPLATE + "\n" + output_language_rule("zh")
     assert gateway.many_calls[0][1]["response_schema"] == PROMPT_SCHEMA
     catalog = gateway.many_calls[0][1]["context_builder"](1)
     assert "character-001" in catalog

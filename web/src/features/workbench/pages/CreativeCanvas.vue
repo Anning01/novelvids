@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import type { Connection, Edge, Node, NodeChange, NodeDragEvent, NodeTypesObject, OnConnectStartParams } from '@vue-flow/core'
 import type { CompatibleNodeCreation, WorkbenchConnectionOrigin, WorkbenchNodeCreationCandidate } from '../graph/nodeCreationRules'
 import { Background } from '@vue-flow/background'
@@ -76,7 +78,7 @@ const capabilities = ref<WorkbenchCapabilities>({
 })
 const sectionDropTargetKey = ref<string | null>(null)
 const promptEditorNodeKey = ref<string | null>(null)
-const keyboardStatus = ref('尚未选择连线起点')
+const keyboardStatus = ref(tr('尚未选择连线起点'))
 const promptActionRegistry = createWorkbenchPromptActionRegistry()
 provide(workbenchPromptActionRegistryKey, promptActionRegistry)
 const nodeRunRegistry = createWorkbenchNodeRunRegistry()
@@ -99,10 +101,10 @@ const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewpo
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), source_video: markRaw(RemakeSourceNode), ai_decomposition: markRaw(RemakeAnalysisNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
-  { id: 'asset', label: '资产', description: '创建可编辑的昵称、Prompt 与图片资产', kind: 'asset', data: {} },
-  { id: 'shot', label: '视频', description: '创建一个可编辑的视频生产节点', kind: 'shot', data: {} },
-  { id: 'watermark', label: '创建水印', description: '创建水印配置节点', kind: 'watermark', data: {} },
-  { id: 'operation:video_composer', label: '视频合成器', description: '创建成片合成节点', kind: 'video_composer', data: {} },
+  { id: 'asset', get label() { return tr('资产') }, get description() { return tr('创建可编辑的昵称、Prompt 与图片资产') }, kind: 'asset', data: {} },
+  { id: 'shot', get label() { return tr('视频') }, get description() { return tr('创建一个可编辑的视频生产节点') }, kind: 'shot', data: {} },
+  { id: 'watermark', get label() { return tr('创建水印') }, get description() { return tr('创建水印配置节点') }, kind: 'watermark', data: {} },
+  { id: 'operation:video_composer', get label() { return tr('视频合成器') }, get description() { return tr('创建成片合成节点') }, kind: 'video_composer', data: {} },
 ]
 const connectionPicker = ref<{
   x: number
@@ -241,37 +243,37 @@ function activateKeyboardHandle(handle: KeyboardHandleActivation) {
   if (handle.type === 'source') {
     if (!nodeExposesHandle(store.nodeByKey(handle.nodeId), handle.handleId, 'source')) {
       keyboardSource = null
-      keyboardStatus.value = '输出端口不可用，请重新选择'
+      keyboardStatus.value = tr('输出端口不可用，请重新选择')
       return
     }
     keyboardSource = handle
-    keyboardStatus.value = `已选择 ${handle.nodeId} 的输出端口，请选择兼容的输入端口`
+    keyboardStatus.value = tr('已选择 {p0} 的输出端口，请选择兼容的输入端口', { p0: handle.nodeId })
     return
   }
   if (!keyboardSource) {
-    keyboardStatus.value = '请先选择一个输出端口'
+    keyboardStatus.value = tr('请先选择一个输出端口')
     return
   }
   const source = keyboardSource
   keyboardSource = null
   if (!nodeExposesHandle(store.nodeByKey(source.nodeId), source.handleId, 'source')) {
-    keyboardStatus.value = '已选择的输出端口已失效，请重新选择'
+    keyboardStatus.value = tr('已选择的输出端口已失效，请重新选择')
     return
   }
   if (!nodeExposesHandle(store.nodeByKey(handle.nodeId), handle.handleId, 'target')) {
-    keyboardStatus.value = '目标输入端口不可用，请重新选择'
+    keyboardStatus.value = tr('目标输入端口不可用，请重新选择')
     return
   }
   const connected = store.connectMediaNode(source.nodeId, handle.nodeId, {
     sourceHandle: source.handleId,
     targetHandle: handle.handleId,
   })
-  keyboardStatus.value = connected ? '连线已创建' : '连线创建失败'
+  keyboardStatus.value = connected ? tr('连线已创建') : tr('连线创建失败')
 }
 
 function cancelKeyboardConnection() {
   keyboardSource = null
-  keyboardStatus.value = '已取消键盘连线'
+  keyboardStatus.value = tr('已取消键盘连线')
 }
 
 provide(workbenchKeyboardConnectorKey, {
@@ -544,7 +546,7 @@ async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'vid
       : await store.uploadMedia(kind, file, visibleNodePosition(size))
     if (created) await ensureNodeVisible(created.key)
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '媒体上传失败')
+    notice.error(error instanceof Error ? error.message : tr('媒体上传失败'))
   }
 }
 function moveEnd() { store.viewport = getViewport(); saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize()); store.persistLayout() }
@@ -634,7 +636,7 @@ async function autoArrange() {
   store.viewport = getViewport()
   saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
   store.persistLayout()
-  notice.success('画布布局已自动整理')
+  notice.success(tr('画布布局已自动整理'))
 }
 async function undoCanvasAction() {
   if (!store.undo()) return
@@ -678,13 +680,13 @@ async function runSelected() {
         const scene = node.data.scene as import('@/types').Scene
         const config = normalizeShotConfig(scene, projectDefaults.value)
         const modelType = Number(config.modelType ?? store.modelOptions[0]?.value)
-        if (!Number.isFinite(modelType)) throw new Error('当前没有可用的视频模型')
+        if (!Number.isFinite(modelType)) throw new Error(tr('当前没有可用的视频模型'))
         const model = store.videoModelOptions.find(item => item.config_id === modelType)
         await store.generateVideo(node.id, modelType, shotGenerationOptions(config, model?.capabilities))
       }
     }
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '运行所选配置失败')
+    notice.error(error instanceof Error ? error.message : tr('运行所选配置失败'))
   } finally {
     generating.value = false
   }
@@ -729,7 +731,7 @@ onMounted(async () => {
     const capabilityResponse = await capabilityRequest
     if (capabilityResponse) capabilities.value = capabilityResponse.data
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : '工作区加载失败')
+    notice.error(error instanceof Error ? error.message : tr('工作区加载失败'))
   }
 })
 onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('keyup', handleKeyup) })
@@ -737,8 +739,8 @@ onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); windo
 
 <template>
   <main class="viral-workbench-page" @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
-    <div v-if="store.loading" class="workbench-state" role="status">正在加载工作区…</div>
-    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" aria-label="小说视频创作画布" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
+    <div v-if="store.loading" class="workbench-state" role="status">{{ tr('正在加载工作区…') }}</div>
+    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" :aria-label="tr('小说视频创作画布')" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
       <Background variant="lines" color="#2b2926" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
       <Controls position="bottom-right" />
@@ -746,8 +748,8 @@ onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); windo
       <WorkbenchToolbar :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div class="workbench-status-stack"><WorkbenchRunStatus :status="generating ? 'RUNNING' : 'IDLE'" :progress="generating ? 0 : undefined" /></div>
       <ConnectionNodePicker v-if="connectionPicker" :options="connectionPicker.options" :x="connectionPicker.x" :y="connectionPicker.y" :accent-class="connectionPicker.accentClass" @select="createCompatibleNode" @close="connectionPicker = null" />
-      <p class="workbench-keyboard-status" role="status" aria-label="键盘连线状态" aria-live="polite">{{ keyboardStatus }}</p>
-      <div v-if="visibleStoreNodes.length === 0" class="workbench-empty" role="status"><span>画布还是空的</span><AppButton type="button" @click="addShot">添加第一个视频</AppButton></div>
+      <p class="workbench-keyboard-status" role="status" :aria-label="tr('键盘连线状态')" aria-live="polite">{{ keyboardStatus }}</p>
+      <div v-if="visibleStoreNodes.length === 0" class="workbench-empty" role="status"><span>{{ tr('画布还是空的') }}</span><AppButton type="button" @click="addShot">{{ tr('添加第一个视频') }}</AppButton></div>
     </VueFlow>
   </main>
 </template>

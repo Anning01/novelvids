@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from prompts.language import output_language_rule
 from prompts.storyboard import (
     STORYBOARD_LANGUAGE_INSTRUCTIONS,
     STORYBOARD_SYSTEM_PROMPT,
@@ -86,7 +87,7 @@ def test_storyboard_messages_render_language_entities_and_narrative():
     assert "后续视频生成会按镜头分别提交" in messages[0]["content"]
     assert "每个时间段都必须重新写明动作主体" in messages[0]["content"]
     assert messages[0]["content"] == STORYBOARD_SYSTEM_PROMPT.format(
-        language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS["zh"],
+        language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS["zh"] + "\n" + output_language_rule("zh"),
     )
     assert "当前分镜策略" not in messages[0]["content"]
     assert "无旁白" not in messages[0]["content"]

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { computed, inject, ref } from 'vue'
 import { Check, Monitor, Moon, Sun } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
@@ -13,9 +15,9 @@ withDefaults(defineProps<{
 const theme = inject(appThemeControllerKey) ?? useAppThemeController()
 const open = ref(false)
 const options: Array<{ value: AppThemePreference; label: string; description: string; icon: typeof Monitor }> = [
-  { value: 'system', label: '跟随系统', description: '自动使用系统外观', icon: Monitor },
-  { value: 'light', label: '浅色', description: '始终使用浅色外观', icon: Sun },
-  { value: 'dark', label: '深色', description: '始终使用深色外观', icon: Moon },
+  { value: 'system', get label() { return tr('跟随系统') }, get description() { return tr('自动使用系统外观') }, icon: Monitor },
+  { value: 'light', get label() { return tr('浅色') }, get description() { return tr('始终使用浅色外观') }, icon: Sun },
+  { value: 'dark', get label() { return tr('深色') }, get description() { return tr('始终使用深色外观') }, icon: Moon },
 ]
 const activeOption = computed(() => options.find(option => option.value === theme.preference.value) ?? options[0])
 const activeLabel = computed(() => activeOption.value.label)
@@ -34,18 +36,18 @@ function select(preference: AppThemePreference) {
       variant="secondary"
       size="sm"
       :icon-only="placement !== 'sidebar'"
-      :aria-label="`外观主题：${activeLabel}`"
+      :aria-label="tr('外观主题：{p0}', { p0: activeLabel })"
       aria-haspopup="menu"
       :aria-expanded="open"
       @click="open = !open"
     >
       <component :is="activeIcon" :size="17" />
       <span v-if="placement === 'sidebar'" class="app-theme-toggle__label">
-        <span>外观</span>
+        <span>{{ tr('外观') }}</span>
         <small>{{ activeLabel }}</small>
       </span>
     </AppButton>
-    <div v-if="open" class="app-theme-toggle__menu" role="menu" aria-label="选择外观主题">
+    <div v-if="open" class="app-theme-toggle__menu" role="menu" :aria-label="tr('选择外观主题')">
       <button
         v-for="option in options"
         :key="option.value"

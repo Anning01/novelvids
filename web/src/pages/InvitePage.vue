@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api'
@@ -22,7 +24,7 @@ async function load() {
   try {
     invite.value = await api.teamInviteInfo(token).then(response => response.data)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '邀请链接无效'
+    errorMessage.value = error instanceof Error ? error.message : tr('邀请链接无效')
   } finally {
     loading.value = false
   }
@@ -35,10 +37,10 @@ async function join() {
   try {
     await api.joinTeamInvite(token)
     await auth.refreshMe()
-    notice.success(`已加入「${invite.value.team_name}」`)
+    notice.success(tr('已加入「{p0}」', { p0: invite.value.team_name }))
     await router.replace('/')
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加入失败'
+    errorMessage.value = error instanceof Error ? error.message : tr('加入失败')
   } finally {
     joining.value = false
   }
@@ -55,10 +57,10 @@ async function register() {
       password: registerForm.value.password,
       invite_token: token,
     })
-    notice.success(`欢迎加入「${invite.value?.team_name ?? ''}」`)
+    notice.success(tr('欢迎加入「{p0}」', { p0: invite.value?.team_name ?? '' }))
     await router.replace('/')
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '注册失败'
+    errorMessage.value = error instanceof Error ? error.message : tr('注册失败')
   } finally {
     registering.value = false
   }
@@ -70,42 +72,42 @@ onMounted(load)
 <template>
   <main class="invite-page">
     <section class="invite-card">
-      <p v-if="loading" class="dim">加载邀请信息…</p>
+      <p v-if="loading" class="dim">{{ tr('加载邀请信息…') }}</p>
 
       <template v-else-if="invite">
-        <img class="invite-logo" src="/logo.png" alt="猫影" />
-        <h1>加入「{{ invite.team_name }}」</h1>
-        <p class="invite-subtitle">你受邀加入该团队，角色：{{ { admin: '团队管理员', creator: '创作者', viewer: '查看者' }[invite.role] }}</p>
+        <img class="invite-logo" src="/logo.png" :alt="tr('猫影')" />
+        <h1>{{ tr('加入「') }}{{ invite.team_name }}」</h1>
+        <p class="invite-subtitle">{{ tr('你受邀加入该团队，角色：') }}{{ { admin: tr('团队管理员'), creator: tr('创作者'), viewer: tr('查看者') }[invite.role] }}</p>
 
         <template v-if="auth.isLoggedIn">
           <button class="primary-button" type="button" :disabled="joining" @click="join">
-            {{ joining ? '加入中…' : '加入团队' }}
+            {{ joining ? tr('加入中…') : tr('加入团队') }}
           </button>
         </template>
         <form v-else class="register-form" @submit.prevent="register">
           <label>
-            <span>用户名</span>
-            <input v-model="registerForm.username" type="text" autocomplete="username" placeholder="设置登录用户名" required />
+            <span>{{ tr('用户名') }}</span>
+            <input v-model="registerForm.username" type="text" autocomplete="username" :placeholder="tr('设置登录用户名')" required />
           </label>
           <label>
-            <span>昵称（可选）</span>
-            <input v-model="registerForm.nickname" type="text" placeholder="你的昵称" />
+            <span>{{ tr('昵称（可选）') }}</span>
+            <input v-model="registerForm.nickname" type="text" :placeholder="tr('你的昵称')" />
           </label>
           <label>
-            <span>密码</span>
-            <input v-model="registerForm.password" type="password" autocomplete="new-password" placeholder="至少 8 位" required minlength="8" />
+            <span>{{ tr('密码') }}</span>
+            <input v-model="registerForm.password" type="password" autocomplete="new-password" :placeholder="tr('至少 8 位')" required minlength="8" />
           </label>
           <button class="primary-button" type="submit" :disabled="registering">
-            {{ registering ? '注册中…' : '注册并加入' }}
+            {{ registering ? tr('注册中…') : tr('注册并加入') }}
           </button>
         </form>
-        <p class="invite-hint">没有账号？注册后将自动加入团队。已有账号？<RouterLink to="/login">去登录</RouterLink> 后再次打开本链接。</p>
+        <p class="invite-hint">{{ tr('没有账号？注册后将自动加入团队。已有账号？') }}<RouterLink to="/login">{{ tr('去登录') }}</RouterLink> {{ tr('后再次打开本链接。') }}</p>
       </template>
 
       <template v-else>
-        <h1>邀请无效</h1>
-        <p class="invite-subtitle">{{ errorMessage || '邀请链接不存在或已过期' }}</p>
-        <RouterLink class="primary-button link-button" to="/">返回首页</RouterLink>
+        <h1>{{ tr('邀请无效') }}</h1>
+        <p class="invite-subtitle">{{ errorMessage || tr('邀请链接不存在或已过期') }}</p>
+        <RouterLink class="primary-button link-button" to="/">{{ tr('返回首页') }}</RouterLink>
       </template>
     </section>
   </main>

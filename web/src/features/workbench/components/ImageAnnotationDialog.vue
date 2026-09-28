@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ArrowUpRight, Check, Circle, Grid3X3, Hand, Minus, Pencil, Plus, RotateCcw, Square, Trash2, Undo2, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import {
@@ -20,12 +22,12 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ close: []; save: [annotations: ImageAnnotation[]] }>()
 
 const tools: Array<{ value: AnnotationEditorTool; label: string; icon: typeof Hand }> = [
-  { value: 'move', label: '移动', icon: Hand },
-  { value: 'rectangle', label: '矩形', icon: Square },
-  { value: 'ellipse', label: '椭圆', icon: Circle },
-  { value: 'grid', label: '网格', icon: Grid3X3 },
-  { value: 'arrow', label: '箭头', icon: ArrowUpRight },
-  { value: 'freehand', label: '涂鸦', icon: Pencil },
+  { value: 'move', get label() { return tr('移动') }, icon: Hand },
+  { value: 'rectangle', get label() { return tr('矩形') }, icon: Square },
+  { value: 'ellipse', get label() { return tr('椭圆') }, icon: Circle },
+  { value: 'grid', get label() { return tr('网格') }, icon: Grid3X3 },
+  { value: 'arrow', get label() { return tr('箭头') }, icon: ArrowUpRight },
+  { value: 'freehand', get label() { return tr('涂鸦') }, icon: Pencil },
 ]
 const state = ref(emptyAnnotationState())
 const activeTool = ref<AnnotationEditorTool>('move')
@@ -151,34 +153,34 @@ function normalizedStrokeWidth(shape: ImageAnnotation) {
 <template>
   <Teleport to="body">
     <div v-if="open" class="image-annotation-backdrop" role="presentation" @pointerdown.self="emit('close')">
-      <section class="image-annotation-dialog" role="dialog" aria-modal="true" aria-label="图片标注编辑器">
+      <section class="image-annotation-dialog" role="dialog" aria-modal="true" :aria-label="tr('图片标注编辑器')">
         <header>
-          <div><strong>图片标注</strong><small>拖动绘制，所有标注将随图片尺寸等比缩放</small></div>
-          <button type="button" aria-label="关闭图片标注" @click="emit('close')"><X :size="18" aria-hidden="true" /></button>
+          <div><strong>{{ tr('图片标注') }}</strong><small>{{ tr('拖动绘制，所有标注将随图片尺寸等比缩放') }}</small></div>
+          <button type="button" :aria-label="tr('关闭图片标注')" @click="emit('close')"><X :size="18" aria-hidden="true" /></button>
         </header>
 
         <div class="image-annotation-dialog__toolbar">
-          <div class="image-annotation-dialog__tools" role="toolbar" aria-label="批注工具">
+          <div class="image-annotation-dialog__tools" role="toolbar" :aria-label="tr('批注工具')">
             <button v-for="tool in tools" :key="tool.value" type="button" :class="{ 'is-active': activeTool === tool.value }" :aria-label="tool.label" :aria-pressed="activeTool === tool.value" @click="setTool(tool.value)">
               <component :is="tool.icon" :size="17" aria-hidden="true" /><span>{{ tool.label }}</span>
             </button>
           </div>
-          <label class="image-annotation-dialog__stroke"><span>颜色</span><input v-model="stroke" type="color" aria-label="批注颜色"></label>
-          <label class="image-annotation-dialog__brush"><span>画笔 {{ strokeWidth }}</span><input v-model.number="strokeWidth" type="range" min="1" max="12" step="1" aria-label="画笔粗细"></label>
-          <div class="image-annotation-dialog__actions" role="group" aria-label="视图与历史操作">
-            <button type="button" aria-label="缩小图片" @click="adjustZoom(-0.25)"><Minus :size="17" aria-hidden="true" /></button>
-            <output aria-label="图片缩放比例">{{ Math.round(zoom * 100) }}%</output>
-            <button type="button" aria-label="放大图片" @click="adjustZoom(0.25)"><Plus :size="17" aria-hidden="true" /></button>
-            <button type="button" aria-label="重置图片视图" @click="resetView"><RotateCcw :size="17" aria-hidden="true" /></button>
-            <button type="button" aria-label="撤销批注操作" :disabled="!state.history.length" @click="undo"><Undo2 :size="17" aria-hidden="true" /></button>
-            <button type="button" aria-label="清空批注" :disabled="!state.shapes.length" @click="clear"><Trash2 :size="17" aria-hidden="true" /></button>
+          <label class="image-annotation-dialog__stroke"><span>{{ tr('颜色') }}</span><input v-model="stroke" type="color" :aria-label="tr('批注颜色')"></label>
+          <label class="image-annotation-dialog__brush"><span>{{ tr('画笔') }} {{ strokeWidth }}</span><input v-model.number="strokeWidth" type="range" min="1" max="12" step="1" :aria-label="tr('画笔粗细')"></label>
+          <div class="image-annotation-dialog__actions" role="group" :aria-label="tr('视图与历史操作')">
+            <button type="button" :aria-label="tr('缩小图片')" @click="adjustZoom(-0.25)"><Minus :size="17" aria-hidden="true" /></button>
+            <output :aria-label="tr('图片缩放比例')">{{ Math.round(zoom * 100) }}%</output>
+            <button type="button" :aria-label="tr('放大图片')" @click="adjustZoom(0.25)"><Plus :size="17" aria-hidden="true" /></button>
+            <button type="button" :aria-label="tr('重置图片视图')" @click="resetView"><RotateCcw :size="17" aria-hidden="true" /></button>
+            <button type="button" :aria-label="tr('撤销批注操作')" :disabled="!state.history.length" @click="undo"><Undo2 :size="17" aria-hidden="true" /></button>
+            <button type="button" :aria-label="tr('清空批注')" :disabled="!state.shapes.length" @click="clear"><Trash2 :size="17" aria-hidden="true" /></button>
           </div>
         </div>
 
         <div class="image-annotation-dialog__viewport" :class="{ 'is-moving': activeTool === 'move' }">
           <div class="image-annotation-dialog__surface" :style="transformStyle">
-            <img :src="imageUrl" alt="待标注图片">
-            <svg ref="surface" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="图片批注画布" @pointerdown="beginPointer" @pointermove="movePointer" @pointerup="endPointer" @pointercancel="endPointer">
+            <img :src="imageUrl" :alt="tr('待标注图片')">
+            <svg ref="surface" viewBox="0 0 1 1" preserveAspectRatio="none" :aria-label="tr('图片批注画布')" @pointerdown="beginPointer" @pointermove="movePointer" @pointerup="endPointer" @pointercancel="endPointer">
               <defs>
                 <marker id="image-annotation-arrowhead" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto" markerUnits="strokeWidth">
                   <path d="M0,0 L5,2.5 L0,5 z" fill="context-stroke" />
@@ -202,10 +204,10 @@ function normalizedStrokeWidth(shape: ImageAnnotation) {
         </div>
 
         <footer>
-          <span>{{ state.shapes.length }} 个标注</span>
+          <span>{{ state.shapes.length }} {{ tr('个标注') }}</span>
           <div>
-            <button type="button" aria-label="取消图片标注" @click="emit('close')">取消</button>
-            <button type="button" class="is-primary" aria-label="保存图片标注" :disabled="!dirty" @click="save"><Check :size="16" aria-hidden="true" />保存</button>
+            <button type="button" :aria-label="tr('取消图片标注')" @click="emit('close')">{{ tr('取消') }}</button>
+            <button type="button" class="is-primary" :aria-label="tr('保存图片标注')" :disabled="!dirty" @click="save"><Check :size="16" aria-hidden="true" />{{ tr('保存') }}</button>
           </div>
         </footer>
       </section>

@@ -180,7 +180,7 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
         f"/api/asset/{asset.id}/generation-history/{failed.id}/restore"
     )
     assert failed_response.json()["code"] == 400
-    assert "只有生成成功" in failed_response.json()["message"]
+    assert "Only successful generations" in failed_response.json()["message"]
 
     foreign_response = await client.post(
         f"/api/asset/{asset.id}/generation-history/{other_record.id}/restore"
@@ -276,7 +276,7 @@ async def test_api_records_annotated_asset_image_as_generation_history(
     )
     assert invalid_response.status_code == 200
     assert invalid_response.json()["code"] == 422
-    assert "标注图地址必须是本地媒体路径、OSS 对象 key 或完整 URL" in invalid_response.json()["message"]
+    assert "Annotated image URL must be a local media path, object storage key or full URL" in invalid_response.json()["message"]
 
     # OSS 直传的标注图：key（uploads/...）也允许，本地模式不校验对象存在性
     oss_response = await client.post(

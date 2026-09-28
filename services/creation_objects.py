@@ -1,5 +1,7 @@
 """Shared object lifecycle and ordering for page actions and agent transactions."""
 
+from utils.messages import localized_message
+
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -45,7 +47,7 @@ async def project_write(novel_id: int):
     async with in_transaction() as connection:
         changed = await Novel.filter(id=novel_id).using_db(connection).update(updated_at=F("updated_at"))
         if not changed:
-            raise ValueError("项目不存在")
+            raise ValueError(localized_message('项目不存在'))
         yield connection
 
 
@@ -67,27 +69,27 @@ class CreationObjects:
     async def get(self, kind: str, object_id: int, *, include_deleted: bool = False):
         model = OBJECT_MODELS.get(kind)
         if model is None:
-            raise ValueError("不支持的创作对象")
+            raise ValueError(localized_message('不支持的创作对象'))
         query = model.with_deleted() if include_deleted else model.all()
         scope = {"chapter__novel_id": self.novel_id} if kind == "scene" else (
             {"asset__novel_id": self.novel_id, "asset__deleted_at__isnull": True} if kind == "variant" else {"novel_id": self.novel_id})
         target = await query.filter(id=object_id, **scope).first()
         if target is None:
-            raise ValueError("当前项目内不存在该对象，或对象已被移除")
+            raise ValueError(localized_message('当前项目内不存在该对象，或对象已被移除'))
         return target
 
     async def chapter(self, chapter_id: int) -> Chapter:
         chapter = await Chapter.get_or_none(id=chapter_id, novel_id=self.novel_id)
         if chapter is None:
-            raise ValueError("章节不属于当前项目")
+            raise ValueError(localized_message('章节不属于当前项目'))
         return chapter
 
     async def active_assets(self, asset_ids: list[int]) -> list[Asset]:
         if len(asset_ids) != len(set(asset_ids)):
-            raise ValueError("不能重复绑定同一设定")
+            raise ValueError(localized_message('不能重复绑定同一设定'))
         assets = await Asset.filter(id__in=asset_ids, novel_id=self.novel_id)
         if len(assets) != len(asset_ids):
-            raise ValueError("引用设定不存在、已移除或不属于当前项目")
+            raise ValueError(localized_message('引用设定不存在、已移除或不属于当前项目'))
         return assets
 
     async def create_setting(self, values: dict) -> Asset:
@@ -99,7 +101,7 @@ class CreationObjects:
     async def ensure_variant_chapters(self, asset_id: int, numbers: list[int], *, exclude_id: int | None = None):
         variants = await AssetVariant.filter(asset_id=asset_id)
         if any(variant.id != exclude_id and set(variant.chapter_numbers or []) & set(numbers) for variant in variants):
-            raise ValueError('该角色在这些章节已有形态，请编辑已有形态或明确重新分配适用章节')
+            raise ValueError(localized_message('该角色在这些章节已有形态，请编辑已有形态或明确重新分配适用章节'))
 
     async def create_variant(self, asset_id: int, values: dict) -> AssetVariant:
         await self.get('asset', asset_id)
@@ -133,15 +135,15 @@ class CreationObjects:
 
     async def validate_variant_bindings(self, asset_ids: list[int], bindings: dict):
         if not isinstance(bindings, dict):
-            raise ValueError('形态绑定格式无效')
+            raise ValueError(localized_message('形态绑定格式无效'))
         for raw_asset_id, raw_variant_id in bindings.items():
             try:
                 asset_id, variant_id = int(raw_asset_id), int(raw_variant_id)
             except (ValueError, TypeError):
-                raise ValueError('形态绑定标识无效') from None
+                raise ValueError(localized_message('形态绑定标识无效')) from None
             if asset_id not in asset_ids or not await AssetVariant.filter(
                 id=variant_id, asset_id=asset_id, asset__novel_id=self.novel_id, asset__deleted_at__isnull=True).exists():
-                raise ValueError('绑定形态不存在、已移除或不属于出镜设定')
+                raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
 
     async def _ordered(self, chapter_id: int) -> list[Scene]:
         await self.chapter(chapter_id)
@@ -167,7 +169,7 @@ class CreationObjects:
         for index, scene in enumerate(scenes):
             if scene.id == after_id:
                 return index + 1
-        raise ValueError("插入位置的分镜不在当前章节，或已被移除")
+        raise ValueError(localized_message('插入位置的分镜不在当前章节，或已被移除'))
 
     async def create_scene(self, chapter_id: int, *, after_id: int | None, values: dict) -> Scene:
         scenes = await self._ordered(chapter_id)
@@ -181,7 +183,7 @@ class CreationObjects:
 
     async def move_scene(self, scene: Scene, *, after_id: int | None) -> None:
         if after_id == scene.id:
-            raise ValueError("不能把分镜移动到自身之后")
+            raise ValueError(localized_message('不能把分镜移动到自身之后'))
         scenes = [item for item in await self._ordered(scene.chapter_id) if item.id != scene.id]
         scenes.insert(self._insert_position(scenes, after_id), scene)
         await self._resequence(scenes)
@@ -189,7 +191,7 @@ class CreationObjects:
 
     async def ensure_idle(self, kind: str, target) -> None:
         if kind == "scene" and await Video.filter(scene_id=target.id, status__in=ACTIVE_TASK_STATUSES).exists():
-            raise ValueError("该分镜仍有生成任务，请先停止或等待完成")
+            raise ValueError(localized_message('该分镜仍有生成任务，请先停止或等待完成'))
         task_types = [AiTaskTypeEnum.reference_image, AiTaskTypeEnum.storyboard] if kind != "scene" else [AiTaskTypeEnum.video, AiTaskTypeEnum.storyboard]
         # Request JSON has different schemas across existing task types. Only
         # inspect active generation tasks and never copy credentials into errors.
@@ -204,7 +206,7 @@ class CreationObjects:
                 if task['task_type'] == AiTaskTypeEnum.storyboard and params.get('novel_id') == self.novel_id:
                     matches = True
             if matches:
-                raise ValueError("该对象仍有生成任务，请先停止或等待完成")
+                raise ValueError(localized_message('该对象仍有生成任务，请先停止或等待完成'))
 
     async def variant_references(self, variant: AssetVariant) -> list[Scene]:
         scenes = await Scene.filter(assets__id=variant.asset_id, chapter__novel_id=self.novel_id).only(
@@ -225,13 +227,13 @@ class CreationObjects:
         snapshot: dict = {'content_version': await self.recovery_version(target)}
         if kind == 'asset':
             if await Scene.filter(assets__id=target.id).exists():
-                raise ValueError("设定仍被分镜引用，请先明确并处理引用范围")
+                raise ValueError(localized_message('设定仍被分镜引用，请先明确并处理引用范围'))
             variants = await AssetVariant.filter(asset_id=target.id)
             snapshot['variant_ids'] = [variant.id for variant in variants]
             snapshot['variant_versions'] = {str(variant.id): await self.recovery_version(variant) for variant in variants}
         elif kind == 'variant':
             if await self.variant_references(target):
-                raise ValueError("该形态仍被分镜引用，请先调整对应分镜的形态绑定")
+                raise ValueError(localized_message('该形态仍被分镜引用，请先调整对应分镜的形态绑定'))
         else:
             snapshot['sequence'] = target.sequence
             ordered = await self._ordered(target.chapter_id)
@@ -254,21 +256,21 @@ class CreationObjects:
         target = await self.get(kind, object_id, include_deleted=True)
         snapshot = snapshot or (target.metadata or {}).get('_removal')
         if not snapshot or 'deleted_at' not in snapshot:
-            raise ValueError('对象没有可恢复的删除记录')
+            raise ValueError(localized_message('对象没有可恢复的删除记录'))
         if target.deleted_at is None:
-            raise ValueError("对象已有后续恢复，不能覆盖")
+            raise ValueError(localized_message('对象已有后续恢复，不能覆盖'))
         if target.deleted_at.astimezone(timezone.utc).isoformat() != snapshot['deleted_at']:
-            raise ValueError("对象已有后续删除操作，不能覆盖")
+            raise ValueError(localized_message('对象已有后续删除操作，不能覆盖'))
         if snapshot.get('content_version') and await self.recovery_version(target) != snapshot['content_version']:
-            raise ValueError('已移除对象的内容或引用已有后续修改，不能直接恢复覆盖')
+            raise ValueError(localized_message('已移除对象的内容或引用已有后续修改，不能直接恢复覆盖'))
         if kind == 'asset':
             variants = await AssetVariant.with_deleted().filter(id__in=snapshot['variant_ids'], asset_id=target.id)
             if len(variants) != len(snapshot['variant_ids']):
-                raise ValueError('关联形态已有后续修改，不能直接恢复覆盖')
+                raise ValueError(localized_message('关联形态已有后续修改，不能直接恢复覆盖'))
             for variant in variants:
                 expected = (snapshot.get('variant_versions') or {}).get(str(variant.id))
                 if variant.deleted_at != target.deleted_at or (expected and expected != await self.recovery_version(variant)):
-                    raise ValueError('关联形态已有后续修改，不能直接恢复覆盖')
+                    raise ValueError(localized_message('关联形态已有后续修改，不能直接恢复覆盖'))
         if kind == 'variant':
             await self.ensure_variant_chapters(target.asset_id, target.chapter_numbers or [], exclude_id=target.id)
         if kind == 'scene':
@@ -278,7 +280,7 @@ class CreationObjects:
             rows = await target.assets.all()
             archived_ids = await Asset.with_deleted().filter(scenes__id=target.id, deleted_at__not_isnull=True).values_list('id', flat=True)
             if archived_ids:
-                raise ValueError("分镜引用的设定已移除，请先恢复设定")
+                raise ValueError(localized_message('分镜引用的设定已移除，请先恢复设定'))
             await self.active_assets([asset.id for asset in rows])
             await self.validate_variant_bindings([asset.id for asset in rows], (target.metadata or {}).get('asset_variant_ids') or {})
         now = datetime.now(timezone.utc)

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import AgentUsageDetails from './AgentUsageDetails.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -63,16 +65,16 @@ const allOptions = computed(() => [...new Map([
   ...workspace.selection.map(option => ({ ...option, key: targetKey(option.target) })), ...options.value,
 ].map(option => [option.key, option])).values()])
 const suggestions = computed(() => targets.value.length ? [
-  '光线更柔和，保留人物外貌和服装。',
-  '画面更有电影感，每个分镜独立完整描述。',
-] : ['先聊聊这个故事适合怎样的画面风格。', '帮我梳理人物与场景需要保持一致的设定。'])
-const welcomeHint = computed(() => targets.value.length ? '已指定操作对象，直接说出你希望的变化。'
-  : '可以查找设定、新增分镜或调整画面。直接描述要求，助手会在当前范围内找到对象。')
+  tr('光线更柔和，保留人物外貌和服装。'),
+  tr('画面更有电影感，每个分镜独立完整描述。'),
+] : [tr('先聊聊这个故事适合怎样的画面风格。'), tr('帮我梳理人物与场景需要保持一致的设定。')])
+const welcomeHint = computed(() => targets.value.length ? tr('已指定操作对象，直接说出你希望的变化。')
+  : tr('可以查找设定、新增分镜或调整画面。直接描述要求，助手会在当前范围内找到对象。'))
 
 function applyDefaults() {
   if (workspace.scopeEdited || store.busy) return
   workspace.select((props.selectedTargets ?? []).map(target => options.value.find(option => option.key === targetKey(target))
-    ?? { target, label: target.kind === 'scene' ? '当前分镜' : '当前图片设定' }), false)
+    ?? { target, label: target.kind === 'scene' ? tr('当前分镜') : tr('当前图片设定') }), false)
 }
 
 function selectSuggestion(text: string) { draft.value = text; void nextTick(() => composer.value?.focus()) }
@@ -84,7 +86,7 @@ const bubbles = computed(() => store.messages.filter(message => message.role ===
 ).map(message => ({ ...message,
   content: message.role === 'assistant' && message.status !== 3 ? '' : message.content,
   paragraphs: (message.role === 'assistant' && message.status !== 3 ? '' : message.content).split(/\n\s*\n/).filter(Boolean),
-  preview: message.content.replace(/\s+/g, ' ').slice(0, 90) || (message.changes.length ? `${message.changes.length} 条修改记录` : message.status === 4 ? '本轮未完成' : '查询与处理记录'),
+  preview: message.content.replace(/\s+/g, ' ').slice(0, 90) || (message.changes.length ? tr('{p0} 条修改记录', { p0: message.changes.length }) : message.status === 4 ? tr('本轮未完成') : tr('查询与处理记录')),
   placement: message.role === 'user' ? 'end' as const : 'start' as const,
   variant: message.role === 'user' ? 'filled' as const : 'borderless' as const,
   maxWidth: '100%', loading: false,
@@ -98,7 +100,7 @@ function toggleAllMessages() {
   const open = allCollapsed.value
   messageExpansion.value = Object.fromEntries(bubbles.value.map(message => [message.id, open]))
 }
-const statusLabel = computed(() => store.error ? '本轮未完成 · 查看原因' : store.statusText || '创作上下文')
+const statusLabel = computed(() => store.error ? tr('本轮未完成 · 查看原因') : store.statusText || tr('创作上下文'))
 watch(() => store.error, error => { if (error) statusOpen.value = true })
 watch(() => store.conversationId, () => { messageExpansion.value = {}; statusOpen.value = false })
 
@@ -118,7 +120,7 @@ async function loadTargets(more = false) {
       ...(asset.variants ?? []).map(variant => ({ key: `variant:${variant.id}`, target: { kind: 'variant' as const, id: variant.id }, label: `${asset.canonical_name} · ${variant.name}`, assetType: asset.asset_type })),
     ])
     const addedOptions = [
-      ...(scenes?.data.items ?? []).map(scene => ({ key: `scene:${scene.id}`, target: { kind: 'scene' as const, id: scene.id }, label: `镜头 ${scene.sequence} · ${scene.description || '未命名'}` })), ...assetOptions,
+      ...(scenes?.data.items ?? []).map(scene => ({ key: `scene:${scene.id}`, target: { kind: 'scene' as const, id: scene.id }, label: tr('镜头 {p0} · {p1}', { p0: scene.sequence, p1: scene.description || tr('未命名') }) })), ...assetOptions,
     ]
     options.value = more ? [...options.value, ...addedOptions] : addedOptions
     catalogPage.value = page
@@ -126,7 +128,7 @@ async function loadTargets(more = false) {
     hasMoreScenes.value = page < (scenes?.data.pagination.pages ?? 0)
     if (!more) applyDefaults()
     await refreshTargetStatus()
-  } catch (error) { notice.error(error instanceof Error ? error.message : '无法加载当前对象') }
+  } catch (error) { notice.error(error instanceof Error ? error.message : tr('无法加载当前对象')) }
   finally { if (epoch === catalogEpoch) catalogLoading.value = false }
 }
 
@@ -144,7 +146,7 @@ async function refreshTargetStatus() {
     pendingConstraints.value = Object.fromEntries(responses.flatMap(response => response.data).map(status => [`${status.kind}:${status.id}`, status.pending_constraints]))
     statusError.value = ''
   } catch {
-    if (epoch === statusEpoch) statusError.value = '暂时无法核对新约束，请稍后重新打开对象列表。'
+    if (epoch === statusEpoch) statusError.value = tr('暂时无法核对新约束，请稍后重新打开对象列表。')
   }
 }
 
@@ -192,7 +194,7 @@ async function send(text: string) {
 
 async function operation(action: () => Promise<unknown>) {
   operationBusy.value = true
-  try { await action() } catch (error) { notice.error(error instanceof Error ? error.message : '操作失败') }
+  try { await action() } catch (error) { notice.error(error instanceof Error ? error.message : tr('操作失败')) }
   finally { operationBusy.value = false }
 }
 
@@ -218,7 +220,7 @@ async function locate(target: AgentChangeItem) {
     await router.push({ path: `/create/short-drama/storyboard/${props.projectId}`, query: { chapter: scene.chapter_id, scene: scene.id } })
   } else {
     const assetId = target.kind === 'variant' ? target.asset_id : target.target_id
-    if (!assetId) throw new Error('这条历史记录缺少所属资产信息，请从设定页选择对应形象。')
+    if (!assetId) throw new Error(tr('这条历史记录缺少所属资产信息，请从设定页选择对应形象。'))
     await router.push({ path: `/create/short-drama/manual/${props.projectId}`, query: { chapter: props.chapterId || undefined, asset: assetId, variant: target.kind === 'variant' ? target.target_id : undefined } })
   }
 }
@@ -235,7 +237,7 @@ async function locateQuery(target: AgentQueryItem) {
 function selectQueryTarget(target: AgentQueryItem) {
   if (target.kind === 'chapter' || store.busy) return
   const existing = workspace.selection.some(option => option.target.kind === target.kind && option.target.id === target.id)
-  if (!existing && targets.value.length >= (store.capabilities?.max_targets || 1)) { notice.info('已达到本轮对象上限'); return }
+  if (!existing && targets.value.length >= (store.capabilities?.max_targets || 1)) { notice.info(tr('已达到本轮对象上限')); return }
   workspace.select([...workspace.selection, { target: { kind: target.kind, id: target.id }, label: target.name }])
   void nextTick(() => composer.value?.focus())
 }
@@ -245,57 +247,57 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
 </script>
 
 <template>
-  <aside class="creation-agent-panel" :class="{ 'is-workflow': workflow }" aria-label="创作助手" @keydown.esc.stop="close">
+  <aside class="creation-agent-panel" :class="{ 'is-workflow': workflow }" :aria-label="tr('创作助手')" @keydown.esc.stop="close">
     <header>
-      <div><Bot :size="18" /><strong>创作助手</strong></div>
-      <div class="creation-agent-panel__header-actions"><AppButton v-if="bubbles.length" size="xs" icon-only :aria-label="allCollapsed ? '展开全部消息' : '折叠全部消息'" :title="allCollapsed ? '展开全部消息' : '折叠全部消息'" @click="toggleAllMessages"><ChevronsUpDown :size="15" /></AppButton>
-      <AppButton size="xs" icon-only aria-label="关闭创作助手" @click="close"><X :size="18" /></AppButton>
+      <div><Bot :size="18" /><strong>{{ tr('创作助手') }}</strong></div>
+      <div class="creation-agent-panel__header-actions"><AppButton v-if="bubbles.length" size="xs" icon-only :aria-label="allCollapsed ? tr('展开全部消息') : tr('折叠全部消息')" :title="allCollapsed ? tr('展开全部消息') : tr('折叠全部消息')" @click="toggleAllMessages"><ChevronsUpDown :size="15" /></AppButton>
+      <AppButton size="xs" icon-only :aria-label="tr('关闭创作助手')" @click="close"><X :size="18" /></AppButton>
       </div>
     </header>
     <AgentConversationMenu :conversations="store.conversations" :deleted-conversations="store.deletedConversations" :current-id="store.conversationId" :workflow="workflow" :disabled="store.busy || store.loading || store.sessionBusy || operationBusy"
       @select="operation(() => store.selectConversation($event))" @create="newConversation"
       @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" />
-    <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || '当前章节' }}</span>
-      <select v-model="writeScope" aria-label="助手操作范围" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? '指定对象' : '当前章' }}</option><option value="project">全项目</option><option value="read_only">只查询</option></select>
+    <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || tr('当前章节') }}</span>
+      <select v-model="writeScope" :aria-label="tr('助手操作范围')" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? tr('指定对象') : tr('当前章') }}</option><option value="project">{{ tr('全项目') }}</option><option value="read_only">{{ tr('只查询') }}</option></select>
     </div>
     <AgentSetupState v-if="store.loading || !ready" :capabilities="store.capabilities" :loading="store.loading" :error="store.error" @retry="store.open(projectId)" />
     <div v-else-if="!store.messages.length" class="creation-agent-panel__welcome">
       <span class="creation-agent-panel__welcome-icon"><Bot :size="27" /></span>
-      <strong>{{ targets.length ? '想让画面怎样变化？' : '一起把故事变成画面' }}</strong>
+      <strong>{{ targets.length ? tr('想让画面怎样变化？') : tr('一起把故事变成画面') }}</strong>
       <p>{{ welcomeHint }}</p>
       <button v-for="suggestion in suggestions" :key="suggestion" type="button" class="creation-agent-panel__suggestion" @click="selectSuggestion(suggestion)">{{ suggestion }}</button>
-      <span>每次修改都有记录，随时查看或撤销。</span>
+      <span>{{ tr('每次修改都有记录，随时查看或撤销。') }}</span>
     </div>
-    <AppButton v-if="store.nextBefore" size="xs" @click="operation(() => store.history(store.nextBefore || undefined))">查看更早的消息</AppButton>
+    <AppButton v-if="store.nextBefore" size="xs" @click="operation(() => store.history(store.nextBefore || undefined))">{{ tr('查看更早的消息') }}</AppButton>
     <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
-        <AgentDisclosure class="creation-agent-panel__message-group" :title="item.role === 'user' ? '你' : '创作助手'" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
+        <AgentDisclosure class="creation-agent-panel__message-group" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
         <div v-if="item.content" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
-        <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? '本轮已停止' : '本轮未完成' }}{{ item.changes.length ? '，已保存的修改见下方记录' : '，尚未保存修改' }}</p>
+        <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? tr('本轮已停止') : tr('本轮未完成') }}{{ item.changes.length ? tr('，已保存的修改见下方记录') : tr('，尚未保存修改') }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
         </AgentDisclosure>
       </template>
-      <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? `${unreadCount} 条新消息` : '回到最新' }}</AppButton></template>
+      <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? tr('{p0} 条新消息', { p0: unreadCount }) : tr('回到最新') }}</AppButton></template>
     </BubbleList>
     <footer v-if="ready && !store.loading">
       <AgentDisclosure v-if="store.statusText || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
         <template #title><AgentActivity :text="statusLabel" :active="store.busy" /></template>
-        <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="`${pendingCount} 个对象有新设定待核对`" @click="pickerOpen = true">待核对 {{ pendingCount }}</button></template>
-      <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">继续对话</AppButton>
-      <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">编辑后重试</AppButton><AppButton size="xs" @click="router.push('/settings')">查看设置</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">重新连接</AppButton></p>
-      <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />重新连接</AppButton>
-      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} 个对象有新设定待核对 <span>查看</span></button></p>
+        <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待核对', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('待核对') }} {{ pendingCount }}</button></template>
+      <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
+      <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">{{ tr('编辑后重试') }}</AppButton><AppButton size="xs" @click="router.push('/settings')">{{ tr('查看设置') }}</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">{{ tr('重新连接') }}</AppButton></p>
+      <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />{{ tr('重新连接') }}</AppButton>
+      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} {{ tr('个对象有新设定待核对') }} <span>{{ tr('查看') }}</span></button></p>
       <p v-if="statusError && (pickerOpen || targets.length)" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
       </AgentDisclosure>
       <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
         <template #context>
-          <AgentDisclosure v-if="targets.length" class="creation-agent-panel__references" :title="`引用 ${targets.length}`" :summary="workspace.selection.map(option => option.label).join('、')">
-          <div class="creation-agent-panel__selected" aria-label="已选修改对象">
-            <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label.replace(/@\{([^{}]+)\}/g, '$1') }}</span><button type="button" :disabled="store.busy" :aria-label="`移除${option.label}`" @click="removeTarget(option)"><X :size="12" /></button></span>
+          <AgentDisclosure v-if="targets.length" class="creation-agent-panel__references" :title="tr('引用 {p0}', { p0: targets.length })" :summary="workspace.selection.map(option => option.label).join('、')">
+          <div class="creation-agent-panel__selected" :aria-label="tr('已选修改对象')">
+            <span v-for="option in workspace.selection" :key="targetKey(option.target)" :title="option.label"><span class="creation-agent-panel__selected-label">{{ option.label.replace(/@\{([^{}]+)\}/g, '$1') }}</span><button type="button" :disabled="store.busy" :aria-label="tr('移除{p0}', { p0: option.label })" @click="removeTarget(option)"><X :size="12" /></button></span>
           </div>
           </AgentDisclosure>
         </template>
@@ -303,7 +305,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
           <AgentTargetPicker v-model="selected" v-model:open="pickerOpen" :options="allOptions" :limit="store.capabilities?.max_targets || 1" :loading="catalogLoading" :has-more="hasMoreAssets || hasMoreScenes" :disabled="store.busy" :pending="pendingConstraints" @refresh="loadTargets()" @more="loadTargets(true)" @done="nextTick(() => composer?.focus())" />
         </template>
       </AgentComposer>
-      <p class="creation-agent-panel__boundary">操作可撤销<span>Enter 发送 · Shift + Enter 换行</span></p>
+      <p class="creation-agent-panel__boundary">{{ tr('操作可撤销') }}<span>{{ tr('Enter 发送 · Shift + Enter 换行') }}</span></p>
     </footer>
   </aside>
 </template>

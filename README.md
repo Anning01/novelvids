@@ -1,3 +1,5 @@
+[English documentation](README.en.md) · [英文对白与角色声音指南](docs/english-production.md)
+
 <p align="center">
   <img src="docs/images/logo.png" width="200" alt="猫影短剧 Logo">
 </p>
@@ -27,6 +29,7 @@
   <a href="#快速开始">快速开始</a> &bull;
   <a href="#模型配置">模型配置</a> &bull;
   <a href="#数据库与媒体存储">数据库与媒体存储</a> &bull;
+  <a href="#prompt-与规则定制开发者">Prompt 定制</a> &bull;
   <a href="#项目结构">项目结构</a> &bull;
   <a href="#技术栈">技术栈</a> &bull;
   <a href="#测试">测试</a> &bull;
@@ -428,6 +431,50 @@ VIDEO_RECONCILE_BATCH_SIZE=50
 ```
 
 后端会持续查询排队中和生成中的供应商任务。即使用户关闭故事版页面，任务完成、计费、尾帧提取与下一镜头注入仍会继续执行。
+
+## Prompt 与规则定制（开发者）
+
+**如果默认生成效果不理想，可以自行修改 Prompt 和生成规则。** 比如角色提取不准、分镜过碎、对白过长、风格不稳定，都可以先调整对应模板，再用同一段小样本对比效果，无需改写模型调用代码。
+
+中文模板放在 [`prompts/templates/zh/`](prompts/templates/zh/)，英文模板放在 [`prompts/templates/en/`](prompts/templates/en/)。两种语言使用同名文件、独立正文，运行时按任务的语言快照选取完整模板，不再通过替换中文句子或给中文系统指令追加英文要求来实现英文模式。
+
+下表的文件名均相对于上述语言目录：
+
+| 要调整的效果 / 规则 | 修改位置 |
+| --- | --- |
+| 故事分析、题材、大纲、关键人物 | `analysis_system.md` |
+| 项目封面 | `cover.md` |
+| 哪些角色、场景、道具应该被提取；去重与事实优先级 | `extraction_system.md` |
+| 单人/动物、群像、场景、道具的视觉描述规则 | `character_rules.md`、`group_rules.md`、`scene_rules.md`、`item_rules.md` |
+| 最终发送的角色参考图、场景四视图、道具参考图版式 | `reference_character.md`、`reference_scene.md`、`reference_item.md`；其他类型为 `reference_other.md` |
+| 分镜质量、动作时间轴、对白、连续性 | `storyboard_system.md`；首批与续写要求为 `storyboard_initial.md`、`storyboard_continue.md` |
+| 分镜中的资料边界与上下文包装 | `storyboard_assets.md`、`storyboard_narrative.md`、`storyboard_constraints.md` |
+| 电影感 / 旁白策略 | `strategy_cinematic.md`、`strategy_narration.md`；禁止项在 `messages.json` 的 `prohibitions_*` 中。电影感策略默认只使用主分镜规则，因此附加文件为空 |
+| 助手编辑、增删改查、历史摘要、轮次用尽时的回复 | `agent_edit.md`、`agent_crud.md`、`agent_summary.md`、`agent_turn_limit.md` |
+| 视频重制的资产识别、字幕核对、分镜还原 | `remake_assets.md`、`remake_shots.md` |
+| 各视觉风格的生图与生视频规则 | `styles.json`，按稳定的风格 key 修改 `image` / `video`；`label` 是该语言 Prompt 中的风格名称，页面文案另由前端 i18n 管理 |
+| 输出语言、JSON 格式要求、角色音频映射、首尾帧衔接、资料包装与通用说明 | `messages.json` 中对应命名条目 |
+| 发给模型的字段和工具说明 | `schema.json`；对应关系在 [`prompts/schema.py`](prompts/schema.py) |
+| 角色特征栏位和渲染栏目文字 | `contracts.json`、`labels.json`；这类修改同时涉及解析兼容性，不能只改文案 |
+
+### 修改规则与生效方式
+
+1. **只调生成效果，优先修改模板正文。** 保留约束含义、事实优先级和资料边界。中英文正文独立维护；修改通用规则时同步更新两个版本。
+2. **保留占位符与协议字段。** 不随意删除或改名 `{details}`、`{ratio}`、`{output_guard}`、`{language_instruction}` 等现有占位符，以及 JSON key、工具名、风格 key。使用 `.format()` 的模板中，正文需要字面花括号时写成 `{{`、`}}`；例如分镜系统模板中的 `@{{Full Entity Name}}`。助手正文直接加载，其原有 `@{Full Entity Name}` 不要机械改成双括号。
+3. **自然语言规则与程序限制分开。** 文字指导在模板目录；响应结构与参数校验在 [`schemas/`](schemas/)，人物栏位校验在 [`prompts/extraction.py`](prompts/extraction.py) 和 [`prompts/creation_standards.py`](prompts/creation_standards.py)。模型素材数量、时长和计费能力仍以后端配置及服务校验为准，改 Prompt 不会解除这些限制。
+4. **保留历史数据兼容。** 新英文人物描述使用英文栏位，旧中文栏位仍可读取。`contracts.json` 的栏位名称/顺序、`labels.json` 的栏目或模板开头标记如需变化，要同步检查校验器、解析器和测试。`*_legacy_prefix.md`、`remake_*_prefix.md` 保留旧导出/重制版式兼容，日常调优先改表中主模板。
+5. **用户资料不做自动翻译。** 已有正文、资产名称、用户编辑的 Prompt 和自定义风格会原样传入。`@{资产名}`、`@{镜头时长:…}`、`[音频N]` 等兼容引用标记属于技术协议，不是中英文指令正文混用，不要自行改名。
+6. **修改后重启后端，再创建测试任务。** [`prompts/catalog.py`](prompts/catalog.py) 缓存模板文件；Docker 部署需要重新构建并重启容器。语言会在提交时固定，但模板正文不保存版本快照，尚未渲染的排队任务可能读到新模板。已保存的资产/分镜 Prompt 不会自动重写；已有完整参考图 Prompt 仍以用户保存的内容为准，需要重新生成或手动编辑才能采用新版正文。
+
+### 验证修改
+
+先检查渲染、语言隔离、栏位兼容和调用契约，再用小样本检查真实模型效果：
+
+```bash
+uv run pytest test/test_services/test_prompt_locales.py test/test_services/test_prompt_language.py test/test_services/test_storyboard_prompts.py test/test_services/test_creation_prompt_standards.py test/test_services/test_style_prompts.py test/test_services/test_remake_prompt_render.py -q
+```
+
+建议一次只调整一类规则，使用固定模型、参数、两章书稿和声音参考做前后对比，记录人物一致性、分镜连贯性、对白和口型结果。自动化测试能检查模板与请求是否正确，不能代替真实音视频质量验收。
 
 ## 项目结构
 

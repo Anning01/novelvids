@@ -1,5 +1,7 @@
 """Typed object discovery and change sets; no arbitrary database fields."""
 
+from utils.messages import localized_message
+
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -76,9 +78,9 @@ class SettingFields(ChangeInput):
     @model_validator(mode='after')
     def nonempty(self):
         if self.prompt is not None and self.prompt_replacements is not None:
-            raise ValueError('完整提示词和片段替换二选一')
+            raise ValueError(localized_message('完整提示词和片段替换二选一'))
         if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
-            raise ValueError('提供实际修改字段，未修改的字段省略，不传 null')
+            raise ValueError(localized_message('提供实际修改字段，未修改的字段省略，不传 null'))
         return self
 
 
@@ -90,9 +92,9 @@ class UpdateSetting(ChangeInput):
     @model_validator(mode='after')
     def image_target(self):
         if self.target.kind == 'scene':
-            raise ValueError('该工具只编辑设定和形态')
+            raise ValueError(localized_message('该工具只编辑设定和形态'))
         if self.target.kind == 'variant' and (self.fields.aliases is not None or self.fields.is_global is not None):
-            raise ValueError('形态的别名由父资产决定')
+            raise ValueError(localized_message('形态的别名由父资产决定'))
         return self
 
 
@@ -112,7 +114,7 @@ class CreateScene(ChangeInput):
     @model_validator(mode='after')
     def one_prompt(self):
         if (self.prompt is None) == (self.structure is None):
-            raise ValueError('新增分镜必须提供完整文本或完整结构，二选一')
+            raise ValueError(localized_message('新增分镜必须提供完整文本或完整结构，二选一'))
         return self
 
 
@@ -135,11 +137,11 @@ class SceneFields(ChangeInput):
     @model_validator(mode='after')
     def nonempty(self):
         if not self.model_fields_set:
-            raise ValueError('至少提供一个修改字段')
+            raise ValueError(localized_message('至少提供一个修改字段'))
         if sum(value is not None for value in (self.prompt, self.visual, self.prompt_replacements)) > 1:
-            raise ValueError('纯文本和结构化 Prompt 修改二选一')
+            raise ValueError(localized_message('纯文本和结构化 Prompt 修改二选一'))
         if any(getattr(self, key) is None for key in self.model_fields_set - {'after'}):
-            raise ValueError('未修改的字段省略，不传 null')
+            raise ValueError(localized_message('未修改的字段省略，不传 null'))
         return self
 
 
@@ -176,5 +178,5 @@ class CreationChangeSet(ChangeInput):
     def unique_references(self):
         refs = [item.client_ref for item in self.operations if isinstance(item, (CreateSetting, CreateScene))]
         if len(set(refs)) != len(refs):
-            raise ValueError('同一批新增对象的 client_ref 不能重复')
+            raise ValueError(localized_message('同一批新增对象的 client_ref 不能重复'))
         return self

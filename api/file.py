@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from datetime import datetime
 import asyncio
@@ -45,7 +47,7 @@ async def get_upload_policy(
         if novel is None:
             from fastapi import HTTPException
 
-            raise HTTPException(status_code=404, detail="项目不存在")
+            raise HTTPException(status_code=404, detail=localized_message('项目不存在'))
         team_id = novel.team_id
     key = make_upload_key(team_id, filename)
     policy = oss.sign_form_upload(key, content_type, _DIRECT_UPLOAD_MAX_BYTES)
@@ -70,7 +72,7 @@ async def oss_finalize(
     if not oss.enabled:
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=400, detail="未启用对象存储")
+        raise HTTPException(status_code=400, detail=localized_message('未启用对象存储'))
     analysis = await analyze_oss_document(payload.key, payload.original_filename)
     return ResponseSchema(
         data={

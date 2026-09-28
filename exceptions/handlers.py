@@ -11,6 +11,7 @@ from tortoise.exceptions import (
 )
 
 from config import settings
+from utils.messages import localized_message
 from utils.response_format import ResponseSchema
 
 
@@ -22,7 +23,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     response_data = ResponseSchema(
         code=exc.status_code,
         data=None,
-        message=exc.detail or "请求错误",
+        message=exc.detail or localized_message("请求错误"),
     )
     # 兼容现有 HTTP 200 + body.code 协议；限流必须保留标准 429，供浏览器、
     # 反向代理与监控正确识别，并透传 Retry-After。
@@ -57,7 +58,7 @@ async def database_exception_handler(request: Request, exc: Exception):
         response_data = ResponseSchema(
             code=404,
             data=None,
-            message="请求的数据不存在",
+            message=localized_message("请求的数据不存在"),
         )
         return JSONResponse(status_code=200, content=response_data.model_dump())
 
@@ -65,7 +66,7 @@ async def database_exception_handler(request: Request, exc: Exception):
         response_data = ResponseSchema(
             code=400,
             data=None,
-            message="数据完整性错误，可能存在重复数据或违反约束",
+            message=localized_message("数据完整性错误，可能存在重复数据或违反约束"),
         )
         return JSONResponse(status_code=200, content=response_data.model_dump())
 
@@ -82,7 +83,7 @@ async def database_exception_handler(request: Request, exc: Exception):
 # 捕获 Python 所有未处理异常
 async def global_exception_handler(request: Request, exc: Exception):
     if settings.EXPOSE_INTERNAL_ERRORS:
-        message = str(exc) or "服务器内部错误，请联系管理员"
+        message = str(exc) or localized_message("服务器内部错误，请联系管理员")
         logger.error(
             "Unhandled %s during %s %s: %s",
             type(exc).__name__,
@@ -91,7 +92,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             exc,
         )
     else:
-        message = "服务器内部错误，请联系管理员"
+        message = localized_message("服务器内部错误，请联系管理员")
         # 生产环境不记录异常正文，避免上游响应、密钥或用户数据进入日志。
         logger.error(
             "Unhandled %s during %s %s",

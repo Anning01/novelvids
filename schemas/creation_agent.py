@@ -1,10 +1,12 @@
 """Narrow contracts for creation-agent prompt edits."""
 
+from utils.messages import localized_message
+
 from typing import Literal
 from uuid import UUID
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from schemas.scene import ScenePromptSegment
@@ -55,7 +57,7 @@ class AgentConfiguration(BaseModel):
     @model_validator(mode='after')
     def valid_compaction_thresholds(self):
         if self.compaction_target_ratio >= self.compaction_trigger_ratio:
-            raise ValueError('压缩目标必须小于触发阈值')
+            raise ValueError(localized_message('压缩目标必须小于触发阈值'))
         return self
 
 
@@ -102,7 +104,7 @@ class AgentRunRequest(BaseModel):
     @model_validator(mode="after")
     def unique_targets(self):
         if len({(target.kind, target.id) for target in self.targets}) != len(self.targets):
-            raise ValueError("不能重复选择同一目标")
+            raise ValueError(localized_message('不能重复选择同一目标'))
         return self
 
 
@@ -199,17 +201,17 @@ class CreationConstraintScope(BaseModel):
     @model_validator(mode="after")
     def explicit_scope(self):
         if self.kind == "chapter" and self.chapter_id is None:
-            raise ValueError("章节约束必须指定章节")
+            raise ValueError(localized_message('章节约束必须指定章节'))
         if self.kind == "targets" and not self.targets:
-            raise ValueError("局部约束必须指定已有目标集合")
+            raise ValueError(localized_message('局部约束必须指定已有目标集合'))
         if self.kind == "range" and (self.start_chapter is None or self.end_chapter is None or self.end_chapter < self.start_chapter):
-            raise ValueError("剧情区间必须具有明确起止章节，不能猜测终点")
+            raise ValueError(localized_message('剧情区间必须具有明确起止章节，不能猜测终点'))
         if self.kind != "chapter" and self.chapter_id is not None:
-            raise ValueError("作用范围包含无关章节字段")
+            raise ValueError(localized_message('作用范围包含无关章节字段'))
         if self.kind != "range" and (self.start_chapter is not None or self.end_chapter is not None):
-            raise ValueError("作用范围包含无关区间字段")
+            raise ValueError(localized_message('作用范围包含无关区间字段'))
         if self.kind != "targets" and self.targets:
-            raise ValueError("作用范围包含无关目标集合")
+            raise ValueError(localized_message('作用范围包含无关目标集合'))
         return self
 
 
@@ -250,6 +252,14 @@ def _omit_null_patch_defaults(schema: dict) -> None:
 
 
 class StoryboardVisualChanges(BaseModel):
+    @field_validator("reference_only_types", mode="before")
+    @classmethod
+    def normalize_reference_types(cls, value):
+        if not isinstance(value, list):
+            return value
+        aliases = {"person": "人物", "scene": "场景", "item": "物品"}
+        return [aliases.get(item, item) if isinstance(item, str) else item for item in value]
+
     """Only visual prompt fields; tracks, duration and bindings remain read-only."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, json_schema_extra=_omit_null_patch_defaults)
@@ -276,13 +286,13 @@ class StoryboardVisualChanges(BaseModel):
     @classmethod
     def reject_explicit_null(cls, values):
         if isinstance(values, dict) and any(value is None for value in values.values()):
-            raise ValueError('未修改的字段请省略，不接受 null 字段')
+            raise ValueError(localized_message('未修改的字段请省略，不接受 null 字段'))
         return values
 
     @model_validator(mode="after")
     def require_actual_changes(self):
         if not self.model_fields_set or any(getattr(self, name) is None for name in self.model_fields_set):
-            raise ValueError("至少提供一项非空的 Prompt 修改，不接受 null 字段")
+            raise ValueError(localized_message('至少提供一项非空的 Prompt 修改，不接受 null 字段'))
         return self
 
 
@@ -294,5 +304,5 @@ class StoryboardPromptEdit(PromptEditInput):
     @model_validator(mode="after")
     def select_one_mode(self):
         if (self.changes is None) == (self.legacy_prompt is None):
-            raise ValueError("结构化修改和历史纯文本修改必须且只能选择一种")
+            raise ValueError(localized_message('结构化修改和历史纯文本修改必须且只能选择一种'))
         return self

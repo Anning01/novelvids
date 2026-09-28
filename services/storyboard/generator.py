@@ -1,5 +1,7 @@
 """Storyboard model orchestration with bounded continuation batches."""
 
+from utils.messages import localized_message
+
 import json
 from typing import Any
 
@@ -113,6 +115,7 @@ async def generate_storyboard(
                 model=model,
                 messages=messages,
                 response_model=Storyboard,
+                prompt_language=prompt_language,
                 supports_json_output=supports_json_output,
                 timeout=600,
                 thinking=thinking,
@@ -131,5 +134,5 @@ async def generate_storyboard(
         batch_index += 1
 
     if not completions:
-        raise ValueError("分镜模型未返回任何批次结果")
+        raise ValueError(localized_message('分镜模型未返回任何批次结果'))
     return Storyboard(shots=shots), _aggregate_metadata(completions)

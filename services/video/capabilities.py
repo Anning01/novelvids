@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -318,7 +320,7 @@ def capabilities_for(model_type: str | VideoGenerationModelTypeEnum | None) -> V
     try:
         return CAPABILITIES[VideoGenerationModelTypeEnum(model_type)]
     except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="该视频配置未选择受支持的视频模型类型") from exc
+        raise HTTPException(status_code=400, detail=localized_message('该视频配置未选择受支持的视频模型类型')) from exc
 
 
 def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: str) -> None:
@@ -329,7 +331,7 @@ def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: 
             ImageApiProtocol.minimax: "MiniMax 官方",
             ImageApiProtocol.dashscope: "阿里云百炼 DashScope",
         }.get(capabilities.api_protocol, capabilities.api_protocol.value)
-        raise HTTPException(status_code=400, detail=f"当前视频模型仅支持{label}接口协议")
+        raise HTTPException(status_code=400, detail=localized_message('当前视频模型仅支持{p1}接口协议', p1=f'{label}'))
 
 
 def _canonical_value(value: object, supported: tuple[str, ...], fallback: str) -> str:
@@ -366,31 +368,31 @@ def validate_selection(
     try:
         selected_duration = int(duration)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="视频时长无效") from exc
+        raise HTTPException(status_code=400, detail=localized_message('视频时长无效')) from exc
 
     if generation_mode not in capabilities.generation_modes:
-        raise HTTPException(status_code=400, detail="所选生成方式不受当前视频模型支持")
+        raise HTTPException(status_code=400, detail=localized_message('所选生成方式不受当前视频模型支持'))
     if selected_resolution not in capabilities.resolutions:
-        raise HTTPException(status_code=400, detail="所选分辨率不受当前视频模型支持")
+        raise HTTPException(status_code=400, detail=localized_message('所选分辨率不受当前视频模型支持'))
     mode_aspect_ratios = capabilities.aspect_ratios_by_mode.get(
         generation_mode,
         capabilities.aspect_ratios,
     )
     if selected_ratio not in mode_aspect_ratios:
-        raise HTTPException(status_code=400, detail="所选比例不受当前视频模型支持")
+        raise HTTPException(status_code=400, detail=localized_message('所选比例不受当前视频模型支持'))
     if selected_format not in capabilities.output_formats:
-        raise HTTPException(status_code=400, detail="所选视频格式不受当前视频模型支持")
+        raise HTTPException(status_code=400, detail=localized_message('所选视频格式不受当前视频模型支持'))
     if selected_duration != -1 and not capabilities.duration_min <= selected_duration <= capabilities.duration_max:
         raise HTTPException(
             status_code=400,
-            detail=f"当前视频模型仅支持 {capabilities.duration_min}-{capabilities.duration_max} 秒",
+            detail=localized_message('当前视频模型仅支持 {p1}-{p3} 秒', p1=f'{capabilities.duration_min}', p3=f'{capabilities.duration_max}'),
         )
     if selected_duration == -1 and not capabilities.supports_auto_duration:
-        raise HTTPException(status_code=400, detail="当前视频模型不支持自动时长")
+        raise HTTPException(status_code=400, detail=localized_message('当前视频模型不支持自动时长'))
     if selected_audio and not capabilities.supports_audio:
-        raise HTTPException(status_code=400, detail="当前视频模型不支持生成同步音频")
+        raise HTTPException(status_code=400, detail=localized_message('当前视频模型不支持生成同步音频'))
     if selected_return_last_frame and not capabilities.supports_return_last_frame:
-        raise HTTPException(status_code=400, detail="当前视频模型不支持返回尾帧")
+        raise HTTPException(status_code=400, detail=localized_message('当前视频模型不支持返回尾帧'))
     return VideoGenerationSelection(
         resolution=selected_resolution,
         aspect_ratio=selected_ratio,

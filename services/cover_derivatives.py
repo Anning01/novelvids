@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from utils.messages import localized_message
+
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -100,7 +102,7 @@ def render_cover_derivatives(image_bytes: bytes) -> dict[CoverDerivativeKind, by
     encoded = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(encoded, cv2.IMREAD_UNCHANGED)
     if image is None or image.size == 0:
-        raise ValueError("封面图片无法解码")
+        raise ValueError(localized_message('封面图片无法解码'))
 
     return {
         kind: _render_variant(image, spec)
@@ -122,7 +124,7 @@ def write_local_cover_derivatives(
         reference = image_derivative_reference(cover_reference, kind)
         destination = local_media_path(media_root, reference)
         if destination is None:
-            raise ValueError("封面不是受支持的本地媒体引用")
+            raise ValueError(localized_message('封面不是受支持的本地媒体引用'))
         if destination.exists() and not force:
             written[kind] = destination
             continue
@@ -212,5 +214,5 @@ def _render_variant(image: np.ndarray, spec: CoverDerivativeSpec) -> bytes:
         [cv2.IMWRITE_WEBP_QUALITY, spec.quality],
     )
     if not success:
-        raise ValueError("封面 WebP 编码失败")
+        raise ValueError(localized_message('封面 WebP 编码失败'))
     return output.tobytes()

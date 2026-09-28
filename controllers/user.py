@@ -1,5 +1,7 @@
 """用户管理控制器（仅超级管理员）：列表/统计/手动创建/禁用登录/删除。"""
 
+from utils.messages import localized_message
+
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -59,9 +61,9 @@ class UserController:
     async def create_user(self, username: str, password: str, nickname: str) -> dict:
         username = username.strip()
         if not username:
-            raise HTTPException(status_code=422, detail="用户名不能为空")
+            raise HTTPException(status_code=422, detail=localized_message('用户名不能为空'))
         if await User.filter(username=username).exists():
-            raise HTTPException(status_code=400, detail="用户名已存在")
+            raise HTTPException(status_code=400, detail=localized_message('用户名已存在'))
         user = await User.create(
             username=username,
             nickname=nickname or username,
@@ -80,10 +82,10 @@ class UserController:
 
     async def set_status(self, user_id: int, status: int, operator_id: int) -> dict:
         if user_id == operator_id:
-            raise HTTPException(status_code=400, detail="不能修改自己的登录状态")
+            raise HTTPException(status_code=400, detail=localized_message('不能修改自己的登录状态'))
         user = await self._get_user(user_id)
         if user.is_super_admin:
-            raise HTTPException(status_code=400, detail="超级管理员账号不可在界面禁用")
+            raise HTTPException(status_code=400, detail=localized_message('超级管理员账号不可在界面禁用'))
         user.status = status
         await user.save(update_fields=["status", "updated_at"])
         return {
@@ -99,13 +101,13 @@ class UserController:
 
     async def remove_user(self, user_id: int, operator_id: int) -> None:
         if user_id == operator_id:
-            raise HTTPException(status_code=400, detail="不能删除自己")
+            raise HTTPException(status_code=400, detail=localized_message('不能删除自己'))
         user = await self._get_user(user_id)
         if user.is_super_admin:
-            raise HTTPException(status_code=400, detail="超级管理员账号不可删除")
+            raise HTTPException(status_code=400, detail=localized_message('超级管理员账号不可删除'))
         if await Team.filter(owner_user_id=user.id).exists():
             raise HTTPException(
-                status_code=400, detail="该用户是团队所有人，请先转移或删除其团队"
+                status_code=400, detail=localized_message('该用户是团队所有人，请先转移或删除其团队')
             )
         await user.delete()  # 级联删除成员关系与会话
 
@@ -128,7 +130,7 @@ class UserController:
     async def _get_user(self, user_id: int) -> User:
         user = await User.get_or_none(id=user_id)
         if user is None:
-            raise HTTPException(status_code=404, detail="用户不存在")
+            raise HTTPException(status_code=404, detail=localized_message('用户不存在'))
         return user
 
     async def _user_total_cost(self, user_id: int) -> Decimal:

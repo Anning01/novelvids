@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
+
 import { ChevronDown } from 'lucide-vue-next'
 import { ref } from 'vue'
 
@@ -59,7 +61,7 @@ function handleFocusOut(event: FocusEvent) {
       type="button"
       class="workbench-suggested-input__toggle"
       :class="{ 'is-open': open }"
-      :aria-label="`${open ? '关闭' : '打开'}${label}推荐值`"
+      :aria-label="tr('{p0}{p1}推荐值', { p0: open ? '关闭' : '打开', p1: label })"
       :aria-expanded="open"
       @pointerdown.prevent
       @click="toggleSuggestions"
@@ -69,7 +71,7 @@ function handleFocusOut(event: FocusEvent) {
     <div
       v-if="open && suggestions.length"
       class="workbench-suggested-input__menu workbench-scroll-region nowheel"
-      :aria-label="`${label}推荐值`"
+      :aria-label="tr('{p0}推荐值', { p0: label })"
       role="listbox"
     >
       <button
