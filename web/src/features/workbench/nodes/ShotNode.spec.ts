@@ -7,7 +7,7 @@ import ShotNode from './ShotNode.vue'
 
 const frameStub = {
   props: ['data'],
-  template: '<article :data-kind="data.kind" :data-borderless="String(data.borderless_media)" :data-draggable="String(data.body_draggable)"><header><slot name="meta" /></header><slot /></article>',
+  template: '<article :data-kind="data.kind" :data-borderless="String(data.borderless_media)" :data-draggable="String(data.body_draggable)"><header><slot name="meta" /></header><div class="toolbar-actions"><slot name="toolbar-actions" /></div><slot /></article>',
 }
 
 const videoStub = {
@@ -88,4 +88,9 @@ it('presents a shot as a ratio-aware video card with media and asset metadata in
     'shot-video-generation-model',
     'shot-video-generation-parameters',
   ])
+
+  const libraryButton = wrapper.get('.toolbar-actions button[aria-label="从资源库选择视频"]')
+  expect(libraryButton.attributes('title')).toBe('从资源库选择视频')
+  expect(libraryButton.text()).toBe('')
+  expect(libraryButton.find('svg').exists()).toBe(true)
 })

@@ -2587,6 +2587,8 @@
     "保存到：{p0}": "Save to: {p0}",
     "上传进度：{p0}": "Upload progress: {p0}",
     "查看所在文件夹": "View destination folder",
-    "在后台继续": "Continue in background"
+    "在后台继续": "Continue in background",
+    "第 {p0} 个参考视频": "Reference video #{p0}",
+    "请尝试重新上传参考视频，或在素材列表替换为有效视频后重新生成。": "Please re-upload the reference video, or replace it with a valid video in the assets list and generate again."
   }
 }

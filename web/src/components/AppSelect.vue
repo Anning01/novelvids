@@ -14,6 +14,7 @@ const props = withDefaults(defineProps<{
   options: Array<string | AppSelectOption>
   ariaLabel: string
   menuLabel?: string
+  menuClass?: string
   menuZIndex?: number
   menuWidth?: number
   maxMenuHeight?: number
@@ -22,6 +23,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
 }>(), {
   menuLabel: '',
+  menuClass: '',
   menuZIndex: 1000,
   menuWidth: undefined,
   maxMenuHeight: 360,
@@ -134,7 +136,7 @@ onUnmounted(() => {
         v-if="open"
         ref="menu"
         class="app-select__menu"
-        :class="{ 'is-up': opensUp, 'is-end': align === 'end', 'is-compact': density === 'compact' }"
+        :class="[menuClass, { 'is-up': opensUp, 'is-end': align === 'end', 'is-compact': density === 'compact' }]"
         :style="menuStyle"
         role="listbox"
         :aria-label="ariaLabel"

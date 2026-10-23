@@ -39,4 +39,19 @@ describe('formatVideoGenerationError', () => {
     expect(result.requestId).toBe('req-400')
     expect(result.httpStatus).toBe(400)
   })
+
+  it('把参考视频下载失败识别为参考视频并提供对应建议', () => {
+    const result = formatVideoGenerationError(
+      '视频供应商请求失败：The parameter `content[1].video_url` specified in the request is not valid: resource download failed. Request id: 02179275141305109fb6d9bae00304bb74f776328be18e98a2080（InvalidParameter）（HTTP 400，request_id=02179275141305109fb6d9bae00304bb74f776328be18e98a2080）',
+    )
+
+    expect(result.title).toBe('第 1 个参考视频下载失败')
+    expect(result.message).toContain('第 1 个参考视频地址无效或无法被供应商下载')
+    expect(result.suggestion).toContain('重新上传参考视频')
+    expect(result.category).toBe('download')
+    expect(result.referenceImageNumber).toBe(1)
+    expect(result.requestId).toBe('02179275141305109fb6d9bae00304bb74f776328be18e98a2080')
+    expect(result.errorCode).toBe('InvalidParameter')
+    expect(result.httpStatus).toBe(400)
+  })
 })

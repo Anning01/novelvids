@@ -50,15 +50,18 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
   const contentIndexText = firstMatch(raw, [
     /input image\s*['"]?content\[(\d+)\]/iu,
     /content\[(\d+)\]\.image_uri/iu,
+    /content\[(\d+)\]\.video_url/iu,
     /content\[(\d+)\]/iu,
   ])
   const referenceNumber = contentIndexText ? Number(contentIndexText) : undefined
 
+  const isVideoUrl = /video_url/iu.test(raw)
   const isPrivacyError = raw.includes(PRIVACY_ERROR_CODE) || /may contain real person/iu.test(raw)
   const isDownloadError =
     !isPrivacyError &&
     (/resource download failed/iu.test(raw) ||
-      (/image_uri/iu.test(raw) && /not valid/iu.test(raw)))
+      (/image_uri/iu.test(raw) && /not valid/iu.test(raw)) ||
+      (/video_url/iu.test(raw) && /not valid/iu.test(raw)))
 
   if (isPrivacyError) {
     const target = referenceNumber && referenceNumber > 0
@@ -79,12 +82,16 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
 
   if (isDownloadError) {
     const target = referenceNumber && referenceNumber > 0
-      ? tr('第 {p0} 张参考图', { p0: referenceNumber })
-      : tr('参考图片')
+      ? (isVideoUrl ? tr('第 {p0} 个参考视频', { p0: referenceNumber }) : tr('第 {p0} 张参考图', { p0: referenceNumber }))
+      : (isVideoUrl ? tr('参考视频') : tr('参考图片'))
     return {
       title: tr('{p0}下载失败', { p0: target }),
       message: tr('{p0}地址无效或无法被供应商下载，请检查该素材是否可正常访问。', { p0: target }),
-      get suggestion() { return tr('请尝试重新上传参考素材，或在素材列表替换为有效图片后重新生成。') },
+      get suggestion() {
+        return isVideoUrl
+          ? tr('请尝试重新上传参考视频，或在素材列表替换为有效视频后重新生成。')
+          : tr('请尝试重新上传参考素材，或在素材列表替换为有效图片后重新生成。')
+      },
       raw,
       errorCode,
       requestId,

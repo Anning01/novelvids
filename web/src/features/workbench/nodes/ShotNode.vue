@@ -5,6 +5,7 @@ import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 import { computed, inject, markRaw, ref, watch } from 'vue'
+import { Film } from 'lucide-vue-next'
 import type { Asset, Scene, Video, VideoGenerationModel } from '@/types'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
 import type { VideoResource } from '@/features/resource-library/types'
@@ -371,7 +372,17 @@ watch([selectedModel, generationMode], ([model]) => {
         borderless_media: true,
       }"
     >
-      <template #toolbar-actions><AppButton size="sm" :disabled="busy || config.useLastFrame || !selectedModel?.capabilities.max_reference_videos" @click.stop="libraryOpen = true">{{ tr('资源库') }}</AppButton></template>
+      <template #toolbar-actions>
+        <button
+          type="button"
+          :disabled="busy || config.useLastFrame || !selectedModel?.capabilities.max_reference_videos"
+          :aria-label="tr('从资源库选择视频')"
+          :title="tr('从资源库选择视频')"
+          @click.stop="libraryOpen = true"
+        >
+          <Film :size="16" aria-hidden="true" />
+        </button>
+      </template>
       <template #meta>
         <span class="workbench-node-frame__media-size">{{ mediaSizeLabel }}</span>
         <span class="workbench-shot-media__asset-summary" :aria-label="tr('资产输入 {p0} 个，{p1}', { p0: referenceEdges.length, p1: assetInputSummary })">
