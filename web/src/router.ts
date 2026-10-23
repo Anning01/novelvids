@@ -20,6 +20,7 @@ const router = createRouter({
     { path: '/profile', name: 'profile', component: () => import('./pages/ProfilePage.vue') },
     { path: '/novel/:id', component: () => import('./pages/NovelPage.vue') },
     { path: '/novel/:novelId/chapter/:chapterId/step/:stepId', component: () => import('./pages/WorkflowPage.vue') },
+    { path: '/resource-library', component: () => import('./pages/ResourceLibraryPage.vue') },
     { path: '/assets', component: () => import('./pages/VideosPage.vue') },
     { path: '/settings', component: () => import('./pages/ConfigPage.vue'), meta: { roles: ['admin'] } },
     { path: '/billing', component: () => import('./pages/BillingPage.vue'), meta: { roles: ['admin', 'creator'] } },

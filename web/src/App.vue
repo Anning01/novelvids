@@ -3,7 +3,7 @@ import { tr } from '@/i18n'
 
 import { ElConfigProvider } from 'element-plus'
 import { elementLocale } from '@/i18n'
-import { BarChart3, Building2, Clapperboard, FolderKanban, Images, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
+import { BarChart3, Building2, Clapperboard, Film, FolderKanban, Images, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { notice } from '@/shared/notice'
@@ -34,6 +34,7 @@ const creationItems = [
 const personalItems = computed(() => {
   const items = [
     { path: '/projects', get label() { return tr('项目') }, icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
+    { path: '/resource-library', get label() { return tr('资源库') }, icon: Film, active: () => route.path.startsWith('/resource-library') },
     { path: '/assets', get label() { return tr('资产') }, icon: Images, active: () => route.path.startsWith('/assets') },
   ]
   if (auth.canAccessBilling) items.push({ path: '/billing', get label() { return tr('成本') }, icon: BarChart3, active: () => route.path.startsWith('/billing') })

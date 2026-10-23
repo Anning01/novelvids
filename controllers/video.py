@@ -379,11 +379,24 @@ class VideoController(CRUDBase[Video, dict, dict]):
             len(referenced_media),
         )
         for reference in referenced_media:
+            library_verified = None
+            if reference.library_resource_id is not None:
+                from services.resource_references import resource_for, validate_resource_model
+                resource = await resource_for((novel.team_id or 0) if settings.AUTH_ENABLED and novel else 0, reference.library_resource_id)
+                validate_resource_model(resource, capabilities)
+                if reference.type != "video":
+                    raise HTTPException(400, detail="资源库仅支持参考视频")
+                reference.mention_url = reference.mention_url or reference.url
+                reference.url = resource.storage_ref
+                for field in ("duration", "width", "height", "fps", "codec", "content_type", "size_bytes"):
+                    if field in resource.media:
+                        setattr(reference, field, resource.media[field])
+                library_verified = resource.media
             identity = (reference.type, reference.url)
             if identity in seen_references:
                 continue
             seen_references.add(identity)
-            verified = await verify_local_reference(reference.type, reference.url, capabilities)
+            verified = library_verified or await verify_local_reference(reference.type, reference.url, capabilities)
             if reference.type == "image":
                 try:
                     reference_images.append(

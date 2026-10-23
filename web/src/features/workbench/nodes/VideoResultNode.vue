@@ -8,6 +8,7 @@ import { statusLabel } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
 import type { Video } from '@/types'
 import { TaskStatusEnum } from '@/types'
+import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchVideoMedia from '../components/WorkbenchVideoMedia.vue'
 import { videoAspectRatio, videoCoverUrl, videoDownloadFilename, videoPixelSize, videoResolution } from '../graph/videoMedia'
@@ -74,6 +75,7 @@ async function downloadVideo() {
       </button>
     </template>
     <div class="workbench-node-content workbench-media-node">
+      <SaveVideoToLibrary v-if="video.url && !processing && !failed" :source="{ source: 'video', source_id: video.id, name: title }" />
       <WorkbenchVideoMedia
         :src="video.url"
         :poster="videoCoverUrl(video)"

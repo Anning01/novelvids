@@ -14,6 +14,7 @@ const props = withDefaults(defineProps<{
   options: Array<string | AppSelectOption>
   ariaLabel: string
   menuLabel?: string
+  menuZIndex?: number
   menuWidth?: number
   maxMenuHeight?: number
   align?: 'start' | 'end'
@@ -21,6 +22,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
 }>(), {
   menuLabel: '',
+  menuZIndex: 1000,
   menuWidth: undefined,
   maxMenuHeight: 360,
   align: 'start',
@@ -43,6 +45,7 @@ const normalizedOptions = computed<AppSelectOption[]>(() => props.options.map(op
 )))
 const selectedOption = computed(() => normalizedOptions.value.find(option => option.value === props.modelValue) ?? normalizedOptions.value[0])
 const menuStyle = computed(() => ({
+  zIndex: props.menuZIndex,
   maxHeight: `${props.maxMenuHeight}px`,
   width: `${props.menuWidth || menuPosition.value.width}px`,
   top: `${menuPosition.value.top}px`,
@@ -53,6 +56,7 @@ async function toggleMenu() {
   if (props.disabled) return
   open.value = !open.value
   if (!open.value) return
+  updatePlacement()
   await nextTick()
   updatePlacement()
 }
@@ -61,12 +65,13 @@ function updatePlacement() {
   const rect = root.value?.getBoundingClientRect()
   if (!rect) return
   const estimatedMenuHeight = Math.min(props.maxMenuHeight, normalizedOptions.value.length * 38 + (props.menuLabel ? 34 : 14))
+  const menuHeight = menu.value?.getBoundingClientRect().height || estimatedMenuHeight
   const roomBelow = window.innerHeight - rect.bottom
-  opensUp.value = roomBelow < estimatedMenuHeight + 12 && rect.top > roomBelow
+  opensUp.value = roomBelow < menuHeight + 12 && rect.top > roomBelow
   const width = props.menuWidth || rect.width
   const left = props.align === 'end' ? rect.right - width : rect.left
   menuPosition.value = {
-    top: opensUp.value ? rect.top - estimatedMenuHeight - 7 : rect.bottom + 7,
+    top: opensUp.value ? rect.top - menuHeight - 7 : rect.bottom + 7,
     left: Math.max(8, Math.min(left, window.innerWidth - width - 8)),
     width,
   }

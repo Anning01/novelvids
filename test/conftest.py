@@ -124,6 +124,9 @@ async def clear_db():
 
     await login_throttle.reset()
 
+    from models.resource_library import ResourceFolder, VideoResource
+    await VideoResource.all().delete()
+    await ResourceFolder.all().delete()
     await AudioReference.all().delete()
     await DigitalHuman.all().delete()
     await Video.all().delete()

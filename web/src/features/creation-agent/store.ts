@@ -1,3 +1,4 @@
+import { creationAgentToolProgressLabel } from './toolPresentation'
 
 import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
@@ -106,10 +107,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         },
         onToolCallStartEvent({ event }) {
           if (revision !== epoch || subscription !== handle) return
-          const labels: Record<string, string> = { get get_creation_context() { return tr('正在读取创作上下文') }, get query_creation_objects() { return tr('正在查找对象') },
-            get create_creation_setting() { return tr('正在创建新设定') }, get patch_creation_prompts() { return tr('正在保存提示词调整') },
-            get read_creation_objects() { return tr('正在查看设定和引用') }, get apply_creation_changes() { return tr('正在保存创作调整') }, get undo_creation_change() { return tr('正在撤销操作') } }
-          statusText.value = labels[event.toolCallName] || tr('正在调整提示词')
+          statusText.value = creationAgentToolProgressLabel(event.toolCallName)
         },
         async onToolCallResultEvent() {
           const result = await agentApi.snapshot(taskId)

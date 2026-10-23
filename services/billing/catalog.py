@@ -22,6 +22,11 @@ IMAGE_PRICING: dict[str, dict] = {
         "prices": {"1K": 0.30, "1.5K": 0.30, "2K": 0.60},
         "input_image": {"first_free": 1, "price_per_image": 0.02},
     },
+    "seedream_5_flash": {
+        "type": "image",
+        "currency": "CNY",
+        "prices": {"1K": 0.12, "1.5K": 0.12, "2K": 0.12},
+    },
     "seedream_5_lite": {
         "type": "image",
         "currency": "CNY",

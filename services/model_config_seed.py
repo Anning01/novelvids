@@ -74,6 +74,7 @@ DEFAULT_MODELS: list[dict] = [
         "pricing": {"type": "text", "currency": "CNY", **LLM_PRICING["deepseek-v4-pro"]},
     },
     _image_spec("doubao-seedream-5-0-pro", "doubao-seedream-5-0-pro-260628", "seedream_5_pro"),
+    _image_spec("doubao-seedream-5-0-flash", "doubao-seedream-5-0-flash-260915", "seedream_5_flash"),
     _image_spec("doubao-seedream-5-0-lite", "doubao-seedream-5-0-260128", "seedream_5_lite"),
     _video_spec("doubao-seedance-2.0", "doubao-seedance-2-0-260128", "seedance_2"),
     _video_spec("doubao-seedance-2-0-fast", "doubao-seedance-2-0-fast-260128", "seedance_2_fast"),

@@ -155,6 +155,7 @@ class ImageModelTypeEnum(NicknameStrEnum):
 
     seedream_5_lite = "seedream_5_lite", "Doubao Seedream 5.0 Lite"
     seedream_5_pro = "seedream_5_pro", "Doubao Seedream 5.0 Pro"
+    seedream_5_flash = "seedream_5_flash", "Doubao Seedream 5.0 Flash"
     gpt_image_2 = "gpt_image_2", "GPT Image 2"
 
 

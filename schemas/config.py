@@ -24,7 +24,7 @@ class AiModelConfigProperties(BaseModel):
     )
     image_model_type: Optional[ImageModelTypeEnum] = Field(
         None,
-        description="生图模型能力类型，仅支持 Seedream 5 Lite/Pro 与 GPT Image 2",
+        description="生图模型能力类型，仅支持 Seedream 5 Lite/Pro/Flash 与 GPT Image 2",
     )
     video_model_type: Optional[VideoGenerationModelTypeEnum] = Field(
         None,

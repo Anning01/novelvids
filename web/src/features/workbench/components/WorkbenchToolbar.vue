@@ -37,6 +37,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  chooseLibrary: []
   addAsset: []
   addShot: []
   addNote: []
@@ -169,6 +170,7 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
             <ImageUp :size="18" aria-hidden="true" />
             <span>{{ tr('上传图片') }}</span>
           </button>
+          <button type="button" role="menuitem" @click="closeAddMenu(); emit('chooseLibrary')"><Film :size="18" aria-hidden="true" /><span>{{ tr('从资源库选择视频') }}</span></button>
           <button type="button" role="menuitem" @click="chooseFiles(videoInput)">
             <Video :size="18" aria-hidden="true" />
             <span>{{ tr('上传视频') }}</span>

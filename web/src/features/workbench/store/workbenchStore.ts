@@ -3,6 +3,11 @@ import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { api, mediaUrl, persistedMediaRef } from '@/api'
+import { libraryApi } from '@/features/resource-library/api'
+import type { VideoResource } from '@/features/resource-library/types'
+import { readVideoReferenceMedia } from '@/shared/scenePromptReferences'
+import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
+import type { VideoReferenceMedia } from '@/types'
 import { notice } from '@/shared/notice'
 import type { AiTask, Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel, WorkbenchBootstrap, WorkbenchProjectConfig, WorkbenchRemakeSource, WorkbenchRemakeTask } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -450,7 +455,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       position?: Point,
     ) {
       this.checkpoint()
-      const stamp = Date.now()
+      let stamp = Date.now()
+      while (this.nodes.some(item => item.key === `${kind.replace('_', '-')}-${stamp}`)) stamp++
       const key = `${kind.replace('_', '-')}-${stamp}`
       const mediaData: UploadedMediaData = {
         url: uploadedUrl(uploaded),
@@ -471,7 +477,40 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success(tr('{p0}上传完成', { p0: label }))
       return item
     },
+    addLibraryVideo(resource: VideoResource, position?: Point) {
+      const item = this.addUploadedMedia('video_media', { filename: resource.filename, original_filename: resource.name, content_type: resource.content_type }, position)
+      item.title = resource.name
+      item.data = { ...item.data, url: resource.url, storage_ref: resource.storage_ref, library_resource_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
+      this.persistLayout()
+      return item
+    },
+    libraryVideoReferences(sceneId: number): VideoReferenceMedia[] {
+      const sources = this.edges.filter(edge => edge.type === 'asset_reference' && edge.target === `shot-${sceneId}`)
+        .sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id)
+        .map(edge => ({ node: this.nodeByKey(edge.source), edge }))
+        .filter(value => value.node)
+      const saved = readVideoReferenceMedia(this.scenes.find(item => item.id === sceneId)?.metadata?.video_reference_media)
+        .filter(item => item.type === 'video' && item.library_resource_id)
+      const references = disambiguateMaterialMentionNames(sources.map(value => ({ ...value, name: value.node!.title.trim() || value.node!.key })))
+        .filter(value => value.node!.kind === 'video_media' && Number(value.node!.data.library_resource_id)
+          && (!value.edge.config?.inputMode || ['auto', 'reference_video'].includes(String(value.edge.config.inputMode))))
+        .map(value => ({ type: 'video' as const, url: String(value.node!.data.storage_ref || value.node!.data.url), name: value.name, mention_name: value.name,
+          library_resource_id: Number(value.node!.data.library_resource_id), duration: Number(value.node!.data.durationSeconds) || undefined }))
+      const unique = new Map<number, VideoReferenceMedia>()
+      for (const reference of [...saved, ...references]) {
+        const id = reference.library_resource_id!
+        unique.set(id, { ...unique.get(id), ...reference })
+      }
+      return [...unique.values()]
+    },
     async uploadMedia(kind: 'image_media' | 'video_media' | 'audio_media', file: File, position?: Point) {
+      if (kind === 'video_media' && /\.(mp4|mov)$/i.test(file.name)) {
+        const resource = await libraryApi.upload(file, 0, undefined, true)
+        const item = this.addUploadedMedia(kind, { filename: resource.filename, original_filename: file.name, content_type: resource.content_type }, position)
+        item.data = { ...item.data, url: resource.url, upload_source_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
+        this.persistLayout()
+        return item
+      }
       const uploaded = await api.upload(file)
       return this.addUploadedMedia(kind, {
         filename: uploaded.filename,
@@ -510,11 +549,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async replaceUploadedMedia(key: string, file: File) {
       const item = this.nodeByKey(key)
       if (!item || !uploadedMediaKinds.has(item.kind)) return null
-      const uploaded = await api.upload(file)
+      const source = item.kind === 'video_media' && /\.(mp4|mov)$/i.test(file.name) ? await libraryApi.upload(file, 0, undefined, true) : null
+      const uploaded = source ? { filename: source.filename, original_filename: file.name, content_type: source.content_type, url: source.storage_ref } : await api.upload(file)
       this.checkpoint()
       item.title = mediaTitle(uploaded.original_filename || file.name)
       item.data = {
         ...item.data,
+        library_resource_id: undefined,
+        upload_source_id: source?.id,
         url: uploadedUrl(uploaded),
         filename: uploaded.filename,
         originalFilename: uploaded.original_filename || file.name,
@@ -711,7 +753,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }
       if (this.mediaEdges.some(item => item.source === source && item.target === target)) return false
       this.checkpoint()
-      const stamp = Date.now()
+      let stamp = Date.now()
+      while (this.edges.some(item => item.key === `media-edge-${stamp}`)) stamp++
       const isOutputBinding = isWatermarkVideo || isComposerShot || isComposerVideo || isComposerWatermark
       const orderIndex = isComposerShot || isComposerVideo
         ? this.mediaEdges.filter(item => item.target === target && item.targetHandle !== 'watermark-input').length
@@ -1157,7 +1200,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       let submittedVideoId: number | null = null
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
       try {
-        let video = (await api.generateVideo(sceneId, modelConfigId, options)).data
+        const references = options.generation_mode === 'keyframes' ? [] : this.libraryVideoReferences(sceneId)
+        let video = (await api.generateVideo(sceneId, modelConfigId, { ...options, ...(references.length ? { reference_media: references } : {}) })).data
         submittedVideoId = video.id
         if (controller.signal.aborted) return
         this.videos[sceneId] = [video, ...(this.videos[sceneId] || []).filter(item => item.id !== video.id)]

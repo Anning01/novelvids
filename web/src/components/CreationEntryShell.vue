@@ -37,6 +37,7 @@ withDefaults(defineProps<{
 
 .creation-entry-workspace {
   width: min(820px, 100%);
+  min-width: 0;
   margin: auto;
 }
 

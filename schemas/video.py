@@ -41,6 +41,8 @@ class VideoReferenceMedia(BaseModel):
     """已上传并通过模型能力校验的参考素材。"""
     model_config = ConfigDict(extra="forbid")
 
+    library_resource_id: int | None = Field(default=None, ge=1)
+    mention_name: str | None = Field(default=None, min_length=1, max_length=255)
     type: Literal["image", "video"]
     url: str = Field(..., min_length=1, max_length=2000)
     mention_url: Optional[str] = Field(

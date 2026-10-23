@@ -78,6 +78,7 @@ export function workbenchNodeHandles(kind: WorkbenchNodeKind, data?: Partial<Wor
   if (['asset', 'audio_reference', 'digital_human', 'image_media', 'video_media', 'audio_media', 'video_result'].includes(kind)) {
     source.push(assetOutput)
   }
+  if (kind === 'video_media') source.push(outputOutput)
   if (kind === 'shot') source.push(sequenceOutput, outputOutput)
   if (kind === 'video_result' || kind === 'video_composer') source.push(outputOutput)
   if (kind === 'watermark') source.push(watermarkOutput, outputOutput)

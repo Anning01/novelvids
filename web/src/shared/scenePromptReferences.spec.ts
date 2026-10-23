@@ -49,3 +49,17 @@ describe('scenePromptReferences', () => {
     ])
   })
 })
+
+it('preserves library identity and stable mention address when reopening saved references', async () => {
+  const { readVideoReferenceMedia } = await import('./scenePromptReferences')
+  const saved = readVideoReferenceMedia([
+    { type: 'video', url: 'https://cdn.invalid/motion.mp4', mention_url: 'uploads/1/motion.mp4', library_resource_id: 7, name: 'Motion', duration: 4 },
+    { type: 'image', url: '/media/legacy.png' },
+    { type: 'video', url: '/media/invalid.mp4', library_resource_id: -1 },
+    { type: 'audio', url: '/media/a.wav' },
+  ])
+  expect(saved).toHaveLength(3)
+  expect(saved[0]).toMatchObject({ library_resource_id: 7, mention_url: 'uploads/1/motion.mp4', duration: 4 })
+  expect(saved[1]?.library_resource_id).toBeUndefined()
+  expect(saved[2]?.library_resource_id).toBeUndefined()
+})

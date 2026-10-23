@@ -6,6 +6,9 @@ import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from
 import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 import { computed, inject, markRaw, ref, watch } from 'vue'
 import type { Asset, Scene, Video, VideoGenerationModel } from '@/types'
+import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
+import type { VideoResource } from '@/features/resource-library/types'
+import { notice } from '@/shared/notice'
 import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
 import { disambiguateMaterialMentionNames, materialMentionAssetCategory } from '../components/materialMentionTypes'
 import MediaGenerationModelSelector from '../components/MediaGenerationModelSelector.vue'
@@ -225,6 +228,24 @@ async function save() {
   }
 }
 
+const libraryOpen = ref(false)
+async function addLibraryReferences(items: VideoResource[]) {
+  const existing = store.libraryVideoReferences(scene.value.id)
+  const additions = items.filter(item => !existing.some(current => current.library_resource_id === item.id))
+  const caps = selectedModel.value?.capabilities
+  if (!caps || existing.length + additions.length > caps.max_reference_videos || existing.reduce((total, item) => total + (item.duration || 0), 0) + additions.reduce((total, item) => total + item.duration, 0) > caps.reference_video_total_duration_max + 0.001) {
+    notice.error(tr('参考视频数量或总时长超过当前模型限制'))
+    return
+  }
+  for (const resource of additions) {
+    const target = store.nodeByKey(props.id)
+    const item = store.addLibraryVideo(resource, { x: (target?.position.x || 0) - 430, y: (target?.position.y || 0) + existing.length * 60 })
+    store.connectMediaNode(item.key, props.id)
+  }
+  libraryOpen.value = false
+  notice.info(tr('视频已连接，请在提示词中通过 @ 选择引用'))
+}
+
 async function generate() {
   if (!canGenerate.value || config.value.modelType === null) return
   await save()
@@ -336,6 +357,7 @@ watch([selectedModel, generationMode], ([model]) => {
 
 <template>
   <div class="workbench-node-component">
+    <ResourceLibraryPicker v-if="libraryOpen" :open="libraryOpen" :model-config-id="selectedModel?.config_id" :max-selection="selectedModel?.capabilities.max_reference_videos || 0" @close="libraryOpen = false" @choose="addLibraryReferences" />
     <WorkbenchNodeFrame
       v-bind="props"
       :data="{
@@ -349,6 +371,7 @@ watch([selectedModel, generationMode], ([model]) => {
         borderless_media: true,
       }"
     >
+      <template #toolbar-actions><AppButton size="sm" :disabled="busy || config.useLastFrame || !selectedModel?.capabilities.max_reference_videos" @click.stop="libraryOpen = true">{{ tr('资源库') }}</AppButton></template>
       <template #meta>
         <span class="workbench-node-frame__media-size">{{ mediaSizeLabel }}</span>
         <span class="workbench-shot-media__asset-summary" :aria-label="tr('资产输入 {p0} 个，{p1}', { p0: referenceEdges.length, p1: assetInputSummary })">

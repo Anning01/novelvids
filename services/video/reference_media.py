@@ -50,7 +50,9 @@ def select_referenced_media(prompt: str, references: Sequence[ReferenceT]) -> li
             continue
         identity = (kind, url)
         mention_url = _reference_mention_url(reference)
-        if identity in seen or reference_mention_syntax(kind, mention_url) not in prompt:
+        canvas_name = getattr(reference, "mention_name", None) if getattr(reference, "library_resource_id", None) else None
+        has_canvas_mention = bool(canvas_name and f"@{{{canvas_name}}}" in prompt)
+        if identity in seen or (reference_mention_syntax(kind, mention_url) not in prompt and not has_canvas_mention):
             continue
         seen.add(identity)
         selected.append(reference)
@@ -67,6 +69,9 @@ def render_reference_mentions(prompt: str, references: Sequence[Any]) -> str:
             continue
         default_name = f"参考{'图片' if kind == 'image' else '视频'} {index}"
         name = str(getattr(reference, "name", "") or default_name)
+        canvas_name = getattr(reference, "mention_name", None) if getattr(reference, "library_resource_id", None) else None
+        if canvas_name:
+            rendered = rendered.replace(f"@{{{canvas_name}}}", f"【参考视频：{name}】")
         rendered = rendered.replace(
             reference_mention_syntax(kind, _reference_mention_url(reference)),
             f"【参考{'图片' if kind == 'image' else '视频'}：{name}】",

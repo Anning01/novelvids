@@ -14,7 +14,10 @@ from api.workbench import router as workbench_router
 from api.remake import router as remake_router
 from api.creation_agent import router as creation_agent_router
 
+from api.resource_library import router as resource_library_router
+
 api_router = APIRouter()
+api_router.include_router(resource_library_router, prefix="/resource-library", tags=["团队视频资源库"])
 
 
 api_router.include_router(novel_router, prefix="/novel", tags=["小说/剧本管理"])

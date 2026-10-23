@@ -1,9 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { libraryApi } from '@/features/resource-library/api'
 import { api } from '@/api'
 import { AssetTypeEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
+vi.mock('@/features/resource-library/api', () => ({ libraryApi: { upload: vi.fn() } }))
 vi.mock('@/api', () => ({
   api: { createAsset: vi.fn(), updateAsset: vi.fn(), upload: vi.fn() },
   sleep: vi.fn(),
@@ -124,7 +126,7 @@ it('uploads an image before creating a persistent media node', async () => {
 
 it('does not leave a media node when upload rejects', async () => {
   const file = new File(['video'], 'clip.mp4', { type: 'video/mp4' })
-  uploadMock.mockRejectedValueOnce(new Error('network'))
+  vi.mocked(libraryApi.upload).mockRejectedValueOnce(new Error('network'))
 
   await expect(store.uploadMedia('video_media', file, { x: 20, y: 30 })).rejects.toThrow('network')
 

@@ -495,7 +495,74 @@ function handleEditorPointerdown(event: PointerEvent) {
   event.preventDefault()
 }
 
+function deleteMentionAtSelection(backward: boolean) {
+  const root = editor.value
+  const selection = window.getSelection()
+  if (!root || !selection?.rangeCount) return false
+  const range = selection.getRangeAt(0).cloneRange()
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return false
+  if (!range.collapsed) {
+    const mentions = [...root.querySelectorAll<HTMLElement>('[data-mention-id]')]
+      .filter(mention => range.intersectsNode(mention))
+    if (!mentions.length) return false
+    for (const mention of mentions) {
+      if (mention.contains(range.startContainer)) range.setStartBefore(mention)
+      if (mention.contains(range.endContainer)) range.setEndAfter(mention)
+    }
+  } else {
+    const container = range.startContainer
+    const element = container instanceof Element ? container : container.parentElement
+    let mention = element?.closest<HTMLElement>('[data-mention-id]') || null
+    if (!mention) {
+      let node: Node | null = container
+      const offset = range.startOffset
+      if (container instanceof Text) {
+        if (backward ? offset !== 0 : offset !== container.length) return false
+      } else {
+        const child = container.childNodes[backward ? offset - 1 : offset]
+        if (child) node = child
+      }
+      if (node === container) {
+        while (node && node !== root && !(backward ? node.previousSibling : node.nextSibling)) node = node.parentNode
+        node = node && node !== root ? (backward ? node.previousSibling : node.nextSibling) : null
+      }
+      while (node) {
+        if (node instanceof HTMLElement && node.dataset.mentionId) { mention = node; break }
+        if (node instanceof Text) {
+          if (node.data.replace(/\u200b/g, '')) return false
+          node = backward ? node.previousSibling : node.nextSibling
+        } else {
+          node = backward ? node.lastChild : node.firstChild
+        }
+      }
+    }
+    if (!mention || !root.contains(mention)) return false
+    range.selectNode(mention)
+  }
+  range.deleteContents()
+  range.collapse(true)
+  root.focus()
+  selection.removeAllRanges()
+  selection.addRange(range)
+  menuOpen.value = false
+  closeHoverPreview()
+  handleInput()
+  return true
+}
+
+function handleBeforeInput(event: InputEvent) {
+  if (event.isComposing) return
+  if (event.inputType === 'deleteContentBackward' || event.inputType === 'deleteContentForward') {
+    if (deleteMentionAtSelection(event.inputType === 'deleteContentBackward')) event.preventDefault()
+  }
+}
+
 function handleEditorKeydown(event: KeyboardEvent) {
+  if (!event.isComposing && (event.key === 'Backspace' || event.key === 'Delete')
+    && deleteMentionAtSelection(event.key === 'Backspace')) {
+    event.preventDefault()
+    return
+  }
   const target = event.target
   if (target instanceof Element) {
     const mention = target.closest<HTMLElement>('[data-mention-id]')
@@ -605,6 +672,7 @@ onBeforeUnmount(() => {
       :aria-label="tr('分镜视频提示词，输入艾特符号可添加引用')"
       :data-placeholder="placeholder"
       spellcheck="true"
+      @beforeinput="handleBeforeInput"
       @input="handleInput"
       @scroll.passive="closeHoverPreview"
       @pointerdown="handleEditorPointerdown"

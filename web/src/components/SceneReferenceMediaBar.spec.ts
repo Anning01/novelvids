@@ -1,8 +1,11 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { libraryApi } from '@/features/resource-library/api'
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
 import AppButton from './AppButton.vue'
 import SceneReferenceMediaBar from './SceneReferenceMediaBar.vue'
 import type { VideoGenerationModel } from '@/types'
+
+vi.mock('@/features/resource-library/api', () => ({ libraryApi: { get: vi.fn() } }))
 
 const model: VideoGenerationModel = {
   config_id: 7,
@@ -116,4 +119,17 @@ describe('SceneReferenceMediaBar', () => {
     expect(wrapper.get('[data-reference-media-index="1"]').classes()).toContain('is-reference-highlighted')
     expect(wrapper.get('[data-reference-media-index="0"]').classes()).not.toContain('is-reference-highlighted')
   })
+})
+
+
+it('shows a removable invalid state for a deleted library video', async () => {
+  vi.mocked(libraryApi.get).mockRejectedValueOnce(new Error('deleted'))
+  const wrapper = mount(SceneReferenceMediaBar, { props: {
+    model, assetImageCount: 0, media: [{ type: 'video', url: '/media/deleted.mp4', library_resource_id: 8, name: 'Deleted motion' }],
+  } })
+  await flushPromises()
+  expect(wrapper.get('[role="alert"]').text()).toContain('已失效')
+  expect(wrapper.find('video').exists()).toBe(false)
+  await wrapper.get('[aria-label="移除 Deleted motion"]').trigger('click')
+  expect(wrapper.emitted('remove')).toEqual([[0]])
 })

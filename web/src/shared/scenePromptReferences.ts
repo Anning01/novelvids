@@ -104,3 +104,27 @@ export function buildVideoInputImageReferences(
 
   return references
 }
+
+export function readVideoReferenceMedia(value: unknown): VideoReferenceMedia[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object') return []
+    const media = item as Record<string, unknown>
+    if ((media.type !== 'image' && media.type !== 'video') || typeof media.url !== 'string' || !media.url) return []
+    return [{
+      library_resource_id: typeof media.library_resource_id === 'number' && Number.isInteger(media.library_resource_id) && media.library_resource_id > 0 ? media.library_resource_id : undefined,
+      mention_name: typeof media.mention_name === 'string' ? media.mention_name : undefined,
+      type: media.type,
+      url: media.url,
+      mention_url: typeof media.mention_url === 'string' ? media.mention_url : undefined,
+      name: typeof media.name === 'string' ? media.name : undefined,
+      content_type: typeof media.content_type === 'string' ? media.content_type : undefined,
+      size_bytes: typeof media.size_bytes === 'number' ? media.size_bytes : undefined,
+      width: typeof media.width === 'number' ? media.width : undefined,
+      height: typeof media.height === 'number' ? media.height : undefined,
+      duration: typeof media.duration === 'number' ? media.duration : undefined,
+      fps: typeof media.fps === 'number' ? media.fps : undefined,
+      codec: typeof media.codec === 'string' ? media.codec : undefined,
+    } satisfies VideoReferenceMedia]
+  })
+}

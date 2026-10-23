@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   loop?: boolean
   autoplayOnActivate?: boolean
   aspectRatio?: string
+  suspended?: boolean
 }>(), {
   src: '',
   poster: '',
@@ -23,6 +24,7 @@ const props = withDefaults(defineProps<{
   loop: false,
   autoplayOnActivate: true,
   aspectRatio: '',
+  suspended: false,
 })
 const emit = defineEmits<{ activate: [] }>()
 const activated = ref(false)
@@ -33,10 +35,12 @@ async function activate() {
   activated.value = true
   emit('activate')
   await nextTick()
-  if (props.autoplayOnActivate) {
+  if (props.autoplayOnActivate && !props.suspended) {
     await video.value?.play().catch(() => undefined)
   }
 }
+
+watch(() => props.suspended, suspended => { if (suspended) video.value?.pause() })
 
 watch(() => props.src, () => {
   activated.value = false

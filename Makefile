@@ -45,6 +45,8 @@ PORT ?= 8000
 
 dev:
 	@echo "启动开发服务器..."
+	@echo "前端页面：http://localhost:3000（需另开终端运行 cd web && npm run dev；实际端口以 Vite 输出为准）"
+	@echo "后端接口：http://localhost:$(PORT)"
 	uv run uvicorn main:app --host $(HOST) --port $(PORT) --reload
 
 start:

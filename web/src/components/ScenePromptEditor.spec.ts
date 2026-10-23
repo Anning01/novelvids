@@ -327,3 +327,60 @@ describe('ScenePromptEditor', () => {
     expect(wrapper.find('[data-mention-kind="duration"]').text()).toBe('8s')
   })
 })
+
+const videoOption: ScenePromptMentionOption = {
+  id: 'uploaded-video', kind: 'video', label: '动作参考', syntax: '@{参考视频:motion.mp4}', group: '参考视频', previewUrl: '/media/motion.mp4',
+}
+function mountVideoPrompt() {
+  return mount(ScenePromptEditor, {
+    attachTo: document.body, props: { modelValue: `之前${videoOption.syntax}之后`, options: [videoOption] },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+}
+function placeCaret(node: Node, offset: number) {
+  const range = document.createRange(); range.setStart(node, offset); range.collapse(true)
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+}
+
+it.each(['Backspace', 'Delete'])('removes the whole video token with %s at its boundary', async key => {
+  const wrapper = mountVideoPrompt()
+  const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
+  const mention = wrapper.get<HTMLElement>('[data-mention-id="uploaded-video"]')
+  const index = Array.from(editor.element.childNodes).indexOf(mention.element)
+  placeCaret(editor.element, key === 'Backspace' ? index + 1 : index)
+  await editor.trigger('keydown', { key })
+  expect(wrapper.find('[data-mention-id="uploaded-video"]').exists()).toBe(false)
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['之前之后'])
+})
+
+it('deletes the token when the caret is at the start of the following text', async () => {
+  const wrapper = mountVideoPrompt()
+  const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
+  placeCaret(editor.element.lastChild!, 0)
+  await editor.trigger('keydown', { key: 'Backspace' })
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['之前之后'])
+})
+
+it('supports native beforeinput deletion without swallowing ordinary text deletion', async () => {
+  const wrapper = mountVideoPrompt()
+  const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
+  placeCaret(editor.element.firstChild!, 1)
+  const ordinary = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' })
+  editor.element.dispatchEvent(ordinary)
+  expect(ordinary.defaultPrevented).toBe(false)
+  placeCaret(editor.element.lastChild!, 0)
+  const deletion = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' })
+  editor.element.dispatchEvent(deletion)
+  expect(deletion.defaultPrevented).toBe(true)
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['之前之后'])
+})
+
+it('removes a selection spanning text and the reference chip as a whole', async () => {
+  const wrapper = mountVideoPrompt()
+  const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
+  const range = document.createRange()
+  range.setStart(editor.element.firstChild!, 1); range.setEnd(editor.element.lastChild!, 1)
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  await editor.trigger('keydown', { key: 'Backspace' })
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['之后'])
+})

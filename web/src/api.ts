@@ -77,7 +77,7 @@ function qs(params: Record<string, unknown>) {
   return value ? `?${value}` : ''
 }
 
-function uploadWithProgress(
+export function uploadWithProgress(
   url: string,
   body: FormData,
   headers: Record<string, string>,
@@ -92,6 +92,7 @@ function uploadWithProgress(
         onProgress?.(Math.round((event.loaded / event.total) * 100))
       }
     }
+    xhr.upload.onload = () => onProgress?.(100)
     xhr.onerror = () => reject(new Error(tr('视频上传失败，请检查网络后重试')))
     xhr.onabort = () => reject(new Error(tr('视频上传已取消')))
     xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText })

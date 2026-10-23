@@ -33,6 +33,7 @@ import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
+import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import SceneReferenceMediaBar from '@/components/SceneReferenceMediaBar.vue'
 import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
 import ShortDramaBatchVideoDialog, { type BatchVideoGenerationRequest, type BatchVideoSceneOption } from '@/components/ShortDramaBatchVideoDialog.vue'
@@ -55,7 +56,7 @@ import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { chapterHasCompletedVideo } from '@/shared/chapterVideoTimeline'
 import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
 import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
-import { buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
+import { readVideoReferenceMedia as readReferenceMedia, buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
@@ -393,27 +394,6 @@ function makeSceneDraft(scene: Scene): SceneDraft {
   }
 }
 
-function readReferenceMedia(value: unknown): VideoReferenceMedia[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap(item => {
-    if (!item || typeof item !== 'object') return []
-    const media = item as Record<string, unknown>
-    if ((media.type !== 'image' && media.type !== 'video') || typeof media.url !== 'string' || !media.url) return []
-    return [{
-      type: media.type,
-      url: media.url,
-      mention_url: typeof media.mention_url === 'string' ? media.mention_url : undefined,
-      name: typeof media.name === 'string' ? media.name : undefined,
-      content_type: typeof media.content_type === 'string' ? media.content_type : undefined,
-      size_bytes: typeof media.size_bytes === 'number' ? media.size_bytes : undefined,
-      width: typeof media.width === 'number' ? media.width : undefined,
-      height: typeof media.height === 'number' ? media.height : undefined,
-      duration: typeof media.duration === 'number' ? media.duration : undefined,
-      fps: typeof media.fps === 'number' ? media.fps : undefined,
-      codec: typeof media.codec === 'string' ? media.codec : undefined,
-    } satisfies VideoReferenceMedia]
-  })
-}
 
 function readSelectedVariantIds(value: unknown): Record<number, number | null> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -1150,6 +1130,21 @@ async function uploadReferenceMedia(scene: Scene, files: File[]) {
   } finally {
     setSceneBusy(uploadingReferenceSceneIds, scene.id, false)
   }
+}
+
+async function addLibraryReferences(scene: Scene, references: VideoReferenceMedia[]) {
+  const model = selectedVideoModelConfig.value
+  if (!model) return
+  const draft = draftFor(scene)
+  const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
+  const combined = [...draft.referenceMedia, ...additions]
+  const videos = combined.filter(item => item.type === 'video')
+  if (videos.length > model.capabilities.max_reference_videos || videos.reduce((total, item) => total + (item.duration || 0), 0) > model.capabilities.reference_video_total_duration_max + 0.001) {
+    notice.error(tr('参考视频数量或总时长超过当前模型限制'))
+    return
+  }
+  draft.referenceMedia = combined
+  await saveScene(scene, false)
 }
 
 async function removeReferenceMedia(scene: Scene, index: number) {
@@ -2190,6 +2185,7 @@ onBeforeUnmount(() => {
                   <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="draftFor(scene).lastFrameUrl" :alt="tr('尾帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传尾帧') }}</strong><small>{{ tr('视频结束画面') }}</small></span><i>{{ tr('尾帧') }}</i></label>
                 </div>
                 <SceneReferenceMediaBar
+                  :scene-id="scene.id"
                   :model="selectedVideoModelConfig"
                   :media="draftFor(scene).referenceMedia"
                   :asset-image-count="selectedAssetReferenceImageCount(scene)"
@@ -2197,6 +2193,7 @@ onBeforeUnmount(() => {
                   :disabled="draftFor(scene).videoGenerationMode === 'keyframes'"
                   :uploading="uploadingReferenceSceneIds.has(scene.id)"
                   @upload="uploadReferenceMedia(scene, $event)"
+                  @choose-library="addLibraryReferences(scene, $event)"
                   @remove="removeReferenceMedia(scene, $event)"
                 />
                 <ScenePromptEditor
@@ -2226,7 +2223,7 @@ onBeforeUnmount(() => {
               </section>
 
               <aside class="preview-panel">
-                <header><strong>{{ tr('视频预览') }}</strong><RefreshCw :size="15" /></header>
+                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><RefreshCw :size="15" /></header>
                 <div class="preview-stage">
                   <VideoGenerationErrorState
                     v-if="sceneVideoError(scene)"

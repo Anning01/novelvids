@@ -27,5 +27,16 @@
   "voice_line": "{names}: use {marker} as the voice reference.",
   "voice_rule": "Speak the scripted dialogue and narration in English. Keep each speaker's voice consistent with their reference; synchronize visible speech with mouth movement. Do not read these instructions aloud.",
   "chapter_heading": "Chapter {number}",
-  "reference_output_guard": "Do not output any text, labels, logos, or watermarks."
+  "reference_output_guard": "Do not output any text, labels, logos, or watermarks.",
+  "strategy_cinematic_name": "Cinematic narrative",
+  "strategy_cinematic_description": "Use continuous action, varied shot sizes and emotional turns to advance the story through cinematic visuals and character performances.",
+  "strategy_narration_name": "Narrated story",
+  "strategy_narration_description": "Use a consistent narrator for background and turns, with inner monologues only outside character dialogue. Keep dialogue faithful to the story and use no background music.",
+  "strategy_cinematic_aliases": [
+    "cinematic narrative",
+    "default"
+  ],
+  "strategy_narration_aliases": [
+    "narration mode"
+  ]
 }

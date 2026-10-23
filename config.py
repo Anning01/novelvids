@@ -91,6 +91,8 @@ class Settings:
         "MODEL_CONFIG_SEED_ENABLED", True
     )
 
+    RESOURCE_LIBRARY_MAX_SIZE_MB = max(1, int(os.getenv("RESOURCE_LIBRARY_MAX_SIZE_MB", "200")))
+
     # 媒体文件目录
     MEDIA_PATH = os.getenv("MEDIA_PATH", "./media")
 

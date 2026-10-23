@@ -67,6 +67,13 @@ CAPABILITIES: dict[ImageModelTypeEnum, ImageModelCapabilities] = {
         generation_counts=(1,),
         default_clarity="1.5K",
     ),
+    ImageModelTypeEnum.seedream_5_flash: ImageModelCapabilities(
+        clarities=("1K", "1.5K", "2K"),
+        aspect_ratios=COMMON_SEEDREAM_RATIOS,
+        output_formats=("png", "jpeg"),
+        generation_counts=(1,),
+        default_clarity="2K",
+    ),
     ImageModelTypeEnum.seedream_5_lite: ImageModelCapabilities(
         clarities=("2K", "3K", "4K"),
         aspect_ratios=COMMON_SEEDREAM_RATIOS,
@@ -89,6 +96,7 @@ PROTOCOLS: dict[ImageModelTypeEnum, tuple[ImageApiProtocol, ...]] = {
         ImageApiProtocol.volcengine_ark,
         ImageApiProtocol.openrouter_compatible,
     ),
+    ImageModelTypeEnum.seedream_5_flash: (ImageApiProtocol.volcengine_ark,),
     ImageModelTypeEnum.seedream_5_lite: (
         ImageApiProtocol.volcengine_ark,
         ImageApiProtocol.openrouter_compatible,
@@ -149,7 +157,11 @@ def validate_selection(
         provider_size = {"1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536"}[selected_ratio]
         provider_quality = selected_clarity
     else:
-        size_table = _SEEDREAM_PRO_SIZES if normalized == ImageModelTypeEnum.seedream_5_pro else _SEEDREAM_LITE_SIZES
+        size_table = (
+            _SEEDREAM_PRO_SIZES
+            if normalized in {ImageModelTypeEnum.seedream_5_pro, ImageModelTypeEnum.seedream_5_flash}
+            else _SEEDREAM_LITE_SIZES
+        )
         provider_size = size_table[selected_clarity][COMMON_SEEDREAM_RATIOS.index(selected_ratio)]
         provider_quality = None
 
