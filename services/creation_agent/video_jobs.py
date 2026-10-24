@@ -90,7 +90,7 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
                     await AiTask.get(id=metadata["agent_run_id"]), params
                 )
                 return video
-            if metadata.get("submission_uncertain"):
+            if metadata.get("submission_uncertain") and not metadata.get("submission_outcome_known"):
                 raise HTTPException(
                     409, localized_message("已有视频提交结果待核对，请先核对供应商任务")
                 )

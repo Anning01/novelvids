@@ -249,8 +249,12 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             if record is None and request_params.get("workflow_version") == "agent-skills-v1":
                 raise RuntimeError("Media usage record could not be saved")
             if record is not None and request_params.get("workflow_version") == "agent-skills-v1" and task.stage in {"needs_review", "review_closed"}:
+                certainty = request_params.get("review_certainty")
                 known_count = res.get("image_count") or len(res.get("images") or []) or getattr(error, "image_count", 0)
-                if not known_count:
+                if certainty:
+                    record.usage = {**record.usage, **certainty}
+                    await record.save(update_fields=["usage"])
+                elif not known_count:
                     record.usage = {**record.usage, "missing_usage": True, "submission_uncertain": True}
                     await record.save(update_fields=["usage"])
 

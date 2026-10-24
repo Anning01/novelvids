@@ -35,6 +35,10 @@ async def settle_video(video):
         )
         if usage is None:
             raise RuntimeError("Video usage record could not be saved")
+        certainty = metadata.get("review_resolution", {}).get("certainty")
+        if certainty:
+            usage.usage = {**usage.usage, **certainty}
+            await usage.save(update_fields=["usage"])
         await video_controller._consume_balance(
             usage, metadata.get("team_id"), user_id=metadata.get("user_id")
         )
