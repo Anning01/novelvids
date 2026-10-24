@@ -232,7 +232,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             return
         if task_type == AiTaskTypeEnum.reference_image.value:
             res = result or {}
-            record = await billing_recorder.record_image(
+            arguments = dict(
                 novel_id=novel_id,
                 task_type=task_type,
                 model_config_id=request_params.get("model_config_id"),
@@ -246,36 +246,26 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 team_id=team_id,
                 user_id=user_id,
             )
-            if record is None and request_params.get("workflow_version") == "agent-skills-v1":
-                raise RuntimeError("Media usage record could not be saved")
-            if record is not None and request_params.get("workflow_version") == "agent-skills-v1" and task.stage in {"needs_review", "review_closed"}:
-                certainty = request_params.get("review_certainty")
-                known_count = res.get("image_count") or len(res.get("images") or []) or getattr(error, "image_count", 0)
-                if certainty:
-                    record.usage = {**record.usage, **certainty}
-                    await record.save(update_fields=["usage"])
-                elif not known_count:
-                    record.usage = {**record.usage, "missing_usage": True, "submission_uncertain": True}
-                    await record.save(update_fields=["usage"])
-
+            if request_params.get("workflow_version") == "agent-skills-v1":
+                from services.creation_agent.image_settlement import settle_image
+                from services.creation_agent.review_evidence import image_evidence
+                await settle_image(task, arguments, image_evidence(res, error))
+                return
+            record = await billing_recorder.record_image(**arguments)
             await _consume_team_balance(record, team_id, user_id=user_id)
             return
         from services.creation_agent.skill_execution import WORKFLOW_VERSION
         if request_params.get('workflow_version') == WORKFLOW_VERSION and task_type != AiTaskTypeEnum.reference_image.value:
             if task_type == AiTaskTypeEnum.project_analysis.value and (result or {}).get('image_usage'):
-                from tortoise.transactions import in_transaction
-                from models.ai_task import AiTask
-                async with in_transaction() as connection:
-                    await AiTask.filter(id=task.id).using_db(connection).select_for_update().get()
-                    if not await ModelUsageRecord.filter(ai_task_id=task.id, billing_type='image').using_db(connection).exists():
-                        usage = result['image_usage']
-                        record = await billing_recorder.record_image(novel_id=novel_id, task_type=task_type,
-                            model_config_id=result['image_config_id'], fallback_model=result.get('image_model'),
-                            image_count=usage.get('image_count',0), clarity=usage.get('clarity'), status=status,
-                            ai_task_id=task.id, team_id=team_id, user_id=user_id)
-                        if record is None:
-                            raise RuntimeError("Cover usage record could not be saved")
-                        await _consume_team_balance(record, team_id, user_id=user_id)
+                from services.creation_agent.image_settlement import settle_image
+                from services.creation_agent.review_evidence import image_evidence
+                res = result or {}
+                usage = res['image_usage']
+                proof = {**usage, **({'images': [res['cover']]} if res.get('cover') else {})}
+                await settle_image(task, dict(novel_id=novel_id, task_type=task_type,
+                    model_config_id=res['image_config_id'], fallback_model=res.get('image_model'),
+                    image_count=usage.get('image_count', 0), clarity=usage.get('clarity'), status=status,
+                    ai_task_id=task.id, team_id=team_id, user_id=user_id), image_evidence(proof))
             return
         if task_type == AiTaskTypeEnum.project_analysis.value:
             res = result or {}

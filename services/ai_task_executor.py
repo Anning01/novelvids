@@ -274,17 +274,14 @@ class AiTaskExecutor:
             await AiTask.filter(id=task.id).update(response_data=result)
         versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
         try:
-            if versioned and task.task_type == AiTaskTypeEnum.reference_image.value:
-                from services.creation_agent.operation_receipts import record_once
-                await record_once(task.id, 'billing:media', lambda: record_ai_task_usage(task, result=result, error=None))
-            else:
-                await record_ai_task_usage(task, result=result, error=None)
+            await record_ai_task_usage(task, result=result, error=None)
         except Exception as error:
             if not versioned:
                 raise
             await self._defer_billing(task, result)
             logger.warning("Task usage settlement deferred: task_id=%s error_type=%s", task.id, type(error).__name__)
         else:
+            await task.refresh_from_db()
             if versioned:
                 terminal_stage = {3: 'completed', 4: 'failed', 5: 'cancelled'}.get(task.status, task.stage)
                 await AiTask.filter(id=task.id, stage='billing_pending').update(stage=terminal_stage)
@@ -353,17 +350,14 @@ class AiTaskExecutor:
             await task.refresh_from_db()
             versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
             try:
-                if versioned and task.task_type == AiTaskTypeEnum.reference_image.value:
-                    from services.creation_agent.operation_receipts import record_once
-                    await record_once(task.id, 'billing:media', lambda: record_ai_task_usage(task, result=None, error=error))
-                else:
-                    await record_ai_task_usage(task, result=partial_result, error=error)
+                await record_ai_task_usage(task, result=partial_result, error=error)
             except Exception:
                 if not versioned:
                     raise
                 await self._defer_billing(task, {**(task.response_data or {}), 'image_count': getattr(error, 'image_count', 0)})
 
     async def _defer_billing(self, task, result):
+        await task.refresh_from_db()
         await AiTask.filter(id=task.id).update(
             stage=task.stage if task.stage == 'needs_review' else 'billing_pending',
             response_data=result,

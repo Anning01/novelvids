@@ -74,6 +74,8 @@ class ProductionRecovery:
                 )
 
                 await retry_video_settlements()
+                from services.creation_agent.review_evidence import retry_review_evidence
+                await retry_review_evidence()
 
                 for pending in await AiTask.filter(
                     stage__in=["billing_pending", "needs_review", "review_closed"]

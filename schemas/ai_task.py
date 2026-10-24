@@ -43,5 +43,8 @@ class AiTaskOut(BaseResponse):
 
 class TaskReviewResolution(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    outcome: Literal["not_submitted", "provider_failed", "completed_unrecoverable"]
+    outcome: Literal[
+        "not_submitted", "provider_failed", "completed_unrecoverable", "completed"
+    ]
+    evidence_id: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
     note: str = Field(min_length=10, max_length=2000)

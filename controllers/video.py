@@ -729,7 +729,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             from services.creation_agent.video_settlement import settle_video
             video.metadata = {**(video.metadata or {}), "provider_accounting": {
                 "status": new_status,
-                "seconds": (result_metadata.get("duration") or metadata.get("duration")) if new_status == 3 else 0,
+                "usage_reported": result_metadata.get("duration") is not None,
+                "reported_seconds": result_metadata.get("duration"),
+                "seconds": (result_metadata["duration"] if result_metadata.get("duration") is not None else metadata.get("duration")) if new_status == 3 else 0,
             }, "billing_pending": True}
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
