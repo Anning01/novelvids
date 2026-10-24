@@ -42,7 +42,7 @@ def visual_contract(
     layout: str = CHARACTER_TURNAROUND,
     strategy: StoryboardStrategyPrompt | None = None,
 ) -> dict:
-    from prompts.catalog import template, text
+    from prompts.legacy.catalog import template, text
     from prompts.extraction import visual_rules, trait_labels
     from prompts.storyboard_strategies import localized_strategy
 

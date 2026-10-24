@@ -5,6 +5,7 @@ from __future__ import annotations
 from utils.messages import localized_message
 
 import asyncio
+import json
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
@@ -76,17 +77,17 @@ class RemakeDecompositionPipeline:
         )
 
         gateway = self.gateway_factory(model_config)
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
         await _report(progress, 20, "extracting_assets")
         raw_assets = await gateway.analyze_one(
             index=1,
             path=model_source_path,
-            prompt=render_remake_prompt("assets", task_language.get() or "zh"),
+            prompt="" if execution else render_remake_prompt("assets", task_language.get() or "zh"),
             schema_name="global_key_assets",
             response_schema=ASSET_SCHEMA,
             include_segment_metadata=False,
         )
-        from services.creation_agent.skill_execution import current_execution
-        execution = current_execution.get()
         if execution:
             assets = {group: [{**item, 'id': f"{kind}-{index:03d}"} for index,item in enumerate(raw_assets.get(group, []), 1)]
                 for group,kind in [('characters','character'),('scenes','scene'),('objects','object')]}
@@ -105,7 +106,11 @@ class RemakeDecompositionPipeline:
             *(asyncio.to_thread(self.probe_duration, path) for path in scene_paths)
         )
 
-        catalog_context = render_remake_catalog(compact_catalog(assets), task_language.get() or "zh")
+        catalog_context = (
+            json.dumps(assets, ensure_ascii=False)
+            if execution
+            else render_remake_catalog(compact_catalog(assets), task_language.get() or "zh")
+        )
         await _report(progress, 55, "generating_storyboards")
 
         async def report_scene_progress(completed: int, total: int) -> None:
@@ -118,7 +123,7 @@ class RemakeDecompositionPipeline:
 
         raw_prompts = await gateway.analyze_many(
             scene_paths,
-            prompt=render_remake_prompt("shots", task_language.get() or "zh"),
+            prompt="" if execution else render_remake_prompt("shots", task_language.get() or "zh"),
             schema_name="professional_video_prompt_material",
             response_schema=PROMPT_SCHEMA,
             context_builder=lambda _index: catalog_context,

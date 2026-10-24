@@ -27,8 +27,13 @@ from test.test_services.test_prompt_language import _shot
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
-    monkeypatch, language
+    monkeypatch, language, tmp_path
 ):
+    from prompts.legacy import catalog as legacy
+
+    legacy.template.cache_clear()
+    legacy.catalog.cache_clear()
+    monkeypatch.setattr(legacy, "_ROOT", tmp_path / "unavailable-legacy-templates")
     novel, first, _ = await enabled_project()
     second = await Chapter.create(
         novel=novel,
@@ -175,7 +180,7 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
         task = await AiTask.get(id=video.metadata["agent_run_id"])
         await ai_task_executor.run(task)
         await task.refresh_from_db()
-        assert task.stage == "waiting_media"
+        assert task.stage == "waiting_media", task.error_message
         submitted = provider.submit.call_args.kwargs
         assert submitted["prompt"].startswith(prompt)
         assert "voice_bindings" in submitted["prompt"]

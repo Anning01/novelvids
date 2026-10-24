@@ -1,6 +1,6 @@
 """Pure, locale-specific story analysis and cover renderers."""
 
-from prompts.catalog import template, text
+from prompts.legacy.catalog import template, text
 from prompts.extraction import visual_rules
 
 ANALYSIS_SYSTEM_PROMPT = template("analysis_system.md", "zh")

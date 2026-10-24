@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.messages import ModelResponse, TextPart
 
-from prompts.catalog import catalog, template
+from prompts.legacy.catalog import catalog, template
 from prompts.creation_agent import (
     render_creation_instructions,
     render_summary_instructions,
@@ -38,7 +38,7 @@ from services.creation_agent.runtime import creation_agent, CreationAgentDeps
 from utils.prompt_language import task_language
 
 HAN = re.compile(r"[\u3400-\u9fff]")
-ROOT = Path(__file__).parents[2] / "prompts" / "templates"
+ROOT = Path(__file__).parents[2] / "prompts" / "legacy" / "templates"
 
 
 def english_traits(group=False):

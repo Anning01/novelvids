@@ -400,7 +400,7 @@ Tune [`prompts/skills/`](prompts/skills/): `SKILL.md` is the entrypoint. Story a
 
 Free-text interpretation proposes operations; ambiguous requests require confirmation of their targets before generation. Database-unique receipts and persisted unresolved client IDs protect retries across reloads.
 
-Tasks snapshot skill content and language at submission. Edits affect new tasks only. Complete saved prompts remain authoritative; editing prompts alone does not authorize paid media generation. The former Chinese/English templates remain for historical compatibility. See the [workflow and maintenance guide](docs/agent-skills-workflow.en.md) for file roles, recovery, billing boundaries and regression commands.
+Tasks snapshot skill content and language at submission. Edits affect new tasks only. Complete saved prompts remain authoritative; editing prompts alone does not authorize paid media generation. Former Chinese/English templates are archived unchanged and frozen in [`prompts/legacy/`](prompts/legacy/README.md), solely for historical tasks and documents. `prompts/locales/` contains display and serialization labels only. Tune images, storyboards and shared styles exclusively in Skills; new tasks neither prepare old templates nor fall back to them after assistant failures. See the [workflow and maintenance guide](docs/agent-skills-workflow.en.md) for file roles, recovery, billing boundaries and regression commands.
 
 ## Project structure
 

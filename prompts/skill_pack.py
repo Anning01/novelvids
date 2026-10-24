@@ -38,11 +38,12 @@ class SkillSnapshot(BaseModel):
         return self.contents[name]
 
 
+def read_skill(name: str) -> str:
+    return (ROOT / FILES[name]).read_text(encoding="utf-8")
+
+
 def snapshot_skills() -> dict:
-    contents = {
-        name: (ROOT / filename).read_text(encoding="utf-8")
-        for name, filename in FILES.items()
-    }
+    contents = {name: read_skill(name) for name in FILES}
     revision = hashlib.sha256(
         json.dumps(contents, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()

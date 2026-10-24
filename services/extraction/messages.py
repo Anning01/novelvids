@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 
 from prompts.extraction import render_extraction_system
-from prompts.catalog import text
+from prompts.legacy.catalog import text
 from services.extraction.context import ExtractionContext
 
 

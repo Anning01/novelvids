@@ -24,7 +24,9 @@
 
 规则调整后只对新提交任务生效；每个任务保存完整技能快照及内容摘要版本，运行与恢复都读取该快照。新任务的模型字段和工具说明只维护一套，Agent 根据 language 输出。人物视觉说明不再强制14/15个自然语言栏目；结构化分镜仍校验时间、引用、字段类型和归属。
 
-`prompts/templates/zh/`、`en/` 保留为旧任务、旧渲染文档及历史编辑的兼容资源，不是新增技能规则的维护入口。已保存完整提示词默认原文提交；只有缺失或明确要求优化时才由助手写作。新图片与视频请求不追加隐藏风格/版式段落。媒体编号和供应商参数转换仍由程序负责。
+旧 `prompts/templates/zh/`、`en/` 已原样归档到 [`prompts/legacy/templates/`](../prompts/legacy/README.md)，仅供旧任务、旧渲染文档及历史编辑兼容，内容冻结，不再同步创作规则。活跃的中英文显示/序列化标签独立放在 `prompts/locales/`；它们不是创作模板。新流程直接使用 Skills 和事实数据，不会先组装旧模板再覆盖；风格选项也从 `prompts/skills/styles.json` 读取。生图或分镜质量不好时，只修改上方对应技能，不改归档目录。
+
+已保存完整提示词默认原文提交；只有缺失或明确要求优化时才由助手写作。新图片与视频请求不追加隐藏风格/版式段落。媒体编号和供应商参数转换仍由程序负责。归档仅改变资源读取路径，没有删除兼容逻辑或迁移历史数据；回滚代码即可恢复原路径。
 
 ## 执行与恢复
 
@@ -40,6 +42,7 @@
 
 ```sh
 uv run pytest test/test_services/test_skill_workflow.py -q
+uv run pytest test/test_services/test_skill_pack_boundaries.py test/test_services/test_agent_skills_flow.py -q
 uv run pytest
 cd web
 npm run test
@@ -65,6 +68,8 @@ npm run build
 ### 本次验收范围
 
 `test/test_services/test_agent_skills_flow.py` 使用固定两章、Alex Chen、Sam Lee 和旁白，分别验证中英文的分析、资产、生图、分镜、视频与合成接口；检查声音绑定和最终出站映射。模型和媒体提供方使用替身，不代表画质、口音或口型已实测。
+
+该流程测试会禁用旧模板目录，确保新入口不读取归档创作规则；`test_skill_pack_boundaries.py` 另行验证归档正文未变、当前风格清单来自 Skills，以及长书稿、重制、上下文压缩不再组装旧语言模板。
 
 本工作区缺少 `test/.test.env`，没有发起真实模型调用，也没有部署。后续真实验收需提供有效配置和明确预算，再按同一素材完成试听、画面与口型检查。
 

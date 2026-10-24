@@ -1,6 +1,6 @@
 """Prompt templates and pure renderers for storyboard generation."""
 
-from prompts.catalog import template, text
+from prompts.legacy.catalog import template, text
 
 import json
 import re

@@ -1,14 +1,14 @@
-"""视觉风格提示词注册表。
+"""风格选项读取单套 Skills；以下提示词渲染仅用于历史任务。
 
-每个风格提供两套提示词：
-- image_prompt：生图定调 —— 静态画面的材质、光影、色彩与细节要求；
-- video_prompt：生视频定调 —— 运动规律、镜头衔接、一致性与时间连续性要求。
+历史快照中的 image_prompt 和 video_prompt 分别保留原静态画面与动态镜头规则。
 
 本模块仅负责模板与纯渲染函数；业务上下文加载与调用由对应 Service 完成。
 """
 
 from dataclasses import dataclass
-from prompts.catalog import catalog, text
+import json
+from prompts.legacy.catalog import catalog, text
+from prompts.skill_pack import read_skill
 
 
 AUTO_STYLE_KEY = "auto"
@@ -28,7 +28,7 @@ STYLE_PROMPTS: dict[str, StylePromptSet] = {
     for key, value in catalog("styles.json", "zh").items()
 }
 
-STYLE_KEYS: tuple[str, ...] = tuple(STYLE_PROMPTS.keys())
+STYLE_KEYS: tuple[str, ...] = tuple(json.loads(read_skill("styles")))
 
 
 def get_style(key: str | None, language: str = "zh") -> StylePromptSet | None:
@@ -86,7 +86,8 @@ def video_project_style_suffix(
 def list_styles() -> list[dict]:
     """系统内置风格清单（后端唯一事实来源）。"""
     return [
-        {"key": style.key, "label": style.label} for style in STYLE_PROMPTS.values()
+        {"key": key, "label": style["label"]}
+        for key, style in json.loads(read_skill("styles")).items()
     ]
 
 

@@ -2,6 +2,7 @@
 from utils.messages import localized_message
 import asyncio
 import base64
+import json
 import logging
 import os
 from pathlib import Path
@@ -24,7 +25,7 @@ from prompts.extraction import (
     ensure_ordered_trait_labels,
 )
 from prompts.reference import render_default_asset_prompt
-from prompts.catalog import text as prompt_text
+from prompts.legacy.catalog import text as prompt_text
 from prompts.project_analysis import render_analysis_messages, render_cover_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
@@ -73,7 +74,9 @@ class BookAnalysis(BaseModel):
     key_characters: list[KeyCharacter] = Field(description="推动主线的关键人物，通常为 3 至 10 位")
 
 
-def _build_analysis_material(novel: Novel, chapters: list[Chapter], language: str = "zh") -> str:
+def _build_analysis_material(
+    novel: Novel, chapters: list[Chapter], language: str = "zh", *, facts_only: bool = False
+) -> str:
     """优先使用完整书稿；超长时按章节均匀取样，避免只分析故事开头。"""
     content = (novel.content or "").strip()
     if len(content) <= MAX_ANALYSIS_TEXT_LENGTH:
@@ -82,6 +85,8 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter], language: st
     if not chapters:
         head = content[: MAX_ANALYSIS_TEXT_LENGTH // 2]
         tail = content[-MAX_ANALYSIS_TEXT_LENGTH // 2 :]
+        if facts_only:
+            return json.dumps({"head": head, "tail": tail}, ensure_ascii=False)
         return prompt_text("analysis_head_tail", language, head=head, tail=tail)
 
     sample_count = min(len(chapters), 24)
@@ -106,10 +111,14 @@ def _build_analysis_material(novel: Novel, chapters: list[Chapter], language: st
             first = allowance * 2 // 3
             chapter_text = f"{chapter_text[:first]}\n……\n{chapter_text[-(allowance - first):]}"
         chapter_title = strip_chapter_ordinal(chapter.name)
-        heading = prompt_text("chapter_heading", language, number=chapter.number)
-        if chapter_title:
-            heading = f"{heading}：{chapter_title}"
-        block = f"【{heading}】\n{chapter_text}"
+        if facts_only:
+            block = json.dumps({"chapter_number": chapter.number, "title": chapter_title,
+                                "content": chapter_text}, ensure_ascii=False)
+        else:
+            heading = prompt_text("chapter_heading", language, number=chapter.number)
+            if chapter_title:
+                heading = f"{heading}：{chapter_title}"
+            block = f"【{heading}】\n{chapter_text}"
         blocks.append(block)
         used += len(block)
     return "\n\n".join(blocks)
@@ -246,7 +255,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         execution = current_execution.get()
         if execution:
             llm_config, _ = await require_agent(request_params.get('team_id'), request_params['assistant_model_config_id'])
-            material = _build_analysis_material(novel, chapters, prompt_language)
+            material = _build_analysis_material(novel, chapters, prompt_language, facts_only=True)
             analysis = await execution.generate('story', {'name': novel.name, 'manuscript': material,
                 'chapter_numbers': [c.number for c in chapters]}, BookAnalysis)
             token_usage = {}

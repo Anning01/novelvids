@@ -464,16 +464,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # Audio URLs are deduplicated by the shared content builder. Use the same
         # order here, including two asset records that resolve to the same URL.
         audio_urls = list(dict.fromkeys(item.url for item in voice_references))
-        voice_instruction = render_voice_reference_instruction([
+        voice_bindings = [
             {"index": audio_urls.index(item.url) + 1, "kind": item.kind, "subjects": list(item.subjects)}
             for item in voice_references
-        ], language=prompt_language) if selection.generate_audio else ""
+        ]
         if current_execution.get():
             from prompts.skill_pack import render_voice_bindings
-            voice_instruction = render_voice_bindings([
-                {"index": audio_urls.index(item.url) + 1, "kind": item.kind, "subjects": list(item.subjects)}
-                for item in voice_references
-            ])
+            voice_instruction = render_voice_bindings(voice_bindings)
+        else:
+            voice_instruction = render_voice_reference_instruction(
+                voice_bindings, language=prompt_language
+            ) if selection.generate_audio else ""
         if voice_instruction:
             provider_prompt += "\n\n" + voice_instruction
         video_metadata = {

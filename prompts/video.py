@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from prompts.catalog import text
+from prompts.legacy.catalog import text
 
 
 LAST_FRAME_CONTINUITY_TITLE = "【首帧衔接】"

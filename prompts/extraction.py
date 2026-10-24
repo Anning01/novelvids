@@ -1,6 +1,6 @@
 """人物、场景、道具统一文本资产提取 Prompt。"""
 
-from prompts.catalog import template, text, catalog
+from prompts.legacy.catalog import template, text, catalog
 
 import re
 

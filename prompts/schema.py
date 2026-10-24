@@ -1,7 +1,7 @@
 """Model-facing schema annotations; stored/API schema identities remain unchanged."""
 
 from copy import deepcopy
-from prompts.catalog import catalog, text
+from prompts.legacy.catalog import catalog, text
 import json
 
 ANNOTATION_KEYS = {

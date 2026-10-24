@@ -1,7 +1,7 @@
 """Pure renderers for default asset image prompts stored in the database."""
 
 from utils.prompt_language import normalize_prompt_language
-from prompts.catalog import template, text
+from prompts.legacy.catalog import template, text
 
 
 CHARACTER_TURNAROUND = "character_turnaround"

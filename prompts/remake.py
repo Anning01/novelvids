@@ -5,7 +5,7 @@
 """
 
 from typing import Any
-from prompts.catalog import template, text
+from prompts.legacy.catalog import template, text
 from prompts.schema import localized_schema
 
 

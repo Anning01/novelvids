@@ -5,7 +5,7 @@ storyboard service factory.
 """
 
 from dataclasses import dataclass, replace
-from prompts.catalog import catalog, template, text
+from prompts.legacy.catalog import catalog, template, text
 
 
 @dataclass(frozen=True, slots=True)

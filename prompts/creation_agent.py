@@ -1,6 +1,6 @@
 """Creation-agent fixed instructions and side-effect-free prompt fragments."""
 
-from prompts.catalog import template, text
+from prompts.legacy.catalog import template, text
 
 from collections.abc import Sequence
 import json
@@ -38,10 +38,15 @@ def render_creation_summary(previous: str, messages: list[dict]) -> str:
     )
 
 
-def render_working_checkpoint(evidence: dict, language: str = "zh") -> str:
+def render_working_checkpoint(
+    evidence: dict, language: str = "zh", *, facts_only: bool = False
+) -> str:
     """Historical evidence stays user/tool data, never new system authority."""
     return json.dumps(
-        {"working_checkpoint": evidence, "notice": text("checkpoint_notice", language)},
+        {
+            "working_checkpoint": evidence,
+            **({} if facts_only else {"notice": text("checkpoint_notice", language)}),
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )
