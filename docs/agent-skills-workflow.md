@@ -109,6 +109,7 @@ HTTP 生成请求在 `agent_submissions` 中以操作者、团队、请求 ID �
 - `not_submitted` 后收到正数用量、已完成结果或供应商任务号，或 `provider_failed` 后收到成功媒体结果，标记 `review_conflict=true` 并将任务置为 `needs_review`。原 `review:closure` 审计不变，供应商证据追加到独立的 `review:evidence:<摘要>` 回执。
 - 与原结论一致的迟到数量可补全 `usage_known` / `missing_usage`。视频配置时长不能作为供应商已报告用量；供应商报告的零值也不会被配置默认值替换。
 - 已入账的金额和数量保持原值，实际迟到数量保存在流水的 `reported_usage.quantity`。若两者不同，继续保留 `accounting_needs_review=true`，差额需另行人工对账，系统不会自动改价、补扣或新增流水。没有既有流水时，原授权任务的首次实际用量仍只结算一次。
+- 提交结论冲突与账务差异独立计算。例如双方均确认成功，但已入账 2 张、供应商实际报告 3 张时，`submission_outcome_known=true`，`accounting_needs_review=true`。`review_conflict` 仅汇总尚未人工复核的提交结论冲突或账务差异，不能据此判断提交结果是否未知；人工确认新证据后，它可变为 `false`，账务待核对标记仍保留。兼容字段 `submission_uncertain` 也包含账务待核对状态，提交判断应读取 `submission_outcome_known`。
 - 计费幂等与证据幂等分开：计费回执已完成也会检查新证据；相同证据重放、重启恢复或证据写入重试不再次收费、不再次生成。
 
 任务查询的 `request_params.review_evidence` 提供当前证据 `id`、事实与冲突原因。核对新证据后，向同一人工核对接口提交 `evidence_id`：

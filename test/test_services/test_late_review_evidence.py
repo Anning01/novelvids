@@ -123,6 +123,115 @@ async def test_consistent_late_image_usage_fills_certainty_and_is_charged_once(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["image", "video"])
+@pytest.mark.parametrize(
+    "outcome,reported,outcome_known,accounting_pending,reason",
+    [
+        (
+            "completed_unrecoverable", 3, True, True,
+            "reported_usage_differs_from_booked_usage",
+        ),
+        ("provider_failed", 2, False, False, "provider_result_contradicts_review"),
+    ],
+)
+async def test_submission_and_accounting_conflicts_remain_independent(
+    kind, outcome, reported, outcome_known, accounting_pending, reason, monkeypatch
+):
+    novel, chapter, model = await enabled_project()
+    task = await AiTask.create(
+        task_type=2 if kind == "image" else 4,
+        status=4,
+        stage="needs_review",
+        request_params={"novel_id": novel.id, "workflow_version": "agent-skills-v1"},
+    )
+    video = None
+    if kind == "video":
+        scene = await Scene.create(chapter=chapter, sequence=1, prompt="Saved")
+        video = await Video.create(
+            scene=scene,
+            model_type=1,
+            status=4,
+            metadata={
+                "agent_run_id": str(task.id),
+                "novel_id": novel.id,
+                "model_config_id": model.id,
+            },
+        )
+        task.request_params["video_id"] = video.id
+        await task.save()
+    field = "image_count" if kind == "image" else "seconds"
+    ledger = await ModelUsageRecord.create(
+        novel_id=novel.id,
+        task_type=task.task_type,
+        billing_type=kind,
+        ai_task_id=task.id,
+        video_id=video.id if video else None,
+        model="original",
+        cost=Decimal("7.5"),
+        status=4,
+        usage={field: 2, "usage_known": True, "missing_usage": False},
+    )
+    await AgentOperation.create(
+        task=task, key="media:" + kind, state="uncertain", external=True
+    )
+    await AgentOperation.create(
+        task=task,
+        key="billing:media" if kind == "image" else "billing:video",
+        state="completed",
+        result={"usage_record_id": ledger.id},
+    )
+    await close_uncertain_task(
+        task.id,
+        TaskReviewResolution(
+            outcome=outcome,
+            note="The operator verified the result before late usage arrived.",
+        ),
+    )
+    audit = deepcopy((await AgentOperation.get(task=task, key="review:closure")).result)
+    charge = AsyncMock()
+    monkeypatch.setattr("services.billing.recorder._consume_team_balance", charge)
+    monkeypatch.setattr("controllers.video.video_controller._consume_balance", charge)
+    if video:
+        await video.refresh_from_db()
+        video.status = 3
+        video.metadata = {
+            **video.metadata,
+            "provider_accounting": {
+                "status": 3, "seconds": reported, "usage_reported": True,
+            },
+        }
+        await video.save()
+
+    async def settle():
+        if video:
+            await settle_video(video)
+        else:
+            await record_ai_task_usage(task, {"image_count": reported})
+
+    await settle()
+    await settle()
+    await task.refresh_from_db()
+    await ledger.refresh_from_db()
+    assert task.stage == "needs_review"
+    assert task.request_params["review_evidence"]["reasons"] == [reason]
+    projections = [task.request_params["review_certainty"], ledger.usage]
+    if video:
+        await video.refresh_from_db()
+        projections.append(video.metadata)
+    for state in projections:
+        assert state["submission_outcome_known"] is outcome_known
+        assert state["accounting_needs_review"] is accounting_pending
+        assert state["usage_known"] is True and state["missing_usage"] is False
+        assert state["review_conflict"] is True
+    assert ledger.usage["reported_usage"]["quantity"] == reported
+    assert ledger.usage[field] == 2 and ledger.cost == Decimal("7.5")
+    assert await ModelUsageRecord.filter(ai_task_id=task.id).count() == 1
+    assert (await AgentOperation.get(task=task, key="review:closure")).result == audit
+    assert (await AgentOperation.get(task=task, key="media:" + kind)).state == "uncertain"
+    charge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "outcome", ["not_submitted", "provider_failed", "completed_unrecoverable"]
 )
@@ -268,6 +377,8 @@ async def test_evidence_recheck_appends_audit_and_never_erases_original_or_recha
     await ledger.refresh_from_db()
     assert task.stage == "review_closed"
     assert task.request_params["review_conflict"] is False
+    assert ledger.usage["review_conflict"] is False
+    assert ledger.usage["submission_outcome_known"] is True
     assert ledger.usage["usage_known"] is True
     assert ledger.usage["accounting_needs_review"] is True
     assert ledger.cost == cost

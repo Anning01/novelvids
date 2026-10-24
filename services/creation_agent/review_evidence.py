@@ -92,18 +92,26 @@ def outcome_conflicts(outcome, evidence):
     )
 
 
-def evidence_certainty(base, evidence, *, conflict=False, accounting_pending=False):
+def evidence_certainty(
+    base,
+    evidence,
+    *,
+    submission_conflict=False,
+    accounting_conflict=False,
+    accounting_pending=False,
+):
     state = dict(base)
     known = evidence.quantity is not None or (
-        bool(base.get("usage_known")) and not conflict
+        bool(base.get("usage_known")) and not submission_conflict
     )
     state.update(
         usage_known=known,
         missing_usage=not known,
-        submission_outcome_known=not conflict,
-        accounting_needs_review=conflict or accounting_pending,
-        submission_uncertain=conflict or accounting_pending or not known,
-        review_conflict=conflict,
+        submission_outcome_known=not submission_conflict,
+        accounting_needs_review=accounting_pending,
+        submission_uncertain=submission_conflict or accounting_pending or not known,
+        # Aggregate unacknowledged evidence, not submission outcome certainty.
+        review_conflict=submission_conflict or accounting_conflict,
     )
     if evidence.media_available is not None:
         state["media_result_recoverable"] = evidence.media_available
@@ -153,7 +161,8 @@ async def reconcile_evidence(task_id, record, evidence):
             else None
         )
         reasons = []
-        if outcome_conflicts(review.result["outcome"], evidence):
+        submission_conflict = outcome_conflicts(review.result["outcome"], evidence)
+        if submission_conflict:
             reasons.append("provider_result_contradicts_review")
         billed = (
             quantity(
@@ -170,14 +179,18 @@ async def reconcile_evidence(task_id, record, evidence):
             and billed is not None
             and billed != evidence.quantity
         )
-        if mismatch and acknowledged.get("quantity") != evidence.quantity:
+        accounting_conflict = (
+            mismatch and acknowledged.get("quantity") != evidence.quantity
+        )
+        if accounting_conflict:
             reasons.append("reported_usage_differs_from_booked_usage")
         certainty = evidence_certainty(
             task.request_params.get("review_certainty")
             or review.result.get("certainty")
             or {},
             evidence,
-            conflict=bool(reasons),
+            submission_conflict=submission_conflict,
+            accounting_conflict=accounting_conflict,
             accounting_pending=mismatch,
         )
         projection = {
@@ -190,7 +203,7 @@ async def reconcile_evidence(task_id, record, evidence):
             **task.request_params,
             "review_certainty": certainty,
             "review_evidence": projection,
-            "review_conflict": bool(reasons),
+            "review_conflict": certainty["review_conflict"],
         }
         if reasons:
             task.stage = "needs_review"
