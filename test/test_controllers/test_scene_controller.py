@@ -141,7 +141,7 @@ async def test_get_with_assets():
 # =====================================================================
 
 @pytest.mark.asyncio
-async def test_generate_submits_task():
+async def test_generate_submits_task(configured_creation_agent):
     """generate 方法成功提交分镜生成任务。"""
     _, chapter = await _create_chapter()
     await AiModelConfig.create(
@@ -167,7 +167,7 @@ async def test_generate_submits_task():
 
 
 @pytest.mark.asyncio
-async def test_generate_resolves_legacy_project_storyboard_strategy():
+async def test_generate_resolves_legacy_project_storyboard_strategy(configured_creation_agent):
     """旧项目策略名会转换成稳定 key 后进入任务参数。"""
     novel, chapter = await _create_chapter()
     novel.storyboard_strategy = "电影化叙事 1.5"
@@ -187,7 +187,7 @@ async def test_generate_resolves_legacy_project_storyboard_strategy():
 
 
 @pytest.mark.asyncio
-async def test_generate_duplicate_returns_existing_task():
+async def test_generate_duplicate_returns_existing_task(configured_creation_agent):
     """同一章节重复提交时返回已有任务（前端继续轮询，不再报错）。"""
     _, chapter = await _create_chapter()
     await AiModelConfig.create(
@@ -223,12 +223,12 @@ async def test_generate_no_config():
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
         await scene_controller.generate(chapter.id)
-    assert exc_info.value.status_code == 404
-    print(f"    无配置，返回 404: {exc_info.value.detail}")
+    assert exc_info.value.status_code == 409
+    print(f"    无配置，返回 409: {exc_info.value.detail}")
 
 
 @pytest.mark.asyncio
-async def test_generate_stale_task_cleaned():
+async def test_generate_stale_task_cleaned(configured_creation_agent):
     """超时任务被清理后可重新提交。"""
     from datetime import datetime, timezone, timedelta
 

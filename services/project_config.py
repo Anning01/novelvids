@@ -2,7 +2,7 @@
 from utils.messages import localized_message
 from fastapi import HTTPException
 
-from prompts.styles import AUTO_STYLE_KEY, get_style
+from prompts.styles import AUTO_STYLE_KEY, list_styles
 from services.video.capabilities import CAPABILITIES, COMMON_RATIOS
 
 
@@ -68,7 +68,7 @@ def validate_project_config(
     style_key = None if requested_style_key == AUTO_STYLE_KEY else requested_style_key
     if requested_style_key == AUTO_STYLE_KEY:
         normalized["style_key"] = None
-    if style_key and get_style(style_key) is None:
+    if style_key and style_key not in {style["key"] for style in list_styles()}:
         raise HTTPException(status_code=422, detail=localized_message('视觉风格不存在'))
     if blank_custom_style:
         raise HTTPException(status_code=422, detail=localized_message('自定义风格不能为空'))

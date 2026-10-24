@@ -326,3 +326,25 @@ it('opens restored history at the latest message', async () => {
   expect(scrollToBottom).toHaveBeenCalledWith(false)
   wrapper.unmount()
 })
+
+it('shows the exact proposed operations and sends the frozen grant only after confirmation', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  const send = vi.spyOn(store, 'send').mockResolvedValue(true)
+  const pending = { confirmation_request_id: 'confirmation-1', message: 'Confirm listed tasks',
+    labels: [{ operation: 'image', target_label: 'Alex Chen' }], intents: [{ operation: 'image' as const, target_id: 17, request_id: 'intent-1' }],
+    chapter_id: 3, targets: [{ kind: 'asset' as const, id: 17 }], write_scope: 'selected' as const, model_config_id: 1 }
+  store.messages = [{ id: 4, role: 'assistant', content: 'Please confirm', task_id: 'proposal-run', status: 3,
+    changes: [], usage: {}, created_at: '', pending_production: pending }]
+  await flushPromises()
+  expect(wrapper.text()).toContain('Alex Chen')
+  expect(wrapper.text()).toContain('确认后会调用模型并产生费用')
+  expect(send).not.toHaveBeenCalled()
+  const button = wrapper.findAll('button').find(item => item.text().includes('确认生成并计费'))!
+  await button.trigger('click')
+  expect(send).toHaveBeenCalledWith({ request_id: pending.confirmation_request_id, message: pending.message,
+    production_intents: pending.intents, chapter_id: 3, targets: pending.targets, write_scope: 'selected', model_config_id: 1 })
+  wrapper.unmount()
+})

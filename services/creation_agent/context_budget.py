@@ -6,11 +6,10 @@ from dataclasses import replace
 import json
 import math
 
-from pydantic_ai.messages import ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import BinaryContent, ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 
 from models.creation_agent import AgentContextCheckpoint
 from prompts.creation_agent import render_working_checkpoint
-from utils.prompt_language import task_language
 
 
 def encode(value) -> str:
@@ -32,6 +31,11 @@ def wire_size(messages, parameters) -> dict:
                 segments['objects'] += len(encode(part.content)) + len(part.tool_name) + 24
             elif isinstance(part, ToolCallPart):
                 segments['history'] += len(part.args_as_json_str()) + len(part.tool_name) + 24
+            elif isinstance(part, UserPromptPart) and isinstance(part.content, list):
+                # Media byte limits are checked at upload/preparation. Base64 is
+                # not text context; actual media token usage comes from the model.
+                segments['history'] += sum(len(item.media_type) + 64 if isinstance(item, BinaryContent)
+                                           else len(str(item)) for item in part.content) + 16
             else:
                 segments['history'] += len(str(getattr(part, 'content', ''))) + 16
     return {**segments, 'total_characters': sum(segments.values())}
@@ -179,7 +183,7 @@ class ContextBudget:
             self.recovery['archive_refs'].append(archive_id)
         for key in ('requests', 'outcomes', 'archive_refs'):
             self.recovery[key] = self.recovery[key][-4:]
-        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery, task_language.get() or "zh"))
+        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery))
 
     def _with_recovery(self, messages):
         result = []

@@ -5,10 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from prompts.language import output_language_rule
+from prompts.skill_pack import render_skill
 from prompts.storyboard import (
-    STORYBOARD_LANGUAGE_INSTRUCTIONS,
-    STORYBOARD_SYSTEM_PROMPT,
     build_storyboard_messages,
     entity_reference_names,
     format_storyboard_prompt,
@@ -23,12 +21,12 @@ from services.storyboard.strategies import storyboard_strategy_factory
 
 
 def test_saved_creative_rules_are_scoped_facts_in_generation_messages():
-    rules = [{'content': '林夏保持灰色风衣', 'scope': {'kind': 'project', 'asset_id': 8}}]
-    messages = build_storyboard_messages('清晨，林夏走进咖啡馆。', [_entity()], creative_constraints=rules)
-    assert '林夏保持灰色风衣' not in messages[0]['content']
-    assert '林夏保持灰色风衣' in messages[-1]['content']
-    assert 'asset_id' in messages[-1]['content']
-    assert '作用范围' in messages[0]['content']
+    import json
+    rules = [{"content": "林夏保持灰色风衣", "scope": {"kind": "project", "asset_id": 8}}]
+    messages = build_storyboard_messages("清晨，林夏走进咖啡馆。", [_entity()], creative_constraints=rules)
+    assert "林夏保持灰色风衣" not in messages[0]["content"]
+    facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
+    assert facts["constraints"] == rules
 
 
 def _entity() -> SceneEntity:
@@ -66,31 +64,16 @@ def _shot(sequence: int, title: str = "夜访小楼") -> SoraScenePromptConfig:
 
 
 def test_storyboard_messages_render_language_entities_and_narrative():
+    import json
     narrative = "夜色里，小楼的窗户忽然亮起。"
     messages = build_storyboard_messages(narrative, [_entity()], "zh")
-
-    assert [message["role"] for message in messages] == [
-        "system",
-        "user",
-        "user",
-        "user",
-    ]
-    assert "使用简体中文" in messages[0]["content"]
-    assert "郊区小楼" not in messages[0]["content"]
-    assert '"canonical_name":"郊区小楼"' in messages[1]["content"]
-    assert '"aliases":["小楼","旧宅"]' in messages[1]["content"]
-    assert "@{郊区小楼}" in messages[1]["content"]
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert messages[0]["content"] == render_skill("storyboard", "zh")
+    facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
+    assert facts["assets"][0] == {"asset_type": "场景", "canonical_name": "郊区小楼",
+        "aliases": ["小楼", "旧宅"], "visual_description": "红砖外墙，窗框斑驳", "reference_syntax": "@{郊区小楼}"}
+    assert facts["manuscript"] == narrative
     assert narrative not in messages[0]["content"]
-    assert narrative in messages[2]["content"]
-    assert "分镜生成任务" in messages[3]["content"]
-    assert "保持动作、视线、轴线、人物位置和时空关系的连续性" in messages[0]["content"]
-    assert "后续视频生成会按镜头分别提交" in messages[0]["content"]
-    assert "每个时间段都必须重新写明动作主体" in messages[0]["content"]
-    assert messages[0]["content"] == STORYBOARD_SYSTEM_PROMPT.format(
-        language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS["zh"] + "\n" + output_language_rule("zh"),
-    )
-    assert "当前分镜策略" not in messages[0]["content"]
-    assert "无旁白" not in messages[0]["content"]
 
 
 def test_storyboard_strategy_factory_supports_legacy_name_and_safe_fallback():
@@ -100,14 +83,14 @@ def test_storyboard_strategy_factory_supports_legacy_name_and_safe_fallback():
 
 
 def test_narration_strategy_requires_non_overlapping_timed_voice_tracks():
+    import json
+    from prompts.skill_pack import read_skill
     strategy = storyboard_strategy_factory.resolve("narration")
     messages = build_storyboard_messages("章节正文", [_entity()], strategy=strategy)
-    system_prompt = messages[0]["content"]
-
-    assert "当前分镜策略：旁白叙事" in system_prompt
-    assert "禁止与 `dialogue` 的任何时间段重叠" in system_prompt
-    assert "同一时间只能有一个可辨识的人声主体" in system_prompt
-    assert "旁白不是每个镜头必需" in system_prompt
+    assert "旁白和内心独白不得与对白重叠" in messages[0]["content"]
+    assert json.loads(messages[1]["content"])["untrusted_task_facts"]["strategy"] == "narration"
+    resource = json.loads(read_skill("strategies"))["narration"]
+    assert "同一时间只能有一个可辨识的人声主体" in resource["rules"]
 
 
 @pytest.mark.asyncio
@@ -376,9 +359,9 @@ async def test_storyboard_generator_uses_fresh_continuation_calls():
     assert completion_call.await_count == 2
     first_messages = completion_call.await_args_list[0].kwargs["messages"]
     second_messages = completion_call.await_args_list[1].kwargs["messages"]
-    assert "分镜生成任务" in first_messages[-1]["content"]
-    assert "分镜续写任务" in second_messages[-1]["content"]
-    assert '"sequence":1' in second_messages[-1]["content"]
+    assert '"previous_shot": null' in first_messages[-1]["content"]
+    assert '"previous_shot": {' in second_messages[-1]["content"]
+    assert '"sequence": 1' in second_messages[-1]["content"]
     assert "第一句。" * 20 not in second_messages[0]["content"]
     assert metadata["batch_count"] == 2
 

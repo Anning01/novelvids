@@ -84,9 +84,10 @@ async def test_gateway_sends_compatible_json_mode_schema_instruction_and_video_d
     assert request["max_tokens"] == 4096
     assert request["response_format"] == {"type": "json_object"}
     content = request["messages"][0]["content"]
-    assert content[0]["text"].startswith("分析片段\n\n只允许引用资产")
-    assert "当前片段序号：2" in content[0]["text"]
-    assert '"type":"object"' in content[0]["text"]
+    import json
+    assert content[0]["text"].startswith("分析片段\n")
+    facts = json.loads(content[0]["text"].split("\n", 1)[1])["untrusted_task_facts"]
+    assert facts == {"assets": "只允许引用资产", "segment": 2, "schema": {"type": "object"}}
     assert content[1]["type"] == "video_url"
     assert content[1]["video_url"]["url"].startswith("data:video/quicktime;base64,")
     assert content[1]["video_url"]["fps"] == 1.0

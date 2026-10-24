@@ -32,6 +32,19 @@ async def ensure_creation_agent_schema() -> None:
             )
 
 
+async def ensure_agent_operation_schema() -> None:
+    """Add durable receipts on existing installs even when automatic schemas are off."""
+    from models.agent_operation import AgentOperation
+    from models.agent_submission import AgentSubmission
+
+    connection = Tortoise.get_connection("default")
+    # Reuse the ORM's backend-specific FK/UUID definitions instead of parallel DDL.
+    generator = connection.schema_generator(connection)
+    for model in (AgentOperation, AgentSubmission):
+        definition = generator._get_table_sql(model, safe=True)
+        await connection.execute_script(definition["table_creation_string"])
+
+
 async def ensure_ai_model_config_schema() -> None:
     """为已有 SQLite 数据库补齐模型能力与协议字段。"""
     if not settings.DATABASE_URL.startswith("sqlite"):

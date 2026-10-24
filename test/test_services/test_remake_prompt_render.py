@@ -1,10 +1,4 @@
-from prompts.remake import (
-    ASSET_PROMPT,
-    ASSET_SCHEMA,
-    PROMPT_TEMPLATE,
-    SCENE_PROMPT_PREFIX,
-    SINGLE_CHARACTER_PROMPT_PREFIX,
-)
+from prompts.remake import ASSET_SCHEMA, render_remake_prompt
 from pathlib import Path
 from services.remake.prompt_render import (
     compact_catalog,
@@ -18,17 +12,18 @@ def test_asset_prompt_contract_matches_reference_pipeline():
 
     assert character["properties"]["label"]["enum"] == ["人物", "动物", "群像"]
     assert character["required"] == ["name", "label", "description"]
-    assert "先在内部判断出现次数" in ASSET_PROMPT
-    assert "不输出次数和判断过程" in ASSET_PROMPT
+    rules = render_remake_prompt("assets", "zh")
+    assert "读取" in rules or "字幕" in rules
+    assert "任务语言 language=zh" in rules
 
 
-def test_storyboard_prompt_requires_subtitle_review_before_unclear_marker():
-    assert "不得在第一次听觉识别失败后停止" in PROMPT_TEMPLATE
-    assert "必须用字幕补足听不清的内容" in PROMPT_TEMPLATE
-    assert "不得用“[听不清]”“无法识别”" in PROMPT_TEMPLATE
-    assert "对应时间段没有任何清晰可读的对白字幕" in PROMPT_TEMPLATE
-    assert "对每一处“[听不清]”重新检查对应画面字幕" in PROMPT_TEMPLATE
-    assert "听不清处标记“[听不清]”" not in PROMPT_TEMPLATE
+def test_storyboard_prompt_uses_the_same_remake_skill_for_both_languages():
+    from prompts.skill_pack import read_skill
+
+    for language in ("zh", "en"):
+        rules = render_remake_prompt("shots", language)
+        assert read_skill("remake") in rules
+        assert "language=" + language in rules
 
 
 def test_global_assets_are_deduplicated_and_receive_stable_reference_layouts():
@@ -47,13 +42,13 @@ def test_global_assets_are_deduplicated_and_receive_stable_reference_layouts():
     assert len(assets["characters"]) == 2
     assert assets["characters"][0]["id"] == "character-001"
     assert assets["characters"][0]["description"] == (
-        f"{SINGLE_CHARACTER_PROMPT_PREFIX}\n\n角色描述：\n黑色铠甲，红色盔缨"
+        "黑色铠甲，红色盔缨"
     )
     assert assets["characters"][1]["description"] == "统一札甲的守卫"
     assert assets["scenes"][0]["description"] == (
-        f"{SCENE_PROMPT_PREFIX}\n\n场景描述: 深色军帐"
+        "深色军帐"
     )
-    assert assets["objects"][0]["description"] == "【道具描述】黑色木质令牌"
+    assert assets["objects"][0]["description"] == "黑色木质令牌"
 
 
 def test_compact_catalog_strips_reference_image_layout_instructions():

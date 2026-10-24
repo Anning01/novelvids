@@ -1,8 +1,4 @@
-
-from utils.messages import localized_message
-from fastapi import HTTPException
-
-from controllers.config import ai_model_config_controller, general_config_controller
+from controllers.config import general_config_controller
 from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.novel import Novel
@@ -10,7 +6,7 @@ from schemas.chapter import ChapterCreate, ChapterPatch, ChapterUpdate
 from services.ai_task_executor import ai_task_executor
 from services.chapter_titles import normalize_chapter_title
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum
 
 
 class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
@@ -71,24 +67,12 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         chapter = await self.get(chapter_id)
 
         # 1. 获取提取任务的启用配置（团队自定义优先，官方兜底）
-        config = await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.extraction.value, team_id=team_id
-        )
+        from services.creation_agent.skill_execution import require_agent
+        config, _ = await require_agent(team_id)
         prompt_language = await general_config_controller.get_prompt_language()
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.extraction)
-
-        active_tasks = await AiTask.filter(
-            task_type=AiTaskTypeEnum.extraction.value,
-            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
-        )
-        for t in active_tasks:
-            if t.request_params.get("chapter_id") == chapter_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail=localized_message('该章节已有进行中的提取任务（{p1}）', p1=f'{t.id}'),
-                )
 
         # 3. 提交任务（BackgroundTask 中执行）
         request_params = {
@@ -107,10 +91,19 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             request_params["team_id"] = team_id
         if user_id is not None:
             request_params["user_id"] = user_id
-        task = await ai_task_executor.submit(
-            AiTaskTypeEnum.extraction, request_params
-        )
-        return task
+        from services.creation_agent.skill_execution import prepare_workflow
+        request_params = await prepare_workflow(request_params)
+        from services.creation_objects import project_write
+        async with project_write(chapter.novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(1, {**request_params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
+            for existing in await AiTask.filter(task_type=AiTaskTypeEnum.extraction.value, status__in=[1,2,6]).using_db(connection):
+                if existing.request_params.get('chapter_id') == chapter_id:
+                    return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
+            return await ai_task_executor.submit(AiTaskTypeEnum.extraction, request_params, db_connection=connection)
+
 
     async def latest_extraction_task(self, chapter_id: int) -> AiTask | None:
         """返回章节最近一次提取任务，用于页面恢复任务状态。"""

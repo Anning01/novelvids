@@ -57,6 +57,13 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
 
     async def execute(self, request_params: dict) -> dict:
         task_id = request_params.get("ai_task_id")
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            from models.agent_operation import AgentOperation
+            saved = await AgentOperation.get_or_none(task_id=execution.params["task_id"], key="persist:remake", state="completed")
+            if saved:
+                return saved.result
         source = await RemakeSource.get_or_none(
             id=request_params["remake_source_id"],
             novel_id=request_params["novel_id"],
@@ -103,22 +110,20 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                     work_dir=work_dir,
                     progress=report,
                 )
-                summary = await self.persistence.persist(
-                    source=source,
-                    assets=result.assets,
-                    prompt_document=result.prompt_document,
-                    pipeline_metadata={
-                        **result.metadata,
-                        "attempt": int(request_params.get("attempt", 1) or 1),
-                    },
-                )
-            return {
-                **summary,
-                "pipeline": result.metadata,
-                "token_usage": result.token_usage,
-                "llm_config_id": model_config.id,
-                "llm_model": model_config.model,
-            }
+                async def persist():
+                    summary = await self.persistence.persist(
+                        source=source,
+                        assets=result.assets,
+                        prompt_document=result.prompt_document,
+                        pipeline_metadata={**result.metadata, "attempt": int(request_params.get("attempt", 1) or 1)},
+                    )
+                    return {**summary, "pipeline": result.metadata, "token_usage": result.token_usage,
+                            "llm_config_id": model_config.id, "llm_model": model_config.model}
+                if execution:
+                    await execution.before_request()
+                    from services.creation_agent.operation_receipts import execute_step
+                    return await execute_step(execution.params["task_id"], "persist:remake", persist, atomic=True)
+                return await persist()
         except RemakeDecompositionError:
             await self._mark_failed(source)
             raise

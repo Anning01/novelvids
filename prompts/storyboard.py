@@ -1,6 +1,6 @@
 """Prompt templates and pure renderers for storyboard generation."""
 
-from prompts.catalog import template, text
+from prompts.skill_pack import render_skill, task_facts
 
 import json
 import re
@@ -13,7 +13,6 @@ from prompts.storyboard_strategies import (
     StoryboardStrategyPrompt,
 )
 from utils.prompt_language import normalize_prompt_language
-from prompts.language import output_language_rule
 from prompts.labels import prompt_label
 
 
@@ -59,28 +58,6 @@ class StoryboardSegment(Protocol):
     visual_prose: str
     actions: list[str]
     camera_movement: str
-
-
-STORYBOARD_LANGUAGE_INSTRUCTIONS = {
-    lang: text("storyboard_language", lang) for lang in ("zh", "en")
-}
-
-
-STORYBOARD_SYSTEM_PROMPT = template("storyboard_system.md", "zh")
-
-
-STORYBOARD_ASSET_MESSAGE = template("storyboard_assets.md", "zh")
-
-
-STORYBOARD_NARRATIVE_MESSAGE = template("storyboard_narrative.md", "zh")
-
-STORYBOARD_CONSTRAINT_MESSAGE = template("storyboard_constraints.md", "zh")
-
-
-STORYBOARD_INITIAL_TASK_MESSAGE = template("storyboard_initial.md", "zh")
-
-
-STORYBOARD_CONTINUATION_TASK_MESSAGE = template("storyboard_continue.md", "zh")
 
 
 _REFERENCE_TEXT_FIELDS = (
@@ -269,72 +246,19 @@ def _continuation_payload(previous_shot: StoryboardShot) -> str:
 
 
 def build_storyboard_messages(
-    long_text: str,
-    entities: Sequence[StoryboardEntity],
-    prompt_language: str = "zh",
-    *,
-    batch_index: int = 0,
-    batch_count: int = 1,
-    next_sequence: int = 1,
-    previous_shot: StoryboardShot | None = None,
-    strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
-    creative_constraints: Sequence[dict] = (),
-) -> list[dict[str, str]]:
-    """Build stable rules and request facts as separate chat messages."""
-    language = normalize_prompt_language(prompt_language)
-    from prompts.storyboard_strategies import localized_strategy
-
-    strategy = localized_strategy(strategy, language)
-    task_template = (
-        template("storyboard_continue.md", language)
-        if previous_shot is not None
-        else template("storyboard_initial.md", language)
-    )
-    task_content = task_template.format(
-        batch_number=batch_index + 1,
-        batch_count=batch_count,
-        next_sequence=next_sequence,
-        previous_shot=(
-            _continuation_payload(previous_shot) if previous_shot is not None else ""
-        ),
-    )
+    long_text, entities, prompt_language="zh", *, batch_index=0, batch_count=1,
+    next_sequence=1, previous_shot=None, strategy=CINEMATIC_STORYBOARD_STRATEGY,
+    creative_constraints=(),
+):
     return [
-        {
-            "role": "system",
-            "content": template("storyboard_system.md", language).format(
-                language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS[language]
-                + "\n"
-                + output_language_rule(language),
-            )
-            + (f"\n\n{strategy.generation_rules}" if strategy.generation_rules else ""),
-        },
-        {
-            "role": "user",
-            "content": template("storyboard_assets.md", language).format(
-                asset_registry=_asset_payload(entities),
-            ),
-        },
-        {
-            "role": "user",
-            "content": template("storyboard_narrative.md", language).format(
-                long_text=long_text
-            ),
-        },
-        {"role": "user", "content": task_content},
-        *(
-            [
-                {
-                    "role": "user",
-                    "content": template("storyboard_constraints.md", language).format(
-                        constraints=json.dumps(
-                            list(creative_constraints), ensure_ascii=False
-                        )
-                    ),
-                }
-            ]
-            if creative_constraints
-            else []
-        ),
+        {"role": "system", "content": render_skill("storyboard", prompt_language)},
+        {"role": "user", "content": task_facts({
+            "assets": json.loads(_asset_payload(entities)),
+            "manuscript": long_text, "strategy": strategy.key,
+            "batch_number": batch_index + 1, "batch_count": batch_count,
+            "next_sequence": next_sequence, "constraints": list(creative_constraints),
+            "previous_shot": json.loads(_continuation_payload(previous_shot)) if previous_shot else None,
+        })},
     ]
 
 

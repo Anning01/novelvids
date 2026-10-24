@@ -4,13 +4,8 @@ import asyncio
 from typing import Literal
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, model_validator, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-from prompts.extraction import (
-    GROUP_PORTRAIT_TRAIT_LABELS,
-    SINGLE_CHARACTER_TRAIT_LABELS,
-    ensure_ordered_trait_labels,
-)
 from services.llm.json_output import create_json_completion, completion_usage
 
 
@@ -46,21 +41,13 @@ class Person(BaseModel):
     def normalize_label(cls, value):
         return {"person": "人物", "animal": "动物", "group": "群像"}.get(value, value) if isinstance(value, str) else value
 
-    @model_validator(mode="after")
-    def validate_visual_contract(self) -> "Person":
-        if self.label == "群像":
-            ensure_ordered_trait_labels(
-                self.base_traits,
-                GROUP_PORTRAIT_TRAIT_LABELS,
-                "群像视觉描述",
-            )
-        else:
-            ensure_ordered_trait_labels(
-                self.base_traits,
-                SINGLE_CHARACTER_TRAIT_LABELS,
-                "单人或动物视觉描述",
-            )
-        return self
+    @field_validator("base_traits")
+    @classmethod
+    def validate_visual_prompt(cls, value: str) -> str:
+        from utils.prompt_language import skill_workflow
+        if skill_workflow.get() and not value.strip():
+            raise ValueError("Visual prompt must not be empty")
+        return value
 
     @property
     def reference_layout(self) -> Literal["character_turnaround", "group_portrait"]:
@@ -124,6 +111,10 @@ class AssetExtractor:
         self,
         messages: list[dict[str, str]],
     ) -> AssetExtractionResult:
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            return await execution.generate('assets', messages, self.response_model)
         try:
             parsed, completion = await create_json_completion(
                 self.client,

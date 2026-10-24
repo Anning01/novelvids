@@ -209,3 +209,17 @@ it('parses authenticated remake progress SSE snapshots', async () => {
     signal: controller.signal,
   })
 })
+
+it('reuses the generation request ID after a lost response and clears it after success', async () => {
+  const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('Network disconnected'))
+    .mockImplementation(async () => new Response(JSON.stringify({ code: 0, data: { id: 12 } })))
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(api.generateVideo(713, 2)).rejects.toThrow('Network disconnected')
+  await api.generateVideo(713, 2)
+  await api.generateVideo(713, 2)
+  const ids = fetchMock.mock.calls.map(call => (call[1] as RequestInit).headers as Record<string, string>)
+    .map(headers => headers['X-Creation-Request-Id'])
+  expect(ids[0]).toBeTruthy()
+  expect(ids[1]).toBe(ids[0])
+  expect(ids[2]).not.toBe(ids[0])
+})

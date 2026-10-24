@@ -4,7 +4,6 @@ import json
 from dataclasses import asdict
 
 from prompts.extraction import render_extraction_system
-from prompts.catalog import text
 from services.extraction.context import ExtractionContext
 
 
@@ -44,7 +43,8 @@ class ExtractionMessageBuilder:
         context: ExtractionContext,
         prompt_language: str,
     ) -> list[dict[str, str]]:
-        system_content = render_extraction_system(prompt_language)
+        from utils.prompt_language import skill_workflow
+        system_content = "" if skill_workflow.get() else render_extraction_system(prompt_language)
         novel_payload = _drop_empty(asdict(context.novel))
         asset_payload = [
             _drop_empty(
@@ -65,12 +65,7 @@ class ExtractionMessageBuilder:
             for asset in context.assets
         ]
         chapter_payload = asdict(context.chapter)
-        return [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": text("extraction_fact", prompt_language, boundary="novel_metadata", payload=_compact_json(novel_payload)),
-            },
-            {"role": "user", "content": text("extraction_registry", prompt_language, payload=_compact_json(asset_payload))},
-            {"role": "user", "content": text("extraction_chapter", prompt_language, payload=_compact_json(chapter_payload))},
-        ]
+        return [{"role": "system", "content": system_content},
+                {"role": "user", "content": _compact_json(novel_payload)},
+                {"role": "user", "content": _compact_json(asset_payload)},
+                {"role": "user", "content": _compact_json(chapter_payload)}]

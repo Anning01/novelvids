@@ -32,6 +32,19 @@ class AiTaskController:
         await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value, TaskStatusEnum.queued.value]).update(
             status=TaskStatusEnum.cancelled.value, finished_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
         await task.refresh_from_db()
+        if task.request_params.get('workflow_version') == 'agent-skills-v1':
+            children = [child for child in await AiTask.filter(status__in=[1, 2, 6])
+                        if child.request_params.get('origin_run_id') == str(task.id)]
+            for child in children:
+                await self.cancel(child.id)
+            if task.request_params.get('operation') == 'video':
+                from models.video import Video
+                video = await Video.get_or_none(id=task.request_params.get('video_id'))
+                # Never mark an in-flight provider submission as cancelled locally.
+                if video and video.status == TaskStatusEnum.queued.value:
+                    await Video.filter(id=video.id, status=TaskStatusEnum.queued.value).update(status=TaskStatusEnum.cancelled.value)
+            from services.creation_agent.production import finish_production_message
+            await finish_production_message(task)
         return task
 
 

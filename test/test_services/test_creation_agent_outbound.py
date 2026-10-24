@@ -83,7 +83,7 @@ async def test_a_b_and_later_chapter_remain_independent_in_actual_video_http_pay
     bodies = []
     capture_http(monkeypatch, bodies, {'id': 'synthetic-video-task'})
     for _, id in selected:
-        await video_controller.generate(VideoGenerateRequest(scene_id=id, model_config_id=config.id, duration=6))
+        await video_controller._submit_generation(VideoGenerateRequest(scene_id=id, model_config_id=config.id, duration=6))
     assert len(bodies) == 3
     for label, body in zip(('A', 'B', 'I'), bodies):
         prompt = next(item['text'] for item in body['content'] if item['type'] == 'text')

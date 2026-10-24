@@ -1,6 +1,7 @@
+import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
 
 import { tr } from '@/i18n'
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoGenerationOptions, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -56,8 +57,13 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
+const isGenerationRequest = (url: string) => /^\/(?:asset\/reference\/\d+|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/generate\/|video\/(?:generate\/|merge))(?:\?|$)/.test(url)
+
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
+  const generation = isGenerationRequest(url)
+    ? await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]), url, options?.body) : null
+  if (generation) headers['X-Creation-Request-Id'] = generation.id
   const response = await fetch(BASE + url, { headers, ...options })
   const payload = await response.json()
   if (!response.ok || payload.code !== 0) {
@@ -68,6 +74,7 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
     }
     throw new Error(payload.message || payload.detail || tr('请求失败'))
   }
+  if (generation) finishGenerationRequest(generation.key)
   return payload
 }
 function qs(params: Record<string, unknown>) {
@@ -296,12 +303,12 @@ export const api = {
   insertSceneAfter: (sceneId: number) => request<SingleResponse<Scene>>(`/scene/${sceneId}/insert-after`, { method: 'POST' }),
   updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
-  generateScenes: (chapterId: number) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId }) }),
+  generateScenes: (chapterId: number, replaceExisting = false) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
   storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
-  generateVideo: (sceneId: number, modelConfigId: number, options: { generation_mode?: 'reference' | 'keyframes'; first_frame_url?: string; last_frame_url?: string; resolution?: string; aspect_ratio?: string; duration?: number; output_format?: string; generate_audio?: boolean; return_last_frame?: boolean; reference_media?: VideoReferenceMedia[] } = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
+  generateVideo: (sceneId: number, modelConfigId: number, options: VideoGenerationOptions = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
   async uploadVideoReference(file: File, modelConfigId: number) {
     const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
     if (policyResponse.data.direct) {

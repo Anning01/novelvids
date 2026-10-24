@@ -20,7 +20,6 @@ from pydantic_ai.settings import ModelSettings
 
 from prompts.creation_agent import render_creation_instructions, render_creation_request
 from services.language import task_language
-from prompts.schema import localized_schema, schema_annotation
 from schemas.creation_agent import AgentConfiguration, ImagePromptEdit, StoryboardPromptEdit, CreationReply, AgentTarget
 from schemas.creation_objects import CreationObjectQuery, CreationChangeSet, CreationPromptPatch
 from models.creation_agent import AgentMessage, PromptChange
@@ -150,6 +149,11 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
                 omitted.add('apply_creation_changes')
             if 'undo' not in capabilities:
                 omitted.add('undo_creation_change')
+    from services.creation_agent.skill_execution import current_execution
+    if current_execution.get() is None:
+        omitted.update({'read_skill', 'submit_production', 'get_production_context'})
+    if not ctx.deps.changes or getattr(getattr(ctx.deps.changes, 'request', None), 'write_scope', 'read_only') == 'read_only':
+        omitted.add('submit_production')
     prepared = [definition for definition in definitions if definition.name not in omitted]
     if ctx.deps.changes:
         for index, definition in enumerate(prepared):
@@ -171,20 +175,15 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
             ) if definition.name == 'apply_creation_changes' else definition
             for definition in prepared
         ]
-    return localize_tool_definitions(prepared, task_language.get() or "zh")
-
-
-def localize_tool_definitions(definitions, language: str):
-    return [replace(definition, description=schema_annotation(definition.description, language),
-                    parameters_json_schema=localized_schema(definition.parameters_json_schema, language))
-            for definition in definitions]
-
-
-async def prepare_creation_output_tools(ctx, definitions):
-    return localize_tool_definitions(definitions, task_language.get() or "zh")
+    return prepared
 
 
 def creation_instructions(ctx: RunContext[CreationAgentDeps]):
+    from services.creation_agent.skill_execution import current_execution
+    from prompts.skill_pack import instructions
+    execution = current_execution.get()
+    if execution:
+        return instructions(execution.snapshot, execution.language, 'editing') + '\n' + str({'authorized_production': [item.model_dump(mode='json') for item in ctx.deps.changes.request.production_intents] if ctx.deps.changes else []})
     return render_creation_instructions(language=task_language.get() or "zh", crud=bool(ctx.deps.changes), turn_limited=final_reply_due(ctx))
 
 
@@ -197,7 +196,6 @@ creation_agent = Agent(
     deps_type=CreationAgentDeps,
     instructions=creation_instructions,
     prepare_tools=prepare_creation_tools,
-    prepare_output_tools=prepare_creation_output_tools,
     name="creation_assistant",
     output_type=[str, CreationReply],
     retries=2,
@@ -578,3 +576,55 @@ async def stream_creation_agent(
         model_settings=model_settings, on_complete=on_complete,
     ):
         yield event
+
+
+@creation_agent.tool
+async def read_skill(ctx: RunContext[CreationAgentDeps], name: str) -> str:
+    """读取本轮固定版本技能；仅允许技能清单中的名称。"""
+    from services.creation_agent.skill_execution import current_execution
+    execution = current_execution.get()
+    if execution is None:
+        raise ModelRetry(localized_message('此历史任务没有技能快照'))
+    return execution.snapshot.read(name)
+
+
+@creation_agent.tool
+async def submit_production(ctx: RunContext[CreationAgentDeps], intent_index: int = 0) -> dict:
+    """仅在用户明确要求生成时使用。服务端从本轮原话核对范围并提交真实任务。"""
+    from services.creation_agent.intent_tools import submit_intent
+    from services.creation_agent.authorization import resolve_production_intents
+    if ctx.deps.changes is None or ctx.deps.source_message is None:
+        raise ModelRetry(localized_message('此历史运行不支持生成'))
+    request = ctx.deps.changes.request
+    if not request.production_intents:
+        request = await resolve_production_intents(request, ctx.deps.changes.novel_id, ctx.deps.source_message)
+        ctx.deps.changes.request = request
+    if intent_index < 0 or intent_index >= len(request.production_intents):
+        return {'status': 'confirmation_required', 'submitted': False}
+    receipt = await submit_intent(request.production_intents[intent_index], request=request, novel_id=ctx.deps.changes.novel_id)
+    return {**receipt, "intent_index": intent_index, "intent_count": len(request.production_intents)}
+
+
+@creation_agent.tool
+async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
+    """读取当前可用媒体模型能力及本轮生产任务的真实状态，不触发生成。"""
+    from services.creation_agent.skill_execution import current_execution
+    from services.creation_agent.receipts import production_receipts
+    from services.model_resolution import resolve_scope_configs
+    from services.video.capabilities import capabilities_for as video_capabilities
+    from services.image_generation.capabilities import capabilities_for as image_capabilities
+    from config import settings
+
+    execution = current_execution.get()
+    if execution is None:
+        raise ModelRetry(localized_message('此历史运行不支持生产工具'))
+    await execution.before_request()
+    team_id = execution.params.get('team_id') if settings.AUTH_ENABLED else None
+    models = []
+    for task_type, kind, resolve in ((2, 'image', image_capabilities), (4, 'video', video_capabilities)):
+        for item in await resolve_scope_configs(task_type, team_id):
+            capabilities = resolve(item.image_model_type if kind == 'image' else item.video_model_type)
+            models.append({'id': item.id, 'name': item.name, 'kind': kind, 'capabilities': capabilities.public_dict()})
+    from models.remake_source import RemakeSource
+    sources = await RemakeSource.filter(novel_id=execution.params['novel_id']).values('id', 'chapter_id', 'episode_number', 'media_status')
+    return {'models': models, 'remake_sources': sources, 'tasks': await production_receipts(execution.params['task_id'])}

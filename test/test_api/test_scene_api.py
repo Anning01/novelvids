@@ -292,7 +292,7 @@ async def test_api_get_nonexistent_scene(client: AsyncClient):
     "services.storyboard.handler.StoryboardTaskHandler.execute",
     new=_mock_handler_execute,
 )
-async def test_generate_creates_task_and_scenes(client: AsyncClient):
+async def test_generate_creates_task_and_scenes(client: AsyncClient, configured_creation_agent):
     """生成接口：创建任务 + BackgroundTask 写入分镜。"""
     novel, chapter, config = await _setup_scene_env()
 
@@ -338,7 +338,7 @@ async def test_generate_creates_task_and_scenes(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_generate_duplicate_returns_existing_task(client: AsyncClient):
+async def test_generate_duplicate_returns_existing_task(client: AsyncClient, configured_creation_agent):
     """重复提交同一章节返回已有任务（离开页面再返回不再报错）。"""
     novel, chapter, config = await _setup_scene_env()
 
@@ -360,7 +360,7 @@ async def test_generate_duplicate_returns_existing_task(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_generate_no_config(client: AsyncClient):
-    """无启用的配置时返回 404。"""
+    """无启用的配置时返回 409。"""
     novel = await Novel.create(name="No Config Novel", author="Author")
     chapter = await Chapter.create(
         novel_id=novel.id, number=1, name="Ch1", content="content"
@@ -371,8 +371,8 @@ async def test_generate_no_config(client: AsyncClient):
         json={"chapter_id": chapter.id, "model": 1},
     )
     body = response.json()
-    assert body["code"] == 404
-    print(f"    无配置，返回 404: {body['message']}")
+    assert body["code"] == 409
+    print(f"    无配置，返回 409: {body['message']}")
 
 
 @pytest.mark.asyncio
@@ -380,7 +380,7 @@ async def test_generate_no_config(client: AsyncClient):
     "services.storyboard.handler.StoryboardTaskHandler.execute",
     new=_mock_handler_execute,
 )
-async def test_generate_stale_task_cleaned(client: AsyncClient):
+async def test_generate_stale_task_cleaned(client: AsyncClient, configured_creation_agent):
     """超时异常任务被清理后可重新提交。"""
     from datetime import datetime, timezone, timedelta
 
@@ -414,7 +414,7 @@ async def test_generate_stale_task_cleaned(client: AsyncClient):
     "services.storyboard.handler.StoryboardTaskHandler.execute",
     side_effect=Exception("LLM API error"),
 )
-async def test_generate_llm_failure_marks_task_failed(mock_exec, client: AsyncClient):
+async def test_generate_llm_failure_marks_task_failed(mock_exec, client: AsyncClient, configured_creation_agent):
     """LLM 调用失败时任务标记为 failed。"""
     novel, chapter, config = await _setup_scene_env()
 

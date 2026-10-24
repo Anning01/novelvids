@@ -1,3 +1,4 @@
+from api._production_request import production_request
 
 from utils.messages import localized_message
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
@@ -31,7 +32,7 @@ from utils.enums import AiTaskTypeEnum
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(production_request)])
 
 _EDITOR = Depends(require_roles("admin", "creator"))
 
@@ -178,7 +179,7 @@ async def merge_chapter_videos(
     _: AuthContext = _EDITOR,
 ):
     await require_chapter_access(req.chapter_id, ctx)
-    result = await video_controller.merge_chapter_videos(req.chapter_id, strict=req.strict)
+    result = await video_controller.merge_chapter_videos(req.chapter_id, strict=req.strict, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
     return ResponseSchema(data=result)
 
 
