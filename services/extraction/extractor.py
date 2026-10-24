@@ -48,6 +48,11 @@ class Person(BaseModel):
 
     @model_validator(mode="after")
     def validate_visual_contract(self) -> "Person":
+        from utils.prompt_language import skill_workflow
+        if skill_workflow.get():
+            if not self.base_traits.strip():
+                raise ValueError("Visual prompt must not be empty")
+            return self
         if self.label == "群像":
             ensure_ordered_trait_labels(
                 self.base_traits,
@@ -124,6 +129,10 @@ class AssetExtractor:
         self,
         messages: list[dict[str, str]],
     ) -> AssetExtractionResult:
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            return await execution.generate('assets', messages, self.response_model)
         try:
             parsed, completion = await create_json_completion(
                 self.client,

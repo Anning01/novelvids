@@ -85,7 +85,13 @@ class RemakeDecompositionPipeline:
             response_schema=ASSET_SCHEMA,
             include_segment_metadata=False,
         )
-        assets = normalize_global_assets(raw_assets, task_language.get() or "zh")
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            assets = {group: [{**item, 'id': f"{kind}-{index:03d}"} for index,item in enumerate(raw_assets.get(group, []), 1)]
+                for group,kind in [('characters','character'),('scenes','scene'),('objects','object')]}
+        else:
+            assets = normalize_global_assets(raw_assets, task_language.get() or "zh")
 
         await _report(progress, 42, "detecting_scenes")
         scene_paths = await asyncio.to_thread(
@@ -118,15 +124,22 @@ class RemakeDecompositionPipeline:
             context_builder=lambda _index: catalog_context,
             on_completed=report_scene_progress,
         )
-        prompts = [
-            render_professional_prompt(
-                raw,
-                assets,
-                duration_seconds=durations[index],
-                language=task_language.get() or "zh",
-            )
-            for index, raw in enumerate(raw_prompts)
-        ]
+        if execution:
+            known_ids = {item['id'] for values in assets.values() for item in values}
+            for item in raw_prompts:
+                if any(ref.get('asset_id') not in known_ids for ref in item['asset_refs']):
+                    raise ValueError(localized_message('重制分镜引用了未登记资产'))
+            prompts = [{**item, 'duration_seconds': durations[index]} for index,item in enumerate(raw_prompts)]
+        else:
+            prompts = [
+                render_professional_prompt(
+                    raw,
+                    assets,
+                    duration_seconds=durations[index],
+                    language=task_language.get() or "zh",
+                )
+                for index, raw in enumerate(raw_prompts)
+            ]
 
         await _report(progress, 88, "persisting")
         analysis_requests = [dict(item) for item in gateway.timings]

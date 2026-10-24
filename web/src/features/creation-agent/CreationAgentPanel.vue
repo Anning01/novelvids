@@ -242,8 +242,18 @@ function selectQueryTarget(target: AgentQueryItem) {
   void nextTick(() => composer.value?.focus())
 }
 
-onBeforeUnmount(() => { catalogEpoch += 1; statusEpoch += 1; window.removeEventListener('focus', refreshTargetStatus); store.disconnect() })
-onMounted(() => window.addEventListener('focus', refreshTargetStatus))
+let productionTimer: ReturnType<typeof setInterval> | undefined
+function refreshVisibleState() { void refreshTargetStatus(); void store.refreshProduction() }
+onBeforeUnmount(() => {
+  catalogEpoch += 1; statusEpoch += 1
+  window.removeEventListener('focus', refreshVisibleState)
+  clearInterval(productionTimer)
+  store.disconnect()
+})
+onMounted(() => {
+  window.addEventListener('focus', refreshVisibleState)
+  productionTimer = setInterval(() => { if (!document.hidden) void store.refreshProduction() }, 4000)
+})
 </script>
 
 <template>
@@ -278,6 +288,13 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
         <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? tr('本轮已停止') : tr('本轮未完成') }}{{ item.changes.length ? tr('，已保存的修改见下方记录') : tr('，尚未保存修改') }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
+        <ul v-if="item.production?.length" class="creation-agent-panel__production">
+          <li v-for="receipt in item.production" :key="receipt.task_id">
+            {{ tr('生成任务') }} · {{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成' } as Record<string, string>)[receipt.operation] || receipt.operation) }} · {{ tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
+            <span v-if="receipt.stage === 'billing_pending'">{{ tr('用量正在结算') }}</span>
+            <span v-if="receipt.error">{{ receipt.error }}</span>
+          </li>
+        </ul>
         <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
         </AgentDisclosure>
       </template>

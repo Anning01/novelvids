@@ -1,3 +1,5 @@
+import type { VideoGenerationOptions } from '@/types'
+
 export interface AgentTarget {
   kind: 'asset' | 'variant' | 'scene'
   id: number
@@ -51,7 +53,10 @@ export interface AgentConversation {
   title?: string
 }
 
+export interface ProductionReceipt { task_id: string; operation: string; status: number; stage?: string | null; error?: string | null }
+
 export interface AgentMessage {
+  production?: ProductionReceipt[]
   id: number
   role: 'user' | 'assistant'
   content: string
@@ -64,6 +69,7 @@ export interface AgentMessage {
 }
 
 export interface AgentRun {
+  production?: ProductionReceipt[]
   task_id: string
   conversation_id: number
   status: number
@@ -82,7 +88,18 @@ export interface AgentCapabilities {
   models: { id: number; name: string; model: string }[]
 }
 
+export interface ProductionIntent {
+  operation: 'story' | 'assets' | 'image' | 'storyboard' | 'video' | 'compose'
+  target_id: number
+  request_id: string
+  media_model_config_id?: number | null
+  variant_id?: number | null
+  video_options?: VideoGenerationOptions | null
+  replace_existing?: boolean
+}
+
 export interface AgentRunInput {
+  production_intents?: ProductionIntent[]
   request_id: string
   message: string
   chapter_id: number | null
@@ -92,6 +109,7 @@ export interface AgentRunInput {
 }
 
 export interface AgentConfiguration {
+  production_concurrency?: number
   enabled: boolean
   request_limit: number
   tool_calls_limit: number

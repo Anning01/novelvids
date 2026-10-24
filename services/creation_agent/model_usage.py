@@ -36,6 +36,16 @@ class UsagePreservingStreamedResponse(OpenAIStreamedResponse):
 class UsagePreservingChatModel(OpenAIChatModel):
     """Use the SDK's documented response hooks without replacing its tool loop."""
 
+    async def _map_binary_content_item(self, item):
+        if item.media_type.startswith("video/"):
+            # Preserve the existing OpenAI-compatible video-input contract.
+            metadata = item.vendor_metadata or {}
+            video = {"url": item.data_uri}
+            if "fps" in metadata:
+                video["fps"] = metadata["fps"]
+            return {"type": "video_url", "video_url": video}
+        return await super()._map_binary_content_item(item)
+
     def prepare_request(self, model_settings: ModelSettings | None, model_request_parameters: ModelRequestParameters):
         settings, parameters = super().prepare_request(model_settings, model_request_parameters)
         settings = dict(settings or {})

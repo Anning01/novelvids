@@ -85,7 +85,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         user_message = await AgentMessage.get(task_id=task_id, role="user")
         assistant = await AgentMessage.get(task_id=task_id, role="assistant")
         conversation = await AgentConversation.get(id=assistant.conversation_id)
-        request = AgentRunRequest.model_validate(user_message.run_input)
+        request = AgentRunRequest.model_validate({key:value for key,value in user_message.run_input.items() if key != "resolved_production_intents"})
         limits = AgentConfiguration.model_validate(request_params["agent_configuration"])
 
         async def before_request():
@@ -175,6 +175,12 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         deps = CreationAgentDeps(service=service, context=context, source_message=user_message,
                                  context_loader=refresh_context, changes=changes if progressive else None, limits=limits)
+        from services.creation_agent.skill_execution import SkillExecution, current_execution
+        from utils.prompt_language import skill_workflow
+        mode_token = skill_workflow.set(bool(request_params.get("skill_snapshot")))
+        execution_token = None
+        if request_params.get('skill_snapshot'):
+            execution_token = current_execution.set(SkillExecution(request_params, assistant, before_request))
         try:
             history = await prepare_history(conversation, assistant, limits, recorded_model)
             context['conversation_summary'] = conversation.summary
@@ -221,6 +227,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                     "change_ids": await PromptChange.filter(task_id=task_id).values_list("id", flat=True),
                     "token_usage": assistant.usage}
         finally:
+            skill_workflow.reset(mode_token)
+            if execution_token is not None:
+                current_execution.reset(execution_token)
             await flush()
             if isinstance(model, OpenAIChatModel):
                 await model.client.close()

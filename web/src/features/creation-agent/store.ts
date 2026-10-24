@@ -57,7 +57,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   function applySnapshot(run: AgentRun) {
     currentRun.value = run
     const message = messages.value.find(item => item.task_id === run.task_id && item.role === 'assistant')
-    if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [] })
+    if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [] })
     reportChanges(run.changes)
     if (!isAgentRunning(run.status)) {
       statusText.value = run.status === 3 ? (run.usage.turn_limited ? tr('本轮处理已结束，可以继续对话') : run.changes.length ? tr('修改已保存') : tr('回复已完成'))
@@ -285,6 +285,18 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     } finally { submitting.value = false }
   }
 
+  async function refreshProduction() {
+    const revision = epoch
+    const runs = [...new Set(messages.value.filter(message => message.role === 'assistant'
+      && message.production?.some(receipt => isAgentRunning(receipt.status))).map(message => message.task_id))]
+    await Promise.allSettled(runs.map(async taskId => {
+      const response = await agentApi.snapshot(taskId)
+      if (revision !== epoch) return
+      const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
+      if (message) Object.assign(message, { production: response.data.production || [], usage: response.data.usage })
+    }))
+  }
+
   async function stop() {
     if (!currentRun.value) return
     const response = await agentApi.stop(currentRun.value.task_id)
@@ -299,6 +311,6 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
     streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
-    open, history, send, stop, undo, newConversation, selectConversation, follow, disconnect,
+    open, history, send, stop, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
     deleteConversation, restoreConversation, loadDeletedConversations }
 })

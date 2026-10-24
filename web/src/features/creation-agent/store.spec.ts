@@ -241,3 +241,16 @@ it('admits one new conversation at a time without showing a model run or sending
   expect(store.conversationId).toBe(4)
   expect(store.sessionBusy).toBe(false)
 })
+
+
+it('refreshes child generation receipts after the assistant has finished speaking', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  store.messages = [{ id: 1, role: 'assistant', content: 'Submitted', task_id: 'run-1', status: 3,
+    changes: [], usage: {}, created_at: '', production: [{ task_id: 'child', operation: 'video', status: 2 }] }]
+  vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { ...run,
+    production: [{ task_id: 'child', operation: 'video', status: 3 }] } })
+  await store.refreshProduction()
+  expect(store.messages[0]?.production?.[0]?.status).toBe(3)
+  expect(agentApi.submit).not.toHaveBeenCalled()
+})

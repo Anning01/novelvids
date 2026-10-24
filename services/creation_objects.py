@@ -189,14 +189,16 @@ class CreationObjects:
         await self._resequence(scenes)
         await scene.refresh_from_db()
 
-    async def ensure_idle(self, kind: str, target) -> None:
+    async def ensure_idle(self, kind: str, target, *, current_storyboard_task=None) -> None:
         if kind == "scene" and await Video.filter(scene_id=target.id, status__in=ACTIVE_TASK_STATUSES).exists():
             raise ValueError(localized_message('该分镜仍有生成任务，请先停止或等待完成'))
         task_types = [AiTaskTypeEnum.reference_image, AiTaskTypeEnum.storyboard] if kind != "scene" else [AiTaskTypeEnum.video, AiTaskTypeEnum.storyboard]
         # Request JSON has different schemas across existing task types. Only
         # inspect active generation tasks and never copy credentials into errors.
-        tasks = await AiTask.filter(status__in=ACTIVE_TASK_STATUSES, task_type__in=task_types).values('task_type', 'request_params')
+        tasks = await AiTask.filter(status__in=ACTIVE_TASK_STATUSES, task_type__in=task_types).values('id', 'task_type', 'request_params')
         for task in tasks:
+            if current_storyboard_task and task['id'] == current_storyboard_task.id and task['task_type'] == AiTaskTypeEnum.storyboard.value and current_storyboard_task.request_params.get('chapter_id') == getattr(target, 'chapter_id', None):
+                continue
             params = task['request_params'] or {}
             if kind == 'scene':
                 matches = params.get('scene_id') == target.id or (
@@ -220,10 +222,10 @@ class CreationObjects:
                 result.append(scene)
         return result
 
-    async def archive(self, kind: str, object_id: int) -> dict:
+    async def archive(self, kind: str, object_id: int, *, current_storyboard_task=None) -> dict:
         """Called under project_write. Retain rows, media and archived relations."""
         target = await self.get(kind, object_id)
-        await self.ensure_idle(kind, target)
+        await self.ensure_idle(kind, target, current_storyboard_task=current_storyboard_task)
         snapshot: dict = {'content_version': await self.recovery_version(target)}
         if kind == 'asset':
             if await Scene.filter(assets__id=target.id).exists():

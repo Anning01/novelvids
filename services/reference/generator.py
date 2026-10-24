@@ -5,7 +5,8 @@ def build_sora_compatible_prompt(data: dict, prompt_language: str = "en") -> str
     """Return the user-editable database prompt without hidden augmentation."""
     del prompt_language  # Kept in the signature for queued-task compatibility.
     value = data.get("base_traits")
-    return "" if value is None else str(value).strip()
+    from utils.prompt_language import skill_workflow
+    return "" if value is None else str(value) if skill_workflow.get() else str(value).strip()
 
 
 async def generate_for_sora_consistency(
@@ -37,23 +38,23 @@ async def generate_for_sora_consistency(
     if reference_images:
         extra_body["image"] = reference_images
 
-    try:
-        result = []
-        for _ in range(max(1, int(count))):
-            result.extend(await generate_images(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                prompt=final_prompt,
-                api_protocol=api_protocol,
-                resolution=resolution,
-                aspect_ratio=aspect_ratio,
-                count=1,
-                output_format=output_format,
-                quality=quality,
-                extra_body=extra_body,
-            ))
-        return result
-    except Exception as error:
-        print(f"生成异常: {error}")
-        raise
+    result = []
+    for _ in range(max(1, int(count))):
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            await execution.before_request()
+        result.extend(await generate_images(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            prompt=final_prompt,
+            api_protocol=api_protocol,
+            resolution=resolution,
+            aspect_ratio=aspect_ratio,
+            count=1,
+            output_format=output_format,
+            quality=quality,
+            extra_body=extra_body,
+        ))
+    return result

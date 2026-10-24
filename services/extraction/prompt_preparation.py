@@ -13,6 +13,9 @@ class AssetPromptPreparationService:
         *,
         prompt_language: str,
     ) -> AssetExtractionResult:
+        from utils.prompt_language import skill_workflow
+        if skill_workflow.get():
+            return result
         persons = [
             person.model_copy(update={
                 "base_traits": render_default_asset_prompt(

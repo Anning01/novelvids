@@ -1,3 +1,4 @@
+from api._production_request import production_request
 
 from utils.messages import localized_message
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
@@ -29,7 +30,7 @@ from services.storyboard.strategies import storyboard_strategy_factory
 from services.creation_objects import CreationObjects
 from controllers._creation import creation_write
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(production_request)])
 
 _EDITOR = Depends(require_roles("admin", "creator"))
 
@@ -64,6 +65,7 @@ async def generate_scene(
     await _ensure_chapter_team_access(generate_data.chapter_id, ctx)
     task = await scene_controller.generate(
         generate_data.chapter_id,
+        replace_existing=generate_data.replace_existing,
         team_id=ctx.team_id,
         user_id=ctx.user.id if ctx.user else None,
     )

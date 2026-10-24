@@ -177,9 +177,11 @@ class ExtractionTaskHandler(BaseTaskHandler):
             result,
             prompt_language=prompt_language,
         )
-        summary = await self.upsert_service.save_result(
-            novel_id=novel_id,
-            chapter_number=context.chapter.number,
-            result=prepared_result,
-        )
+        from services.creation_agent.skill_execution import current_execution
+        from services.creation_agent.operation_receipts import execute_step
+        execution = current_execution.get()
+        async def persist():
+            return await self.upsert_service.save_result(novel_id=novel_id,
+                chapter_number=context.chapter.number, result=prepared_result)
+        summary = await execute_step(execution.params['task_id'], 'persist:assets', persist, atomic=True) if execution else await persist()
         return {**summary, "token_usage": getattr(extractor, "last_usage", {})}

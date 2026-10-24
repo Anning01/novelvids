@@ -34,6 +34,7 @@ class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    production_concurrency: int = Field(4, ge=1, le=20)
     # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
     # 128K output. The assistant keeps the default output below that maximum,
     # while leaving enough room for tool schemas and provider-side reasoning.
@@ -91,6 +92,7 @@ class PromptTargetStatusOut(AgentTarget):
 
 
 class AgentRunRequest(BaseModel):
+    production_intents: list["ProductionIntent"] = Field(default_factory=list, max_length=100)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     request_id: UUID
@@ -161,6 +163,7 @@ class CreationQueryResultOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    production: list[dict] = Field(default_factory=list)
     task_id: UUID
     conversation_id: int
     status: int
@@ -173,6 +176,7 @@ class AgentRunOut(BaseModel):
 
 
 class AgentMessageOut(BaseModel):
+    production: list[dict] = Field(default_factory=list)
     id: int
     role: Literal["user", "assistant"]
     content: str
@@ -306,3 +310,6 @@ class StoryboardPromptEdit(PromptEditInput):
         if (self.changes is None) == (self.legacy_prompt is None):
             raise ValueError(localized_message('结构化修改和历史纯文本修改必须且只能选择一种'))
         return self
+
+from schemas.agent_workflow import ProductionIntent
+AgentRunRequest.model_rebuild()

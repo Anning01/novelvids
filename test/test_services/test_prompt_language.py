@@ -413,7 +413,7 @@ def test_project_cover_prompt_supports_both_languages():
 
 
 @pytest.mark.asyncio
-async def test_all_generation_tasks_snapshot_the_global_language():
+async def test_all_generation_tasks_snapshot_the_global_language(configured_creation_agent):
     await GeneralConfig.create(id=1, prompt_language="zh")
     novel = await Novel.create(name="语言测试", content="第1章 起点\n李舟走上石桥。")
     chapter = await Chapter.create(

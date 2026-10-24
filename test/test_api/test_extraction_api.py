@@ -153,7 +153,7 @@ async def _setup_extraction_env():
     "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
-async def test_extract_creates_task_and_assets(client: AsyncClient):
+async def test_extract_creates_task_and_assets(client: AsyncClient, configured_creation_agent):
     """提取接口：创建任务 + BackgroundTask 写入资产。"""
     novel, chapter, config = await _setup_extraction_env()
 
@@ -172,7 +172,8 @@ async def test_extract_creates_task_and_assets(client: AsyncClient):
     # 验证任务完成
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.completed.value
-    assert set(task.response_data) == {"persons", "scenes", "items", "token_usage"}
+    assert set(task.response_data) == {"persons", "scenes", "items", "token_usage", "conversation_id", "agent_run_id"}
+    assert task.response_data["agent_run_id"] == str(task.id)
     assert [entry["name"] for entry in task.response_data["persons"]] == [
         "张三",
         "李四",
@@ -203,7 +204,7 @@ async def test_extract_creates_task_and_assets(client: AsyncClient):
     "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
-async def test_extract_incremental_merge(client: AsyncClient):
+async def test_extract_incremental_merge(client: AsyncClient, configured_creation_agent):
     """增量提取：第二次提取合并别名和章节。"""
     novel, chapter1, config = await _setup_extraction_env()
 
@@ -237,22 +238,22 @@ async def test_extract_incremental_merge(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_extract_duplicate_task_blocked(client: AsyncClient):
-    """重复提交同一章节的提取任务被拦截。"""
+async def test_extract_duplicate_task_reuses_existing(client: AsyncClient, configured_creation_agent):
+    """重复提交同一章节的提取任务返回原任务。"""
     novel, chapter, config = await _setup_extraction_env()
 
     # 创建一个 pending 的任务
-    await AiTask.create(
+    existing = await AiTask.create(
         task_type=AiTaskTypeEnum.extraction.value,
         status=TaskStatusEnum.pending.value,
         request_params={"chapter_id": chapter.id, "novel_id": novel.id},
     )
 
-    # 再次提交应被拒绝
+    # 再次提交复用已有任务
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
-    assert body["code"] == 400
-    assert "active extraction task" in body["message"]
+    assert body["code"] == 0
+    assert body["data"]["id"] == str(existing.id)
 
 
 @pytest.mark.asyncio
@@ -294,7 +295,7 @@ async def test_get_latest_extraction_task_returns_none_when_missing(client: Asyn
     "services.extraction.extractor.AssetExtractor.extract",
     new=_mock_extract,
 )
-async def test_extract_stale_task_cleaned(client: AsyncClient):
+async def test_extract_stale_task_cleaned(client: AsyncClient, configured_creation_agent):
     """超时异常任务被清理后可重新提交。"""
     from datetime import datetime, timezone, timedelta
 
@@ -319,8 +320,8 @@ async def test_extract_stale_task_cleaned(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_extract_no_config_returns_404(client: AsyncClient):
-    """无启用的配置时返回 404。"""
+async def test_extract_without_assistant_returns_409(client: AsyncClient):
+    """助手未启用时阻止新任务。"""
     novel = await Novel.create(name="No Config Novel", author="Author")
     chapter = await Chapter.create(
         novel_id=novel.id, number=1, name="Ch1", content="content"
@@ -328,8 +329,8 @@ async def test_extract_no_config_returns_404(client: AsyncClient):
 
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
-    assert body["code"] == 404
-    assert "Enable a model" in body["message"]
+    assert body["code"] == 409
+    assert "assistant" in body["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -341,6 +342,7 @@ async def test_extract_injected_failure_is_sanitized_in_task_and_logs(
     mock_extract,
     client: AsyncClient,
     caplog,
+    configured_creation_agent,
 ):
     """注入的模型异常不得进入任务错误或日志。"""
     marker = "secret-injected-extractor-marker"

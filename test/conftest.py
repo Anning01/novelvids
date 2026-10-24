@@ -263,3 +263,14 @@ async def performance_profiler():
             # print(profiler.output_text(unicode=True, color=True))
 
     return InstrumentContext()
+
+
+@pytest.fixture
+async def configured_creation_agent():
+    """Explicit prerequisite for tests exercising the new production entrypoints."""
+    from models.creation_agent import AgentSettings
+    from models.config import AiModelConfig
+    await AgentSettings.update_or_create(id=1, defaults={'configuration': {'enabled': True}})
+    return await AiModelConfig.create(name='production-assistant', model='mock-model',
+        task_type=7, supports_tool_calls=True, supports_json_output=True,
+        base_url='https://mock.api.com/v1', api_key='test-agent-key', is_active=True)

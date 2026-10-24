@@ -237,7 +237,7 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 task_type=task_type,
                 model_config_id=request_params.get("model_config_id"),
                 fallback_model=request_params.get("model"),
-                image_count=len(res.get("images") or []),
+                image_count=res.get("image_count", getattr(error, "image_count", len(res.get("images") or []))),
                 clarity=request_params.get("clarity"),
                 input_image_count=res.get("input_image_count", 0),
                 status=status,
@@ -246,7 +246,26 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 team_id=team_id,
                 user_id=user_id,
             )
+            if record is None and request_params.get("workflow_version") == "agent-skills-v1":
+                raise RuntimeError("Media usage record could not be saved")
             await _consume_team_balance(record, team_id, user_id=user_id)
+            return
+        from services.creation_agent.skill_execution import WORKFLOW_VERSION
+        if request_params.get('workflow_version') == WORKFLOW_VERSION and task_type != AiTaskTypeEnum.reference_image.value:
+            if task_type == AiTaskTypeEnum.project_analysis.value and (result or {}).get('image_usage'):
+                from tortoise.transactions import in_transaction
+                from models.ai_task import AiTask
+                async with in_transaction() as connection:
+                    await AiTask.filter(id=task.id).using_db(connection).select_for_update().get()
+                    if not await ModelUsageRecord.filter(ai_task_id=task.id, billing_type='image').using_db(connection).exists():
+                        usage = result['image_usage']
+                        record = await billing_recorder.record_image(novel_id=novel_id, task_type=task_type,
+                            model_config_id=result['image_config_id'], fallback_model=result.get('image_model'),
+                            image_count=usage.get('image_count',0), clarity=usage.get('clarity'), status=status,
+                            ai_task_id=task.id, team_id=team_id, user_id=user_id)
+                        if record is None:
+                            raise RuntimeError("Cover usage record could not be saved")
+                        await _consume_team_balance(record, team_id, user_id=user_id)
             return
         if task_type == AiTaskTypeEnum.project_analysis.value:
             res = result or {}
@@ -319,6 +338,8 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
         await _consume_team_balance(record, team_id, user_id=user_id)
     except Exception:
         logger.exception("billing record failed for task %s", getattr(task, "id", None))
+        if (task.request_params or {}).get("workflow_version") == "agent-skills-v1":
+            raise
 
 
 async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:

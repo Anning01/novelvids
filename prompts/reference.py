@@ -54,6 +54,9 @@ def render_default_asset_prompt(
     This renderer is intentionally used before persistence. Image generation must
     submit the stored prompt verbatim so a user's later edits remain authoritative.
     """
+    from utils.prompt_language import skill_workflow
+    if skill_workflow.get():
+        return visual_traits
     details = visual_traits.strip()
     if not details or is_complete_reference_prompt(details):
         return details

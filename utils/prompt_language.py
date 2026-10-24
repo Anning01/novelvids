@@ -15,3 +15,6 @@ def prompt_language_name(value: str | None) -> str:
 
 # Task scopes are separate from request/display scopes.
 task_language: ContextVar[str | None] = ContextVar("task_language", default=None)
+
+# New agent workflows validate structure; creative completeness belongs to skills.
+skill_workflow: ContextVar[bool] = ContextVar("skill_workflow", default=False)

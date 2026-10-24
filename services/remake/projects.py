@@ -138,6 +138,8 @@ class RemakeProjectService:
             "folder_upload": "重制工坊 · 文件夹多集",
             "history": "重制工坊 · 历史项目",
         }
+        from services.creation_agent.skill_execution import prepare_workflow
+        workflow = await prepare_workflow({'team_id': team_id, 'user_id': user_id})
         created: list[tuple[RemakeSource, AiTask]] = []
 
         try:
@@ -209,6 +211,7 @@ class RemakeProjectService:
                         stage="queued",
                         progress=0,
                         request_params={
+                            **workflow,
                             "novel_id": novel.id,
                             "chapter_id": chapter.id,
                             "remake_source_id": source.id,
@@ -412,6 +415,10 @@ class RemakeProjectService:
                     localized_message('只有失败的拆解任务可以重试'),
                 )
             previous_params = previous.request_params or {}
+            if previous_params.get('workflow_version'):
+                from models.agent_operation import AgentOperation
+                if await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True).exists():
+                    raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '请先核对未完成的外部请求')
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
             task = await AiTask.create(
                 using_db=connection,
@@ -420,6 +427,7 @@ class RemakeProjectService:
                 stage="queued",
                 progress=0,
                 request_params={
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

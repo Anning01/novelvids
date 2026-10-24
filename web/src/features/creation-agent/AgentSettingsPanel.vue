@@ -25,6 +25,7 @@ interface BudgetField {
 }
 const groups: { title: string; description: string; fields: BudgetField[] }[] = [
   { get title() { return tr('对话用量') }, get description() { return tr('默认按 DeepSeek 长上下文对话设置，仍受所选模型自身上限约束。') }, fields: [
+    { key: 'production_concurrency', get label() { return tr('同时执行的创作任务') }, get unit() { return tr('个') } },
     { key: 'max_targets', get label() { return tr('最多修改对象') }, get unit() { return tr('个 / 轮') } },
     { key: 'request_limit', get label() { return tr('模型调用上限') }, get unit() { return tr('次 / 轮') } },
     { key: 'tool_calls_limit', get label() { return tr('工具调用上限') }, get unit() { return tr('次 / 轮') } },
@@ -69,7 +70,7 @@ async function save() {
     <p v-if="error" class="agent-settings-panel__error" role="alert">{{ error }}</p>
     <form v-if="configuration" :id="formId" @submit.prevent="save">
       <div class="agent-settings-panel__enable">
-        <div><strong>{{ tr('启用创作助手') }}</strong><p>{{ tr('在工作区中管理人物、场景、道具和分镜。') }}</p></div>
+        <div><strong>{{ tr('启用创作助手') }}</strong><p>{{ tr('所有新创作任务都需要启用助手并配置支持工具调用的模型。') }}</p></div>
         <ElSwitch v-model="configuration.enabled" :aria-label="tr('启用创作助手')" :disabled="saving" />
       </div>
       <div class="agent-settings-panel__features" :aria-label="tr('助手能力')">

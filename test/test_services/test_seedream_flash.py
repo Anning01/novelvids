@@ -112,7 +112,7 @@ async def test_flash_can_be_configured_and_listed_via_api(client):
 
 
 @pytest.mark.asyncio
-async def test_flash_asset_request_and_reference_limit():
+async def test_flash_asset_request_and_reference_limit(configured_creation_agent):
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.reference_image.value, name="flash",
         base_url="https://ark.cn-beijing.volces.com/api/v3", api_key="",

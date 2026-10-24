@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import Field, ConfigDict
+from pydantic import field_serializer, Field, ConfigDict
 
 from schemas._base import BaseResponse
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -12,6 +12,10 @@ class AiTaskOut(BaseResponse):
     """任务查询输出。"""
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer('request_params')
+    def public_request_params(self, value):
+        return {key: item for key,item in value.items() if key not in {'api_key','base_url','skill_snapshot','agent_configuration','replace_versions','replaced_scene_snapshots'}}
 
     id: UUID = Field(..., description="任务ID")
     task_type: int = Field(..., description=AiTaskTypeEnum.__doc__)

@@ -107,7 +107,7 @@ async def test_delete_chapter():
 
 
 @pytest.mark.asyncio
-async def test_extract_snapshots_context_limit(monkeypatch):
+async def test_extract_snapshots_context_limit(monkeypatch, configured_creation_agent):
     novel = await Novel.create(name="Context Limit Novel", author="Author")
     chapter = await Chapter.create(
         novel_id=novel.id,
@@ -115,20 +115,8 @@ async def test_extract_snapshots_context_limit(monkeypatch):
         name="Context Limit Chapter",
         content="Content",
     )
-    config = SimpleNamespace(
-        id=1,
-        base_url="https://api.example.com/v1",
-        api_key="key",
-        model="model",
-        concurrency=1,
-        supports_json_output=False,
-        max_context_characters=120000,
-    )
-
-    monkeypatch.setattr(
-        "controllers.chapter.ai_model_config_controller.get_active",
-        AsyncMock(return_value=config),
-    )
+    configured_creation_agent.max_context_characters = 120000
+    await configured_creation_agent.save()
     monkeypatch.setattr(
         "controllers.chapter.general_config_controller.get_prompt_language",
         AsyncMock(return_value="en"),
@@ -138,11 +126,12 @@ async def test_extract_snapshots_context_limit(monkeypatch):
         AsyncMock(),
     )
 
-    async def submit(_task_type, request_params):
+    async def submit(_task_type, request_params, db_connection=None):
         return SimpleNamespace(request_params=request_params)
 
     monkeypatch.setattr("controllers.chapter.ai_task_executor.submit", submit)
 
     task = await chapter_controller.extract(chapter.id)
 
-    assert task.request_params["max_context_characters"] == 120000
+    assert task.request_params["max_context_characters"] == configured_creation_agent.max_context_characters
+    assert task.request_params["assistant_model_config_id"] == configured_creation_agent.id

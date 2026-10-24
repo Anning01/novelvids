@@ -88,6 +88,8 @@ async def _initialize_database_schema() -> None:
     await ensure_ai_model_config_schema()
     await ensure_novel_analysis_schema()
     await ensure_usage_record_schema()
+    from services.schema_compat import ensure_agent_operation_schema
+    await ensure_agent_operation_schema()
     # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
     await ensure_shared_team_columns()
 
@@ -110,9 +112,12 @@ async def lifespan(_: FastAPI):
     # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）
     await ai_task_executor.fail_stale_on_boot()
     await video_task_reconciler.start()
+    from services.creation_agent.recovery import production_recovery
+    await production_recovery.start()
     try:
         yield
     finally:
+        await production_recovery.stop()
         await video_task_reconciler.stop()
         await Tortoise.close_connections()
 

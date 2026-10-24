@@ -6,7 +6,7 @@ from dataclasses import replace
 import json
 import math
 
-from pydantic_ai.messages import ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import BinaryContent, ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 
 from models.creation_agent import AgentContextCheckpoint
 from prompts.creation_agent import render_working_checkpoint
@@ -32,6 +32,11 @@ def wire_size(messages, parameters) -> dict:
                 segments['objects'] += len(encode(part.content)) + len(part.tool_name) + 24
             elif isinstance(part, ToolCallPart):
                 segments['history'] += len(part.args_as_json_str()) + len(part.tool_name) + 24
+            elif isinstance(part, UserPromptPart) and isinstance(part.content, list):
+                # Media byte limits are checked at upload/preparation. Base64 is
+                # not text context; actual media token usage comes from the model.
+                segments['history'] += sum(len(item.media_type) + 64 if isinstance(item, BinaryContent)
+                                           else len(str(item)) for item in part.content) + 16
             else:
                 segments['history'] += len(str(getattr(part, 'content', ''))) + 16
     return {**segments, 'total_characters': sum(segments.values())}

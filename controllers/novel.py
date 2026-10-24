@@ -251,20 +251,19 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         novel_id: int,
         team_id: int | None = None,
         user_id: int | None = None,
+        include_cover: bool = True,
     ) -> AiTask:
         """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
         novel = await self.get(novel_id)
         if not (novel.content or "").strip():
             raise HTTPException(status_code=400, detail=localized_message('项目没有可分析的书稿内容'))
 
-        await ai_model_config_controller.get_active_with_legacy_fallback(
-            AiTaskTypeEnum.project_analysis.value,
-            AiTaskTypeEnum.extraction.value,
-            team_id=team_id,
-        )
-        await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.reference_image.value, team_id=team_id
-        )
+        if include_cover:
+            for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
+                if pending.request_params.get("novel_id") == novel_id:
+                    raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
+        from services.creation_agent.skill_execution import require_agent
+        await require_agent(team_id)
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 
@@ -279,16 +278,21 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         params = {
             "novel_id": novel_id,
             "resolution": "1K",
+            "include_cover": include_cover,
             "prompt_language": prompt_language,
         }
         if team_id is not None:
             params["team_id"] = team_id
         if user_id is not None:
             params["user_id"] = user_id
-        return await ai_task_executor.submit(
-            AiTaskTypeEnum.project_analysis,
-            params,
-        )
+        from services.creation_agent.skill_execution import prepare_workflow
+        params = await prepare_workflow(params)
+        from services.creation_objects import project_write
+        async with project_write(novel_id) as connection:
+            for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
+                if existing.request_params.get('novel_id') == novel_id:
+                    return existing
+            return await ai_task_executor.submit(AiTaskTypeEnum.project_analysis, params, db_connection=connection)
 
     async def latest_analysis(self, novel_id: int) -> AiTask | None:
         await self.get(novel_id)

@@ -192,7 +192,7 @@ async def test_split_novel_already_has_chapters():
 
 
 @pytest.mark.asyncio
-async def test_analyze_novel_submits_one_safe_task():
+async def test_analyze_novel_submits_one_safe_task(configured_creation_agent):
     novel = await Novel.create(name="Analyze Novel", content="第1章 开始\n正文")
     await AiModelConfig.create(
         task_type=AiTaskTypeEnum.project_analysis.value,
@@ -218,11 +218,13 @@ async def test_analyze_novel_submits_one_safe_task():
 
     assert first.id == second.id
     assert first.task_type == AiTaskTypeEnum.project_analysis.value
-    assert first.request_params == {
+    assert {key: first.request_params[key] for key in ("novel_id", "resolution", "prompt_language")} == {
         "novel_id": novel.id,
         "resolution": "1K",
         "prompt_language": "en",
     }
+    assert first.request_params["workflow_version"] == "agent-skills-v1"
+    assert first.request_params["skill_snapshot"]["revision"]
     assert "api_key" not in first.request_params
 
 

@@ -49,14 +49,13 @@ async def resolve_assets(
     # 查找该小说下的所有资产（一次查询）
     assets = await Asset.filter(novel_id=novel_id).prefetch_related("variants")
     logger.info(
-        "resolve_assets: novel_id=%s, total_assets=%d, names=%s",
-        novel_id, len(assets), [a.canonical_name for a in assets],
+        "resolve_assets: novel_id=%s, total_assets=%d",
+        novel_id, len(assets),
     )
     mentions = _extract_asset_mentions(prompt, assets)
     logger.info(
-        "resolve_assets: mentions=%s (prompt[:100]=%r)",
-        [(asset.canonical_name, variant_name) for asset, variant_name in mentions],
-        prompt[:100],
+        "resolve_assets: matched_references=%d",
+        len(mentions),
     )
     if not mentions:
         return []

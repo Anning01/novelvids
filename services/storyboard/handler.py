@@ -1,3 +1,5 @@
+
+from utils.messages import localized_message
 import time
 from typing import List
 from openai import AsyncOpenAI
@@ -128,6 +130,35 @@ class StoryboardTaskHandler(BaseTaskHandler):
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
         chapter = await Chapter.get(id=chapter_id)
+        from services.creation_agent.skill_execution import current_execution
+        from services.creation_agent.operation_receipts import execute_step
+        execution = current_execution.get()
+        if execution:
+            # Validate all candidate shots before any persistent changes.
+            from services.creation_agent.prompt_edits import validate_prompt_dependencies
+            from services.creation_agent.operations import CreationOperations
+            for shot in storyboard.shots:
+                validate_prompt_dependencies(shot.prompt, entities or [])
+                CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))
+            async def persist():
+                async with project_write(chapter.novel_id):
+                    from models.ai_task import AiTask
+                    from services.creation_agent.object_state import object_version
+                    task = await AiTask.get(id=execution.params['task_id'])
+                    before = execution.params.get('replace_versions')
+                    if before is not None:
+                        old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
+                        if {str(row.id): await object_version(row) for row in old_scenes} != before:
+                            raise ValueError(localized_message('原分镜已有新修改，请核对后重新生成'))
+                        objects = CreationObjects(chapter.novel_id)
+                        snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
+                        task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
+                        await task.save(update_fields=['request_params'])
+                    rows = await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
+                        prompt_language, entities, storyboard_strategy)
+                    return {'scene_ids': [row.id for row in rows]}
+            result = await execute_step(execution.params['task_id'], 'persist:storyboard', persist, atomic=True)
+            return await Scene.filter(id__in=result['scene_ids']).order_by('sequence')
         async with project_write(chapter.novel_id):
             return await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
                                               prompt_language, entities, storyboard_strategy)
@@ -199,12 +230,22 @@ class StoryboardTaskHandler(BaseTaskHandler):
             # 如果有拒绝信息，添加到 metadata
             if "refusal" in api_metadata:
                 scene_metadata["refusal"] = api_metadata["refusal"]
-            prompt = format_storyboard_prompt(
-                shot,
-                prompt_language,
-                entities=entities or [],
-                strategy=strategy,
-            )
+            from utils.prompt_language import skill_workflow
+            if skill_workflow.get():
+                from services.creation_agent.prompt_edits import validate_prompt_dependencies
+                from services.creation_agent.operations import CreationOperations
+                prompt = shot.prompt
+                validate_prompt_dependencies(prompt, entities or [])
+                CreationOperations.validate_timing(prompt, duration_value)
+                prompt_params['prompt_language'] = prompt_language
+                prompt_params['rendering_version'] = 'agent-skills-v1'
+            else:
+                prompt = format_storyboard_prompt(
+                    shot,
+                    prompt_language,
+                    entities=entities or [],
+                    strategy=strategy,
+                )
             # 镜头实际引用的资产 ID，持久化到 scene.assets（与画布工作流共用同一份引用数据）
             referenced_asset_ids = [
                 entity.asset_id

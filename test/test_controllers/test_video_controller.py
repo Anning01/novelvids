@@ -72,7 +72,7 @@ async def test_生成视频_提交成功():
         mock_gen.submit.return_value = "ext-task-001"
         mock_factory.return_value = mock_gen
 
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
     assert video.id is not None
     assert video.scene_id == scene.id
@@ -107,7 +107,7 @@ async def test_生成_minimax_h3_视频记录正确供应商类型():
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "minimax-task-001"
         mock_factory.return_value = mock_gen
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
     assert video.model_type == VideoModelTypeEnum.minimax.value
     assert video.metadata["video_model_type"] == "minimax_h3"
@@ -139,7 +139,7 @@ async def test_wan3_输入参考视频与输出视频总时长不能超过30秒(
     )
 
     with pytest.raises(HTTPException, match="输入参考视频与输出视频总时长不超过 30 秒"):
-        await video_controller.generate(req)
+        await video_controller._submit_generation(req)
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_生成视频_供应商提交失败时持久化异常记录():
             "视频供应商请求失败：参考图片格式不受支持（HTTP 400，request_id=req-test）"
         )
         mock_factory.return_value = mock_gen
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
     assert video.status == TaskStatusEnum.failed.value
     assert video.external_task_id is None
@@ -183,7 +183,7 @@ async def test_生成视频_传递并记录参考图片和视频():
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "reference-task"
         mock_factory.return_value = mock_gen
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
     kwargs = mock_gen.submit.call_args.kwargs
     assert kwargs["reference_images"] == ["https://cdn.example.com/look.png"]
@@ -221,7 +221,7 @@ async def test_wan3_本地参考视频交给适配器临时上传而不依赖媒
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "wan-local-video"
         mock_factory.return_value = mock_gen
-        await video_controller.generate(req)
+        await video_controller._submit_generation(req)
 
     assert mock_gen.submit.call_args.kwargs["reference_videos"] == [local_url]
 
@@ -242,7 +242,7 @@ async def test_生成视频_未在提示词引用的上传素材不会提交供�
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "no-reference-task"
         mock_factory.return_value = mock_gen
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
     kwargs = mock_gen.submit.call_args.kwargs
     assert kwargs["reference_images"] == []
@@ -263,7 +263,7 @@ async def test_首尾帧模式_拒绝全模态参考素材():
     )
 
     with pytest.raises(HTTPException, match="不能同时"):
-        await video_controller.generate(req)
+        await video_controller._submit_generation(req)
 
 
 @pytest.mark.asyncio
@@ -274,7 +274,7 @@ async def test_生成视频_分镜不存在():
         model_config_id=1,
     )
     with pytest.raises(HTTPException) as exc_info:
-        await video_controller.generate(req)
+        await video_controller._submit_generation(req)
     assert exc_info.value.status_code == 404
     assert "分镜" in exc_info.value.detail
     print(f"    分镜不存在: {exc_info.value.detail}")
@@ -292,7 +292,7 @@ async def test_生成视频_未选择可用配置报400():
         model_config_id=99999,
     )
     with pytest.raises(HTTPException) as exc_info:
-        await video_controller.generate(req)
+        await video_controller._submit_generation(req)
     assert exc_info.value.status_code == 400
     assert "未启用或已被删除" in exc_info.value.detail
     print(f"    无配置: {exc_info.value.detail}")
@@ -335,7 +335,7 @@ async def test_生成视频_解析资产引用():
         mock_gen.submit.return_value = "ext-task-002"
         mock_factory.return_value = mock_gen
 
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
         # 验证 submit 被调用时传递了 subjects
         call_kwargs = mock_gen.submit.call_args
@@ -395,7 +395,7 @@ async def test_生成视频_提交角色与旁白音频并添加显式映射():
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "voice-task"
         mock_factory.return_value = mock_gen
-        video = await video_controller.generate(VideoGenerateRequest(
+        video = await video_controller._submit_generation(VideoGenerateRequest(
             scene_id=scene.id,
             model_config_id=config.id,
         ))
@@ -448,7 +448,7 @@ async def test_生成视频_关闭声音时不提交音色参考():
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "muted-voice-task"
         mock_factory.return_value = mock_gen
-        video = await video_controller.generate(VideoGenerateRequest(
+        video = await video_controller._submit_generation(VideoGenerateRequest(
             scene_id=scene.id,
             model_config_id=config.id,
             generate_audio=False,
@@ -498,7 +498,7 @@ async def test_生成视频_采用分镜选择的资产衍生状态():
         mock_gen = AsyncMock()
         mock_gen.submit.return_value = "variant-task-001"
         mock_factory.return_value = mock_gen
-        await video_controller.generate(VideoGenerateRequest(
+        await video_controller._submit_generation(VideoGenerateRequest(
             scene_id=scene.id,
             model_config_id=config.id,
         ))
@@ -520,7 +520,7 @@ async def test_首尾帧生成_必须同时提供两张图片():
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await video_controller.generate(req)
+        await video_controller._submit_generation(req)
 
     assert exc_info.value.status_code == 400
     assert "首帧和尾帧" in exc_info.value.detail
@@ -543,7 +543,7 @@ async def test_首尾帧生成_传递关键帧并记录模式():
         mock_gen.submit.return_value = "keyframe-task-001"
         mock_factory.return_value = mock_gen
 
-        video = await video_controller.generate(req)
+        video = await video_controller._submit_generation(req)
 
     kwargs = mock_gen.submit.call_args.kwargs
     assert kwargs["generation_mode"] == "keyframes"
@@ -1031,7 +1031,7 @@ async def test_章节合并按分镜顺序使用当前已有视频并跳过缺�
             "poster_thumbnail_url": "/media/videos/merged/posters/chapter-thumbnail.webp",
         },
     ) as posters:
-        result = await video_controller.merge_chapter_videos(chapter.id)
+        result = await video_controller._compose_chapter(chapter.id)
 
     assert [video.id for video in merge.call_args.args[0]] == [selected.id, third.id]
     assert merge.call_args.args[1] == chapter.id
@@ -1057,7 +1057,7 @@ async def test_章节没有已生成视频时不能合并():
     await Scene.create(chapter=chapter, sequence=1, prompt="1", duration=4.0)
 
     with pytest.raises(HTTPException) as exc_info:
-        await video_controller.merge_chapter_videos(chapter.id)
+        await video_controller._compose_chapter(chapter.id)
 
     assert exc_info.value.status_code == 400
     assert "还没有已生成的视频" in exc_info.value.detail
@@ -1087,7 +1087,7 @@ async def test_严格章节合并要求每个分镜当前版本均已完成():
     await second.save(update_fields=["metadata", "updated_at"])
 
     with pytest.raises(HTTPException) as exc_info:
-        await video_controller.merge_chapter_videos(chapter.id, strict=True)
+        await video_controller._compose_chapter(chapter.id, strict=True)
 
     assert exc_info.value.status_code == 400
     assert "镜头 2" in exc_info.value.detail

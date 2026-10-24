@@ -23,6 +23,17 @@ class CreationPromptStandards:
                 'strategy': storyboard_strategy_factory.resolve(project.storyboard_strategy)}
 
     async def contract(self, kind: str, layout: str = CHARACTER_TURNAROUND) -> dict:
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            options = await self.context()
+            project = await Novel.get(id=self.novel_id)
+            skill = 'storyboard' if kind == 'storyboard' else 'image'
+            return {'kind': kind, 'language': execution.language, 'aspect_ratio': options['aspect_ratio'],
+                    'reference_layout': layout, 'required_fields': [], 'revision': execution.snapshot.revision,
+                    'writing_rules': execution.snapshot.read(skill) + '\n' + execution.snapshot.read('assets'),
+                    'styles': execution.snapshot.read('styles'), 'strategy': project.storyboard_strategy,
+                    'project_style_key': project.style_key, 'custom_style_prompt': project.custom_style_prompt}
         contract = visual_contract(kind, layout=layout, **await self.context())
         project = await Novel.get(id=self.novel_id)
         style = video_project_style_suffix if kind == 'storyboard' else image_project_style_suffix
@@ -35,6 +46,11 @@ class CreationPromptStandards:
 
     async def prepare_asset(self, text: str, *, asset_type: int, layout: str = CHARACTER_TURNAROUND,
                             previous: str | None = None, local_edit: bool = False) -> str:
+        from services.creation_agent.skill_execution import current_execution
+        if current_execution.get():
+            if not text.strip():
+                raise ValueError(localized_message('提示词不能为空'))
+            return text
         kind = ASSET_PROMPT_KINDS[asset_type]
         validate_reference_kind(text, kind)
         if local_edit and previous and is_complete_reference_prompt(previous) and not is_complete_reference_prompt(text):

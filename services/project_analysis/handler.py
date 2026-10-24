@@ -55,6 +55,11 @@ class KeyCharacter(BaseModel):
     @field_validator("base_traits")
     @classmethod
     def validate_base_traits(cls, value: str) -> str:
+        from utils.prompt_language import skill_workflow
+        if skill_workflow.get():
+            if not value.strip():
+                raise ValueError("Visual prompt must not be empty")
+            return value
         return ensure_ordered_trait_labels(
             value,
             SINGLE_CHARACTER_TRAIT_LABELS,
@@ -237,36 +242,51 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             await novel_controller.split(novel_id)
             chapters = await Chapter.filter(novel_id=novel_id).order_by("number")
 
-        llm_config = await ai_model_config_controller.get_active_with_legacy_fallback(
-            AiTaskTypeEnum.project_analysis.value,
-            AiTaskTypeEnum.extraction.value,
-            team_id=request_params.get("team_id"),
-        )
+        from services.creation_agent.skill_execution import current_execution, require_agent
+        execution = current_execution.get()
+        if execution:
+            llm_config, _ = await require_agent(request_params.get('team_id'), request_params['assistant_model_config_id'])
+            material = _build_analysis_material(novel, chapters, prompt_language)
+            analysis = await execution.generate('story', {'name': novel.name, 'manuscript': material,
+                'chapter_numbers': [c.number for c in chapters]}, BookAnalysis)
+            token_usage = {}
+        else:
+            llm_config = await ai_model_config_controller.get_active_with_legacy_fallback(
+                AiTaskTypeEnum.project_analysis.value,
+                AiTaskTypeEnum.extraction.value,
+                team_id=request_params.get("team_id"),
+            )
 
-        material = _build_analysis_material(novel, chapters, prompt_language)
-        llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
-        analysis, completion = await create_json_completion(
-            llm_client,
-            model=llm_config.model,
-            messages=render_analysis_messages(name=novel.name, chapter_count=len(chapters), material=material, prompt_language=prompt_language),
-            response_model=BookAnalysis,
-            prompt_language=prompt_language,
-            supports_json_output=llm_config.supports_json_output,
-        )
-        token_usage = completion_usage(completion)
+            material = _build_analysis_material(novel, chapters, prompt_language)
+            llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
+            analysis, completion = await create_json_completion(
+                llm_client,
+                model=llm_config.model,
+                messages=render_analysis_messages(name=novel.name, chapter_count=len(chapters), material=material, prompt_language=prompt_language),
+                response_model=BookAnalysis,
+                prompt_language=prompt_language,
+                supports_json_output=llm_config.supports_json_output,
+            )
+            token_usage = completion_usage(completion)
 
-        await _sync_character_assets(
-            novel,
-            analysis.key_characters,
-            len(chapters),
-            prompt_language,
-        )
 
-        # Save the useful story result before the optional cover request.
-        novel.total_chapters = len(chapters)
-        novel.tags = analysis.book_types
-        novel.story_outline = analysis.story_outline
-        await novel.save(update_fields=["total_chapters", "tags", "story_outline", "updated_at"])
+        async def persist_analysis():
+            from services.creation_objects import project_write
+            async with project_write(novel_id):
+                await _sync_character_assets(
+                    novel, analysis.key_characters, len(chapters), prompt_language,
+                )
+                novel.total_chapters = len(chapters)
+                novel.tags = analysis.book_types
+                novel.story_outline = analysis.story_outline
+                await novel.save(update_fields=["total_chapters", "tags", "story_outline", "updated_at"])
+            return {"novel_id": novel_id}
+
+        if execution:
+            from services.creation_agent.operation_receipts import execute_step
+            await execute_step(execution.params["task_id"], "persist:story", persist_analysis, atomic=True)
+        else:
+            await persist_analysis()
         result = {
             **analysis.model_dump(),
             "chapter_count": len(chapters),
@@ -275,6 +295,8 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             "llm_config_id": llm_config.id,
             "llm_model": llm_config.model,
         }
+        if not request_params.get("include_cover", True):
+            return result
         try:
             image_config = await ai_model_config_controller.get_active(
                 AiTaskTypeEnum.reference_image.value, team_id=request_params.get("team_id"),
@@ -283,22 +305,43 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 image_config.image_model_type, clarity=None, aspect_ratio="2:3",
                 output_format="png", generation_count=1,
             )
-            images = await generate_images(
-                base_url=image_config.base_url, api_key=image_config.api_key, model=image_config.model,
-                prompt=render_cover_prompt(name=novel.name, book_types=analysis.book_types,
-                                           story_outline=analysis.story_outline, prompt_language=prompt_language),
-                api_protocol=image_config.api_protocol, resolution=cover_selection.provider_size,
-                aspect_ratio=cover_selection.aspect_ratio, output_format=cover_selection.output_format,
-                quality=cover_selection.provider_quality, count=1,
-            )
-            # Preserve actual provider usage even if saving a returned image subsequently fails.
-            result.update(image_usage={"image_count": len(images), "clarity": cover_selection.clarity},
-                          image_config_id=image_config.id, image_model=image_config.model)
-            cover = await _save_cover(images[0], novel_id)
-            novel.cover = cover
-            await novel.save(update_fields=["cover", "updated_at"])
-            result["cover"] = cover
+            if execution:
+                from schemas.agent_workflow import CompletePrompt
+                cover = await execution.generate('image', {'purpose': 'project_cover', 'name': novel.name,
+                    'outline': analysis.story_outline, 'aspect_ratio': '2:3'}, CompletePrompt)
+                cover_prompt = cover.prompt
+            else:
+                cover_prompt = render_cover_prompt(name=novel.name, book_types=analysis.book_types,
+                    story_outline=analysis.story_outline, prompt_language=prompt_language)
+            async def generate_cover():
+                if execution:
+                    await execution.before_request()
+                images = await generate_images(
+                    base_url=image_config.base_url, api_key=image_config.api_key, model=image_config.model,
+                    prompt=cover_prompt,
+                    api_protocol=image_config.api_protocol, resolution=cover_selection.provider_size,
+                    aspect_ratio=cover_selection.aspect_ratio, output_format=cover_selection.output_format,
+                    quality=cover_selection.provider_quality, count=1,
+                )
+                # Preserve actual provider usage even if saving a returned image subsequently fails.
+                result.update(image_usage={"image_count": len(images), "clarity": cover_selection.clarity},
+                              image_config_id=image_config.id, image_model=image_config.model)
+                cover = await _save_cover(images[0], novel_id)
+                novel.cover = cover
+                await novel.save(update_fields=["cover", "updated_at"])
+                result["cover"] = cover
+                return {key: result[key] for key in ('cover', 'image_usage', 'image_config_id', 'image_model') if key in result}
+            if execution:
+                from services.creation_agent.operation_receipts import execute_step
+                result.update(await execute_step(execution.params['task_id'], 'media:cover', generate_cover, external=True))
+            else:
+                await generate_cover()
         except Exception as error:
+            if execution:
+                from models.agent_operation import AgentOperation
+                if await AgentOperation.filter(task_id=execution.params['task_id'], external=True, state='uncertain').exists():
+                    error.partial_result = result
+                    raise
             logger.warning("Optional project cover failed: %s", type(error).__name__)
             result["cover_warning"] = "故事分析已完成，封面暂未生成。可以继续提取资产和制作分镜；请在模型设置中检查图片服务后再试。"
         return result
