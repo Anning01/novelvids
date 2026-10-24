@@ -1,7 +1,6 @@
-"""Active skills and frozen historical resources have separate maintenance paths."""
+"""The single skill pack is the only source of creative instructions."""
 
 import json
-import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -17,21 +16,13 @@ from services.project_analysis.handler import _build_analysis_material
 from services.remake.pipeline import RemakeDecompositionPipeline
 
 
-def test_legacy_templates_remain_frozen_and_active_locales_only_hold_labels():
+def test_old_creative_templates_are_removed_and_only_ui_locales_remain():
     root = Path(__file__).parents[2] / "prompts"
-    digest = hashlib.sha256()
-    for path in sorted((root / "legacy" / "templates").rglob("*.*")):
-        digest.update(str(path.relative_to(root / "legacy" / "templates")).encode())
-        digest.update(path.read_bytes())
-    assert digest.hexdigest() == "1db5a663ceb61f580c36db8529a9f3f2ed80d872c76904abe8446a083ce8025d"
+    assert not (root / "legacy").exists()
     assert not (root / "templates").exists()
-    from prompts.catalog import catalog
-
+    assert set((root / "skills").glob("en/*")) == set()
     for language in ("zh", "en"):
-        assert {path.name for path in (root / "locales" / language).iterdir()} == {
-            "labels.json"
-        }
-    assert catalog("labels.json", "zh").keys() == catalog("labels.json", "en").keys()
+        assert {p.name for p in (root / "locales" / language).iterdir()} == {"labels.json", "strategies.json"}
 
 
 @pytest.fixture
@@ -59,11 +50,7 @@ def test_style_options_follow_the_single_skill_resource(tmp_path, monkeypatch):
     assert validate_project_config({"style_key": "new-style"}) == {"style_key": "new-style"}
 
 
-def test_skill_checkpoint_contains_only_evidence(skill_execution, monkeypatch):
-    def forbidden(*args, **kwargs):
-        raise AssertionError("New checkpoint read a legacy bilingual instruction")
-
-    monkeypatch.setattr("prompts.creation_agent.text", forbidden)
+def test_skill_checkpoint_contains_only_evidence(skill_execution):
     budget = ContextBudget(SimpleNamespace())
     budget._remember_evidence(
         [ModelRequest(parts=[UserPromptPart("Keep Alex Chen's name.")])], None
@@ -75,16 +62,12 @@ def test_skill_checkpoint_contains_only_evidence(skill_execution, monkeypatch):
 
 @pytest.mark.parametrize("with_chapters", [False, True])
 def test_skill_manuscript_sampling_uses_facts_instead_of_templates(
-    with_chapters, monkeypatch
+    with_chapters
 ):
-    def forbidden(*args, **kwargs):
-        raise AssertionError("New manuscript sampling read a legacy template")
-
-    monkeypatch.setattr("services.project_analysis.handler.prompt_text", forbidden)
     novel = SimpleNamespace(content="Original manuscript. " * 4000)
     chapters = [SimpleNamespace(number=1, name="Chapter 1: Arrival", content=novel.content)]
     result = _build_analysis_material(
-        novel, chapters if with_chapters else [], "en", facts_only=True
+        novel, chapters if with_chapters else [], "en"
     )
     payload = json.loads(result)
     assert "Original manuscript." in str(payload)

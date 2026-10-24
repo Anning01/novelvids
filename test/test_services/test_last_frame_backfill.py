@@ -31,7 +31,8 @@ async def test_旧尾帧引用启动时补齐_prompt_且重复执行幂等():
     reference = scene.metadata["video_reference_media"][0]
     mention = reference_mention_syntax("image", reference["url"])
     assert reference["mention_url"] == reference["url"]
-    assert f"{mention} 作为本镜头首帧" in scene.prompt
+    import json
+    assert json.loads(scene.prompt.split("\n", 1)[0]) == {"first_frame_reference": mention}
     assert scene.prompt.endswith("人物继续前行")
 
     assert await backfill_last_frame_continuity() == {"scanned": 1, "updated": 0}

@@ -20,12 +20,6 @@ from controllers.novel import novel_controller
 from models.asset import Asset
 from models.chapter import Chapter
 from models.novel import Novel
-from prompts.extraction import (
-    SINGLE_CHARACTER_TRAIT_LABELS,
-    ensure_ordered_trait_labels,
-)
-from prompts.reference import render_default_asset_prompt
-from prompts.legacy.catalog import text as prompt_text
 from prompts.project_analysis import render_analysis_messages, render_cover_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
@@ -56,16 +50,9 @@ class KeyCharacter(BaseModel):
     @field_validator("base_traits")
     @classmethod
     def validate_base_traits(cls, value: str) -> str:
-        from utils.prompt_language import skill_workflow
-        if skill_workflow.get():
-            if not value.strip():
-                raise ValueError("Visual prompt must not be empty")
-            return value
-        return ensure_ordered_trait_labels(
-            value,
-            SINGLE_CHARACTER_TRAIT_LABELS,
-            "关键人物视觉描述",
-        )
+        if not value.strip():
+            raise ValueError("Visual prompt must not be empty")
+        return value
 
 
 class BookAnalysis(BaseModel):
@@ -75,7 +62,7 @@ class BookAnalysis(BaseModel):
 
 
 def _build_analysis_material(
-    novel: Novel, chapters: list[Chapter], language: str = "zh", *, facts_only: bool = False
+    novel: Novel, chapters: list[Chapter], language: str = "zh"
 ) -> str:
     """优先使用完整书稿；超长时按章节均匀取样，避免只分析故事开头。"""
     content = (novel.content or "").strip()
@@ -85,9 +72,7 @@ def _build_analysis_material(
     if not chapters:
         head = content[: MAX_ANALYSIS_TEXT_LENGTH // 2]
         tail = content[-MAX_ANALYSIS_TEXT_LENGTH // 2 :]
-        if facts_only:
-            return json.dumps({"head": head, "tail": tail}, ensure_ascii=False)
-        return prompt_text("analysis_head_tail", language, head=head, tail=tail)
+        return json.dumps({"head": head, "tail": tail}, ensure_ascii=False)
 
     sample_count = min(len(chapters), 24)
     if sample_count == 1:
@@ -111,14 +96,8 @@ def _build_analysis_material(
             first = allowance * 2 // 3
             chapter_text = f"{chapter_text[:first]}\n……\n{chapter_text[-(allowance - first):]}"
         chapter_title = strip_chapter_ordinal(chapter.name)
-        if facts_only:
-            block = json.dumps({"chapter_number": chapter.number, "title": chapter_title,
-                                "content": chapter_text}, ensure_ascii=False)
-        else:
-            heading = prompt_text("chapter_heading", language, number=chapter.number)
-            if chapter_title:
-                heading = f"{heading}：{chapter_title}"
-            block = f"【{heading}】\n{chapter_text}"
+        block = json.dumps({"chapter_number": chapter.number, "title": chapter_title,
+                            "content": chapter_text}, ensure_ascii=False)
         blocks.append(block)
         used += len(block)
     return "\n\n".join(blocks)
@@ -208,11 +187,7 @@ async def _sync_character_assets(
         values = {
             "aliases": character.aliases,
             "description": character.description,
-            "base_traits": render_default_asset_prompt(
-                asset_type="person",
-                visual_traits=character.base_traits,
-                prompt_language=prompt_language,
-            ),
+            "base_traits": character.base_traits,
             "is_global": False,
             "source_chapters": chapter_numbers,
             # 项目分析只建立全书人物档案，不代表某一章的增量提取版本。
@@ -255,7 +230,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         execution = current_execution.get()
         if execution:
             llm_config, _ = await require_agent(request_params.get('team_id'), request_params['assistant_model_config_id'])
-            material = _build_analysis_material(novel, chapters, prompt_language, facts_only=True)
+            material = _build_analysis_material(novel, chapters, prompt_language)
             analysis = await execution.generate('story', {'name': novel.name, 'manuscript': material,
                 'chapter_numbers': [c.number for c in chapters]}, BookAnalysis)
             token_usage = {}

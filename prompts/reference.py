@@ -1,19 +1,11 @@
-"""Pure renderers for default asset image prompts stored in the database."""
-
-from utils.prompt_language import normalize_prompt_language
-from prompts.legacy.catalog import template, text
+"""Recognize historical reference-sheet formats; stored prompts remain authoritative."""
 
 
 CHARACTER_TURNAROUND = "character_turnaround"
 GROUP_PORTRAIT = "group_portrait"
-REFERENCE_OUTPUT_GUARD_ZH = text("reference_output_guard", "zh")
-REFERENCE_OUTPUT_GUARD_EN = text("reference_output_guard", "en")
+REFERENCE_OUTPUT_GUARD_ZH = "禁止生成任何文字、标签、Logo 或水印。"
+REFERENCE_OUTPUT_GUARD_EN = "Do not generate text, labels, logos, or watermarks."
 
-SINGLE_CHARACTER_PROMPT_PREFIX_ZH = template(
-    "reference_character_legacy_prefix.md", "zh"
-)
-
-SCENE_PROMPT_PREFIX_ZH = template("reference_scene_legacy_prefix.md", "zh")
 
 REFERENCE_PROMPT_MARKERS_BY_KIND = {
     "person": (
@@ -39,47 +31,3 @@ def is_complete_reference_prompt(value: str) -> bool:
     """Return whether a value already contains an explicit image task."""
     text = value.strip()
     return any(text.startswith(marker) for marker in COMPLETE_REFERENCE_PROMPT_MARKERS)
-
-
-def render_default_asset_prompt(
-    *,
-    asset_type: str,
-    visual_traits: str,
-    prompt_language: str = "en",
-    aspect_ratio: str = "16:9",
-    reference_layout: str = CHARACTER_TURNAROUND,
-) -> str:
-    """Render the editable default prompt that will be persisted with an asset.
-
-    This renderer is intentionally used before persistence. Image generation must
-    submit the stored prompt verbatim so a user's later edits remain authoritative.
-    """
-    from utils.prompt_language import skill_workflow
-    if skill_workflow.get():
-        return visual_traits
-    details = visual_traits.strip()
-    if not details or is_complete_reference_prompt(details):
-        return details
-
-    language = normalize_prompt_language(prompt_language)
-    kind = asset_type.strip().lower()
-    ratio = aspect_ratio.strip() or "16:9"
-    layout = reference_layout.strip().lower()
-
-    if kind == "person" and layout in {
-        "group",
-        "ensemble",
-        "group_portrait",
-        "group-portrait",
-    }:
-        return details
-    names = {
-        "person": "reference_character.md",
-        "scene": "reference_scene.md",
-        "item": "reference_item.md",
-        "object": "reference_item.md",
-        "prop": "reference_item.md",
-    }
-    return template(names.get(kind, "reference_other.md"), language).format(
-        details=details, ratio=ratio, output_guard=text("reference_output_guard", language)
-    )

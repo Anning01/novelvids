@@ -20,7 +20,6 @@ from pydantic_ai.settings import ModelSettings
 
 from prompts.creation_agent import render_creation_instructions, render_creation_request
 from services.language import task_language
-from prompts.schema import localized_schema, schema_annotation
 from schemas.creation_agent import AgentConfiguration, ImagePromptEdit, StoryboardPromptEdit, CreationReply, AgentTarget
 from schemas.creation_objects import CreationObjectQuery, CreationChangeSet, CreationPromptPatch
 from models.creation_agent import AgentMessage, PromptChange
@@ -176,24 +175,7 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
             ) if definition.name == 'apply_creation_changes' else definition
             for definition in prepared
         ]
-    from services.creation_agent.skill_execution import current_execution
-    execution = current_execution.get()
-    if execution:
-        return prepared
-    return localize_tool_definitions(prepared, task_language.get() or "zh")
-
-
-def localize_tool_definitions(definitions, language: str):
-    return [replace(definition, description=schema_annotation(definition.description, language),
-                    parameters_json_schema=localized_schema(definition.parameters_json_schema, language))
-            for definition in definitions]
-
-
-async def prepare_creation_output_tools(ctx, definitions):
-    from services.creation_agent.skill_execution import current_execution
-    if current_execution.get():
-        return definitions
-    return localize_tool_definitions(definitions, task_language.get() or "zh")
+    return prepared
 
 
 def creation_instructions(ctx: RunContext[CreationAgentDeps]):
@@ -214,7 +196,6 @@ creation_agent = Agent(
     deps_type=CreationAgentDeps,
     instructions=creation_instructions,
     prepare_tools=prepare_creation_tools,
-    prepare_output_tools=prepare_creation_output_tools,
     name="creation_assistant",
     output_type=[str, CreationReply],
     retries=2,

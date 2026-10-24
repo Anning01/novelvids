@@ -1,25 +1,13 @@
 """Shared visual contracts; retrieval is type-specific, rendering has no side effects."""
 
-import hashlib
-import json
 import re
 
 from prompts.labels import prompt_label
-from prompts.language import output_language_rule
-from prompts.extraction import (
-    GROUP_PORTRAIT_TRAIT_LABELS,
-    PLACEHOLDER_TRAIT_VALUES,
-    SINGLE_CHARACTER_TRAIT_LABELS,
-)
 from prompts.reference import (
     CHARACTER_TURNAROUND,
-    GROUP_PORTRAIT,
     REFERENCE_PROMPT_MARKERS_BY_KIND,
-    render_default_asset_prompt,
 )
-from prompts.storyboard import STORYBOARD_LANGUAGE_INSTRUCTIONS
 from prompts.storyboard_strategies import StoryboardStrategyPrompt
-from utils.prompt_language import normalize_prompt_language
 
 
 ASSET_PROMPT_KINDS = {1: "person", 2: "scene", 3: "item"}
@@ -42,91 +30,15 @@ def visual_contract(
     layout: str = CHARACTER_TURNAROUND,
     strategy: StoryboardStrategyPrompt | None = None,
 ) -> dict:
-    from prompts.legacy.catalog import template, text
-    from prompts.extraction import visual_rules, trait_labels
-    from prompts.storyboard_strategies import localized_strategy
+    from prompts.skill_pack import SkillSnapshot, snapshot_skills, instructions
 
-    language = normalize_prompt_language(language)
-    if kind == "storyboard":
-        instructions = template("storyboard_system.md", language).format(
-            language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS[language]
-            + "\n"
-            + output_language_rule(language)
-        )
-        if strategy:
-            localized = localized_strategy(strategy, language)
-            instructions += (
-                "\n" + localized.generation_rules + "\n" + localized.prohibitions
-            )
-        labels = [
-            prompt_label("【" + label + "】", language)
-            for label in STORYBOARD_REQUIRED_SECTIONS
-        ]
-        rendering = text("visual_rendering", language)
-    else:
-        instructions = visual_rules(
-            "group" if kind == "person" and layout == GROUP_PORTRAIT else kind, language
-        )
-        labels = (
-            list(trait_labels(layout == GROUP_PORTRAIT, language))
-            if kind == "person"
-            else []
-        )
-        rendering = render_default_asset_prompt(
-            asset_type=kind,
-            visual_traits=text("visual_placeholder", language),
-            prompt_language=language,
-            aspect_ratio=aspect_ratio,
-            reference_layout=layout,
-        )
-    body = {
-        "kind": kind,
-        "language": language,
-        "aspect_ratio": aspect_ratio,
-        "reference_layout": layout,
-        "required_fields": labels,
-        "writing_rules": instructions,
-        "rendering": rendering,
-        "submission": text("visual_submission", language),
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    return {
+        "kind": kind, "language": language, "aspect_ratio": aspect_ratio,
+        "reference_layout": layout, "required_fields": [],
+        "writing_rules": instructions(snapshot, language, "storyboard" if kind == "storyboard" else "image"),
+        "revision": snapshot.revision,
     }
-    body["revision"] = hashlib.sha256(
-        json.dumps(body, ensure_ascii=False, sort_keys=True).encode()
-    ).hexdigest()[:16]
-    return body
-
-
-def validate_person_visual_traits(
-    text: str, layout: str = CHARACTER_TURNAROUND
-) -> None:
-    labels = (
-        GROUP_PORTRAIT_TRAIT_LABELS
-        if layout == GROUP_PORTRAIT
-        else SINGLE_CHARACTER_TRAIT_LABELS
-    )
-    from prompts.extraction import matching_trait_labels
-
-    labels = matching_trait_labels(text, labels)
-    positions = []
-    # A short prose sentence mentioning all labels is not a fourteen-row design.
-    for label in labels:
-        pattern = (
-            r"(?m)^[ \t]*(?:[-*][ \t]+)?\*{0,2}"
-            + re.escape(label)
-            + r"\*{0,2}[ \t]*[:：][ \t]*([^\n]*)"
-        )
-        matches = list(re.finditer(pattern, text))
-        values = [match.group(1) for match in matches]
-        if (
-            len(values) != 1
-            or not values[0].strip(" *_`。.;；,，")
-            or values[0].strip(" *_`。.;；,，").casefold() in PLACEHOLDER_TRAIT_VALUES
-        ):
-            raise ValueError(
-                f"人物视觉描述须包含{len(labels)}项字段；「{label}」必须出现一次且内容具体，请先读取 get_creation_prompt_rules 补齐规范"
-            )
-        positions.append(matches[0].start())
-    if positions != sorted(positions):
-        raise ValueError(f"人物视觉描述必须按规范顺序包含{len(labels)}项固定字段")
 
 
 def validate_storyboard_sections(text: str, previous: str | None = None) -> None:

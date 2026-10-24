@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from prompts.legacy.catalog import text
+import json
+from prompts.skill_pack import render_voice_bindings
 
 
 LAST_FRAME_CONTINUITY_TITLE = "【首帧衔接】"
 _LAST_FRAME_CONTINUITY_SECTION = re.compile(
-    rf"\A(?:{re.escape(LAST_FRAME_CONTINUITY_TITLE)}|\[First-frame continuity\])\n[^\n]*(?:\n+|\Z)"
+    rf'\A(?:(?:{re.escape(LAST_FRAME_CONTINUITY_TITLE)}|\[First-frame continuity\])\n[^\n]*|\{{"first_frame_reference": [^\n]*\}})(?:\n+|\Z)'
 )
 
 
@@ -19,7 +20,7 @@ def render_last_frame_continuity_instruction(
     mention = reference_mention.strip()
     if not mention:
         return ""
-    return text("continuity", language, mention=mention)
+    return json.dumps({"first_frame_reference": mention}, ensure_ascii=False)
 
 
 def inject_last_frame_continuity_prompt(
@@ -35,13 +36,4 @@ def inject_last_frame_continuity_prompt(
 
 def render_voice_reference_instruction(bindings: list[dict], *, language: str) -> str:
     """Bindings use the final deduplicated audio order, starting at one."""
-    lines = [text("voice_intro", language)] if bindings else []
-    for binding in bindings:
-        names = ", ".join(binding["subjects"])
-        if binding["kind"] == "narrator":
-            names = text("narrator", language)
-        # Provider reference markers are protocol tokens, not prose.
-        marker = f"[音频{binding['index']}]"
-        lines.append(text("voice_line", language, names=names, marker=marker))
-    lines.append(text("voice_rule", language))
-    return "\n".join(lines)
+    return render_voice_bindings(bindings)

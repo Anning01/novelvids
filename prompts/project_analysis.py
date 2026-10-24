@@ -1,38 +1,19 @@
-"""Pure, locale-specific story analysis and cover renderers."""
+"""Story and cover instructions share the Chinese skill pack."""
 
-from prompts.legacy.catalog import template, text
-from prompts.extraction import visual_rules
-
-ANALYSIS_SYSTEM_PROMPT = template("analysis_system.md", "zh")
+from prompts.skill_pack import render_skill, task_facts
 
 
-def render_analysis_messages(
-    *, name: str, chapter_count: int, material: str, prompt_language: str
-) -> list[dict[str, str]]:
+def render_analysis_messages(*, name, chapter_count, material, prompt_language):
     return [
-        {
-            "role": "system",
-            "content": template("analysis_system.md", prompt_language).format(
-                prompt_language_name=text("language_name", prompt_language),
-                single_character_visual_rules=visual_rules("person", prompt_language),
-            ),
-        },
-        {
-            "role": "user",
-            "content": text(
-                "analysis_user",
-                prompt_language,
-                name=name,
-                chapter_count=chapter_count,
-                material=material,
-            ),
-        },
+        {"role": "system", "content": render_skill("story", prompt_language)},
+        {"role": "user", "content": task_facts({
+            "name": name, "chapter_count": chapter_count, "manuscript": material,
+        })},
     ]
 
 
-def render_cover_prompt(
-    *, name: str, book_types: list[str], story_outline: str, prompt_language: str = "en"
-) -> str:
-    return template("cover.md", prompt_language).format(
-        name=name, genres=", ".join(book_types), story_outline=story_outline
-    )
+def render_cover_prompt(*, name, book_types, story_outline, prompt_language="en"):
+    return render_skill("image", prompt_language) + "\n" + task_facts({
+        "purpose": "project_cover", "name": name, "genres": book_types,
+        "outline": story_outline, "aspect_ratio": "2:3",
+    })

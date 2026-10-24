@@ -49,16 +49,11 @@ STRUCTURED_PERSON_TRAITS = """**时代基底**: modern
 **年龄**: young adult"""
 
 
-def test_project_analysis_rejects_freeform_character_visual_traits():
-    with pytest.raises(ValidationError, match="14项"):
-        KeyCharacter(
-            name="林舟",
-            aliases=[],
-            role="主角",
-            description="执着寻找真相的青年。",
-            base_traits="young Chinese man, black hair, travel cloak",
-            chapter_numbers=[1, 2],
-        )
+def test_project_analysis_accepts_prose_and_rejects_empty_visual_prompt():
+    value = "young Chinese man, black hair, travel cloak"
+    assert KeyCharacter(name="林舟", aliases=[], role="主角", description="寻找真相", base_traits=value, chapter_numbers=[1, 2]).base_traits == value
+    with pytest.raises(ValidationError, match="must not be empty"):
+        KeyCharacter(name="林舟", role="主角", description="寻找真相", base_traits="  ")
 
 
 @pytest.mark.asyncio
@@ -135,18 +130,17 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
     assert character.is_global is False
     assert character.source_chapters == [1, 2]
     assert character.last_updated_chapter == 0
-    assert character.base_traits.startswith(
-        "Task: Create an upper-body, front-facing, eye-level close-up"
-    )
+    assert character.base_traits == STRUCTURED_PERSON_TRAITS
     assert STRUCTURED_PERSON_TRAITS in character.base_traits
     assert character.metadata["role"] == "主角"
     assert character.metadata["reference_layout"] == "character_turnaround"
 
     messages = llm_client.create.await_args.kwargs["messages"]
     system_prompt = messages[0]["content"]
-    assert "Do not merge, omit or add fields" in system_prompt
-    from prompts.extraction import trait_labels
-    assert all(label in system_prompt for label in trait_labels(False, 'en'))
+    from prompts.skill_pack import read_skill
+    assert read_skill("story") in system_prompt
+    assert read_skill("structured") in system_prompt
+    assert "language=en" in system_prompt
 
     await novel.refresh_from_db()
     assert novel.cover == "/media/covers/test.png"
@@ -294,11 +288,12 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
 
 
 def test_project_analysis_templates_preserve_material_and_requested_language():
+    import json
     from prompts.project_analysis import render_analysis_messages
-    for language, label in [('zh', '中文'), ('en', 'English')]:
-        messages = render_analysis_messages(name='雨夜来信', chapter_count=2, material='第一章 车站\n第二章 咖啡馆', prompt_language=language)
-        assert [message['role'] for message in messages] == ['system', 'user']
-        assert label in messages[0]['content']
-        assert ('所有新生成的描述、题材标签、大纲、设定和 base_traits' if language == 'zh' else 'Write new descriptions, genre tags, outline, settings and base_traits') in messages[0]['content']
-        assert ('共 2 章' if language == 'zh' else 'Chapters: 2') in messages[1]['content']
-        assert '第一章 车站\n第二章 咖啡馆' in messages[1]['content']
+    from prompts.skill_pack import read_skill
+    for language in ("zh", "en"):
+        messages = render_analysis_messages(name="雨夜来信", chapter_count=2, material="第一章 车站\n第二章 咖啡馆", prompt_language=language)
+        assert messages[0]["content"].endswith(read_skill("story"))
+        assert "language=" + language in messages[0]["content"]
+        facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
+        assert facts == {"name": "雨夜来信", "chapter_count": 2, "manuscript": "第一章 车站\n第二章 咖啡馆"}

@@ -29,11 +29,6 @@ from test.test_services.test_prompt_language import _shot
 async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
     monkeypatch, language, tmp_path
 ):
-    from prompts.legacy import catalog as legacy
-
-    legacy.template.cache_clear()
-    legacy.catalog.cache_clear()
-    monkeypatch.setattr(legacy, "_ROOT", tmp_path / "unavailable-legacy-templates")
     novel, first, _ = await enabled_project()
     second = await Chapter.create(
         novel=novel,

@@ -5,8 +5,7 @@ def build_sora_compatible_prompt(data: dict, prompt_language: str = "en") -> str
     """Return the user-editable database prompt without hidden augmentation."""
     del prompt_language  # Kept in the signature for queued-task compatibility.
     value = data.get("base_traits")
-    from utils.prompt_language import skill_workflow
-    return "" if value is None else str(value) if skill_workflow.get() else str(value).strip()
+    return "" if value is None else str(value)
 
 
 async def generate_for_sora_consistency(

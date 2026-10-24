@@ -14,12 +14,8 @@ from models.asset import Asset
 from models.chapter import Chapter
 from models.config import AiModelConfig, GeneralConfig
 from models.novel import Novel
-from prompts.extraction import trait_labels
-from prompts.extraction import (
-    GROUP_PORTRAIT_TRAIT_LABELS,
-    SINGLE_CHARACTER_TRAIT_LABELS,
-)
-from prompts.reference import render_default_asset_prompt
+from test.visual_fields import trait_labels
+from test.visual_fields import GROUP_PORTRAIT_TRAIT_LABELS, SINGLE_CHARACTER_TRAIT_LABELS
 from prompts.storyboard import format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig
 from services.extraction.context import (
@@ -70,141 +66,32 @@ def _shot() -> SoraScenePromptConfig:
     ("prompt_language", "language_name"),
     [("zh", "简体中文"), ("en", "English")],
 )
-def test_extraction_system_rules_use_locale_specific_labels(
+def test_extraction_rules_use_one_skill_and_explicit_output_language(
     prompt_language: str,
     language_name: str,
 ):
-    context = ExtractionContext(
-        novel=NovelExtractionMetadata(
-            name="语言测试",
-            author=None,
-            description=None,
-            tags=(),
-            story_outline=None,
-            project_type=None,
-            project_setting=None,
-        ),
-        assets=(),
-        chapter=ChapterExtractionInput(
-            id=1,
-            number=1,
-            name="起点",
-            content="唯一章节事实。",
-        ),
-    )
-
+    from prompts.skill_pack import read_skill
+    context = ExtractionContext(novel=NovelExtractionMetadata(name="语言测试", author=None,
+        description=None, tags=(), story_outline=None, project_type=None, project_setting=None), assets=(),
+        chapter=ChapterExtractionInput(id=1, number=1, name="起点", content="唯一章节事实。"))
     messages = ExtractionMessageBuilder().build(context, prompt_language)
-    system_prompt = messages[0]["content"]
-
-    if prompt_language == "zh":
-        assert f"目标提示词语言：{language_name}" in system_prompt
-        assert f"base_traits 必须使用{language_name}" in system_prompt
-    else:
-        assert "Target language: English" in system_prompt
-    assert all(label in system_prompt for label in trait_labels(False, prompt_language))
-    assert all(label in system_prompt for label in trait_labels(True, prompt_language))
-    assert "唯一章节事实。" not in system_prompt
-    assert "严格返回以下 JSON" not in system_prompt
-    assert "```json" not in system_prompt
-    assert "必须返回空数组" not in system_prompt
-    assert "为空也必须返回空数组" not in system_prompt
+    assert read_skill("assets") in messages[0]["content"]
+    assert "language=" + prompt_language in messages[0]["content"]
+    assert "唯一章节事实。" not in messages[0]["content"]
+    assert json.loads(messages[-1]["content"])["content"] == "唯一章节事实。"
 
 
-def test_default_reference_prompt_supports_chinese_and_english():
-    chinese = render_default_asset_prompt(
-        asset_type="person",
-        visual_traits="青年，黑发，深色斗篷",
-        prompt_language="zh",
-    )
-    english = render_default_asset_prompt(
-        asset_type="person",
-        visual_traits="young man, black hair, dark cloak",
-        prompt_language="en",
-    )
-
-    assert "上半身正面平视特写" in chinese
-    assert "全身三视图" in chinese
-    assert "正面全身、侧面全身、背面全身" in chinese
-    assert "upper-body, front-facing, eye-level close-up" in english
-    assert "full-body three-view turnaround" in english
-    assert "front, side, and back full-body views" in english
-    assert "Anime" not in english
-    assert "二次元" not in chinese
-    assert "水印" in chinese
-    assert "watermarks" in english
+def test_reference_generation_preserves_prompt_language_verbatim():
+    for language, value in [("zh", "青年，黑发，深色斗篷"), ("en", "young man, black hair, dark cloak")]:
+        assert build_sora_compatible_prompt({"base_traits": value}, language) == value
 
 
-def test_default_reference_prompt_supports_group_scene_and_prop_layouts():
-    group_data = {
-        "type": "person",
-        "canonical_name": "调查小队",
-        "base_traits": "李舟居中，林遥站在左侧，顾衡站在右侧",
-        "description": "三人是长期协作的伙伴",
-        "metadata": {"reference_layout": "group_portrait"},
-    }
-    scene_data = {
-        "type": "scene",
-        "canonical_name": "石桥",
-        "base_traits": "青石桥面，薄雾，河岸柳树",
-        "description": "清晨，无人",
-    }
-    prop_data = {
-        "type": "item",
-        "canonical_name": "铜制罗盘",
-        "base_traits": "氧化铜外壳，黑色刻度盘",
-        "description": "边缘有一道细小裂纹",
-    }
-
-    chinese_group = render_default_asset_prompt(
-        asset_type="person",
-        visual_traits=group_data["base_traits"],
-        prompt_language="zh",
-        reference_layout="group_portrait",
-    )
-    english_group = render_default_asset_prompt(
-        asset_type="person",
-        visual_traits=group_data["base_traits"],
-        prompt_language="en",
-        reference_layout="group_portrait",
-    )
-    chinese_scene = render_default_asset_prompt(
-        asset_type="scene",
-        visual_traits=scene_data["base_traits"],
-        prompt_language="zh",
-    )
-    english_scene = render_default_asset_prompt(
-        asset_type="scene",
-        visual_traits=scene_data["base_traits"],
-        prompt_language="en",
-    )
-    chinese_prop = render_default_asset_prompt(
-        asset_type="item",
-        visual_traits=prop_data["base_traits"],
-        prompt_language="zh",
-    )
-    english_prop = render_default_asset_prompt(
-        asset_type="item",
-        visual_traits=prop_data["base_traits"],
-        prompt_language="en",
-    )
-
-    assert chinese_group == group_data["base_traits"]
-    assert english_group == group_data["base_traits"]
-    assert group_data["description"] not in chinese_group
-
-    assert chinese_scene.startswith("生成四宫格画面，展示同一个场景中的四个不同视角")
-    assert all(view in chinese_scene for view in ("正视图", "俯视图", "背视图", "侧视图"))
-    assert "four-panel environment reference sheet" in english_scene
-    assert "high-angle aerial view" in english_scene
-    assert scene_data["description"] not in chinese_scene
-    assert "水印" in chinese_scene
-    assert "watermarks" in english_scene
-
-    assert chinese_prop.startswith("【道具描述】氧化铜外壳，黑色刻度盘")
-    assert english_prop.startswith("[Prop description] 氧化铜外壳，黑色刻度盘")
-    assert "水印" in chinese_prop
-    assert "watermarks" in english_prop
-    assert prop_data["description"] not in chinese_prop
+def test_reference_generation_does_not_inject_type_or_layout_templates():
+    for kind, layout, value in [("person", "group_portrait", "三人居中合影"),
+                                ("scene", "character_turnaround", "青石桥面，薄雾"),
+                                ("item", "character_turnaround", "氧化铜外壳")]:
+        for language in ("zh", "en"):
+            assert build_sora_compatible_prompt({"base_traits": value, "reference_layout": layout}, language) == value
 
 
 def test_reference_prompt_keeps_a_complete_manual_override_verbatim():
@@ -233,15 +120,9 @@ def test_reference_generation_uses_custom_database_prompt_verbatim():
     ) == custom_prompt
 
 
-def test_default_reference_prompt_uses_requested_aspect_ratio():
-    prompt = render_default_asset_prompt(
-        asset_type="scene",
-        visual_traits="山谷与河流",
-        aspect_ratio="21:9",
-        prompt_language="zh",
-    )
-
-    assert "21:9" in prompt
+def test_reference_generation_does_not_rewrite_saved_aspect_ratio():
+    value = "画幅已写入完整提示词的山谷与河流"
+    assert build_sora_compatible_prompt({"base_traits": value, "aspect_ratio": "21:9"}, "zh") == value
 
 
 def test_storyboard_prompt_uses_professional_chinese_structure():
@@ -376,40 +257,25 @@ async def test_asset_extractor_does_not_swallow_cancelled_error():
             await extractor.extract([])
 
 
-def test_person_visual_traits_reject_placeholder_values():
-    placeholder_traits = """时代基底: 现代
-国家/朝代: 中国
-人种: 东亚人
-类型基底: 写实
-脸型: None
-发型: 无
-耳饰: 未提及
-身材: 未知
-头身比: 无/None
-上身着装: 无法确认
-下身着装: unknown
-鞋子: not mentioned
-性别: 男性
-年龄: 青年"""
+def test_new_character_requires_nonempty_visual_prompt_without_fixed_rows():
+    from utils.prompt_language import skill_workflow
 
-    with pytest.raises(ValidationError, match="不得使用占位值"):
-        Person(
-            name="宫平",
-            description="小说人物",
-            base_traits=placeholder_traits,
-        )
+    assert Person(name="宫平", base_traits="短发青年，深色斗篷").base_traits == "短发青年，深色斗篷"
+    token = skill_workflow.set(True)
+    try:
+        for empty in ("", "  "):
+            with pytest.raises(ValidationError, match="must not be empty"):
+                Person(name="宫平", base_traits=empty)
+    finally:
+        skill_workflow.reset(token)
 
 
 def test_project_cover_prompt_supports_both_languages():
-    novel = SimpleNamespace(name="山海归途")
-    analysis = BookAnalysis(
-        book_types=["奇幻"],
-        story_outline="一名旅人寻找归途。",
-        key_characters=[],
-    )
-
-    assert render_cover_prompt(name=novel.name, book_types=analysis.book_types, story_outline=analysis.story_outline, prompt_language="zh").startswith("为小说")
-    assert render_cover_prompt(name=novel.name, book_types=analysis.book_types, story_outline=analysis.story_outline, prompt_language="en").startswith("Create a vertical")
+    from prompts.skill_pack import read_skill
+    for language in ("zh", "en"):
+        value = render_cover_prompt(name="山海归途", book_types=["奇幻"], story_outline="旅人寻找归途。", prompt_language=language)
+        assert read_skill("image") in value and "language=" + language in value
+        assert "山海归途" in value and "旅人寻找归途。" in value
 
 
 @pytest.mark.asyncio

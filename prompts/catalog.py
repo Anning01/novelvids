@@ -17,3 +17,7 @@ def read_resource(root: Path, name: str, language: str) -> str:
 @lru_cache(maxsize=None)
 def catalog(name: str, language: str = "zh") -> dict:
     return json.loads(read_resource(Path(__file__).with_name("locales"), name, language))
+
+
+def text(key: str, language: str = "zh") -> str:
+    return catalog("strategies.json", language)[key]

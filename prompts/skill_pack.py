@@ -20,6 +20,7 @@ FILES = {
             "editing",
             "authorization",
             "summary",
+            "structured",
         )
     },
     "styles": "styles.json",
@@ -58,6 +59,10 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
         + "\n"
         + snapshot.read(skill)
     )
+
+
+def render_skill(skill: str, language: str) -> str:
+    return instructions(SkillSnapshot.model_validate(snapshot_skills()), language, skill)
 
 
 def task_facts(value: object) -> str:

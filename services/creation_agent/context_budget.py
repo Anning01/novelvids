@@ -10,7 +10,6 @@ from pydantic_ai.messages import BinaryContent, ModelRequest, ModelMessagesTypeA
 
 from models.creation_agent import AgentContextCheckpoint
 from prompts.creation_agent import render_working_checkpoint
-from utils.prompt_language import task_language
 
 
 def encode(value) -> str:
@@ -184,12 +183,7 @@ class ContextBudget:
             self.recovery['archive_refs'].append(archive_id)
         for key in ('requests', 'outcomes', 'archive_refs'):
             self.recovery[key] = self.recovery[key][-4:]
-        from services.creation_agent.skill_execution import current_execution
-
-        self.recovery_part = UserPromptPart(render_working_checkpoint(
-            self.recovery, task_language.get() or "zh",
-            facts_only=current_execution.get() is not None,
-        ))
+        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery))
 
     def _with_recovery(self, messages):
         result = []

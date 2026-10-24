@@ -1,6 +1,7 @@
 """Language selection, immutable task snapshots and English voice contracts."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -97,10 +98,10 @@ def test_english_agent_instructions_have_no_chinese_reply_requirement(crud):
     instructions = render_creation_instructions(
         language="en", crud=crud, turn_limited=True
     )
-    assert "reply in English" in instructions
-    assert "使用简体中文" not in instructions
-    assert "只用简体中文" not in instructions
-    assert "等中文" not in instructions
+    from prompts.skill_pack import read_skill
+    assert read_skill("editing") in instructions
+    assert "任务语言 language=en" in instructions
+    assert "en 使用英文" in instructions
 
 
 def test_english_storyboard_is_editable_and_preserves_identity_and_user_text():
@@ -209,9 +210,10 @@ async def test_uploaded_english_voices_survive_across_chapters_and_variant_overr
             for item in prepared.items
             if item["type"] == "audio_url"
         ] == audio_urls
-        assert "Narrator: use [音频1]" in prepared.prompt
-        assert "Alex Reed" in prepared.prompt and "Morgan Lee" in prepared.prompt
-        assert "narration in English" in prepared.prompt
+        bindings = json.loads(prepared.prompt)["voice_bindings"]
+        assert bindings[0]["role"] == "narrator" and bindings[0]["reference"] == "[音频1]"
+        assert bindings[1] == {"subjects": ["Alex Reed"], "role": "character", "reference": "[音频2]"}
+        assert bindings[2] == {"subjects": ["Morgan Lee"], "role": "character", "reference": "[音频3]"}
 
 
 @pytest.mark.asyncio
@@ -277,8 +279,11 @@ async def test_seedance_outbound_payload_preserves_english_dialogue_and_audio_or
     body = requests[0]
     assert body["generate_audio"] is True
     assert "Stay here." in body["content"][0]["text"]
-    assert "Narrator: use [音频1]" in body["content"][0]["text"]
-    assert "Alex Reed, Morgan Lee: use [音频2]" in body["content"][0]["text"]
+    bindings = json.loads(body["content"][0]["text"].split("\n", 1)[1])["voice_bindings"]
+    assert bindings == [
+        {"subjects": ["Narrator"], "role": "narrator", "reference": "[音频1]"},
+        {"subjects": ["Alex Reed", "Morgan Lee"], "role": "character", "reference": "[音频2]"},
+    ]
     assert [
         item["audio_url"]["url"]
         for item in body["content"]
@@ -287,9 +292,10 @@ async def test_seedance_outbound_payload_preserves_english_dialogue_and_audio_or
 
 
 def test_english_video_language_is_explicit_without_uploaded_voices():
-    assert "narration in English" in render_voice_reference_instruction(
-        [], language="en"
-    )
+    from prompts.skill_pack import render_skill
+
+    assert render_voice_reference_instruction([], language="en") == ""
+    assert "language=en" in render_skill("video", "en")
 
 
 def test_english_continuity_is_idempotent_and_does_not_rewrite_dialogue():
@@ -302,7 +308,7 @@ def test_english_continuity_is_idempotent_and_does_not_rewrite_dialogue():
     second = inject_last_frame_continuity_prompt(
         first, "@{参考图片:https://example.test/two.png}", "en"
     )
-    assert second.count("[First-frame continuity]") == 1
+    assert second.count('"first_frame_reference"') == 1
     assert "one.png" not in second and "two.png" in second
     assert original in second
 

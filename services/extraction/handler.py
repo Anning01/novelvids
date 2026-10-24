@@ -10,7 +10,6 @@ from services.extraction.context import ExtractionContextLoader
 from services.extraction.extractor import AssetExtractionGatewayError, AssetExtractor
 from services.extraction.messages import ExtractionMessageBuilder
 from services.extraction.persistence import AssetUpsertService
-from services.extraction.prompt_preparation import AssetPromptPreparationService
 from utils.prompt_language import normalize_prompt_language
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ class ExtractionTaskHandler(BaseTaskHandler):
         context_loader: ExtractionContextLoader | None = None,
         message_builder: ExtractionMessageBuilder | None = None,
         upsert_service: AssetUpsertService | None = None,
-        prompt_preparer: AssetPromptPreparationService | None = None,
         budget_policy_factory: Callable[
             [int | None], ContextBudgetPolicy
         ] = ContextBudgetPolicy,
@@ -58,7 +56,6 @@ class ExtractionTaskHandler(BaseTaskHandler):
         self.context_loader = context_loader or ExtractionContextLoader()
         self.message_builder = message_builder or ExtractionMessageBuilder()
         self.upsert_service = upsert_service or AssetUpsertService()
-        self.prompt_preparer = prompt_preparer or AssetPromptPreparationService()
         self.budget_policy_factory = budget_policy_factory
         self.extractor_factory = extractor_factory
 
@@ -173,15 +170,11 @@ class ExtractionTaskHandler(BaseTaskHandler):
             formatted_message_roles,
         )
 
-        prepared_result = self.prompt_preparer.prepare(
-            result,
-            prompt_language=prompt_language,
-        )
         from services.creation_agent.skill_execution import current_execution
         from services.creation_agent.operation_receipts import execute_step
         execution = current_execution.get()
         async def persist():
             return await self.upsert_service.save_result(novel_id=novel_id,
-                chapter_number=context.chapter.number, result=prepared_result)
+                chapter_number=context.chapter.number, result=result)
         summary = await execute_step(execution.params['task_id'], 'persist:assets', persist, atomic=True) if execution else await persist()
         return {**summary, "token_usage": getattr(extractor, "last_usage", {})}

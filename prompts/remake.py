@@ -5,17 +5,8 @@
 """
 
 from typing import Any
-from prompts.legacy.catalog import template, text
-from prompts.schema import localized_schema
+from prompts.skill_pack import render_skill, task_facts
 
-
-SINGLE_CHARACTER_PROMPT_PREFIX = template("remake_character_prefix.md", "zh")
-
-SCENE_PROMPT_PREFIX = template("remake_scene_prefix.md", "zh")
-
-ASSET_PROMPT = template("remake_assets.md", "zh")
-
-PROMPT_TEMPLATE = template("remake_shots.md", "zh")
 
 ASSET_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -175,53 +166,13 @@ PROMPT_SCHEMA: dict[str, Any] = {
 }
 
 
-def render_remake_request(
-    prompt: str,
-    *,
-    context: str,
-    index: int,
-    schema: dict,
-    include_segment_metadata: bool,
-    language: str = "zh",
-) -> str:
-    import json
-
-    parts = [prompt]
-    if context:
-        parts.append(context)
-    if include_segment_metadata:
-        parts.append(text("remake_index", language, index=index))
-    parts.append(
-        text(
-            "remake_schema",
-            language,
-            schema=json.dumps(
-                localized_schema(schema, language),
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ),
-        )
-    )
-    return "\n\n".join(parts)
+def render_remake_request(prompt, *, context, index, schema, include_segment_metadata, language="zh"):
+    return prompt + "\n" + task_facts({"assets": context, "segment": index, "schema": schema})
 
 
 def render_remake_prompt(kind: str, language: str) -> str:
-    from prompts.language import output_language_rule
-
-    return (
-        template(
-            {"assets": "remake_assets.md", "shots": "remake_shots.md"}[kind], language
-        )
-        + "\n"
-        + output_language_rule(language)
-    )
+    return render_skill("remake", language)
 
 
 def render_remake_catalog(assets: list[dict], language: str) -> str:
-    import json
-
-    return text(
-        "remake_catalog",
-        language,
-        catalog=json.dumps(assets, ensure_ascii=False, separators=(",", ":")),
-    )
+    return task_facts({"assets": assets})

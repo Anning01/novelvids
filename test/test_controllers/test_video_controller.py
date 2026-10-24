@@ -405,8 +405,10 @@ async def test_生成视频_提交角色与旁白音频并添加显式映射():
         "asset://voice-narrator", "asset://voice-zhangsan",
     ]
     assert kwargs["prompt"].startswith("@张三（低声）：天亮了。")
-    assert "Narrator: use [音频1]" in kwargs["prompt"]
-    assert "张三: use [音频2]" in kwargs["prompt"]
+    import json
+    bindings = json.loads(kwargs["prompt"].split("\n\n", 1)[1])["voice_bindings"]
+    assert bindings[0] == {"subjects": ["旁白"], "role": "narrator", "reference": "[音频1]"}
+    assert bindings[1] == {"subjects": ["张三"], "role": "character", "reference": "[音频2]"}
     assert video.metadata["prompt_language"] == "en"
     assert "【音色参考】" not in kwargs["prompt"]
     assert [item["reference_id"] for item in video.metadata["voice_references"]] == [
@@ -704,8 +706,8 @@ async def test_返回尾帧_注入同章下一分镜参考图():
     assert references[1]["url"] == "https://cdn.example.com/manual.png"
     assert result.metadata["last_frame_injected_scene_id"] == next_scene.id
     mention = reference_mention_syntax("image", references[0]["url"])
-    assert next_scene.prompt.startswith("【首帧衔接】\n")
-    assert f"{mention} 作为本镜头首帧" in next_scene.prompt
+    import json
+    assert json.loads(next_scene.prompt.split("\n", 1)[0]) == {"first_frame_reference": mention}
     assert next_scene.prompt.endswith("下一镜头")
     assert result.metadata["last_frame_prompt_instruction"] in next_scene.prompt
     assert select_referenced_media(
@@ -823,7 +825,8 @@ async def test_返回尾帧_章节末镜头注入下一章首镜头():
 
     await next_scene.refresh_from_db()
     assert next_scene.metadata["video_reference_media"][0]["source_scene_id"] == scene.id
-    assert "作为本镜头首帧" in next_scene.prompt
+    import json
+    assert "first_frame_reference" in json.loads(next_scene.prompt.split("\n", 1)[0])
 
 
 @pytest.mark.asyncio
