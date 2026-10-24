@@ -69,13 +69,20 @@ class ProductionRecovery:
         while True:
             try:
                 from models.video import Video
+                from services.creation_agent.video_settlement import (
+                    retry_video_settlements,
+                )
+
+                await retry_video_settlements()
 
                 for pending in await AiTask.filter(
-                    stage__in=["billing_pending", "needs_review"]
+                    stage__in=["billing_pending", "needs_review", "review_closed"]
                 ).limit(20):
-                    if (
-                        pending.request_params.get("workflow_version")
-                        == WORKFLOW_VERSION
+                    if pending.request_params.get(
+                        "workflow_version"
+                    ) == WORKFLOW_VERSION and (
+                        pending.stage == "billing_pending"
+                        or pending.request_params.get("billing_pending")
                     ):
                         await ai_task_executor._complete(
                             pending, pending.response_data or {}

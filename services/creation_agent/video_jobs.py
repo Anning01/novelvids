@@ -61,6 +61,17 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
         }
     )
     async with creation_write(scene.chapter.novel_id) as connection:
+        from services.creation_agent.submissions import (
+            previous_submission,
+            submit_once,
+            bind_submission,
+        )
+
+        previous = await previous_submission(4, params, connection)
+        if previous:
+            return await Video.get(id=previous.request_params["video_id"]).using_db(
+                connection
+            )
         for video in (
             await Video.filter(scene_id=scene.id).using_db(connection).order_by("-id")
         ):
@@ -70,36 +81,48 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
                     raise HTTPException(
                         409, localized_message("同一请求标识不能对应不同内容")
                     )
+                await bind_submission(
+                    await AiTask.get(id=metadata["agent_run_id"]), params
+                )
                 return video
             if video.status in {1, 2, 6} and metadata.get("agent_run_id"):
+                await bind_submission(
+                    await AiTask.get(id=metadata["agent_run_id"]), params
+                )
                 return video
             if metadata.get("submission_uncertain"):
                 raise HTTPException(
                     409, localized_message("已有视频提交结果待核对，请先核对供应商任务")
                 )
-        task = await AiTask.create(
-            task_type=AiTaskTypeEnum.video.value,
-            status=6,
-            request_params=params,
-            using_db=connection,
-        )
-        video = await Video.create(
-            scene=scene,
-            model_type=get_record_model_type(config).value,
-            status=6,
-            metadata={
-                "agent_run_id": str(task.id),
-                "request_id": str(req.request_id) if req.request_id else None,
-                "video_request": params["video_request"],
-                "novel_id": scene.chapter.novel_id,
-                "model_config_id": config.id,
-                "team_id": team_id,
-                "user_id": user_id,
-            },
-            using_db=connection,
-        )
-        task.request_params = {**params, "video_id": video.id}
-        await task.save(using_db=connection, update_fields=["request_params"])
+
+        async def create(connection):
+            task = await AiTask.create(
+                task_type=AiTaskTypeEnum.video.value,
+                status=6,
+                request_params=params,
+                using_db=connection,
+            )
+            video = await Video.create(
+                scene=scene,
+                model_type=get_record_model_type(config).value,
+                status=6,
+                metadata={
+                    "agent_run_id": str(task.id),
+                    "request_id": str(req.request_id) if req.request_id else None,
+                    "video_request": params["video_request"],
+                    "novel_id": scene.chapter.novel_id,
+                    "model_config_id": config.id,
+                    "team_id": team_id,
+                    "user_id": user_id,
+                },
+                using_db=connection,
+            )
+            task.request_params = {**params, "video_id": video.id}
+            await task.save(using_db=connection, update_fields=["request_params"])
+            return task
+
+        task = await submit_once(4, params, create)
+        video = await Video.get(id=task.request_params["video_id"]).using_db(connection)
     return video
 
 

@@ -163,6 +163,7 @@ class CreationQueryResultOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    pending_production: dict | None = None
     production: list[dict] = Field(default_factory=list)
     task_id: UUID
     conversation_id: int
@@ -176,6 +177,7 @@ class AgentRunOut(BaseModel):
 
 
 class AgentMessageOut(BaseModel):
+    pending_production: dict | None = None
     production: list[dict] = Field(default_factory=list)
     id: int
     role: Literal["user", "assistant"]

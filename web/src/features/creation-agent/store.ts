@@ -1,3 +1,4 @@
+import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
 import { creationAgentToolProgressLabel } from './toolPresentation'
 
 import { tr } from '@/i18n'
@@ -33,7 +34,6 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   let epoch = 0
   let subscriptionAttempt = 0
   let identity = ''
-  let pendingRequest: { conversationId: number; input: AgentRunInput } | null = null
   const observed = new Map<number, string | null>()
 
   function disconnect() {
@@ -57,7 +57,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   function applySnapshot(run: AgentRun) {
     currentRun.value = run
     const message = messages.value.find(item => item.task_id === run.task_id && item.role === 'assistant')
-    if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [] })
+    if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
     reportChanges(run.changes)
     if (!isAgentRunning(run.status)) {
       statusText.value = run.status === 3 ? (run.usage.turn_limited ? tr('本轮处理已结束，可以继续对话') : run.changes.length ? tr('修改已保存') : tr('回复已完成'))
@@ -133,7 +133,6 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     epoch += 1
     conversationId.value = id
     currentRun.value = null
-    pendingRequest = null
     messages.value = []
     error.value = ''
     statusText.value = ''
@@ -164,7 +163,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     epoch += 1
     const revision = epoch
     if (identity !== nextIdentity || projectId.value !== novelId) {
-      conversationId.value = null; currentRun.value = null; messages.value = []; pendingRequest = null
+      conversationId.value = null; currentRun.value = null; messages.value = []
       capabilities.value = null; conversations.value = []; nextBefore.value = null
       deletedConversations.value = []
       statusText.value = ''
@@ -232,12 +231,15 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     } finally { sessionBusy.value = false }
   }
 
-  async function send(input: Omit<AgentRunInput, 'request_id'>) {
+  async function send(input: Omit<AgentRunInput, 'request_id'> & { request_id?: string }) {
     if (busy.value || sessionBusy.value || loading.value) return false
     submitting.value = true
     error.value = ''
     const revision = epoch
-    const frozenInput = { ...input, targets: input.targets.map(target => ({ kind: target.kind, id: target.id })) }
+    const { request_id: explicitRequestId, ...content } = input
+    // Freeze the JSON wire payload before hashing or other awaits can let the
+    // current Vue selection or a confirmed proposal change underneath it.
+    const frozenInput: Omit<AgentRunInput, 'request_id'> = JSON.parse(JSON.stringify(content))
     try {
       if (!conversationId.value) {
         const created = await agentApi.create(projectId.value)
@@ -246,13 +248,12 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         conversationId.value = created.data.id
       }
       const id = conversationId.value
-      const matching = pendingRequest?.conversationId === id
-        && JSON.stringify({ ...pendingRequest.input, request_id: undefined }) === JSON.stringify(frozenInput)
-      const body: AgentRunInput = matching && pendingRequest ? pendingRequest.input : { ...frozenInput, request_id: crypto.randomUUID() }
-      pendingRequest = { conversationId: id, input: body }
+      const receipt = await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]),
+        `/creation-agent/conversations/${id}/runs`, JSON.stringify(frozenInput))
+      const body: AgentRunInput = { ...frozenInput, request_id: explicitRequestId ?? receipt.id }
       const response = await agentApi.submit(id, body)
+      finishGenerationRequest(receipt.key)
       if (revision !== epoch) return false
-      pendingRequest = null
       applySnapshot(response.data)
       // A history read failure cannot turn an accepted (possibly billable) run into a failed submission.
       try { await history() }

@@ -178,6 +178,10 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         # 3. 事务内锁章节行：检查活跃任务并创建任务保持原子性，
         #    同章节并发提交只会创建一个任务，其余请求复用同一个任务。
         async with creation_write(chapter.novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(3, {**request_params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
             locked_chapter = await Chapter.filter(
                 id=chapter_id
             ).using_db(connection).select_for_update().first()
@@ -196,7 +200,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 if t.request_params.get("chapter_id") == chapter_id:
                     # 已有进行中的任务：直接返回该任务，前端继续轮询，
                     # 避免离开页面再返回时重复提交被 400 拒绝
-                    return t
+                    return await bind_submission(t, {**request_params, "team_id": team_id, "user_id": user_id})
 
             if replace_existing:
                 from services.creation_agent.object_state import object_version

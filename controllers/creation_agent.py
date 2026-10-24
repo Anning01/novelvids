@@ -1,5 +1,6 @@
 """Creation-assistant application flows and private response projections."""
 
+from services.creation_agent.authorization import public_run_input, pending_production
 from utils.messages import localized_message
 
 
@@ -77,7 +78,7 @@ class CreationAgentController:
         conversation, assistant = await agent_sessions.for_task(task_id, ctx)
         task = await AiTask.get(id=task_id)
         changes = await message_changes(assistant, conversation.novel_id)
-        return AgentRunOut(production=await production_receipts(task.id), task_id=task.id, conversation_id=conversation.id, status=task.status,
+        return AgentRunOut(pending_production=await pending_production(task.id), production=await production_receipts(task.id), task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
             changes=[change_projection(change) for change in changes], usage=await usage_summary(assistant),
             event_count=len(assistant.events), query_results=query_results(assistant))
@@ -95,6 +96,7 @@ class CreationAgentController:
                            "changes": [change_projection(change) for change in changes.get(row.id, [])],
                            "query_results": query_results(row) if row.role == 'assistant' else [],
                            "usage": await usage_summary(row) if row.role == 'assistant' else {},
+                           "pending_production": await pending_production(row.task_id) if row.role == 'assistant' else None,
                            "production": await production_receipts(row.task_id) if row.role == 'assistant' else []}
                           for row in reversed(rows) if not (row.run_input or {}).get("internal_production_step")],
                 "next_before": rows[-1].id if len(rows) == 50 else None}
@@ -116,7 +118,7 @@ class CreationAgentController:
         await require_roles('admin', 'creator')(ctx)
         task = await AiTask.get(id=change.task_id)
         user_message = await AgentMessage.get(task=task, role='user')
-        request = AgentRunRequest.model_validate({key:value for key,value in user_message.run_input.items() if key != "resolved_production_intents"})
+        request = AgentRunRequest.model_validate(public_run_input(user_message.run_input))
         limits = AgentConfiguration.model_validate(task.request_params['agent_configuration'])
         async def check():
             await authorize_run(task.request_params)

@@ -22,74 +22,8 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
     ]:
         raise ValueError(localized_message("仅能执行用户本轮明确选择的生成操作"))
     await execution.before_request()
+    await validate_intent_scope(intent, request=request, novel_id=novel_id)
     params = execution.params
-    model = {
-        "image": Asset,
-        "story": None,
-        "assets": Chapter,
-        "storyboard": Chapter,
-        "video": Scene,
-        "compose": Chapter,
-        "remake": RemakeSource,
-    }[intent.operation]
-    if model is None:
-        belongs = intent.target_id == novel_id
-    elif model is Scene:
-        belongs = await Scene.filter(
-            id=intent.target_id, chapter__novel_id=novel_id
-        ).exists()
-    else:
-        belongs = await model.filter(id=intent.target_id, novel_id=novel_id).exists()
-    if not belongs:
-        raise ValueError(localized_message("生成目标不属于当前项目"))
-    if (
-        intent.variant_id is not None
-        and not await AssetVariant.filter(
-            id=intent.variant_id, asset_id=intent.target_id
-        ).exists()
-    ):
-        raise ValueError(localized_message("资产形态不属于生成目标"))
-    request_scope = request.write_scope
-    if request_scope == "read_only":
-        raise ValueError(localized_message("只读请求不能生成"))
-    if request_scope == "selected":
-        kind = (
-            "asset"
-            if intent.operation == "image"
-            else "scene"
-            if intent.operation == "video"
-            else None
-        )
-        if not any(
-            target.kind == ("variant" if intent.variant_id else kind)
-            and target.id == (intent.variant_id or intent.target_id)
-            for target in request.targets
-        ):
-            raise ValueError(localized_message("生成目标不在选中范围内"))
-    if request_scope == "chapter":
-        if model is Chapter and intent.target_id != request.chapter_id:
-            raise ValueError(localized_message("目标不在当前章节"))
-        if (
-            model is Scene
-            and not await Scene.filter(
-                id=intent.target_id, chapter_id=request.chapter_id
-            ).exists()
-        ):
-            raise ValueError(localized_message("目标不在当前章节"))
-        if model is RemakeSource and not await RemakeSource.filter(id=intent.target_id, chapter_id=request.chapter_id).exists():
-            raise ValueError(localized_message("目标不在当前章节"))
-        if model is None:
-            raise ValueError(localized_message("故事分析需要项目范围"))
-        if model is Asset:
-            asset = await Asset.get(id=intent.target_id)
-            chapter = await Chapter.get_or_none(
-                id=request.chapter_id, novel_id=novel_id
-            )
-            if not chapter or (
-                not asset.is_global
-                and chapter.number not in (asset.source_chapters or [])
-            ):
-                raise ValueError(localized_message("目标不在当前章节"))
 
     async def submit():
         if intent.operation == "image":
@@ -135,8 +69,11 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
             source = await RemakeSource.get(id=intent.target_id)
             task = await AiTask.get_or_none(id=source.analysis_task_id)
             if task is None or task.status not in {1, 2, 6}:
-                result = await remake_project_service.retry(source.id,
-                    team_id=params.get("team_id"), user_id=params.get("user_id"))
+                result = await remake_project_service.retry(
+                    source.id,
+                    team_id=params.get("team_id"),
+                    user_id=params.get("user_id"),
+                )
                 task = await AiTask.get(id=result["task_id"])
         elif intent.operation == "video":
             model_id = intent.media_model_config_id
@@ -190,3 +127,78 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
     return await execute_step(
         params["task_id"], "submit:" + str(intent.request_id), submit, atomic=True
     )
+
+
+async def validate_intent_scope(intent, *, request, novel_id):
+    model = {
+        "image": Asset,
+        "story": None,
+        "assets": Chapter,
+        "storyboard": Chapter,
+        "video": Scene,
+        "compose": Chapter,
+        "remake": RemakeSource,
+    }[intent.operation]
+    if model is None:
+        belongs = intent.target_id == novel_id
+    elif model is Scene:
+        belongs = await Scene.filter(
+            id=intent.target_id, chapter__novel_id=novel_id
+        ).exists()
+    else:
+        belongs = await model.filter(id=intent.target_id, novel_id=novel_id).exists()
+    if not belongs:
+        raise ValueError(localized_message("生成目标不属于当前项目"))
+    if (
+        intent.variant_id is not None
+        and not await AssetVariant.filter(
+            id=intent.variant_id, asset_id=intent.target_id
+        ).exists()
+    ):
+        raise ValueError(localized_message("资产形态不属于生成目标"))
+    request_scope = request.write_scope
+    if request_scope == "read_only":
+        raise ValueError(localized_message("只读请求不能生成"))
+    if request_scope == "selected":
+        kind = (
+            "asset"
+            if intent.operation == "image"
+            else "scene"
+            if intent.operation == "video"
+            else None
+        )
+        if not any(
+            target.kind == ("variant" if intent.variant_id else kind)
+            and target.id == (intent.variant_id or intent.target_id)
+            for target in request.targets
+        ):
+            raise ValueError(localized_message("生成目标不在选中范围内"))
+    if request_scope == "chapter":
+        if model is Chapter and intent.target_id != request.chapter_id:
+            raise ValueError(localized_message("目标不在当前章节"))
+        if (
+            model is Scene
+            and not await Scene.filter(
+                id=intent.target_id, chapter_id=request.chapter_id
+            ).exists()
+        ):
+            raise ValueError(localized_message("目标不在当前章节"))
+        if (
+            model is RemakeSource
+            and not await RemakeSource.filter(
+                id=intent.target_id, chapter_id=request.chapter_id
+            ).exists()
+        ):
+            raise ValueError(localized_message("目标不在当前章节"))
+        if model is None:
+            raise ValueError(localized_message("故事分析需要项目范围"))
+        if model is Asset:
+            asset = await Asset.get(id=intent.target_id)
+            chapter = await Chapter.get_or_none(
+                id=request.chapter_id, novel_id=novel_id
+            )
+            if not chapter or (
+                not asset.is_global
+                and chapter.number not in (asset.source_chapters or [])
+            ):
+                raise ValueError(localized_message("目标不在当前章节"))

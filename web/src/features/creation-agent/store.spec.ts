@@ -172,7 +172,7 @@ describe('creation assistant store', () => {
     const selection = reactive({ ...input, targets: [{ kind: 'scene' as const, id: 9 }] })
     const sending = store.send(selection)
     selection.targets[0]!.id = 10
-    expect(vi.mocked(agentApi.submit).mock.calls[0]?.[1].targets[0]?.id).toBe(9)
+    await vi.waitFor(() => expect(vi.mocked(agentApi.submit).mock.calls[0]?.[1].targets[0]?.id).toBe(9))
     resolve({ code: 0, message: '', data: run })
     await sending
   })
@@ -253,4 +253,20 @@ it('refreshes child generation receipts after the assistant has finished speakin
   await store.refreshProduction()
   expect(store.messages[0]?.production?.[0]?.status).toBe(3)
   expect(agentApi.submit).not.toHaveBeenCalled()
+})
+
+
+it('retains the chat run request ID after a lost response and a store/page restart', async () => {
+  const first = useCreationAgentStore()
+  await first.open(7)
+  vi.mocked(agentApi.submit).mockRejectedValueOnce(new TypeError('Lost response'))
+    .mockResolvedValueOnce({ code: 0, message: '', data: run })
+  expect(await first.send(input)).toBe(false)
+  first.disconnect()
+  setActivePinia(createPinia())
+  const restarted = useCreationAgentStore()
+  await restarted.open(7)
+  expect(await restarted.send(input)).toBe(true)
+  const calls = vi.mocked(agentApi.submit).mock.calls
+  expect(calls[0]?.[1].request_id).toBe(calls[1]?.[1].request_id)
 })

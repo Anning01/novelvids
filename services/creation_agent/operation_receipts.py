@@ -52,8 +52,14 @@ async def execute_step(task_id, key: str, action, *, external=False, atomic=Fals
 
 async def record_once(task_id, key, action):
     from tortoise.transactions import in_transaction
+    from tortoise.expressions import F
 
     async with in_transaction() as connection:
+        await (
+            AiTask.filter(id=task_id)
+            .using_db(connection)
+            .update(updated_at=F("updated_at"))
+        )
         await AiTask.filter(id=task_id).using_db(connection).select_for_update().get()
         row, _ = await AgentOperation.get_or_create(
             task_id=task_id, key=key, using_db=connection

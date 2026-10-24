@@ -95,9 +95,13 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         request_params = await prepare_workflow(request_params)
         from services.creation_objects import project_write
         async with project_write(chapter.novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(1, {**request_params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.extraction.value, status__in=[1,2,6]).using_db(connection):
                 if existing.request_params.get('chapter_id') == chapter_id:
-                    return existing
+                    return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
             return await ai_task_executor.submit(AiTaskTypeEnum.extraction, request_params, db_connection=connection)
 
 

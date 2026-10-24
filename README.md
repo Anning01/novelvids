@@ -438,6 +438,8 @@ VIDEO_RECONCILE_BATCH_SIZE=50
 
 生成效果需要调整时，修改 [`prompts/skills/`](prompts/skills/)：入口 `SKILL.md`；故事、资产、生图、分镜、重制、视频分别在 `story.md`、`assets.md`、`image.md`、`storyboard.md`、`remake.md`、`video.md`；共享风格和策略在 `styles.json`、`strategies.json`。
 
+自由表述只提出候选操作；含糊请求需在页面核对对象并确认后才生成。重复提交使用数据库唯一回执，刷新后的未确认请求标识保存在浏览器本机。
+
 任务提交时保存技能快照，规则修改仅影响新任务。已保存完整提示词默认原样使用；仅编辑提示词不会自动收费生成。旧中英文模板保留用于历史兼容。开发者修改规则、恢复与计费边界、测试方法详见 [统一技能开发指南](docs/agent-skills-workflow.md)。
 
 ## 项目结构

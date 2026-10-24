@@ -594,6 +594,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             TaskStatusEnum.failed.value,
             TaskStatusEnum.cancelled.value,
         ):
+            if (video.metadata or {}).get('agent_run_id'):
+                from services.creation_agent.video_settlement import settle_video
+                await settle_video(video)
             return video
 
         if not video.external_task_id:
@@ -721,6 +724,20 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
+
+        if metadata.get("agent_run_id") and new_status in {3, 4, 5}:
+            from services.creation_agent.video_settlement import settle_video
+            video.metadata = {**(video.metadata or {}), "provider_accounting": {
+                "status": new_status,
+                "seconds": (result_metadata.get("duration") or metadata.get("duration")) if new_status == 3 else 0,
+            }, "billing_pending": True}
+            if "metadata" not in update_fields:
+                update_fields.append("metadata")
+            from models.agent_operation import AgentOperation
+            await AgentOperation.get_or_create(task_id=metadata['agent_run_id'], key='billing:video')
+            await video.save(update_fields=update_fields)
+            await settle_video(video)
+            return video
 
         try:
             if metadata.get("novel_id") is not None:

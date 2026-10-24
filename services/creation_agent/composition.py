@@ -11,7 +11,27 @@ async def submit_composition(chapter_id, *, strict=False, team_id=None, user_id=
     from services.ai_task_executor import ai_task_executor
 
     chapter = await Chapter.get(id=chapter_id)
+    from services.creation_agent.skill_execution import prepare_workflow
+
+    params = await prepare_workflow(
+        {
+            "operation": "compose",
+            "chapter_id": chapter_id,
+            "novel_id": chapter.novel_id,
+            "strict": strict,
+            "team_id": team_id,
+            "user_id": user_id,
+        }
+    )
     async with creation_write(chapter.novel_id) as connection:
+        from services.creation_agent.submissions import (
+            previous_submission,
+            bind_submission,
+        )
+
+        previous = await previous_submission(4, params, connection)
+        if previous:
+            return previous
         for task in await AiTask.filter(
             task_type=AiTaskTypeEnum.video.value, status__in=[1, 2, 6]
         ).using_db(connection):
@@ -19,19 +39,7 @@ async def submit_composition(chapter_id, *, strict=False, team_id=None, user_id=
                 task.request_params.get("operation") == "compose"
                 and task.request_params.get("chapter_id") == chapter_id
             ):
-                return task
-        from services.creation_agent.skill_execution import prepare_workflow
-
-        params = await prepare_workflow(
-            {
-                "operation": "compose",
-                "chapter_id": chapter_id,
-                "novel_id": chapter.novel_id,
-                "strict": strict,
-                "team_id": team_id,
-                "user_id": user_id,
-            }
-        )
+                return await bind_submission(task, params)
         return await ai_task_executor.submit(
             AiTaskTypeEnum.video, params, db_connection=connection
         )

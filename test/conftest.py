@@ -132,6 +132,8 @@ async def clear_db():
     await Video.all().delete()
     await RemakeSource.all().delete()
     await RemakeUpload.all().delete()
+    from models.agent_submission import AgentSubmission
+    await AgentSubmission.all().delete()
     await AiTask.all().delete()
     await Scene.all().delete()
     await Chapter.all().delete()

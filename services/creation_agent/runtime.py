@@ -619,7 +619,7 @@ async def submit_production(ctx: RunContext[CreationAgentDeps], intent_index: in
         request = await resolve_production_intents(request, ctx.deps.changes.novel_id, ctx.deps.source_message)
         ctx.deps.changes.request = request
     if intent_index < 0 or intent_index >= len(request.production_intents):
-        raise ModelRetry(localized_message('当前用户请求没有明确可执行的生成目标，请澄清'))
+        return {'status': 'confirmation_required', 'submitted': False}
     receipt = await submit_intent(request.production_intents[intent_index], request=request, novel_id=ctx.deps.changes.novel_id)
     return {**receipt, "intent_index": intent_index, "intent_count": len(request.production_intents)}
 

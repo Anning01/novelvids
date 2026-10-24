@@ -912,14 +912,10 @@ async def test_chat_authorization_uses_only_current_input_and_reuses_its_grant(
         with patch(
             "services.creation_agent.handler.configured_model", return_value=model
         ):
-            if valid_quote:
-                first = await resolve_production_intents(request, novel.id, message)
-                second = await resolve_production_intents(request, novel.id, message)
-                assert first.production_intents == second.production_intents
-                assert first.production_intents[0].target_id == asset.id
-            else:
-                with pytest.raises(ValueError):
-                    await resolve_production_intents(request, novel.id, message)
+            first = await resolve_production_intents(request, novel.id, message)
+            second = await resolve_production_intents(request, novel.id, message)
+            assert first.production_intents == second.production_intents == []
+            assert bool(message.run_input['production_proposals']) is valid_quote
             read_only = request.model_copy(update={"write_scope": "read_only"})
             assert (
                 await resolve_production_intents(read_only, novel.id, message)

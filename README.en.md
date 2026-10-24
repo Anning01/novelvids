@@ -398,6 +398,8 @@ New production uses the **creation assistant and one Chinese skill pack**. Enabl
 
 Tune [`prompts/skills/`](prompts/skills/): `SKILL.md` is the entrypoint. Story analysis, assets, images, storyboards, remake and video production use `story.md`, `assets.md`, `image.md`, `storyboard.md`, `remake.md` and `video.md`. Shared styles and strategies live in `styles.json` and `strategies.json`.
 
+Free-text interpretation proposes operations; ambiguous requests require confirmation of their targets before generation. Database-unique receipts and persisted unresolved client IDs protect retries across reloads.
+
 Tasks snapshot skill content and language at submission. Edits affect new tasks only. Complete saved prompts remain authoritative; editing prompts alone does not authorize paid media generation. The former Chinese/English templates remain for historical compatibility. See the [workflow and maintenance guide](docs/agent-skills-workflow.en.md) for file roles, recovery, billing boundaries and regression commands.
 
 ## Project structure

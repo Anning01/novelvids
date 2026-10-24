@@ -55,7 +55,19 @@ export interface AgentConversation {
 
 export interface ProductionReceipt { task_id: string; operation: string; status: number; stage?: string | null; error?: string | null }
 
+export interface PendingProduction {
+  confirmation_request_id: string
+  message: string
+  labels: { operation: string; target_label: string }[]
+  intents: ProductionIntent[]
+  chapter_id: number | null
+  targets: AgentTarget[]
+  write_scope: 'selected' | 'chapter' | 'project' | 'read_only'
+  model_config_id: number | null
+}
+
 export interface AgentMessage {
+  pending_production?: PendingProduction | null
   production?: ProductionReceipt[]
   id: number
   role: 'user' | 'assistant'
@@ -69,6 +81,7 @@ export interface AgentMessage {
 }
 
 export interface AgentRun {
+  pending_production?: PendingProduction | null
   production?: ProductionReceipt[]
   task_id: string
   conversation_id: number

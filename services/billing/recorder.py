@@ -248,6 +248,12 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             )
             if record is None and request_params.get("workflow_version") == "agent-skills-v1":
                 raise RuntimeError("Media usage record could not be saved")
+            if record is not None and request_params.get("workflow_version") == "agent-skills-v1" and task.stage in {"needs_review", "review_closed"}:
+                known_count = res.get("image_count") or len(res.get("images") or []) or getattr(error, "image_count", 0)
+                if not known_count:
+                    record.usage = {**record.usage, "missing_usage": True, "submission_uncertain": True}
+                    await record.save(update_fields=["usage"])
+
             await _consume_team_balance(record, team_id, user_id=user_id)
             return
         from services.creation_agent.skill_execution import WORKFLOW_VERSION
@@ -347,7 +353,9 @@ async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:
     from tortoise.transactions import in_transaction
     from models.creation_agent import AgentMessage
 
+    from tortoise.expressions import F
     async with in_transaction() as connection:
+        await AgentMessage.filter(task_id=task.id, role="assistant").using_db(connection).update(billing_record_id=F("billing_record_id"))
         message = await AgentMessage.filter(task_id=task.id, role="assistant").using_db(connection).select_for_update().first()
         if message is None or message.billing_record_id is not None or not message.usage.get("calls"):
             return

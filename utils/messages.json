@@ -517,5 +517,9 @@
   "提示词不能为空": "The prompt cannot be empty.",
   "技能分镜必须提供完整 prompt，结构字段不能替代实际生成提示词": "A skill-generated shot must include the complete generation prompt.",
   "提交结果待核对，系统不会重复提交": "The submission needs verification and will not be sent again automatically.",
-  "外部请求结果待核对，系统不会自动重试": "The external request needs verification and will not be retried automatically."
+  "外部请求结果待核对，系统不会自动重试": "The external request needs verification and will not be retried automatically.",
+  "确认执行所列生成任务": "Confirm the listed production tasks",
+  "请求回执待核对，不能重复创建任务": "The request receipt needs verification; a duplicate task cannot be created.",
+  "只有待核对的失败任务可以人工收口": "Only failed tasks awaiting verification can be closed manually.",
+  "已有供应商任务号，请先查询真实结果": "A provider task ID exists. Query its actual result first."
 }

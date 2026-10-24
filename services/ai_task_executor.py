@@ -137,13 +137,13 @@ class AiTaskExecutor:
                 return previous
             for secret in ('api_key', 'base_url'):
                 request_params.pop(secret, None)
-        task = await AiTask.create(
-            task_type=task_type.value,
-            request_params=request_params,
-            status=TaskStatusEnum.pending.value,
-            using_db=db_connection,
-        )
-        return task
+        async def create(connection):
+            return await AiTask.create(task_type=task_type.value, request_params=request_params,
+                status=TaskStatusEnum.pending.value, using_db=connection)
+        if request_params.get('workflow_version') == 'agent-skills-v1':
+            from services.creation_agent.submissions import submit_once
+            return await submit_once(task_type.value, request_params, create)
+        return await create(db_connection)
 
     async def run(self, task: AiTask):
         key = str(task.id)

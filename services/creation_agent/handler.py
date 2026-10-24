@@ -1,5 +1,6 @@
 """Run a private creation conversation inside the existing AI task executor."""
 
+from services.creation_agent.authorization import public_run_input
 from utils.messages import localized_message
 
 import json
@@ -85,7 +86,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         user_message = await AgentMessage.get(task_id=task_id, role="user")
         assistant = await AgentMessage.get(task_id=task_id, role="assistant")
         conversation = await AgentConversation.get(id=assistant.conversation_id)
-        request = AgentRunRequest.model_validate({key:value for key,value in user_message.run_input.items() if key != "resolved_production_intents"})
+        request = AgentRunRequest.model_validate(public_run_input(user_message.run_input))
         limits = AgentConfiguration.model_validate(request_params["agent_configuration"])
 
         async def before_request():

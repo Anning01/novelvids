@@ -163,7 +163,10 @@
     "所有新创作任务都需要启用助手并配置支持工具调用的模型。": "All new creation tasks require an enabled assistant and a model with tool calling.",
     "同时执行的创作任务": "Concurrent creation tasks",
     "生成任务": "Generation task",
-    "合成": "Compose"
+    "合成": "Compose",
+    "请核对以下操作，确认后会调用模型并产生费用。": "Review these operations. Confirming calls the models and incurs charges.",
+    "确认生成并计费": "Confirm generation and charges",
+    "未核对的生成请求过多，请先核对已有任务": "Too many unresolved generation requests. Verify the existing tasks first."
   },
   "components": {
     "请选择": "Select",

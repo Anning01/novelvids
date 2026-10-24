@@ -813,13 +813,17 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             request_params["user_id"] = user_id
 
         async with creation_write(asset.novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(2, {**request_params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.reference_image.value).using_db(connection).order_by('-created_at'):
                 prior = existing.request_params or {}
                 if prior.get('asset_id') == asset.id and prior.get('variant_id') == variant_id:
                     if existing.stage == 'needs_review':
                         raise HTTPException(409, '已有图片请求结果待核对，不能重复提交')
                     if existing.status in {1,2,6}:
-                        return existing
+                        return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
             objects = CreationObjects(asset.novel_id)
             await objects.get('asset', asset.id)
             if variant:

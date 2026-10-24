@@ -1,3 +1,4 @@
+import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
 
 import { tr } from '@/i18n'
 import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoGenerationOptions, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
@@ -56,18 +57,13 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const pendingGenerationRequests = new Map<string, string>()
 const isGenerationRequest = (url: string) => /^\/(?:asset\/reference\/\d+|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/generate\/|video\/(?:generate\/|merge))(?:\?|$)/.test(url)
 
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
-  const generationKey = isGenerationRequest(url)
-    ? JSON.stringify([getAuthToken(), getActiveTeamId(), url, options?.body ?? '']) : null
-  if (generationKey) {
-    const id = pendingGenerationRequests.get(generationKey) ?? crypto.randomUUID()
-    pendingGenerationRequests.set(generationKey, id)
-    headers['X-Creation-Request-Id'] = id
-  }
+  const generation = isGenerationRequest(url)
+    ? await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]), url, options?.body) : null
+  if (generation) headers['X-Creation-Request-Id'] = generation.id
   const response = await fetch(BASE + url, { headers, ...options })
   const payload = await response.json()
   if (!response.ok || payload.code !== 0) {
@@ -78,7 +74,7 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
     }
     throw new Error(payload.message || payload.detail || tr('请求失败'))
   }
-  if (generationKey) pendingGenerationRequests.delete(generationKey)
+  if (generation) finishGenerationRequest(generation.key)
   return payload
 }
 function qs(params: Record<string, unknown>) {

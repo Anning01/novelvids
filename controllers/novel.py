@@ -23,7 +23,7 @@ from utils.crud import CRUDBase
 from models.novel import Novel
 from models.audio_reference import AudioReference
 from schemas.novel import NovelCreate, NovelPatch, NovelUpdate
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum
 
 
 class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
@@ -267,14 +267,6 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 
-        active_tasks = await AiTask.filter(
-            task_type=AiTaskTypeEnum.project_analysis.value,
-            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
-        )
-        for task in active_tasks:
-            if task.request_params.get("novel_id") == novel_id:
-                return task
-
         params = {
             "novel_id": novel_id,
             "resolution": "1K",
@@ -289,9 +281,13 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         params = await prepare_workflow(params)
         from services.creation_objects import project_write
         async with project_write(novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(5, {**params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
                 if existing.request_params.get('novel_id') == novel_id:
-                    return existing
+                    return await bind_submission(existing, {**params, "team_id": team_id, "user_id": user_id})
             return await ai_task_executor.submit(AiTaskTypeEnum.project_analysis, params, db_connection=connection)
 
     async def latest_analysis(self, novel_id: int) -> AiTask | None:
