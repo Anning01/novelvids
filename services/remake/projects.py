@@ -415,6 +415,9 @@ class RemakeProjectService:
                     localized_message('只有失败的拆解任务可以重试'),
                 )
             previous_params = previous.request_params or {}
+            from services.creation_agent.skill_execution import current_execution
+            parent = current_execution.get()
+            origin = {"origin_run_id": parent.params["task_id"]} if parent else {}
             if previous_params.get('workflow_version'):
                 from models.agent_operation import AgentOperation
                 if await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True).exists():
@@ -436,6 +439,7 @@ class RemakeProjectService:
                     "attempt": attempt,
                     "prompt_language": previous_params.get("prompt_language", "zh"),
                     "retry_of_task_id": str(previous.id),
+                    **origin,
                 },
             )
             task.request_params = {

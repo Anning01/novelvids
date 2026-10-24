@@ -644,4 +644,6 @@ async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
         for item in await resolve_scope_configs(task_type, team_id):
             capabilities = resolve(item.image_model_type if kind == 'image' else item.video_model_type)
             models.append({'id': item.id, 'name': item.name, 'kind': kind, 'capabilities': capabilities.public_dict()})
-    return {'models': models, 'tasks': await production_receipts(execution.params['task_id'])}
+    from models.remake_source import RemakeSource
+    sources = await RemakeSource.filter(novel_id=execution.params['novel_id']).values('id', 'chapter_id', 'episode_number', 'media_status')
+    return {'models': models, 'remake_sources': sources, 'tasks': await production_receipts(execution.params['task_id'])}

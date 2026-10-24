@@ -40,6 +40,8 @@ async def resolve_production_intents(request, novel_id, user_message):
                     or getattr(row, "description", ""),
                 }
             )
+    from models.remake_source import RemakeSource
+    remake_sources = await RemakeSource.filter(novel_id=novel_id).values("id", "chapter_id", "episode_number", "media_status")
     result = await execution.generate(
         "authorization",
         {
@@ -47,6 +49,7 @@ async def resolve_production_intents(request, novel_id, user_message):
             "selected_targets": targets,
             "chapter_id": request.chapter_id,
             "project_id": novel_id,
+            "remake_sources": remake_sources,
             "write_scope": request.write_scope,
         },
         ProductionAuthorization,

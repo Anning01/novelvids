@@ -1244,3 +1244,40 @@ async def test_uncertain_cover_keeps_story_result_and_blocks_duplicate_paid_subm
     with pytest.raises(HTTPException):
         await novel_controller.analyze(novel.id)
     submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_remake_reuses_uploaded_source_and_original_skill_snapshot():
+    from uuid import uuid4
+    from models.remake_source import RemakeSource
+    from services.creation_agent.skill_execution import SkillExecution, current_execution
+    from services.creation_agent.intent_tools import submit_intent
+    from schemas.agent_workflow import ProductionIntent
+    from schemas.creation_agent import AgentRunRequest
+
+    novel, chapter, _ = await enabled_project()
+    original = await prepare_workflow({'novel_id': novel.id, 'chapter_id': chapter.id, 'prompt_language': 'en'})
+    failed = await AiTask.create(task_type=6, status=4, request_params=original)
+    source = await RemakeSource.create(novel=novel, chapter=chapter, episode_number=1, source_kind='upload',
+        storage_provider='local', object_key='uploaded.mp4', original_filename='uploaded.mp4',
+        size_bytes=10, duration_seconds=4, width=640, height=480, container_format='mp4', checksum='abc',
+        media_status='failed', analysis_task=failed)
+    parent_params = await prepare_workflow({'novel_id': novel.id, 'chapter_id': chapter.id, 'prompt_language': 'zh'})
+    parent = await AiTask.create(task_type=7, status=2, request_params=parent_params)
+    execution = SkillExecution({**parent_params, 'task_id': str(parent.id)}, None, AsyncMock())
+    intent = ProductionIntent(operation='remake', target_id=source.id, request_id=uuid4())
+    request = AgentRunRequest(request_id=uuid4(), message='Retry this episode', chapter_id=chapter.id,
+        write_scope='chapter', production_intents=[intent])
+    token = current_execution.set(execution)
+    try:
+        first = await submit_intent(intent, request=request, novel_id=novel.id)
+        second = await submit_intent(intent, request=request, novel_id=novel.id)
+        assert first == second
+        retry = await AiTask.get(id=first['task_id'])
+        assert retry.request_params['prompt_language'] == 'en'
+        assert retry.request_params['skill_snapshot'] == original['skill_snapshot']
+        assert retry.request_params['remake_source_id'] == source.id
+        assert retry.request_params['origin_run_id'] == str(parent.id)
+        assert await AiTask.filter(task_type=6).count() == 2
+    finally:
+        current_execution.reset(token)

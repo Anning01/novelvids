@@ -6,6 +6,7 @@ from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.chapter import Chapter
 from models.scene import Scene
+from models.remake_source import RemakeSource
 from schemas.agent_workflow import ProductionIntent
 from services.creation_agent.skill_execution import current_execution
 from services.creation_agent.operation_receipts import execute_step
@@ -29,6 +30,7 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
         "storyboard": Chapter,
         "video": Scene,
         "compose": Chapter,
+        "remake": RemakeSource,
     }[intent.operation]
     if model is None:
         belongs = intent.target_id == novel_id
@@ -73,6 +75,8 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
                 id=intent.target_id, chapter_id=request.chapter_id
             ).exists()
         ):
+            raise ValueError(localized_message("目标不在当前章节"))
+        if model is RemakeSource and not await RemakeSource.filter(id=intent.target_id, chapter_id=request.chapter_id).exists():
             raise ValueError(localized_message("目标不在当前章节"))
         if model is None:
             raise ValueError(localized_message("故事分析需要项目范围"))
@@ -124,6 +128,16 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
                 team_id=params.get("team_id"),
                 user_id=params.get("user_id"),
             )
+        elif intent.operation == "remake":
+            from models.ai_task import AiTask
+            from services.remake.projects import remake_project_service
+
+            source = await RemakeSource.get(id=intent.target_id)
+            task = await AiTask.get_or_none(id=source.analysis_task_id)
+            if task is None or task.status not in {1, 2, 6}:
+                result = await remake_project_service.retry(source.id,
+                    team_id=params.get("team_id"), user_id=params.get("user_id"))
+                task = await AiTask.get(id=result["task_id"])
         elif intent.operation == "video":
             model_id = intent.media_model_config_id
             if model_id is None:

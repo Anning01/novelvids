@@ -89,7 +89,7 @@ export interface AgentCapabilities {
 }
 
 export interface ProductionIntent {
-  operation: 'story' | 'assets' | 'image' | 'storyboard' | 'video' | 'compose'
+  operation: 'story' | 'assets' | 'image' | 'storyboard' | 'remake' | 'video' | 'compose'
   target_id: number
   request_id: string
   media_model_config_id?: number | null

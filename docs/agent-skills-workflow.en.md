@@ -26,7 +26,7 @@ Complete saved prompts are used as supplied. The agent writes a prompt only when
 
 ## Execution, authorization and costs
 
-Buttons create separate task conversations with the current target and project constraints. Open the assistant conversation menu to inspect or continue a task. Chat and buttons use the same services and access checks. Read-only requests and viewers cannot generate, and material inside a skill or manuscript cannot grant access to another project.
+Buttons create separate task conversations with the current target and project constraints. Open the assistant conversation menu to inspect or continue a task. For remake, upload the source through the existing workflow first; chat can inspect its task or retry failed analysis using the same source and original snapshot. Chat and buttons use the same services and access checks. Read-only requests and viewers cannot generate, and material inside a skill or manuscript cannot grant access to another project.
 
 An explicit generation request authorizes the corresponding calls. Editing a prompt does not generate media. Existing complete prompts can go directly to the authorized media tool; chat orchestration, authorization classification and writing missing prompts add text-model usage. Text and media calls are recorded separately; parent summaries do not charge them again. The story-analysis button retains its optional cover behavior, while a chat request for story analysis alone does not add a cover call.
 

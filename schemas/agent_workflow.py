@@ -23,7 +23,7 @@ class SkillStoryboard(BaseModel):
 
 class ProductionIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["story", "assets", "image", "storyboard", "video", "compose"]
+    operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose"]
     target_id: int = Field(gt=0)
     media_model_config_id: int | None = Field(None, gt=0)
     request_id: UUID
@@ -71,7 +71,7 @@ class RemakeShot(BaseModel):
 
 class RequestedProduction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["story", "assets", "image", "storyboard", "video", "compose"]
+    operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose"]
     target_id: int = Field(gt=0)
     source_quote: str = Field(min_length=1, max_length=8000)
     variant_id: int | None = Field(None, gt=0)
