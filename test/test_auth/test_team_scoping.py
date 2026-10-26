@@ -57,6 +57,28 @@ def _auth(token: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_project_overview_uses_the_same_team_scope_for_cards_and_totals(client: AsyncClient):
+    from models.chapter import Chapter
+
+    team_a = await _create_team("Overview A")
+    team_b = await _create_team("Overview B")
+    await _create_member("overview_viewer", team_a, role=TeamRoleEnum.viewer.value)
+    own = await _create_novel("Own overview", team_a)
+    foreign = await _create_novel("Foreign overview", team_b)
+    for project in (own, foreign):
+        await Chapter.create(novel=project, number=1, name="Episode", content="Private manuscript")
+    token = await _login(client, "overview_viewer")
+    payload = (await client.get("/api/novel/overview", headers=_auth(token))).json()
+    assert payload["code"] == 0
+    assert [item["id"] for item in payload["data"]["items"]] == [own.id]
+    assert payload["data"]["summary"]["project_count"] == 1
+    assert payload["data"]["summary"]["chapter_count"] == 1
+    assert "Private manuscript" not in str(payload)
+    anonymous = (await client.get("/api/novel/overview")).json()
+    assert anonymous["code"] == 401
+
+
+@pytest.mark.asyncio
 async def test_member_list_sees_only_own_team_novels(client: AsyncClient):
     team_a = await _create_team("团队A")
     team_b = await _create_team("团队B")

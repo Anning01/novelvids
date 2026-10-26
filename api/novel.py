@@ -3,6 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 
 from auth.deps import AuthContext, get_auth_context, require_roles, require_team_access
 from controllers.novel import novel_controller
+from schemas.project_overview import ProjectOverview
 from schemas.ai_task import AiTaskOut
 from schemas.novel import NovelBriefOut, NovelCreate, NovelUpdate, NovelPatch, NovelMetaOut, NovelOut
 from services.ai_task_executor import ai_task_executor
@@ -61,6 +62,11 @@ async def get_novel_list(
         params, NovelBriefOut, search_fields=['name', 'author'], team_id=ctx.team_id
     )
     return ResponseSchema(data=novels)
+
+
+@router.get("/overview", summary="项目概览与当前制作进度", response_model=ResponseSchema[ProjectOverview])
+async def get_project_overview(ctx: AuthContext = Depends(get_auth_context)):
+    return ResponseSchema(data=await novel_controller.overview(ctx.team_id))
 
 
 @router.get(

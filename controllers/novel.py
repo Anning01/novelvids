@@ -27,6 +27,10 @@ from utils.enums import AiTaskTypeEnum
 
 
 class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
+    async def overview(self, team_id: int | None = None):
+        from services.project_overview import project_overview
+        return await project_overview(team_id)
+
     async def meta(self, novel_id: int) -> dict:
         """轻量元信息：不返回书稿正文，节约流量。"""
         novel = await self.get(novel_id)
