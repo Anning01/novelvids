@@ -17,3 +17,8 @@ describe('analysisGate', () => {
     expect(analysisGate(TaskStatusEnum.CANCELLED)).toBe('failed')
   })
 })
+
+it('封面失败不阻止已保存分析进入后续创作', () => {
+  expect(analysisGate(TaskStatusEnum.FAILED, true)).toBe('generate')
+  expect(analysisGate(TaskStatusEnum.CANCELLED, true)).toBe('generate')
+})

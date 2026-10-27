@@ -30,6 +30,7 @@ describe('会话列表', () => {
     expect(wrapper.get('[aria-label="新建对话"]').text()).toBe('新会话')
     await wrapper.get('[aria-label="对话记录"]').trigger('click')
     expect(wrapper.get('[aria-current="true"]').text()).toContain('当前会话')
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
     await wrapper.get('input[aria-label="搜索会话"]').setValue('晨光')
     expect(wrapper.findAll('li')).toHaveLength(1)
     await wrapper.get('[aria-label="打开会话：咖啡馆晨光"]').trigger('click')

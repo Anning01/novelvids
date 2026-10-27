@@ -141,7 +141,7 @@ def folder_payload(sources, *, key=None, name="文件夹重制"):
 
 
 @pytest.mark.asyncio
-async def test_single_upload_creation_is_atomic_and_creates_one_decomposition_task(tmp_path):
+async def test_single_upload_creation_is_atomic_and_creates_one_decomposition_task(tmp_path, configured_creation_agent):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -176,6 +176,7 @@ async def test_single_upload_creation_is_atomic_and_creates_one_decomposition_ta
 async def test_auto_style_creates_remake_without_fixed_style_override(
     tmp_path,
     style_key,
+    configured_creation_agent,
 ):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
@@ -197,7 +198,7 @@ async def test_auto_style_creates_remake_without_fixed_style_override(
 
 
 @pytest.mark.asyncio
-async def test_project_creation_checks_balance_before_committing_media(tmp_path):
+async def test_project_creation_checks_balance_before_committing_media(tmp_path, configured_creation_agent):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -222,6 +223,7 @@ async def test_project_creation_checks_balance_before_committing_media(tmp_path)
 @pytest.mark.asyncio
 async def test_same_idempotency_key_returns_original_project_and_conflicting_payload_is_rejected(
     tmp_path,
+    configured_creation_agent,
 ):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
@@ -273,6 +275,7 @@ async def test_single_mode_rejects_multiple_or_unowned_uploads(tmp_path):
 @pytest.mark.asyncio
 async def test_history_creation_persists_snapshot_audit_and_uses_source_episode_number(
     tmp_path,
+    configured_creation_agent,
 ):
     source_novel = await Novel.create(name="旧项目", author="作者", team_id=3)
     source_chapter = await Chapter.create(
@@ -328,7 +331,7 @@ async def test_history_creation_rejects_cross_team_source_before_snapshot(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_history_snapshot_is_cleaned_when_project_transaction_fails(tmp_path):
+async def test_history_snapshot_is_cleaned_when_project_transaction_fails(tmp_path, configured_creation_agent):
     await Novel.create(name="名称冲突", author="作者", team_id=3)
     source_novel = await Novel.create(name="事务旧项目", author="作者", team_id=3)
     source_chapter = await Chapter.create(
@@ -353,7 +356,7 @@ async def test_history_snapshot_is_cleaned_when_project_transaction_fails(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_folder_creation_sorts_three_episodes_and_creates_independent_tasks(tmp_path):
+async def test_folder_creation_sorts_three_episodes_and_creates_independent_tasks(tmp_path, configured_creation_agent):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -385,7 +388,7 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
 
 
 @pytest.mark.asyncio
-async def test_folder_creation_returns_gap_warning_without_blocking(tmp_path):
+async def test_folder_creation_returns_gap_warning_without_blocking(tmp_path, configured_creation_agent):
     upload_service = RemakeUploadService(
         validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path
     )
@@ -440,8 +443,8 @@ async def test_folder_creation_revalidates_filename_episode_and_duplicate_batch(
 
 
 @pytest.mark.asyncio
-async def test_folder_transaction_failure_rolls_back_every_promoted_upload(tmp_path):
-    await Novel.create(name="多集名称冲突", author="作者")
+async def test_folder_transaction_failure_rolls_back_every_promoted_upload(tmp_path, configured_creation_agent):
+    await Novel.create(name="多集名称冲突", author="作者", team_id=3, created_by=5)
     upload_service = RemakeUploadService(
         validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path
     )
@@ -472,8 +475,8 @@ async def test_folder_transaction_failure_rolls_back_every_promoted_upload(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_cleanup_failure_does_not_mask_transaction_error_or_skip_siblings(tmp_path):
-    await Novel.create(name="清理失败名称冲突", author="作者")
+async def test_cleanup_failure_does_not_mask_transaction_error_or_skip_siblings(tmp_path, configured_creation_agent):
+    await Novel.create(name="清理失败名称冲突", author="作者", team_id=3, created_by=5)
     upload_service = CleanupFailingUploadService(
         validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path
     )
@@ -503,7 +506,7 @@ async def test_cleanup_failure_does_not_mask_transaction_error_or_skip_siblings(
 
 
 @pytest.mark.asyncio
-async def test_one_folder_episode_failure_and_retry_does_not_change_sibling_task(tmp_path):
+async def test_one_folder_episode_failure_and_retry_does_not_change_sibling_task(tmp_path, configured_creation_agent):
     upload_service = RemakeUploadService(
         validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path
     )
@@ -536,7 +539,7 @@ async def test_one_folder_episode_failure_and_retry_does_not_change_sibling_task
 
 
 @pytest.mark.asyncio
-async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path):
+async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -567,3 +570,20 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     with pytest.raises(RemakeError) as exc_info:
         await service.retry(source.id, team_id=3, user_id=5)
     assert exc_info.value.error_code == "REMAKE_ANALYSIS_NOT_RETRYABLE"
+
+
+@pytest.mark.asyncio
+async def test_remake_keeps_a_title_already_used_by_a_different_team(tmp_path, configured_creation_agent):
+    existing = await Novel.create(name="可复用重制标题", team_id=8, created_by=5)
+    upload_service = RemakeUploadService(
+        validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path,
+    )
+    upload = await ready_upload(upload_service)
+    result = await RemakeProjectService(upload_service=upload_service).create(
+        payload(upload.id, name="可复用重制标题"), team_id=3, user_id=5,
+    )
+    created = await Novel.get(id=result["novel_id"])
+    assert created.name == existing.name
+    assert created.id != existing.id
+    assert created.team_id == 3
+    assert await Novel.filter(id=existing.id, team_id=8).exists()

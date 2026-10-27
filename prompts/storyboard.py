@@ -1,6 +1,6 @@
 """Prompt templates and pure renderers for storyboard generation."""
 
-from prompts.catalog import template, text
+from prompts.skill_pack import render_skill, task_facts
 
 import json
 import re
@@ -13,7 +13,6 @@ from prompts.storyboard_strategies import (
     StoryboardStrategyPrompt,
 )
 from utils.prompt_language import normalize_prompt_language
-from prompts.language import output_language_rule
 from prompts.labels import prompt_label
 
 
@@ -61,28 +60,6 @@ class StoryboardSegment(Protocol):
     camera_movement: str
 
 
-STORYBOARD_LANGUAGE_INSTRUCTIONS = {
-    lang: text("storyboard_language", lang) for lang in ("zh", "en")
-}
-
-
-STORYBOARD_SYSTEM_PROMPT = template("storyboard_system.md", "zh")
-
-
-STORYBOARD_ASSET_MESSAGE = template("storyboard_assets.md", "zh")
-
-
-STORYBOARD_NARRATIVE_MESSAGE = template("storyboard_narrative.md", "zh")
-
-STORYBOARD_CONSTRAINT_MESSAGE = template("storyboard_constraints.md", "zh")
-
-
-STORYBOARD_INITIAL_TASK_MESSAGE = template("storyboard_initial.md", "zh")
-
-
-STORYBOARD_CONTINUATION_TASK_MESSAGE = template("storyboard_continue.md", "zh")
-
-
 _REFERENCE_TEXT_FIELDS = (
     "description",
     "shot_size_and_camera",
@@ -121,7 +98,24 @@ _UNSAFE_AUTOMATIC_ALIASES = {
     "女子",
     "对方",
     "那人",
+    "师父", "师傅", "父亲", "母亲", "老师", "宗主", "前辈",
 }
+
+
+def split_storyboard_voice_track(value: str) -> tuple[str, str]:
+    """Separate timeline/speaker from literal speech, including colons in emotions."""
+    timeline = re.match(r"^\s*\d+(?:\.\d+)?\s*s?\s*[-–—~]\s*\d+(?:\.\d+)?\s*s?\s*[:：]\s*", value)
+    start = timeline.end() if timeline else 0
+    depth = 0
+    for index in range(start, len(value)):
+        character = value[index]
+        if character in "（(":
+            depth += 1
+        elif character in "）)":
+            depth = max(0, depth - 1)
+        elif character in ":：" and depth == 0:
+            return value[:index + 1], value[index + 1:]
+    return value, ""
 
 
 def _safe_canonical_asset_name(value: object) -> str:
@@ -164,6 +158,8 @@ def _asset_reference_candidates(
 def _normalize_asset_reference_text(
     text: str,
     candidates: Sequence[tuple[str, str]],
+    *,
+    preserve_speech: bool = False,
 ) -> str:
     if not text or not candidates:
         return text
@@ -182,7 +178,17 @@ def _normalize_asset_reference_text(
         canonical_name = candidate_map.get(raw_name)
         return protect(f"@{{{canonical_name}}}" if canonical_name else match.group(0))
 
-    normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, text)
+    timeline = r"\d+(?:\.\d+)?\s*s?\s*[-–—~]\s*\d+(?:\.\d+)?\s*s?\s*[:：]"
+
+    def protect_speech(match: re.Match[str]) -> str:
+        prefix, speech = split_storyboard_voice_track(match.group(0))
+        return prefix + protect(speech) if speech else match.group(0)
+
+    normalized = (
+        re.sub(rf"{timeline}[^\n]*?(?={timeline}|\n|\Z)", protect_speech, text)
+        if preserve_speech else text
+    )
+    normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, normalized)
 
     # 兼容旧格式 @资产名，并统一升级为带花括号的正式名。模型常会把后续
     # 中文动作直接连在名称后面（例如 ``@羽宁沿着步道走``），因此必须按
@@ -211,7 +217,7 @@ def normalize_storyboard_reference_text(
     text: str, entities: Sequence[StoryboardEntity]
 ) -> str:
     """Use the shared name/alias rules for free-text and structured prompts alike."""
-    return _normalize_asset_reference_text(text, _asset_reference_candidates(entities))
+    return _normalize_asset_reference_text(text, _asset_reference_candidates(entities), preserve_speech=True)
 
 
 def normalized_storyboard_reference_fields(
@@ -232,7 +238,12 @@ def normalized_storyboard_reference_fields(
     for field_name in _REFERENCE_LIST_FIELDS:
         original = list(getattr(shot, field_name))
         normalized = [
-            _normalize_asset_reference_text(str(value), candidates)
+            (
+                _normalize_asset_reference_text(split_storyboard_voice_track(str(value))[0], candidates)
+                + split_storyboard_voice_track(str(value))[1]
+                if field_name in {"dialogue", "narration"}
+                else _normalize_asset_reference_text(str(value), candidates)
+            )
             for value in original
         ]
         if normalized != original:
@@ -269,72 +280,19 @@ def _continuation_payload(previous_shot: StoryboardShot) -> str:
 
 
 def build_storyboard_messages(
-    long_text: str,
-    entities: Sequence[StoryboardEntity],
-    prompt_language: str = "zh",
-    *,
-    batch_index: int = 0,
-    batch_count: int = 1,
-    next_sequence: int = 1,
-    previous_shot: StoryboardShot | None = None,
-    strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
-    creative_constraints: Sequence[dict] = (),
-) -> list[dict[str, str]]:
-    """Build stable rules and request facts as separate chat messages."""
-    language = normalize_prompt_language(prompt_language)
-    from prompts.storyboard_strategies import localized_strategy
-
-    strategy = localized_strategy(strategy, language)
-    task_template = (
-        template("storyboard_continue.md", language)
-        if previous_shot is not None
-        else template("storyboard_initial.md", language)
-    )
-    task_content = task_template.format(
-        batch_number=batch_index + 1,
-        batch_count=batch_count,
-        next_sequence=next_sequence,
-        previous_shot=(
-            _continuation_payload(previous_shot) if previous_shot is not None else ""
-        ),
-    )
+    long_text, entities, prompt_language="zh", *, batch_index=0, batch_count=1,
+    next_sequence=1, previous_shot=None, strategy=CINEMATIC_STORYBOARD_STRATEGY,
+    creative_constraints=(),
+):
     return [
-        {
-            "role": "system",
-            "content": template("storyboard_system.md", language).format(
-                language_instruction=STORYBOARD_LANGUAGE_INSTRUCTIONS[language]
-                + "\n"
-                + output_language_rule(language),
-            )
-            + (f"\n\n{strategy.generation_rules}" if strategy.generation_rules else ""),
-        },
-        {
-            "role": "user",
-            "content": template("storyboard_assets.md", language).format(
-                asset_registry=_asset_payload(entities),
-            ),
-        },
-        {
-            "role": "user",
-            "content": template("storyboard_narrative.md", language).format(
-                long_text=long_text
-            ),
-        },
-        {"role": "user", "content": task_content},
-        *(
-            [
-                {
-                    "role": "user",
-                    "content": template("storyboard_constraints.md", language).format(
-                        constraints=json.dumps(
-                            list(creative_constraints), ensure_ascii=False
-                        )
-                    ),
-                }
-            ]
-            if creative_constraints
-            else []
-        ),
+        {"role": "system", "content": render_skill("storyboard", prompt_language)},
+        {"role": "user", "content": task_facts({
+            "assets": json.loads(_asset_payload(entities)),
+            "manuscript": long_text, "strategy": strategy.key,
+            "batch_number": batch_index + 1, "batch_count": batch_count,
+            "next_sequence": next_sequence, "constraints": list(creative_constraints),
+            "previous_shot": json.loads(_continuation_payload(previous_shot)) if previous_shot else None,
+        })},
     ]
 
 
@@ -358,7 +316,7 @@ def _shot_search_text(shot: StoryboardShot) -> str:
     values: list[object] = [
         *(getattr(shot, field_name) for field_name in _REFERENCE_TEXT_FIELDS),
         *(
-            value
+            split_storyboard_voice_track(value)[0] if field_name in {"dialogue", "narration"} else value
             for field_name in _REFERENCE_LIST_FIELDS
             for value in getattr(shot, field_name)
         ),
@@ -525,12 +483,14 @@ def format_storyboard_prompt(
     *,
     entities: Sequence[StoryboardEntity] = (),
     strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
+    localize_strategy: bool = True,
 ) -> str:
     """Render one structured shot as the stable professional video prompt."""
     language = normalize_prompt_language(prompt_language)
     from prompts.storyboard_strategies import localized_strategy
 
-    strategy = localized_strategy(strategy, language)
+    if localize_strategy:
+        strategy = localized_strategy(strategy, language)
     duration_token = _duration_token(shot.duration)
     dialogue = "\n".join(shot.dialogue)
     shot_body_parts = [shot.visual_prose, *shot.actions]
@@ -596,6 +556,14 @@ def format_storyboard_prompt(
             f"{prompt_label('总时长：', language)}{duration_token}",
         )
     )
-    return _normalize_asset_reference_text(
-        prompt, _asset_reference_candidates(entities)
-    )
+    candidates = _asset_reference_candidates(entities)
+    protected_voices = []
+    for index, voice in enumerate([*shot.narration, *shot.dialogue]):
+        prefix, speech = split_storyboard_voice_track(voice)
+        placeholder = f"\ue100{index}\ue101"
+        protected_voices.append((placeholder, _normalize_asset_reference_text(prefix, candidates) + speech))
+        prompt = prompt.replace(voice, placeholder)
+    prompt = _normalize_asset_reference_text(prompt, candidates)
+    for placeholder, voice in protected_voices:
+        prompt = prompt.replace(placeholder, voice)
+    return prompt

@@ -319,7 +319,7 @@ async def test_folder_resource_endpoints_and_delete_preview(client):
 
 
 @pytest.mark.asyncio
-async def test_library_reference_generation_validates_identity_before_submission(client, clip, monkeypatch):
+async def test_library_reference_generation_validates_identity_before_submission(client, clip, monkeypatch, configured_creation_agent):
     from controllers.video import video_controller
     from models.novel import Novel
     from models.chapter import Chapter
@@ -338,7 +338,7 @@ async def test_library_reference_generation_validates_identity_before_submission
     generator = AsyncMock()
     generator.submit.return_value = "library-task"
     monkeypatch.setattr("controllers.video.get_generator", lambda config: generator)
-    result = await video_controller.generate(req, media_base_url="https://app.invalid")
+    result = await video_controller._submit_generation(req, media_base_url="https://app.invalid")
     assert result.metadata["reference_media"][0]["url"] == source["storage_ref"]
     assert result.metadata["reference_media"][0]["duration"] == 2
     submitted = generator.submit.call_args
@@ -346,7 +346,7 @@ async def test_library_reference_generation_validates_identity_before_submission
     # A deleted library ID is rejected even when the caller supplies a usable URL.
     await library.delete_resources(0, [source["id"]])
     with pytest.raises(HTTPException, match="已删除"):
-        await video_controller.generate(req, media_base_url="https://app.invalid")
+        await video_controller._submit_generation(req, media_base_url="https://app.invalid")
 
 
 @pytest.mark.asyncio

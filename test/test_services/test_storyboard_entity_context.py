@@ -1,6 +1,5 @@
 import pytest
 
-from prompts.reference import render_default_asset_prompt
 from services.storyboard.entities import visual_entity_description
 
 
@@ -8,7 +7,15 @@ from services.storyboard.entities import visual_entity_description
 @pytest.mark.parametrize('kind', ['person', 'scene', 'item'])
 def test_visual_definition_uses_current_traits_without_reference_sheet_layout(kind, language):
     traits = '齐肩黑发，灰色风衣' if language == 'zh' else 'Black shoulder-length hair, gray coat'
-    prompt = render_default_asset_prompt(asset_type=kind, visual_traits=traits, prompt_language=language)
+    prefix = {
+        ("person", "zh"): "任务：完成角色的上半身正面平视特写\n角色描述：",
+        ("person", "en"): "Task: Create an upper-body, front-facing, eye-level close-up\nCharacter description:",
+        ("scene", "zh"): "生成四宫格画面，展示同一个场景\n场景描述：",
+        ("scene", "en"): "Create a four-panel environment reference sheet\nScene description:",
+        ("item", "zh"): "【道具描述】",
+        ("item", "en"): "[Prop description]",
+    }[(kind, language)]
+    prompt = prefix + traits
     description = visual_entity_description('故事中的来访者', prompt)
     assert traits in description
     assert '故事中的来访者' in description

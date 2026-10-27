@@ -242,6 +242,9 @@ class AssetReferenceHandler(BaseTaskHandler):
         if variant_id is not None:
             variant = await AssetVariant.get(id=variant_id, asset_id=asset_id)
 
+        from services.creation_agent.media_execution import prepare_image_prompt
+        await prepare_image_prompt(asset, variant, request_params)
+
         # 项目视觉风格 → 生图提示词定调（未知/未设置风格不注入）
         novel = await asset.novel
         style_prompt = image_project_style_suffix(
@@ -249,6 +252,11 @@ class AssetReferenceHandler(BaseTaskHandler):
             novel.custom_style_prompt if novel else None,
             language=prompt_language,
         )
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
+        if execution:
+            style_prompt = ""
+
 
         # 构造生成所需的数据
         try:
@@ -368,9 +376,13 @@ class AssetReferenceHandler(BaseTaskHandler):
                     )
 
             if not result_urls:
-                raise RuntimeError(localized_message('参考图生成完成，但没有可持久化的图片'))
+                failure = RuntimeError(localized_message('参考图生成完成，但没有可持久化的图片'))
+                failure.image_count = len(image_list or [])
+                raise failure
 
             result = {"images": result_urls, "variant_id": variant.id if variant else None}
+            if execution:
+                result["image_count"] = len(image_list)
             if reference_images:
                 result["input_image_count"] = len(reference_images)
             return result

@@ -25,6 +25,7 @@ vi.mock('@/api', () => ({
     createAssetVariant: vi.fn(),
     updateAssetVariant: vi.fn(),
     updateAsset: vi.fn(),
+    createAsset: vi.fn(),
     assignAssetVariantToChapter: vi.fn(),
     deleteAssetVariant: vi.fn(),
     generateAsset: vi.fn(),
@@ -144,6 +145,28 @@ it('keeps the drawer header compact', () => {
   expect(styles).toContain('grid-template-columns: 36px 1fr 32px')
   expect(styles).toContain('padding: 11px 18px')
   expect(styles).toContain('width: 36px; height: 36px')
+})
+
+it('notifies the outer card of a new asset generation before closing the drawer', async () => {
+  vi.clearAllMocks()
+  const created = { ...editedAsset, id: 21, asset_type: AssetTypeEnum.SCENE, canonical_name: '办公室' }
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: '', data: [imageModel(1, '运行模型')] })
+  vi.mocked(api.createAsset).mockResolvedValue({ code: 0, message: '', data: created })
+  vi.mocked(api.generateAsset).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'new-image', task_type: 2, status: TaskStatusEnum.PENDING, created_at: '',
+  } })
+  const wrapper = mount(AssetCreateDialog, { props: { open: true, kind: 'scene', novelId: 9 },
+    global: { components: { AppButton }, stubs: { Teleport: true } } })
+  await flushPromises()
+  await wrapper.get('input[placeholder="请输入"]').setValue('办公室')
+  await wrapper.get('textarea[placeholder="描述场景的外观、材质、光影和视角要求"]').setValue('保存的完整场景提示词')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(api.generateAsset).toHaveBeenCalledOnce()
+  expect(wrapper.emitted('created')).toEqual([[created]])
+  expect(wrapper.emitted('generation-started')).toEqual([[{ asset_id: 21, task_id: 'new-image', status: TaskStatusEnum.PENDING }]])
+  expect(wrapper.emitted('close')).toHaveLength(1)
 })
 
 it('keeps the selected library card outline inside the scroll viewport', async () => {
@@ -434,6 +457,7 @@ it('shows a live animated generation state immediately after regeneration starts
   await flushPromises()
 
   expect(api.generateAsset).toHaveBeenCalledWith(assetWithBaseImage.id, pendingVariant.id)
+  expect(wrapper.emitted('generation-started')).toEqual([[{ asset_id: editedAsset.id, task_id: 'generation-pending', status: TaskStatusEnum.PENDING }]])
   expect(wrapper.get('.asset-generated-preview > header strong').text()).toContain('测试形态')
   expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('生成中')
   expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('自动显示最新结果')
@@ -727,7 +751,7 @@ it('renders as a right drawer and lists previous generation images', async () =>
   expect(failureButton.text()).toContain('查看详情')
   expect(historyList.text()).not.toContain(fullFailureReason)
   expect(historyList.text()).toContain(`${fullFailureReason.slice(0, 20)}...`)
-  expect(assetDialogSource).toContain('color: #c92f43')
+  expect(assetDialogSource).toContain('color: var(--creation-danger)')
   expect(assetDialogSource).toContain('font-size: 8px')
   await failureButton.trigger('click')
   expect(wrapper.get('.asset-generation-error-detail pre').text()).toContain(fullFailureReason)

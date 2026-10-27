@@ -31,6 +31,7 @@ vi.mock('@/api', () => ({
     latestExtraction: vi.fn(),
     updateAsset: vi.fn(),
     generateAsset: vi.fn(),
+    activeAssetGenerations: vi.fn(),
     task: vi.fn(),
   },
   sleep: vi.fn(),
@@ -72,6 +73,7 @@ beforeEach(() => {
     data: { items: [chapter], pagination: { total: 1, page: 1, page_size: 30, pages: 1 } },
   })
   vi.mocked(api.latestExtraction).mockResolvedValue({ code: 0, message: 'ok', data: null })
+  vi.mocked(api.activeAssetGenerations).mockResolvedValue({ code: 0, message: 'ok', data: [] })
   vi.mocked(api.assets).mockImplementation(async (_novelId, _page, _pageSize, chapterId) => {
     const allAssets = [
         {
@@ -312,4 +314,142 @@ it('opens the exact asset and variant from an assistant result link outside the 
   expect(api.asset).toHaveBeenCalledWith(901)
   expect(drawer.props()).toMatchObject({ open: true, kind: 'scene', asset, initialVariantId: 807 })
   wrapper.unmount()
+})
+
+it('reconciles an old failed extraction with the latest completed task on window focus', async () => {
+  vi.mocked(api.latestExtraction).mockResolvedValueOnce({ code: 0, message: '', data: {
+    id: 'old-failure', task_type: 1, status: TaskStatusEnum.FAILED,
+    error_message: '旧的提取失败', created_at: '',
+  } }).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'new-success', task_type: 1, status: TaskStatusEnum.COMPLETED, created_at: '',
+  } })
+  const wrapper = await mountInCurrentChapterScope()
+  expect(wrapper.text()).toContain('旧的提取失败')
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  expect(api.latestExtraction).toHaveBeenLastCalledWith(2162)
+  expect(wrapper.text()).not.toContain('旧的提取失败')
+  expect(wrapper.find('.extraction-task-status').exists()).toBe(false)
+  expect(api.generateAsset).not.toHaveBeenCalled()
+  const calls = vi.mocked(api.latestExtraction).mock.calls.length
+  wrapper.unmount()
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  expect(api.latestExtraction).toHaveBeenCalledTimes(calls)
+})
+
+it('refreshes extraction state as well as assets through the existing refresh button', async () => {
+  vi.mocked(api.latestExtraction).mockResolvedValueOnce({ code: 0, message: '', data: {
+    id: 'old-failure', task_type: 1, status: TaskStatusEnum.FAILED, error_message: '旧失败', created_at: '',
+  } }).mockResolvedValue({ code: 0, message: '', data: null })
+  const wrapper = await mountInCurrentChapterScope()
+  expect(wrapper.text()).toContain('旧失败')
+  await wrapper.get('[aria-label="刷新"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('旧失败')
+  expect(api.latestExtraction).toHaveBeenCalledTimes(2)
+})
+
+it('does not let a late poll for an old task overwrite a reconciled success', async () => {
+  let finish!: (response: Awaited<ReturnType<typeof api.task>>) => void
+  vi.mocked(api.latestExtraction).mockResolvedValueOnce({ code: 0, message: '', data: {
+    id: 'old-running', task_type: 1, status: TaskStatusEnum.PROCESSING, created_at: '',
+  } }).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'new-success', task_type: 1, status: TaskStatusEnum.COMPLETED, created_at: '',
+  } })
+  vi.mocked(api.task).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const wrapper = await mountInCurrentChapterScope()
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  finish({ code: 0, message: '', data: { id: 'old-running', task_type: 1,
+    status: TaskStatusEnum.FAILED, error_message: '迟到的旧失败', created_at: '' } })
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('迟到的旧失败')
+  expect(wrapper.find('.extraction-task-status').exists()).toBe(false)
+})
+
+
+it('shows the outer card animation for a drawer generation and completes after the drawer closes', async () => {
+  let finish!: (response: Awaited<ReturnType<typeof api.task>>) => void
+  vi.mocked(api.task).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const wrapper = await mountInCurrentChapterScope()
+  const drawer = wrapper.findComponent(AssetCreateDialog)
+  const generation = { asset_id: 31, task_id: 'drawer-image', status: TaskStatusEnum.PROCESSING }
+  drawer.vm.$emit('generation-started', generation)
+  await nextTick()
+  expect(wrapper.get('.asset-generating-placeholder').text()).toContain('正在生成参考图')
+  expect(wrapper.get('.asset-visual').classes()).toContain('is-generating')
+  expect(wrapper.get('.asset-state-badge').text()).toContain('生成中')
+  drawer.vm.$emit('close')
+  await flushPromises()
+  expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(true)
+  // Discovering the same request again must not create another card polling loop.
+  vi.mocked(api.activeAssetGenerations).mockResolvedValue({ code: 0, message: '', data: [generation] })
+  await wrapper.get('[aria-label="刷新"]').trigger('click')
+  await flushPromises()
+  expect(api.task).toHaveBeenCalledOnce()
+  vi.mocked(api.assets).mockResolvedValue({ code: 0, message: '', data: { items: [{
+    id: 31, novel_id: 9, canonical_name: '宫平', asset_type: AssetTypeEnum.PERSON, main_image: '/media/completed.png',
+    created_at: '', updated_at: '',
+  }], pagination: { total: 1, page: 1, page_size: 100, pages: 1 } } })
+  finish({ code: 0, message: '', data: { id: 'drawer-image', task_type: 2, status: TaskStatusEnum.COMPLETED, created_at: '' } })
+  await flushPromises()
+  expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(false)
+  expect(wrapper.get('.asset-visual img').attributes('src')).toBe('/media/completed.png')
+  expect(api.generateAsset).not.toHaveBeenCalled()
+})
+
+it('recovers an externally submitted generation and stops the animation on failure', async () => {
+  let finish!: (response: Awaited<ReturnType<typeof api.task>>) => void
+  vi.mocked(api.task).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const wrapper = await mountInCurrentChapterScope()
+  vi.mocked(api.activeAssetGenerations).mockResolvedValue({ code: 0, message: '', data: [
+    { asset_id: 31, task_id: 'assistant-image', status: TaskStatusEnum.QUEUED },
+  ] })
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(true)
+  finish({ code: 0, message: '', data: { id: 'assistant-image', task_type: 2, status: TaskStatusEnum.FAILED, created_at: '' } })
+  await flushPromises()
+  expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(false)
+  expect(wrapper.get('.asset-state-badge').text()).toBe('生成失败')
+})
+
+it('discovers assistant image tasks while the page stays visible and stops checking after unmount', async () => {
+  vi.useFakeTimers()
+  try {
+    let finish!: (response: Awaited<ReturnType<typeof api.task>>) => void
+    vi.mocked(api.task).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = await mountInCurrentChapterScope()
+    vi.mocked(api.activeAssetGenerations).mockResolvedValue({ code: 0, message: '', data: [
+      { asset_id: 31, task_id: 'background-image', status: TaskStatusEnum.PROCESSING },
+    ] })
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(true)
+    const calls = vi.mocked(api.activeAssetGenerations).mock.calls.length
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(10000)
+    finish({ code: 0, message: '', data: { id: 'background-image', task_type: 2, status: TaskStatusEnum.COMPLETED, created_at: '' } })
+    await flushPromises()
+    expect(api.activeAssetGenerations).toHaveBeenCalledTimes(calls)
+    expect(api.generateAsset).not.toHaveBeenCalled()
+  } finally { vi.useRealTimers() }
+})
+
+it('keeps the animation until all generations for an asset finish', async () => {
+  const finishes = new Map<string, (response: Awaited<ReturnType<typeof api.task>>) => void>()
+  vi.mocked(api.task).mockImplementation(taskId => new Promise(resolve => { finishes.set(taskId, resolve) }))
+  const wrapper = await mountInCurrentChapterScope()
+  const drawer = wrapper.findComponent(AssetCreateDialog)
+  for (const taskId of ['main-image', 'variant-image']) {
+    drawer.vm.$emit('generation-started', { asset_id: 31, task_id: taskId, status: TaskStatusEnum.PROCESSING })
+  }
+  await flushPromises()
+  finishes.get('main-image')!({ code: 0, message: '', data: { id: 'main-image', task_type: 2, status: TaskStatusEnum.CANCELLED, created_at: '' } })
+  await flushPromises()
+  expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(true)
+  finishes.get('variant-image')!({ code: 0, message: '', data: { id: 'variant-image', task_type: 2, status: TaskStatusEnum.COMPLETED, created_at: '' } })
+  await flushPromises()
+  expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(false)
 })

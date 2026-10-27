@@ -57,6 +57,28 @@ def _auth(token: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_project_overview_uses_the_same_team_scope_for_cards_and_totals(client: AsyncClient):
+    from models.chapter import Chapter
+
+    team_a = await _create_team("Overview A")
+    team_b = await _create_team("Overview B")
+    await _create_member("overview_viewer", team_a, role=TeamRoleEnum.viewer.value)
+    own = await _create_novel("Own overview", team_a)
+    foreign = await _create_novel("Foreign overview", team_b)
+    for project in (own, foreign):
+        await Chapter.create(novel=project, number=1, name="Episode", content="Private manuscript")
+    token = await _login(client, "overview_viewer")
+    payload = (await client.get("/api/novel/overview", headers=_auth(token))).json()
+    assert payload["code"] == 0
+    assert [item["id"] for item in payload["data"]["items"]] == [own.id]
+    assert payload["data"]["summary"]["project_count"] == 1
+    assert payload["data"]["summary"]["chapter_count"] == 1
+    assert "Private manuscript" not in str(payload)
+    anonymous = (await client.get("/api/novel/overview")).json()
+    assert anonymous["code"] == 401
+
+
+@pytest.mark.asyncio
 async def test_member_list_sees_only_own_team_novels(client: AsyncClient):
     team_a = await _create_team("团队A")
     team_b = await _create_team("团队B")
@@ -182,3 +204,70 @@ async def test_ensure_team_schema_skips_when_no_orphans(client: AsyncClient):
     await ensure_team_schema()
     # 已有团队且无孤儿数据：不应新建默认团队
     assert await Team.filter(name="默认团队").count() == 0
+
+
+@pytest.mark.asyncio
+async def test_same_project_name_is_independent_between_teams(client: AsyncClient):
+    team_a = await _create_team("Name scope A")
+    team_b = await _create_team("Name scope B")
+    await _create_member("name_alice", team_a)
+    await _create_member("name_bob", team_b)
+    await _create_member("name_carol", team_a)
+    tokens = {name: await _login(client, name) for name in ("name_alice", "name_bob", "name_carol")}
+
+    bodies = [
+        (await client.post("/api/novel", json={"name": "同一本小说", "content": name}, headers=_auth(tokens[name]))).json()
+        for name in ("name_alice", "name_bob", "name_carol")
+    ]
+    assert all(body["code"] == 0 for body in bodies)
+    assert [body["data"]["name"] for body in bodies] == ["同一本小说", "同一本小说", "同一本小说 (2)"]
+    own_ids = {bodies[0]["data"]["id"], bodies[2]["data"]["id"]}
+    own = (await client.get("/api/novel", headers=_auth(tokens["name_alice"]))).json()
+    assert {item["id"] for item in own["data"]["items"]} == own_ids
+    foreign_id = bodies[1]["data"]["id"]
+    for method in ("get", "patch", "delete"):
+        kwargs = {"json": {"name": "试图修改"}} if method == "patch" else {}
+        response = await getattr(client, method)(f"/api/novel/{foreign_id}", headers=_auth(tokens["name_alice"]), **kwargs)
+        assert response.json()["code"] == 404
+    assert await Novel.filter(id=foreign_id, team_id=team_b.id, name="同一本小说").exists()
+
+
+@pytest.mark.asyncio
+async def test_team_bootstrap_keeps_personal_projects_in_creator_scope(client: AsyncClient):
+    team = await _create_team("Personal scope guard")
+    owner = await User.create(username="personal_owner", password_hash=hash_password("password123"))
+    personal = await _create_novel("重启同名项目", created_by=owner.id)
+    shared = await _create_novel("重启同名项目", team=team)
+    legacy = await _create_novel("历史无归属项目")
+    personal_usage = await ModelUsageRecord.create(
+        novel_id=personal.id, task_type=AiTaskTypeEnum.extraction.value,
+        billing_type="text", model="test-model", cost=1.5, team_id=None, user_id=owner.id,
+    )
+
+    await ensure_team_schema()
+    await ensure_team_schema()
+
+    await personal.refresh_from_db()
+    await shared.refresh_from_db()
+    await legacy.refresh_from_db()
+    await personal_usage.refresh_from_db()
+    assert personal.team_id is None
+    assert personal.created_by == owner.id
+    assert shared.team_id == team.id
+    assert legacy.team_id == team.id
+    assert personal_usage.team_id is None
+    assert personal_usage.user_id == owner.id
+    assert float(personal_usage.cost) == 1.5
+
+
+@pytest.mark.asyncio
+async def test_personal_projects_alone_do_not_trigger_a_default_team(client: AsyncClient):
+    owner = await User.create(username="personal_only", password_hash=hash_password("password123"))
+    personal = await _create_novel("个人项目", created_by=owner.id)
+
+    await ensure_team_schema()
+    await ensure_team_schema()
+
+    await personal.refresh_from_db()
+    assert personal.team_id is None
+    assert await Team.all().count() == 0

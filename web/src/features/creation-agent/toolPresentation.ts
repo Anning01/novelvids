@@ -1,6 +1,9 @@
 import { tr } from '@/i18n'
 
 const TOOL_LABELS: Record<string, { operation: string; progress: string }> = {
+  read_skill: { operation: '读取创作规范', progress: '正在读取创作规范' },
+  get_production_context: { operation: '查看生成能力和进度', progress: '正在查看生成能力和进度' },
+  submit_production: { operation: '提交生成任务', progress: '正在提交生成任务' },
   read_creation_history: { operation: '回查对话历史', progress: '正在回查对话历史' },
   get_creation_context: { operation: '读取创作上下文', progress: '正在读取创作上下文' },
   list_creation_objects: {operation:'浏览作品对象',progress:'正在浏览作品对象'},

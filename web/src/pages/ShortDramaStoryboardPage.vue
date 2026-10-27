@@ -277,7 +277,7 @@ async function waitForAnalysisThenGenerate(chapterId: number) {
     for (;;) {
       if (!alive || chapterLoadVersion !== loadVersion) return
       const task = (await api.novelAnalysis(projectId.value)).data
-      const gate = analysisGate(task?.status)
+      const gate = analysisGate(task?.status, task?.response_data?.analysis_completed === true)
       if (gate === 'generate') break
       if (gate === 'failed') {
         throw new Error(task?.error_message || tr('项目分析失败，请回到剧本页重新分析'))
@@ -1349,14 +1349,14 @@ function restorePersistedStoryboardTasks() {
   }
 }
 
-async function generateChapterStoryboard(chapterId: number) {
+async function generateChapterStoryboard(chapterId: number, replaceExisting = false) {
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
   const pendingTask = readPersistedStoryboardTasks()[chapterId]
   if (pendingTask) { await pollStoryboardTask(chapterId, pendingTask); return }
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId)).data
+    const task = (await api.generateScenes(chapterId, replaceExisting)).data
     // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
     persistStoryboardTask(chapterId, task.id)
     await pollStoryboardTask(chapterId, task.id)
@@ -1375,7 +1375,7 @@ async function regenerateStoryboard() {
   if (!scenes.value.length || canReconnectStoryboard.value) { await retryStoryboard(); return }
   // 分析未完成时：等待完成后自动生成本集分镜（不删除现有内容）
   const analysis = (await api.novelAnalysis(projectId.value)).data
-  const gate = analysisGate(analysis?.status)
+  const gate = analysisGate(analysis?.status, analysis?.response_data?.analysis_completed === true)
   if (gate === 'failed') {
     notice.error(analysis?.error_message || tr('项目分析失败，请回到剧本页重新分析'))
     return
@@ -1388,26 +1388,11 @@ async function regenerateStoryboard() {
   const chapterScenes = [...scenes.value]
   if (!await appConfirm({
     get title() { return tr('重新生成本集分镜？') },
-    message: tr('本集现有 {p0} 个分镜将被替换，此操作无法撤销。', { p0: chapterScenes.length }),
+    message: tr('新分镜校验成功后将替换本集 {p0} 个分镜；失败时保留原内容。', { p0: chapterScenes.length }),
     get confirmLabel() { return tr('重新生成') },
     tone: 'warning',
   })) return
-  setChapterGenerating(chapterId, true)
-  setGenerationError(chapterId)
-  try {
-    await Promise.all(chapterScenes.map(scene => api.deleteScene(scene.id)))
-    if (activeChapterId.value === chapterId) {
-      scenes.value = []
-      activeSceneId.value = 0
-      sceneDrafts.value = {}
-    }
-  } catch (error) {
-    setChapterGenerating(chapterId, false)
-    notice.error((error as Error).message)
-    return
-  }
-  setChapterGenerating(chapterId, false)
-  await generateChapterStoryboard(chapterId)
+  await generateChapterStoryboard(chapterId, true)
 }
 
 async function loadChapter(chapterId: number) {

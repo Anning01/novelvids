@@ -31,7 +31,7 @@ async def _setup_video_data(
 
 
 @pytest.mark.asyncio
-async def test_api_生成视频(client: AsyncClient):
+async def test_api_生成视频(client: AsyncClient, configured_creation_agent):
     """POST /api/video/generate/ 成功返回 Video。"""
     scene, config = await _setup_video_data()
 
@@ -44,16 +44,24 @@ async def test_api_生成视频(client: AsyncClient):
             "scene_id": scene.id,
             "model_config_id": config.id,
         })
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["external_task_id"] is None
+        assert data["status"] == TaskStatusEnum.queued.value
+        mock_gen.submit.assert_not_awaited()
+        from models.ai_task import AiTask
+        from services.ai_task_executor import ai_task_executor
+        task = await AiTask.get(id=data["metadata"]["agent_run_id"])
+        await ai_task_executor.run(task)
+        video = await Video.get(id=data["id"])
+        assert video.external_task_id == "api-task-001"
+        assert video.status == TaskStatusEnum.pending.value
+        mock_gen.submit.assert_awaited_once()
 
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert data["external_task_id"] == "api-task-001"
-    assert data["status"] == TaskStatusEnum.pending.value
-    print(f"    API 生成视频: id={data['id']}, task_id={data['external_task_id']}")
 
 
 @pytest.mark.asyncio
-async def test_api_上传参考素材使用所选模型能力(client: AsyncClient):
+async def test_api_上传参考素材使用所选模型能力(client: AsyncClient, configured_creation_agent):
     _, config = await _setup_video_data()
     uploaded = {
         "type": "video",
@@ -77,7 +85,8 @@ async def test_api_上传参考素材使用所选模型能力(client: AsyncClien
         )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["data"] == uploaded
+    from schemas.video import VideoReferenceMedia
+    assert resp.json()["data"] == VideoReferenceMedia.model_validate(uploaded).model_dump()
     assert save.await_args.args[1].max_reference_videos == 3
 
 

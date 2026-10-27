@@ -597,7 +597,7 @@ async def test_api_delete_asset(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_api_reference_asset(client: AsyncClient):
+async def test_api_reference_asset(client: AsyncClient, configured_creation_agent):
     """提交参考图生成任务。"""
     from models.config import AiModelConfig
     from models.ai_task import AiTask
@@ -629,7 +629,7 @@ async def test_api_reference_asset(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_api_reference_asset_with_image_inputs(client: AsyncClient):
+async def test_api_reference_asset_with_image_inputs(client: AsyncClient, configured_creation_agent):
     from models.config import AiModelConfig
     from models.ai_task import AiTask
     from utils.enums import AiTaskTypeEnum

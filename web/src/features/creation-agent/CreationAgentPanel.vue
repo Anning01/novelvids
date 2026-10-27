@@ -192,6 +192,12 @@ async function send(text: string) {
   }
 }
 
+async function confirmProduction(pending: import('./types').PendingProduction) {
+  await store.send({ request_id: pending.confirmation_request_id, message: pending.message,
+    chapter_id: pending.chapter_id, targets: pending.targets, write_scope: pending.write_scope,
+    model_config_id: pending.model_config_id, production_intents: pending.intents })
+}
+
 async function operation(action: () => Promise<unknown>) {
   operationBusy.value = true
   try { await action() } catch (error) { notice.error(error instanceof Error ? error.message : tr('操作失败')) }
@@ -242,8 +248,22 @@ function selectQueryTarget(target: AgentQueryItem) {
   void nextTick(() => composer.value?.focus())
 }
 
-onBeforeUnmount(() => { catalogEpoch += 1; statusEpoch += 1; window.removeEventListener('focus', refreshTargetStatus); store.disconnect() })
-onMounted(() => window.addEventListener('focus', refreshTargetStatus))
+let productionTimer: ReturnType<typeof setInterval> | undefined
+function refreshVisibleState() {
+  void refreshTargetStatus()
+  void store.refreshProduction()
+  void store.refreshConversations().catch(error => notice.error(error instanceof Error ? error.message : tr('加载助手失败')))
+}
+onBeforeUnmount(() => {
+  catalogEpoch += 1; statusEpoch += 1
+  window.removeEventListener('focus', refreshVisibleState)
+  clearInterval(productionTimer)
+  store.disconnect()
+})
+onMounted(() => {
+  window.addEventListener('focus', refreshVisibleState)
+  productionTimer = setInterval(() => { if (!document.hidden) void store.refreshProduction() }, 4000)
+})
 </script>
 
 <template>
@@ -256,7 +276,7 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
     </header>
     <AgentConversationMenu :conversations="store.conversations" :deleted-conversations="store.deletedConversations" :current-id="store.conversationId" :workflow="workflow" :disabled="store.busy || store.loading || store.sessionBusy || operationBusy"
       @select="operation(() => store.selectConversation($event))" @create="newConversation"
-      @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" />
+      @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" @refresh="operation(store.refreshConversations)" />
     <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || tr('当前章节') }}</span>
       <select v-model="writeScope" :aria-label="tr('助手操作范围')" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? tr('指定对象') : tr('当前章') }}</option><option value="project">{{ tr('全项目') }}</option><option value="read_only">{{ tr('只查询') }}</option></select>
     </div>
@@ -278,6 +298,18 @@ onMounted(() => window.addEventListener('focus', refreshTargetStatus))
         <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? tr('本轮已停止') : tr('本轮未完成') }}{{ item.changes.length ? tr('，已保存的修改见下方记录') : tr('，尚未保存修改') }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
+        <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
+          <p>{{ tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
+          <ul><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
+          <AppButton :disabled="!writable || store.busy" @click="confirmProduction(item.pending_production)">{{ tr('确认生成并计费') }}</AppButton>
+        </div>
+        <ul v-if="item.production?.length" class="creation-agent-panel__production">
+          <li v-for="receipt in item.production" :key="receipt.task_id">
+            {{ tr('生成任务') }} · {{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成' } as Record<string, string>)[receipt.operation] || receipt.operation) }} · {{ tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
+            <span v-if="receipt.stage === 'billing_pending'">{{ tr('用量正在结算') }}</span>
+            <span v-if="receipt.error">{{ receipt.error }}</span>
+          </li>
+        </ul>
         <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
         </AgentDisclosure>
       </template>

@@ -75,7 +75,10 @@ interface ProjectAnalysisResult {
   key_characters: KeyCharacter[]
   chapter_count: number
   cover: string | null
+  analysis_completed?: boolean
+  cover_status?: string
   cover_warning?: string
+  cover_error?: string
 }
 
 const fallbackProject: AgentProjectMeta = {
@@ -130,8 +133,9 @@ const episodeTabs = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
 
 const analysisResult = computed<ProjectAnalysisResult | null>(() => {
-  if (analysisTask.value?.status !== TaskStatusEnum.COMPLETED || !analysisTask.value.response_data) return null
-  return analysisTask.value.response_data as unknown as ProjectAnalysisResult
+  const task = analysisTask.value
+  if (!task?.response_data || (task.status !== TaskStatusEnum.COMPLETED && task.response_data.analysis_completed !== true)) return null
+  return task.response_data as unknown as ProjectAnalysisResult
 })
 const projectView = computed(() => createProjectAnalysisDraft(
   novel.value ?? { name: project.value.name },
@@ -195,8 +199,8 @@ const analysisRunning = computed(() => {
 })
 const analysisStatus = computed(() => {
   if (startingAnalysis.value || analysisRunning.value) return tr('正在理解故事并准备封面')
-  if (analysisTask.value?.status === TaskStatusEnum.FAILED) return tr('分析失败')
   if (analysisResult.value) return tr('剧本分析完成')
+  if (analysisTask.value?.status === TaskStatusEnum.FAILED) return tr('分析失败')
   if (hasScriptPreview.value) return tr('剧本已载入')
   return tr('准备分析')
 })
@@ -344,7 +348,6 @@ async function loadAnalysis() {
 }
 
 async function regenerateAnalysis() {
-  analysisTask.value = null
   await startAnalysis()
 }
 
@@ -530,7 +533,7 @@ onBeforeUnmount(() => {
         <div class="analysis-hero-copy">
           <AppBadge
             class="analysis-ready"
-            :tone="analysisTask?.status === TaskStatusEnum.FAILED ? 'danger' : analysisRunning || startingAnalysis ? 'accent' : analysisResult ? 'success' : 'neutral'"
+            :tone="analysisRunning || startingAnalysis ? 'accent' : analysisResult ? 'success' : analysisTask?.status === TaskStatusEnum.FAILED ? 'danger' : 'neutral'"
           >
             <RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="13" />
             <Check v-else-if="analysisResult" :size="13" />
@@ -560,7 +563,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section v-if="!hasScriptPreview || analysisRunning || startingAnalysis || analysisError || analysisTask?.status === TaskStatusEnum.FAILED" class="analysis-progress-card" :class="{ 'is-failed': analysisTask?.status === TaskStatusEnum.FAILED || analysisError }" role="status">
+      <section v-if="!hasScriptPreview || analysisRunning || startingAnalysis || analysisError || (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult)" class="analysis-progress-card" :class="{ 'is-failed': (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult) || analysisError }" role="status">
         <span><RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="25" /><FileText v-else :size="25" /></span>
         <div>
           <h2>{{ analysisStatus }}</h2>
@@ -573,7 +576,7 @@ onBeforeUnmount(() => {
         <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">{{ tr('重新连接') }}</AppButton>
       </section>
 
-      <p v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status">{{ analysisResult.cover_warning }}</p>
+      <div v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status"><p>{{ analysisResult.cover_warning }}</p><p v-if="analysisResult.cover_error">{{ analysisResult.cover_error }}</p></div>
       <template v-if="hasScriptPreview">
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>{{ tr('项目设定') }}</h2></div></header>
@@ -679,6 +682,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }
 .creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
 .creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 24px; padding: 18px 20px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }
 .creation-stage-guide > div { flex: 1 1 240px; }

@@ -46,15 +46,27 @@ def _identity_key(value: str) -> str:
     return re.sub(r"[\W_]+", "", (value or "").casefold())
 
 
-def _identity_keys(asset: Asset) -> set[str]:
-    return {
-        key
-        for key in (
-            _identity_key(asset.canonical_name),
-            *(_identity_key(alias) for alias in (asset.aliases or [])),
-        )
-        if key
-    }
+def _match_identity(item: ExtractedAsset, assets: list[Asset], batch_names: set[str]) -> Asset | None:
+    name = _identity_key(item.name)
+    exact = [asset for asset in assets if name == _identity_key(asset.canonical_name)]
+    if exact:
+        candidates = exact
+    else:
+        aliases = {_identity_key(alias) for alias in item.aliases if _identity_key(alias)}
+        # Shared titles such as “master” are not identity evidence. Distinct
+        # canonical names in this response also cannot collapse into each other.
+        candidates = [
+            asset for asset in assets
+            if name in {_identity_key(alias) for alias in asset.aliases or []}
+            or _identity_key(asset.canonical_name) in aliases
+        ]
+    if len(candidates) > 1:
+        from utils.messages import localized_message
+
+        raise ValueError(localized_message("资产名称匹配到多个对象，请核对别名后重试"))
+    if not exact and candidates and _identity_key(candidates[0].canonical_name) in batch_names:
+        return None
+    return candidates[0] if candidates else None
 
 
 def _ordered_strings(*groups: list[str] | None) -> list[str]:
@@ -173,28 +185,14 @@ class AssetUpsertService:
             novel_id=novel_id,
             asset_type=asset_type.value,
         ).using_db(connection)
+        batch_names = {_identity_key(item.name) for item in items}
 
         for item in items:
             item_metadata: dict[str, str] = {}
             if asset_type == AssetTypeEnum.person:
                 item_metadata = _person_metadata(item)
 
-            incoming_keys = {
-                key
-                for key in (
-                    _identity_key(item.name),
-                    *(_identity_key(alias) for alias in item.aliases),
-                )
-                if key
-            }
-            existing = next(
-                (
-                    asset
-                    for asset in existing_assets
-                    if incoming_keys & _identity_keys(asset)
-                ),
-                None,
-            )
+            existing = _match_identity(item, existing_assets, batch_names)
 
             if existing:
                 existing_last_chapter = int(existing.last_updated_chapter or 0)

@@ -1,5 +1,6 @@
 """Run a private creation conversation inside the existing AI task executor."""
 
+from services.creation_agent.authorization import public_run_input
 from utils.messages import localized_message
 
 import json
@@ -54,7 +55,13 @@ def configured_model(config, limits: AgentConfiguration):
     extra_body = {}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}
-    return UsagePreservingChatModel(config.model, provider=OpenAIProvider(openai_client=client),
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
+    provider = OpenAIProvider(openai_client=client)
+    # Reasoning endpoints can reject tool_choice=required; output validation stays in the Agent.
+    profile = OpenAIModelProfile.from_profile(provider.model_profile(config.model)).update(
+        OpenAIModelProfile(openai_supports_tool_choice_required=False)
+    )
+    return UsagePreservingChatModel(config.model, provider=provider, profile=profile,
                                    settings={'extra_body': extra_body})
 
 
@@ -85,7 +92,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         user_message = await AgentMessage.get(task_id=task_id, role="user")
         assistant = await AgentMessage.get(task_id=task_id, role="assistant")
         conversation = await AgentConversation.get(id=assistant.conversation_id)
-        request = AgentRunRequest.model_validate(user_message.run_input)
+        request = AgentRunRequest.model_validate(public_run_input(user_message.run_input))
         limits = AgentConfiguration.model_validate(request_params["agent_configuration"])
 
         async def before_request():
@@ -108,7 +115,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         progressive = 'write_scope' in user_message.run_input
         context = {"project": {"id": novel.id, "name": novel.name, "outline": novel.story_outline,
                               "setting": novel.project_setting, "style": novel.custom_style_prompt or novel.style_key},
-                   "chapter": chapter_context(chapter, max(500, limits.max_context_characters // 3)),
+                   "chapter": chapter_context(chapter, max(500, limits.max_context_characters // 3) if limits.max_context_characters is not None else limits.context_page_characters),
                    "conversation_summary": conversation.summary}
         if progressive:
             context['project'] = {'id': novel.id, 'name': novel.name, 'style': novel.custom_style_prompt or novel.style_key}
@@ -139,7 +146,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         changes.chapter_character_budget = limits.context_page_characters
         model = configured_model(chosen, limits)
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
-            max_characters=min(limits.max_context_characters, chosen.max_context_characters or limits.max_context_characters),
+            max_characters=limits.context_character_limit(chosen.max_context_characters),
             request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits)
         persisted = []
         buffer = []
@@ -175,6 +182,12 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         deps = CreationAgentDeps(service=service, context=context, source_message=user_message,
                                  context_loader=refresh_context, changes=changes if progressive else None, limits=limits)
+        from services.creation_agent.skill_execution import SkillExecution, current_execution
+        from utils.prompt_language import skill_workflow
+        mode_token = skill_workflow.set(bool(request_params.get("skill_snapshot")))
+        execution_token = None
+        if request_params.get('skill_snapshot'):
+            execution_token = current_execution.set(SkillExecution(request_params, assistant, before_request))
         try:
             history = await prepare_history(conversation, assistant, limits, recorded_model)
             context['conversation_summary'] = conversation.summary
@@ -221,6 +234,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                     "change_ids": await PromptChange.filter(task_id=task_id).values_list("id", flat=True),
                     "token_usage": assistant.usage}
         finally:
+            skill_workflow.reset(mode_token)
+            if execution_token is not None:
+                current_execution.reset(execution_token)
             await flush()
             if isinstance(model, OpenAIChatModel):
                 await model.client.close()

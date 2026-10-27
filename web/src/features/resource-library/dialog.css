@@ -3,52 +3,39 @@
 @import 'element-plus/theme-chalk/el-icon.css';
 @import 'element-plus/theme-chalk/el-dialog.css';
 
-/* 资源库（弹窗及组件）强制使用统一 Dark 主题，不被全局 dark/light 模式影响 */
+/* Teleported dialogs inherit the global app palette, just like the library page. */
 .resource-library-dialog,
 .resource-library {
-  color-scheme: dark !important;
-  --app-canvas: #151412;
-  --app-surface: #211e1b;
-  --app-surface-raised: rgb(33 30 27 / 94%);
-  --app-surface-muted: #292521;
-  --app-surface-hover: #302b27;
-  --app-fill-subtle: #292521;
-  --app-border: #3d3732;
-  --app-border-strong: #524a43;
-  --app-text: #eee9e2;
-  --app-text-secondary: #c7bdb4;
-  --app-text-muted: #8f867d;
-  --app-accent: #b8a7ff;
-  --app-accent-soft: rgb(169 149 255 / 14%);
-  --app-shadow: 0 16px 42px rgb(0 0 0 / 30%);
-  --app-danger: #e08a92;
-  --app-success: #82d5ad;
+  --app-danger: var(--creation-danger);
+  --app-success: var(--creation-success);
+}
 
-  --el-dialog-bg-color: #211e1b;
+.resource-library-dialog.el-dialog {
+  --el-dialog-bg-color: var(--app-surface);
   --el-dialog-padding-primary: 0;
-  --el-text-color-primary: #eee9e2;
-  --el-text-color-regular: #eee9e2;
-  --el-text-color-secondary: #8f867d;
-  --el-border-color: #3d3732;
-  --el-fill-color-blank: #211e1b;
-  --el-bg-color: #211e1b;
-  --el-bg-color-overlay: #211e1b;
-  --el-color-info: #8f867d;
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text);
+  --el-text-color-secondary: var(--app-text-muted);
+  --el-border-color: var(--app-border);
+  --el-fill-color-blank: var(--app-surface);
+  --el-bg-color: var(--app-surface);
+  --el-bg-color-overlay: var(--app-surface);
+  --el-color-info: var(--app-text-muted);
 }
 
 .resource-library-dialog {
-  background-color: #211e1b !important;
-  color: #eee9e2 !important;
-  border: 1px solid #3d3732;
+  background-color: var(--app-surface);
+  color: var(--app-text);
+  border: 1px solid var(--app-border);
   border-radius: 16px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6) !important;
+  box-shadow: var(--app-shadow);
   max-width: calc(100vw - 32px);
   overflow: hidden;
 }
 
 /* 弹窗遮罩 */
 .el-overlay:has(.resource-library-dialog) {
-  background-color: rgba(10, 9, 8, 0.75) !important;
+  background-color: rgb(0 0 0 / 45%);
   backdrop-filter: blur(8px);
 }
 
@@ -59,12 +46,12 @@
   justify-content: space-between;
   padding: 16px 22px;
   margin: 0;
-  border-bottom: 1px solid #35322e;
-  background: #1c1a18;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface-muted);
 }
 
 .resource-library-dialog .el-dialog__title {
-  color: #eee9e2;
+  color: var(--app-text);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
@@ -86,110 +73,46 @@
 }
 
 .resource-library-dialog .el-dialog__headerbtn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--app-surface-hover);
 }
 
 .resource-library-dialog .el-dialog__headerbtn .el-dialog__close {
-  color: #8f867d;
+  color: var(--app-text-muted);
   font-size: 18px;
 }
 
 .resource-library-dialog .el-dialog__headerbtn:hover .el-dialog__close {
-  color: #eee9e2;
+  color: var(--app-text);
 }
 
 .resource-library-dialog .el-dialog__body {
   padding: 0;
-  color: #eee9e2;
-  background: #211e1b;
+  color: var(--app-text);
+  background: var(--app-surface);
 }
 
-/* 弹窗与资源库内部按钮样式 */
-.resource-library-dialog .app-button--secondary,
-.resource-library .app-button--secondary,
-.resource-library-dialog .library-toolbar .library-actions > .app-button:not(.app-button--primary),
-.resource-library .library-toolbar .library-actions > .app-button:not(.app-button--primary),
-.resource-library-dialog .library-heading .library-actions > .app-button:not(.app-button--primary) {
-  border: 1px solid #3d3732;
-  color: #eee9e2;
-  background: #292521;
-  box-shadow: none;
+/* Dialogs are mounted outside .app-shell; theme their shared button variants locally. */
+.resource-library-dialog .app-button--secondary {
+  color: var(--app-text-secondary);
+  background: var(--app-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--app-border);
 }
 
-.resource-library-dialog .app-button--secondary:hover:not(:disabled),
-.resource-library .app-button--secondary:hover:not(:disabled),
-.resource-library-dialog .library-toolbar .library-actions > .app-button:not(.app-button--primary):hover:not(:disabled),
-.resource-library .library-toolbar .library-actions > .app-button:not(.app-button--primary):hover:not(:disabled),
-.resource-library-dialog .library-heading .library-actions > .app-button:not(.app-button--primary):hover:not(:disabled) {
-  border-color: #524a43;
-  color: #ffffff;
-  background: #342f2b;
+.resource-library-dialog .app-button--secondary:hover:not(:disabled) {
+  color: var(--app-text);
+  background: var(--app-surface-hover);
 }
 
-.resource-library-dialog .app-button--ghost:hover:not(:disabled),
-.resource-library .app-button--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #eee9e2;
+.resource-library-dialog .app-button--ghost:hover:not(:disabled) {
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
 }
 
-.resource-library-dialog .app-button--primary,
-.resource-library .app-button--primary {
-  color: #171411 !important;
-  background: #a995ff !important;
-  box-shadow: 0 4px 14px rgba(169, 149, 255, 0.28) !important;
+.resource-library-dialog .app-button--danger {
+  color: var(--app-danger);
+  background: color-mix(in srgb,var(--app-danger) 10%,var(--app-surface));
 }
 
-.resource-library-dialog .app-button--primary:hover:not(:disabled),
-.resource-library .app-button--primary:hover:not(:disabled) {
-  background: #b8a7ff !important;
-  box-shadow: 0 6px 20px rgba(169, 149, 255, 0.38) !important;
-}
-
-.resource-library-dialog .app-button--primary:disabled,
-.resource-library .app-button--primary:disabled {
-  opacity: 0.35 !important;
-  cursor: not-allowed !important;
-  box-shadow: none !important;
-}
-
-.resource-library-dialog .library-footer .app-button:not(.app-button--primary),
-.resource-library .library-footer .app-button:not(.app-button--primary),
-.resource-library-dialog .library-selection .app-button,
-.resource-library .library-selection .app-button {
-  border: 1px solid #3d3732;
-  color: #c7bdb4;
-  background: #25221f;
-}
-
-.resource-library-dialog .library-footer .app-button:not(.app-button--primary):hover:not(:disabled),
-.resource-library .library-footer .app-button:not(.app-button--primary):hover:not(:disabled),
-.resource-library-dialog .library-selection .app-button:hover:not(:disabled),
-.resource-library .library-selection .app-button:hover:not(:disabled) {
-  border-color: #524a43;
-  color: #ffffff;
-  background: #302b27;
-}
-
-/* 资源库下拉菜单全局弹出层暗黑样式 */
-.app-select__menu.resource-library-select-menu {
-  color-scheme: dark;
-  background: #211e1b !important;
-  border: 1px solid #3d3732 !important;
-  color: #eee9e2 !important;
-  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.45) !important;
-}
-
-.app-select__menu.resource-library-select-menu .app-select__option {
-  color: #c7bdb4 !important;
-  background: transparent !important;
-}
-
-.app-select__menu.resource-library-select-menu .app-select__option:hover {
-  background: #302b27 !important;
-  color: #eee9e2 !important;
-}
-
-.app-select__menu.resource-library-select-menu .app-select__option.is-selected {
-  background: rgba(169, 149, 255, 0.16) !important;
-  color: #b8a7ff !important;
+.resource-library-dialog .app-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb,var(--app-danger) 18%,var(--app-surface));
 }

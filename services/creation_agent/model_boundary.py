@@ -14,7 +14,7 @@ from models.creation_agent import AgentMessage
 
 
 class RecordedAgentModel(WrapperModel):
-    def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int,
+    def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
                  request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None):
         super().__init__(model)
         self.message = message
@@ -36,7 +36,7 @@ class RecordedAgentModel(WrapperModel):
         if self.total_tokens_limit is not None and used >= self.total_tokens_limit:
             raise ValueError(localized_message('本轮 token 消耗已达到配置上限'))
         report = wire_size(messages, parameters)
-        if report['total_characters'] > self.max_characters:
+        if self.max_characters is not None and report['total_characters'] > self.max_characters:
             raise ValueError(localized_message('上下文超过配置上限，请分段读取当前对象'))
         call = {"index": len(self.calls) + 1, "status": "in_progress", "usage_reported": False,
                 "phase": self.phase, "context": self.budget.report(messages, parameters)}

@@ -1,3 +1,4 @@
+from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
@@ -61,12 +62,9 @@ class VideoReferenceMedia(BaseModel):
     codec: Optional[str] = Field(None, max_length=50)
 
 
-class VideoGenerateRequest(BaseModel):
-    """提交视频生成请求"""
+class VideoGenerationOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    scene_id: int = Field(..., description="分镜ID")
-    model_config_id: int = Field(..., description="后台已启用的视频模型配置ID", ge=1)
     generation_mode: Literal["reference", "keyframes"] = Field("reference", description="参考图或首尾帧生成模式")
     first_frame_url: Optional[str] = Field(None, description="首帧图片地址")
     last_frame_url: Optional[str] = Field(None, description="尾帧图片地址")
@@ -77,6 +75,13 @@ class VideoGenerateRequest(BaseModel):
     generate_audio: Optional[bool] = Field(None, description="是否生成同步音频")
     return_last_frame: Optional[bool] = Field(False, description="是否返回尾帧并注入下一分镜参考图")
     reference_media: list[VideoReferenceMedia] = Field(default_factory=list, description="用户上传的参考图片与视频")
+
+
+class VideoGenerateRequest(VideoGenerationOptions):
+    """提交视频生成请求。"""
+    request_id: UUID | None = None
+    scene_id: int = Field(..., description="分镜ID")
+    model_config_id: int = Field(..., description="后台已启用的视频模型配置ID", ge=1)
 
 
 # --- 输出 Schema ---

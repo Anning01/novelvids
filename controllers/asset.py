@@ -727,6 +727,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         asset_id: int,
         variant_id: int | None = None,
         reference_images: list[str] | None = None,
+        media_model_config_id: int | None = None,
         team_id: int | None = None,
         user_id: int | None = None,
     ) -> AiTask:
@@ -746,7 +747,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             else {}
         )
         effective_metadata = {**metadata, **variant_metadata}
-        requested_config_id = effective_metadata.get("model_config_id")
+        requested_config_id = media_model_config_id or effective_metadata.get("model_config_id")
         config = await ai_model_config_controller.get_active(
             AiTaskTypeEnum.reference_image.value,
             int(requested_config_id) if requested_config_id else None,
@@ -783,22 +784,6 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         # 2. 清理超时异常任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.reference_image)
 
-        # 3. 检查活跃任务
-        active_tasks = await AiTask.filter(
-            task_type=AiTaskTypeEnum.reference_image.value,
-            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
-        )
-        for t in active_tasks:
-            # 检查 request_params 中的 asset_id
-            if (
-                t.request_params.get("asset_id") == asset_id
-                and t.request_params.get("variant_id") == variant_id
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=localized_message('该资产已有进行中的生成任务（{p1}）', p1=f'{t.id}'),
-                )
-
         # 4. 提交任务
         request_params = {
             "asset_id": asset.id,
@@ -828,10 +813,23 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             request_params["user_id"] = user_id
 
         async with creation_write(asset.novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(2, {**request_params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
+            for existing in await AiTask.filter(task_type=AiTaskTypeEnum.reference_image.value).using_db(connection).order_by('-created_at'):
+                prior = existing.request_params or {}
+                if prior.get('asset_id') == asset.id and prior.get('variant_id') == variant_id:
+                    if existing.stage == 'needs_review':
+                        raise HTTPException(409, '已有图片请求结果待核对，不能重复提交')
+                    if existing.status in {1,2,6}:
+                        return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
             objects = CreationObjects(asset.novel_id)
             await objects.get('asset', asset.id)
             if variant:
                 await objects.get('variant', variant.id)
+            from services.creation_agent.skill_execution import prepare_workflow
+            request_params = await prepare_workflow(request_params)
             task = await ai_task_executor.submit(AiTaskTypeEnum.reference_image, request_params, db_connection=connection)
             task.request_params = {**(task.request_params or request_params), 'generation_run_id': str(task.id)}
             await task.save(update_fields=['request_params', 'updated_at'])

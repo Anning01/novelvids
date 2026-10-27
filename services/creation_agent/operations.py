@@ -132,12 +132,14 @@ class CreationOperations:
         return {'asset_ids': asset_ids, 'variant_bindings': bindings}
 
     async def scene_prompt(self, scene: Scene, *, prompt=None, structure=None, visual=None, previous=None):
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
         entities = await PromptEditService._entities(scene)
         strategy = storyboard_strategy_factory.resolve(scene.chapter.novel.storyboard_strategy)
         legacy_params = scene.prompt_params or {}
         # Local edits retain the document's stored rendering language. New
         # structures use this turn's language snapshot.
-        language = ((await self.service.prompt_standards.context())['language']
+        language = ((execution.language if execution else (await self.service.prompt_standards.context())['language'])
                     if previous is None else legacy_params.get('prompt_language', 'zh'))
         legacy_params = {**legacy_params, 'prompt_language': language}
         if structure is not None:
@@ -160,8 +162,37 @@ class CreationOperations:
                     raise ValueError(localized_message('当前为手工文本或引用已变化，请提交完整 prompt 保留当前画面'))
         else:
             candidate = None
+        if execution and candidate and prompt is None and "storyboard_contract" in execution.snapshot.contents:
+            from schemas.agent_workflow import StructuredSkillStoryboard
+            from services.storyboard.validation import prepare_skill_storyboard
+            import json
+
+            if previous is not None and legacy_params.get('rendering_version') == 'agent-skills-v1' and legacy_params.get('prompt_contract_version') != 2:
+                raise ValueError(localized_message('当前是历史手工提示词；请提交完整 prompt 或精确片段替换，保留已有画面和声音'))
+            data = candidate.model_dump(exclude={'prompt'})
+            if previous is None and structure is not None and 'reference_only_types' not in structure.model_fields_set:
+                data.pop('reference_only_types', None)
+            output = prepare_skill_storyboard(StructuredSkillStoryboard.model_validate({'shots': [data]}),
+                execution.snapshot, language, entities, strategy.key).shots[0]
+            validate_prompt_dependencies(output.prompt, entities)
+            await write_fields(self.objects, scene, {'prompt': output.prompt,
+                'prompt_params': {**output.model_dump(exclude={'sequence','description','duration','prompt'}),
+                    'prompt_language': language, 'rendering_version': 'agent-skills-v1',
+                    'prompt_contract_version': json.loads(execution.snapshot.read('storyboard_contract'))['version']}})
+            return
+        if execution and candidate:
+            rendered = prompt or candidate.prompt
+            if not rendered:
+                raise ValueError(localized_message('技能分镜必须提供完整 prompt，结构字段不能替代实际生成提示词'))
+            validate_prompt_dependencies(rendered, entities)
+            self.validate_timing(rendered, scene.duration)
+            await write_fields(self.objects, scene, {'prompt': rendered,
+                'prompt_params': {**candidate.model_dump(exclude={'sequence','description','duration','prompt'}),
+                    'prompt_language': language, 'rendering_version': 'agent-skills-v1'}})
+            return
         if prompt is not None:
-            validate_storyboard_sections(prompt, previous.prompt if previous is not None else None)
+            if not current_execution.get():
+                validate_storyboard_sections(prompt, previous.prompt if previous is not None else None)
             # The shared legacy path preserves tracks and expands actual references.
             values = prepare_storyboard_edit(edit=StoryboardPromptEdit(scene_id=scene.id, legacy_prompt=prompt),
                 prompt=scene.prompt, params=legacy_params, sequence=scene.sequence,

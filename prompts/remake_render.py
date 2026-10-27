@@ -8,9 +8,6 @@ import re
 from typing import Any
 
 from prompts.labels import prompt_label
-from prompts.reference import render_default_asset_prompt
-
-from prompts.remake import SCENE_PROMPT_PREFIX, SINGLE_CHARACTER_PROMPT_PREFIX
 
 
 def normalize_global_assets(
@@ -46,31 +43,11 @@ def _deduplicate_assets(
     result: list[dict[str, Any]] = []
     for index, item in enumerate(unique.values(), start=1):
         core = str(item.get("description", "")).strip()
-        label = str(item.get("label", "")).strip()
-        if prefix == "character" and label in {"人物", "动物"}:
-            description = f"{SINGLE_CHARACTER_PROMPT_PREFIX}\n\n角色描述：\n{core}"
-        elif prefix == "scene":
-            description = f"{SCENE_PROMPT_PREFIX}\n\n场景描述: {core}"
-        elif prefix == "object":
-            description = f"【道具描述】{core}"
-        else:
-            description = core
-        if language == "en":
-            description = render_default_asset_prompt(
-                asset_type={"character": "person", "scene": "scene", "object": "item"}[
-                    prefix
-                ],
-                visual_traits=core,
-                prompt_language=language,
-                reference_layout="group_portrait"
-                if label == "群像"
-                else "character_turnaround",
-            )
         result.append(
             {
                 "id": f"{prefix}-{index:03d}",
                 **item,
-                "description": description,
+                "description": core,
             }
         )
     return result

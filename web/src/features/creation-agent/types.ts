@@ -1,3 +1,5 @@
+import type { VideoGenerationOptions } from '@/types'
+
 export interface AgentTarget {
   kind: 'asset' | 'variant' | 'scene'
   id: number
@@ -51,7 +53,22 @@ export interface AgentConversation {
   title?: string
 }
 
+export interface ProductionReceipt { task_id: string; operation: string; status: number; stage?: string | null; error?: string | null }
+
+export interface PendingProduction {
+  confirmation_request_id: string
+  message: string
+  labels: { operation: string; target_label: string }[]
+  intents: ProductionIntent[]
+  chapter_id: number | null
+  targets: AgentTarget[]
+  write_scope: 'selected' | 'chapter' | 'project' | 'read_only'
+  model_config_id: number | null
+}
+
 export interface AgentMessage {
+  pending_production?: PendingProduction | null
+  production?: ProductionReceipt[]
   id: number
   role: 'user' | 'assistant'
   content: string
@@ -64,6 +81,8 @@ export interface AgentMessage {
 }
 
 export interface AgentRun {
+  pending_production?: PendingProduction | null
+  production?: ProductionReceipt[]
   task_id: string
   conversation_id: number
   status: number
@@ -82,7 +101,18 @@ export interface AgentCapabilities {
   models: { id: number; name: string; model: string }[]
 }
 
+export interface ProductionIntent {
+  operation: 'story' | 'assets' | 'image' | 'storyboard' | 'remake' | 'video' | 'compose'
+  target_id: number
+  request_id: string
+  media_model_config_id?: number | null
+  variant_id?: number | null
+  video_options?: VideoGenerationOptions | null
+  replace_existing?: boolean
+}
+
 export interface AgentRunInput {
+  production_intents?: ProductionIntent[]
   request_id: string
   message: string
   chapter_id: number | null
@@ -92,12 +122,13 @@ export interface AgentRunInput {
 }
 
 export interface AgentConfiguration {
+  production_concurrency?: number
   enabled: boolean
   request_limit: number
   tool_calls_limit: number
   max_targets: number
   timeout_seconds: number
-  max_context_characters: number
+  max_context_characters: number | null
   working_input_tokens?: number
   compaction_trigger_ratio?: number
   compaction_target_ratio?: number

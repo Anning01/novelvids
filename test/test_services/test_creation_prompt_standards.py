@@ -1,4 +1,4 @@
-from prompts.extraction import trait_labels
+from test.visual_fields import trait_labels
 from types import SimpleNamespace
 
 import pytest
@@ -12,9 +12,9 @@ from models.config import GeneralConfig
 from models.creation_agent import PromptChange
 from models.novel import Novel
 from models.scene import Scene
-from prompts.creation_standards import STORYBOARD_REQUIRED_SECTIONS, validate_person_visual_traits, visual_contract
-from prompts.extraction import GROUP_PORTRAIT_TRAIT_LABELS, SINGLE_CHARACTER_TRAIT_LABELS, SINGLE_CHARACTER_VISUAL_RULES
-from prompts.reference import GROUP_PORTRAIT, render_default_asset_prompt
+from prompts.creation_standards import STORYBOARD_REQUIRED_SECTIONS, visual_contract
+from test.visual_fields import GROUP_PORTRAIT_TRAIT_LABELS, SINGLE_CHARACTER_TRAIT_LABELS
+from prompts.reference import GROUP_PORTRAIT
 from schemas.creation_agent import AgentTarget
 from schemas.creation_objects import CreationChangeSet
 from services.creation_agent.runtime import CreationAgentDeps, creation_agent, get_creation_prompt_rules
@@ -32,7 +32,7 @@ def create_setting(prompt, asset_type=1, **fields):
 
 @pytest.mark.parametrize('kind', ['person', 'scene', 'item', 'storyboard'])
 @pytest.mark.parametrize('language', ['zh', 'en'])
-def test_type_specific_contracts_reuse_templates_without_extraction_selection_rules(kind, language):
+def test_type_specific_contracts_use_single_skills_without_fixed_rows(kind, language):
     result = visual_contract(kind, language=language, aspect_ratio='9:16')
     assert result == visual_contract(kind, language=language, aspect_ratio='9:16')
     assert result['kind'] == kind and result['language'] == language
@@ -40,10 +40,10 @@ def test_type_specific_contracts_reuse_templates_without_extraction_selection_ru
     assert '至少出现两次' not in result['writing_rules']
     assert '至少出现2次' not in result['writing_rules']
     if kind == 'person':
-        assert result['required_fields'] == list(trait_labels(False, language))
-        assert '9:16' in result['rendering']
+        assert result['required_fields'] == []
+        assert result['aspect_ratio'] == '9:16'
     else:
-        assert SINGLE_CHARACTER_VISUAL_RULES not in result['writing_rules']
+        assert result['writing_rules']
 
 
 @pytest.mark.parametrize('bad', [
@@ -52,25 +52,24 @@ def test_type_specific_contracts_reuse_templates_without_extraction_selection_ru
     person_traits() + '\n发型: long hair',
 ])
 @pytest.mark.asyncio
-async def test_invalid_character_cannot_be_persisted_or_emit_success(bad):
+async def test_character_prose_is_saved_without_fixed_row_validation(bad):
     service, _, _, _, _ = await crud()
-    with pytest.raises(ValueError, match='字段|占位'):
-        await service.apply(create_setting(bad), tool_call_id='invalid')
-    assert not await Asset.filter(canonical_name='胖子').exists()
-    assert await PromptChange.all().count() == 0
+    saved = await service.apply(create_setting(bad), tool_call_id="freeform")
+    target = await Asset.get(id=saved.changes[0]["target_id"])
+    assert target.base_traits == bad
+    assert await PromptChange.all().count() == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('asset_type,text', [(1, person_traits()), (2, '庭院中央是石井，东侧木门，青砖围墙，阴天柔光。'),
                                           (3, '圆形铜表，白色表盘，黑色指针，表壳边缘磨损。')])
-async def test_creation_persists_same_reference_template_as_normal_generation(asset_type, text):
+async def test_creation_preserves_complete_asset_prompt_verbatim(asset_type, text):
     service, _, _, _, _ = await crud()
     await GeneralConfig.create(id=1, prompt_language='zh')
     await Novel.filter(id=service.novel_id).update(aspect_ratio='9:16')
     saved = await service.apply(create_setting(text, asset_type), tool_call_id='create')
     target = await Asset.get(id=saved.changes[0]['target_id'])
-    expected = render_default_asset_prompt(asset_type={1: 'person', 2: 'scene', 3: 'item'}[asset_type],
-        visual_traits=text, prompt_language='zh', aspect_ratio='9:16')
+    expected = text
     assert target.base_traits == expected
     await service.read([AgentTarget(kind='asset', id=target.id)])
     await service.apply(CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
@@ -87,7 +86,7 @@ async def test_group_contract_and_metadata_survive_creation_and_reading():
     target = await Asset.get(id=saved.changes[0]['target_id'])
     assert await service.prompt_standards.asset_kind(target) == ('person', GROUP_PORTRAIT)
     assert target.base_traits == text  # Existing group policy has no turnaround wrapper.
-    assert (await service.prompt_standards.contract('person', GROUP_PORTRAIT))['required_fields'] == list(trait_labels(True, 'en'))
+    assert (await service.prompt_standards.contract('person', GROUP_PORTRAIT))['required_fields'] == []
 
 
 @pytest.mark.asyncio
@@ -104,18 +103,19 @@ async def test_character_patch_preserves_other_traits_template_and_undo():
         ]}}]}), tool_call_id='patch')
     await target.refresh_from_db()
     assert target.base_traits == original.replace('short black hair', 'short black hair with a side part')
-    validate_person_visual_traits(target.base_traits)
     await service.undo(patched.id)
     await target.refresh_from_db()
     assert target.base_traits == original
     await service.read([ref])
-    with pytest.raises(ValueError, match='14项'):
-        await service.apply(CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
-            'target': ref.model_dump(), 'fields': {'prompt': '胖胖的短发男生'}}]}), tool_call_id='degrade')
+    await service.apply(CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
+        'target': ref.model_dump(), 'fields': {'prompt': '胖胖的短发男生'}}]}), tool_call_id='rewrite')
+    await target.refresh_from_db()
+    assert target.base_traits == '胖胖的短发男生'
+
 
 
 @pytest.mark.asyncio
-async def test_legacy_exact_patch_remains_local_but_full_rewrite_requires_contract():
+async def test_historical_exact_patch_remains_local_and_reversible():
     service, _, asset, _, _ = await crud()
     saved = await service.apply(CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
         'target': {'kind': 'asset', 'id': asset.id}, 'fields': {'prompt_replacements': [
@@ -125,6 +125,28 @@ async def test_legacy_exact_patch_remains_local_but_full_rewrite_requires_contra
     await service.undo(saved.id)
     await asset.refresh_from_db()
     assert asset.base_traits == '灰色风衣'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('prefix', [
+    '任务：完成角色的上半身正面平视特写\n\n角色描述：\n',
+    'Task: Create an upper-body, front-facing, eye-level close-up\n\nCharacter description:\n',
+])
+async def test_historical_template_text_can_be_read_patched_and_undone(prefix):
+    service, _, asset, _, _ = await crud()
+    original = prefix + 'Black hair, gray coat.\nKeep this custom composition.'
+    await Asset.filter(id=asset.id).update(base_traits=original)
+    target = AgentTarget(kind='asset', id=asset.id)
+    await service.read([target])
+    change = await service.apply(CreationChangeSet.model_validate({'operations': [{
+        'operation': 'update_setting', 'target': target.model_dump(),
+        'fields': {'prompt_replacements': [{'old': 'Black hair', 'new': 'Silver hair'}]},
+    }]}), tool_call_id='historical-patch')
+    await asset.refresh_from_db()
+    assert asset.base_traits == original.replace('Black hair', 'Silver hair')
+    await service.undo(change.id)
+    await asset.refresh_from_db()
+    assert asset.base_traits == original
 
 
 @pytest.mark.asyncio
@@ -167,14 +189,14 @@ async def test_rules_tool_uses_actual_type_and_project_language_and_rejects_othe
 @pytest.mark.asyncio
 async def test_reference_template_cannot_be_applied_to_wrong_type():
     service, _, _, _, _ = await crud()
-    wrong = render_default_asset_prompt(asset_type='scene', visual_traits='青砖庭院')
+    wrong = '生成四宫格画面，展示同一个场景：青砖庭院'
     with pytest.raises(ValueError, match='类型不符'):
         await service.apply(create_setting(wrong, asset_type=3), tool_call_id='wrong-kind')
     assert not await Asset.filter(canonical_name='胖子').exists()
 
 
 @pytest.mark.asyncio
-async def test_full_traits_edit_preserves_custom_character_composition():
+async def test_full_prompt_replacement_is_authoritative():
     service, _, asset, _, _ = await crud()
     custom = '任务：完成角色的上半身正面平视特写，保留自定义构图。\n\n角色描述：\n' + person_traits()
     await Asset.filter(id=asset.id).update(base_traits=custom)
@@ -184,7 +206,7 @@ async def test_full_traits_edit_preserves_custom_character_composition():
     await service.apply(CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
         'target': ref.model_dump(), 'fields': {'prompt': updated}}]}), tool_call_id='traits-only')
     await asset.refresh_from_db()
-    assert asset.base_traits == custom.replace(person_traits(), updated)
+    assert asset.base_traits == updated
 
 
 @pytest.mark.asyncio
@@ -201,7 +223,7 @@ async def test_agent_loads_one_contract_then_creates_complete_prompt_in_three_ca
             return ModelResponse(parts=[ToolCallPart('get_creation_prompt_rules', {'kind': 'person'}, tool_call_id='rules')])
         result = [part.content for message in messages for part in message.parts if isinstance(part, ToolReturnPart)][-1]
         if calls == 2:
-            assert result['prompt_rules']['required_fields'] == list(trait_labels(False, 'en'))
+            assert result['prompt_rules']['required_fields'] == []
             return ModelResponse(parts=[ToolCallPart('create_creation_setting', {
                 'name': '胖子', 'asset_type': 1, 'description': '主角的死党',
                 'prompt': person_traits(脸型='round face, dark eyes, round glasses', 身材='stocky build'),
@@ -211,4 +233,4 @@ async def test_agent_loads_one_contract_then_creates_complete_prompt_in_three_ca
     await creation_agent.run('帮我创建胖子，主角的死党，胖胖的短发戴眼镜', model=FunctionModel(respond),
         deps=CreationAgentDeps(service=legacy, changes=service, context={}), usage_limits=UsageLimits(request_limit=4))
     target = await Asset.get(novel_id=service.novel_id, canonical_name='胖子')
-    assert calls == 3 and 'round glasses' in target.base_traits and 'three-view' in target.base_traits
+    assert calls == 3 and 'round glasses' in target.base_traits and 'three-view' not in target.base_traits

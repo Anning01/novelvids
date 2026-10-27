@@ -232,12 +232,12 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
             return
         if task_type == AiTaskTypeEnum.reference_image.value:
             res = result or {}
-            record = await billing_recorder.record_image(
+            arguments = dict(
                 novel_id=novel_id,
                 task_type=task_type,
                 model_config_id=request_params.get("model_config_id"),
                 fallback_model=request_params.get("model"),
-                image_count=len(res.get("images") or []),
+                image_count=res.get("image_count", getattr(error, "image_count", len(res.get("images") or []))),
                 clarity=request_params.get("clarity"),
                 input_image_count=res.get("input_image_count", 0),
                 status=status,
@@ -246,7 +246,26 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
                 team_id=team_id,
                 user_id=user_id,
             )
+            if request_params.get("workflow_version") == "agent-skills-v1":
+                from services.creation_agent.image_settlement import settle_image
+                from services.creation_agent.review_evidence import image_evidence
+                await settle_image(task, arguments, image_evidence(res, error))
+                return
+            record = await billing_recorder.record_image(**arguments)
             await _consume_team_balance(record, team_id, user_id=user_id)
+            return
+        from services.creation_agent.skill_execution import WORKFLOW_VERSION
+        if request_params.get('workflow_version') == WORKFLOW_VERSION and task_type != AiTaskTypeEnum.reference_image.value:
+            if task_type == AiTaskTypeEnum.project_analysis.value and (result or {}).get('image_usage'):
+                from services.creation_agent.image_settlement import settle_image
+                from services.creation_agent.review_evidence import image_evidence
+                res = result or {}
+                usage = res['image_usage']
+                proof = {**usage, **({'images': [res['cover']]} if res.get('cover') else {})}
+                await settle_image(task, dict(novel_id=novel_id, task_type=task_type,
+                    model_config_id=res['image_config_id'], fallback_model=res.get('image_model'),
+                    image_count=usage.get('image_count', 0), clarity=usage.get('clarity'), status=status,
+                    ai_task_id=task.id, team_id=team_id, user_id=user_id), image_evidence(proof))
             return
         if task_type == AiTaskTypeEnum.project_analysis.value:
             res = result or {}
@@ -319,6 +338,8 @@ async def record_ai_task_usage(task, result: dict | None, error: Exception | Non
         await _consume_team_balance(record, team_id, user_id=user_id)
     except Exception:
         logger.exception("billing record failed for task %s", getattr(task, "id", None))
+        if (task.request_params or {}).get("workflow_version") == "agent-skills-v1":
+            raise
 
 
 async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:
@@ -326,7 +347,9 @@ async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:
     from tortoise.transactions import in_transaction
     from models.creation_agent import AgentMessage
 
+    from tortoise.expressions import F
     async with in_transaction() as connection:
+        await AgentMessage.filter(task_id=task.id, role="assistant").using_db(connection).update(billing_record_id=F("billing_record_id"))
         message = await AgentMessage.filter(task_id=task.id, role="assistant").using_db(connection).select_for_update().first()
         if message is None or message.billing_record_id is not None or not message.usage.get("calls"):
             return

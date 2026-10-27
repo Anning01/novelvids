@@ -1,3 +1,4 @@
+from api._production_request import production_request
 
 from utils.messages import localized_message
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
@@ -43,7 +44,7 @@ from utils.response_format import PaginationResponse, ResponseSchema
 from services.creation_objects import CreationObjects
 from controllers._creation import creation_write
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(production_request)])
 
 _EDITOR = Depends(require_roles("admin", "creator"))
 

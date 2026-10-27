@@ -66,6 +66,8 @@ def current_storyboard_structure(*, prompt: str | None, params: dict, sequence: 
             'description': description or '', 'duration': f'{duration:g}s'})
     except ValueError:
         return None
+    if params.get('rendering_version') == 'agent-skills-v1':
+        return candidate.model_copy(update={'prompt': prompt})
     if prompt and format_storyboard_prompt(candidate, params.get("prompt_language", "zh"), entities=entities, strategy=strategy).strip() != prompt.strip():
         return None
     return candidate

@@ -205,7 +205,8 @@ async def test_api_split_novel(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_api_create_novel_from_source_key(client: AsyncClient, monkeypatch):
+@pytest.mark.parametrize("duplicate_name", [False, True])
+async def test_api_create_novel_from_source_key(client: AsyncClient, monkeypatch, duplicate_name):
     """OSS 直传后仅回传 key，服务端经内网读取并解析正文，响应不回传正文。"""
     from controllers import novel as novel_controller_module
     from services import document as document_module
@@ -219,6 +220,9 @@ async def test_api_create_novel_from_source_key(client: AsyncClient, monkeypatch
 
         def public_url(self, key):
             return f"https://fake-cdn/{key}"
+
+    if duplicate_name:
+        await Novel.create(name="OSS Novel", content="已有正文")
 
     fake = FakeOss()
     monkeypatch.setattr(novel_controller_module, "oss", fake)
@@ -236,7 +240,7 @@ async def test_api_create_novel_from_source_key(client: AsyncClient, monkeypatch
     )
     assert response.status_code == 200, response.text
     data = response.json()["data"]
-    assert data["name"] == "OSS Novel"
+    assert data["name"] == ("OSS Novel (2)" if duplicate_name else "OSS Novel")
     assert "content" not in data
 
     novel = await Novel.get(id=data["id"])
@@ -303,3 +307,16 @@ async def test_api_novel_meta_excludes_content(client: AsyncClient):
     assert data["project_setting"] == "现实主义世界观"
     assert data["cover_thumbnail"] is None
     assert data["cover_preview"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_repeated_manual_creation_returns_unique_project_names(client: AsyncClient):
+    responses = [
+        await client.post("/api/novel", json={"name": "新项目", "author": "人工创建", "content": ""})
+        for _ in range(3)
+    ]
+    bodies = [response.json() for response in responses]
+
+    assert all(body["code"] == 0 for body in bodies)
+    assert [body["data"]["name"] for body in bodies] == ["新项目", "新项目 (2)", "新项目 (3)"]
+    assert len({body["data"]["id"] for body in bodies}) == 3

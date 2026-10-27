@@ -22,9 +22,11 @@ interface BudgetField {
   label: string
   unit: string
   ratio?: boolean
+  optional?: boolean
 }
 const groups: { title: string; description: string; fields: BudgetField[] }[] = [
   { get title() { return tr('对话用量') }, get description() { return tr('默认按 DeepSeek 长上下文对话设置，仍受所选模型自身上限约束。') }, fields: [
+    { key: 'production_concurrency', get label() { return tr('同时执行的创作任务') }, get unit() { return tr('个') } },
     { key: 'max_targets', get label() { return tr('最多修改对象') }, get unit() { return tr('个 / 轮') } },
     { key: 'request_limit', get label() { return tr('模型调用上限') }, get unit() { return tr('次 / 轮') } },
     { key: 'tool_calls_limit', get label() { return tr('工具调用上限') }, get unit() { return tr('次 / 轮') } },
@@ -34,7 +36,7 @@ const groups: { title: string; description: string; fields: BudgetField[] }[] = 
   ] },
   { get title() { return tr('记忆与上下文') }, get description() { return tr('按 840K 输入预算管理工作区，达到 70% 时自动整理历史。') }, fields: [
     { key: 'working_input_tokens', get label() { return tr('工作上下文预算') }, get unit() { return tr('预估 token') } },
-    { key: 'max_context_characters', get label() { return tr('上下文字符上限') }, get unit() { return tr('字符') } },
+    { key: 'max_context_characters', get label() { return tr('上下文字符上限') }, get unit() { return tr('字符') }, optional: true },
     { key: 'compaction_trigger_ratio', get label() { return tr('整理触发比例') }, unit: '0–1', ratio: true },
     { key: 'compaction_target_ratio', get label() { return tr('整理后目标比例') }, unit: '0–1', ratio: true },
     { key: 'history_runs', get label() { return tr('近期对话轮数') }, get unit() { return tr('轮') } },
@@ -54,7 +56,7 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
-    configuration.value = (await agentApi.updateConfiguration(configuration.value)).data
+    configuration.value = (await agentApi.updateConfiguration({ ...configuration.value, max_context_characters: configuration.value.max_context_characters || null })).data
     savedSnapshot.value = JSON.stringify(configuration.value)
     notice.success(tr('创作助手配置已保存'))
   } catch (caught) { error.value = (caught as Error).message }
@@ -69,7 +71,7 @@ async function save() {
     <p v-if="error" class="agent-settings-panel__error" role="alert">{{ error }}</p>
     <form v-if="configuration" :id="formId" @submit.prevent="save">
       <div class="agent-settings-panel__enable">
-        <div><strong>{{ tr('启用创作助手') }}</strong><p>{{ tr('在工作区中管理人物、场景、道具和分镜。') }}</p></div>
+        <div><strong>{{ tr('启用创作助手') }}</strong><p>{{ tr('所有新创作任务都需要启用助手并配置支持工具调用的模型。') }}</p></div>
         <ElSwitch v-model="configuration.enabled" :aria-label="tr('启用创作助手')" :disabled="saving" />
       </div>
       <div class="agent-settings-panel__features" :aria-label="tr('助手能力')">
@@ -82,7 +84,7 @@ async function save() {
             <legend>{{ group.title }}</legend><p>{{ group.description }}</p>
             <div class="agent-settings-panel__fields">
               <label v-for="field in group.fields" :key="field.key"><span>{{ field.label }}</span>
-                <span class="agent-settings-panel__input"><input v-model.number="configuration[field.key]" type="number" :min="field.ratio ? 0.01 : 1" :max="field.ratio ? 0.99 : undefined" :step="field.ratio ? 0.01 : 1" /><span aria-hidden="true">{{ field.unit }}</span></span>
+                <span class="agent-settings-panel__input"><input v-model.number="configuration[field.key]" type="number" :placeholder="field.optional ? tr('留空，由模型服务判断') : undefined" :min="field.ratio ? 0.01 : field.optional ? 2000 : 1" :max="field.ratio ? 0.99 : undefined" :step="field.ratio ? 0.01 : 1" /><span aria-hidden="true">{{ field.unit }}</span></span>
               </label>
             </div>
           </fieldset>

@@ -31,7 +31,7 @@ import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
-import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type Chapter } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetActiveGeneration, type Chapter } from '@/types'
 
 type AssetTab = 'character' | 'scene' | 'prop'
 type AssetScope = 'project' | 'chapter'
@@ -94,6 +94,11 @@ const mergeArmedTargetId = ref<number | null>(null)
 const mergeProgressKey = ref(0)
 let pageAlive = true
 let extractionPollVersion = 0
+let workspaceRefreshVersion = 0
+let refreshingWorkspace = false
+let discoveringGenerations = false
+let generationDiscoveryTimer: ReturnType<typeof setInterval> | undefined
+const generationMonitors = new Map<string, { assetId: number; result: Promise<boolean> }>()
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
 let suppressAssetClickUntil = 0
 
@@ -259,6 +264,37 @@ async function refreshAssets() {
   }
 }
 
+async function refreshWorkspaceState() {
+  if (!pageAlive || loading.value || submittingExtraction.value || refreshingWorkspace) return
+  refreshingWorkspace = true
+  const revision = ++workspaceRefreshVersion
+  const pollRevision = extractionPollVersion
+  const projectIdAtStart = projectId.value
+  const chapterId = selectedChapter.value?.id
+  const scope = assetScope.value
+  try {
+    const [latest, currentAssets] = await Promise.all([
+      chapterId ? api.latestExtraction(chapterId) : Promise.resolve(null),
+      api.assets(projectIdAtStart, 1, 100, scope === 'chapter' ? chapterId : undefined),
+    ])
+    if (!pageAlive || revision !== workspaceRefreshVersion || pollRevision !== extractionPollVersion
+      || projectIdAtStart !== projectId.value || chapterId !== selectedChapter.value?.id || scope !== assetScope.value) return
+    extractionPollVersion++
+    extractionTask.value = latest?.data?.status === TaskStatusEnum.COMPLETED ? null : latest?.data ?? null
+    extractionSubmissionError.value = ''
+    // Keep an open editor's draft; refresh the saved cards and current task only.
+    assets.value = currentAssets.data.items
+    void resumeActiveGenerations()
+    if (extractionTaskActive.value && extractionTask.value) void monitorExtractionTask(extractionTask.value.id)
+  } catch (error) {
+    if (pageAlive && revision === workspaceRefreshVersion) notice.error(extractionErrorMessage(error))
+  } finally { refreshingWorkspace = false }
+}
+
+function refreshVisibleWorkspace() {
+  if (!document.hidden) void refreshWorkspaceState()
+}
+
 async function refreshAgentChanges(changes: AgentChange[]) {
   const targets = changes.flatMap(change => change.changes)
   const changedAssets = targets.filter(target => target.kind === 'asset').map(target => target.target_id)
@@ -302,10 +338,12 @@ async function monitorExtractionTask(taskId: string, notifyWhenComplete = false)
     let task = extractionTask.value?.id === taskId
       ? extractionTask.value
       : (await api.task(taskId)).data
+    if (!pageAlive || pollVersion !== extractionPollVersion) return
     extractionTask.value = task
     while (pageAlive && pollVersion === extractionPollVersion && !terminalTaskStatuses.has(task.status)) {
       await sleep(1500)
       task = (await api.task(task.id)).data
+      if (!pageAlive || pollVersion !== extractionPollVersion) return
       extractionTask.value = task
     }
     if (!pageAlive || pollVersion !== extractionPollVersion) return
@@ -315,6 +353,7 @@ async function monitorExtractionTask(taskId: string, notifyWhenComplete = false)
       if (notifyWhenComplete) notice.success(tr('第 {p0} 章资产提取完成', { p0: selectedChapter.value?.number || '-' }))
     }
   } catch (error) {
+    if (!pageAlive || pollVersion !== extractionPollVersion) return
     extractionSubmissionError.value = tr('任务状态读取失败：{p0}', { p0: extractionErrorMessage(error) })
     notice.error(extractionSubmissionError.value)
   }
@@ -553,23 +592,43 @@ function setAssetFailed(assetId: number, value: boolean) {
 }
 
 async function monitorAssetGeneration(assetId: number, taskId: string): Promise<boolean> {
-  try {
-    let task = (await api.task(taskId)).data
-    while (pageAlive && !terminalTaskStatuses.has(task.status)) {
-      await sleep(2000)
-      task = (await api.task(task.id)).data
+  const existing = generationMonitors.get(taskId)
+  if (existing) return existing.result
+  setAssetGenerating(assetId, true)
+  setAssetFailed(assetId, false)
+  const projectAtStart = projectId.value
+  const current = () => pageAlive && projectAtStart === projectId.value
+  const result = pollAssetGeneration()
+  generationMonitors.set(taskId, { assetId, result })
+  return result
+
+  async function pollAssetGeneration(): Promise<boolean> {
+    try {
+      let task = (await api.task(taskId)).data
+      while (current() && !terminalTaskStatuses.has(task.status)) {
+        await sleep(2000)
+        if (!current()) return false
+        task = (await api.task(task.id)).data
+      }
+      if (!current()) return false
+      const completed = task.status === TaskStatusEnum.COMPLETED
+      setAssetFailed(assetId, !completed)
+      if (completed) await refreshAssets()
+      return completed
+    } catch {
+      if (current()) setAssetFailed(assetId, true)
+      return false
+    } finally {
+      generationMonitors.delete(taskId)
+      if (current() && ![...generationMonitors.values()].some(item => item.assetId === assetId)) {
+        setAssetGenerating(assetId, false)
+      }
     }
-    if (!pageAlive) return false
-    const completed = task.status === TaskStatusEnum.COMPLETED
-    setAssetFailed(assetId, !completed)
-    if (completed) await refreshAssets()
-    return completed
-  } catch {
-    setAssetFailed(assetId, true)
-    return false
-  } finally {
-    setAssetGenerating(assetId, false)
   }
+}
+
+function trackAssetGeneration(generation: AssetActiveGeneration) {
+  void monitorAssetGeneration(generation.asset_id, generation.task_id)
 }
 
 async function generateAssetAndWait(asset: Asset) {
@@ -587,18 +646,19 @@ async function generateAssetAndWait(asset: Asset) {
 }
 
 async function resumeActiveGenerations() {
-  if (!Number.isFinite(projectId.value) || projectId.value <= 0) return
+  if (!pageAlive || discoveringGenerations || !Number.isFinite(projectId.value) || projectId.value <= 0) return
+  discoveringGenerations = true
+  const projectAtStart = projectId.value
   try {
-    const response = await api.activeAssetGenerations(projectId.value)
+    const response = await api.activeAssetGenerations(projectAtStart)
+    if (!pageAlive || projectAtStart !== projectId.value) return
     for (const item of response.data) {
       if (!assets.value.some(asset => asset.id === item.asset_id)) continue
-      setAssetGenerating(item.asset_id, true)
-      setAssetFailed(item.asset_id, false)
       void monitorAssetGeneration(item.asset_id, item.task_id)
     }
   } catch (error) {
     notice.error((error as Error).message)
-  }
+  } finally { discoveringGenerations = false }
 }
 
 async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
@@ -660,13 +720,24 @@ function goToStoryboard() {
   })
 }
 
-onMounted(loadProject)
+onMounted(() => {
+  void loadProject()
+  generationDiscoveryTimer = setInterval(() => {
+    if (!document.hidden && !loading.value) void resumeActiveGenerations()
+  }, 5000)
+  window.addEventListener('focus', refreshVisibleWorkspace)
+  document.addEventListener('visibilitychange', refreshVisibleWorkspace)
+})
 watch(activeTab, () => {
   clearMergeHover(true)
 })
 onBeforeUnmount(() => {
   pageAlive = false
+  workspaceRefreshVersion++
   extractionPollVersion++
+  clearInterval(generationDiscoveryTimer)
+  window.removeEventListener('focus', refreshVisibleWorkspace)
+  document.removeEventListener('visibilitychange', refreshVisibleWorkspace)
   clearMergeHover(true)
 })
 </script>
@@ -733,7 +804,7 @@ onBeforeUnmount(() => {
           <span><Check :size="13" />{{ tr('已完成') }} {{ completedCount }}</span>
           <span><i v-if="generatingCount" class="generating-summary-dot" />{{ tr('生成中') }} {{ generatingCount }}</span>
           <span>{{ tr('失败') }} {{ failedCount }}</span>
-          <AppButton type="button" variant="secondary" size="sm" icon-only :aria-label="tr('刷新')" @click="refreshAssets"><RefreshCw :size="14" /></AppButton>
+          <AppButton type="button" variant="secondary" size="sm" icon-only :aria-label="tr('刷新')" @click="refreshWorkspaceState"><RefreshCw :size="14" /></AppButton>
           <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
           <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="assets.length ? showBatchDialog = true : notice.info(tr('请先添加角色、场景或道具资产'))"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? tr('批量生成中') : tr('批量生成') }}</AppButton>
         </div>
@@ -860,6 +931,7 @@ onBeforeUnmount(() => {
       @close="closeAssetDialog"
       @created="addCreatedAsset"
       @saved="saveEditedAsset"
+      @generation-started="trackAssetGeneration"
     />
 
     <AssetBatchGenerateDialog

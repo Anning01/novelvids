@@ -1,6 +1,6 @@
 """Creation-agent fixed instructions and side-effect-free prompt fragments."""
 
-from prompts.catalog import template, text
+from prompts.skill_pack import render_skill
 
 from collections.abc import Sequence
 import json
@@ -8,12 +8,6 @@ import re
 
 from prompts.storyboard import StoryboardEntity
 from prompts.labels import prompt_label
-
-
-CREATION_AGENT_INSTRUCTIONS = template("agent_edit.md", "zh")
-
-
-CREATION_CRUD_INSTRUCTIONS = template("agent_crud.md", "zh")
 
 
 def render_creation_request(message: str, current_selection: dict | None = None) -> str:
@@ -24,13 +18,6 @@ def render_creation_request(message: str, current_selection: dict | None = None)
     return json.dumps(payload, ensure_ascii=False)
 
 
-def render_turn_limit_instruction(language: str = "zh") -> str:
-    return template("agent_turn_limit.md", language)
-
-
-CREATION_SUMMARY_INSTRUCTIONS = template("agent_summary.md", "zh")
-
-
 def render_creation_summary(previous: str, messages: list[dict]) -> str:
     return json.dumps(
         {"previous_summary": previous, "conversation_records": messages},
@@ -38,10 +25,14 @@ def render_creation_summary(previous: str, messages: list[dict]) -> str:
     )
 
 
-def render_working_checkpoint(evidence: dict, language: str = "zh") -> str:
+def render_working_checkpoint(
+    evidence: dict
+) -> str:
     """Historical evidence stays user/tool data, never new system authority."""
     return json.dumps(
-        {"working_checkpoint": evidence, "notice": text("checkpoint_notice", language)},
+        {
+            "working_checkpoint": evidence,
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -110,14 +101,9 @@ def render_preserved_tracks(prompt: str, parameters: dict) -> str:
     return "\n".join(parts)
 
 
-def render_creation_instructions(
-    *, language: str, crud: bool = False, turn_limited: bool = False
-) -> str:
-    instructions = template("agent_crud.md" if crud else "agent_edit.md", language)
-    if turn_limited:
-        instructions += "\n" + render_turn_limit_instruction(language)
-    return instructions
+def render_creation_instructions(*, language: str, crud=False, turn_limited=False) -> str:
+    return render_skill("editing", language)
 
 
-def render_summary_instructions(language: str) -> str:
-    return template("agent_summary.md", language)
+def render_summary_instructions(language: str = "zh") -> str:
+    return render_skill("summary", language)

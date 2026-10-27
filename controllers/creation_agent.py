@@ -1,8 +1,8 @@
 """Creation-assistant application flows and private response projections."""
 
+from services.creation_agent.authorization import public_run_input, pending_production
 from utils.messages import localized_message
 
-from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from tortoise.functions import Min
@@ -16,8 +16,8 @@ from services.creation_agent.handler import authorize_run
 from services.creation_agent.sessions import ACTIVE_STATUSES, agent_sessions, agent_configuration, agent_models
 from services.creation_agent.tools import PromptEditService, PromptEditConflict
 from services.creation_agent.changes import CreationChanges
+from services.creation_agent.receipts import production_receipts, usage_summary
 from services.creation_agent.results import message_changes, query_results
-from utils.enums import TaskStatusEnum
 
 
 def change_projection(change: PromptChange) -> dict:
@@ -78,9 +78,9 @@ class CreationAgentController:
         conversation, assistant = await agent_sessions.for_task(task_id, ctx)
         task = await AiTask.get(id=task_id)
         changes = await message_changes(assistant, conversation.novel_id)
-        return AgentRunOut(task_id=task.id, conversation_id=conversation.id, status=task.status,
+        return AgentRunOut(pending_production=await pending_production(task.id), production=await production_receipts(task.id), task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
-            changes=[change_projection(change) for change in changes], usage=assistant.usage,
+            changes=[change_projection(change) for change in changes], usage=await usage_summary(assistant),
             event_count=len(assistant.events), query_results=query_results(assistant))
 
     async def messages(self, conversation_id: int, ctx: AuthContext, before: int | None):
@@ -95,15 +95,19 @@ class CreationAgentController:
                            "created_at": row.created_at,
                            "changes": [change_projection(change) for change in changes.get(row.id, [])],
                            "query_results": query_results(row) if row.role == 'assistant' else [],
-                           "usage": row.usage if row.role == 'assistant' else {}}
-                          for row in reversed(rows)],
+                           "usage": await usage_summary(row) if row.role == 'assistant' else {},
+                           "pending_production": await pending_production(row.task_id) if row.role == 'assistant' else None,
+                           "production": await production_receipts(row.task_id) if row.role == 'assistant' else []}
+                          for row in reversed(rows) if not (row.run_input or {}).get("internal_production_step")],
                 "next_before": rows[-1].id if len(rows) == 50 else None}
 
     async def stop(self, task_id, ctx: AuthContext):
         await agent_sessions.for_task(task_id, ctx)
         await require_roles('admin', 'creator')(ctx)
-        await AiTask.filter(id=task_id, status__in=ACTIVE_STATUSES).update(
-            status=TaskStatusEnum.cancelled.value, finished_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+        from controllers.ai_task import ai_task_controller
+        task = await AiTask.get(id=task_id)
+        if task.status in ACTIVE_STATUSES:
+            await ai_task_controller.cancel(task_id)
         return await self.snapshot(task_id, ctx)
 
     async def undo(self, change_id: int, ctx: AuthContext):
@@ -114,7 +118,7 @@ class CreationAgentController:
         await require_roles('admin', 'creator')(ctx)
         task = await AiTask.get(id=change.task_id)
         user_message = await AgentMessage.get(task=task, role='user')
-        request = AgentRunRequest.model_validate(user_message.run_input)
+        request = AgentRunRequest.model_validate(public_run_input(user_message.run_input))
         limits = AgentConfiguration.model_validate(task.request_params['agent_configuration'])
         async def check():
             await authorize_run(task.request_params)
