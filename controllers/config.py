@@ -173,6 +173,30 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
 
     @classmethod
     def _validate_generation_payload(cls, data: dict, instance: AiModelConfig | None = None) -> None:
+        tasks = data.get('task_types', (instance.task_types or [instance.task_type]) if instance else [])
+        if AiTaskTypeEnum.video_enhancement.value in tasks:
+            from pydantic import ValidationError
+            from services.video_enhancement.contract import EnhancementOptions, EnhancementPricing, enhancement_cost
+            if tasks != [AiTaskTypeEnum.video_enhancement.value]:
+                raise HTTPException(400, localized_message('媒体处理配置不能与生成模型共用'))
+            protocol = data.get('api_protocol', instance.api_protocol if instance else None)
+            model = data.get('model', instance.model if instance else None)
+            if str(protocol) != 'volcengine_mediakit' or model != 'enhance-video-generative':
+                raise HTTPException(400, localized_message('请选择 MediaKit 大模型画质增强协议'))
+            try:
+                data['processing_options'] = EnhancementOptions.model_validate(
+                    data.get('processing_options', instance.processing_options if instance else None) or {}
+                ).model_dump(mode='json')
+                pricing = data.get('pricing', instance.pricing if instance else None)
+                if pricing is not None:
+                    EnhancementPricing.model_validate(pricing)
+                    for fps in (30, 60, 120):
+                        enhancement_cost(1, 1080, fps, pricing)
+                elif data.get('is_active', instance.is_active if instance else False):
+                    raise ValueError('missing media processing pricing')
+            except (ValueError, ValidationError):
+                raise HTTPException(400, localized_message('画质增强能力或价格配置不完整')) from None
+            return
         cls._validate_image_payload(data, instance)
         cls._validate_video_payload(data, instance)
         cls._validate_pricing(data, instance)
@@ -237,7 +261,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
     async def activate(self, config_id: int) -> AiModelConfig:
         """启用配置；同一生图或视频能力类型自动停用旧项。"""
         instance = await self.get(config_id)
-        self._validate_generation_payload({}, instance)
+        self._validate_generation_payload({'is_active': True} if instance.task_type == 8 else {}, instance)
         instance.is_active = True
         await instance.save(update_fields=["is_active", "updated_at"])
         await self._enforce_single_active_generation_type(instance)
@@ -300,7 +324,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         return list_styles()
 
     async def list_generation_capabilities(self) -> dict:
+        from services.video_enhancement.contract import ENHANCEMENT_PRESET
         return {
+            'media_processing': ENHANCEMENT_PRESET,
             "image": {
                 model_type.value: list(image_capabilities_for(model_type.value).clarities)
                 for model_type in ImageModelTypeEnum

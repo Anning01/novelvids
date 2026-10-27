@@ -23,6 +23,7 @@ import {
   ZoomOut,
 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import ChapterExportPanel from '@/features/video-export/ChapterExportPanel.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { api, mediaUrl } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
@@ -402,6 +403,7 @@ onUnmounted(() => gapPlaybackClock.stop())
         </div>
       </template>
 
+      <ChapterExportPanel v-if="activeChapter" :chapter-id="activeChapter.id" />
       <section class="video-editor-workspace">
         <div v-if="loading" class="video-page-state"><LoaderCircle class="is-spinning" :size="30" /><strong>{{ tr('正在加载本集视频') }}</strong><span>{{ tr('准备分镜顺序和生成结果。') }}</span></div>
         <div v-else-if="loadError" class="video-page-state is-error"><AlertTriangle :size="30" /><strong>{{ tr('视频工作区加载失败') }}</strong><span>{{ loadError }}</span><AppButton variant="primary" size="sm" @click="load">{{ tr('重新加载') }}</AppButton></div>

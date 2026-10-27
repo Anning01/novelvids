@@ -182,6 +182,9 @@ class AiTaskExecutor:
             if task.request_params.get('operation') == 'compose':
                 from services.creation_agent.composition import CompositionHandler
                 handler = CompositionHandler()
+            elif task.request_params.get('operation') == 'prepare_export':
+                from services.video_enhancement.handler import PrepareExportHandler
+                handler = PrepareExportHandler()
         if handler is None:
             await self._fail(task, localized_message("未注册的任务类型: {p0}", p0=localized_message(task_type.nickname)))
             return

@@ -9,3 +9,4 @@ class ImageApiProtocol(StrEnum):
     volcengine_ark = "volcengine_ark"
     minimax = "minimax"
     dashscope = "dashscope"
+    volcengine_mediakit = "volcengine_mediakit"

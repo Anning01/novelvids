@@ -35,7 +35,7 @@ import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, Generation
 
 const AgentSettingsPanel = defineAsyncComponent(() => import('@/features/creation-agent/AgentSettingsPanel.vue'))
 
-type ModelCategoryId = 'llm' | 'image' | 'video'
+type ModelCategoryId = 'llm' | 'image' | 'video' | 'enhancement'
 type SettingsSection = 'models' | 'general'
 
 interface ModelCategory {
@@ -73,6 +73,11 @@ const categories: ModelCategory[] = [
     icon: Video,
   },
 ]
+categories.push({
+  id: 'enhancement', get label() { return tr('成片画质增强') }, eyebrow: 'ENHANCEMENT',
+  get description() { return tr('定稿后增强至1080p，原片与高清版分别保存。') },
+  taskTypes: [8], icon: Zap,
+})
 const settingsTabs: AppTabItem[] = [
   { value: 'models', get label() { return tr('模型配置') }, icon: Bot },
   { value: 'general', get label() { return tr('通用配置') }, icon: Settings2 },
@@ -123,6 +128,8 @@ const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value =>
 })))
 
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
+const enhancementPricing = ref<NonNullable<ModelPricing['tiers']>>([])
+const processingOptions = ref<Record<string, unknown>>({})
 const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
 const tierPrices = ref<Record<string, number>>({})
 const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
@@ -173,6 +180,7 @@ function taskLabel(value: number) {
 }
 
 function protocolLabel(value: ImageApiProtocol) {
+  if (value === 'volcengine_mediakit') return 'AI MediaKit'
   if (value === 'minimax') return tr('MiniMax 官方')
   if (value === 'dashscope') return tr('阿里云百炼 DashScope')
   if (value === 'volcengine_ark') return tr('火山方舟 Seedream')
@@ -251,12 +259,21 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
   form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, supports_tool_calls: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
   textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
-  tierPrices.value = category.id === 'llm'
+  tierPrices.value = category.id === 'llm' || category.id === 'enhancement'
     ? {}
     : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
   inputImagePricing.value = { first_free: 1, price_per_image: 0 }
   videoRefPrices.value = {}
   if (category.id === 'video') applyVideoPricingPreset()
+  if (category.id === 'enhancement') {
+    const preset = generationCapabilities.value.media_processing
+    if (!preset) { notice.error(tr('画质增强能力尚未加载')); return }
+    form.value.base_url = preset.base_url
+    form.value.model = preset.model
+    form.value.api_protocol = preset.api_protocol
+    enhancementPricing.value = (preset.pricing.tiers || []).map(tier => ({ ...tier }))
+    processingOptions.value = { ...preset.processing_options }
+  }
   discountPricing.value = { discount: 1, description: '' }
   editingConfigId.value = null
   showApiKey.value = false
@@ -294,6 +311,8 @@ function openEdit(item: AiModelConfig) {
     ? { first_free: item.pricing.input_image.first_free, price_per_image: item.pricing.input_image.price_per_image }
     : { first_free: 1, price_per_image: 0 }
   videoRefPrices.value = item.pricing?.video_reference_prices ? { ...item.pricing.video_reference_prices } : {}
+  enhancementPricing.value = (item.pricing?.tiers || []).map(tier => ({ ...tier }))
+  processingOptions.value = { ...(item.processing_options || {}) }
   discountPricing.value = {
     discount: item.pricing?.discount ?? 1,
     description: item.pricing?.discount_description ?? '',
@@ -332,7 +351,9 @@ async function saveConfig() {
       })
     )
     let pricing: ModelPricing
-    if (selectedCategoryId.value === 'llm') {
+    if (selectedCategoryId.value === 'enhancement') {
+      pricing = { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: enhancementPricing.value }
+    } else if (selectedCategoryId.value === 'llm') {
       pricing = {
         type: 'text',
         currency: 'CNY',
@@ -372,6 +393,7 @@ async function saveConfig() {
       api_protocol: selectedCategoryId.value === 'video'
         ? videoProtocolFor(form.value.video_model_type)
         : form.value.api_protocol,
+      processing_options: selectedCategoryId.value === 'enhancement' ? processingOptions.value : null,
       task_type: taskTypes[0],
       task_types: taskTypes,
       max_context_characters: form.value.max_context_characters || null,
@@ -679,6 +701,17 @@ onMounted(load)
           <input v-model="form.supports_tool_calls" type="checkbox" role="switch" :aria-label="tr('多轮工具调用')" />
           <span>{{ tr('支持多轮工具调用（创作助手必需）') }}</span>
         </label>
+        <section v-if="selectedCategoryId === 'enhancement'" class="pricing-editor">
+          <span class="pricing-title">{{ tr('1080p增强费用（元 / 输出分钟）') }}</span>
+          <div class="pricing-grid">
+            <label v-for="tier in enhancementPricing" :key="tier.fps_max">
+              <span>{{ tr('最高帧率') }} {{ tier.fps_max }} fps</span>
+              <input v-model.number="tier.price" type="number" min="0" step="0.01" />
+            </label>
+          </div>
+          <p>{{ tr('本地成片通过MediaKit临时上传读取；OSS成片使用签名地址。无需开放本地媒体目录。') }}</p>
+          <p>{{ tr('保持原片帧率，不自动插帧。默认价格来自后台能力配置，保存后按此配置估价。') }}</p>
+        </section>
         <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
           <span class="pricing-title">{{ tr('费用设置（元 / 百万 token）') }}</span>
           <div class="pricing-grid">
@@ -775,7 +808,7 @@ onMounted(load)
 .scope-badge.is-official { color: var(--app-accent); background: var(--app-accent-soft); }
 .scope-badge.is-team { color: #059669; background: rgb(16 185 129 / 12%); }
 .official-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.model-category-grid { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.model-category-grid { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
 .model-category-card { position: relative; display: grid; min-height: 158px; grid-template-columns: 46px minmax(0, 1fr); align-content: start; gap: 13px; padding: 18px; overflow: hidden; border: 1px solid #e6e8ef; border-radius: 15px; color: #303442; background: #fff; cursor: pointer; text-align: left; box-shadow: 0 10px 30px rgb(37 41 57 / 4%); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .model-category-card:hover { border-color: #d6d9e5; box-shadow: 0 14px 34px rgb(37 41 57 / 7%); transform: translateY(-1px); }
 .model-category-card.is-active { border-color: #bfc1ff; box-shadow: 0 14px 34px rgb(91 92 246 / 10%); }

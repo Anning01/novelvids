@@ -78,6 +78,7 @@ class AiModelConfig(AbstractBaseModel):
         null=True,
         description="计费费用模块，按任务类型分 text/image/video 三种结构",
     )
+    processing_options = fields.JSONField(null=True, description="媒体处理能力、并发及访问设置")
     scope = fields.CharField(
         max_length=16,
         default="official",

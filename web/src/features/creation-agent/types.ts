@@ -102,7 +102,8 @@ export interface AgentCapabilities {
 }
 
 export interface ProductionIntent {
-  operation: 'story' | 'assets' | 'image' | 'storyboard' | 'remake' | 'video' | 'compose'
+  operation: 'story' | 'assets' | 'image' | 'storyboard' | 'remake' | 'video' | 'compose' | 'prepare_export' | 'enhance_export'
+  enhancement?: { model_config_id: number; source_sha256: string; quote_version: string } | null
   target_id: number
   request_id: string
   media_model_config_id?: number | null

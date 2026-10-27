@@ -14,9 +14,12 @@ async def ensure_creation_agent_schema() -> None:
             await connection.execute_script(
                 "ALTER TABLE ai_model_configs ADD COLUMN supports_tool_calls INT NOT NULL DEFAULT 0;"
             )
+        if columns and "processing_options" not in {str(column["name"]) for column in columns}:
+            await connection.execute_script("ALTER TABLE ai_model_configs ADD COLUMN processing_options JSON;")
     elif settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
         await connection.execute_script(
             "ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS supports_tool_calls BOOL NOT NULL DEFAULT FALSE;"
+            "ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS processing_options JSONB;"
         )
 
     # Run before safe schema creation: it does not add columns to old tables.
@@ -36,13 +39,23 @@ async def ensure_agent_operation_schema() -> None:
     """Add durable receipts on existing installs even when automatic schemas are off."""
     from models.agent_operation import AgentOperation
     from models.agent_submission import AgentSubmission
+    from models.chapter_export import ChapterExport
 
     connection = Tortoise.get_connection("default")
     # Reuse the ORM's backend-specific FK/UUID definitions instead of parallel DDL.
     generator = connection.schema_generator(connection)
-    for model in (AgentOperation, AgentSubmission):
+    for model in (AgentOperation, AgentSubmission, ChapterExport):
         definition = generator._get_table_sql(model, safe=True)
         await connection.execute_script(definition["table_creation_string"])
+    if settings.DATABASE_URL.startswith('sqlite'):
+        columns = {row['name'] for row in await connection.execute_query_dict('PRAGMA table_info(chapter_exports)')}
+        for name, field in {'collection_owner':'CHAR(36)', 'collection_lease_until':'TIMESTAMP', 'submission_slot':'INT NOT NULL DEFAULT 0'}.items():
+            if name not in columns:
+                await connection.execute_script(f'ALTER TABLE chapter_exports ADD COLUMN {name} {field};')
+    else:
+        await connection.execute_script('ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS collection_owner UUID;'
+            'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS collection_lease_until TIMESTAMPTZ;'
+            'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS submission_slot BOOL NOT NULL DEFAULT FALSE;')
 
 
 async def ensure_ai_model_config_schema() -> None:

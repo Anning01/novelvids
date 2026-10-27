@@ -66,6 +66,13 @@ def _load_test_env() -> dict:
 TEST_ENV = _load_test_env()
 
 
+def pytest_runtest_setup(item):
+    # Live model acceptance needs its dedicated configuration; never inherit a
+    # developer's .env credentials merely because the ordinary suite was run.
+    if item.get_closest_marker('real_llm') and not (Path(__file__).parent / '.test.env').is_file():
+        pytest.skip('缺少 test/.test.env，按项目规范跳过真实模型测试')
+
+
 @pytest.fixture(scope="session")
 def test_env() -> dict:
     """返回 .test.env 配置字典。"""
@@ -108,6 +115,8 @@ async def clear_db():
     # Manual cleanup for core models we use in tests
     from models.novel import Novel
     from models.chapter import Chapter
+    from models.chapter_export import ChapterExport
+    await ChapterExport.all().delete()
     from models.asset import Asset
     from models.asset_variant import AssetVariant
     from models.scene import Scene

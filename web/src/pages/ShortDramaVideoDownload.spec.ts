@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { createPinia } from 'pinia'
+import { exportApi } from '@/features/video-export/api'
 import ShortDramaVideoPage from './ShortDramaVideoPage.vue'
 import { api } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
@@ -40,7 +42,7 @@ async function mountPage() {
   await router.isReady()
   return mount(ShortDramaVideoPage, {
     global: {
-      plugins: [router],
+      plugins: [router, createPinia()],
       stubs: {
         ShortDramaWorkspaceShell: {
           template: '<div><slot name="header-end" /><slot /></div>',
@@ -53,6 +55,8 @@ async function mountPage() {
 describe('短剧视频页完整视频下载', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(exportApi, 'list').mockResolvedValue({ data: [] })
+    vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [] })
     vi.mocked(api.novelMeta).mockResolvedValue({
       code: 0,
       message: 'ok',

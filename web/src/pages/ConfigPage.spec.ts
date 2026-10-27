@@ -52,6 +52,37 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     vi.restoreAllMocks()
   })
 
+  it('creates MediaKit processing configuration with server-provided minute prices', async () => {
+    baseMocks()
+    vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: {}, video: {}, media_processing: {
+      base_url: 'https://mediakit.cn-beijing.volces.com', model: 'enhance-video-generative', api_protocol: 'volcengine_mediakit',
+      processing_options: { poll_seconds: 15, input_short_side_min: 360 },
+      pricing: { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: [
+        { short_side_max: 1080, fps_max: 30, price: 5 }, { short_side_max: 1080, fps_max: 60, price: 10 },
+        { short_side_max: 1080, fps_max: 120, price: 20 },
+      ] },
+    } } } as never)
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+    const createConfig = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+    const wrapper = mountPage(teamAdminStore())
+    await flushPromises()
+    await wrapper.get('.model-category-card.is-enhancement').trigger('click')
+    await wrapper.get('.model-config-section > header button').trigger('click')
+    expect((wrapper.get('input[name="model-service-base-url"]').element as HTMLInputElement).value).toBe('https://mediakit.cn-beijing.volces.com')
+    expect(wrapper.text()).toContain('1080p增强费用')
+    await wrapper.get('input[name="model-config-name"]').setValue('团队画质增强')
+    await wrapper.get('input[name="model-service-api-key"]').setValue('test-only-key')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(createConfig).toHaveBeenCalledWith(expect.objectContaining({
+      task_type: 8, task_types: [8], api_protocol: 'volcengine_mediakit', model: 'enhance-video-generative',
+      processing_options: expect.objectContaining({ poll_seconds: 15 }),
+      pricing: expect.objectContaining({ type: 'media_processing', billing_unit: 'minute', tiers: expect.arrayContaining([
+        { short_side_max: 1080, fps_max: 30, price: 5 },
+      ]) }),
+    }))
+  })
+
   it('团队管理员只看到本团队配置，并提示未配置时使用平台模型', async () => {
     baseMocks()
     vi.spyOn(api, 'configs').mockResolvedValue({

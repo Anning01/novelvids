@@ -135,7 +135,7 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'dashscope'
+export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'dashscope' | 'volcengine_mediakit'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
@@ -210,23 +210,25 @@ export interface VideoGenerationCapabilities {
 }
 export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
 export interface ModelPricing {
-  type: 'text' | 'image' | 'video'
+  type: 'text' | 'image' | 'video' | 'media_processing'
   currency: string
   input_price_per_1m?: number
   output_price_per_1m?: number
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
-  billing_unit?: 'token' | 'second'
+  billing_unit?: 'token' | 'second' | 'minute'
+  tiers?: Array<{ short_side_max: number; fps_max: number; price: number }>
   discount?: number
   discount_description?: string
 }
 export interface GenerationCapabilities {
+  media_processing?: { base_url: string; model: string; api_protocol: ImageApiProtocol; processing_options: Record<string, unknown>; pricing: ModelPricing }
   image: Record<string, string[]>
   video: Record<string, string[]>
   video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>
 }
-export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; scope?: 'official' | 'team'; team_id?: number | null; created_at: string; updated_at: string }
+export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team'; team_id?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; source?: 'system' | 'upload'; duration?: number | null; team_id?: number | null; is_active: boolean; created_at: string; updated_at: string }
 export interface DigitalHuman { id: number; country: string; age: number; gender: string; occupation: string; asset_id: string; image_url: string; is_active: boolean; created_at: string; updated_at: string }
@@ -453,7 +455,7 @@ export interface BillingRecord {
   id: number
   novel_id: number
   task_type: number
-  billing_type: 'text' | 'image' | 'video'
+  billing_type: 'text' | 'image' | 'video' | 'media_processing'
   ai_task_id?: string | null
   video_id?: number | null
   model_config_id?: number | null

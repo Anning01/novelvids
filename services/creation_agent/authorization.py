@@ -118,6 +118,8 @@ async def resolve_production_intents(request, novel_id, user_message):
         sources = await RemakeSource.filter(novel_id=novel_id).values(
             "id", "chapter_id", "episode_number", "media_status"
         )
+        from models.chapter_export import ChapterExport
+        exports = await ChapterExport.filter(novel_id=novel_id, parent_export_id__isnull=True,source_sha256__not_isnull=True).order_by('-id').limit(20).values('id','chapter_id','source_sha256')
         result = await execution.generate(
             "authorization",
             {
@@ -126,6 +128,7 @@ async def resolve_production_intents(request, novel_id, user_message):
                 "chapter_id": request.chapter_id,
                 "project_id": novel_id,
                 "remake_sources": sources,
+                'chapter_exports': exports,
                 "write_scope": request.write_scope,
             },
             ProductionAuthorization,
@@ -150,6 +153,18 @@ async def resolve_production_intents(request, novel_id, user_message):
     for intent in intents:
         try:
             await validate_intent_scope(intent, request=request, novel_id=novel_id)
+            if intent.operation == 'enhance_export':
+                from controllers.chapter_export import chapter_exports
+                from services.creation_agent.handler import authorize_run
+                from schemas.video_export import ExportEnhanceIn
+                ctx = await authorize_run(execution.params)
+                export = await chapter_exports.get(intent.target_id, ctx)
+                models = await chapter_exports.configs(ctx)
+                if not models:
+                    continue
+                quote = await chapter_exports.quote(export, models[0].id, ctx)
+                intent = intent.model_copy(update={'enhancement':ExportEnhanceIn(model_config_id=models[0].id,
+                    source_sha256=quote['source_sha256'], quote_version=quote['quote_version'])})
         except ValueError:
             continue
         checked.append(intent)
@@ -196,6 +211,7 @@ async def pending_production(task_id):
     from models.chapter import Chapter
     from models.novel import Novel
     from models.remake_source import RemakeSource
+    from models.chapter_export import ChapterExport
 
     for intent in intents:
         model = {
@@ -206,6 +222,8 @@ async def pending_production(task_id):
             "storyboard": Chapter,
             "compose": Chapter,
             "remake": RemakeSource,
+            'prepare_export': Chapter,
+            'enhance_export': ChapterExport,
         }[intent.operation]
         row = await model.get_or_none(id=intent.target_id)
         label = (
@@ -220,6 +238,18 @@ async def pending_production(task_id):
                 id=intent.variant_id, asset_id=intent.target_id
             )
             label += " / " + (variant.name if variant else str(intent.variant_id))
+        if intent.operation == 'enhance_export' and intent.enhancement:
+            from controllers.chapter_export import chapter_exports
+            from services.creation_agent.handler import authorize_run
+            try:
+                ctx = await authorize_run(task.request_params)
+                quote = await chapter_exports.quote(row, intent.enhancement.model_config_id, ctx)
+                if quote['quote_version'] == intent.enhancement.quote_version:
+                    label += f" · {quote['config_snapshot']['name']} · 1080p · ¥{quote['amount']}"
+                else:
+                    label += ' · ' + localized_message('来源或报价已变化，请重新确认')
+            except Exception:
+                label += ' · ' + localized_message('请先核对高清导出的来源与费用')
         labels.append({"operation": intent.operation, "target_label": label})
     return {
         "confirmation_request_id": str(

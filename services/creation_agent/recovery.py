@@ -22,6 +22,9 @@ class ProductionRecovery:
                 "workflow_version"
             ) != WORKFLOW_VERSION or task.request_params.get("parent_task_id"):
                 continue
+            from services.video_enhancement.recovery import recover_export
+            if await recover_export(task):
+                continue
             if task.request_params.get("operation") == "video":
                 from models.video import Video
 
@@ -56,6 +59,8 @@ class ProductionRecovery:
         self.worker = asyncio.create_task(self.loop())
 
     async def stop(self):
+        from services.video_enhancement.recovery import stop_collectors
+        await stop_collectors()
         if self.worker:
             self.worker.cancel()
             await asyncio.gather(self.worker, return_exceptions=True)
@@ -76,10 +81,14 @@ class ProductionRecovery:
                 await retry_video_settlements()
                 from services.creation_agent.review_evidence import retry_review_evidence
                 await retry_review_evidence()
+                from services.video_enhancement.recovery import collect_exports
+                await collect_exports()
 
                 for pending in await AiTask.filter(
                     stage__in=["billing_pending", "needs_review", "review_closed"]
                 ).limit(20):
+                    if pending.task_type == 8:
+                        continue
                     if pending.request_params.get(
                         "workflow_version"
                     ) == WORKFLOW_VERSION and (
