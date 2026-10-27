@@ -1,5 +1,7 @@
 """At-most-once external submission, with recoverable deterministic results."""
 
+from collections.abc import Callable
+
 from utils.messages import localized_message
 
 from models.agent_operation import AgentOperation
@@ -11,7 +13,7 @@ class SubmissionUncertain(RuntimeError):
     pass
 
 
-async def execute_step(task_id, key: str, action, *, external=False, atomic=False):
+async def execute_step(task_id, key: str, action, *, external=False, atomic=False, external_started: Callable[[], bool] | None = None):
     row, _ = await AgentOperation.get_or_create(
         task_id=task_id, key=key, defaults={"external": external}
     )
@@ -43,8 +45,10 @@ async def execute_step(task_id, key: str, action, *, external=False, atomic=Fals
                 state="completed", result=result
             )
     except BaseException:
+        # Model preflight can prove no request started; media keeps the conservative default.
+        uncertain = external and (external_started is None or external_started())
         await AgentOperation.filter(id=row.id).update(
-            state="uncertain" if external else "failed"
+            state="uncertain" if uncertain else "failed"
         )
         raise
     return result

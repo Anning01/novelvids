@@ -138,6 +138,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             from services.creation_agent.prompt_edits import validate_prompt_dependencies
             from services.creation_agent.operations import CreationOperations
             for shot in storyboard.shots:
+                from services.storyboard.validation import validate_skill_storyboard_shot
+                validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])
                 validate_prompt_dependencies(shot.prompt, entities or [])
                 CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))
             async def persist():
@@ -165,6 +167,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
     async def _persist_scenes(self, chapter: Chapter, storyboard, api_metadata: dict, request_duration: float,
                              prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None) -> List[Scene]:
+        from services.creation_agent.skill_execution import current_execution
+        execution = current_execution.get()
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
@@ -203,6 +207,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             # 解析 duration 为浮点数
             if shot.segments:
                 prompt_params["segments"] = [segment.model_dump() for segment in shot.segments]
+            if shot.reference_only_types:
+                prompt_params["reference_only_types"] = list(shot.reference_only_types)
             duration_value = float(shot.duration.replace("s", ""))
 
             # 构建 metadata，包含 API 元数据
@@ -239,6 +245,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 CreationOperations.validate_timing(prompt, duration_value)
                 prompt_params['prompt_language'] = prompt_language
                 prompt_params['rendering_version'] = 'agent-skills-v1'
+                if execution and "storyboard_contract" in execution.snapshot.contents:
+                    import json
+                    prompt_params['prompt_contract_version'] = json.loads(execution.snapshot.read("storyboard_contract"))["version"]
             else:
                 prompt = format_storyboard_prompt(
                     shot,

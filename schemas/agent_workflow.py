@@ -21,6 +21,19 @@ class SkillStoryboard(BaseModel):
     shots: list[SkillShot] = Field(min_length=1, max_length=200)
 
 
+class StructuredSkillShot(SoraScenePromptConfig):
+    prompt: None = None
+    reference_only_types: list[Literal["人物", "场景", "物品"]] = Field(
+        default_factory=lambda: ["人物", "场景", "物品"],
+        max_length=3,
+        description="参考图通过名称引用，不把生图版式写进视频内容",
+    )
+
+
+class StructuredSkillStoryboard(BaseModel):
+    shots: list[StructuredSkillShot] = Field(min_length=1, max_length=200)
+
+
 class ProductionIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose"]

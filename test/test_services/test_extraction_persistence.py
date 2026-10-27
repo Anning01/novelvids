@@ -557,3 +557,109 @@ async def test_后续分类保存失败时回滚先前分类更新():
     assert original.base_traits == original_traits
     assert original.source_chapters == original_source_chapters
     assert original.last_updated_chapter == 7
+
+
+@pytest.mark.asyncio
+async def test_shared_relationship_alias_does_not_merge_master_into_disciple():
+    novel = await Novel.create(name="Shared title identities")
+    disciple = await Asset.create(novel=novel, asset_type=1, canonical_name="苏玄",
+        aliases=["师父", "无极宗第七十二代宗主"], description="十六岁少年",
+        base_traits="少年形象", source_chapters=[1, 2], last_updated_chapter=2,
+        metadata={"analysis_source": "project_analysis", "voice_reference_id": 73},
+        main_image="/media/disciple.png")
+    summary = await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1,
+        result=_result(persons=[_person(name="赵无垢", aliases=["师父", "老头儿", "无极宗第七十一代宗主"],
+            description="六十四岁师父，在回忆中抱回婴儿并教他识字", base_traits="六十四岁老者形象")]))
+    await disciple.refresh_from_db()
+    master = await Asset.get(novel=novel, canonical_name="赵无垢")
+    assert summary["persons"] == [{"name": "赵无垢", "action": "created"}]
+    assert master.id != disciple.id
+    assert master.base_traits == "六十四岁老者形象"
+    assert disciple.base_traits == "少年形象"
+    assert disciple.description == "十六岁少年"
+    assert disciple.aliases == ["师父", "无极宗第七十二代宗主"]
+    assert disciple.metadata["voice_reference_id"] == 73
+    assert disciple.main_image == "/media/disciple.png"
+
+
+@pytest.mark.asyncio
+async def test_canonical_name_wins_over_another_assets_polluted_alias():
+    novel = await Novel.create(name="Exact name precedence")
+    first = await Asset.create(novel=novel, asset_type=1, canonical_name="苏玄",
+        aliases=["师父", "赵无垢"], base_traits="少年形象")
+    master = await Asset.create(novel=novel, asset_type=1, canonical_name="赵无垢",
+        aliases=["师父"], base_traits="原师父形象")
+    await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1,
+        result=_result(persons=[_person(name="赵无垢", aliases=["师父"], base_traits="更新师父形象")]))
+    await first.refresh_from_db()
+    await master.refresh_from_db()
+    assert first.base_traits == "少年形象"
+    assert master.base_traits == "更新师父形象"
+    assert await Asset.filter(novel=novel, asset_type=1).count() == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse_order", [False, True])
+async def test_repeated_extraction_keeps_named_people_with_shared_titles_separate(reverse_order):
+    novel = await Novel.create(name="Repeated identities")
+    persons = [_person(name="苏玄", aliases=["师父"], base_traits="少年形象"),
+        _person(name="赵无垢", aliases=["师父", "老头儿"], base_traits="老者形象")]
+    if reverse_order:
+        persons.reverse()
+    service = AssetUpsertService()
+    for _ in range(2):
+        await service.save_result(novel_id=novel.id, chapter_number=1, result=_result(persons=persons))
+    saved = await Asset.filter(novel=novel).order_by("canonical_name")
+    assert {a.canonical_name: a.base_traits for a in saved} == {"苏玄": "少年形象", "赵无垢": "老者形象"}
+    assert all(a.source_chapters == [1] for a in saved)
+
+
+@pytest.mark.asyncio
+async def test_name_alias_match_reuses_identity_without_using_alias_to_alias_overlap():
+    novel = await Novel.create(name="Renamed identity")
+    existing = await Asset.create(novel=novel, asset_type=1, canonical_name="宫平", aliases=["小宫"], base_traits="旧形象")
+    await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=2,
+        result=_result(persons=[_person(name="宫先生", aliases=["宫平"], base_traits="新形象")]))
+    await existing.refresh_from_db()
+    assert existing.canonical_name == "宫平"
+    assert existing.base_traits == "新形象"
+    assert await Asset.filter(novel=novel).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_name_alias_rejects_the_entire_result_without_overwriting_anyone():
+    novel = await Novel.create(name="Ambiguous identities")
+    people = [await Asset.create(novel=novel, asset_type=1, canonical_name=name,
+        aliases=["师父"], base_traits=name) for name in ("苏玄", "赵无垢")]
+    with pytest.raises(ValueError, match="资产名称匹配到多个对象"):
+        await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=2,
+            result=_result(persons=[_person(name="苏玄", base_traits="应回滚的修改"),
+                _person(name="师父", base_traits="无法确定属于谁")]))
+    for person in people:
+        await person.refresh_from_db()
+        assert person.base_traits == person.canonical_name
+    assert await Asset.filter(novel=novel).count() == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse_order", [False, True])
+async def test_distinct_canonical_names_in_one_response_resist_old_polluted_aliases(reverse_order):
+    novel = await Novel.create(name="Explicit response identities")
+    await Asset.create(novel=novel, asset_type=1, canonical_name="苏玄", aliases=["赵无垢"], base_traits="少年形象")
+    persons = [_person(name="苏玄", base_traits="少年形象"), _person(name="赵无垢", base_traits="老者形象")]
+    if reverse_order:
+        persons.reverse()
+    await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1, result=_result(persons=persons))
+    assert {a.canonical_name: a.base_traits for a in await Asset.filter(novel=novel)} == {"苏玄": "少年形象", "赵无垢": "老者形象"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asset_type,result_key,model", [(2, "scenes", Scene), (3, "items", Item)])
+async def test_shared_scene_or_prop_alias_does_not_collapse_different_named_assets(asset_type, result_key, model):
+    novel = await Novel.create(name="Shared object labels")
+    existing = await Asset.create(novel=novel, asset_type=asset_type, canonical_name="东门", aliases=["入口"], base_traits="东门原貌")
+    result = _result(**{result_key: [model(name="西门", aliases=["入口"], base_traits="西门原貌")]})
+    await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1, result=result)
+    await existing.refresh_from_db()
+    assert existing.base_traits == "东门原貌"
+    assert await Asset.filter(novel=novel, asset_type=asset_type).count() == 2

@@ -314,6 +314,12 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from test.test_services.test_prompt_language import _shot
+    from prompts.storyboard import format_storyboard_prompt
+
+    candidate = _shot()
+    candidate.actions = ["0s-4s: rain falls."]
+    candidate.reference_only_types = ["人物", "场景", "物品"]
+    expected_prompt = format_storyboard_prompt(candidate, "en")
 
     novel, chapter, _ = await enabled_project()
     old = await Scene.create(
@@ -325,8 +331,7 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     )
 
     def respond(messages, info):
-        shot = _shot().model_dump()
-        shot.update(prompt="New independent shot.", actions=["0s-4s: rain falls."])
+        shot = candidate.model_dump(exclude={"prompt"})
         return ModelResponse(
             parts=[ToolCallPart(info.output_tools[0].name, {"shots": [shot]})]
         )
@@ -343,7 +348,7 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     assert await Scene.with_deleted().filter(id=old.id).exists()
     assert str(old.id) in task.request_params["replaced_scene_snapshots"]
     assert await Scene.filter(chapter=chapter).count() == 1
-    assert (await Scene.get(chapter=chapter)).prompt == "New independent shot."
+    assert (await Scene.get(chapter=chapter)).prompt == expected_prompt
 
 
 @pytest.mark.asyncio
@@ -1277,3 +1282,135 @@ async def test_chat_remake_reuses_uploaded_source_and_original_skill_snapshot():
         assert await AiTask.filter(task_type=6).count() == 2
     finally:
         current_execution.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_model_preflight_failure_is_definite_and_preserves_actual_error():
+    task = await AiTask.create(task_type=5, status=2, request_params={'workflow_version': 'agent-skills-v1'})
+    action = AsyncMock(side_effect=ValueError('上下文超过配置上限'))
+    with pytest.raises(ValueError, match='上下文超过配置上限'):
+        await execute_step(task.id, 'model:story', action, external=True, external_started=lambda: False)
+    assert (await AgentOperation.get(task=task, key='model:story')).state == 'failed'
+    from services.ai_task_executor import ai_task_executor
+    await ai_task_executor._fail(task, '上下文超过配置上限', record_usage=False)
+    await task.refresh_from_db()
+    assert task.stage != 'needs_review'
+    assert task.error_message == '上下文超过配置上限'
+
+
+@pytest.mark.asyncio
+async def test_started_model_failure_remains_uncertain_and_cannot_replay():
+    task = await AiTask.create(task_type=5, status=2)
+    action = AsyncMock(side_effect=TimeoutError())
+    with pytest.raises(TimeoutError):
+        await execute_step(task.id, 'model:story', action, external=True, external_started=lambda: True)
+    assert (await AgentOperation.get(task=task, key='model:story')).state == 'uncertain'
+    with pytest.raises(SubmissionUncertain):
+        await execute_step(task.id, 'model:story', action, external=True, external_started=lambda: False)
+    action.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('explicit_cap', [None, 64000])
+async def test_large_story_input_uses_model_limit_and_never_marks_local_rejection_uncertain(explicit_cap):
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+    from models.chapter import Chapter
+    from models.novel import Novel
+    from models.creation_agent import AgentMessage
+    from services.ai_task_executor import ai_task_executor
+    from controllers.novel import novel_controller
+
+    novel, _, _ = await enabled_project()
+    # Many quoted paragraph breaks expand at the JSON boundary, as in the reported 828-chapter book.
+    text = '"这是一个完整段落。"\n' * 4000
+    novel.content = text * 30
+    await novel.save()
+    await Chapter.bulk_create([
+        Chapter(novel_id=novel.id, number=index, name=f'第{index}章', content=text)
+        for index in range(2, 829)
+    ])
+    settings = await AgentSettings.get(id=1)
+    settings.configuration = {'enabled': True, 'request_limit': 9, 'max_context_characters': explicit_cap}
+    await settings.save()
+    calls = []
+
+    def respond(messages, info):
+        calls.append(messages)
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            'book_types': ['冒险'], 'story_outline': 'A complete story outline.', 'key_characters': [],
+        })])
+
+    model = FunctionModel(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        task = await novel_controller.analyze(novel.id)
+        task.request_params['include_cover'] = False
+        await task.save()
+        await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    receipt = await AgentOperation.get(task=task, key='model:story:BookAnalysis:')
+    if explicit_cap is None:
+        assert task.status == 3, task.error_message
+        assert calls
+        assert receipt.state == 'completed'
+    else:
+        assert task.status == 4
+        assert task.stage != 'needs_review'
+        assert any(text in task.error_message for text in ('上下文超过配置上限', 'Context exceeds the limit'))
+        assert not calls
+        assert receipt.state == 'failed'
+        child = await AgentMessage.filter(role='assistant').exclude(task_id=task.id).get()
+        assert child is not None and not (child.usage or {}).get('calls')
+
+
+@pytest.mark.asyncio
+async def test_cover_failure_preserves_usable_analysis_in_the_latest_analysis_api(client, monkeypatch):
+    from controllers.novel import novel_controller
+    from models.novel import Novel
+    from services.ai_task_executor import ai_task_executor
+    from services.creation_agent.skill_execution import SkillExecution
+    from services.project_analysis.handler import BookAnalysis
+    from schemas.agent_workflow import CompletePrompt
+
+    novel, _, _ = await enabled_project()
+    await Novel.filter(id=novel.id).update(content='第一章\nAlex waits.')
+    await AiModelConfig.create(name='image',model='image',task_type=2,api_key='test',
+        base_url='https://example.test',image_model_type='seedream_5_lite',api_protocol='volcengine_ark',is_active=True)
+
+    async def generate(self, skill, facts, output_type, **kwargs):
+        return BookAnalysis(book_types=['冒险'],story_outline='已保存的故事大纲',key_characters=[]) if output_type is BookAnalysis else CompletePrompt(prompt='Cover')
+    monkeypatch.setattr(SkillExecution,'generate',generate)
+    submit=AsyncMock(side_effect=TimeoutError('Lost image response'))
+    monkeypatch.setattr('services.project_analysis.handler.generate_images',submit)
+    task=await novel_controller.analyze(novel.id)
+    task.request_params['prompt_language']='zh'
+    await task.save()
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.stage == 'needs_review'
+    assert task.response_data['analysis_completed'] is True
+    assert task.response_data['cover_status'] == 'needs_review'
+    response=(await client.get(f'/api/novel/{novel.id}/analysis')).json()['data']
+    assert response['response_data']['analysis_completed'] is True
+    assert response['response_data']['story_outline'] == '已保存的故事大纲'
+    assert '封面' in response['response_data']['cover_warning']
+    submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_old_cover_failure_exposes_verified_story_without_changing_external_receipt(client):
+    from models.novel import Novel
+    novel, _, _=await enabled_project()
+    task=await AiTask.create(task_type=5,status=4,stage='needs_review',request_params={'novel_id':novel.id,'workflow_version':'agent-skills-v1','prompt_language':'zh'},response_data={
+        'book_types':['冒险'],'story_outline':'历史已保存大纲','key_characters':[],'chapter_count':1,'cover':None,
+    })
+    await AgentOperation.create(task=task,key='persist:story',state='completed',result={'novel_id':novel.id})
+    cover=await AgentOperation.create(task=task,key='media:cover',state='uncertain',external=True)
+    response=(await client.get(f'/api/novel/{novel.id}/analysis')).json()['data']
+    assert response['response_data']['analysis_completed'] is True
+    assert response['response_data']['cover_status'] == 'needs_review'
+    await task.refresh_from_db()
+    await cover.refresh_from_db()
+    assert 'analysis_completed' not in task.response_data
+    assert task.status == 4 and task.stage == 'needs_review' and cover.state == 'uncertain'

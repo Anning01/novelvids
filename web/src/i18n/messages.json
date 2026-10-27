@@ -677,6 +677,7 @@
     "工作上下文预算": "Working context budget",
     "预估 token": "estimated tokens",
     "上下文字符上限": "Context character limit",
+    "留空，由模型服务判断": "Leave blank to use the model service limit",
     "字符": "characters",
     "整理触发比例": "Compaction threshold",
     "整理后目标比例": "Target after compaction",

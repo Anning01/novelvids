@@ -69,3 +69,27 @@ async def test_configured_model_preserves_reasoning_usage_totals(monkeypatch, tm
             assert entry['cost_cny'] == '0.026865'  # 2805 input + 60 output, including reasoning.
     finally:
         await model.client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('thinking', [None, 'enabled', 'disabled'])
+async def test_structured_agent_uses_auto_tool_choice_compatible_with_reasoning_models(monkeypatch, thinking):
+    from pydantic_ai.tools import ToolDefinition
+
+    async def respond(request):
+        body=json.loads(request.content)
+        assert body['tool_choice']=='auto'
+        assert body['tools'][0]['function']['name']=='final_result'
+        return httpx.Response(200,json={'id':'response','created':1,'model':'test','object':'chat.completion',
+            'choices':[{'index':0,'message':{'role':'assistant','tool_calls':[{
+                'id':'output','type':'function','function':{'name':'final_result','arguments':'{"result":"ok"}'},
+            }]},'finish_reason':'tool_calls'}]})
+
+    monkeypatch.setattr(handler,'AsyncOpenAI',lambda **kwargs: AsyncOpenAI(**kwargs,http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
+    model=handler.configured_model(SimpleNamespace(base_url='https://example.invalid',api_key='synthetic',model='test',thinking=thinking),AgentConfiguration())
+    try:
+        await model.request([ModelRequest(parts=[UserPromptPart('Read the chapter')])],{'max_tokens':100},
+            ModelRequestParameters(output_mode='tool',output_tools=[ToolDefinition(name='final_result',kind='output',parameters_json_schema={
+                'type':'object','properties':{'result':{'type':'string'}},'required':['result'],
+            })],allow_text_output=False))
+    finally: await model.client.close()

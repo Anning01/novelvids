@@ -13,6 +13,7 @@ Maintain one Chinese skill pack in `prompts/skills/`:
 | `assets.md` | Consistent identities, appearances and variants |
 | `image.md` | Complete image prompts, layouts, references and covers |
 | `storyboard.md` | Shots, action timing, dialogue, narration and continuity |
+| `storyboard_contract.json` | Snapshot version and required serialized shot sections |
 | `remake.md` | Video analysis, audio/subtitle checks and shot reconstruction |
 | `video.md` | Media references, generation, continuity and composition |
 | `editing.md` | Focused edits to saved content |
@@ -23,6 +24,18 @@ Maintain one Chinese skill pack in `prompts/skills/`:
 If output quality is unsatisfactory, revise the relevant skill and test a new task with the same input. Tasks snapshot their language, skill contents and revision at submission, so edits do not change running or resumed tasks. Chinese instructions do not force Chinese output: the agent follows the system language while preserving established names and user material. UI translations remain separate.
 
 Complete saved prompts are used as supplied. The agent writes a prompt only when it is missing or optimization is requested. Image/video tools do not silently append style or layout instructions. Code still handles reference ordering, audio-to-speaker mappings, signed URLs and provider parameters. Character designs no longer require fixed 14/15-field prose; shot structures still validate types, references and timing.
+
+New storyboard generation asks the agent for one complete structure. The shared serializer in `prompts/storyboard.py` saves the full editable Prompt, including restrictions, style and cinematography, references, initial conditions, action and voice timelines, transition and effects. It does not ask the model to maintain a second prose copy. Buttons and structured chat creation/edits use the same serialization. Creative rules remain in `storyboard.md` and the shared styles/strategies; localized section labels are protocol serialization. Submitted videos use the stored Prompt unchanged.
+
+`prompt_contract_version=2` identifies this complete output. Tasks without the contract snapshot keep their original schema and prompt. Existing free-form documents are preserved; local structured edits must not silently rebuild them from potentially stale fields. Submit exact text replacements or an explicitly complete prompt instead. Spoken text after the timeline and speaker is preserved literally, so “师父” is not replaced with a character name and a person mentioned in narration is not automatically added to the cast. Actual speakers still retain their references for audio binding.
+
+On 2026-10-27, a real read-only eight-second sample from the reported chapter produced a 3,460-character prompt with four action intervals, two lines of dialogue and one narration interval. The complete result passed validation; a database-copy test saved it verbatim, archived the original twenty shots recoverably and reused the same result on replay. The user's original chapter was unchanged, and no video model was called. The successful text step recorded 17,642 input tokens, 5,121 output tokens and CNY 0.334608. Two earlier validation attempts remain recorded: one hit an output/provider error with incomplete usage evidence, and another demonstrated divergence between independently written fields and prose. Neither was replayed as a production generation. This sample does not establish full-chapter video quality or PostgreSQL behavior.
+
+Scene references use the layout in `image.md`: a full-bleed 2×2 grid of cinematic viewpoints, separated by thin lines, without labels, title bars, white margins or presentation-board framing. For an existing asset, optimize and save its prompt first; regeneration alone preserves its old wording. On 2026-10-26, a real office reference generation verified the saved prompt matched the outbound prompt verbatim and produced four panels without title bars or annotations. The former image remains in history. This checks the current configured image model; other image models and PostgreSQL remain unverified.
+
+Chapter extraction returns the complete qualifying cast, including already registered characters and characters acting or speaking in a staged flashback. `assets.md` distinguishes these appearances from names merely mentioned in background information. Persistence prioritizes canonical names and explicit name-to-alias matches; shared titles in two alias lists cannot merge identities. Ambiguous matches roll back the result. The same protection covers locations and props and retains unique historical nickname matching.
+
+On 2026-10-26, a real read-only extraction of the reported 2,278-character chapter returned both 苏玄 (16) and 赵无垢 (64). Saving that actual output twice into a database copy kept their records separate, did not create duplicates on replay and preserved existing images. The user's project assets were unchanged. These fixes do not automatically repair previously corrupted records or regenerate images; old tasks retain their snapshots. PostgreSQL and extraction quality across all manuscripts remain unverified.
 
 ## Execution, authorization and costs
 

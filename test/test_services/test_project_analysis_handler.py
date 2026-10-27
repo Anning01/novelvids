@@ -259,7 +259,8 @@ async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', ['missing_config', 'provider', 'save'])
-async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_usage(failure):
+@pytest.mark.parametrize('language', ['zh', 'en'])
+async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_usage(failure, language):
     novel = await Novel.create(name='可继续制作', content='第一章 归来\n林舟走回故乡。', cover='/media/existing.png')
     llm = await AiModelConfig.create(task_type=5, name='llm', model='test-llm', api_key='test-key', base_url='https://example.invalid', is_active=True)
     if failure != 'missing_config':
@@ -270,11 +271,13 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
     generate = AsyncMock(side_effect=RuntimeError('provider rejects request')) if failure == 'provider' else AsyncMock(return_value=[SimpleNamespace(url='https://example.invalid/cover.png')])
     save = AsyncMock(side_effect=OSError('storage unavailable'))
     with patch('services.project_analysis.handler.AsyncOpenAI', return_value=FakeLlmClientWithUsage(analysis)), patch('services.project_analysis.handler.generate_images', generate), patch('services.project_analysis.handler._save_cover', save):
-        result = await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id})
+        result = await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id, 'prompt_language': language})
     await novel.refresh_from_db()
     assert result['story_outline'] == novel.story_outline == analysis.story_outline
     assert result['cover'] == novel.cover == '/media/existing.png'
-    assert '可以继续' in result['cover_warning']
+    assert ('可以继续' if language == 'zh' else 'ready to use') in result['cover_warning']
+    assert result['analysis_completed'] is True
+    assert result['cover_status'] == 'failed'
     assert result['token_usage']['prompt_tokens'] == 200
     assert result['llm_config_id'] == llm.id
     assert await Asset.filter(novel_id=novel.id, canonical_name='林舟').exists()

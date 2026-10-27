@@ -15,7 +15,7 @@ from models.chapter import Chapter
 from models.creation_agent import AgentMessage, PromptChange
 from models.novel import Novel
 from models.scene import Scene
-from schemas.creation_agent import AgentRunRequest, AgentTarget, PromptStatusRequest
+from schemas.creation_agent import AgentConfiguration, AgentRunRequest, AgentTarget, PromptStatusRequest
 from schemas.creation_objects import CreationChangeSet
 from services.creation_agent.catalog import CreationCatalog
 from services.creation_agent.memory import creation_memory
@@ -30,13 +30,13 @@ from utils.enums import TaskStatusEnum
 class CreationChanges:
     def __init__(self, *, novel_id: int, task_id, request: AgentRunRequest, max_batch_size: int,
                  authorization_check: Callable[[], Awaitable[None]] | None = None,
-                 max_context_characters: int = 32000):
+                 max_context_characters: int | None = 32000):
         self.novel_id = novel_id
         self.task_id = task_id
         self.request = request.model_copy(deep=True)
         self.max_batch_size = max_batch_size
         self.authorization_check = authorization_check
-        self.chapter_character_budget = max(500, max_context_characters // 3)
+        self.chapter_character_budget = max(500, max_context_characters // 3) if max_context_characters is not None else AgentConfiguration().context_page_characters
         self.scope = CreationWriteScope(novel_id, request)
         self.objects = CreationObjects(novel_id)
         self.prompt_standards = CreationPromptStandards(novel_id)

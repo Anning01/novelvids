@@ -23,6 +23,7 @@ from models.novel import Novel
 from prompts.project_analysis import render_analysis_messages, render_cover_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
+from services.project_analysis.results import cover_warning
 from services.cover_derivatives import (
     cover_derivative_reference,
     render_cover_derivatives,
@@ -273,6 +274,8 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             await persist_analysis()
         result = {
             **analysis.model_dump(),
+            "analysis_completed": True,
+            "cover_status": "ready" if novel.cover else "not_requested",
             "chapter_count": len(chapters),
             "cover": novel.cover,
             "token_usage": token_usage,
@@ -314,18 +317,23 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 novel.cover = cover
                 await novel.save(update_fields=["cover", "updated_at"])
                 result["cover"] = cover
-                return {key: result[key] for key in ('cover', 'image_usage', 'image_config_id', 'image_model') if key in result}
+                result["cover_status"] = "ready"
+                return {key: result[key] for key in ('cover', 'cover_status', 'image_usage', 'image_config_id', 'image_model') if key in result}
             if execution:
                 from services.creation_agent.operation_receipts import execute_step
                 result.update(await execute_step(execution.params['task_id'], 'media:cover', generate_cover, external=True))
             else:
                 await generate_cover()
         except Exception as error:
+            result.update(cover_status="failed", cover_warning=cover_warning(prompt_language))
+            from services.image_generation import ImageGenerationError
+            if isinstance(error, ImageGenerationError):
+                result["cover_error"] = str(error)
             if execution:
                 from models.agent_operation import AgentOperation
                 if await AgentOperation.filter(task_id=execution.params['task_id'], external=True, state='uncertain').exists():
+                    result["cover_status"] = "needs_review"
                     error.partial_result = result
                     raise
             logger.warning("Optional project cover failed: %s", type(error).__name__)
-            result["cover_warning"] = "故事分析已完成，封面暂未生成。可以继续提取资产和制作分镜；请在模型设置中检查图片服务后再试。"
         return result

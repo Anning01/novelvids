@@ -88,7 +88,9 @@ async def prepare_history(conversation: AgentConversation, assistant: AgentMessa
     previous = [item for item in previous if not item.run_input.get('internal_production_step')]
     recent = []
     characters = 0
-    history_budget = min(limits.max_context_characters // 3, limits.working_input_tokens)
+    history_budget = limits.working_input_tokens
+    if limits.max_context_characters is not None:
+        history_budget = min(limits.max_context_characters // 3, history_budget)
     from services.creation_agent.context_budget import wire_size
     from pydantic_ai.models import ModelRequestParameters
     # Small conversations can append to an unchanged prefix. A turn-count-only

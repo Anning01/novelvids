@@ -185,6 +185,14 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     } finally { if (revision === epoch) loading.value = false }
   }
 
+  async function refreshConversations() {
+    if (!projectId.value || loading.value) return
+    const revision = epoch
+    const id = projectId.value
+    const listed = await agentApi.conversations(id)
+    if (revision === epoch && projectId.value === id) conversations.value = listed.data
+  }
+
   async function newConversation() {
     if (busy.value || sessionBusy.value || loading.value) return
     const revision = epoch
@@ -313,5 +321,5 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
     streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
     open, history, send, stop, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
-    deleteConversation, restoreConversation, loadDeletedConversations }
+    deleteConversation, restoreConversation, loadDeletedConversations, refreshConversations }
 })

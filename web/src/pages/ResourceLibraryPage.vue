@@ -8,8 +8,8 @@ import ResourceLibraryBrowser from '@/features/resource-library/ResourceLibraryB
 </template>
 <style scoped>
 .resource-library-page {
-  min-height: calc(100vh - var(--short-drama-header-height, 72px));
-  background: #151412;
-  color: #eee9e2;
+  min-height: 100%;
+  background: var(--app-canvas);
+  color: var(--app-text);
 }
 </style>

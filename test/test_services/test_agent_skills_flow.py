@@ -16,6 +16,9 @@ from controllers.asset import asset_controller
 from controllers.scene import scene_controller
 from controllers.video import video_controller
 from schemas.video import VideoGenerateRequest
+from schemas.scene import SoraScenePromptConfig, SceneEntity
+from prompts.storyboard import format_storyboard_prompt
+from services.storyboard.strategies import storyboard_strategy_factory
 from services.ai_task_executor import ai_task_executor
 from services.creation_agent.skill_execution import SkillExecution
 from services.image_generation.gateway import GeneratedImage
@@ -30,6 +33,7 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
     monkeypatch, language, tmp_path
 ):
     novel, first, _ = await enabled_project()
+    novel.storyboard_strategy = 'narration'
     second = await Chapter.create(
         novel=novel,
         number=2,
@@ -66,10 +70,11 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
     )
     words = "信号来了。" if language == "zh" else "The signal is here."
     narrator = "旁白" if language == "zh" else "Narrator"
-    prompt = f"0s-4s: @{{Alex Chen}} meets @{{Sam Lee}}. Alex Chen: {words}"
     seen = []
+    storyboard_prompt = ""
 
     async def generate(self, skill, facts, output_type, **kwargs):
+        nonlocal storyboard_prompt
         seen.append((skill, self.language, self.snapshot.revision))
         assert self.language == language
         if skill == "story":
@@ -90,12 +95,16 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
         elif skill == "storyboard":
             shot = _shot().model_dump()
             shot.update(
-                prompt=prompt,
-                visual_prose=prompt,
-                actions=[prompt],
-                dialogue=[f"0s-2s: Alex Chen: {words}", f"2s-3s: Sam Lee: {words}"],
+                reference_only_types=["人物", "场景", "物品"],
+                visual_prose="@{Alex Chen} meets @{Sam Lee}.",
+                actions=["0s-4s: @{Alex Chen} meets @{Sam Lee}."],
+                dialogue=[f"0s-2s: @{{Alex Chen}}: {words}", f"2s-3s: @{{Sam Lee}}: {words}"],
                 narration=[f"3s-4s: {narrator}: {words}"],
             )
+            storyboard_prompt = format_storyboard_prompt(SoraScenePromptConfig.model_validate(shot), language,
+                entities=[SceneEntity.model_validate(value) for value in facts['entities']],
+                strategy=storyboard_strategy_factory.resolve('narration'))
+            shot['prompt'] = None
             payload = {"shots": [shot]}
         else:
             raise AssertionError(f"Unexpected extra creative call: {skill}")
@@ -168,7 +177,7 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
             ]
         await finish(await scene_controller.generate(chapter.id))
         scene = await Scene.get(chapter=chapter)
-        assert scene.prompt == prompt
+        assert scene.prompt == storyboard_prompt
         video = await video_controller.generate(
             VideoGenerateRequest(scene_id=scene.id, model_config_id=video_model.id)
         )
@@ -177,7 +186,9 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
         await task.refresh_from_db()
         assert task.stage == "waiting_media", task.error_message
         submitted = provider.submit.call_args.kwargs
-        assert submitted["prompt"].startswith(prompt)
+        assert submitted["prompt"].startswith(storyboard_prompt)
+        for track in [*scene.prompt_params['dialogue'], *scene.prompt_params['narration']]:
+            assert track in submitted['prompt']
         assert "voice_bindings" in submitted["prompt"]
         assert "Alex Chen" in submitted["prompt"] and "Sam Lee" in submitted["prompt"]
         audio_orders.append(submitted["reference_audios"])

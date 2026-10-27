@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from fastapi import HTTPException
 from tortoise.contrib.test import finalizer, initializer
@@ -235,3 +237,125 @@ async def test_analyze_novel_rejects_empty_content():
         await novel_controller.analyze(novel.id)
     assert exc_info.value.status_code == 400
     assert "书稿内容" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_create_same_title_allocates_distinct_projects_without_changing_existing():
+    original = await Novel.create(name="同一本书", content="已有正文", team_id=8)
+    first = await novel_controller.create(NovelCreate(name="同一本书", content="新正文"), team_id=8, created_by=9)
+    second = await novel_controller.create(NovelCreate(name="同一本书", content="另一个版本"), team_id=8)
+
+    assert first.name == "同一本书 (2)"
+    assert second.name == "同一本书 (3)"
+    assert first.team_id == 8
+    assert first.created_by == 9
+    assert first.content == "新正文"
+    await original.refresh_from_db()
+    assert original.name == "同一本书"
+    assert original.content == "已有正文"
+
+
+@pytest.mark.asyncio
+async def test_create_same_max_length_title_preserves_name_limit():
+    name = "书" * 255
+    await Novel.create(name=name)
+
+    novel = await novel_controller.create(NovelCreate(name=name))
+
+    assert novel.name == "书" * 251 + " (2)"
+    assert len(novel.name) == 255
+
+
+@pytest.mark.asyncio
+async def test_create_same_title_handles_competing_name_claim(monkeypatch):
+    from tortoise.exceptions import IntegrityError
+    from utils.crud import CRUDBase
+
+    create = CRUDBase.create
+    candidates = []
+
+    async def racing_create(self, data, **kwargs):
+        candidates.append(data["name"])
+        if len(candidates) == 1:
+            await Novel.create(name=data["name"], content="并发请求")
+            raise IntegrityError("UNIQUE constraint failed: novels.name")
+        return await create(self, data, **kwargs)
+
+    monkeypatch.setattr(CRUDBase, "create", racing_create)
+    novel = await novel_controller.create(NovelCreate(name="同时创建", content="本次正文"))
+
+    assert novel.name == "同时创建 (2)"
+    assert novel.content == "本次正文"
+    assert candidates == ["同时创建", "同时创建 (2)"]
+    assert await Novel.filter(name="同时创建").count() == 1
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_hide_unrelated_integrity_errors(monkeypatch):
+    from tortoise.exceptions import IntegrityError
+    from utils.crud import CRUDBase
+
+    async def invalid_create(self, data, **kwargs):
+        raise IntegrityError("unrelated constraint")
+
+    monkeypatch.setattr(CRUDBase, "create", invalid_create)
+    with pytest.raises(IntegrityError, match="unrelated constraint"):
+        await novel_controller.create(NovelCreate(name="其他约束错误"))
+
+
+@pytest.mark.asyncio
+async def test_concurrent_creates_keep_unique_names_and_separate_content():
+    await Novel.create(name="并发书稿 (2)", content="已有版本")
+    projects = await asyncio.gather(*[
+        novel_controller.create(NovelCreate(name="并发书稿", content=f"正文 {index}"))
+        for index in range(4)
+    ])
+
+    assert len({project.id for project in projects}) == 4
+    assert {project.name for project in projects} == {
+        "并发书稿", "并发书稿 (3)", "并发书稿 (4)", "并发书稿 (5)",
+    }
+    assert [project.content for project in projects] == [f"正文 {index}" for index in range(4)]
+    assert (await Novel.get(name="并发书稿 (2)")).content == "已有版本"
+
+
+@pytest.mark.asyncio
+async def test_different_teams_can_keep_the_same_project_title():
+    first = await novel_controller.create(NovelCreate(name="同一书名"), team_id=7, created_by=1)
+    second = await novel_controller.create(NovelCreate(name="同一书名"), team_id=8, created_by=1)
+    assert first.name == second.name == "同一书名"
+    assert first.id != second.id
+
+
+@pytest.mark.asyncio
+async def test_team_members_share_the_team_name_scope():
+    first = await novel_controller.create(NovelCreate(name="团队书名"), team_id=7, created_by=1)
+    second = await novel_controller.create(NovelCreate(name="团队书名"), team_id=7, created_by=2)
+    assert first.name == "团队书名"
+    assert second.name == "团队书名 (2)"
+
+
+@pytest.mark.asyncio
+async def test_personal_projects_use_creator_scope_separate_from_teams_and_local_workspace():
+    projects = [
+        await novel_controller.create(NovelCreate(name="个人书名"), created_by=1),
+        await novel_controller.create(NovelCreate(name="个人书名"), created_by=2),
+        await novel_controller.create(NovelCreate(name="个人书名"), team_id=1, created_by=1),
+        await novel_controller.create(NovelCreate(name="个人书名")),
+    ]
+    repeated = await novel_controller.create(NovelCreate(name="个人书名"), created_by=1)
+    assert {project.name for project in projects} == {"个人书名"}
+    assert repeated.name == "个人书名 (2)"
+
+
+@pytest.mark.asyncio
+async def test_database_enforces_names_within_scope_on_creates_and_renames():
+    from tortoise.exceptions import IntegrityError
+
+    for scope in ({"team_id": 7}, {"created_by": 1}, {}):
+        first = await Novel.create(name="受约束名称", **scope)
+        second = await Novel.create(name="可修改名称", **scope)
+        with pytest.raises(IntegrityError):
+            await Novel.create(name="受约束名称", **scope)
+        with pytest.raises(IntegrityError):
+            await Novel.filter(id=second.id).update(name=first.name)

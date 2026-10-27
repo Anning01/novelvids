@@ -249,7 +249,11 @@ function selectQueryTarget(target: AgentQueryItem) {
 }
 
 let productionTimer: ReturnType<typeof setInterval> | undefined
-function refreshVisibleState() { void refreshTargetStatus(); void store.refreshProduction() }
+function refreshVisibleState() {
+  void refreshTargetStatus()
+  void store.refreshProduction()
+  void store.refreshConversations().catch(error => notice.error(error instanceof Error ? error.message : tr('加载助手失败')))
+}
 onBeforeUnmount(() => {
   catalogEpoch += 1; statusEpoch += 1
   window.removeEventListener('focus', refreshVisibleState)
@@ -272,7 +276,7 @@ onMounted(() => {
     </header>
     <AgentConversationMenu :conversations="store.conversations" :deleted-conversations="store.deletedConversations" :current-id="store.conversationId" :workflow="workflow" :disabled="store.busy || store.loading || store.sessionBusy || operationBusy"
       @select="operation(() => store.selectConversation($event))" @create="newConversation"
-      @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" />
+      @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" @refresh="operation(store.refreshConversations)" />
     <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || tr('当前章节') }}</span>
       <select v-model="writeScope" :aria-label="tr('助手操作范围')" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? tr('指定对象') : tr('当前章') }}</option><option value="project">{{ tr('全项目') }}</option><option value="read_only">{{ tr('只查询') }}</option></select>
     </div>

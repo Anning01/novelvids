@@ -83,6 +83,8 @@ async def _initialize_database_schema() -> None:
     await ensure_remake_schema(include_indexes=include_compat_indexes)
     await ensure_voice_reference_schema(include_indexes=include_compat_indexes)
     await ensure_creation_agent_schema()
+    # Ownership columns must exist before generating the scoped project-name index.
+    await ensure_shared_team_columns()
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
@@ -90,8 +92,6 @@ async def _initialize_database_schema() -> None:
     await ensure_usage_record_schema()
     from services.schema_compat import ensure_agent_operation_schema
     await ensure_agent_operation_schema()
-    # 共享表团队增量列：无条件补齐（旧库在关闭开关时同样需要，纯增量幂等）
-    await ensure_shared_team_columns()
 
 
 @asynccontextmanager

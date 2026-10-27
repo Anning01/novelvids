@@ -27,7 +27,8 @@ async def test_shared_team_columns_restore_legacy_schema():
     """旧库缺列 → ensure_shared_team_columns 补列 → ORM 插入正常。"""
     connection = Tortoise.get_connection("default")
 
-    # 模拟旧库：删除（非索引）增量列
+    # 旧库没有新版命名索引；先移除它，再模拟缺少团队列的旧表。
+    await connection.execute_script("DROP INDEX IF EXISTS uid_novels_scope_name;")
     await connection.execute_script("ALTER TABLE ai_model_configs DROP COLUMN scope;")
     await connection.execute_script("ALTER TABLE novels DROP COLUMN created_by;")
 
@@ -50,6 +51,9 @@ async def test_shared_team_columns_restore_legacy_schema():
     assert "created_by" in _columns(
         await connection.execute_query_dict("PRAGMA table_info(novels)")
     )
+
+    # 与启动顺序一致：团队列齐全后，安全生成新版索引。
+    await Tortoise.generate_schemas(safe=True)
 
     # 复现原始故障路径：模型配置插入（种子数据同款操作）
     config = await AiModelConfig.create(

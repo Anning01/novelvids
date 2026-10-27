@@ -270,3 +270,19 @@ it('retains the chat run request ID after a lost response and a store/page resta
   const calls = vi.mocked(agentApi.submit).mock.calls
   expect(calls[0]?.[1].request_id).toBe(calls[1]?.[1].request_id)
 })
+
+it('refreshes recent task conversations without switching the selected history or sending a request', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  const selected = store.conversationId
+  const messages = store.messages
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [
+    { ...conversation, id: 2, title: '最新提取资产' }, conversation,
+  ] })
+  await store.refreshConversations()
+  expect(store.conversations[0]?.id).toBe(2)
+  expect(store.conversationId).toBe(selected)
+  expect(store.messages).toBe(messages)
+  expect(agentApi.submit).not.toHaveBeenCalled()
+  expect(agentApi.create).not.toHaveBeenCalled()
+})

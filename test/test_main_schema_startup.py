@@ -37,10 +37,11 @@ async def test_legacy_columns_are_added_before_safe_schema_generation(monkeypatc
     await app_main._initialize_database_schema()
 
     names = [name for name, _kwargs in events]
-    assert names[:4] == [
+    assert names[:5] == [
         "init",
         "ensure_remake_schema",
         "ensure_voice_reference_schema",
+        "ensure_shared_team_columns",
         "generate",
     ]
     assert events[1][1] == {"include_indexes": False}

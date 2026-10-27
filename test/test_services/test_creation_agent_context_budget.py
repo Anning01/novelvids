@@ -306,3 +306,24 @@ def test_working_checkpoint_template_keeps_untrusted_evidence_out_of_instruction
     assert set(value) == {'working_checkpoint'}
     from prompts.skill_pack import read_skill
     assert '历史摘录' in read_skill('base') and '读取当前对象' in read_skill('base')
+
+
+@pytest.mark.asyncio
+async def test_default_context_does_not_reject_large_current_input_by_character_count():
+    _, assistant = await message_fixture()
+    requested = '完整书稿。' * 500000
+    budget = ContextBudget(AgentConfiguration(), assistant)
+    messages = [ModelRequest(parts=[UserPromptPart(requested)])]
+
+    outgoing = await budget.prepare(messages, ModelRequestParameters())
+
+    assert outgoing[0].parts[0].content == requested
+    assert budget.last_report['total_characters'] > 2000000
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_character_cap_still_blocks_before_provider_request():
+    _, assistant = await message_fixture()
+    budget = ContextBudget(AgentConfiguration(max_context_characters=64000), assistant)
+    with pytest.raises(ValueError, match='上下文超过配置上限'):
+        await budget.prepare([ModelRequest(parts=[UserPromptPart('章' * 64842)])], ModelRequestParameters())

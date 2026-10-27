@@ -192,10 +192,7 @@ class SkillExecution:
             model,
             message=child_message,
             before_request=validate_call,
-            max_characters=min(
-                limits.max_context_characters,
-                chosen.max_context_characters or limits.max_context_characters,
-            ),
+            max_characters=limits.context_character_limit(chosen.max_context_characters),
             request_limit=limits.request_limit,
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
@@ -211,6 +208,20 @@ class SkillExecution:
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
             """读取本次运行固定版本的技能；只接受技能清单中的名称。"""
             return ctx.deps.read(name)
+
+        @agent.output_validator
+        def validate_output(ctx: RunContext[SkillSnapshot], output):
+            if skill == "storyboard" and hasattr(output, "shots"):
+                from pydantic_ai import ModelRetry
+                from services.storyboard.validation import validate_skill_storyboard_timing
+
+                try:
+                    if "storyboard_contract" in ctx.deps.contents:
+                        for shot in output.shots:
+                            validate_skill_storyboard_timing(shot)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
+            return output
 
         async def invoke():
             from models.novel import Novel
@@ -267,7 +278,8 @@ class SkillExecution:
 
         try:
             payload = await execute_step(
-                self.params["task_id"], key, invoke, external=True
+                self.params["task_id"], key, invoke, external=True,
+                external_started=lambda: bool(recorded.calls),
             )
             child.status = TaskStatusEnum.completed.value
             child.response_data = payload

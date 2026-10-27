@@ -277,7 +277,7 @@ async function waitForAnalysisThenGenerate(chapterId: number) {
     for (;;) {
       if (!alive || chapterLoadVersion !== loadVersion) return
       const task = (await api.novelAnalysis(projectId.value)).data
-      const gate = analysisGate(task?.status)
+      const gate = analysisGate(task?.status, task?.response_data?.analysis_completed === true)
       if (gate === 'generate') break
       if (gate === 'failed') {
         throw new Error(task?.error_message || tr('项目分析失败，请回到剧本页重新分析'))
@@ -1375,7 +1375,7 @@ async function regenerateStoryboard() {
   if (!scenes.value.length || canReconnectStoryboard.value) { await retryStoryboard(); return }
   // 分析未完成时：等待完成后自动生成本集分镜（不删除现有内容）
   const analysis = (await api.novelAnalysis(projectId.value)).data
-  const gate = analysisGate(analysis?.status)
+  const gate = analysisGate(analysis?.status, analysis?.response_data?.analysis_completed === true)
   if (gate === 'failed') {
     notice.error(analysis?.error_message || tr('项目分析失败，请回到剧本页重新分析'))
     return

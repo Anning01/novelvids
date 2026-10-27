@@ -128,7 +128,7 @@ export interface AgentConfiguration {
   tool_calls_limit: number
   max_targets: number
   timeout_seconds: number
-  max_context_characters: number
+  max_context_characters: number | null
   working_input_tokens?: number
   compaction_trigger_ratio?: number
   compaction_target_ratio?: number

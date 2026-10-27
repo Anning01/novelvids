@@ -1,8 +1,10 @@
 
 from utils.messages import localized_message
 import asyncio
+from itertools import count
 
 from fastapi import HTTPException
+from tortoise.exceptions import IntegrityError
 
 from models.ai_task import AiTask
 from models.chapter import Chapter
@@ -110,7 +112,25 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 )
             ):
                 raise HTTPException(400, detail=localized_message('选择的旁白音色不存在或不可用'))
-        return await super().create(data, team_id=team_id, created_by=created_by)
+        # Only names within this ownership scope compete; other teams keep the original title.
+        name_scope = {"team_id": team_id}
+        if team_id is None:
+            name_scope["created_by"] = created_by
+        base_name = data["name"]
+        max_length = Novel._meta.fields_map["name"].max_length
+        for number in count(1):
+            suffix = f" ({number})" if number > 1 else ""
+            candidate = base_name[:max_length - len(suffix)] + suffix
+            if await Novel.filter(name=candidate, **name_scope).exists():
+                continue
+            try:
+                return await super().create(
+                    {**data, "name": candidate}, team_id=team_id, created_by=created_by,
+                )
+            except IntegrityError:
+                # A concurrent request may have claimed the name after our check.
+                if not await Novel.filter(name=candidate, **name_scope).exists():
+                    raise
 
     async def list(
         self,
@@ -263,9 +283,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             raise HTTPException(status_code=400, detail=localized_message('项目没有可分析的书稿内容'))
 
         if include_cover:
+            from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
             for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
                 if pending.request_params.get("novel_id") == novel_id:
-                    raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
+                    if not await reconcile_unstarted_model_task(pending):
+                        raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
         from services.creation_agent.skill_execution import require_agent
         await require_agent(team_id)
         prompt_language = await general_config_controller.get_prompt_language()
@@ -299,10 +321,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         tasks = await AiTask.filter(
             task_type=AiTaskTypeEnum.project_analysis.value,
         ).order_by("-created_at")
-        return next(
+        from services.project_analysis.results import expose_saved_analysis
+        return await expose_saved_analysis(next(
             (task for task in tasks if task.request_params.get("novel_id") == novel_id),
             None,
-        )
+        ))
 
 
 novel_controller = NovelController()

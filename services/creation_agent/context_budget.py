@@ -74,8 +74,9 @@ class ContextBudget:
         from services.creation_agent.history import compact_retry_history
         messages = self.restore_projection(compact_retry_history(messages))
         report = self.report(messages, parameters)
-        ceiling = min(self.limits.max_context_characters,
-                      int(self.limits.working_input_tokens * self.characters_per_token))
+        ceiling = int(self.limits.working_input_tokens * self.characters_per_token)
+        if self.limits.max_context_characters is not None:
+            ceiling = min(ceiling, self.limits.max_context_characters)
         if not force and report['total_characters'] <= ceiling * self.limits.compaction_trigger_ratio:
             self.last_report = report
             return messages
@@ -135,7 +136,7 @@ class ContextBudget:
                 await self.on_compact()
         self.last_report = self.report(result, parameters)
         self.last_report['compactions'] = self.compactions
-        if self.last_report['total_characters'] > self.limits.max_context_characters:
+        if self.limits.max_context_characters is not None and self.last_report['total_characters'] > self.limits.max_context_characters:
             raise ValueError(localized_message('上下文超过配置上限：当前要求或必要约束无法在预算内完整处理'))
         return result
 

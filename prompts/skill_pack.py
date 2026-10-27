@@ -25,6 +25,7 @@ FILES = {
     },
     "styles": "styles.json",
     "strategies": "strategies.json",
+    "storyboard_contract": "storyboard_contract.json",
 }
 
 
@@ -52,12 +53,19 @@ def snapshot_skills() -> dict:
 
 
 def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
+    contract = ""
+    if skill == "storyboard" and "storyboard_contract" in snapshot.contents:
+        from prompts.labels import prompt_label
+        specification = json.loads(snapshot.read("storyboard_contract"))
+        specification["sections"] = [prompt_label(section, language) for section in specification["sections"]]
+        contract = "\n输出协议（系统按以下栏目序列化结构内容，不单独生成 prompt）：\n" + json.dumps(specification, ensure_ascii=False)
     return (
         snapshot.read("base")
         + "\n任务语言 language="
         + language
         + "\n"
         + snapshot.read(skill)
+        + contract
     )
 
 

@@ -444,7 +444,7 @@ async def test_folder_creation_revalidates_filename_episode_and_duplicate_batch(
 
 @pytest.mark.asyncio
 async def test_folder_transaction_failure_rolls_back_every_promoted_upload(tmp_path, configured_creation_agent):
-    await Novel.create(name="多集名称冲突", author="作者")
+    await Novel.create(name="多集名称冲突", author="作者", team_id=3, created_by=5)
     upload_service = RemakeUploadService(
         validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path
     )
@@ -476,7 +476,7 @@ async def test_folder_transaction_failure_rolls_back_every_promoted_upload(tmp_p
 
 @pytest.mark.asyncio
 async def test_cleanup_failure_does_not_mask_transaction_error_or_skip_siblings(tmp_path, configured_creation_agent):
-    await Novel.create(name="清理失败名称冲突", author="作者")
+    await Novel.create(name="清理失败名称冲突", author="作者", team_id=3, created_by=5)
     upload_service = CleanupFailingUploadService(
         validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path
     )
@@ -570,3 +570,20 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     with pytest.raises(RemakeError) as exc_info:
         await service.retry(source.id, team_id=3, user_id=5)
     assert exc_info.value.error_code == "REMAKE_ANALYSIS_NOT_RETRYABLE"
+
+
+@pytest.mark.asyncio
+async def test_remake_keeps_a_title_already_used_by_a_different_team(tmp_path, configured_creation_agent):
+    existing = await Novel.create(name="可复用重制标题", team_id=8, created_by=5)
+    upload_service = RemakeUploadService(
+        validator=FakeValidator(), provider=LocalProvider(), media_root=tmp_path,
+    )
+    upload = await ready_upload(upload_service)
+    result = await RemakeProjectService(upload_service=upload_service).create(
+        payload(upload.id, name="可复用重制标题"), team_id=3, user_id=5,
+    )
+    created = await Novel.get(id=result["novel_id"])
+    assert created.name == existing.name
+    assert created.id != existing.id
+    assert created.team_id == 3
+    assert await Novel.filter(id=existing.id, team_id=8).exists()

@@ -349,6 +349,8 @@ DATABASE_URL=postgres://novelvids:your-password@127.0.0.1:5432/novelvids
 
 Startup creates missing tables with `safe=True` and runs compatibility initialization. It does not delete existing tables. Back up the database before migrating an existing deployment; changing the URL does not transfer its data.
 
+Project names are unique within a team, or within a creator’s personal scope when no team is assigned. Different scopes can use the same name. Existing global name constraints require an explicitly reviewed migration; see [project name scoping and migration](docs/project-name-scoping.md). The migration defaults to preview and never runs automatically at startup.
+
 ### Local media and Alibaba Cloud OSS
 
 Local storage:
@@ -397,6 +399,10 @@ The backend continues querying queued and running provider tasks after the brows
 New production uses the **creation assistant and one Chinese skill pack**. Enable the assistant and configure a model with tool calling. Buttons and chat share production capabilities; the agent writes output in the configured system language.
 
 Tune [`prompts/skills/`](prompts/skills/): `SKILL.md` is the entrypoint. Story analysis, assets, images, storyboards, remake and video production use `story.md`, `assets.md`, `image.md`, `storyboard.md`, `remake.md` and `video.md`. Shared styles and strategies live in `styles.json` and `strategies.json`.
+
+Scene reference layouts also belong in `image.md`: the default is a full-bleed 2×2 grid of cinematic views with thin dividers, no viewpoint headings, annotations, white margins or presentation-board framing. After changing this rule, ask the assistant to optimize and save an existing asset's prompt before generating again. Regeneration alone keeps the original saved prompt.
+
+The agent authors one complete shot structure. A shared serializer saves the restrictions, style, references, conditions, action and voice timelines, transition and effects as the editable Prompt, preventing a separately written summary from dropping dialogue or narration. Tune creative requirements in `storyboard.md`; `storyboard_contract.json` versions the output protocol, and `prompts/storyboard.py` serializes its columns. Video submission uses the saved text unchanged. Existing shots and task snapshots are preserved; regenerate to apply the new rules.
 
 Free-text interpretation proposes operations; ambiguous requests require confirmation of their targets before generation. Database-unique receipts and persisted unresolved client IDs protect retries across reloads.
 

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-from prompts.skill_pack import snapshot_skills
+from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
 from prompts.styles import list_styles
 from services.creation_agent.context_budget import ContextBudget
 from services.creation_agent.skill_execution import SkillExecution, current_execution
@@ -23,6 +23,60 @@ def test_old_creative_templates_are_removed_and_only_ui_locales_remain():
     assert set((root / "skills").glob("en/*")) == set()
     for language in ("zh", "en"):
         assert {p.name for p in (root / "locales" / language).iterdir()} == {"labels.json", "strategies.json"}
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_scene_image_rules_require_cinematic_panels_without_design_sheet_labels(language):
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    rendered = instructions(snapshot, language, "image")
+    assert f"language={language}" in rendered
+    for rule in ("2×2等大画面", "画面铺满到边缘", "不要留白", "标题栏", "不画文字", "视角名称", "正交投影", "室内与室外", "写进保存的完整提示词"):
+        assert rule in rendered
+    assert snapshot.read("image") in rendered
+
+
+@pytest.mark.asyncio
+async def test_scene_editing_contract_uses_the_same_frozen_image_rules(skill_execution):
+    from models.novel import Novel
+    from services.creation_agent.prompt_standards import CreationPromptStandards
+
+    project = await Novel.create(name="Office reference")
+    contract = await CreationPromptStandards(project.id).contract("scene")
+    assert contract["language"] == "en"
+    assert contract["revision"] == skill_execution.snapshot.revision
+    assert contract["writing_rules"] == skill_execution.snapshot.read("image") + "\n" + skill_execution.snapshot.read("assets")
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_image_rules_keep_style_and_reference_roles_separate_from_character_layout(language):
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    rendered = instructions(snapshot, language, "image")
+    assert f"language={language}" in rendered
+    for rule in ("单人、群像", "对应 key 的完整渲染要求", "自定义风格优先", "不能只写风格名称", "风格定义画法", "风格参考不复制其中的人脸", "多人同框需要明确成员"):
+        assert rule in rendered
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_asset_rules_keep_full_chapter_cast_flashbacks_and_identities(language):
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    rendered = instructions(snapshot, language, "assets")
+    assert f"language={language}" in rendered
+    for rule in ("包含已登记且本章出场的资产", "不能只返回新对象或变更项", "真正演出的回忆", "已去世不等于没有出场", "不能单凭", "不把师徒、前后任或同名者的资料互换", "不把当前哭泣、跪拜、坐化"):
+        assert rule in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("layout", ["character_turnaround", "group_portrait"])
+async def test_single_and_group_editing_contracts_share_project_style(skill_execution, layout):
+    from models.novel import Novel
+    from services.creation_agent.prompt_standards import CreationPromptStandards
+
+    project = await Novel.create(name="Modern engineers", style_key="chinese-3d")
+    contract = await CreationPromptStandards(project.id).contract("person", layout)
+    assert contract["reference_layout"] == layout
+    assert contract["project_style_key"] == "chinese-3d"
+    assert contract["styles"] == skill_execution.snapshot.read("styles")
+    assert contract["writing_rules"] == skill_execution.snapshot.read("image") + "\n" + skill_execution.snapshot.read("assets")
 
 
 @pytest.fixture

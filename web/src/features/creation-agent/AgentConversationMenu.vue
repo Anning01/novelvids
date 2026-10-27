@@ -14,7 +14,7 @@ const props = defineProps<{
   disabled: boolean
   workflow?: boolean
 }>()
-const emit = defineEmits<{ select: [id: number]; create: []; delete: [id: number]; restore: [id: number]; loadDeleted: [] }>()
+const emit = defineEmits<{ select: [id: number]; create: []; delete: [id: number]; restore: [id: number]; loadDeleted: []; refresh: [] }>()
 const open = ref(false)
 const deleted = ref(false)
 const search = ref('')
@@ -48,7 +48,7 @@ function select(id: number) { emit('select', id); close() }
 function create() { emit('create'); open.value = false }
 watch(open, value => {
   confirming.value = null
-  if (value) { search.value = ''; deleted.value = false }
+  if (value) { search.value = ''; deleted.value = false; emit('refresh') }
 })
 watch(() => props.conversations.map(item => item.id).join(','), () => { confirming.value = null })
 </script>

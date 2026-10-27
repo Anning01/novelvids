@@ -55,7 +55,13 @@ def configured_model(config, limits: AgentConfiguration):
     extra_body = {}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}
-    return UsagePreservingChatModel(config.model, provider=OpenAIProvider(openai_client=client),
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
+    provider = OpenAIProvider(openai_client=client)
+    # Reasoning endpoints can reject tool_choice=required; output validation stays in the Agent.
+    profile = OpenAIModelProfile.from_profile(provider.model_profile(config.model)).update(
+        OpenAIModelProfile(openai_supports_tool_choice_required=False)
+    )
+    return UsagePreservingChatModel(config.model, provider=provider, profile=profile,
                                    settings={'extra_body': extra_body})
 
 
@@ -109,7 +115,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         progressive = 'write_scope' in user_message.run_input
         context = {"project": {"id": novel.id, "name": novel.name, "outline": novel.story_outline,
                               "setting": novel.project_setting, "style": novel.custom_style_prompt or novel.style_key},
-                   "chapter": chapter_context(chapter, max(500, limits.max_context_characters // 3)),
+                   "chapter": chapter_context(chapter, max(500, limits.max_context_characters // 3) if limits.max_context_characters is not None else limits.context_page_characters),
                    "conversation_summary": conversation.summary}
         if progressive:
             context['project'] = {'id': novel.id, 'name': novel.name, 'style': novel.custom_style_prompt or novel.style_key}
@@ -140,7 +146,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         changes.chapter_character_budget = limits.context_page_characters
         model = configured_model(chosen, limits)
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
-            max_characters=min(limits.max_context_characters, chosen.max_context_characters or limits.max_context_characters),
+            max_characters=limits.context_character_limit(chosen.max_context_characters),
             request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits)
         persisted = []
         buffer = []
