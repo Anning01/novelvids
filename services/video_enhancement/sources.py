@@ -4,7 +4,7 @@ import asyncio
 
 from models.scene import Scene
 from models.video import Video
-from services.video_enhancement.media import digest, export_media, file_digest
+from services.video_enhancement.media import digest, export_media, file_digest, inspect_media
 from services.oss import normalize_media_url
 from utils.messages import localized_message
 
@@ -27,6 +27,19 @@ async def current_selection(chapter_id: int) -> list[dict]:
         video = next((video for video in videos if video.scene_id == scene.id and (chosen is None or chosen == video.id)), None)
         selected.append({'scene_id':scene.id,'sequence':scene.sequence,'video_id':video.id if video else None})
     return selected
+
+
+async def freeze_video(video: Video, scene: Scene) -> tuple[list[dict], str]:
+    if video.status != 3 or not video.url:
+        raise ValueError(localized_message('请先选择已生成成功的视频'))
+    ref = normalize_media_url(video.url) or video.url
+    async with export_media.materialize(ref) as path:
+        from services.video_enhancement.contract import require_upscale
+        probe = await asyncio.to_thread(inspect_media, path)
+        require_upscale(probe)
+        sha = await asyncio.to_thread(file_digest, path)
+    manifest = [{'scene_id':scene.id,'sequence':scene.sequence,'video_id':video.id,'ref':ref,'sha256':sha}]
+    return manifest, digest({'video_id':video.id,'sha256':sha,'source_version':1})
 
 
 async def freeze_chapter(chapter_id: int) -> tuple[list[dict], str]:

@@ -7,6 +7,7 @@ export interface ChapterExport {
   source_url: string | null; url: string | null; task_id: string | null; status: number | null
   stage: string | null; error: string | null; created_at: string; recipe: Record<string, unknown>
   selection_current?: boolean
+  source_video_id?: number | null
 }
 export interface ExportQuote { amount: string; currency: string; source_sha256: string; quote_version: string; reused_export_id?: number | null }
 export interface ExportTask { export_id: number; task_id: string; status: number }
@@ -14,6 +15,8 @@ interface Response<T> { data: T }
 
 export const exportApi = {
   list: (chapter: number) => request<Response<ChapterExport[]>>(`/video/exports?chapter_id=${chapter}`),
+  listVideo: (videoId: number) => request<Response<ChapterExport[]>>(`/video/exports/video/${videoId}`),
+  prepareVideo: (videoId: number) => request<Response<ExportTask>>(`/video/exports/video/${videoId}`, { method: 'POST' }),
   models: () => request<Response<Array<{ id: number; name: string }>>>('/video/exports/models'),
   prepare: (chapter_id: number) => request<Response<ExportTask>>('/video/exports', { method: 'POST', body: JSON.stringify({ chapter_id }) }),
   quote: (id: number, model: number) => request<Response<ExportQuote>>(`/video/exports/${id}/quote?model_config_id=${model}`),

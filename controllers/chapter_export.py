@@ -9,15 +9,18 @@ from models.chapter_export import ChapterExport
 from services.creation_agent.skill_execution import prepare_workflow, require_agent
 from services.creation_agent.submissions import bind_submission, previous_submission
 from services.creation_objects import project_write
-from services.video_enhancement.contract import EnhancementOptions, MediaProbe, enhancement_cost, validate_source
+from services.video_enhancement.contract import EnhancementOptions, MediaProbe, enhancement_cost, validate_source, require_upscale
 from services.video_enhancement.media import digest, export_media
-from services.video_enhancement.sources import current_selection, freeze_chapter, require_generation_scope
+from services.video_enhancement.sources import current_selection, freeze_chapter, freeze_video, require_generation_scope
 from utils.messages import localized_message
 from utils.enums import AiTaskTypeEnum
 
 
 class ChapterExports:
     async def _enhancement(self, source, recipe, ctx):
+        if source.source_video_id is not None:
+            identity = digest(['video-enhance', source.novel_id, ctx.team_id, source.source_video_id, source.source_sha256, recipe])
+            return await ChapterExport.get_or_none(identity_key=identity), identity
         legacy = digest(['enhance', source.novel_id, ctx.team_id, source.source_sha256, recipe])
         existing = await ChapterExport.get_or_none(identity_key=legacy)
         if existing and existing.chapter_id == source.chapter_id:
@@ -43,14 +46,37 @@ class ChapterExports:
         manifest, version = await freeze_chapter(chapter_id)
         if expected_version is not None and expected_version != version:
             raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
+        return await self._prepare(chapter, manifest, version, ctx)
+
+    async def prepare_video(self, video_id: int, ctx: AuthContext):
+        from models.video import Video
+        from models.scene import Scene
+        await require_roles('admin', 'creator')(ctx)
+        video = await Video.get_or_none(id=video_id)
+        if video is None:
+            raise HTTPException(404, localized_message('视频不存在'))
+        scene = await Scene.get(id=video.scene_id)
+        chapter = await Chapter.get(id=scene.chapter_id)
+        await ensure_novel_access(chapter.novel_id, ctx)
+        await require_generation_scope(chapter.novel_id, ctx.team_id)
+        await require_agent(ctx.team_id)
+        manifest, version = await freeze_video(video, scene)
+        return await self._prepare(chapter, manifest, version, ctx, video_id=video.id)
+
+    async def _prepare(self, chapter, manifest, version, ctx, *, video_id=None):
+        chapter_id = chapter.id
         identity = digest(['source', chapter.novel_id, ctx.team_id, version])
         params = await prepare_workflow({'operation': 'prepare_export', 'novel_id': chapter.novel_id,
-            'chapter_id': chapter_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None})
+            'chapter_id': chapter_id, 'source_video_id':video_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None})
         from services.ai_task_executor import ai_task_executor
         from models.ai_task import AiTask
         async with project_write(chapter.novel_id) as db:
             selected = [{key:item[key] for key in ('scene_id', 'sequence', 'video_id')} for item in manifest]
-            if await current_selection(chapter_id) != selected:
+            if video_id is not None:
+                from models.video import Video
+                if not await Video.filter(id=video_id,scene_id=manifest[0]['scene_id'],status=3).exists():
+                    raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
+            elif await current_selection(chapter_id) != selected:
                 raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
             previous = await previous_submission(4, params, db)
             if previous:
@@ -60,6 +86,7 @@ class ChapterExports:
                 task = await AiTask.get(id=export.task_id).using_db(db)
                 return export, await bind_submission(task, params)
             export = await ChapterExport.create(novel_id=chapter.novel_id, chapter_id=chapter_id,
+                source_video_id=video_id,
                 team_id=ctx.team_id, created_by=ctx.user.id if ctx.user else None,
                 identity_key=identity, source_version=version, manifest=manifest, using_db=db)
             params['export_id'] = export.id
@@ -72,7 +99,7 @@ class ChapterExports:
         await ensure_novel_access(export.novel_id, ctx)
         await require_generation_scope(export.novel_id, ctx.team_id)
         if export.parent_export_id is not None:
-            export = await self.get(export.parent_export_id, ctx)
+            raise ValueError(localized_message('视频已达到1080p或更高，无需重复高清化'))
         if not export.source_media_ref or not export.source_sha256:
             raise HTTPException(409, localized_message('请先完成原片准备'))
         config = await ai_model_config_controller.get_active(8, config_id, team_id=ctx.team_id)
@@ -81,6 +108,7 @@ class ChapterExports:
             raise HTTPException(403, localized_message('所选模型不可用'))
         options = EnhancementOptions.model_validate(config.processing_options or {})
         probe = MediaProbe.model_validate(export.source_probe)
+        require_upscale(probe)
         validate_source(probe, options)
         if not export.source_media_ref.startswith('/media/'):
             export_media.input_url(export.source_media_ref, options.media_base_url)
@@ -101,8 +129,6 @@ class ChapterExports:
     async def enhance(self, export_id: int, request, ctx: AuthContext):
         await require_roles('admin', 'creator')(ctx)
         source = await self.get(export_id, ctx)
-        if source.parent_export_id is not None:
-            source = await self.get(source.parent_export_id, ctx)
         quote = await self.quote(source, request.model_config_id, ctx)
         if request.source_sha256 != source.source_sha256 or request.quote_version != quote['quote_version']:
             raise HTTPException(409, localized_message('来源或报价已变化，请重新确认'))
@@ -113,7 +139,7 @@ class ChapterExports:
             if await asyncio.to_thread(file_digest, path) != source.source_sha256:
                 raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
         params = await prepare_workflow({'operation': 'enhance_export', 'novel_id': source.novel_id,
-            'chapter_id': source.chapter_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None,
+            'chapter_id': source.chapter_id, 'source_video_id':source.source_video_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None,
             'model_config_id': request.model_config_id, 'config_snapshot': quote['config_snapshot']})
         from models.ai_task import AiTask
         from services.ai_task_executor import ai_task_executor
@@ -126,6 +152,7 @@ class ChapterExports:
                 task = await AiTask.get(id=existing.task_id).using_db(db)
                 return existing, await bind_submission(task, params)
             export = await ChapterExport.create(novel_id=source.novel_id, chapter_id=source.chapter_id,
+                source_video_id=source.source_video_id,
                 team_id=ctx.team_id, created_by=ctx.user.id if ctx.user else None, parent_export_id=source.id,
                 identity_key=identity, source_version=source.source_version, manifest=source.manifest,
                 source_media_ref=source.source_media_ref, source_sha256=source.source_sha256,
@@ -143,11 +170,13 @@ class ChapterExports:
     async def describe(self, export: ChapterExport, selection: list[dict] | None = None) -> dict:
         from models.ai_task import AiTask
         task = await AiTask.get_or_none(id=export.task_id)
-        if selection is None:
+        if export.source_video_id is not None:
+            selection = [{key:item.get(key) for key in ('scene_id','sequence','video_id')} for item in export.manifest]
+        elif selection is None:
             from services.video_enhancement.sources import current_selection
             selection = await current_selection(export.chapter_id)
         recorded = [{key:item.get(key) for key in ('scene_id','sequence','video_id')} for item in export.manifest]
-        return {'id': export.id, 'chapter_id': export.chapter_id, 'parent_export_id': export.parent_export_id,
+        return {'id': export.id, 'chapter_id': export.chapter_id, 'source_video_id':export.source_video_id, 'parent_export_id': export.parent_export_id,
             'selection_current': selection == recorded,
             'source_version': export.source_version, 'source_sha256': export.source_sha256,
             'source_probe': export.source_probe, 'output_probe': export.output_probe,

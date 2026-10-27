@@ -99,3 +99,31 @@ async def test_global_admin_must_select_the_project_team_before_export_admission
     from services.video_enhancement.sources import require_generation_scope
     await require_generation_scope(novel.id, team.id)
     assert await AiTask.all().count() == 0
+
+
+@pytest.mark.asyncio
+async def test_single_video_history_and_preparation_use_existing_project_permissions(client, monkeypatch):
+    from models.scene import Scene
+    from models.video import Video
+    team=await Team.create(name='clip-team',balance=10)
+    other=await Team.create(name='other-clip-team',balance=10)
+    owner,_=await _create_member('clip-owner',team)
+    viewer,_=await _create_member('clip-viewer',team,role='viewer')
+    outsider,_=await _create_member('clip-outsider',other)
+    novel=await Novel.create(name='Clip source',team_id=team.id,created_by=owner.id)
+    chapter=await Chapter.create(novel=novel,number=1,name='One',content='Fixture')
+    scene=await Scene.create(chapter=chapter,sequence=1)
+    video=await Video.create(scene=scene,model_type=1,status=3,url='/media/clip.mp4')
+    await ChapterExport.create(novel_id=novel.id,chapter_id=chapter.id,team_id=team.id,source_video_id=video.id,
+        identity_key='a'*64,source_version='b'*64,source_media_ref='/media/exports/1/source.mp4')
+    run=AsyncMock();monkeypatch.setattr('api.video_export.ai_task_executor.run',run)
+    viewer_headers=_auth(await _login(client,viewer.username))
+    outsider_headers=_auth(await _login(client,outsider.username))
+    own=(await client.get(f'/api/video/exports/video/{video.id}',headers=viewer_headers)).json()
+    assert own['code']==0 and own['data'][0]['source_video_id']==video.id
+    assert (await client.post(f'/api/video/exports/video/{video.id}',headers=viewer_headers)).json()['code']==403
+    assert (await client.get(f'/api/video/exports/video/{video.id}',headers=outsider_headers)).json()['code']==404
+    assert (await client.post(f'/api/video/exports/video/{video.id}',headers=outsider_headers)).json()['code']==404
+    assert (await client.get(f'/api/video/exports?chapter_id={chapter.id}',headers=viewer_headers)).json()['data']==[]
+    run.assert_not_awaited()
+    assert await AiTask.all().count()==0

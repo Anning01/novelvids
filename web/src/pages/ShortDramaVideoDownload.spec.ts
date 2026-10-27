@@ -4,6 +4,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia } from 'pinia'
 import { exportApi } from '@/features/video-export/api'
 import ShortDramaVideoPage from './ShortDramaVideoPage.vue'
+import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { api } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
 import { TaskStatusEnum } from '@/types'
@@ -108,5 +109,21 @@ describe('短剧视频页完整视频下载', () => {
       '雾城-第12集-山雨欲来-完整视频.mp4',
     )
     expect(downloadFile).not.toHaveBeenCalledWith('/media/videos/100.mp4', expect.anything())
+    wrapper.unmount()
+  })
+
+  it('shows a first-frame thumbnail for every completed clip even without poster metadata', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    const clips = wrapper.findAll('.video-timeline-clip')
+    expect(clips).toHaveLength(3)
+    const thumbnails = wrapper.find('.video-timeline').findAllComponents(VideoThumbnail)
+    expect(thumbnails).toHaveLength(2)
+    expect(thumbnails[0]!.props()).toMatchObject({ src: '/media/videos/100.mp4', poster: '' })
+    expect(thumbnails[1]!.props()).toMatchObject({ src: '/media/videos/101.mp4', poster: '' })
+    expect(clips[2]!.text()).toContain('待生成')
+    expect(clips[2]!.findComponent(VideoThumbnail).exists()).toBe(false)
+    expect(wrapper.find('.video-stage-poster').findComponent(VideoThumbnail).props('fit')).toBe('contain')
+    wrapper.unmount()
   })
 })

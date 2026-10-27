@@ -48,6 +48,11 @@ def validate_source(probe: MediaProbe, options: EnhancementOptions) -> None:
         raise ValueError(localized_message('原片大小超出管理员配置的范围'))
 
 
+def require_upscale(probe: MediaProbe, target_short_side: int = 1080) -> None:
+    if min(probe.width, probe.height) >= target_short_side:
+        raise ValueError(localized_message('视频已达到1080p或更高，无需重复高清化'))
+
+
 class PriceTier(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     short_side_max: int = Field(gt=0)

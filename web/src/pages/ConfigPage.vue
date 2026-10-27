@@ -74,8 +74,8 @@ const categories: ModelCategory[] = [
   },
 ]
 categories.push({
-  id: 'enhancement', get label() { return tr('成片画质增强') }, eyebrow: 'ENHANCEMENT',
-  get description() { return tr('定稿后增强至1080p，原片与高清版分别保存。') },
+  id: 'enhancement', get label() { return tr('视频画质增强') }, eyebrow: 'ENHANCEMENT',
+  get description() { return tr('单条视频或成片增强至1080p，仅允许清晰度提升。') },
   taskTypes: [8], icon: Zap,
 })
 const settingsTabs: AppTabItem[] = [

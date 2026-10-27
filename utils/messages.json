@@ -583,5 +583,8 @@
   "供应商任务已无法查询，请人工核对用量和结果": "The provider task is no longer available. Review its usage and result manually.",
   "增强结果暂未保存，后台将重试查询或保存；请检查服务配置与网络": "The result is not saved yet. Collection will retry; check the service configuration and network.",
   "请先选择项目所属团队后再生成": "Select the project’s team before generating.",
-  "增强服务地址或协议已变化，请恢复该任务原配置后继续": "The enhancement endpoint or protocol changed. Restore this task’s original configuration to continue."
+  "增强服务地址或协议已变化，请恢复该任务原配置后继续": "The enhancement endpoint or protocol changed. Restore this task’s original configuration to continue.",
+  "视频已达到1080p或更高，无需重复高清化": "This video is already 1080p or higher and cannot be enhanced to the same resolution again.",
+  "请先选择已生成成功的视频": "Select a successfully generated video first.",
+  "视频画质增强": "Video enhancement"
 }

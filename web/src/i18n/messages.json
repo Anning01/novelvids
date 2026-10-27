@@ -207,7 +207,21 @@
     "{p0}s · {p1} · {p2}fps": "{p0}s · {p1} · {p2}fps",
     "确认准备原片，不会提交付费画质增强。": "Confirm source preparation. This does not submit paid video enhancement.",
     "已人工核对": "Manually reviewed",
-    "后续步骤已停止，已人工核对": "Stopped; manually reviewed"
+    "后续步骤已停止，已人工核对": "Stopped; manually reviewed",
+    "封面加载失败": "Cover unavailable",
+    "视频高清化": "Video enhancement",
+    "单条视频高清化": "Enhance this video",
+    "高清化": "Enhance",
+    "已达1080p": "Already HD",
+    "已达1080p，无需高清化": "Already 1080p; no enhancement needed",
+    "只增强当前视频，无需等本集完成。确认费用后提交，原视频保留。": "Enhance this video without completing the episode. Confirm the cost first; the source video is preserved.",
+    "读取当前视频": "Read current video",
+    "正在准备当前视频，随后可确认高清化费用。": "Preparing this video. You can confirm the enhancement cost once ready.",
+    "预览高清版": "Preview HD",
+    "关闭预览": "Close preview",
+    "视频画质增强": "Video enhancement",
+    "单条视频或成片增强至1080p，仅允许清晰度提升。": "Enhance an individual video or complete episode to 1080p. Resolution can only increase.",
+    "请在设置中配置并启用视频画质增强服务。": "Configure and enable video enhancement in Settings first."
   },
   "components": {
     "请选择": "Select",

@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 
 from api._production_request import production_request
-from auth.deps import AuthContext, get_auth_context, require_chapter_access, require_roles
+from auth.deps import AuthContext, get_auth_context, require_chapter_access, require_video_access, require_roles
 from models.chapter_export import ChapterExport
 from schemas.video_export import ExportPrepareIn, ExportEnhanceIn, ExportTaskOut
 from controllers.chapter_export import chapter_exports
@@ -30,7 +30,7 @@ async def prepare_export(payload: ExportPrepareIn, background_tasks:BackgroundTa
 async def list_exports(chapter_id: int, page: int=1, ctx: AuthContext=Depends(get_auth_context)):
     await require_chapter_access(chapter_id,ctx)
     page=max(1,page)
-    rows=await ChapterExport.filter(chapter_id=chapter_id).order_by('-id').offset((page-1)*20).limit(20)
+    rows=await ChapterExport.filter(chapter_id=chapter_id,source_video_id__isnull=True).order_by('-id').offset((page-1)*20).limit(20)
     from services.video_enhancement.sources import current_selection
     selection = await current_selection(chapter_id)
     return ResponseSchema(data=[await chapter_exports.describe(row,selection) for row in rows])
@@ -39,6 +39,22 @@ async def list_exports(chapter_id: int, page: int=1, ctx: AuthContext=Depends(ge
 @router.get('/models')
 async def export_models(ctx: AuthContext=Depends(get_auth_context)):
     return ResponseSchema(data=[{'id':row.id,'name':row.name} for row in await chapter_exports.configs(ctx)])
+
+
+@router.get('/video/{video_id}')
+async def list_video_exports(video_id:int,ctx:AuthContext=Depends(require_video_access)):
+    rows = await ChapterExport.filter(source_video_id=video_id).order_by('-id').limit(20)
+    return ResponseSchema(data=[await chapter_exports.describe(row) for row in rows])
+
+
+@router.post('/video/{video_id}',response_model=ResponseSchema[ExportTaskOut])
+async def prepare_video_export(video_id:int,background_tasks:BackgroundTasks,ctx:AuthContext=Depends(require_video_access),_=EDITOR):
+    try:
+        export,task = await chapter_exports.prepare_video(video_id,ctx)
+    except ValueError as error:
+        raise HTTPException(400,str(error)) from None
+    background_tasks.add_task(ai_task_executor.run,task)
+    return ResponseSchema(data=ExportTaskOut(export_id=export.id,task_id=str(task.id),status=task.status))
 
 
 @router.get('/{export_id}')

@@ -58,7 +58,7 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const isGenerationRequest = (url: string) => /^\/(?:asset\/reference\/\d+|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/generate\/|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance)?))(?:\?|$)/.test(url)
+const isGenerationRequest = (url: string) => /^\/(?:asset\/reference\/\d+|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/generate\/|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }

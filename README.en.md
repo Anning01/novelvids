@@ -137,18 +137,19 @@ Voice bindings persist across chapters when the same project assets are reused. 
 - Compose available shot videos in episode order and download the result.
 - Browse images, audio, videos and generation versions in the media library.
 
-### Episode video enhancement (AI MediaKit)
+### Video enhancement (AI MediaKit)
 
-1. Under **Video enhancement** in Settings, add a Key with AI MediaKit permission, verify pricing and enable it. The creation assistant and a tool-capable assistant model must also be enabled. Enhancement has its own configuration, separate from image/video generation.
-2. Use 480p for production and experimentation where the selected model supports it. Select every shot's video, then choose **Prepare current source** under **HD episode exports** on the video page. Missing or failed shots block preparation.
-3. Check the frozen version, actual duration and quote before confirming **Enhance to 1080p**. Aspect ratio and frame rate are preserved. Source and HD files remain separate; matching successful results are reused without another enhancement charge. Chat uses the same tools and requires confirmation of the specific export and quote.
-4. Background collection continues after the browser closes. A download failure retries saving the existing result; an uncertain submission requires review rather than another paid submission. Prepare a new source version after changing shots.
+1. Under **Video enhancement** in Settings, add a Key with AI MediaKit permission, verify pricing and enable it. The creation assistant and a tool-capable assistant model must also be enabled. Enhancement has its own configuration, separate from image/video generation. Runtime credentials, endpoints and prices come from the saved model configuration, not `MEDIA_KIT_KEY`. The earlier `.env` key was only used to prepare local acceptance; production does not require that environment variable.
+2. For one video, click **Enhance** in the storyboard preview or workflow video node. Other shots do not need to be finished. The service reads the actual video specifications before showing the confirmation. Complete episode exports remain available on the video page and require all shots to be ready.
+3. Resolution can only increase: 480p/720p can be enhanced to 1080p; a video whose actual short side is already 1080px or higher, or an existing HD output, cannot be enhanced to 1080p again. File dimensions determine eligibility, rather than the project label. Source videos stay intact; clip HD results are previewed/downloaded separately and do not automatically replace the current shot selection.
+4. Check the frozen version, actual duration and quote before confirming **Enhance to 1080p**. Aspect ratio and frame rate are preserved. Source and HD files remain separate; matching successful results are reused without another enhancement charge. Chat uses the same tools and requires confirmation of the specific export and quote.
+5. Background collection continues after the browser closes. A download failure retries saving the existing result; an uncertain submission requires review rather than another paid submission. Prepare a new source version after changing shots.
 
 Enhancement has its own usage records, based on reported duration, output specifications and configured prices. Quotes and application records are not independently verified provider invoices. Missing usage is flagged for review rather than treated as verified zero cost. The application checks output dimensions, duration and frame rate and preserves the source audio. Evaluate quality and identity consistency on your actual footage; fixed savings are not guaranteed.
 
 Local exports use `CHAPTER_EXPORT_PATH` (default `./data/chapter-exports`), outside public `MEDIA_PATH`, with project-scoped downloads. The default Docker data volume includes this directory; persist and back up custom paths and never expose them as static files. Local input uses MediaKit temporary uploads, so no public local port is needed. OSS uses existing private storage and signed URLs. Keep credentials out of Skills, task snapshots and source code.
 
-See the [development plan](docs/superpowers/plans/2026-10-27-mediakit-video-enhancement.md) and [execution and acceptance record](docs/superpowers/verification/2026-10-27-mediakit-video-enhancement.md) for contracts, recovery and rollback. This release covers manual 1080p episode enhancement, without frame interpolation, 4K or automatic per-shot processing.
+See the [development plan](docs/superpowers/plans/2026-10-27-mediakit-video-enhancement.md) and [execution and acceptance record](docs/superpowers/verification/2026-10-27-mediakit-video-enhancement.md) for contracts, recovery and rollback. This release covers manual 1080p enhancement of individual generated videos and complete episodes. Both entry points reuse the same task and result for a given video. Frame interpolation, 4K and automatic per-shot processing remain outside scope.
 
 ### Models and costs
 

@@ -8,6 +8,7 @@ from models._base import AbstractBaseModel
 class ChapterExport(AbstractBaseModel):
     novel_id = fields.IntField(db_index=True)
     chapter_id = fields.IntField(db_index=True)
+    source_video_id = fields.IntField(null=True, db_index=True)
     team_id = fields.IntField(null=True, db_index=True)
     created_by = fields.IntField(null=True)
     parent_export_id = fields.IntField(null=True, db_index=True)

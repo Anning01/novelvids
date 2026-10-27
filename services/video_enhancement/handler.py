@@ -35,12 +35,15 @@ class EnhanceExportHandler(BaseTaskHandler):
         import httpx
         from controllers.config import ai_model_config_controller
         from services.creation_agent.waiting import WaitingForMedia
-        from services.video_enhancement.contract import EnhancementOptions
+        from services.video_enhancement.contract import EnhancementOptions, MediaProbe, require_upscale, validate_source
         from services.video_enhancement.provider import MediaKitClient, MediaKitError
 
         export = await ChapterExport.get(id=request_params['export_id'])
         snapshot = request_params['config_snapshot']
         options = EnhancementOptions.model_validate(snapshot['processing_options'])
+        probe = MediaProbe.model_validate(export.source_probe)
+        require_upscale(probe)
+        validate_source(probe, options)
         config = await ai_model_config_controller.get_active(8, snapshot['id'], team_id=request_params.get('team_id'))
         if export.source_media_ref.startswith('/media/'):
             async def upload():

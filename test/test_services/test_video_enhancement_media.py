@@ -23,7 +23,7 @@ async def test_real_media_compose_is_immutable_and_saved_atomically(tmp_path,mon
     monkeypatch.setattr(settings,'MEDIA_PATH',str(tmp_path))
     monkeypatch.setattr(settings,'CHAPTER_EXPORT_PATH',str(tmp_path.with_name(tmp_path.name+'-exports')))
     source=tmp_path/'clip.mp4';fixture_video(source)
-    export=SimpleNamespace(id=99,team_id=None,manifest=[{'ref':'/media/clip.mp4','sha256':file_digest(source)}])
+    export=SimpleNamespace(id=99,team_id=None,source_video_id=None,manifest=[{'ref':'/media/clip.mp4','sha256':file_digest(source)}])
     result=await export_media.compose(export)
     saved=export_media.local_path(result['ref'])
     assert not saved.is_relative_to(tmp_path)

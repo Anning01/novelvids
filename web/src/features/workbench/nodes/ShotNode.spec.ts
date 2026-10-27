@@ -4,6 +4,7 @@ import { expect, it } from 'vitest'
 import { TaskStatusEnum } from '@/types'
 import { createWorkbenchPromptActionRegistry, workbenchPromptActionRegistryKey } from '../prompt/promptActionRegistry'
 import ShotNode from './ShotNode.vue'
+import VideoEnhanceButton from '@/features/video-export/VideoEnhanceButton.vue'
 
 const frameStub = {
   props: ['data'],
@@ -74,6 +75,8 @@ it('presents a shot as a ratio-aware video card with media and asset metadata in
     'data-ratio': '16:9',
   })
   expect(wrapper.get('.workbench-video-production').classes()).toContain('workbench-media-node')
+  expect(wrapper.getComponent(VideoEnhanceButton).props('video').id).toBe(21)
+  expect(wrapper.getComponent(VideoEnhanceButton).text()).toContain('高清化')
   expect(wrapper.get('header').text()).toContain('720p · 16:9')
   expect(wrapper.get('header').text()).toContain('资产输入0 个')
 

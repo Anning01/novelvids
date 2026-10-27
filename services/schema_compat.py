@@ -16,10 +16,14 @@ async def ensure_creation_agent_schema() -> None:
             )
         if columns and "processing_options" not in {str(column["name"]) for column in columns}:
             await connection.execute_script("ALTER TABLE ai_model_configs ADD COLUMN processing_options JSON;")
+        export_columns = await connection.execute_query_dict('PRAGMA table_info(chapter_exports)')
+        if export_columns and 'source_video_id' not in {str(column['name']) for column in export_columns}:
+            await connection.execute_script('ALTER TABLE chapter_exports ADD COLUMN source_video_id INT;')
     elif settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
         await connection.execute_script(
             "ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS supports_tool_calls BOOL NOT NULL DEFAULT FALSE;"
             "ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS processing_options JSONB;"
+            "ALTER TABLE IF EXISTS chapter_exports ADD COLUMN IF NOT EXISTS source_video_id INT;"
         )
 
     # Run before safe schema creation: it does not add columns to old tables.
@@ -49,13 +53,14 @@ async def ensure_agent_operation_schema() -> None:
         await connection.execute_script(definition["table_creation_string"])
     if settings.DATABASE_URL.startswith('sqlite'):
         columns = {row['name'] for row in await connection.execute_query_dict('PRAGMA table_info(chapter_exports)')}
-        for name, field in {'collection_owner':'CHAR(36)', 'collection_lease_until':'TIMESTAMP', 'submission_slot':'INT NOT NULL DEFAULT 0'}.items():
+        for name, field in {'collection_owner':'CHAR(36)', 'collection_lease_until':'TIMESTAMP', 'submission_slot':'INT NOT NULL DEFAULT 0', 'source_video_id':'INT'}.items():
             if name not in columns:
                 await connection.execute_script(f'ALTER TABLE chapter_exports ADD COLUMN {name} {field};')
     else:
         await connection.execute_script('ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS collection_owner UUID;'
             'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS collection_lease_until TIMESTAMPTZ;'
-            'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS submission_slot BOOL NOT NULL DEFAULT FALSE;')
+            'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS submission_slot BOOL NOT NULL DEFAULT FALSE;'
+            'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS source_video_id INT;')
 
 
 async def ensure_ai_model_config_schema() -> None:

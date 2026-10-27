@@ -83,8 +83,11 @@ class ExportMedia(ResourceStorage):
                     if await asyncio.to_thread(file_digest, frozen) != item['sha256']:
                         raise ValueError(localized_message('原片来源已变化，请重新准备成片'))
                     paths.append(str(frozen))
-            output = Path(directory) / 'source.mp4'
-            await asyncio.to_thread(video_merger.merge_paths, paths, str(output))
+            if export.source_video_id is not None:
+                output = Path(paths[0])
+            else:
+                output = Path(directory) / 'source.mp4'
+                await asyncio.to_thread(video_merger.merge_paths, paths, str(output))
             probe = await asyncio.to_thread(inspect_media, output)
             sha = await asyncio.to_thread(file_digest, output)
             ref = self.ref(export, 'source')

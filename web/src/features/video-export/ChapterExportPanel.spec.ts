@@ -4,11 +4,11 @@ import { createPinia } from 'pinia'
 import ChapterExportPanel from './ChapterExportPanel.vue'
 import { exportApi, type ChapterExport } from './api'
 import { appConfirm } from '@/shared/confirmDialog'
-import { downloadFile } from '@/shared/downloadFile'
+import { downloadFile, fetchFileBlob } from '@/shared/downloadFile'
 import { useAuthStore } from '@/features/auth/authStore'
 
 vi.mock('@/shared/confirmDialog', () => ({ appConfirm: vi.fn() }))
-vi.mock('@/shared/downloadFile', () => ({ downloadFile: vi.fn() }))
+vi.mock('@/shared/downloadFile', () => ({ downloadFile: vi.fn(), fetchFileBlob: vi.fn() }))
 
 const source: ChapterExport = { id: 1, chapter_id: 2, parent_export_id: null, source_version: 'a'.repeat(64),
   source_sha256: 'b'.repeat(64), source_probe: { width: 864, height: 496, duration: 5, fps: 24 },
@@ -107,4 +107,42 @@ it('explains free reuse and restores keyboard focus after cancelling confirmatio
   expect(document.activeElement).toBe(trigger.element)
   wrapper.unmount()
   wrapper.element.remove()
+})
+
+it('prepares one video without asking to complete the chapter and blocks 1080p sources', async () => {
+  vi.spyOn(exportApi, 'listVideo').mockResolvedValueOnce({ data: [] }).mockResolvedValue({ data: [{ ...source, source_video_id: 9 }] })
+  const prepare = vi.spyOn(exportApi, 'prepareVideo').mockResolvedValue({ data: { export_id: 1, task_id: 'task', status: 1 } })
+  const enhance = vi.spyOn(exportApi, 'enhance')
+  const wrapper = mount(ChapterExportPanel, { props: { videoId: 9 }, global: { plugins: [createPinia()] } })
+  await flushPromises()
+  expect(prepare).toHaveBeenCalledExactlyOnceWith(9)
+  expect(exportApi.list).not.toHaveBeenCalled()
+  expect(enhance).not.toHaveBeenCalled()
+  expect(wrapper.text()).toContain('无需等本集完成')
+  vi.mocked(exportApi.listVideo).mockResolvedValue({ data: [{ ...source, source_probe: { width: 1920, height: 1080, duration: 5, fps: 24 } }] })
+  await wrapper.get('[aria-label="刷新导出记录"]').trigger('click')
+  await flushPromises()
+  const button = wrapper.findAll('button').find(item => item.text().includes('无需高清化'))!
+  expect(button.attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})
+
+it('previews the saved HD file through the authenticated endpoint and releases its blob URL', async () => {
+  vi.mocked(exportApi.list).mockResolvedValue({ data: [{ ...source, id: 3, parent_export_id: 1 }] })
+  vi.mocked(fetchFileBlob).mockResolvedValue(new Blob(['video'], { type: 'video/mp4' }))
+  const create = vi.fn().mockReturnValue('blob:hd-preview')
+  const revoke = vi.fn()
+  vi.stubGlobal('URL', { createObjectURL: create, revokeObjectURL: revoke })
+  const wrapper = mount(ChapterExportPanel, { props: { chapterId: 2 }, global: { plugins: [createPinia()] } })
+  try {
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '预览高清版')!.trigger('click')
+    await flushPromises()
+    expect(fetchFileBlob).toHaveBeenCalledWith('/api/video/exports/3/download', {})
+    expect(wrapper.get('.export-preview video').attributes('src')).toBe('blob:hd-preview')
+    expect(wrapper.get('.export-preview video').attributes('controls')).toBeDefined()
+    await wrapper.findAll('button').find(button => button.text() === '关闭预览')!.trigger('click')
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:hd-preview')
+    expect(wrapper.find('.export-preview video').exists()).toBe(false)
+  } finally { wrapper.unmount(); vi.unstubAllGlobals() }
 })

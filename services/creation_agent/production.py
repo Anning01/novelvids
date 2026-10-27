@@ -44,6 +44,8 @@ async def conversation_for_task(task):
     label = labels.get(operation, ("创作任务", "Creation task"))[
         0 if params.get("prompt_language") == "zh" else 1
     ]
+    if params.get('source_video_id'):
+        label = ('准备单条视频' if params.get('operation') == 'prepare_export' else '视频高清化') if params.get('prompt_language') == 'zh' else ('Prepare selected video' if params.get('operation') == 'prepare_export' else 'Enhance selected video')
     targets = []
     target = None
     if params.get("variant_id"):
