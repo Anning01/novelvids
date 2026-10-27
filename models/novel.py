@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 from tortoise import fields
 
 from models._base import AbstractBaseModel
+from models._project_name_index import ProjectNameIndex
 
 if TYPE_CHECKING:
     from models.chapter import Chapter
@@ -12,7 +13,7 @@ class Novel(AbstractBaseModel):
     """小说/剧本表"""
 
     name = fields.CharField(
-        max_length=255, unique=True, description="小说/剧本名称"
+        max_length=255, description="小说/剧本名称"
     )
     author = fields.CharField(max_length=255, description="作者", blank=True, null=True)
     cover = fields.CharField(max_length=255, description="封面", blank=True, null=True)
@@ -103,6 +104,7 @@ class Novel(AbstractBaseModel):
     class Meta:
         table = "novels"
         table_description = "小说/剧本表"
+        indexes = (ProjectNameIndex(),)
 
     def __str__(self):
         return self.name

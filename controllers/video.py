@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from utils.messages import localized_message
-from services.language import configured_language
 from prompts.video import render_voice_reference_instruction
 
 
@@ -272,12 +271,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
         await self._set_scene_current_video(scene, video.id)
         return video
 
-    async def generate(
+    async def generate(self, req: VideoGenerateRequest, media_base_url: str = "", team_id=None, user_id=None):
+        from services.creation_agent.video_jobs import submit_video
+        return await submit_video(req, media_base_url=media_base_url, team_id=team_id, user_id=user_id)
+
+    async def _submit_generation(
         self,
         req: VideoGenerateRequest,
         media_base_url: str = "",
         team_id: int | None = None,
         user_id: int | None = None,
+        reserved_video_id: int | None = None,
     ) -> Video:
         """提交视频生成请求。
 
@@ -317,9 +321,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
             ),
         )
         logger.info(
-            "Video resolve_assets: scene_id=%s, novel_id=%s, prompt_len=%d, subjects=%s",
-            scene.id, novel_id, len(prompt),
-            [(s["name"], len(s.get("images", []))) for s in subjects],
+            "Video resolve_assets: scene_id=%s, novel_id=%s, prompt_len=%d, subject_count=%d",
+            scene.id, novel_id, len(prompt), len(subjects),
         )
 
         # 获取生成器并提交
@@ -358,13 +361,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
         novel = await Novel.get_or_none(id=novel_id)
-        prompt_language = await configured_language()
+        from services.language import generation_language
+        prompt_language = await generation_language()
         voice_references = await resolve_voice_references(
             scene=scene,
             novel=novel,
             subjects=subjects,
             capabilities=capabilities,
         ) if novel and req.generation_mode == "reference" and selection.generate_audio else []
+        from services.creation_agent.skill_execution import current_execution
         provider_prompt = _compose_video_prompt(
             prompt,
             referenced_media,
@@ -372,6 +377,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
             novel.custom_style_prompt if novel else None,
             language=prompt_language,
         )
+        if current_execution.get():
+            provider_prompt = render_reference_mentions(prompt, referenced_media)
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
             scene.id,
@@ -457,10 +464,17 @@ class VideoController(CRUDBase[Video, dict, dict]):
         # Audio URLs are deduplicated by the shared content builder. Use the same
         # order here, including two asset records that resolve to the same URL.
         audio_urls = list(dict.fromkeys(item.url for item in voice_references))
-        voice_instruction = render_voice_reference_instruction([
+        voice_bindings = [
             {"index": audio_urls.index(item.url) + 1, "kind": item.kind, "subjects": list(item.subjects)}
             for item in voice_references
-        ], language=prompt_language) if selection.generate_audio else ""
+        ]
+        if current_execution.get():
+            from prompts.skill_pack import render_voice_bindings
+            voice_instruction = render_voice_bindings(voice_bindings)
+        else:
+            voice_instruction = render_voice_reference_instruction(
+                voice_bindings, language=prompt_language
+            ) if selection.generate_audio else ""
         if voice_instruction:
             provider_prompt += "\n\n" + voice_instruction
         video_metadata = {
@@ -503,9 +517,18 @@ class VideoController(CRUDBase[Video, dict, dict]):
         await scene.fetch_related('chapter')
         async with creation_write(scene.chapter.novel_id):
             await CreationObjects(scene.chapter.novel_id).get('scene', scene.id)
-            video = await Video.create(scene_id=scene.id, model_type=record_model_type.value,
-                external_task_id=None, status=TaskStatusEnum.running.value,
-                metadata={**video_metadata, 'submission_pending': True})
+            if reserved_video_id is not None:
+                video = await Video.get(id=reserved_video_id, scene_id=scene.id)
+                if video.status != TaskStatusEnum.queued.value:
+                    raise HTTPException(409, localized_message("视频任务已停止或已提交"))
+                video_metadata = {**video.metadata, **video_metadata}
+                video.metadata = {**video_metadata, 'submission_pending': True}
+                video.status = TaskStatusEnum.running.value
+                await video.save(update_fields=['metadata', 'status'])
+            else:
+                video = await Video.create(scene_id=scene.id, model_type=record_model_type.value,
+                    external_task_id=None, status=TaskStatusEnum.running.value,
+                    metadata={**video_metadata, 'submission_pending': True})
         try:
             external_task_id = await generator.submit(
                 prompt=provider_prompt,
@@ -540,7 +563,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         except BaseException:
             video.status = TaskStatusEnum.failed.value
-            video.metadata = {**video_metadata, 'error': '视频提交未完成，请核对后重试'}
+            video.metadata = {**video_metadata, 'submission_uncertain': True, 'error': '视频提交结果待核对，系统不会重复提交'}
             await video.save(update_fields=['status', 'metadata', 'updated_at'])
             raise
 
@@ -570,11 +593,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
         if video.status in (
             TaskStatusEnum.completed.value,
             TaskStatusEnum.failed.value,
+            TaskStatusEnum.cancelled.value,
         ):
+            if (video.metadata or {}).get('agent_run_id'):
+                from services.creation_agent.video_settlement import settle_video
+                await settle_video(video)
             return video
 
         if not video.external_task_id:
-            if (video.metadata or {}).get('submission_pending'):
+            if (video.metadata or {}).get('submission_pending') or (video.status == TaskStatusEnum.queued.value and (video.metadata or {}).get('agent_run_id')):
                 return video
             raise HTTPException(400, detail=localized_message('该视频无外部任务ID，无法查询'))
 
@@ -598,8 +625,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
         generator = get_generator(config)
         result = await generator.query(video.external_task_id)
         logger.info(
-            "Video query result: video_id=%s, status=%s, url=%s, metadata=%s",
-            video_id, result.get("status"), result.get("url"), result.get("metadata"),
+            "Video query result: video_id=%s, status=%s, has_url=%s",
+            video_id, result.get("status"), bool(result.get("url")),
         )
 
         # 更新 Video 记录
@@ -698,6 +725,22 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
             if "metadata" not in update_fields:
                 update_fields.append("metadata")
+
+        if metadata.get("agent_run_id") and new_status in {3, 4, 5}:
+            from services.creation_agent.video_settlement import settle_video
+            video.metadata = {**(video.metadata or {}), "provider_accounting": {
+                "status": new_status,
+                "usage_reported": result_metadata.get("duration") is not None,
+                "reported_seconds": result_metadata.get("duration"),
+                "seconds": (result_metadata["duration"] if result_metadata.get("duration") is not None else metadata.get("duration")) if new_status == 3 else 0,
+            }, "billing_pending": True}
+            if "metadata" not in update_fields:
+                update_fields.append("metadata")
+            from models.agent_operation import AgentOperation
+            await AgentOperation.get_or_create(task_id=metadata['agent_run_id'], key='billing:video')
+            await video.save(update_fields=update_fields)
+            await settle_video(video)
+            return video
 
         try:
             if metadata.get("novel_id") is not None:
@@ -863,7 +906,19 @@ class VideoController(CRUDBase[Video, dict, dict]):
         for video in videos
     ]
 
-    async def merge_chapter_videos(self, chapter_id: int, *, strict: bool = False) -> dict:
+    async def merge_chapter_videos(self, chapter_id: int, *, strict: bool = False, team_id=None, user_id=None) -> dict:
+        from services.creation_agent.composition import submit_composition
+        from services.ai_task_executor import ai_task_executor
+        task = await submit_composition(chapter_id, strict=strict, team_id=team_id, user_id=user_id)
+        # Preserve the existing synchronous response while the durable worker also
+        # owns recovery if this HTTP request is interrupted.
+        await ai_task_executor.run(task)
+        await task.refresh_from_db()
+        if task.status != TaskStatusEnum.completed.value:
+            raise HTTPException(409, detail=task.error_message or '合成任务仍在后台执行')
+        return task.response_data
+
+    async def _compose_chapter(self, chapter_id: int, *, strict: bool = False) -> dict:
         """合并章节下所有已完成的视频。
 
         Args:

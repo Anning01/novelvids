@@ -79,6 +79,19 @@ async def generate_storyboard(
     creative_constraints: list[dict] | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
+    from services.creation_agent.skill_execution import current_execution
+    execution = current_execution.get()
+    if execution:
+        from schemas.agent_workflow import SkillStoryboard, StructuredSkillStoryboard
+        modern = "storyboard_contract" in execution.snapshot.contents
+        result = await execution.generate('storyboard', {'chapter': long_text,
+            'entities': [entity.model_dump() for entity in entities], 'strategy': storyboard_strategy,
+            'constraints': creative_constraints or []}, StructuredSkillStoryboard if modern else SkillStoryboard)
+        if modern:
+            from services.storyboard.validation import prepare_skill_storyboard
+            result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,
+                                               storyboard_strategy or "cinematic")
+        return result, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {}}
     strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
     fixed_messages = build_storyboard_messages(
         "",

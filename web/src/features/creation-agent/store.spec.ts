@@ -172,7 +172,7 @@ describe('creation assistant store', () => {
     const selection = reactive({ ...input, targets: [{ kind: 'scene' as const, id: 9 }] })
     const sending = store.send(selection)
     selection.targets[0]!.id = 10
-    expect(vi.mocked(agentApi.submit).mock.calls[0]?.[1].targets[0]?.id).toBe(9)
+    await vi.waitFor(() => expect(vi.mocked(agentApi.submit).mock.calls[0]?.[1].targets[0]?.id).toBe(9))
     resolve({ code: 0, message: '', data: run })
     await sending
   })
@@ -240,4 +240,49 @@ it('admits one new conversation at a time without showing a model run or sending
   await creating
   expect(store.conversationId).toBe(4)
   expect(store.sessionBusy).toBe(false)
+})
+
+
+it('refreshes child generation receipts after the assistant has finished speaking', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  store.messages = [{ id: 1, role: 'assistant', content: 'Submitted', task_id: 'run-1', status: 3,
+    changes: [], usage: {}, created_at: '', production: [{ task_id: 'child', operation: 'video', status: 2 }] }]
+  vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { ...run,
+    production: [{ task_id: 'child', operation: 'video', status: 3 }] } })
+  await store.refreshProduction()
+  expect(store.messages[0]?.production?.[0]?.status).toBe(3)
+  expect(agentApi.submit).not.toHaveBeenCalled()
+})
+
+
+it('retains the chat run request ID after a lost response and a store/page restart', async () => {
+  const first = useCreationAgentStore()
+  await first.open(7)
+  vi.mocked(agentApi.submit).mockRejectedValueOnce(new TypeError('Lost response'))
+    .mockResolvedValueOnce({ code: 0, message: '', data: run })
+  expect(await first.send(input)).toBe(false)
+  first.disconnect()
+  setActivePinia(createPinia())
+  const restarted = useCreationAgentStore()
+  await restarted.open(7)
+  expect(await restarted.send(input)).toBe(true)
+  const calls = vi.mocked(agentApi.submit).mock.calls
+  expect(calls[0]?.[1].request_id).toBe(calls[1]?.[1].request_id)
+})
+
+it('refreshes recent task conversations without switching the selected history or sending a request', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  const selected = store.conversationId
+  const messages = store.messages
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [
+    { ...conversation, id: 2, title: '最新提取资产' }, conversation,
+  ] })
+  await store.refreshConversations()
+  expect(store.conversations[0]?.id).toBe(2)
+  expect(store.conversationId).toBe(selected)
+  expect(store.messages).toBe(messages)
+  expect(agentApi.submit).not.toHaveBeenCalled()
+  expect(agentApi.create).not.toHaveBeenCalled()
 })

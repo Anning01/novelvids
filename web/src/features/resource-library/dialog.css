@@ -3,13 +3,116 @@
 @import 'element-plus/theme-chalk/el-icon.css';
 @import 'element-plus/theme-chalk/el-dialog.css';
 
-.resource-library-dialog {
+/* Teleported dialogs inherit the global app palette, just like the library page. */
+.resource-library-dialog,
+.resource-library {
+  --app-danger: var(--creation-danger);
+  --app-success: var(--creation-success);
+}
+
+.resource-library-dialog.el-dialog {
   --el-dialog-bg-color: var(--app-surface);
+  --el-dialog-padding-primary: 0;
   --el-text-color-primary: var(--app-text);
   --el-text-color-regular: var(--app-text);
   --el-text-color-secondary: var(--app-text-muted);
-  --el-dialog-border-radius: 14px;
-  max-width: calc(100vw - 32px);
-  border: 1px solid var(--app-border);
+  --el-border-color: var(--app-border);
+  --el-fill-color-blank: var(--app-surface);
+  --el-bg-color: var(--app-surface);
+  --el-bg-color-overlay: var(--app-surface);
+  --el-color-info: var(--app-text-muted);
+}
+
+.resource-library-dialog {
+  background-color: var(--app-surface);
   color: var(--app-text);
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  box-shadow: var(--app-shadow);
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+}
+
+/* 弹窗遮罩 */
+.el-overlay:has(.resource-library-dialog) {
+  background-color: rgb(0 0 0 / 45%);
+  backdrop-filter: blur(8px);
+}
+
+/* 弹窗头部与关闭按钮 */
+.resource-library-dialog .el-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  margin: 0;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface-muted);
+}
+
+.resource-library-dialog .el-dialog__title {
+  color: var(--app-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.resource-library-dialog .el-dialog__headerbtn {
+  position: static;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.resource-library-dialog .el-dialog__headerbtn:hover {
+  background: var(--app-surface-hover);
+}
+
+.resource-library-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: var(--app-text-muted);
+  font-size: 18px;
+}
+
+.resource-library-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--app-text);
+}
+
+.resource-library-dialog .el-dialog__body {
+  padding: 0;
+  color: var(--app-text);
+  background: var(--app-surface);
+}
+
+/* Dialogs are mounted outside .app-shell; theme their shared button variants locally. */
+.resource-library-dialog .app-button--secondary {
+  color: var(--app-text-secondary);
+  background: var(--app-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--app-border);
+}
+
+.resource-library-dialog .app-button--secondary:hover:not(:disabled) {
+  color: var(--app-text);
+  background: var(--app-surface-hover);
+}
+
+.resource-library-dialog .app-button--ghost:hover:not(:disabled) {
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+
+.resource-library-dialog .app-button--danger {
+  color: var(--app-danger);
+  background: color-mix(in srgb,var(--app-danger) 10%,var(--app-surface));
+}
+
+.resource-library-dialog .app-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb,var(--app-danger) 18%,var(--app-surface));
 }

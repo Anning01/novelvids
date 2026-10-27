@@ -54,3 +54,15 @@ it('shows a stable error when global settings are unavailable', async () => {
   expect(wrapper.get('[role="alert"]').text()).toContain('仅超级管理员')
   expect(wrapper.find('form').exists()).toBe(false)
 })
+
+it('allows clearing the optional character cap and saves null for model-managed limits', async () => {
+  const wrapper = mount(AgentSettingsPanel)
+  await flushPromises()
+  const cap = wrapper.findAll('label').find(label => label.text().includes('上下文字符上限'))!.get('input')
+  expect(cap.attributes('placeholder')).toBe('留空，由模型服务判断')
+  await cap.setValue('')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ max_context_characters: null }))
+  expect(wrapper.get('[placeholder="留空，由模型服务判断"]').element).toHaveValue(null)
+})

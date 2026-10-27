@@ -1,0 +1,13 @@
+{
+  "strategy_cinematic_name": "Cinematic narrative",
+  "strategy_cinematic_description": "Use continuous action, varied shot sizes and emotional turns to advance the story through cinematic visuals and character performances.",
+  "strategy_narration_name": "Narrated story",
+  "strategy_narration_description": "Use a consistent narrator for background and turns, with inner monologues only outside character dialogue. Keep dialogue faithful to the story and use no background music.",
+  "strategy_cinematic_aliases": [
+    "cinematic narrative",
+    "default"
+  ],
+  "strategy_narration_aliases": [
+    "narration mode"
+  ]
+}

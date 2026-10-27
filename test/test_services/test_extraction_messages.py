@@ -77,9 +77,7 @@ def extraction_context() -> ExtractionContext:
 
 
 def _serialized_payload(content: str, boundary: str) -> object:
-    opening = f"<{boundary}>"
-    closing = f"</{boundary}>"
-    return json.loads(content.split(opening, 1)[1].split(closing, 1)[0])
+    return json.loads(content)
 
 
 def test_builder_separates_rules_novel_registry_and_chapter(
@@ -96,14 +94,14 @@ def test_builder_separates_rules_novel_registry_and_chapter(
         "user",
         "user",
     ]
-    assert "当前章节明确事实" in messages[0]["content"]
-    assert "小说元信息" in messages[1]["content"]
+    assert "language=zh" in messages[0]["content"]
+    assert json.loads(messages[1]["content"])["name"] == "厄运之手"
     assert "都市异能" in messages[1]["content"]
-    assert "全部已识别资产" in messages[2]["content"]
+    assert len(json.loads(messages[2]["content"])) == 3
     assert all(
         name in messages[2]["content"] for name in ("宫平", "办公室", "自行车")
     )
-    assert "只返回本章" in messages[3]["content"]
+    assert json.loads(messages[3]["content"])["number"] == 12
     assert extraction_context.chapter.content in messages[3]["content"]
 
     assert extraction_context.chapter.content not in "".join(
@@ -164,16 +162,11 @@ def test_builder_serializes_only_snapshot_fields_compactly_and_omits_empty_value
 def test_asset_registry_explains_identity_matching_and_current_chapter_filtering(
     extraction_context: ExtractionContext,
 ):
-    registry = ExtractionMessageBuilder().build(
-        extraction_context,
-        prompt_language="zh",
-    )[2]["content"]
-
-    assert (
-        "该注册表仅用于身份匹配和稳定视觉一致性。"
-        "只有在当前章节满足提取条件的资产才能进入响应；"
-        "命中标准名称或别名时沿用标准名称。"
-    ) in registry
+    from prompts.skill_pack import read_skill
+    messages = ExtractionMessageBuilder().build(extraction_context, prompt_language="zh")
+    assert read_skill("assets") in messages[0]["content"]
+    assert "别名" in messages[0]["content"]
+    assert "规范" not in messages[2]["content"]
 
 
 def test_compress_chapter_numbers_sorts_deduplicates_and_groups_ranges():

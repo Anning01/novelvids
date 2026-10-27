@@ -214,7 +214,8 @@ async def test_remake_projects_cannot_be_reused_as_history_sources(client):
 
 @pytest.mark.asyncio
 async def test_history_episode_can_create_project_from_immutable_snapshot(
-    client, monkeypatch, tmp_path
+    client, monkeypatch, tmp_path,
+    configured_creation_agent,
 ):
     import api.remake as remake_api
 
@@ -302,7 +303,8 @@ async def test_local_upload_rejects_bad_extension_with_stable_error(
 
 @pytest.mark.asyncio
 async def test_local_upload_create_project_and_read_sources(
-    client, monkeypatch, tmp_path
+    client, monkeypatch, tmp_path,
+    configured_creation_agent,
 ):
     install_services(monkeypatch, tmp_path, LocalProvider())
 
@@ -428,7 +430,8 @@ async def test_oss_policy_finalize_and_release(client, monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_oss_upload_project_normalizes_source_storage_provider(
-    client, monkeypatch, tmp_path
+    client, monkeypatch, tmp_path,
+    configured_creation_agent,
 ):
     provider = OssProvider()
     install_services(monkeypatch, tmp_path, provider)
@@ -474,7 +477,8 @@ async def test_oss_upload_project_normalizes_source_storage_provider(
 
 @pytest.mark.asyncio
 async def test_folder_upload_creates_sorted_chapters_and_dispatches_each_task(
-    client, monkeypatch, tmp_path
+    client, monkeypatch, tmp_path,
+    configured_creation_agent,
 ):
     import api.remake as remake_api
 
@@ -542,7 +546,8 @@ async def test_folder_upload_creates_sorted_chapters_and_dispatches_each_task(
 
 @pytest.mark.asyncio
 async def test_create_dispatches_background_decomposition_and_failed_source_can_retry(
-    client, monkeypatch, tmp_path
+    client, monkeypatch, tmp_path,
+    configured_creation_agent,
 ):
     import api.remake as remake_api
 

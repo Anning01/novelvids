@@ -226,7 +226,7 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
         assert payload['model'] == 'test-model'
         assert payload['stream'] is True
         assert {tool['function']['name'] for tool in payload['tools']} == {
-            'get_creation_context', 'update_image_prompt', 'update_storyboard_prompt', 'final_result'}
+            'get_creation_context', 'update_image_prompt', 'update_storyboard_prompt', 'read_skill', 'get_production_context', 'final_result'}
         assert 'expected_version' not in json.dumps(payload['tools'])
         if len(requests) == 1:
             delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'wire-read', 'type': 'function', 'function': {
@@ -295,7 +295,8 @@ async def test_failed_billing_claim_can_retry_without_losing_or_duplicating_usag
     })
     original = billing_recorder.record_text
     monkeypatch.setattr(billing_recorder, 'record_text', AsyncMock(return_value=None))
-    await record_ai_task_usage(task, {})
+    with pytest.raises(RuntimeError):
+        await record_ai_task_usage(task, {})
     assistant = await AgentMessage.get(task=task, role='assistant')
     assert assistant.billing_record_id is None
     monkeypatch.setattr(billing_recorder, 'record_text', original)

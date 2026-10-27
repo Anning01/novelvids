@@ -1,8 +1,10 @@
 
 from utils.messages import localized_message
 import asyncio
+from itertools import count
 
 from fastapi import HTTPException
+from tortoise.exceptions import IntegrityError
 
 from models.ai_task import AiTask
 from models.chapter import Chapter
@@ -23,10 +25,14 @@ from utils.crud import CRUDBase
 from models.novel import Novel
 from models.audio_reference import AudioReference
 from schemas.novel import NovelCreate, NovelPatch, NovelUpdate
-from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from utils.enums import AiTaskTypeEnum
 
 
 class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
+    async def overview(self, team_id: int | None = None):
+        from services.project_overview import project_overview
+        return await project_overview(team_id)
+
     async def meta(self, novel_id: int) -> dict:
         """轻量元信息：不返回书稿正文，节约流量。"""
         novel = await self.get(novel_id)
@@ -106,7 +112,25 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 )
             ):
                 raise HTTPException(400, detail=localized_message('选择的旁白音色不存在或不可用'))
-        return await super().create(data, team_id=team_id, created_by=created_by)
+        # Only names within this ownership scope compete; other teams keep the original title.
+        name_scope = {"team_id": team_id}
+        if team_id is None:
+            name_scope["created_by"] = created_by
+        base_name = data["name"]
+        max_length = Novel._meta.fields_map["name"].max_length
+        for number in count(1):
+            suffix = f" ({number})" if number > 1 else ""
+            candidate = base_name[:max_length - len(suffix)] + suffix
+            if await Novel.filter(name=candidate, **name_scope).exists():
+                continue
+            try:
+                return await super().create(
+                    {**data, "name": candidate}, team_id=team_id, created_by=created_by,
+                )
+            except IntegrityError:
+                # A concurrent request may have claimed the name after our check.
+                if not await Novel.filter(name=candidate, **name_scope).exists():
+                    raise
 
     async def list(
         self,
@@ -251,54 +275,57 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         novel_id: int,
         team_id: int | None = None,
         user_id: int | None = None,
+        include_cover: bool = True,
     ) -> AiTask:
         """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
         novel = await self.get(novel_id)
         if not (novel.content or "").strip():
             raise HTTPException(status_code=400, detail=localized_message('项目没有可分析的书稿内容'))
 
-        await ai_model_config_controller.get_active_with_legacy_fallback(
-            AiTaskTypeEnum.project_analysis.value,
-            AiTaskTypeEnum.extraction.value,
-            team_id=team_id,
-        )
-        await ai_model_config_controller.get_active(
-            AiTaskTypeEnum.reference_image.value, team_id=team_id
-        )
+        if include_cover:
+            from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
+            for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
+                if pending.request_params.get("novel_id") == novel_id:
+                    if not await reconcile_unstarted_model_task(pending):
+                        raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
+        from services.creation_agent.skill_execution import require_agent
+        await require_agent(team_id)
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
-
-        active_tasks = await AiTask.filter(
-            task_type=AiTaskTypeEnum.project_analysis.value,
-            status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value],
-        )
-        for task in active_tasks:
-            if task.request_params.get("novel_id") == novel_id:
-                return task
 
         params = {
             "novel_id": novel_id,
             "resolution": "1K",
+            "include_cover": include_cover,
             "prompt_language": prompt_language,
         }
         if team_id is not None:
             params["team_id"] = team_id
         if user_id is not None:
             params["user_id"] = user_id
-        return await ai_task_executor.submit(
-            AiTaskTypeEnum.project_analysis,
-            params,
-        )
+        from services.creation_agent.skill_execution import prepare_workflow
+        params = await prepare_workflow(params)
+        from services.creation_objects import project_write
+        async with project_write(novel_id) as connection:
+            from services.creation_agent.submissions import previous_submission, bind_submission
+            previous = await previous_submission(5, {**params, "team_id": team_id, "user_id": user_id}, connection)
+            if previous:
+                return previous
+            for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
+                if existing.request_params.get('novel_id') == novel_id:
+                    return await bind_submission(existing, {**params, "team_id": team_id, "user_id": user_id})
+            return await ai_task_executor.submit(AiTaskTypeEnum.project_analysis, params, db_connection=connection)
 
     async def latest_analysis(self, novel_id: int) -> AiTask | None:
         await self.get(novel_id)
         tasks = await AiTask.filter(
             task_type=AiTaskTypeEnum.project_analysis.value,
         ).order_by("-created_at")
-        return next(
+        from services.project_analysis.results import expose_saved_analysis
+        return await expose_saved_analysis(next(
             (task for task in tasks if task.request_params.get("novel_id") == novel_id),
             None,
-        )
+        ))
 
 
 novel_controller = NovelController()

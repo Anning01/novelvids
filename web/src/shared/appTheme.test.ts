@@ -76,3 +76,19 @@ it('can return from a manual override to live system following', () => {
   expect(theme.resolvedTheme.value).toBe('dark')
   expect(environment.root.dataset.appTheme).toBe('dark')
 })
+
+it('restores an explicit light preference after reload even when the system is dark', () => {
+  const environment = createEnvironment(true)
+  const theme = createAppThemeController(environment)
+  theme.setPreference('light')
+  theme.destroy()
+
+  const restored = createAppThemeController(environment)
+  environment.emitSystemTheme(true)
+
+  expect(restored.preference.value).toBe('light')
+  expect(restored.resolvedTheme.value).toBe('light')
+  expect(environment.root.dataset.appTheme).toBe('light')
+  expect(environment.root.style.colorScheme).toBe('light')
+  restored.destroy()
+})

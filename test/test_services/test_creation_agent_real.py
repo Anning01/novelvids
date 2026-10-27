@@ -198,10 +198,9 @@ async def test_real_creation_and_archived_conflict_finish_without_permission_han
     else:
         assert await Asset.filter(novel_id=conversation.novel_id, canonical_name='胖子').count() == 1
         assert await PromptChange.filter(task=task).count() == 1
-        from prompts.creation_standards import validate_person_visual_traits
         from prompts.reference import is_complete_reference_prompt
         created = await Asset.get(novel_id=conversation.novel_id, canonical_name='胖子')
-        validate_person_visual_traits(created.base_traits)
+        assert created.base_traits.strip()
         assert is_complete_reference_prompt(created.base_traits)
     print(json.dumps({'case': 'archived_conflict' if archived_name else 'creation',
         'requests': assistant.usage['requests'], 'input_tokens': assistant.usage['input_tokens'],

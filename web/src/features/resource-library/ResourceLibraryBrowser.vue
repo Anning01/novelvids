@@ -274,7 +274,21 @@ async function uploadFiles(event: Event) {
         <p v-if="loading" role="status">{{ tr('正在加载资源…') }}</p>
         <div class="library-grid" :aria-busy="loading">
           <article v-for="item in items" :key="item.id" class="library-card" :class="{ selected: selectedIds.includes(item.id) }" :draggable="editable && item.state === 'ready'" @dragstart="startDrag($event, item)" @dragend="dragging = []">
-            <div class="library-cover"><button :disabled="item.state !== 'ready'" :aria-label="tr('预览 {p0}', { p0: item.name })" @click="preview = item"><img v-if="item.poster_url" :src="mediaUrl(item.poster_url)" alt="" loading="lazy"><Film v-else :size="30" /><Play class="library-play" :size="28" /></button><input type="checkbox" :checked="selectedIds.includes(item.id)" :disabled="item.state !== 'ready'" :aria-label="tr('选择 {p0}', { p0: item.name })" @change="toggle(item)"><small>{{ item.duration?.toFixed(1) }}s</small></div>
+            <div class="library-cover">
+              <button
+                type="button"
+                class="library-cover-btn"
+                :disabled="item.state !== 'ready'"
+                :aria-label="tr('预览 {p0}', { p0: item.name })"
+                @click="preview = item"
+              >
+                <img v-if="item.poster_url" :src="mediaUrl(item.poster_url)" alt="" loading="lazy">
+                <Film v-else class="library-cover-placeholder" :size="30" />
+                <span class="library-play" aria-hidden="true"><Play :size="20" fill="currentColor" /></span>
+              </button>
+              <input type="checkbox" :checked="selectedIds.includes(item.id)" :disabled="item.state !== 'ready'" :aria-label="tr('选择 {p0}', { p0: item.name })" @change="toggle(item)">
+              <small v-if="item.duration">{{ item.duration.toFixed(1) }}s</small>
+            </div>
             <div class="library-card-info"><strong :title="item.name">{{ item.name }}</strong><small>{{ path(item.folder_id) }} · {{ item.width }}×{{ item.height }}</small><div v-if="editable && !pick" class="library-card-actions"><AppButton size="sm" :disabled="item.state !== 'ready'" :aria-label="tr('重命名 {p0}', { p0: item.name })" @click="renameItem = item; renameValue = item.name"><Pencil :size="14" /></AppButton><AppButton size="sm" :disabled="busy" :aria-label="tr('删除 {p0}', { p0: item.name })" @click="remove([item.id])"><Trash2 :size="14" />{{ item.state !== 'ready' ? tr('重试删除') : '' }}</AppButton></div><p v-if="item.state !== 'ready'" class="library-error">{{ tr('删除处理中或失败，无法引用') }}</p></div>
           </article>
         </div>
@@ -377,7 +391,23 @@ async function uploadFiles(event: Event) {
 .folder-menu > div button:hover:not(:disabled) { background: var(--app-surface-hover); }
 .folder-menu > div button.danger { color: var(--app-danger, #c54d4d); }
 
-.library-main { padding:20px; min-width:0; }.library-search { display:flex; align-items:center; gap:10px; padding:4px 4px 4px 12px; border:1px solid var(--app-border); border-radius:10px; }.library-search input { flex:1; width:0; border:0; background:transparent; color:inherit; padding:8px; }.library-selection { margin:16px 0; font-size:12px; flex-wrap:wrap; color:var(--app-text-muted); }.library-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:16px; }.library-card { border:1px solid var(--app-border); border-radius:12px; overflow:hidden; }.library-card.selected { border-color:var(--app-accent); box-shadow:0 0 0 1px var(--app-accent); }.library-cover { position:relative; aspect-ratio:16/9; background:var(--app-surface-muted); }.library-cover>button { display:grid; place-items:center; width:100%; height:100%; padding:0; border:0; cursor:pointer; color:var(--app-text-muted); background:transparent; }.library-cover img { width:100%; height:100%; object-fit:cover; }.library-cover input { position:absolute; top:10px; left:10px; width:20px; height:20px; accent-color:var(--app-accent); }.library-play { position:absolute; color:white; background:#0008; border-radius:50%; padding:8px; width:42px; height:42px; }.library-cover small { position:absolute; right:8px; bottom:8px; color:white; background:#000a; padding:2px 5px; border-radius:4px; }.library-card-info { padding:12px; }.library-card-info>strong,.library-card-info>small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.library-card-info>strong { font-size:14px; }.library-card-info>small { font-size:11px; color:var(--app-text-muted); margin-top:6px; }.library-card-actions { display:flex; justify-content:flex-end; gap:4px; margin-top:8px; }.library-empty { display:grid; justify-items:center; gap:12px; padding:70px 12px; color:var(--app-text-muted); }.library-empty p { margin:0; font-size:13px; }.library-footer { margin-top:20px; flex-wrap:wrap; font-size:12px; }.library-error,.danger { color:var(--app-danger,#c54d4d); }.library-file-input { display:none; }.library-preview-video { display:block; width:100%; max-height:70vh; }.library-form { display:grid; gap:16px; }.library-form label { display:grid; gap:8px; }.library-form input { padding:10px; border:1px solid var(--app-border); background:var(--app-surface); border-radius:8px; color:var(--app-text); }.is-picker { padding:0; }button:focus-visible,input:focus-visible { outline:2px solid var(--app-accent); outline-offset:2px; }
+.library-main { padding:20px; min-width:0; }.library-search { display:flex; align-items:center; gap:10px; padding:4px 4px 4px 12px; border:1px solid var(--app-border); border-radius:10px; }.library-search input { flex:1; width:0; border:0; background:transparent; color:inherit; padding:8px; }.library-selection { margin:16px 0; font-size:12px; flex-wrap:wrap; color:var(--app-text-muted); }.library-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:16px; }
+.library-card { display:flex; flex-direction:column; border:1px solid var(--app-border); border-radius:12px; background:var(--app-surface); overflow:hidden; transition:border-color .15s ease, box-shadow .15s ease; }
+.library-card.selected { border-color:var(--app-accent); box-shadow:0 0 0 1px var(--app-accent); }
+.library-cover { position:relative; width:100%; aspect-ratio:16/9; background:var(--app-surface-muted); overflow:hidden; flex-shrink:0; }
+.library-cover-btn { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; width:100%; height:100%; padding:0; border:0; background:transparent; cursor:pointer; overflow:hidden; }
+.library-cover-btn:disabled { cursor:not-allowed; }
+.library-cover img { width:100%; height:100%; object-fit:cover; display:block; }
+.library-cover-placeholder { color:var(--app-text-muted); }
+.library-cover input[type="checkbox"] { position:absolute; top:8px; left:8px; z-index:2; width:18px; height:18px; margin:0; accent-color:var(--app-accent); cursor:pointer; }
+.library-play { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:1; display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:50%; color:#fff; background:rgba(0,0,0,0.55); backdrop-filter:blur(4px); pointer-events:none; transition:transform .15s ease, background .15s ease; }
+.library-card:hover .library-play { transform:translate(-50%,-50%) scale(1.08); background:rgba(0,0,0,0.75); }
+.library-cover small { position:absolute; right:8px; bottom:8px; z-index:2; display:inline-flex; align-items:center; padding:2px 6px; font-size:11px; font-weight:500; line-height:1.2; color:#fff; background:rgba(0,0,0,0.75); border-radius:4px; pointer-events:none; }
+.library-card-info { display:flex; flex-direction:column; gap:4px; padding:10px 12px; min-width:0; flex:1; }
+.library-card-info>strong,.library-card-info>small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.library-card-info>strong { font-size:13px; font-weight:600; color:var(--app-text); }
+.library-card-info>small { font-size:11px; color:var(--app-text-muted); }
+.library-card-actions { display:flex; justify-content:flex-end; gap:4px; margin-top:6px; }.library-empty { display:grid; justify-items:center; gap:12px; padding:70px 12px; color:var(--app-text-muted); }.library-empty p { margin:0; font-size:13px; }.library-footer { margin-top:20px; flex-wrap:wrap; font-size:12px; }.library-error,.danger { color:var(--app-danger,#c54d4d); }.library-file-input { display:none; }.library-preview-video { display:block; width:100%; max-height:70vh; }.library-form { display:grid; gap:16px; }.library-form label { display:grid; gap:8px; }.library-form input { padding:10px; border:1px solid var(--app-border); background:var(--app-surface); border-radius:8px; color:var(--app-text); }.is-picker { padding:0; }button:focus-visible,input:focus-visible { outline:2px solid var(--app-accent); outline-offset:2px; }
 .library-toolbar { display:flex; align-items:center; gap:10px; }.library-toolbar .library-search { flex:1; min-width:0; }.library-toolbar .library-actions { flex-shrink:0; gap:8px; }.is-picker .library-main { padding:14px; }.is-picker .library-selection { margin:12px 0; }
 @media(max-width:700px) { .library-toolbar { flex-wrap:wrap; }.library-toolbar .library-search { flex-basis:100%; }.library-toolbar .library-actions { margin-left:auto; } }
 .library-upload-summary { display:flex; align-items:center; gap:12px; padding:16px; margin-bottom:18px; border:1px solid var(--app-border); border-radius:12px; color:var(--app-accent); background:var(--app-accent-soft); }

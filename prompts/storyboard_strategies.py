@@ -5,7 +5,9 @@ storyboard service factory.
 """
 
 from dataclasses import dataclass, replace
-from prompts.catalog import catalog, template, text
+import json
+from prompts.catalog import catalog, text
+from prompts.skill_pack import read_skill
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,8 +26,8 @@ CINEMATIC_STORYBOARD_STRATEGY = StoryboardStrategyPrompt(
     key="cinematic",
     name=text("strategy_cinematic_name", "zh"),
     description=text("strategy_cinematic_description", "zh"),
-    prohibitions=text("prohibitions_cinematic", "zh"),
-    aliases=tuple(catalog("messages.json", "zh")["strategy_cinematic_aliases"]),
+    prohibitions=json.loads(read_skill("strategies"))["cinematic"]["restrictions"],
+    aliases=tuple(catalog("strategies.json", "zh")["strategy_cinematic_aliases"]),
 )
 
 
@@ -33,9 +35,9 @@ NARRATION_STORYBOARD_STRATEGY = StoryboardStrategyPrompt(
     key="narration",
     name=text("strategy_narration_name", "zh"),
     description=text("strategy_narration_description", "zh"),
-    generation_rules=template("strategy_narration.md", "zh"),
-    prohibitions=text("prohibitions_narration", "zh"),
-    aliases=tuple(catalog("messages.json", "zh")["strategy_narration_aliases"]),
+    generation_rules=json.loads(read_skill("strategies"))["narration"]["rules"],
+    prohibitions=json.loads(read_skill("strategies"))["narration"]["restrictions"],
+    aliases=tuple(catalog("strategies.json", "zh")["strategy_narration_aliases"]),
 )
 
 
@@ -52,6 +54,6 @@ def localized_strategy(
         return strategy
     return replace(
         strategy,
-        generation_rules=template(f"strategy_{strategy.key}.md", language),
-        prohibitions=text(f"prohibitions_{strategy.key}", language),
+        generation_rules=json.loads(read_skill("strategies"))[strategy.key]["rules"],
+        prohibitions=json.loads(read_skill("strategies"))[strategy.key]["restrictions"],
     )

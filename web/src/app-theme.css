@@ -398,11 +398,6 @@
 :root[data-app-theme='dark'] .asset-dialog__header .app-button--ghost { color: var(--app-text-secondary); background: transparent; }
 :root[data-app-theme='dark'] .asset-dialog__header .app-button--ghost:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
 :root[data-app-theme='dark'] .asset-dialog__body { background: var(--app-surface); }
-:root[data-app-theme='dark'] .asset-dialog .asset-generation-history__list article .asset-generation-history__error,
-:root[data-app-theme='dark'] .asset-dialog .asset-generation-history__list article .asset-generation-history__error > :is(span,button) { color: #ff8f9c; }
-:root[data-app-theme='dark'] .asset-dialog .asset-generation-history__list article .asset-generation-history__error > button:hover { color: #ffb2bb; }
-:root[data-app-theme='dark'] .asset-dialog .asset-generation-error-detail { background: #191715; }
-:root[data-app-theme='dark'] .asset-dialog .asset-generation-error-detail pre { color: #f0a097; }
 :root[data-app-theme='dark'] .batch-dialog__header .app-button--ghost { color: var(--app-text-secondary); background: transparent; }
 :root[data-app-theme='dark'] .batch-dialog__header .app-button--ghost:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
 :root[data-app-theme='dark'] .batch-dialog__body { background: var(--app-surface); }

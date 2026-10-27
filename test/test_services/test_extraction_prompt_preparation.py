@@ -4,7 +4,10 @@ from services.extraction.extractor import (
     Person,
     Scene,
 )
-from services.extraction.prompt_preparation import AssetPromptPreparationService
+import pytest
+from models.asset import Asset
+from models.novel import Novel
+from services.extraction.persistence import AssetUpsertService
 
 
 PERSON_TRAITS = """时代基底: modern
@@ -23,7 +26,8 @@ PERSON_TRAITS = """时代基底: modern
 年龄: young adult"""
 
 
-def test_preparation_persists_complete_default_prompts_without_mutating_traits():
+@pytest.mark.asyncio
+async def test_extracted_complete_prompts_are_persisted_without_hidden_templates():
     result = AssetExtractionResult(
         persons=[
             Person(
@@ -45,26 +49,17 @@ def test_preparation_persists_complete_default_prompts_without_mutating_traits()
         ],
     )
 
-    prepared = AssetPromptPreparationService().prepare(
-        result,
-        prompt_language="zh",
-    )
+    novel = await Novel.create(name="Story")
+    await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1, result=result)
 
     assert result.persons[0].base_traits == PERSON_TRAITS
-    assert prepared.persons[0].base_traits.startswith(
-        "任务：完成角色的上半身正面平视特写"
-    )
-    assert "正面全身、侧面全身、背面全身" in prepared.persons[0].base_traits
-    assert PERSON_TRAITS in prepared.persons[0].base_traits
-    assert prepared.scenes[0].base_traits.startswith(
-        "生成四宫格画面，展示同一个场景中的四个不同视角"
-    )
-    assert prepared.items[0].base_traits.startswith(
-        "【道具描述】银色表壳，白色表盘，黑色指针"
-    )
+    assert (await Asset.get(novel_id=novel.id, canonical_name="张三")).base_traits == PERSON_TRAITS
+    assert (await Asset.get(novel_id=novel.id, canonical_name="旧宅")).base_traits == "青灰砖墙，木门，夜间冷光"
+    assert (await Asset.get(novel_id=novel.id, canonical_name="铜表")).base_traits == "银色表壳，白色表盘，黑色指针"
 
 
-def test_preparation_does_not_wrap_an_already_complete_user_prompt_twice():
+@pytest.mark.asyncio
+async def test_historical_complete_user_prompt_is_not_wrapped_twice():
     complete_prompt = (
         "任务：完成角色的上半身正面平视特写和该角色的全身三视图，"
         "这是已经保存的完整自定义 Prompt。"
@@ -75,9 +70,7 @@ def test_preparation_does_not_wrap_an_already_complete_user_prompt_twice():
         items=[],
     )
 
-    prepared = AssetPromptPreparationService().prepare(
-        result,
-        prompt_language="zh",
-    )
+    novel = await Novel.create(name="Story")
+    await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1, result=result)
 
-    assert prepared.scenes[0].base_traits == complete_prompt
+    assert (await Asset.get(novel_id=novel.id, canonical_name="旧宅")).base_traits == complete_prompt

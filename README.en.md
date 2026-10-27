@@ -156,7 +156,7 @@ Voice bindings persist across chapters when the same project assets are reused. 
 - **Bounded context:** query objects as needed, read long text in pages and compact older working context while retaining original records.
 - **Inspectable changes:** show diffs and undo actions. Idempotent requests avoid duplicate writes; version conflicts prevent overwriting newer edits.
 
-The assistant manages creative settings and storyboards. Image and video generation remain available through the workspace's generation controls.
+The assistant coordinates settings, storyboards, images, videos and composition. Existing workspace buttons and chat share the same skills and execution boundaries. An explicit generation request authorizes the corresponding model calls.
 
 ### Enable and use
 
@@ -349,6 +349,8 @@ DATABASE_URL=postgres://novelvids:your-password@127.0.0.1:5432/novelvids
 
 Startup creates missing tables with `safe=True` and runs compatibility initialization. It does not delete existing tables. Back up the database before migrating an existing deployment; changing the URL does not transfer its data.
 
+Project names are unique within a team, or within a creator’s personal scope when no team is assigned. Different scopes can use the same name. Existing global name constraints require an explicitly reviewed migration; see [project name scoping and migration](docs/project-name-scoping.md). The migration defaults to preview and never runs automatically at startup.
+
 ### Local media and Alibaba Cloud OSS
 
 Local storage:
@@ -394,47 +396,17 @@ The backend continues querying queued and running provider tasks after the brows
 
 ## Customizing prompts and rules (developers)
 
-**If the default results are not suitable, you can edit the prompts and generation rules yourself.** For inaccurate extraction, fragmented shots, overly long dialogue or inconsistent style, start with the corresponding template and compare results on a fixed sample. You do not need to rewrite provider calls to tune creative instructions.
+New production uses the **creation assistant and one Chinese skill pack**. Enable the assistant and configure a model with tool calling. Buttons and chat share production capabilities; the agent writes output in the configured system language.
 
-Chinese templates live in [`prompts/templates/zh/`](prompts/templates/zh/); English templates live in [`prompts/templates/en/`](prompts/templates/en/). Matching filenames contain independent language versions. A task loads the complete version for its language snapshot, rather than replacing Chinese sentences or appending English instructions to a Chinese system prompt.
+Tune [`prompts/skills/`](prompts/skills/): `SKILL.md` is the entrypoint. Story analysis, assets, images, storyboards, remake and video production use `story.md`, `assets.md`, `image.md`, `storyboard.md`, `remake.md` and `video.md`. Shared styles and strategies live in `styles.json` and `strategies.json`.
 
-All filenames below are relative to the selected language directory:
+Scene reference layouts also belong in `image.md`: the default is a full-bleed 2×2 grid of cinematic views with thin dividers, no viewpoint headings, annotations, white margins or presentation-board framing. After changing this rule, ask the assistant to optimize and save an existing asset's prompt before generating again. Regeneration alone keeps the original saved prompt.
 
-| Behavior or rule to tune | Location |
-| --- | --- |
-| Story analysis, genres, outline and key characters | `analysis_system.md` |
-| Project cover | `cover.md` |
-| Asset selection, recurrence, deduplication and evidence priority | `extraction_system.md` |
-| Individual/animal, group, location and prop visual-design rules | `character_rules.md`, `group_rules.md`, `scene_rules.md`, `item_rules.md` |
-| Final character reference, four-view location sheet and prop layouts | `reference_character.md`, `reference_scene.md`, `reference_item.md`; other asset types use `reference_other.md` |
-| Shot quality, action timelines, dialogue and continuity | `storyboard_system.md`; initial and continuation batches use `storyboard_initial.md` and `storyboard_continue.md` |
-| Storyboard data boundaries and context framing | `storyboard_assets.md`, `storyboard_narrative.md`, `storyboard_constraints.md` |
-| Cinematic and narration strategies | `strategy_cinematic.md`, `strategy_narration.md`; restrictions are the `prohibitions_*` entries in `messages.json`. The cinematic supplement is empty by default because it uses the main storyboard rules |
-| Assistant editing, CRUD, history summaries and final-turn behavior | `agent_edit.md`, `agent_crud.md`, `agent_summary.md`, `agent_turn_limit.md` |
-| Remake asset analysis, subtitle cross-checking and shot reconstruction | `remake_assets.md`, `remake_shots.md` |
-| Image and video rules for each visual style | `styles.json`: edit `image` / `video` under the stable style key; `label` names the style inside that language's prompt, while page copy uses frontend i18n |
-| Output language, JSON instructions, speaker/audio mapping, frame continuity and shared framing | Named entries in `messages.json` |
-| Model-facing field and tool descriptions | `schema.json`, with mappings in [`prompts/schema.py`](prompts/schema.py) |
-| Character trait fields and rendered section labels | `contracts.json`, `labels.json`; changes also require parser/validation compatibility work |
+The agent authors one complete shot structure. A shared serializer saves the restrictions, style, references, conditions, action and voice timelines, transition and effects as the editable Prompt, preventing a separately written summary from dropping dialogue or narration. Tune creative requirements in `storyboard.md`; `storyboard_contract.json` versions the output protocol, and `prompts/storyboard.py` serializes its columns. Video submission uses the saved text unchanged. Existing shots and task snapshots are preserved; regenerate to apply the new rules.
 
-### Editing rules and activation
+Free-text interpretation proposes operations; ambiguous requests require confirmation of their targets before generation. Database-unique receipts and persisted unresolved client IDs protect retries across reloads.
 
-1. **For creative tuning, edit template prose first.** Preserve evidence priority, data boundaries and the meaning of required constraints. Maintain both language versions when changing a shared rule.
-2. **Keep placeholders and protocol identifiers intact.** Do not casually rename or remove `{details}`, `{ratio}`, `{output_guard}`, `{language_instruction}`, JSON keys, tool names or style keys. In templates rendered with `.format()`, literal braces must be doubled, as in `@{{Full Entity Name}}` inside the storyboard system template. Assistant bodies are loaded directly: do not mechanically double their existing `@{Full Entity Name}` references.
-3. **Prompt guidance and application limits are different.** Natural-language rules live in the template directories. Response structures and validation live in [`schemas/`](schemas/); character-field validation lives in [`prompts/extraction.py`](prompts/extraction.py) and [`prompts/creation_standards.py`](prompts/creation_standards.py). Media limits, durations and billing capabilities remain governed by backend configuration and service validation. Editing prose does not bypass those limits.
-4. **Preserve historical compatibility.** New English character descriptions use English trait labels, while legacy Chinese labels remain readable. Changes to field names/order in `contracts.json`, section labels in `labels.json` or recognized template opening markers require corresponding parser, validator and test updates. `*_legacy_prefix.md` and `remake_*_prefix.md` retain compatibility with legacy exports/remake layouts; normally tune the main templates listed above.
-5. **User content is not automatically translated.** Existing manuscript text, names, edited prompts and custom styles are passed through unchanged. Compatibility reference tokens such as `@{Asset Name}`, `@{镜头时长:…}` and `[音频N]` are protocol syntax, not mixed-language instruction prose. Do not rename them independently.
-6. **Restart the backend after editing, then submit test tasks.** [`prompts/catalog.py`](prompts/catalog.py) caches resource files. Rebuild and restart Docker deployments. Task language is snapshotted, but template bodies are not version-snapshotted: queued tasks that have not rendered their prompts may read the updated templates. Saved asset/shot prompts are not rewritten automatically. An existing complete reference-image prompt remains authoritative; regenerate or edit it to adopt a new template.
-
-### Verify a change
-
-Check rendering, language isolation, legacy fields and call contracts before evaluating a real model:
-
-```sh
-uv run pytest test/test_services/test_prompt_locales.py test/test_services/test_prompt_language.py test/test_services/test_storyboard_prompts.py test/test_services/test_creation_prompt_standards.py test/test_services/test_style_prompts.py test/test_services/test_remake_prompt_render.py -q
-```
-
-Change one rule family at a time. Compare the same model, settings, two-chapter sample and voice references, recording identity consistency, shot continuity, dialogue and lip synchronization. Automated tests validate templates and requests, not the subjective quality of generated audio/video.
+Tasks snapshot skill content and language at submission. Edits affect new tasks only. Complete saved prompts remain authoritative; editing prompts alone does not authorize paid media generation. Former Chinese/English templates, their archive and duplicate rule translations have been deleted; Skills are the only creative rule source. `prompts/locales/` contains display and serialization labels only. Tune images, storyboards and shared styles exclusively in Skills; new tasks neither prepare old templates nor fall back to them after assistant failures. See the [workflow and maintenance guide](docs/agent-skills-workflow.en.md) for file roles, recovery, billing boundaries and regression commands.
 
 ## Project structure
 

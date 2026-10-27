@@ -12,7 +12,7 @@ CATALOG = json.loads(
 )
 
 
-def localized_message(source: str, **parameters: object) -> str:
-    language = task_language.get() or message_language.get()
+def localized_message(source: str, *, _language: str | None = None, **parameters: object) -> str:
+    language = _language or task_language.get() or message_language.get()
     template = CATALOG.get(source, source) if language == "en" else source
     return re.sub(r"\{(p\d+)\}", lambda match: str(parameters[match[1]]), template)

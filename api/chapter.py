@@ -1,3 +1,4 @@
+from api._production_request import production_request
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from auth.deps import (
@@ -15,7 +16,7 @@ from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(production_request)])
 
 _EDITOR = Depends(require_roles("admin", "creator"))
 

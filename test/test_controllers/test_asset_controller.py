@@ -364,7 +364,7 @@ async def test_列表查询_按chapter_id过滤():
 # =====================================================================
 
 @pytest.mark.asyncio
-async def test_reference_提交参考图任务():
+async def test_reference_提交参考图任务(configured_creation_agent):
     """reference 方法成功提交参考图生成任务。"""
     from models.config import AiModelConfig
     from models.ai_task import AiTask
@@ -399,7 +399,7 @@ async def test_reference_提交参考图任务():
 
 
 @pytest.mark.asyncio
-async def test_reference_提交图生图参考图片并去重():
+async def test_reference_提交图生图参考图片并去重(configured_creation_agent):
     from models.config import AiModelConfig
     from utils.enums import AiTaskTypeEnum
 
@@ -428,7 +428,7 @@ async def test_reference_提交图生图参考图片并去重():
 
 
 @pytest.mark.asyncio
-async def test_reference_使用资产指定的生图模型():
+async def test_reference_使用资产指定的生图模型(configured_creation_agent):
     """资产元数据指定已启用模型时，生成任务使用该模型而不是自动选择模型。"""
     from models.config import AiModelConfig
     from utils.enums import AiTaskTypeEnum
@@ -463,13 +463,15 @@ async def test_reference_使用资产指定的生图模型():
     task = await asset_controller.reference(asset.id)
 
     assert selected_config.id != active_config.id
-    assert task.request_params["base_url"] == selected_config.base_url
+    assert task.request_params["model_config_id"] == selected_config.id
+    assert "base_url" not in task.request_params
+    assert "api_key" not in task.request_params
     assert task.request_params["model"] == selected_config.model
     assert task.request_params["api_protocol"] == "volcengine_ark"
 
 
 @pytest.mark.asyncio
-async def test_reference_衍生形态使用自身JSON配置的生图模型():
+async def test_reference_衍生形态使用自身JSON配置的生图模型(configured_creation_agent):
     """衍生形态覆盖主形象的模型与参数，保证每个版本独立生成。"""
     from models.config import AiModelConfig
     from utils.enums import AiTaskTypeEnum
@@ -549,8 +551,8 @@ async def test_reference_拒绝资产指定的停用模型():
 
 
 @pytest.mark.asyncio
-async def test_reference_重复提交被拦截():
-    """同一资产重复提交参考图任务被拦截。"""
+async def test_reference_重复提交返回原任务(configured_creation_agent):
+    """同一资产重复提交参考图任务复用原任务。"""
     from models.config import AiModelConfig
     from models.ai_task import AiTask
     from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -578,11 +580,9 @@ async def test_reference_重复提交被拦截():
         request_params={"asset_id": asset.id},
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await asset_controller.reference(asset.id)
-    assert exc_info.value.status_code == 400
-    assert "进行中" in exc_info.value.detail
-    print(f"    已有任务 id={existing.id}，重复提交被拦截: {exc_info.value.detail}")
+    task = await asset_controller.reference(asset.id)
+    assert task.id == existing.id
+
 
 
 @pytest.mark.asyncio
@@ -602,7 +602,7 @@ async def test_reference_无配置报404():
 
 
 @pytest.mark.asyncio
-async def test_reference_超时任务被清理后可重新提交():
+async def test_reference_超时任务被清理后可重新提交(configured_creation_agent):
     """超时任务被清理后可重新提交参考图任务。"""
     from datetime import datetime, timezone, timedelta
     from models.config import AiModelConfig

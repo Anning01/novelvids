@@ -32,6 +32,19 @@ async def ensure_creation_agent_schema() -> None:
             )
 
 
+async def ensure_agent_operation_schema() -> None:
+    """Add durable receipts on existing installs even when automatic schemas are off."""
+    from models.agent_operation import AgentOperation
+    from models.agent_submission import AgentSubmission
+
+    connection = Tortoise.get_connection("default")
+    # Reuse the ORM's backend-specific FK/UUID definitions instead of parallel DDL.
+    generator = connection.schema_generator(connection)
+    for model in (AgentOperation, AgentSubmission):
+        definition = generator._get_table_sql(model, safe=True)
+        await connection.execute_script(definition["table_creation_string"])
+
+
 async def ensure_ai_model_config_schema() -> None:
     """为已有 SQLite 数据库补齐模型能力与协议字段。"""
     if not settings.DATABASE_URL.startswith("sqlite"):
@@ -402,17 +415,18 @@ async def _ensure_model_config_scope_schema(connection) -> None:
 
 
 async def _backfill_default_team(connection) -> None:
-    """尚无团队且存在无归属小说时，创建默认团队并回填 team_id。"""
+    """Only legacy projects without a team or creator belong in the default team."""
     from auth.models import Team
     from models.novel import Novel
 
-    orphan_novels = await Novel.filter(team_id=None).count()
+    legacy_projects = Novel.filter(team_id=None, created_by=None)
+    orphan_novels = await legacy_projects.count()
     if orphan_novels == 0:
         return
     if not await Team.exists():
         await Team.create(name="默认团队")
     default_team = await Team.first()
-    await Novel.filter(team_id=None).update(team_id=default_team.id)
+    await legacy_projects.update(team_id=default_team.id)
     await connection.execute_script(
         "UPDATE model_usage_records SET team_id = "
         "(SELECT team_id FROM novels WHERE novels.id = model_usage_records.novel_id) "

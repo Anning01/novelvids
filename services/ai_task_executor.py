@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
+from services.creation_agent.waiting import WaitingForMedia
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ class AiTaskExecutor:
         self._semaphores: dict[AiTaskTypeEnum, asyncio.Semaphore] = {}
         # 同一任务可能因幂等重放被重复投递，进程内只允许一个执行者。
         self._task_locks: dict[str, asyncio.Lock] = {}
+        self._production_condition = asyncio.Condition()
+        self._production_active = 0
 
     def register(self, task_type: AiTaskTypeEnum, handler: BaseTaskHandler):
         """注册任务处理器。"""
@@ -93,6 +96,8 @@ class AiTaskExecutor:
         )
 
         for task in stale_tasks:
+            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.status in {1, 6} or task.stage in {"waiting_media", "needs_review"}):
+                continue
             handler = self._handlers.get(task_type)
             timeout = (handler.timeout_seconds(task.request_params) if handler else None) or TASK_TIMEOUT.get(task_type, 60)
             # running 任务以 started_at 为基准，pending 任务以 created_at 为基准
@@ -125,20 +130,40 @@ class AiTaskExecutor:
         request_params = dict(request_params)
         if "prompt_language" not in request_params:
             request_params["prompt_language"] = await generation_language()
-        task = await AiTask.create(
-            task_type=task_type.value,
-            request_params=request_params,
-            status=TaskStatusEnum.pending.value,
-            using_db=db_connection,
-        )
-        return task
+        if request_params.get('workflow_version') == 'agent-skills-v1':
+            from services.creation_agent.submissions import previous_submission
+            previous = await previous_submission(task_type.value, request_params, db_connection)
+            if previous:
+                return previous
+            for secret in ('api_key', 'base_url'):
+                request_params.pop(secret, None)
+        async def create(connection):
+            return await AiTask.create(task_type=task_type.value, request_params=request_params,
+                status=TaskStatusEnum.pending.value, using_db=connection)
+        if request_params.get('workflow_version') == 'agent-skills-v1':
+            from services.creation_agent.submissions import submit_once
+            return await submit_once(task_type.value, request_params, create)
+        return await create(db_connection)
 
     async def run(self, task: AiTask):
         key = str(task.id)
         lock = self._task_locks.setdefault(key, asyncio.Lock())
         try:
             async with lock:
-                await self._run_once(task)
+                if task.request_params.get("workflow_version") != "agent-skills-v1":
+                    await self._run_once(task)
+                    return
+                from services.creation_agent.sessions import agent_configuration
+                capacity = (await agent_configuration()).production_concurrency
+                async with self._production_condition:
+                    await self._production_condition.wait_for(lambda: self._production_active < capacity)
+                    self._production_active += 1
+                try:
+                    await self._run_once(task)
+                finally:
+                    async with self._production_condition:
+                        self._production_active -= 1
+                        self._production_condition.notify_all()
         finally:
             if not lock.locked():
                 self._task_locks.pop(key, None)
@@ -151,6 +176,12 @@ class AiTaskExecutor:
         """
         task_type = AiTaskTypeEnum(task.task_type)
         handler = self._handlers.get(task_type)
+        if task_type == AiTaskTypeEnum.video and task.request_params.get('workflow_version') == 'agent-skills-v1':
+            from services.creation_agent.video_jobs import VideoProductionHandler
+            handler = VideoProductionHandler()
+            if task.request_params.get('operation') == 'compose':
+                from services.creation_agent.composition import CompositionHandler
+                handler = CompositionHandler()
         if handler is None:
             await self._fail(task, localized_message("未注册的任务类型: {p0}", p0=localized_message(task_type.nickname)))
             return
@@ -181,17 +212,29 @@ class AiTaskExecutor:
         token = task_language.set(task.request_params.get("prompt_language", legacy_language))
         try:
             result = await asyncio.wait_for(
-                handler.execute(task.request_params),
+                self._execute_handler(task, handler),
                 timeout=timeout,
             )
             await self._complete(task, result)
-        except asyncio.TimeoutError:
-            await self._fail(task, localized_message("任务超时（{p0}s）", p0=timeout))
+        except WaitingForMedia as waiting:
+            await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
+        except asyncio.TimeoutError as error:
+            await self._fail(task, localized_message("任务超时（{p0}s）", p0=timeout), error=error)
         except Exception as e:
-            logger.exception("AI task #%s failed", task.id)
+            if task.request_params.get("workflow_version") == "agent-skills-v1":
+                logger.warning("AI task failed: task_id=%s error_type=%s", task.id, type(e).__name__)
+            else:
+                logger.exception("AI task #%s failed", task.id)
             await self._fail(task, str(e), error=e)
         finally:
             task_language.reset(token)
+
+    async def _execute_handler(self, task, handler):
+        from services.creation_agent.skill_execution import WORKFLOW_VERSION
+        if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
+            from services.creation_agent.production import run_production
+            return await run_production(task, handler)
+        return await handler.execute(task.request_params)
 
     async def submit_and_run(
         self, task_type: AiTaskTypeEnum, request_params: dict
@@ -227,7 +270,26 @@ class AiTaskExecutor:
             updated_at=datetime.now(timezone.utc),
         )
         await task.refresh_from_db()
-        await record_ai_task_usage(task, result=result, error=None)
+        if task.status == TaskStatusEnum.cancelled.value and task.request_params.get('workflow_version') == 'agent-skills-v1':
+            await AiTask.filter(id=task.id).update(response_data=result)
+        versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
+        try:
+            await record_ai_task_usage(task, result=result, error=None)
+        except Exception as error:
+            if not versioned:
+                raise
+            await self._defer_billing(task, result)
+            logger.warning("Task usage settlement deferred: task_id=%s error_type=%s", task.id, type(error).__name__)
+        else:
+            await task.refresh_from_db()
+            if versioned:
+                terminal_stage = {3: 'completed', 4: 'failed', 5: 'cancelled'}.get(task.status, task.stage)
+                await AiTask.filter(id=task.id, stage='billing_pending').update(stage=terminal_stage)
+                if task.request_params.get('billing_pending'):
+                    await AiTask.filter(id=task.id).update(request_params={key: value for key, value in task.request_params.items() if key != 'billing_pending'})
+        await task.refresh_from_db()
+        from services.creation_agent.production import finish_production_message
+        await finish_production_message(task)
 
     async def fail_stale_on_boot(self) -> None:
         """服务启动时清理进程遗留任务。
@@ -245,6 +307,8 @@ class AiTaskExecutor:
             ],
         )
         for task in stale:
+            if task.request_params.get("workflow_version") == "agent-skills-v1" and task.task_type != AiTaskTypeEnum.creation_agent.value:
+                continue
             logger.warning("Boot cleanup: failing stale task #%s", task.id)
             await self._fail(
                 task,
@@ -261,9 +325,13 @@ class AiTaskExecutor:
     ):
         task.status = TaskStatusEnum.failed.value
         task.error_message = error_message
+        from models.agent_operation import AgentOperation
+        if task.request_params.get('workflow_version') == 'agent-skills-v1' and await AgentOperation.filter(task_id=task.id, state='uncertain', external=True).exists():
+            task.stage = 'needs_review'
+            task.error_message = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))
         task.finished_at = datetime.now(timezone.utc)
-        update_fields = ["status", "error_message", "finished_at", "updated_at"]
-        if task.stage is not None:
+        update_fields = ["status", "error_message", "finished_at", "updated_at", "stage"]
+        if task.stage is not None and task.stage != "needs_review":
             task.stage = "failed"
             update_fields.append("stage")
         await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.queued.value, TaskStatusEnum.running.value]).update(
@@ -271,10 +339,31 @@ class AiTaskExecutor:
             updated_at=datetime.now(timezone.utc),
         )
         await task.refresh_from_db()
+        partial_result = getattr(error, 'partial_result', None)
+        if isinstance(partial_result, dict):
+            await AiTask.filter(id=task.id).update(response_data=partial_result)
+            await task.refresh_from_db()
+        from services.creation_agent.production import finish_production_message
+        await finish_production_message(task)
         if record_usage:
             # Handler 可能在执行期间补充了最终模型配置，失败计费应读取该快照。
             await task.refresh_from_db()
-            await record_ai_task_usage(task, result=None, error=error)
+            versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
+            try:
+                await record_ai_task_usage(task, result=partial_result, error=error)
+            except Exception:
+                if not versioned:
+                    raise
+                await self._defer_billing(task, {**(task.response_data or {}), 'image_count': getattr(error, 'image_count', 0)})
+
+    async def _defer_billing(self, task, result):
+        await task.refresh_from_db()
+        await AiTask.filter(id=task.id).update(
+            stage=task.stage if task.stage == 'needs_review' else 'billing_pending',
+            response_data=result,
+            request_params={**task.request_params, 'billing_pending': True},
+        )
+
 
 
 # 全局单例，在应用启动时注册各 handler

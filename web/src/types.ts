@@ -50,6 +50,28 @@ export interface NovelMeta {
 }
 export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
 export interface Novel { id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface ProjectProduction {
+  chapter_count: number
+  storyboard_chapter_count: number
+  completed_episode_count: number
+  completed_shot_count: number
+  shot_count: number
+  asset_count: number
+  video_seconds: number
+  unknown_duration_count: number
+  latest_episode_number: number | null
+  latest_activity_at: string
+  state: 'not_started' | 'in_progress' | 'ready'
+}
+export interface ProjectOverviewItem extends Novel { production: ProjectProduction }
+export interface ProjectOverviewSummary {
+  project_count: number
+  chapter_count: number
+  asset_count: number
+  video_seconds: number
+  unknown_duration_count: number
+}
+export interface ProjectOverview { items: ProjectOverviewItem[]; summary: ProjectOverviewSummary }
 export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; image_thumbnails?: Array<string | null>; image_previews?: Array<string | null>; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
@@ -118,6 +140,18 @@ export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3' | 'wan_3'
+export interface VideoGenerationOptions {
+  generation_mode?: 'reference' | 'keyframes'
+  first_frame_url?: string
+  last_frame_url?: string
+  resolution?: string
+  aspect_ratio?: string
+  duration?: number
+  output_format?: string
+  generate_audio?: boolean
+  return_last_frame?: boolean
+  reference_media?: VideoReferenceMedia[]
+}
 export interface VideoReferenceMedia { library_resource_id?: number | null; mention_name?: string | null; type: 'image' | 'video'; url: string; mention_url?: string; name?: string; content_type?: string; size_bytes?: number; width?: number; height?: number; duration?: number; fps?: number; codec?: string }
 export interface VideoInputImageReference {
   number: number

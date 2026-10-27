@@ -31,6 +31,7 @@ vi.mock('@/api', async (importOriginal) => {
       assets: vi.fn(),
       storyboardStrategies: vi.fn(),
       analyzeNovel: vi.fn(),
+      task: vi.fn(),
     },
   }
 })
@@ -187,4 +188,57 @@ it('查看者在分析任务缺失时直接预览已上传章节且不会触发�
   expect(wrapper.text()).toContain('宫平与运在雨中前行。')
   expect(wrapper.text()).not.toContain('重新分析')
   expect(wrapper.text()).not.toContain('开始分析')
+})
+
+
+it('reanalysis replaces the old failed run only after a new task is admitted', async () => {
+  vi.mocked(api.novelAnalysis).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'old-run', task_type: 5, status: TaskStatusEnum.FAILED, stage: 'needs_review',
+    error_message: '外部请求结果待核对，系统不会自动重试', created_at: '',
+  } })
+  let admit!: (result: Awaited<ReturnType<typeof api.analyzeNovel>>) => void
+  vi.mocked(api.analyzeNovel).mockImplementation(() => new Promise(resolve => { admit = resolve }))
+  vi.mocked(api.task).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'new-run', task_type: 5, status: TaskStatusEnum.COMPLETED, created_at: '',
+    response_data: { book_types: ['冒险'], story_outline: '新的分析结果', key_characters: [], chapter_count: 1 },
+  } })
+  const wrapper = mount(ShortDramaAgentPage, { global: {
+    plugins: [pinia], components: { AppButton }, stubs: { RouterLink: { template: '<a><slot /></a>' } },
+  } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('外部请求结果待核对')
+  await wrapper.findAll('button').find(button => button.text() === '重新分析')!.trigger('click')
+  expect(api.analyzeNovel).toHaveBeenCalledOnce()
+  expect(wrapper.get('.secondary-action').attributes('disabled')).toBeDefined()
+  admit({ code: 0, message: '', data: { id: 'new-run', task_type: 5, status: TaskStatusEnum.QUEUED, created_at: '' } })
+  await flushPromises()
+  expect(api.task).toHaveBeenCalledWith('new-run')
+  expect(wrapper.text()).toContain('剧本分析完成')
+  expect(wrapper.text()).toContain('新的分析结果')
+  expect(wrapper.text()).not.toContain('外部请求结果待核对')
+})
+
+it('keeps completed story analysis usable when only the cover is awaiting review', async () => {
+  vi.mocked(api.novelAnalysis).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'cover-failed-run', task_type: 5, status: TaskStatusEnum.FAILED, stage: 'needs_review', created_at: '',
+    error_message: '外部请求结果待核对，系统不会自动重试',
+    response_data: { analysis_completed: true, cover_status: 'needs_review',
+      cover_warning: '故事分析已完成，封面暂未生成。已保存的分析结果可以继续使用。',
+      book_types: ['冒险'], story_outline: '封面失败后仍可使用的大纲',
+      key_characters: [{ name: '林舟', role: '主角', description: '人物介绍', aliases: [], base_traits: '黑色短发', chapter_numbers: [1] }],
+      chapter_count: 1, cover: null },
+  } })
+  const wrapper = mount(ShortDramaAgentPage, { global: {
+    plugins: [pinia], components: { AppButton }, stubs: { RouterLink: { template: '<a><slot /></a>' } },
+  } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('剧本分析完成')
+  expect(wrapper.text()).not.toContain('分析失败')
+  expect(wrapper.text()).not.toContain('外部请求结果待核对')
+  expect(wrapper.text()).toContain('封面失败后仍可使用的大纲')
+  expect(wrapper.text()).toContain('林舟')
+  expect(wrapper.get('.creation-cover-notice').text()).toContain('封面暂未生成')
+  expect(wrapper.findAll('button').some(button => button.text() === '编辑内容')).toBe(true)
+  expect(wrapper.find('.analysis-progress-card').exists()).toBe(false)
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
 })

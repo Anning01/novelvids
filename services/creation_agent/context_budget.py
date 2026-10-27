@@ -6,11 +6,10 @@ from dataclasses import replace
 import json
 import math
 
-from pydantic_ai.messages import ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import BinaryContent, ModelRequest, ModelMessagesTypeAdapter, RetryPromptPart, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 
 from models.creation_agent import AgentContextCheckpoint
 from prompts.creation_agent import render_working_checkpoint
-from utils.prompt_language import task_language
 
 
 def encode(value) -> str:
@@ -32,6 +31,11 @@ def wire_size(messages, parameters) -> dict:
                 segments['objects'] += len(encode(part.content)) + len(part.tool_name) + 24
             elif isinstance(part, ToolCallPart):
                 segments['history'] += len(part.args_as_json_str()) + len(part.tool_name) + 24
+            elif isinstance(part, UserPromptPart) and isinstance(part.content, list):
+                # Media byte limits are checked at upload/preparation. Base64 is
+                # not text context; actual media token usage comes from the model.
+                segments['history'] += sum(len(item.media_type) + 64 if isinstance(item, BinaryContent)
+                                           else len(str(item)) for item in part.content) + 16
             else:
                 segments['history'] += len(str(getattr(part, 'content', ''))) + 16
     return {**segments, 'total_characters': sum(segments.values())}
@@ -70,8 +74,9 @@ class ContextBudget:
         from services.creation_agent.history import compact_retry_history
         messages = self.restore_projection(compact_retry_history(messages))
         report = self.report(messages, parameters)
-        ceiling = min(self.limits.max_context_characters,
-                      int(self.limits.working_input_tokens * self.characters_per_token))
+        ceiling = int(self.limits.working_input_tokens * self.characters_per_token)
+        if self.limits.max_context_characters is not None:
+            ceiling = min(ceiling, self.limits.max_context_characters)
         if not force and report['total_characters'] <= ceiling * self.limits.compaction_trigger_ratio:
             self.last_report = report
             return messages
@@ -131,7 +136,7 @@ class ContextBudget:
                 await self.on_compact()
         self.last_report = self.report(result, parameters)
         self.last_report['compactions'] = self.compactions
-        if self.last_report['total_characters'] > self.limits.max_context_characters:
+        if self.limits.max_context_characters is not None and self.last_report['total_characters'] > self.limits.max_context_characters:
             raise ValueError(localized_message('上下文超过配置上限：当前要求或必要约束无法在预算内完整处理'))
         return result
 
@@ -179,7 +184,7 @@ class ContextBudget:
             self.recovery['archive_refs'].append(archive_id)
         for key in ('requests', 'outcomes', 'archive_refs'):
             self.recovery[key] = self.recovery[key][-4:]
-        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery, task_language.get() or "zh"))
+        self.recovery_part = UserPromptPart(render_working_checkpoint(self.recovery))
 
     def _with_recovery(self, messages):
         result = []

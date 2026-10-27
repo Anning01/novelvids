@@ -72,6 +72,8 @@ class SoraScenePromptConfig(BaseModel):
         aliases = {"person": "人物", "scene": "场景", "item": "物品"}
         return [aliases.get(item, item) if isinstance(item, str) else item for item in value]
 
+    prompt: str | None = Field(None, max_length=100_000)
+
     reference_only_types: list[Literal['人物', '场景', '物品']] = Field(
         default_factory=list, max_length=3,
         description='这些资产类型只保留名称引用，不在分镜中展开外貌设定；其他类型保持默认展开',
@@ -247,6 +249,7 @@ class SceneFullProperties(SceneProperties):
 
 
 class SceneGenerateCreate(BaseModel):
+    replace_existing: bool = False
     """创建请求：chapter_id 必填"""
     chapter_id: int = Field(..., description="所属章节")
 

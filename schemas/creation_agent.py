@@ -34,6 +34,7 @@ class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    production_concurrency: int = Field(4, ge=1, le=20)
     # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
     # 128K output. The assistant keeps the default output below that maximum,
     # while leaving enough room for tool schemas and provider-side reasoning.
@@ -41,7 +42,7 @@ class AgentConfiguration(BaseModel):
     tool_calls_limit: int = Field(50, ge=1, le=100)
     max_targets: int = Field(32, ge=1, le=100)
     timeout_seconds: int = Field(600, ge=10, le=900)
-    max_context_characters: int = Field(2_000_000, ge=2000, le=4_000_000)
+    max_context_characters: int | None = Field(None, ge=2000)
     working_input_tokens: int = Field(840_000, ge=1000, le=900_000)
     compaction_trigger_ratio: float = Field(0.70, gt=0.1, lt=1)
     compaction_target_ratio: float = Field(0.45, gt=0, lt=1)
@@ -54,6 +55,9 @@ class AgentConfiguration(BaseModel):
     max_output_tokens: int = Field(64000, ge=256, le=384000)
     total_tokens_limit: int = Field(2_000_000, ge=1000, le=10_000_000)
 
+    def context_character_limit(self, model_limit: int | None) -> int | None:
+        return min((limit for limit in (self.max_context_characters, model_limit) if limit is not None), default=None)
+
     @model_validator(mode='after')
     def valid_compaction_thresholds(self):
         if self.compaction_target_ratio >= self.compaction_trigger_ratio:
@@ -64,8 +68,8 @@ class AgentConfiguration(BaseModel):
 def stored_agent_configuration(value: dict | None) -> AgentConfiguration:
     """Upgrade only the untouched legacy profile; preserve every custom profile."""
     raw = value or {}
-    if raw and all(raw.get(key) == expected for key, expected in LEGACY_AGENT_DEFAULTS.items()):
-        return AgentConfiguration(enabled=bool(raw.get('enabled', False)))
+    if raw and all(key not in raw or raw[key] == expected for key, expected in LEGACY_AGENT_DEFAULTS.items()):
+        return AgentConfiguration(**{key: value for key, value in raw.items() if key not in LEGACY_AGENT_DEFAULTS})
     return AgentConfiguration.model_validate(raw)
 
 
@@ -91,6 +95,7 @@ class PromptTargetStatusOut(AgentTarget):
 
 
 class AgentRunRequest(BaseModel):
+    production_intents: list["ProductionIntent"] = Field(default_factory=list, max_length=100)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     request_id: UUID
@@ -161,6 +166,8 @@ class CreationQueryResultOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    pending_production: dict | None = None
+    production: list[dict] = Field(default_factory=list)
     task_id: UUID
     conversation_id: int
     status: int
@@ -173,6 +180,8 @@ class AgentRunOut(BaseModel):
 
 
 class AgentMessageOut(BaseModel):
+    pending_production: dict | None = None
+    production: list[dict] = Field(default_factory=list)
     id: int
     role: Literal["user", "assistant"]
     content: str
@@ -306,3 +315,6 @@ class StoryboardPromptEdit(PromptEditInput):
         if (self.changes is None) == (self.legacy_prompt is None):
             raise ValueError(localized_message('结构化修改和历史纯文本修改必须且只能选择一种'))
         return self
+
+from schemas.agent_workflow import ProductionIntent
+AgentRunRequest.model_rebuild()

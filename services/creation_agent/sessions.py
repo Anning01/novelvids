@@ -117,11 +117,13 @@ class AgentSessions:
                 return await AiTask.get(id=previous.task_id).using_db(connection)
             if current.active_task_id and await AiTask.filter(id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
                 raise HTTPException(409, localized_message('当前会话仍在执行，请等待完成或停止后继续'))
-            task = await ai_task_executor.submit(AiTaskTypeEnum.creation_agent, {
+            from services.creation_agent.skill_execution import prepare_workflow
+            workflow = await prepare_workflow({
                 "novel_id": conversation.novel_id, "conversation_id": conversation.id,
                 "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None,
-                "model_config_id": chosen.id, "agent_configuration": configuration.model_dump(),
-            }, db_connection=connection)
+                "model_config_id": chosen.id, "assistant_model_config_id": chosen.id, "agent_configuration": configuration.model_dump(),
+            })
+            task = await ai_task_executor.submit(AiTaskTypeEnum.creation_agent, workflow, db_connection=connection)
             task.request_params = {**task.request_params, "task_id": str(task.id)}
             await task.save(using_db=connection, update_fields=["request_params"])
             await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,

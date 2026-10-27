@@ -1,14 +1,8 @@
-"""视觉风格提示词注册表。
-
-每个风格提供两套提示词：
-- image_prompt：生图定调 —— 静态画面的材质、光影、色彩与细节要求；
-- video_prompt：生视频定调 —— 运动规律、镜头衔接、一致性与时间连续性要求。
-
-本模块仅负责模板与纯渲染函数；业务上下文加载与调用由对应 Service 完成。
-"""
+"""Single-source style options and pure fragments from the skill pack."""
 
 from dataclasses import dataclass
-from prompts.catalog import catalog, text
+import json
+from prompts.skill_pack import read_skill
 
 
 AUTO_STYLE_KEY = "auto"
@@ -25,17 +19,17 @@ class StylePromptSet:
 
 STYLE_PROMPTS: dict[str, StylePromptSet] = {
     key: StylePromptSet(key, value["label"], value["image"], value["video"])
-    for key, value in catalog("styles.json", "zh").items()
+    for key, value in json.loads(read_skill("styles")).items()
 }
 
-STYLE_KEYS: tuple[str, ...] = tuple(STYLE_PROMPTS.keys())
+STYLE_KEYS: tuple[str, ...] = tuple(json.loads(read_skill("styles")))
 
 
 def get_style(key: str | None, language: str = "zh") -> StylePromptSet | None:
     """按 key 取风格提示词集；未知 key 返回 None。"""
     if not key:
         return None
-    value = catalog("styles.json", language).get(key)
+    value = json.loads(read_skill("styles")).get(key)
     return (
         StylePromptSet(key, value["label"], value["image"], value["video"])
         if value
@@ -48,7 +42,7 @@ def image_style_suffix(key: str | None, language: str = "zh") -> str:
     style = get_style(key, language)
     if style is None:
         return ""
-    return text("style_image", language, label=style.label, prompt=style.image_prompt)
+    return f"{style.label}: {style.image_prompt}"
 
 
 def video_style_suffix(key: str | None, language: str = "zh") -> str:
@@ -56,7 +50,7 @@ def video_style_suffix(key: str | None, language: str = "zh") -> str:
     style = get_style(key, language)
     if style is None:
         return ""
-    return text("style_video", language, label=style.label, prompt=style.video_prompt)
+    return f"{style.label}: {style.video_prompt}"
 
 
 def image_project_style_suffix(
@@ -67,7 +61,7 @@ def image_project_style_suffix(
     """渲染项目级生图风格；自定义风格由项目配置直接提供。"""
     custom = (custom_style_prompt or "").strip()
     if custom:
-        return text("style_custom_image", language, prompt=custom)
+        return custom
     return image_style_suffix(key, language)
 
 
@@ -79,14 +73,15 @@ def video_project_style_suffix(
     """渲染项目级生视频风格；与生图链路使用同一配置来源。"""
     custom = (custom_style_prompt or "").strip()
     if custom:
-        return text("style_custom_video", language, prompt=custom)
+        return custom
     return video_style_suffix(key, language)
 
 
 def list_styles() -> list[dict]:
     """系统内置风格清单（后端唯一事实来源）。"""
     return [
-        {"key": style.key, "label": style.label} for style in STYLE_PROMPTS.values()
+        {"key": key, "label": style["label"]}
+        for key, style in json.loads(read_skill("styles")).items()
     ]
 
 
