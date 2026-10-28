@@ -1,22 +1,31 @@
 <p align="center">
-  <img src="docs/images/logo.png" width="88" alt="NovelVids logo">
+  <img src="docs/images/logo.png" width="200" alt="NovelVids logo">
 </p>
 
-# NovelVids · 猫影短剧
+<h1 align="center">NovelVids · 猫影短剧</h1>
 
-**An open-source AI workspace for illustrated stories and short dramas.**
+<p align="center">
+  <strong>An open-source AI workspace for illustrated stories and short dramas.</strong>
+</p>
 
-Bring stories, character assets, storyboards, AI images, video generation and episode assembly into **one project you can edit, track and keep refining**.
+<p align="center">
+  Bring stories, character assets, storyboards, AI images, video generation and episode assembly<br>
+  into <strong>one project you can edit, track and keep refining</strong>.
+</p>
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#quick-start)
-[![Chinese / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/deploy-self--hosted-555" alt="Self-hosted"></a>
+  <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="Chinese / English"></a>
+</p>
 
 <p align="center">
   <strong>English</strong> &nbsp;|&nbsp; <a href="README.md">简体中文</a>
 </p>
 
-[Watch a sample](#see-the-result) · [Try the demo](https://demo.xiazq.com) · [Run locally](#quick-start) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
+<p align="center">
+  <a href="#see-the-result">Watch a sample</a> · <a href="https://demo.xiazq.com">Try the demo</a> · <a href="#quick-start">Run locally</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
 ## See the result
 

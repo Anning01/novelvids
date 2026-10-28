@@ -1,22 +1,31 @@
 <p align="center">
-  <img src="docs/images/logo.png" width="88" alt="猫影短剧 · NovelVids Logo">
+  <img src="docs/images/logo.png" width="200" alt="猫影短剧 · NovelVids Logo">
 </p>
 
-# 猫影短剧 · NovelVids
+<h1 align="center">猫影短剧 · NovelVids</h1>
 
-**开源 AI 漫剧与短剧创作工作台。**
+<p align="center">
+  <strong>开源 AI 漫剧与短剧创作工作台。</strong>
+</p>
 
-从故事、角色资产、分镜设计，到 AI 图片、视频生成与成片，把整个创作过程放进一个**可编辑、可追踪、能反复打磨的项目**。
+<p align="center">
+  从故事、角色资产、分镜设计，到 AI 图片、视频生成与成片，<br>
+  把整个创作过程放进一个<strong>可编辑、可追踪、能反复打磨的项目</strong>。
+</p>
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#快速开始)
-[![中文 / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="#快速开始"><img src="https://img.shields.io/badge/deploy-self--hosted-555" alt="Self-hosted"></a>
+  <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="中文 / English"></a>
+</p>
 
 <p align="center">
   <a href="README.en.md">English</a> &nbsp;|&nbsp; <strong>简体中文</strong>
 </p>
 
-[看成品](#先看效果) · [在线体验](https://demo.xiazq.com) · [本地部署](#快速开始) · [文档](#文档中心) · [参与贡献](CONTRIBUTING.md)
+<p align="center">
+  <a href="#先看效果">看成品</a> · <a href="https://demo.xiazq.com">在线体验</a> · <a href="#快速开始">本地部署</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+</p>
 
 ## 先看效果
 
