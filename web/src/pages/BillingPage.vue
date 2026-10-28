@@ -23,8 +23,8 @@ const expandedRecordId = ref<number | null>(null)
 const auth = useAuthStore()
 const showSourceColumn = computed(() => auth.enabled === true)
 
-const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') } }[value] || value)
-const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') } }[value] || tr('任务 {p0}', { p0: value }))
+const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') }, get media_processing() { return tr('画质增强') } }[value] || value)
+const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('画质增强') } }[value] || tr('任务 {p0}', { p0: value }))
 
 function recordDiscount(item: BillingRecord): number {
   if (item.record_kind === 'agent_conversation') return 1
@@ -46,7 +46,7 @@ const selectedProject = computed(() => (
   projects.value.find(item => String(item.novel_id) === selectedProjectId.value) || null
 ))
 const billingBreakdown = computed(() => {
-  const map: Record<string, number> = { text: 0, image: 0, video: 0 }
+  const map: Record<string, number> = { text: 0, image: 0, video: 0, media_processing: 0 }
   for (const item of summary.value?.by_billing_type ?? []) map[item.billing_type] = item.cost
   return map
 })
@@ -163,6 +163,10 @@ onMounted(load)
           <span class="stat-label"><Clapperboard :size="15" />{{ tr('视频') }}</span>
           <strong class="stat-value">{{ money(billingBreakdown.video) }}</strong>
         </article>
+        <article class="stat-card">
+          <span class="stat-label"><Activity :size="15" />{{ tr('画质增强') }}</span>
+          <strong class="stat-value">{{ money(billingBreakdown.media_processing) }}</strong>
+        </article>
       </section>
 
       <section class="table-card">
@@ -242,7 +246,7 @@ onMounted(load)
 .billing-project-filter { width: 240px; }
 .billing-state { padding: 60px 0; color: var(--app-text-muted); text-align: center; }
 
-.summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 26px; }
+.summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 26px; }
 .stat-card { display: grid; align-content: start; gap: 9px; padding: 18px 18px 16px; border-radius: 16px; background: linear-gradient(180deg, var(--app-surface-raised, #fff), var(--app-surface-muted, #f2f3f7)); box-shadow: inset 0 0 0 1px var(--app-border, #eceef3), 0 1px 2px rgb(20 22 28 / 3%), 0 10px 28px rgb(20 22 28 / 5%); }
 .stat-card.is-primary { background: linear-gradient(180deg, color-mix(in srgb, #5b5cf6 16%, var(--app-surface-raised, #fff)), color-mix(in srgb, #5b5cf6 10%, var(--app-surface-muted, #f2f3f7))); }
 .stat-card.is-text { background: linear-gradient(180deg, color-mix(in srgb, #5b5cf6 9%, var(--app-surface-raised, #fff)), var(--app-surface-muted, #f2f3f7)); }

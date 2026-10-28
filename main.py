@@ -181,6 +181,8 @@ if settings.AUTH_ENABLED:
 ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.reference_image, AssetReferenceHandler())
 ai_task_executor.register(AiTaskTypeEnum.storyboard, StoryboardTaskHandler())
+from services.video_enhancement.handler import EnhanceExportHandler
+ai_task_executor.register(AiTaskTypeEnum.video_enhancement, EnhanceExportHandler())
 ai_task_executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
 ai_task_executor.register(

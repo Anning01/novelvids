@@ -531,3 +531,44 @@ async def test_api_获取所有枚举(client: AsyncClient):
 
     assert video_types["seedance_2"]["label"] == "Doubao Seedance 2.0"
     print(f"    枚举接口: keys={list(data.keys())}, video_model_type count={len(data['video_model_type'])}")
+
+
+@pytest.mark.asyncio
+async def test_mediakit_uses_saved_model_configuration_without_env_credentials(client, monkeypatch):
+    import httpx
+    from models.ai_task import AiTask
+    from models.chapter_export import ChapterExport
+    from services.creation_agent.waiting import WaitingForMedia
+    from services.video_enhancement.contract import ENHANCEMENT_PRESET
+    from services.video_enhancement.handler import EnhanceExportHandler
+
+    monkeypatch.setenv('MEDIA_KIT_KEY', 'environment-key-must-not-be-used')
+    payload = {**ENHANCEMENT_PRESET, 'task_type':8, 'task_types':[8],
+        'name':'MediaKit from settings', 'api_key':'saved-model-key'}
+    created = (await client.post('/api/config',json=payload)).json()
+    assert created['code'] == 0
+    config_id = created['data']['id']
+    assert created['data']['is_active'] is False
+    assert (await client.post(f'/api/config/{config_id}/activate')).json()['code'] == 0
+    updated = await client.patch(f'/api/config/{config_id}',json={'api_key':'rotated-saved-key'})
+    assert updated.json()['code'] == 0
+    config = await AiModelConfig.get(id=config_id)
+    assert config.is_active and config.api_key == 'rotated-saved-key'
+    snapshot = {key:getattr(config,key) for key in ('id','name','model','base_url','api_protocol','processing_options','pricing','concurrency')}
+    task = await AiTask.create(task_type=8,status=2,request_params={})
+    export = await ChapterExport.create(novel_id=1,chapter_id=1,task=task,
+        identity_key='a'*64,source_version='b'*64,source_media_ref='https://media.example/source.mp4',
+        source_probe={'duration':'5','width':864,'height':496,'fps':'24'})
+    params = {'task_id':str(task.id),'export_id':export.id,'config_snapshot':snapshot}
+    requests = []
+    original_client = httpx.AsyncClient
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200,json={'success':True,'task_id':'configured-provider-task'})
+    monkeypatch.setattr(httpx,'AsyncClient',lambda **kwargs:original_client(transport=httpx.MockTransport(respond),**kwargs))
+    with pytest.raises(WaitingForMedia):
+        await EnhanceExportHandler().execute(params)
+    assert len(requests) == 1
+    assert requests[0].headers['Authorization'] == 'Bearer rotated-saved-key'
+    assert 'environment-key-must-not-be-used' not in requests[0].headers['Authorization']
+    assert 'api_key' not in params['config_snapshot']

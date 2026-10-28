@@ -2,6 +2,7 @@
 import { tr } from '@/i18n'
 import type { Scene, Video } from '@/types'
 import { TaskStatusEnum } from '@/types'
+import type { ChapterExport } from '@/features/video-export/api'
 import { videoDurationSeconds } from '../graph/videoMedia'
 import type { WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
 
@@ -23,7 +24,7 @@ export interface ComposerInput {
   url: string
   durationSeconds: number
   orderIndex: number
-  sourceKind: 'shot' | 'video_result' | 'video_media'
+  sourceKind: 'shot' | 'video_result' | 'video_media' | 'video_enhancement'
 }
 
 function includesValue<T extends readonly string[]>(values: T, value: unknown): value is T[number] {
@@ -61,6 +62,11 @@ function shotVideo(node: WorkbenchNode) {
 }
 
 function composerInput(node: WorkbenchNode, orderIndex: number): ComposerInput | null {
+  if (node.kind === 'video_enhancement') {
+    const result = node.data.enhancement_result as ChapterExport | undefined
+    return { key: node.key, title: node.title, url: result?.status === 3 ? result.url || '' : '',
+      durationSeconds: Number(result?.output_probe.duration) || 0, orderIndex, sourceKind: node.kind }
+  }
   if (node.kind === 'video_media') {
     return {
       key: node.key,

@@ -72,6 +72,7 @@ export function workbenchNodeHandles(kind: WorkbenchNodeKind, data?: Partial<Wor
   if (kind === 'asset') target.push({ ...assetInput, get label() { return tr('参考图片') } })
   if (kind === 'shot') target.push(assetInput, sequenceInput, watermarkInput)
   if (kind === 'video_result') target.push(outputInput)
+  if (kind === 'video_enhancement') target.push({ ...composerVideoInput, required: true, maxConnections: 1 })
   if (kind === 'watermark') target.push(watermarkVideoInput)
   if (kind === 'video_composer') target.push(composerShotInput, composerVideoInput, watermarkInput)
 
@@ -81,6 +82,7 @@ export function workbenchNodeHandles(kind: WorkbenchNodeKind, data?: Partial<Wor
   if (kind === 'video_media') source.push(outputOutput)
   if (kind === 'shot') source.push(sequenceOutput, outputOutput)
   if (kind === 'video_result' || kind === 'video_composer') source.push(outputOutput)
+  if (kind === 'video_enhancement') source.push(outputOutput)
   if (kind === 'watermark') source.push(watermarkOutput, outputOutput)
   return { source: uniqueHandles(source), target: uniqueHandles(target) }
 }
@@ -110,6 +112,9 @@ export function classifyWorkbenchHandles(
   sourceNode?: Pick<WorkbenchNode, 'kind' | 'data'> | null,
   targetNode?: Pick<WorkbenchNode, 'kind' | 'data'> | null,
 ): SupportedWorkbenchEdgeType | null {
+  if ((sourceHandle === 'output-output' || sourceHandle === 'sequence-output' && sourceNode?.kind === 'shot') && targetHandle === 'video-input'
+    && targetNode?.kind === 'video_enhancement'
+    && sourceNode && ['shot', 'video_result', 'video_enhancement'].includes(sourceNode.kind)) return 'output_binding'
   const configured = configuredNodePorts(targetNode?.data).find(handle => handle.type === 'target' && handle.id === targetHandle)
   if (configured?.edgeType) return configured.edgeType
   if (sourceHandle === 'asset-output'

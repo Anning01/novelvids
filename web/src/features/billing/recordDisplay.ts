@@ -20,6 +20,9 @@ export function usageLabel(item: BillingRecord): string {
   const usage = item.usage || {}
   const num = (value: unknown) => Number(value) || 0
   if (item.billing_type === 'text') return tr('输入 {p0} · 输出 {p1} token', { p0: formatTokens(num(usage.input_tokens)), p1: formatTokens(num(usage.output_tokens)) })
+  if (item.billing_type === 'media_processing') {
+    return usage.missing_usage ? tr('实际用量待核对') : tr('{p0}s · {p1} · {p2}fps', { p0: num(usage.seconds), p1: String(usage.resolution || '—'), p2: num(usage.fps) })
+  }
   if (item.billing_type === 'image') {
     const count = num(usage.image_count)
     const clarity = usage.clarity ? ` @${usage.clarity}` : ''
@@ -38,6 +41,7 @@ export function costSourceLabel(source?: string): string {
 }
 
 export function recordStatus(item: BillingRecord): string {
+  if (item.billing_type === 'media_processing' && (item.usage?.missing_usage || item.usage?.accounting_needs_review)) return tr('需要核对')
   if (item.record_kind === 'agent_conversation') {
     if (item.statuses?.some(status => [1, 2, 6].includes(status))) return tr('处理中')
     if (item.statuses?.includes(4)) return tr('含失败记录')

@@ -426,6 +426,7 @@ watch([selectedModel, generationMode], ([model]) => {
 
 <style scoped>
 .workbench-video-production {
+  position: relative;
   overflow: hidden;
   border-radius: 14px;
   background: transparent;

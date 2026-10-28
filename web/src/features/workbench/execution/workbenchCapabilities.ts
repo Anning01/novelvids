@@ -2,6 +2,7 @@
 import { tr } from '@/i18n'
 import type { WorkbenchCapabilities } from '@/types'
 import type { WorkbenchNode } from '../types/workbenchTypes'
+import type { WorkbenchNodeRunRegistry } from '../run/nodeRunRegistry'
 
 export interface WorkbenchRunState {
   enabled: boolean
@@ -13,6 +14,7 @@ export interface WorkbenchRunState {
 export function selectedRunState(
   nodes: WorkbenchNode[],
   capabilities: WorkbenchCapabilities,
+  commands?: WorkbenchNodeRunRegistry['commands'],
 ): WorkbenchRunState {
   if (!nodes.length) {
     return {
@@ -35,6 +37,8 @@ export function selectedRunState(
     } else if (node.kind === 'shot') {
       if (!capabilities.generate_video) return { enabled: false, get label() { return tr('运行所选配置') }, get reason() { return tr('当前服务不支持视频生成') }, runnableKeys }
       if (!node.data.scene) return { enabled: false, get label() { return tr('运行所选配置') }, reason: tr('{p0}缺少镜头配置', { p0: node.title }), runnableKeys }
+    } else if (node.kind === 'video_enhancement') {
+      if (!commands?.get(node.key)?.enabled.value) return { enabled: false, get label() { return tr('运行所选配置') }, reason: tr('请在视频卡片中完成配置'), runnableKeys }
     } else if (capabilityKey === 'apply_watermark') {
       if (!capabilities.apply_watermark) return { enabled: false, get label() { return tr('运行所选配置') }, get reason() { return tr('当前服务未启用水印执行') }, runnableKeys }
     } else if (capabilityKey === 'compose_video') {

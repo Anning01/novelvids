@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import VideoEnhanceButton from '@/features/video-export/VideoEnhanceButton.vue'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -2208,7 +2209,7 @@ onBeforeUnmount(() => {
               </section>
 
               <aside class="preview-panel">
-                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><RefreshCw :size="15" /></header>
+                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" /><RefreshCw :size="15" /></header>
                 <div class="preview-stage">
                   <VideoGenerationErrorState
                     v-if="sceneVideoError(scene)"

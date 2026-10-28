@@ -26,7 +26,17 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
     params = execution.params
 
     async def submit():
-        if intent.operation == "image":
+        if intent.operation in {'prepare_export', 'enhance_export'}:
+            from controllers.chapter_export import chapter_exports
+            from services.creation_agent.handler import authorize_run
+            ctx = await authorize_run(params)
+            if intent.operation == 'prepare_export':
+                _, task = await chapter_exports.prepare(intent.target_id, ctx)
+            else:
+                if intent.enhancement is None:
+                    raise ValueError(localized_message('请先核对高清导出的来源与费用'))
+                _, task = await chapter_exports.enhance(intent.target_id, intent.enhancement, ctx)
+        elif intent.operation == "image":
             from controllers.asset import asset_controller
 
             task = await asset_controller.reference(
@@ -130,6 +140,7 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
 
 
 async def validate_intent_scope(intent, *, request, novel_id):
+    from models.chapter_export import ChapterExport
     model = {
         "image": Asset,
         "story": None,
@@ -138,6 +149,8 @@ async def validate_intent_scope(intent, *, request, novel_id):
         "video": Scene,
         "compose": Chapter,
         "remake": RemakeSource,
+        "prepare_export": Chapter,
+        "enhance_export": ChapterExport,
     }[intent.operation]
     if model is None:
         belongs = intent.target_id == novel_id
@@ -176,6 +189,8 @@ async def validate_intent_scope(intent, *, request, novel_id):
     if request_scope == "chapter":
         if model is Chapter and intent.target_id != request.chapter_id:
             raise ValueError(localized_message("目标不在当前章节"))
+        if model is ChapterExport and not await ChapterExport.filter(id=intent.target_id, chapter_id=request.chapter_id).exists():
+            raise ValueError(localized_message('目标不在当前章节'))
         if (
             model is Scene
             and not await Scene.filter(

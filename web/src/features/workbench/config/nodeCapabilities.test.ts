@@ -16,6 +16,7 @@ it('defines one exhaustive capability entry for every workbench node kind', () =
     'audio_media',
     'shot',
     'video_result',
+    'video_enhancement',
     'watermark',
     'video_composer',
     'section',

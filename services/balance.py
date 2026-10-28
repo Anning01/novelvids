@@ -63,7 +63,7 @@ async def ensure_solvent(
 
 
 async def accumulate_member_cost(
-    team_id: int, user_id: int | None, cost
+    team_id: int, user_id: int | None, cost, *, strict: bool = False,
 ) -> None:
     """累计成员历史消耗金额（旁路副作用，失败仅记日志）。"""
     if user_id is None:
@@ -80,6 +80,8 @@ async def accumulate_member_cost(
                 "member cost accumulate skipped: team_id=%s user_id=%s", team_id, user_id
             )
     except Exception:
+        if strict:
+            raise
         logger.exception(
             "member cost accumulate failed team_id=%s user_id=%s", team_id, user_id
         )
@@ -116,6 +118,7 @@ async def consume(
     team_id: int,
     cost,
     usage_record_id: int | None = None,
+    *, strict: bool = False,
 ) -> Decimal | None:
     """任务完成后按实际成本扣减；允许透支为负。失败仅记日志，不抛异常。"""
     try:
@@ -125,6 +128,8 @@ async def consume(
         async with in_transaction():
             team = await Team.filter(id=team_id).select_for_update().first()
             if team is None:
+                if strict:
+                    raise ValueError('Billing team is unavailable')
                 return None
             team.balance = _money(team.balance - cost_dec)
             await team.save(update_fields=["balance", "updated_at"])
@@ -138,6 +143,8 @@ async def consume(
             )
         return team.balance
     except Exception:
+        if strict:
+            raise
         logger.exception("balance consume failed team_id=%s", team_id)
         return None
 

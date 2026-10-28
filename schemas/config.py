@@ -55,6 +55,7 @@ class AiModelConfigProperties(BaseModel):
         None,
         description="计费费用模块：文本={input_price_per_1m,output_price_per_1m}，图片/视频={prices}",
     )
+    processing_options: Optional[dict] = Field(None, description="媒体处理能力与访问设置")
     scope: Optional[str] = Field(
         None,
         description="配置归属：official 官方配置 / team 团队自定义",

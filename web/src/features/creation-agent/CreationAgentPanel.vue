@@ -299,13 +299,13 @@ onMounted(() => {
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
-          <p>{{ tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
-          <ul><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
-          <AppButton :disabled="!writable || store.busy" @click="confirmProduction(item.pending_production)">{{ tr('确认生成并计费') }}</AppButton>
+          <p>{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
+          <ul><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
+          <AppButton :disabled="!writable || store.busy" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
         </div>
         <ul v-if="item.production?.length" class="creation-agent-panel__production">
           <li v-for="receipt in item.production" :key="receipt.task_id">
-            {{ tr('生成任务') }} · {{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成' } as Record<string, string>)[receipt.operation] || receipt.operation) }} · {{ tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
+            {{ tr('生成任务') }} · {{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[receipt.operation] || receipt.operation) }} · {{ tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
             <span v-if="receipt.stage === 'billing_pending'">{{ tr('用量正在结算') }}</span>
             <span v-if="receipt.error">{{ receipt.error }}</span>
           </li>
