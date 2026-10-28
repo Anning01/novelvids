@@ -95,6 +95,7 @@ class Settings:
 
     # 媒体文件目录
     MEDIA_PATH = os.getenv("MEDIA_PATH", "./media")
+    CHAPTER_EXPORT_PATH = os.getenv("CHAPTER_EXPORT_PATH", "./data/chapter-exports")
 
     # 时区配置
     TIMEZONE = "Asia/Shanghai"

@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from schemas.scene import SoraScenePromptConfig
 from schemas.video import VideoGenerationOptions
+from schemas.video_export import ExportEnhanceIn
 
 
 class CompletePrompt(BaseModel):
@@ -36,13 +37,14 @@ class StructuredSkillStoryboard(BaseModel):
 
 class ProductionIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose"]
+    operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose", "prepare_export", "enhance_export"]
     target_id: int = Field(gt=0)
     media_model_config_id: int | None = Field(None, gt=0)
     request_id: UUID
     variant_id: int | None = Field(None, gt=0)
     video_options: VideoGenerationOptions | None = None
     replace_existing: bool = False
+    enhancement: ExportEnhanceIn | None = None
 
     @model_validator(mode="after")
     def validate_options(self):
@@ -52,6 +54,8 @@ class ProductionIntent(BaseModel):
             raise ValueError("video_options requires video")
         if self.replace_existing and self.operation != "storyboard":
             raise ValueError("replace_existing requires storyboard")
+        if self.enhancement is not None and self.operation != 'enhance_export':
+            raise ValueError('enhancement requires enhance_export')
         return self
 
 
@@ -84,7 +88,7 @@ class RemakeShot(BaseModel):
 
 class RequestedProduction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose"]
+    operation: Literal["story", "assets", "image", "storyboard", "remake", "video", "compose", "prepare_export", "enhance_export"]
     target_id: int = Field(gt=0)
     source_quote: str = Field(min_length=1, max_length=8000)
     variant_id: int | None = Field(None, gt=0)

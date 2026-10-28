@@ -83,3 +83,27 @@ describe('BillingPage', () => {
     wrapper.unmount()
   })
 })
+
+it('lists enhancement usage separately and preserves an unknown-usage warning', async () => {
+  vi.mocked(api.billingSummary).mockResolvedValue({ code: 0, message: '', data: {
+    total_cost: 0.416667, total_records: 2, by_billing_type: [{ billing_type: 'media_processing', cost: 0.416667 }],
+    by_task_type: [], by_model: [], daily_trend: [],
+  } })
+  vi.mocked(api.billingProjects).mockResolvedValue({ code: 0, message: '', data: {
+    items: [], pagination: { total: 0, page: 1, page_size: 20, pages: 0 },
+  } })
+  const record = { id: 1, novel_id: 1, task_type: 8, billing_type: 'media_processing' as const, model: 'enhance-video-generative',
+    usage: { seconds: 5, fps: 24, resolution: '1080p' }, cost: 0.416667, currency: 'CNY', status: 3, created_at: '', updated_at: '' }
+  vi.mocked(api.billingRecords).mockResolvedValue({ code: 0, message: '', data: {
+    items: [record, { ...record, id: 2, usage: { missing_usage: true }, cost: 0 }],
+    pagination: { total: 2, page: 1, page_size: 20, pages: 1 },
+  } })
+  const wrapper = mount(BillingPage, { global: { plugins: [createPinia()] } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('画质增强')
+  expect(wrapper.text()).toContain('5s · 1080p · 24fps')
+  expect(wrapper.text()).toContain('实际用量待核对')
+  expect(wrapper.text()).toContain('需要核对')
+  expect(wrapper.text()).not.toContain('任务 8')
+  wrapper.unmount()
+})

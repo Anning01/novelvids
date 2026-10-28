@@ -66,7 +66,7 @@ async def close_uncertain_task(task_id, resolution, *, user_id=None):
             # arrives. Replaying an old request cannot clear the conflict.
             if resolution.evidence_id or task.request_params.get("review_evidence"):
                 return task
-        elif task.status != 4 or task.stage != "needs_review":
+        elif (task.status != 4 and not (task.status == 5 and task.task_type == 8)) or task.stage != "needs_review":
             raise HTTPException(
                 409, localized_message("只有待核对的失败任务可以人工收口")
             )
@@ -104,13 +104,26 @@ async def close_uncertain_task(task_id, resolution, *, user_id=None):
                 409, localized_message("已有供应商任务号，请先查询真实结果")
             )
         related = Q(ai_task_id=task.id)
+        from models.chapter_export import ChapterExport
+        export = await ChapterExport.get_or_none(task_id=task.id).using_db(connection)
+        if export and export.provider_task_id:
+            if resolution.outcome == 'not_submitted' or (export.provider_result.get('status') not in {'completed', 'failed'} and not export.provider_result.get('query_unavailable')):
+                raise HTTPException(409, localized_message('已有供应商任务号，请先查询真实结果'))
         if video:
             related |= Q(video_id=video.id)
         records = (
-            await ModelUsageRecord.filter(related, billing_type__in=["image", "video"])
+            await ModelUsageRecord.filter(related, billing_type__in=["image", "video", "media_processing"])
             .using_db(connection)
             .select_for_update()
         )
+        if export and evidence is None and export.provider_result.get('status') in {'completed', 'failed'}:
+            from services.creation_agent.review_evidence import MediaEvidence, outcome_conflicts, quantity
+            result = export.provider_result.get('result') or {}
+            evidence = MediaEvidence('media_processing', quantity(result.get('duration')),
+                completed=export.provider_result['status']=='completed', media_available=bool(export.media_ref),
+                external_task_id=export.provider_task_id)
+            if outcome_conflicts(resolution.outcome,evidence):
+                raise HTTPException(409,localized_message('核对结论与供应商证据矛盾'))
         if evidence is None:
             from services.creation_agent.review_evidence import (
                 MediaEvidence,
@@ -197,4 +210,8 @@ async def close_uncertain_task(task_id, resolution, *, user_id=None):
                 ): audit,
             }
             await video.save(update_fields=["status", "metadata", "updated_at"])
+        if export:
+            export.submission_slot = False
+            export.collection_complete = True
+            await export.save(update_fields=['submission_slot','collection_complete','updated_at'])
         return task

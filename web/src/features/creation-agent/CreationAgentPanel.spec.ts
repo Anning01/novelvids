@@ -348,3 +348,22 @@ it('shows the exact proposed operations and sends the frozen grant only after co
     production_intents: pending.intents, chapter_id: 3, targets: pending.targets, write_scope: 'selected', model_config_id: 1 })
   wrapper.unmount()
 })
+
+it('distinguishes source preparation from paid enhancement in chat confirmation', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.messages = [{ id: 5, role: 'assistant', content: 'Please confirm preparation', task_id: 'prepare-proposal', status: 3,
+    changes: [], usage: {}, created_at: '', pending_production: {
+      confirmation_request_id: 'confirmation-source', message: 'Prepare source',
+      labels: [{ operation: 'prepare_export', target_label: 'Episode 1' }],
+      intents: [{ operation: 'prepare_export', target_id: 3, request_id: 'intent-source' }],
+      chapter_id: 3, targets: [], write_scope: 'chapter', model_config_id: 1,
+    } }]
+  await flushPromises()
+  expect(wrapper.text()).toContain('不会提交付费画质增强')
+  expect(wrapper.text()).not.toContain('确认后会调用模型并产生费用')
+  expect(wrapper.findAll('button').some(button => button.text() === '准备当前原片')).toBe(true)
+  wrapper.unmount()
+})

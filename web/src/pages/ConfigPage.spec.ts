@@ -52,6 +52,37 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     vi.restoreAllMocks()
   })
 
+  it('creates MediaKit processing configuration with server-provided minute prices', async () => {
+    baseMocks()
+    vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: {}, video: {}, media_processing: {
+      base_url: 'https://mediakit.cn-beijing.volces.com', model: 'enhance-video-generative', api_protocol: 'volcengine_mediakit',
+      processing_options: { poll_seconds: 15, input_short_side_min: 360 },
+      pricing: { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: [
+        { short_side_max: 1080, fps_max: 30, price: 5 }, { short_side_max: 1080, fps_max: 60, price: 10 },
+        { short_side_max: 1080, fps_max: 120, price: 20 },
+      ] },
+    } } } as never)
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+    const createConfig = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+    const wrapper = mountPage(teamAdminStore())
+    await flushPromises()
+    await wrapper.get('.model-category-card.is-enhancement').trigger('click')
+    await wrapper.get('.model-config-section > header button').trigger('click')
+    expect((wrapper.get('input[name="model-service-base-url"]').element as HTMLInputElement).value).toBe('https://mediakit.cn-beijing.volces.com')
+    expect(wrapper.text()).toContain('增强费用（元 / 输出分钟）')
+    await wrapper.get('input[name="model-config-name"]').setValue('团队画质增强')
+    await wrapper.get('input[name="model-service-api-key"]').setValue('test-only-key')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(createConfig).toHaveBeenCalledWith(expect.objectContaining({
+      task_type: 8, task_types: [8], api_protocol: 'volcengine_mediakit', model: 'enhance-video-generative',
+      processing_options: expect.objectContaining({ poll_seconds: 15 }),
+      pricing: expect.objectContaining({ type: 'media_processing', billing_unit: 'minute', tiers: expect.arrayContaining([
+        { short_side_max: 1080, fps_max: 30, price: 5 },
+      ]) }),
+    }))
+  })
+
   it('团队管理员只看到本团队配置，并提示未配置时使用平台模型', async () => {
     baseMocks()
     vi.spyOn(api, 'configs').mockResolvedValue({
@@ -213,4 +244,28 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     expect(pricingInputs.some(input => (input.element as HTMLInputElement).value === '5')).toBe(true)
     expect(pricingInputs.some(input => (input.element as HTMLInputElement).value === '0.2')).toBe(true)
   })
+})
+
+it('enables higher output tiers from server presets while preserving existing configured prices', async () => {
+  baseMocks()
+  const rates = [30, 60, 120].map((fps, index) => ({ short_side_max: 1080, fps_max: fps, price: 7 * 2 ** index }))
+  const higher = [30, 60, 120].map((fps, index) => ({ short_side_max: 1440, fps_max: fps, price: 10 * 2 ** index }))
+  vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: {}, video: {}, media_processing: {
+    base_url: 'https://mediakit.example', model: 'enhance-video-generative', api_protocol: 'volcengine_mediakit',
+    processing_options: { output_resolutions: ['1080p','2k'] }, resolutions: [{ value: '1080p', short_side: 1080 }, { value: '2k', short_side: 1440 }],
+    pricing: { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: [...rates, ...higher] },
+  } } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 12, name: '增强服务', task_type: 8, task_types: [8],
+    scope: 'team', team_id: 9, model: 'enhance-video-generative', base_url: 'https://mediakit.example', api_key: 'test-only', api_protocol: 'volcengine_mediakit',
+    concurrency: 1, processing_options: {}, pricing: { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: rates } }] } } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+  const wrapper = mountPage(teamAdminStore()); await flushPromises()
+  await wrapper.get('.model-category-card.is-enhancement').trigger('click')
+  await wrapper.get('[aria-label="编辑配置"]').trigger('click')
+  const input = wrapper.findAll('.enhancement-resolution-options label').find(item => item.text() === '2K')!.get('input')
+  await input.setValue(true); await input.setValue(false); await input.setValue(true)
+  await wrapper.get('form.model-modal').trigger('submit'); await flushPromises()
+  expect(update).toHaveBeenCalledWith(12, expect.objectContaining({ processing_options: { output_resolutions: ['1080p','2k'] },
+    pricing: expect.objectContaining({ tiers: [...rates,...higher] }) }))
+  wrapper.unmount()
 })

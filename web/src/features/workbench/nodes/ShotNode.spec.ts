@@ -74,6 +74,7 @@ it('presents a shot as a ratio-aware video card with media and asset metadata in
     'data-ratio': '16:9',
   })
   expect(wrapper.get('.workbench-video-production').classes()).toContain('workbench-media-node')
+  expect(wrapper.find('.workbench-video-enhancement').exists()).toBe(false)
   expect(wrapper.get('header').text()).toContain('720p · 16:9')
   expect(wrapper.get('header').text()).toContain('资产输入0 个')
 

@@ -167,3 +167,12 @@ async def test_skill_remake_does_not_build_unused_legacy_prompts(
         "characters": [], "scenes": [], "objects": [],
     }
     assert result.prompt_document["prompts"][0]["prompt"] == "The saved complete shot."
+
+
+@pytest.mark.parametrize('language',['zh','en'])
+def test_video_enhancement_skill_keeps_targets_authorization_and_source_identity_in_one_pack(language):
+    snapshot=SkillSnapshot.model_validate(snapshot_skills())
+    rendered=instructions(snapshot,language,'video')
+    assert f'language={language}' in rendered
+    for rule in ('720p、1080p、2k或4k','目标清晰度与服务端报价','无须中间转换器','不能再转1080p','不能为了绕过限制悄悄换回原片'):
+        assert rule in rendered

@@ -12,7 +12,7 @@ from services.creation_agent.skill_execution import (
 )
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
-SKILLS = {1: "assets", 2: "image", 3: "storyboard", 4: "video", 5: "story", 6: "remake"}
+SKILLS = {1: "assets", 2: "image", 3: "storyboard", 4: "video", 5: "story", 6: "remake", 8: "video"}
 
 
 async def conversation_for_task(task):
@@ -38,10 +38,14 @@ async def conversation_for_task(task):
         "remake": ("重制视频", "Analyze source video"),
         "video": ("生成视频", "Generate video"),
         "compose": ("合成章节", "Compose episode"),
+        "prepare_export": ("准备章节成片", "Prepare episode export"),
+        "enhance_export": ("生成高清成片", "Enhance episode export"),
     }
     label = labels.get(operation, ("创作任务", "Creation task"))[
         0 if params.get("prompt_language") == "zh" else 1
     ]
+    if params.get('source_video_id'):
+        label = ('准备单条视频' if params.get('operation') == 'prepare_export' else '视频高清化') if params.get('prompt_language') == 'zh' else ('Prepare selected video' if params.get('operation') == 'prepare_export' else 'Enhance selected video')
     targets = []
     target = None
     if params.get("variant_id"):
@@ -116,7 +120,10 @@ async def run_production(task, handler):
     params = dict(task.request_params)
 
     async def before_request():
-        await authorize_run(params)
+        ctx = await authorize_run(params)
+        if params.get('operation') in {'prepare_export', 'enhance_export'}:
+            from services.video_enhancement.sources import require_generation_scope
+            await require_generation_scope(params['novel_id'], ctx.team_id)
         from services.balance import ensure_solvent
 
         await ensure_solvent(params.get("team_id"), params.get("user_id"))

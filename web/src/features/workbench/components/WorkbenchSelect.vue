@@ -3,16 +3,17 @@ import { tr } from '@/i18n'
 
 import { Check, ChevronDown } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { claimExclusivePopover } from '@/shared/exclusivePopover'
 
 const props = defineProps<{
   modelValue: string
-  options: Array<{ label: string; value: string; disabled?: boolean; icon?: Component }>
+  options: Array<{ label: string; value: string; disabled?: boolean; icon?: Component; description?: string }>
   label: string
   placeholder?: string
   iconOnly?: boolean
   fallbackIcon?: Component
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
@@ -25,11 +26,13 @@ const selectedOption = computed(() => props.options.find(option => option.value 
 
 function updatePlacement() {
   const trigger = container.value?.querySelector<HTMLElement>('.workbench-select__trigger')
-  const boundary = container.value?.closest<HTMLElement>('.workbench-prompt-panel, .workbench-node-frame')
+  const boundary = container.value?.closest<HTMLElement>('.workbench-prompt-panel')
   if (!trigger) return
   const triggerRect = trigger.getBoundingClientRect()
   const boundaryRect = boundary?.getBoundingClientRect()
-  const menuHeight = Math.min(props.options.length * 34 + 12, 220)
+  // Canvas nodes do not clip menus; compare zoomed menu size with the viewport.
+  const scale = trigger.offsetHeight > 0 ? triggerRect.height / trigger.offsetHeight : 1
+  const menuHeight = (Math.min(props.options.length * 34 + 12, 220) + 5) * scale
   const lowerBoundary = Math.min(window.innerHeight, boundaryRect?.bottom ?? window.innerHeight)
   const upperBoundary = Math.max(0, boundaryRect?.top ?? 0)
   const spaceBelow = lowerBoundary - triggerRect.bottom
@@ -43,6 +46,7 @@ function beginExclusiveSession() {
 }
 
 function toggle() {
+  if (props.disabled) return
   if (open.value) {
     close()
     return
@@ -69,6 +73,7 @@ function handleFocusOut(event: FocusEvent) {
 }
 
 async function openAndFocus(last = false) {
+  if (props.disabled) return
   updatePlacement()
   beginExclusiveSession()
   open.value = true
@@ -91,6 +96,7 @@ function closeAndFocus() {
 }
 
 onBeforeUnmount(close)
+watch(() => props.disabled, value => { if (value) close() })
 </script>
 
 <template>
@@ -109,10 +115,11 @@ onBeforeUnmount(close)
       :aria-label="label"
       aria-haspopup="listbox"
       :aria-expanded="open"
+      :disabled="disabled"
       :data-state="open ? 'open' : 'closed'"
       @click="toggle"
-      @keydown.down.prevent="openAndFocus()"
-      @keydown.up.prevent="openAndFocus(true)"
+      @keydown.down.stop.prevent="openAndFocus()"
+      @keydown.up.stop.prevent="openAndFocus(true)"
       @keydown.esc.stop.prevent="close"
     >
       <component
@@ -130,10 +137,10 @@ onBeforeUnmount(close)
       :class="{ 'is-above': openAbove }"
       role="listbox"
       :aria-label="tr('{p0}选项', { p0: label })"
-      @keydown.down="moveOptionFocus($event, 1)"
-      @keydown.up="moveOptionFocus($event, -1)"
-      @keydown.home.prevent="openAndFocus()"
-      @keydown.end.prevent="openAndFocus(true)"
+      @keydown.down.stop="moveOptionFocus($event, 1)"
+      @keydown.up.stop="moveOptionFocus($event, -1)"
+      @keydown.home.stop.prevent="openAndFocus()"
+      @keydown.end.stop.prevent="openAndFocus(true)"
       @keydown.esc.stop.prevent="closeAndFocus"
     >
       <button
@@ -150,10 +157,15 @@ onBeforeUnmount(close)
       >
         <span class="workbench-select__option">
           <component :is="option.icon" v-if="option.icon" :size="16" aria-hidden="true" />
-          <span class="workbench-select__option-label">{{ option.label }}</span>
+          <span class="workbench-select__option-label">{{ option.label }}<small v-if="option.description" class="workbench-select__description">{{ option.description }}</small></span>
         </span>
         <Check v-if="option.value === modelValue" :size="13" aria-hidden="true" />
       </button>
     </div>
   </div>
 </template>
+
+<style scoped>
+.workbench-select__description { margin-left:10px;font-size:10px;font-weight:400;opacity:.8 }
+.workbench-select__trigger:disabled { opacity:.55;cursor:default }
+</style>

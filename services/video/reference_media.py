@@ -100,7 +100,7 @@ def _probe(path: Path) -> dict[str, Any]:
         result = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-show_entries",
-                "format=duration,size,format_name:stream=codec_type,codec_name,width,height,duration,avg_frame_rate,r_frame_rate",
+                "format=duration,size,format_name:stream=codec_type,codec_name,width,height,duration,avg_frame_rate,r_frame_rate,color_transfer,color_primaries,color_space,sample_rate,channels,channel_layout",
                 "-of", "json", str(path),
             ],
             check=True,

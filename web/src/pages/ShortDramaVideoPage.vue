@@ -23,6 +23,8 @@ import {
   ZoomOut,
 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import VideoThumbnail from '@/components/VideoThumbnail.vue'
+import ChapterExportPanel from '@/features/video-export/ChapterExportPanel.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { api, mediaUrl } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
@@ -402,6 +404,7 @@ onUnmounted(() => gapPlaybackClock.stop())
         </div>
       </template>
 
+      <ChapterExportPanel v-if="activeChapter" :chapter-id="activeChapter.id" />
       <section class="video-editor-workspace">
         <div v-if="loading" class="video-page-state"><LoaderCircle class="is-spinning" :size="30" /><strong>{{ tr('正在加载本集视频') }}</strong><span>{{ tr('准备分镜顺序和生成结果。') }}</span></div>
         <div v-else-if="loadError" class="video-page-state is-error"><AlertTriangle :size="30" /><strong>{{ tr('视频工作区加载失败') }}</strong><span>{{ loadError }}</span><AppButton variant="primary" size="sm" @click="load">{{ tr('重新加载') }}</AppButton></div>
@@ -442,13 +445,12 @@ onUnmounted(() => gapPlaybackClock.stop())
                 :aria-label="tr('播放{p0}', { p0: sceneLabel(activeItem) })"
                 @click="togglePlayback"
               >
-                <img
-                  v-if="videoCoverUrl(activeItem.video)"
-                  :src="videoCoverUrl(activeItem.video)"
+                <VideoThumbnail
+                  :src="activeItem.video.url"
+                  :poster="videoCoverUrl(activeItem.video)"
                   :alt="tr('{p0}视频封面', { p0: sceneLabel(activeItem) })"
-                  decoding="async"
-                >
-                <Film v-else :size="38" />
+                  fit="contain"
+                />
                 <i><Play :size="24" fill="currentColor" /></i>
               </button>
               <div v-else class="video-stage-blackout" role="img" :aria-label="activeItem ? tr('{p0}无视频，使用黑屏占位', { p0: sceneLabel(activeItem) }) : tr('黑屏占位')" />
@@ -508,8 +510,7 @@ onUnmounted(() => gapPlaybackClock.stop())
                     >
                       <span class="video-timeline-copy"><strong>{{ sceneLabel(item) }}</strong><small>{{ formatTime(item.duration) }}</small></span>
                       <span class="video-timeline-thumb">
-                        <img v-if="item.video?.url && item.coverUrl" :src="item.coverUrl" alt="" loading="lazy" decoding="async" />
-                        <template v-else-if="item.video?.url"><Film :size="23" /><em>{{ tr('点击播放') }}</em></template>
+                        <VideoThumbnail v-if="item.video?.url" :src="item.video.url" :poster="item.coverUrl" />
                         <template v-else-if="item.state === 'failed'"><AlertTriangle :size="23" /><em>{{ tr('生成失败') }}</em></template>
                         <template v-else-if="item.state === 'generating'"><LoaderCircle class="is-spinning" :size="23" /><em>{{ tr('生成中') }}</em></template>
                         <template v-else><Film :size="23" /><em>{{ tr('待生成') }}</em></template>
@@ -547,7 +548,6 @@ onUnmounted(() => gapPlaybackClock.stop())
 .video-stage { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; background: #090a0d; }
 .video-stage video { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; cursor: pointer; }
 .video-stage-poster { position: relative; display: grid; width: 100%; height: 100%; min-height: 230px; place-items: center; overflow: hidden; padding: 0; border: 0; color: #fff; background: #11141b; cursor: pointer; }
-.video-stage-poster > img { width: 100%; height: 100%; object-fit: contain; }
 .video-stage-poster > i { position: absolute; display: grid; width: 60px; height: 60px; place-items: center; border: 1px solid rgb(255 255 255 / 45%); border-radius: 50%; background: rgb(26 29 38 / 72%); font-style: normal; backdrop-filter: blur(8px); }
 .video-stage-poster:hover > i,.video-stage-poster:focus-visible > i { background: rgb(83 78 236 / 90%); transform: scale(1.06); }
 .video-stage-blackout { width: 100%; height: 100%; min-height: 230px; background: #000; }
@@ -589,7 +589,6 @@ onUnmounted(() => gapPlaybackClock.stop())
 .video-timeline-copy strong { overflow: hidden; min-width: 0; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .video-timeline-copy small { color: var(--app-text-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
 .video-timeline-thumb { display: grid; overflow: hidden; place-items: center; border-radius: 8px; color: var(--app-text-muted); background: var(--app-surface-muted); }
-.video-timeline-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .video-timeline-thumb em { margin-top: -18px; font-size: 10px; font-style: normal; }
 .video-timeline-clip.is-failed .video-timeline-thumb { color: #df596c; background: color-mix(in srgb,#ef5c70 9%,var(--app-surface-muted)); }
 .video-timeline-clip.is-generating .video-timeline-thumb { color: var(--app-accent); }

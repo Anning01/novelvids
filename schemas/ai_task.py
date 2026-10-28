@@ -24,6 +24,7 @@ class AiTaskOut(BaseResponse):
                 "base_url",
                 "skill_snapshot",
                 "agent_configuration",
+                "config_snapshot",
                 "replace_versions",
                 "replaced_scene_snapshots",
             }
