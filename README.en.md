@@ -1,5 +1,3 @@
-[中文](README.md) · English
-
 <p align="center">
   <img src="docs/images/logo.png" width="88" alt="NovelVids logo">
 </p>
@@ -13,6 +11,10 @@ Bring stories, character assets, storyboards, AI images, video generation and ep
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#quick-start)
 [![Chinese / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
+
+<p align="center">
+  <strong>English</strong> &nbsp;|&nbsp; <a href="README.md">简体中文</a>
+</p>
 
 [Watch a sample](#see-the-result) · [Try the demo](https://demo.xiazq.com) · [Run locally](#quick-start) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
 
@@ -133,9 +135,6 @@ Project code and documentation use the **[MIT License](LICENSE)**. Commercial us
 
 Third-party dependencies, fonts, media and model services retain their own terms. Demonstration content is not a grant of rights to underlying stories, music or voices. See [third-party notices](NOTICE.md).
 
-<details>
-<summary>Star history</summary>
+## Star history
 
 [![NovelVids Star history](https://novelvids-star-history.864399407.workers.dev/card.svg)](https://github.com/Anning01/novelvids/stargazers)
-
-</details>

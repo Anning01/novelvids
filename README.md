@@ -1,5 +1,3 @@
-[English](README.en.md) · 中文
-
 <p align="center">
   <img src="docs/images/logo.png" width="88" alt="猫影短剧 · NovelVids Logo">
 </p>
@@ -13,6 +11,10 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#快速开始)
 [![中文 / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
+
+<p align="center">
+  <a href="README.en.md">English</a> &nbsp;|&nbsp; <strong>简体中文</strong>
+</p>
 
 [看成品](#先看效果) · [在线体验](https://demo.xiazq.com) · [本地部署](#快速开始) · [文档](#文档中心) · [参与贡献](CONTRIBUTING.md)
 
@@ -133,8 +135,7 @@ flowchart LR
 
 第三方依赖、字体、素材和模型服务仍遵循各自许可；演示内容不代表授予第三方小说、音乐或声音的使用权，详见[第三方声明](NOTICE.md)。
 
-<details>
-<summary>Star 历史</summary>
+## Star 历史
 
 <!-- star-growth-card:start -->
 <p align="center">
@@ -143,5 +144,3 @@ flowchart LR
   </a>
 </p>
 <!-- star-growth-card:end -->
-
-</details>
