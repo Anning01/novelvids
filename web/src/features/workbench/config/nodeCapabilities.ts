@@ -20,6 +20,7 @@ export const NODE_CAPABILITIES: Record<WorkbenchNodeKind, WorkbenchNodeCapabilit
   audio_media: { deletable: true, copyable: false, runnable: false, target: false, source: true },
   shot: { deletable: true, copyable: true, runnable: true, target: true, source: true },
   video_result: { deletable: true, copyable: false, runnable: false, target: true, source: true },
+  video_enhancement: { deletable: true, copyable: false, runnable: true, target: true, source: true },
   watermark: { deletable: true, copyable: false, runnable: true, target: true, source: true },
   video_composer: { deletable: true, copyable: false, runnable: true, target: true, source: true },
   section: { deletable: true, copyable: false, runnable: false, target: false, source: false },

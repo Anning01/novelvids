@@ -243,9 +243,9 @@ async def pending_production(task_id):
             from services.creation_agent.handler import authorize_run
             try:
                 ctx = await authorize_run(task.request_params)
-                quote = await chapter_exports.quote(row, intent.enhancement.model_config_id, ctx)
+                quote = await chapter_exports.quote(row, intent.enhancement.model_config_id, ctx, intent.enhancement.resolution)
                 if quote['quote_version'] == intent.enhancement.quote_version:
-                    label += f" · {quote['config_snapshot']['name']} · 1080p · ¥{quote['amount']}"
+                    label += f" · {quote['config_snapshot']['name']} · {intent.enhancement.resolution} · ¥{quote['amount']}"
                 else:
                     label += ' · ' + localized_message('来源或报价已变化，请重新确认')
             except Exception:

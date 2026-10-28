@@ -9,7 +9,7 @@ from models.chapter_export import ChapterExport
 from services.creation_agent.skill_execution import prepare_workflow, require_agent
 from services.creation_agent.submissions import bind_submission, previous_submission
 from services.creation_objects import project_write
-from services.video_enhancement.contract import EnhancementOptions, MediaProbe, enhancement_cost, validate_source, require_upscale
+from services.video_enhancement.contract import EnhancementOptions, MediaProbe, enhancement_cost, validate_source, require_upscale, RESOLUTION_SHORT_SIDE
 from services.video_enhancement.media import digest, export_media
 from services.video_enhancement.sources import current_selection, freeze_chapter, freeze_video, require_generation_scope
 from utils.messages import localized_message
@@ -17,11 +17,12 @@ from utils.enums import AiTaskTypeEnum
 
 
 class ChapterExports:
-    async def _enhancement(self, source, recipe, ctx):
+    async def _enhancement(self, source, recipe, ctx, *, sha=None):
+        sha = sha or source.source_sha256
         if source.source_video_id is not None:
-            identity = digest(['video-enhance', source.novel_id, ctx.team_id, source.source_video_id, source.source_sha256, recipe])
+            identity = digest(['video-enhance', source.novel_id, ctx.team_id, source.source_video_id, sha, recipe])
             return await ChapterExport.get_or_none(identity_key=identity), identity
-        legacy = digest(['enhance', source.novel_id, ctx.team_id, source.source_sha256, recipe])
+        legacy = digest(['enhance', source.novel_id, ctx.team_id, sha, recipe])
         existing = await ChapterExport.get_or_none(identity_key=legacy)
         if existing and existing.chapter_id == source.chapter_id:
             return existing, legacy
@@ -95,59 +96,70 @@ class ChapterExports:
             await export.save(using_db=db, update_fields=['task_id'])
             return export, task
 
-    async def quote(self, export: ChapterExport, config_id: int, ctx: AuthContext) -> dict:
+    async def quote(self, export: ChapterExport, config_id: int, ctx: AuthContext, resolution: str = '1080p') -> dict:
         await ensure_novel_access(export.novel_id, ctx)
         await require_generation_scope(export.novel_id, ctx.team_id)
-        if export.parent_export_id is not None:
-            raise ValueError(localized_message('视频已达到1080p或更高，无需重复高清化'))
-        if not export.source_media_ref or not export.source_sha256:
+        ref, sha, source_probe = await self.enhancement_source(export)
+        if not ref or not sha:
             raise HTTPException(409, localized_message('请先完成原片准备'))
         config = await ai_model_config_controller.get_active(8, config_id, team_id=ctx.team_id)
         allowed = await self.configs(ctx)
         if config.id not in {row.id for row in allowed}:
             raise HTTPException(403, localized_message('所选模型不可用'))
         options = EnhancementOptions.model_validate(config.processing_options or {})
-        probe = MediaProbe.model_validate(export.source_probe)
-        require_upscale(probe)
+        if resolution not in options.output_resolutions or resolution not in RESOLUTION_SHORT_SIDE:
+            raise ValueError(localized_message('增强服务未启用所选清晰度'))
+        probe = MediaProbe.model_validate(source_probe)
+        require_upscale(probe, RESOLUTION_SHORT_SIDE[resolution])
         validate_source(probe, options)
-        if not export.source_media_ref.startswith('/media/'):
-            export_media.input_url(export.source_media_ref, options.media_base_url)
+        if not ref.startswith('/media/'):
+            export_media.input_url(ref, options.media_base_url)
         snapshot = {name: getattr(config, name) for name in ('id', 'name', 'model', 'base_url', 'api_protocol',
             'scope', 'team_id', 'processing_options', 'pricing', 'concurrency')}
         snapshot['processing_options'] = options.model_dump(mode='json')
-        price = enhancement_cost(probe.duration, 1080, probe.fps, config.pricing)
-        recipe = {'version': 1, 'config_id': config.id, 'resolution': '1080p', 'fps_mode': 'source'}
-        reusable, _ = await self._enhancement(export, recipe, ctx)
+        price = enhancement_cost(probe.duration, RESOLUTION_SHORT_SIDE[resolution], probe.fps, config.pricing)
+        recipe = {'version': 1, 'config_id': config.id, 'resolution': resolution, 'fps_mode': 'source'}
+        # Enhanced inputs use their own bytes, never silently fall back to the original.
+        reusable, _ = await self._enhancement(export, recipe, ctx, sha=sha)
         if reusable and (not reusable.media_ref or not await ChapterExport.filter(id=reusable.id, task__status=3).exists()):
             reusable = None
         if reusable:
             price = 0
-        return {'amount': str(price), 'currency': 'CNY', 'source_sha256': export.source_sha256,
-            'quote_version': digest([export.id, export.source_sha256, recipe, snapshot]),
+        return {'amount': str(price), 'currency': 'CNY', 'source_sha256': sha,
+            'quote_version': digest([export.id, sha, recipe, snapshot]),
             'recipe': recipe, 'config_snapshot': snapshot, 'reused_export_id': reusable.id if reusable else None}
+
+    async def enhancement_source(self, export):
+        if export.parent_export_id is not None:
+            if not export.media_ref or not await ChapterExport.filter(id=export.id, task__status=3).exists():
+                raise ValueError(localized_message('请先选择已生成成功的视频'))
+            return export.media_ref, export.media_sha256, export.output_probe
+        return export.source_media_ref, export.source_sha256, export.source_probe
 
     async def enhance(self, export_id: int, request, ctx: AuthContext):
         await require_roles('admin', 'creator')(ctx)
         source = await self.get(export_id, ctx)
-        quote = await self.quote(source, request.model_config_id, ctx)
-        if request.source_sha256 != source.source_sha256 or request.quote_version != quote['quote_version']:
+        quote = await self.quote(source, request.model_config_id, ctx, request.resolution)
+        ref, sha, probe = await self.enhancement_source(source)
+        if request.source_sha256 != sha or request.quote_version != quote['quote_version']:
             raise HTTPException(409, localized_message('来源或报价已变化，请重新确认'))
         # Content is rechecked before admitting a paid operation; never trust only the displayed hash.
         from services.video_enhancement.media import file_digest
         import asyncio
-        async with export_media.materialize(source.source_media_ref) as path:
-            if await asyncio.to_thread(file_digest, path) != source.source_sha256:
+        async with export_media.materialize(ref) as path:
+            if await asyncio.to_thread(file_digest, path) != sha:
                 raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
         params = await prepare_workflow({'operation': 'enhance_export', 'novel_id': source.novel_id,
             'chapter_id': source.chapter_id, 'source_video_id':source.source_video_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None,
-            'model_config_id': request.model_config_id, 'config_snapshot': quote['config_snapshot']})
+            'model_config_id': request.model_config_id, 'resolution': request.resolution,
+            'source_export_id': source.id, 'source_sha256': sha, 'config_snapshot': quote['config_snapshot']})
         from models.ai_task import AiTask
         from services.ai_task_executor import ai_task_executor
         async with project_write(source.novel_id) as db:
             previous = await previous_submission(8, params, db)
             if previous:
                 return await ChapterExport.get(task=previous), previous
-            existing, identity = await self._enhancement(source, quote['recipe'], ctx)
+            existing, identity = await self._enhancement(source, quote['recipe'], ctx, sha=sha)
             if existing and existing.task_id:
                 task = await AiTask.get(id=existing.task_id).using_db(db)
                 return existing, await bind_submission(task, params)
@@ -155,8 +167,8 @@ class ChapterExports:
                 source_video_id=source.source_video_id,
                 team_id=ctx.team_id, created_by=ctx.user.id if ctx.user else None, parent_export_id=source.id,
                 identity_key=identity, source_version=source.source_version, manifest=source.manifest,
-                source_media_ref=source.source_media_ref, source_sha256=source.source_sha256,
-                source_probe=source.source_probe, recipe=quote['recipe'], using_db=db)
+                source_media_ref=ref, source_sha256=sha,
+                source_probe=probe, recipe=quote['recipe'], using_db=db)
             task = await ai_task_executor.submit(AiTaskTypeEnum.video_enhancement, {**params, 'export_id': export.id}, db_connection=db)
             export.task_id = task.id
             await export.save(using_db=db, update_fields=['task_id'])

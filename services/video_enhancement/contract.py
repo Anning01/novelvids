@@ -1,10 +1,14 @@
 """Validated media processing configuration and output-duration pricing."""
 
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from utils.messages import localized_message
+
+EnhancementResolution = Literal['720p', '1080p', '2k', '4k']
+RESOLUTION_SHORT_SIDE = {'720p': 720, '1080p': 1080, '2k': 1440, '4k': 2160}
 
 
 class EnhancementOptions(BaseModel):
@@ -21,6 +25,7 @@ class EnhancementOptions(BaseModel):
     queue_id: str | None = Field(None, max_length=100)
     media_base_url: str | None = Field(None, max_length=500)
     local_upload_max_bytes: int = Field(5 * 1024 ** 3, gt=0)
+    output_resolutions: list[EnhancementResolution] = Field(default_factory=lambda: ['1080p'], min_length=1)
 
 
 class MediaProbe(BaseModel):
@@ -50,7 +55,7 @@ def validate_source(probe: MediaProbe, options: EnhancementOptions) -> None:
 
 def require_upscale(probe: MediaProbe, target_short_side: int = 1080) -> None:
     if min(probe.width, probe.height) >= target_short_side:
-        raise ValueError(localized_message('视频已达到1080p或更高，无需重复高清化'))
+        raise ValueError(localized_message('目标清晰度必须高于原片（短边 {p0}px）', p0=min(probe.width, probe.height)))
 
 
 class PriceTier(BaseModel):
@@ -74,11 +79,11 @@ ENHANCEMENT_PRESET = {
     'base_url': 'https://mediakit.cn-beijing.volces.com',
     'model': 'enhance-video-generative',
     'api_protocol': 'volcengine_mediakit',
-    'processing_options': EnhancementOptions().model_dump(mode='json'),
+    'processing_options': EnhancementOptions(output_resolutions=list(RESOLUTION_SHORT_SIDE)).model_dump(mode='json'),
     'pricing': {'type': 'media_processing', 'currency':'CNY', 'billing_unit':'minute', 'tiers': [
-        {'short_side_max':1080, 'fps_max':30, 'price':5},
-        {'short_side_max':1080, 'fps_max':60, 'price':10},
-        {'short_side_max':1080, 'fps_max':120, 'price':20},
+        {'short_side_max':short, 'fps_max':fps, 'price':price * multiplier}
+        for short,price in ((720,2.5),(1080,5),(1440,10),(2160,20))
+        for fps,multiplier in ((30,1),(60,2),(120,4))
     ]},
 }
 

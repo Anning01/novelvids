@@ -57,8 +57,8 @@ class MediaKitClient:
         except (httpx.HTTPError, ValueError):
             raise MediaKitError(localized_message('MediaKit 请求失败，请先核对任务回执')) from None
 
-    async def submit(self, video_url: str, client_token: str, *, queue_id: str | None = None) -> str:
-        payload = {'video_url': video_url, 'resolution': '1080p', 'client_token': client_token}
+    async def submit(self, video_url: str, client_token: str, *, queue_id: str | None = None, resolution: str = '1080p') -> str:
+        payload = {'video_url': video_url, 'resolution': resolution, 'client_token': client_token}
         if queue_id:
             payload['queue_id'] = queue_id
         result = await self._request('POST', '/api/v1/tools/enhance-video-generative', json=payload)

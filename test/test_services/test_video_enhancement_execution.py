@@ -156,7 +156,7 @@ async def test_local_export_upload_and_paid_submission_are_both_reused_on_replay
             with pytest.raises(WaitingForMedia):
                 await EnhanceExportHandler().execute(task.request_params)
         upload.assert_awaited_once()
-        submit.assert_awaited_once_with('mediakit://frozen', export.identity_key, queue_id=None)
+        submit.assert_awaited_once_with('mediakit://frozen', export.identity_key, queue_id=None, resolution='1080p')
 
 
 @pytest.mark.asyncio

@@ -4717,3 +4717,6 @@
   .workbench-add-menu-enter-from,
   .workbench-add-menu-leave-to { opacity: 1; transform: none; }
 }
+
+.viral-workbench-canvas .vue-flow__node-video_enhancement { width: 560px; }
+.viral-workbench-canvas .vue-flow__node-video_enhancement:has(.is-portrait) { width: 480px; }

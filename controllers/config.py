@@ -176,7 +176,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         tasks = data.get('task_types', (instance.task_types or [instance.task_type]) if instance else [])
         if AiTaskTypeEnum.video_enhancement.value in tasks:
             from pydantic import ValidationError
-            from services.video_enhancement.contract import EnhancementOptions, EnhancementPricing, enhancement_cost
+            from services.video_enhancement.contract import EnhancementOptions, EnhancementPricing, enhancement_cost, RESOLUTION_SHORT_SIDE
             if tasks != [AiTaskTypeEnum.video_enhancement.value]:
                 raise HTTPException(400, localized_message('媒体处理配置不能与生成模型共用'))
             protocol = data.get('api_protocol', instance.api_protocol if instance else None)
@@ -190,8 +190,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 pricing = data.get('pricing', instance.pricing if instance else None)
                 if pricing is not None:
                     EnhancementPricing.model_validate(pricing)
-                    for fps in (30, 60, 120):
-                        enhancement_cost(1, 1080, fps, pricing)
+                    for resolution in data['processing_options']['output_resolutions']:
+                        for fps in (30, 60, 120):
+                            enhancement_cost(1, RESOLUTION_SHORT_SIDE[resolution], fps, pricing)
                 elif data.get('is_active', instance.is_active if instance else False):
                     raise ValueError('missing media processing pricing')
             except (ValueError, ValidationError):
@@ -324,9 +325,10 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         return list_styles()
 
     async def list_generation_capabilities(self) -> dict:
-        from services.video_enhancement.contract import ENHANCEMENT_PRESET
+        from services.video_enhancement.contract import ENHANCEMENT_PRESET, RESOLUTION_SHORT_SIDE
         return {
-            'media_processing': ENHANCEMENT_PRESET,
+            'media_processing': {**ENHANCEMENT_PRESET, 'resolutions': [
+                {'value': value, 'short_side': short} for value, short in RESOLUTION_SHORT_SIDE.items()]},
             "image": {
                 model_type.value: list(image_capabilities_for(model_type.value).clarities)
                 for model_type in ImageModelTypeEnum

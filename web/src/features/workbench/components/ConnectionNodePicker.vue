@@ -29,6 +29,7 @@ function optionIcon(id: string) {
     return Stamp;
   if (id === 'shot')
     return Clapperboard;
+  if (id === 'video_enhancement') return Sparkles;
   if (id.startsWith('operation:'))
     return Sparkles;
   return Box;

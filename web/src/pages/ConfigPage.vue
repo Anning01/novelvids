@@ -75,7 +75,7 @@ const categories: ModelCategory[] = [
 ]
 categories.push({
   id: 'enhancement', get label() { return tr('视频画质增强') }, eyebrow: 'ENHANCEMENT',
-  get description() { return tr('单条视频或成片增强至1080p，仅允许清晰度提升。') },
+  get description() { return tr('单条视频或成片提升清晰度，按后台配置选择输出档位。') },
   taskTypes: [8], icon: Zap,
 })
 const settingsTabs: AppTabItem[] = [
@@ -130,6 +130,15 @@ const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value =>
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
 const enhancementPricing = ref<NonNullable<ModelPricing['tiers']>>([])
 const processingOptions = ref<Record<string, unknown>>({})
+const enhancementResolutions = computed(() => generationCapabilities.value.media_processing?.resolutions || [])
+function toggleEnhancementResolution(value: string, shortSide: number, enabled: boolean) {
+  const current = Array.isArray(processingOptions.value.output_resolutions) ? processingOptions.value.output_resolutions as string[] : ['1080p']
+  processingOptions.value.output_resolutions = enabled ? [...new Set([...current, value])] : current.filter(item => item !== value)
+  if (enabled && !enhancementPricing.value.some(tier => tier.short_side_max === shortSide)) {
+    const preset = generationCapabilities.value.media_processing?.pricing.tiers || []
+    enhancementPricing.value.push(...preset.filter(tier => tier.short_side_max === shortSide).map(tier => ({ ...tier })))
+  }
+}
 const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
 const tierPrices = ref<Record<string, number>>({})
 const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
@@ -702,10 +711,13 @@ onMounted(load)
           <span>{{ tr('支持多轮工具调用（创作助手必需）') }}</span>
         </label>
         <section v-if="selectedCategoryId === 'enhancement'" class="pricing-editor">
-          <span class="pricing-title">{{ tr('1080p增强费用（元 / 输出分钟）') }}</span>
+          <span class="pricing-title">{{ tr('增强费用（元 / 输出分钟）') }}</span>
+          <div class="enhancement-resolution-options">
+            <label v-for="item in enhancementResolutions" :key="item.value"><input type="checkbox" :checked="(Array.isArray(processingOptions.output_resolutions) ? processingOptions.output_resolutions : ['1080p']).includes(item.value)" @change="toggleEnhancementResolution(item.value, item.short_side, ($event.target as HTMLInputElement).checked)" />{{ item.value.toUpperCase() }}</label>
+          </div>
           <div class="pricing-grid">
-            <label v-for="tier in enhancementPricing" :key="tier.fps_max">
-              <span>{{ tr('最高帧率') }} {{ tier.fps_max }} fps</span>
+            <label v-for="tier in enhancementPricing" :key="`${tier.short_side_max}:${tier.fps_max}`">
+              <span>{{ tier.short_side_max }}p · {{ tr('最高帧率') }} {{ tier.fps_max }} fps</span>
               <input v-model.number="tier.price" type="number" min="0" step="0.01" />
             </label>
           </div>
@@ -919,4 +931,5 @@ onMounted(load)
   .model-form-grid label, .model-form-grid label.is-full { grid-column: 1; }
   .prompt-language-options { grid-template-columns: 1fr; }
 }
+.enhancement-resolution-options{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.enhancement-resolution-options label{display:flex;gap:6px;align-items:center}.enhancement-resolution-options input{width:auto;min-height:auto}
 </style>

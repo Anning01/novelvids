@@ -95,7 +95,7 @@ async function enhance(row: ChapterExport) {
 async function download(row: ChapterExport, source: boolean) {
   try {
     const target = row.source_video_id ? `video-${row.source_video_id}` : `chapter-${row.chapter_id}`
-    await downloadFile(`${API_BASE}/video/exports/${row.id}/download${source ? '?source=true' : ''}`, `${target}-export-${row.id}-${source ? 'source' : '1080p'}.mp4`, authHeaders())
+    await downloadFile(`${API_BASE}/video/exports/${row.id}/download${source ? '?source=true' : ''}`, `${target}-export-${row.id}-${source ? 'source' : row.recipe.resolution || '1080p'}.mp4`, authHeaders())
   } catch (caught) { error.value = (caught as Error).message }
 }
 function clearPreview() {
@@ -147,7 +147,7 @@ onUnmounted(() => { alive = false; generation++; clearPreview(); clearInterval(t
       <small v-if="!models.length">{{ tr('请在设置中配置并启用视频画质增强服务。') }}</small>
     </label>
     <ol class="export-list"><li v-for="row in exports" :key="row.id">
-      <div class="export-description"><strong>{{ row.parent_export_id ? tr('1080p高清版') : tr('原片版本') }} · #{{ row.id }}</strong>
+      <div class="export-description"><strong>{{ row.parent_export_id ? `${String(row.recipe.resolution || '1080p').toUpperCase()} ${tr('高清版')}` : tr('原片版本') }} · #{{ row.id }}</strong>
         <small v-if="row.selection_current === false">{{ tr('当前镜头选择已更新，此版本保留原内容。') }}</small>
         <span role="status"><LoaderCircle v-if="[1, 2, 6].includes(row.status || 0)" class="spin" :size="14" />{{ status(row) }}</span>
         <small v-if="row.source_probe.width">{{ tr('原片') }} {{ row.source_probe.width }}×{{ row.source_probe.height }} · {{ Number(row.source_probe.duration).toFixed(2) }}s · {{ row.source_probe.fps }}fps</small>

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
-import VideoEnhanceButton from '@/features/video-export/VideoEnhanceButton.vue'
 
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
@@ -393,7 +392,6 @@ watch([selectedModel, generationMode], ([model]) => {
         </span>
       </template>
       <div class="workbench-node-content workbench-media-node workbench-video-production">
-        <div v-if="activeVideo" class="workbench-video-enhancement"><VideoEnhanceButton :video="activeVideo" :pixel-size="displayedVideoSize" /></div>
         <WorkbenchVideoMedia
           :src="activeVideo?.url || ''"
           :poster="activeVideo ? videoCoverUrl(activeVideo) : ''"
@@ -434,5 +432,4 @@ watch([selectedModel, generationMode], ([model]) => {
   background: transparent;
   gap: 0;
 }
-.workbench-video-enhancement { position:absolute;top:10px;right:10px;z-index:2 }
 </style>

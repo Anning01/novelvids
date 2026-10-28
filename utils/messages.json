@@ -586,5 +586,7 @@
   "增强服务地址或协议已变化，请恢复该任务原配置后继续": "The enhancement endpoint or protocol changed. Restore this task’s original configuration to continue.",
   "视频已达到1080p或更高，无需重复高清化": "This video is already 1080p or higher and cannot be enhanced to the same resolution again.",
   "请先选择已生成成功的视频": "Select a successfully generated video first.",
-  "视频画质增强": "Video enhancement"
+  "视频画质增强": "Video enhancement",
+  "目标清晰度必须高于原片（短边 {p0}px）": "The target resolution must exceed the source (short side {p0}px)",
+  "增强服务未启用所选清晰度": "The selected resolution is not enabled for this enhancement service"
 }

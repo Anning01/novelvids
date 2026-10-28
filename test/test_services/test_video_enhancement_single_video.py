@@ -64,8 +64,8 @@ async def test_single_video_preparation_does_not_require_other_shots_and_preserv
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('size',['1920x1080','1080x1920','3840x2160'])
-async def test_actual_hd_video_is_rejected_before_preparation_or_paid_submission(tmp_path, monkeypatch, size):
+@pytest.mark.parametrize('size',['1920x1080','1080x1920'])
+async def test_actual_1080p_video_can_be_prepared_but_same_resolution_is_rejected(tmp_path, monkeypatch, size):
     _, chapter, _=await enabled_project()
     scene=await Scene.create(chapter=chapter,sequence=1)
     path=tmp_path/'hd.mp4';fixture_video(path,size=size)
@@ -73,10 +73,15 @@ async def test_actual_hd_video_is_rejected_before_preparation_or_paid_submission
     @asynccontextmanager
     async def materialize(_ref):yield path
     monkeypatch.setattr(export_media,'materialize',materialize)
-    with pytest.raises(ValueError,match='1080p'):
-        await chapter_exports.prepare_video(video.id,AuthContext())
-    assert await ChapterExport.all().count()==0
-    assert await AiTask.all().count()==0
+    source,task=await chapter_exports.prepare_video(video.id,AuthContext())
+    await ai_task_executor.run(task)
+    await source.refresh_from_db()
+    config=await AiModelConfig.create(task_type=8,name='MediaKit',is_active=True,api_key='test-key',**ENHANCEMENT_PRESET)
+    with pytest.raises(ValueError):
+        await chapter_exports.quote(source,config.id,AuthContext(),'1080p')
+    quote=await chapter_exports.quote(source,config.id,AuthContext(),'2k')
+    assert quote['recipe']['resolution']=='2k'
+    assert await AiTask.filter(task_type=8).count()==0
 
 
 @pytest.mark.asyncio
@@ -86,7 +91,7 @@ async def test_queued_1080p_task_cannot_bypass_server_upscale_guard():
     export.source_probe={**export.source_probe,'width':1920,'height':1080}
     await export.save()
     with patch('services.video_enhancement.provider.MediaKitClient.submit',AsyncMock()) as submit:
-        with pytest.raises(ValueError,match='1080p'):
+        with pytest.raises(ValueError):
             await EnhanceExportHandler().execute(task.request_params)
         submit.assert_not_awaited()
 
@@ -98,6 +103,6 @@ async def test_episode_source_at_1080p_cannot_be_enhanced_even_with_a_forged_res
     source=await ChapterExport.create(novel_id=novel.id,chapter_id=chapter.id,identity_key='a'*64,source_version='b'*64,
         source_sha256='c'*64,source_media_ref='/media/exports/1/source.mp4',
         source_probe={'width':1920,'height':1080,'duration':'5','fps':'24'})
-    with pytest.raises(ValueError,match='1080p'):
+    with pytest.raises(ValueError):
         await chapter_exports.quote(source,config.id,AuthContext())
     assert await AiTask.filter(task_type=8).count()==0

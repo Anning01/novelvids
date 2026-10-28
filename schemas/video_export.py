@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
+from services.video_enhancement.contract import EnhancementResolution
 
 
 class ExportPrepareIn(BaseModel):
@@ -12,6 +13,7 @@ class ExportEnhanceIn(BaseModel):
     model_config_id: int = Field(gt=0)
     source_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
     quote_version: str = Field(pattern=r'^[a-f0-9]{64}$')
+    resolution: EnhancementResolution = '1080p'
 
 
 class ExportTaskOut(BaseModel):

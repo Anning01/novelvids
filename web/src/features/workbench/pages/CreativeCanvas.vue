@@ -43,6 +43,7 @@ import RemakeAnalysisNode from '../nodes/RemakeAnalysisNode.vue'
 import ChapterNode from '../nodes/ChapterNode.vue'
 import ShotNode from '../nodes/ShotNode.vue'
 import VideoResultNode from '../nodes/VideoResultNode.vue'
+import VideoEnhancementNode from '../nodes/VideoEnhancementNode.vue'
 import AudioReferenceNode from '../nodes/AudioReferenceNode.vue'
 import DigitalHumanNode from '../nodes/DigitalHumanNode.vue'
 import ImageMediaNode from '../nodes/ImageMediaNode.vue'
@@ -105,11 +106,12 @@ const promptEditors = computed<WorkbenchPromptEditor[]>(() => (capabilities.valu
 const restoredViewportChapterId = ref<number | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
 const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
-const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), source_video: markRaw(RemakeSourceNode), ai_decomposition: markRaw(RemakeAnalysisNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
+const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), source_video: markRaw(RemakeSourceNode), ai_decomposition: markRaw(RemakeAnalysisNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), video_enhancement: markRaw(VideoEnhancementNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
   { id: 'asset', get label() { return tr('资产') }, get description() { return tr('创建可编辑的昵称、Prompt 与图片资产') }, kind: 'asset', data: {} },
   { id: 'shot', get label() { return tr('视频') }, get description() { return tr('创建一个可编辑的视频生产节点') }, kind: 'shot', data: {} },
+  { id: 'video_enhancement', get label() { return tr('高清视频') }, get description() { return tr('选择更高清晰度，直接生成新的视频') }, kind: 'video_enhancement', data: {} },
   { id: 'watermark', get label() { return tr('创建水印') }, get description() { return tr('创建水印配置节点') }, kind: 'watermark', data: {} },
   { id: 'operation:video_composer', get label() { return tr('视频合成器') }, get description() { return tr('创建成片合成节点') }, kind: 'video_composer', data: {} },
 ]
@@ -179,7 +181,7 @@ const selectedNodes = computed(() => store.selectedNodeKeys.flatMap(key => {
   const node = store.nodeByKey(key)
   return node ? [node] : []
 }))
-const runState = computed(() => selectedRunState(selectedNodes.value, capabilities.value))
+const runState = computed(() => selectedRunState(selectedNodes.value, capabilities.value, nodeRunRegistry.commands))
 
 function canonicalEdgeHandles(edge: WorkbenchEdge) {
   const source = store.nodeByKey(edge.source)
@@ -294,6 +296,7 @@ function canvasNodeSize(item: WorkbenchNode) {
   if (item.kind === 'shot') return { width: 560, height: 760 }
   if (item.size) return item.size
   if (item.kind === 'video_result') return { width: 360, height: 300 }
+  if (item.kind === 'video_enhancement') return { width: 560, height: 480 }
   if (item.kind === 'watermark') return { width: 360, height: 300 }
   if (item.kind === 'video_composer') return { width: 390, height: 420 }
   if (item.kind === 'chapter') return { width: 360, height: 240 }
@@ -489,11 +492,13 @@ async function createCompatibleNode(option: CompatibleNodeCreation) {
     ? await store.addEmptyAsset(position)
     : option.candidate.id === 'shot'
       ? await store.addShot(position)
-      : option.candidate.id === 'watermark'
-        ? addWatermark(position)
-        : option.candidate.id === 'operation:video_composer'
-          ? addVideoComposer(position)
-          : null
+      : option.candidate.id === 'video_enhancement'
+        ? store.addVideoEnhancement(position)
+        : option.candidate.id === 'watermark'
+          ? addWatermark(position)
+          : option.candidate.id === 'operation:video_composer'
+            ? addVideoComposer(position)
+            : null
   if (!created) return
   if (picker.origin.handleType === 'source') {
     store.connectMediaNode(picker.origin.nodeId, created.key, {

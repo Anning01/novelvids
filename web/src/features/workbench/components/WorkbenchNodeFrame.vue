@@ -82,6 +82,7 @@ const icon = computed(() => ({
   audio_media: FileAudio2,
   shot: Clapperboard,
   video_result: FileVideo2,
+  video_enhancement: FileVideo2,
   watermark: Droplet,
   video_composer: Film,
   section: Layers3,

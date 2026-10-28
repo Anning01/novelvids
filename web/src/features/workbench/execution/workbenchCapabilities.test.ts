@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest'
 import type { WorkbenchCapabilities } from '@/types'
 import { selectedRunState } from './workbenchCapabilities'
+import { ref } from 'vue'
+import { createWorkbenchNodeRunRegistry } from '../run/nodeRunRegistry'
+import type { WorkbenchNode } from '../types/workbenchTypes'
 
 const capabilities: WorkbenchCapabilities = {
   upload_media: true,
@@ -63,4 +66,17 @@ it('shows the truthful composer capability reason', () => {
     reason: '当前服务未启用视频合成',
     runnableKeys: [],
   })
+})
+
+it('uses the video card command for canvas execution and disables repeated submissions', () => {
+  const node: WorkbenchNode = { id: -1, key: 'hd', kind: 'video_enhancement', backendKind: 'video_enhancement', title: '高清视频',
+    position: { x: 0, y: 0 }, size: null, zIndex: 1, activeVersionId: null, status: 'ready', data: {}, createdAt: '', updatedAt: '' }
+  const registry = createWorkbenchNodeRunRegistry()
+  const enabled = ref(false)
+  registry.register(node.key, { enabled, run: () => {} })
+  expect(selectedRunState([node], capabilities, registry.commands).enabled).toBe(false)
+  enabled.value = true
+  expect(selectedRunState([node], capabilities, registry.commands)).toMatchObject({ enabled: true, runnableKeys: ['hd'] })
+  enabled.value = false
+  expect(selectedRunState([node], capabilities, registry.commands).enabled).toBe(false)
 })

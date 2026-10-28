@@ -7,6 +7,7 @@ from api._production_request import production_request
 from auth.deps import AuthContext, get_auth_context, require_chapter_access, require_video_access, require_roles
 from models.chapter_export import ChapterExport
 from schemas.video_export import ExportPrepareIn, ExportEnhanceIn, ExportTaskOut
+from services.video_enhancement.contract import EnhancementOptions, EnhancementResolution, RESOLUTION_SHORT_SIDE
 from controllers.chapter_export import chapter_exports
 from services.ai_task_executor import ai_task_executor
 from utils.response_format import ResponseSchema
@@ -38,7 +39,12 @@ async def list_exports(chapter_id: int, page: int=1, ctx: AuthContext=Depends(ge
 
 @router.get('/models')
 async def export_models(ctx: AuthContext=Depends(get_auth_context)):
-    return ResponseSchema(data=[{'id':row.id,'name':row.name} for row in await chapter_exports.configs(ctx)])
+    return ResponseSchema(data=[{'id':row.id,'name':row.name,
+        'input_short_side_max': EnhancementOptions.model_validate(row.processing_options or {}).input_short_side_max,
+        'supported_resolutions':[{'value':value,'short_side':short} for value,short in RESOLUTION_SHORT_SIDE.items()],
+        'resolutions':[{'value':value,'short_side':RESOLUTION_SHORT_SIDE[value]} for value in
+            EnhancementOptions.model_validate(row.processing_options or {}).output_resolutions]}
+        for row in await chapter_exports.configs(ctx)])
 
 
 @router.get('/video/{video_id}')
@@ -73,16 +79,17 @@ async def download_export(export_id:int, source:bool=False,ctx:AuthContext=Depen
         path = export_media.local_path(ref)
         if not path.is_file():
             raise HTTPException(404, localized_message('成片文件不存在或已移除'))
-        return FileResponse(path, media_type='video/mp4', filename=f'chapter-{export.chapter_id}-export-{export.id}-{"source" if source else "1080p"}.mp4')
+        resolution = (export.recipe or {}).get('resolution', 'source')
+        return FileResponse(path, media_type='video/mp4', filename=f'chapter-{export.chapter_id}-export-{export.id}-{"source" if source else resolution}.mp4')
     from services.oss import resolve_media_url
     return RedirectResponse(resolve_media_url(ref), status_code=307)
 
 
 @router.get('/{export_id}/quote')
-async def quote_export(export_id:int,model_config_id:int,ctx:AuthContext=Depends(get_auth_context),_=EDITOR):
+async def quote_export(export_id:int,model_config_id:int,resolution:EnhancementResolution='1080p',ctx:AuthContext=Depends(get_auth_context),_=EDITOR):
     source=await chapter_exports.get(export_id,ctx)
     try:
-        quote=await chapter_exports.quote(source,model_config_id,ctx)
+        quote=await chapter_exports.quote(source,model_config_id,ctx,resolution)
     except ValueError as error:
         raise HTTPException(400,str(error)) from None
     return ResponseSchema(data={key:quote[key] for key in ('amount','currency','source_sha256','quote_version','recipe','reused_export_id')})

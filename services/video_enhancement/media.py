@@ -118,11 +118,13 @@ class ExportMedia(ResourceStorage):
                     async for block in response.aiter_bytes(1024 * 1024):
                         output.write(block)
             actual = await asyncio.to_thread(inspect_media, downloaded)
+            from services.video_enhancement.contract import RESOLUTION_SHORT_SIDE
+            resolution = (getattr(export, 'recipe', None) or {}).get('resolution', '1080p')
             source = MediaProbe.model_validate(export.source_probe)
             tolerance = max(2 / float(source.fps), .1)
             if (abs(float(actual.duration - source.duration)) > tolerance
                     or abs(actual.fps - source.fps) > .01
-                    or abs(min(actual.width, actual.height) - 1080) > 2
+                    or abs(min(actual.width, actual.height) - RESOLUTION_SHORT_SIDE[resolution]) > 2
                     or actual.color_transfer in {'smpte2084', 'arib-std-b67'}
                     or abs(actual.width / actual.height / (source.width / source.height) - 1) > .01):
                 raise ValueError(localized_message('增强视频的时长、比例或帧率与原片不符'))
@@ -141,7 +143,7 @@ class ExportMedia(ResourceStorage):
                 actual = await asyncio.to_thread(inspect_media, final)
                 if actual.audio_streams != source.audio_streams or abs(float(actual.duration - source.duration)) > tolerance:
                     raise ValueError(localized_message('增强视频的声音或时序与原片不符'))
-            ref = self.ref(export, '1080p')
+            ref = self.ref(export, resolution)
             await self.store(ref, final)
             return {'ref': ref, 'sha256': await asyncio.to_thread(file_digest, final), 'probe': actual.model_dump(mode='json')}
 

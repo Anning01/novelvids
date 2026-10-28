@@ -35,14 +35,17 @@ class EnhanceExportHandler(BaseTaskHandler):
         import httpx
         from controllers.config import ai_model_config_controller
         from services.creation_agent.waiting import WaitingForMedia
-        from services.video_enhancement.contract import EnhancementOptions, MediaProbe, require_upscale, validate_source
+        from services.video_enhancement.contract import EnhancementOptions, MediaProbe, require_upscale, validate_source, RESOLUTION_SHORT_SIDE
         from services.video_enhancement.provider import MediaKitClient, MediaKitError
 
         export = await ChapterExport.get(id=request_params['export_id'])
         snapshot = request_params['config_snapshot']
         options = EnhancementOptions.model_validate(snapshot['processing_options'])
         probe = MediaProbe.model_validate(export.source_probe)
-        require_upscale(probe)
+        resolution = (export.recipe or {}).get('resolution', '1080p')
+        if resolution not in options.output_resolutions:
+            raise ValueError(localized_message('增强服务未启用所选清晰度'))
+        require_upscale(probe, RESOLUTION_SHORT_SIDE[resolution])
         validate_source(probe, options)
         config = await ai_model_config_controller.get_active(8, snapshot['id'], team_id=request_params.get('team_id'))
         if export.source_media_ref.startswith('/media/'):
@@ -72,7 +75,7 @@ class EnhanceExportHandler(BaseTaskHandler):
                 client = MediaKitClient.for_snapshot(snapshot, current_config, http=http)
                 started = True
                 try:
-                    task_id = await client.submit(url, export.identity_key, queue_id=options.queue_id)
+                    task_id = await client.submit(url, export.identity_key, queue_id=options.queue_id, resolution=resolution)
                 except MediaKitError as error:
                     if error.definite_rejection:
                         started = False

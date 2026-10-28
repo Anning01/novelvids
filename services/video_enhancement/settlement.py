@@ -5,7 +5,7 @@ from models.agent_operation import AgentOperation
 from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
 from services.creation_agent.operation_receipts import record_once
-from services.video_enhancement.contract import MediaProbe, enhancement_cost
+from services.video_enhancement.contract import MediaProbe, enhancement_cost, RESOLUTION_SHORT_SIDE
 from utils.messages import localized_message
 
 
@@ -24,9 +24,10 @@ async def settle_enhancement(task, export) -> ModelUsageRecord | None:
     cost = 0
     if result['status'] == 'completed':
         try:
-            if values.get('resolution') != '1080p':
+            resolution = (export.recipe or {}).get('resolution', '1080p')
+            if values.get('resolution') != resolution:
                 raise ValueError('missing resolution')
-            cost = enhancement_cost(values.get('duration'), 1080, values.get('fps'), config.pricing)
+            cost = enhancement_cost(values.get('duration'), RESOLUTION_SHORT_SIDE[resolution], values.get('fps'), config.pricing)
             from decimal import Decimal
             source = MediaProbe.model_validate(export.source_probe)
             tolerance = max(Decimal(2) / source.fps, Decimal('0.1'))

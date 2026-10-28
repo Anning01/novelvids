@@ -18,7 +18,7 @@ const source: ChapterExport = { id: 1, chapter_id: 2, parent_export_id: null, so
 beforeEach(() => {
   vi.restoreAllMocks()
   vi.spyOn(exportApi, 'list').mockResolvedValue({ data: [source] })
-  vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [{ id: 8, name: 'MediaKit' }] })
+  vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [{ id: 8, name: 'MediaKit', resolutions: [{ value: '1080p', short_side: 1080 }] }] })
 })
 
 describe('ChapterExportPanel', () => {

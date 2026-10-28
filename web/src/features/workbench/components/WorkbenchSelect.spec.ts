@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import WorkbenchSelect from './WorkbenchSelect.vue'
 
 it('opens an in-canvas listbox and emits the selected value', async () => {
@@ -78,4 +78,61 @@ it('opens above when the prompt panel has no room below the trigger', async () =
   expect(wrapper.get('[role="listbox"]').classes()).toContain('is-above')
   wrapper.unmount()
   promptPanel.remove()
+})
+
+it('keeps unavailable options explained and closes when the selector is locked', async () => {
+  const wrapper = mount(WorkbenchSelect, { props: { modelValue: '1080p', label: '目标清晰度', options: [
+    { value: '1080p', label: '1080P' }, { value: '2k', label: '2K', description: '服务未启用', disabled: true },
+  ] } })
+  await wrapper.get('[aria-label="目标清晰度"]').trigger('click')
+  expect(wrapper.findAll('[role="option"]')[1]!.text()).toContain('服务未启用')
+  await wrapper.setProps({ disabled: true })
+  expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+  await wrapper.get('[aria-label="目标清晰度"]').trigger('keydown', { key: 'ArrowDown' })
+  expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+
+it('keeps option-navigation keys from moving selected canvas nodes', async () => {
+  const wrapper = mount(WorkbenchSelect, { attachTo: document.body, props: { modelValue: '1080p', label: '目标清晰度',
+    options: [{ value: '1080p', label: '1080P' }, { value: '2k', label: '2K' }] } })
+  const canvasKey = vi.fn()
+  document.body.addEventListener('keydown', canvasKey)
+  try {
+    await wrapper.get('[aria-label="目标清晰度"]').trigger('keydown', { key: 'ArrowDown' })
+    await wrapper.get('[role="listbox"]').trigger('keydown', { key: 'ArrowDown' })
+    expect(canvasKey).not.toHaveBeenCalled()
+  } finally { document.body.removeEventListener('keydown', canvasKey); wrapper.unmount() }
+})
+
+it('opens below a canvas node when the viewport has space beyond the node boundary', async () => {
+  const node = document.createElement('article')
+  node.className = 'workbench-node-frame'
+  document.body.append(node)
+  const wrapper = mount(WorkbenchSelect, { attachTo: node, props: { modelValue: '1080p', label: '目标清晰度',
+    options: ['720p','1080p','2k','4k'].map(value => ({ value, label: value })) } })
+  node.getBoundingClientRect = () => ({ top: 200, bottom: 440 } as DOMRect)
+  wrapper.get<HTMLElement>('[aria-label="目标清晰度"]').element.getBoundingClientRect = () => ({ top: 340, bottom: 380, height: 40 } as DOMRect)
+  try {
+    await wrapper.get('[aria-label="目标清晰度"]').trigger('click')
+    expect(wrapper.get('[role="listbox"]').classes()).not.toContain('is-above')
+  } finally { wrapper.unmount(); node.remove() }
+})
+
+it.each([
+  { scale: .5, top: 400, viewport: 500, above: false },
+  { scale: 2, top: 700, viewport: 1000, above: true },
+  { scale: 1, top: 690, viewport: 768, above: true },
+])('uses the zoomed menu height for scale $scale before opening above: $above', async ({ scale, top, viewport, above }) => {
+  vi.stubGlobal('innerHeight', viewport)
+  const wrapper = mount(WorkbenchSelect, { props: { modelValue: '1080p', label: '目标清晰度',
+    options: ['720p','1080p','2k','4k'].map(value => ({ value, label: value })) } })
+  const trigger = wrapper.get<HTMLElement>('[aria-label="目标清晰度"]').element
+  Object.defineProperty(trigger, 'offsetHeight', { value: 40 })
+  trigger.getBoundingClientRect = () => ({ top, bottom: top + 40 * scale, height: 40 * scale } as DOMRect)
+  try {
+    await wrapper.get('[aria-label="目标清晰度"]').trigger('click')
+    expect(wrapper.get('[role="listbox"]').classes().includes('is-above')).toBe(above)
+  } finally { wrapper.unmount(); vi.unstubAllGlobals() }
 })

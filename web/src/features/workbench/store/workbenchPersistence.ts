@@ -26,6 +26,7 @@ const manualKinds = new Set<WorkbenchNode['kind']>([
   'audio_media',
   'watermark',
   'video_composer',
+  'video_enhancement',
   'section',
   'note',
 ])

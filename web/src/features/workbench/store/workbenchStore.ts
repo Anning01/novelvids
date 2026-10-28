@@ -122,8 +122,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }
     },
     restore(snapshot: HistorySnapshot) {
+      const submitted = new Map(this.nodes.filter(item => item.kind === 'video_enhancement' && item.data.export_id).map(item => [item.key, item.data]))
+      const frozenInputs = this.mediaEdges.filter(item => submitted.has(item.target))
       const automaticNodes = this.nodes.filter(item => !isManualNodeKind(item.kind))
-      this.manualNodes = cloneValue(snapshot.manualNodes)
+      this.manualNodes = cloneValue(snapshot.manualNodes).map(item => submitted.has(item.key)
+        ? { ...item, data: cloneValue(submitted.get(item.key)!) } : item)
       this.nodes = [...automaticNodes, ...this.manualNodes]
       this.nodes.forEach((item) => {
         const saved = snapshot.nodes[item.key]
@@ -132,7 +135,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         item.data.ui = { ...saved.ui }
       })
       const automaticEdges = this.edges.filter(item => !item.key.startsWith('media-edge-'))
-      this.mediaEdges = cloneValue(snapshot.manualEdges)
+      this.mediaEdges = [
+        ...cloneValue(snapshot.manualEdges).filter(item => !submitted.has(item.target)),
+        ...cloneValue(frozenInputs).filter(item => this.nodeByKey(item.source) && this.nodeByKey(item.target)),
+      ]
       this.edges = [...automaticEdges, ...this.mediaEdges.filter(item => this.nodeByKey(item.source) && this.nodeByKey(item.target))]
       this.selectedNodeKeys = snapshot.selectedNodeKeys.filter(key => Boolean(this.nodeByKey(key)))
       this.selectedEdgeKeys = snapshot.selectedEdgeKeys.filter(key => this.edges.some(item => item.key === key))
@@ -362,6 +368,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     updateManualNodeData(key: string, patch: Record<string, unknown>) {
       const item = this.nodeByKey(key)
       if (!item || !isManualNodeKind(item.kind)) return
+      if (item.kind === 'video_enhancement' && item.data.export_id
+        && ['resolution', 'model_id', 'export_id', 'source_export_id', 'source_title'].some(field => field in patch)) return
       item.data = { ...item.data, ...patch }
       this.manualNodes = this.nodes.filter(nodeItem => isManualNodeKind(nodeItem.kind))
     },
@@ -653,6 +661,15 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
       return item
     },
+    addVideoEnhancement(position: Point) {
+      this.checkpoint()
+      const key = `video-enhancement-${crypto.randomUUID()}`
+      const item = node(-Date.now(), key, 'video_enhancement', tr('高清视频'), position, {
+        resolution: '1080p', layout_family: 'result', ui: {},
+      })
+      this.manualNodes.push(item); this.nodes.push(item); this.selectNode(key); this.persistLayout()
+      return item
+    },
     saveVideoComposerConfig(key: string, config: Partial<ComposerConfig>) {
       const item = this.nodeByKey(key)
       if (!item || item.kind !== 'video_composer') return false
@@ -737,12 +754,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         && sourceNode.kind === 'shot'
         && usesHandles('sequence-output', 'shot-input')
       const isComposerVideo = targetNode.kind === 'video_composer'
-        && ['shot', 'video_result', 'video_media'].includes(sourceNode.kind)
+        && ['shot', 'video_result', 'video_media', 'video_enhancement'].includes(sourceNode.kind)
         && usesHandles('output-output', 'video-input')
       const isComposerWatermark = targetNode.kind === 'video_composer'
         && sourceNode.kind === 'watermark'
         && usesHandles('watermark-output', 'watermark-input')
-      if (!isShotReference && !isAssetReference && !isShotSequence && !isWatermarkVideo && !isComposerShot && !isComposerVideo && !isComposerWatermark) return false
+      const isEnhancementVideo = targetNode.kind === 'video_enhancement'
+        && ['shot', 'video_result', 'video_enhancement'].includes(sourceNode.kind)
+        && source !== target && (usesHandles('output-output', 'video-input') || sourceNode.kind === 'shot' && usesHandles('sequence-output', 'video-input'))
+      if (isEnhancementVideo && (targetNode.data.export_id || this.edges.some(item => item.target === target))) return false
+      if (!isShotReference && !isAssetReference && !isShotSequence && !isWatermarkVideo && !isComposerShot && !isComposerVideo && !isComposerWatermark && !isEnhancementVideo) return false
       if (isShotReference && sourceNode.kind === 'asset') {
         const scene = targetNode.data.scene as Scene
         const assetIds = sceneAssetIds(scene)
@@ -755,7 +776,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.checkpoint()
       let stamp = Date.now()
       while (this.edges.some(item => item.key === `media-edge-${stamp}`)) stamp++
-      const isOutputBinding = isWatermarkVideo || isComposerShot || isComposerVideo || isComposerWatermark
+      const isOutputBinding = isWatermarkVideo || isComposerShot || isComposerVideo || isComposerWatermark || isEnhancementVideo
       const orderIndex = isComposerShot || isComposerVideo
         ? this.mediaEdges.filter(item => item.target === target && item.targetHandle !== 'watermark-input').length
         : 0
@@ -773,8 +794,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       } else if (isComposerShot) {
         item.sourceHandle = 'sequence-output'
         item.targetHandle = 'shot-input'
-      } else if (isComposerVideo) {
-        item.sourceHandle = 'output-output'
+      } else if (isComposerVideo || isEnhancementVideo) {
+        item.sourceHandle = isEnhancementVideo ? handles.sourceHandle || 'output-output' : 'output-output'
         item.targetHandle = 'video-input'
       } else if (isComposerWatermark) {
         item.sourceHandle = 'watermark-output'
@@ -783,6 +804,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.mediaEdges.push(item); this.edges.push(item); this.persistLayout()
       notice.success(isAssetReference
         ? tr('参考图片已连接到资产')
+        : isEnhancementVideo
+          ? tr('视频已连接')
         : isShotSequence
           ? tr('视频顺序已连接')
           : isWatermarkVideo
@@ -795,7 +818,13 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return true
     },
     deleteMediaEdge(edgeKey: string) {
-      if (!this.mediaEdges.some(item => item.key === edgeKey)) return false
+      const connection = this.mediaEdges.find(item => item.key === edgeKey)
+      if (!connection) return false
+      const target = this.nodeByKey(connection.target)
+      if (target?.kind === 'video_enhancement' && target.data.export_id) {
+        notice.error(tr('此视频已锁定，请重新拉线创建新视频'))
+        return false
+      }
       this.checkpoint()
       this.mediaEdges = this.mediaEdges.filter(item => item.key !== edgeKey)
       this.edges = this.edges.filter(item => item.key !== edgeKey)

@@ -223,7 +223,7 @@ export interface ModelPricing {
   discount_description?: string
 }
 export interface GenerationCapabilities {
-  media_processing?: { base_url: string; model: string; api_protocol: ImageApiProtocol; processing_options: Record<string, unknown>; pricing: ModelPricing }
+  media_processing?: { base_url: string; model: string; api_protocol: ImageApiProtocol; processing_options: Record<string, unknown>; pricing: ModelPricing; resolutions?: Array<{ value: string; short_side: number }> }
   image: Record<string, string[]>
   video: Record<string, string[]>
   video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>

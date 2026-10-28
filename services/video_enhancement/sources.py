@@ -34,9 +34,7 @@ async def freeze_video(video: Video, scene: Scene) -> tuple[list[dict], str]:
         raise ValueError(localized_message('请先选择已生成成功的视频'))
     ref = normalize_media_url(video.url) or video.url
     async with export_media.materialize(ref) as path:
-        from services.video_enhancement.contract import require_upscale
-        probe = await asyncio.to_thread(inspect_media, path)
-        require_upscale(probe)
+        await asyncio.to_thread(inspect_media, path)
         sha = await asyncio.to_thread(file_digest, path)
     manifest = [{'scene_id':scene.id,'sequence':scene.sequence,'video_id':video.id,'ref':ref,'sha256':sha}]
     return manifest, digest({'video_id':video.id,'sha256':sha,'source_version':1})
