@@ -9,12 +9,12 @@ viewport persistence.
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 The development server runs at `http://localhost:3000` and proxies `/api` and
-`/media` to `http://127.0.0.1:8000`.
+`/media` to `http://127.0.0.1:9000`.
 
 ## Checks
 
@@ -22,3 +22,7 @@ The development server runs at `http://localhost:3000` and proxies `/api` and
 npm run typecheck
 npm run build
 ```
+
+See the [development guide](../docs/development.en.md) for backend startup, tests and extension points.
+
+Project source uses the [MIT License](../LICENSE); retain [third-party notices](../NOTICE.md).

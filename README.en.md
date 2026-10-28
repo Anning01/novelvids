@@ -1,534 +1,140 @@
-[中文](README.md) · **English** · [English dialogue and voices](docs/english-production.md)
-
 <p align="center">
-  <img src="docs/images/logo.png" width="200" alt="NovelVids logo">
+  <img src="docs/images/logo.png" width="88" alt="NovelVids logo">
 </p>
 
-<h1 align="center">NovelVids</h1>
+# NovelVids · 猫影短剧
+
+**An open-source AI workspace for illustrated stories and short dramas.**
+
+Bring stories, character assets, storyboards, AI images, video generation and episode assembly into **one project you can edit, track and keep refining**.
+
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#quick-start)
+[![Chinese / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
 
 <p align="center">
-  <strong>An AI-powered production platform for turning novels into short dramas</strong>
+  <strong>English</strong> &nbsp;|&nbsp; <a href="README.md">简体中文</a>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/FastAPI-00584c?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/Vue_3-42B883?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue 3">
-  <img src="https://img.shields.io/badge/Python_3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12">
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite">
-  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
-  <img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey?style=for-the-badge" alt="License: CC BY-NC 4.0">
-</p>
+[Watch a sample](#see-the-result) · [Try the demo](https://demo.xiazq.com) · [Run locally](#quick-start) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
 
-<p align="center">
-  <a href="#live-demo">Live demo</a> &bull;
-  <a href="#sample-video">Sample video</a> &bull;
-  <a href="#features">Features</a> &bull;
-  <a href="#creation-assistant">Creation assistant</a> &bull;
-  <a href="#screenshots">Screenshots</a> &bull;
-  <a href="#quick-start">Quick start</a> &bull;
-  <a href="#model-configuration">Model configuration</a> &bull;
-  <a href="#database-and-media-storage">Storage</a> &bull;
-  <a href="#customizing-prompts-and-rules-developers">Prompt customization</a> &bull;
-  <a href="#project-structure">Project structure</a> &bull;
-  <a href="#technology-stack">Technology stack</a> &bull;
-  <a href="#tests">Tests</a> &bull;
-  <a href="#license">License</a>
-</p>
+## See the result
 
-## Introduction
+[![A short drama made with NovelVids; click to watch the complete clip](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
 
-**NovelVids**, also known as **猫影短剧**, turns novels, scripts and existing videos into short drama projects:
+[Watch the complete clip on YouTube](https://youtu.be/fdiw__J19uk). Manuscript → characters and locations → storyboard → generated shots → episode. Results depend on the material, models and creative revisions.
 
-**Chapter splitting / video analysis → asset extraction → reference images → storyboards → multimodal video generation → episode composition.**
+**Explore before installing:** [open the live demo](https://demo.xiazq.com), username `demo`, password `NovelVids-Demo-2026`. Browse existing projects, assets, storyboards and videos. The demo is read-only and does not offer free generation; it resets daily at 00:00 Asia/Shanghai. Do not enter private data.
 
-Use Agent mode to start from a manuscript, or manual mode to build a project step by step. Both workflows share character variants, storyboard strategies, character and narrator voices, batch generation, last-frame continuity and a common video-model integration layer.
+## Keep the creative process in one project
 
-The creation assistant uses **Pydantic AI** to call real application tools. Describe a character to create, a shot to adjust or an object to find. The assistant works within the selected scope and returns recorded changes that you can inspect and undo.
-
-## Live demo
-
-- **Application:** [demo.xiazq.com](https://demo.xiazq.com)
-- **Username:** `demo`
-- **Password:** `NovelVids-Demo-2026`
-- **Access:** viewer access to projects, settings, storyboards, images and existing videos. Backend role checks reject writes.
-- **Data:** zero team balance and personal allowance, no model keys and no OSS. The demo resets to its baseline snapshot daily at `00:00` Asia/Shanghai, including the demo password.
-- **API documentation:** [Demo API docs](https://demo.xiazq.com/docs).
-
-The demo uses a separate database and local media copies, isolated from production. Do not upload private or production data. API documentation can be disabled in production deployments.
-
-## Sample video
-
-A short drama clip generated from a novel using NovelVids:
-
-[![Watch the sample video](docs/videos/demo-cover.jpg)](https://youtu.be/fdiw__J19uk)
-
-![Sample video highlights](docs/videos/demo-preview.gif)
-
-Click the cover to watch the full clip. The workflow includes manuscript upload, chapter splitting, asset extraction, reference images, storyboards and shot-by-shot video generation.
-
-## Features
-
-### Manuscripts and projects
-
-- Paste text or import DOC, DOCX, TXT, PDF and Markdown files.
-- Analyze the story, identify chapter boundaries and plan reusable assets.
-- Set the project's aspect ratio, resolution, visual style and storyboard strategy.
-- Switch between light, dark and system appearance, with locally saved preferences.
-
-### Chinese and English
-
-- One administrator-controlled **System language** setting governs the interface and future generation tasks across the installation.
-- New installations default to English; existing saved language settings are retained.
-- Existing manuscripts, assets, prompts, conversation history and media are not automatically translated.
-- Submitted tasks and assistant turns retain their language snapshot, including on retry.
-- English chapter headings, dialogue, narration and uploaded voice references are supported. See the [English production guide](docs/english-production.md) for setup, limitations and a two-chapter acceptance sample.
-
-### Remake studio
-
-- Start from one MP4/MOV video, a folder of episode videos, or an eligible existing project.
-- Each source video can be up to 500 MB and 20 minutes. Folder mode recognizes episode numbers such as `EP12`, `E12`, `第12集`, `第12话` and `12集`, then sorts the episodes.
-- Extract global characters, locations and props before detecting shot boundaries and generating detailed shot prompts.
-- Reuse the existing asset editor, storyboard view and infinite canvas.
-- Background analysis continues when the browser closes. Reopen the project to recover saved progress.
-- Stream episode and stage progress through SSE; retry failed episodes independently.
-- Configure video understanding as an LLM's **Remake** capability, with controlled concurrency and a ten-minute per-request timeout.
-
-### Assets and variants
-
-- Extract characters, locations and props, consolidating aliases for the same entity.
-- Generate all three asset types in a batch, or use uploaded images and image-to-image references.
-- Retain generation history and select the current image version.
-- Create character outfits, age or state changes, location states and prop variants, each with its own references and optional voice override.
-- Merge assets and bind them to chapters. Storyboard and canvas views share the same relationships.
-
-### Storyboards and prompts
-
-- Choose **Cinematic narrative** or **Narrated story** at project creation or while editing story settings.
-- Use a project narrator voice, with narration and inner monologue scheduled outside character dialogue.
-- Produce self-contained shot prompts covering time, environment, positions, action timing, camera movement and sound.
-- Reference assets with `@{Asset Name}` and audio with `@音频N`. Technical reference tokens remain stable across interface languages.
-- Edit prompts visually and preview referenced images or play audio from their tags.
-
-### Storyboard view and infinite canvas
-
-- Edit shot descriptions, assets, prompts, generation parameters and results together.
-- Pan, zoom, select, arrange, copy, paste, undo, redo, collapse and group nodes on a Vue Flow canvas.
-- Drag in reference media using the same multimodal protocol as the storyboard view.
-- Persist selected models, aspect ratios, resolutions and canvas viewport settings.
-
-### Voices and audio references
-
-- Choose system voices or upload MP3/WAV voice references.
-- Preview duration and trim longer recordings into a new copy without changing the original.
-- Assign voices to base characters, individual variants and the project narrator.
-- Send an explicit speaker-to-audio mapping with supported video generation requests.
-- Resolve local or remote audio according to the configured model's capabilities and storage setup.
-
-Voice bindings persist across chapters when the same project assets are reused. They do not guarantee identical sound, a particular accent or perfect lip synchronization. Built-in voice names are not language capability declarations; verify the selected model with authorized English recordings.
-
-### Video generation and episode composition
-
-- Use a configuration-driven factory for reference-based or first/last-frame video generation.
-- Set each shot's model, duration, aspect ratio, resolution, audio and continuity options.
-- Generate selected shots in bulk. Sequential mode feeds each shot's last frame into the next shot automatically.
-- Extract a last frame with FFmpeg when the provider does not return one.
-- Reconcile queued and running provider tasks in the background even after the browser closes.
-- Compose available shot videos in episode order and download the result.
-- Browse images, audio, videos and generation versions in the media library.
-
-### Video enhancement (AI MediaKit)
-
-1. Under **Video enhancement** in Settings, add a Key with AI MediaKit permission, verify pricing and enable it. The creation assistant and a tool-capable assistant model must also be enabled. Enhancement has its own configuration, separate from image/video generation. Runtime credentials, endpoints and prices come from the saved model configuration, not `MEDIA_KIT_KEY`. The earlier `.env` key was only used to prepare local acceptance; production does not require that environment variable.
-2. The storyboard retains its **Enhance** action. On the infinite canvas, drag a video output to empty space and choose **HD video**. The new card uses the dark canvas surface with centered resolution and enhancement actions; service selection stays in its selected-node toolbar. After cost confirmation it shows progress and the completed video, with no intermediate converter or export dialog. Once submitted, its source, service and resolution stay locked, including through undo and connection editing. Delete the card or drag a new connection to change parameters; deleting a canvas card does not delete the saved video. Other shots do not need to be finished. Complete episode exports remain on the video page.
-3. Resolution can only increase, using actual file dimensions: equal targets and downgrades are rejected. Canvas targets are the enabled, priced 720p, 1080p, 2K and 4K tiers. Existing configurations retain their 1080p tier; edit the service in Settings to enable and price additional tiers. The canvas lists all supported targets and distinguishes disabled service tiers from targets that do not exceed the source; showing these options never changes prices or enables a tier automatically. MediaKit generative enhancement accepts inputs up to 1080p, so 1080p→2K/4K is supported while 2K output cannot be submitted again. Generate 4K directly from an eligible source instead. Source files and the current shot selection are preserved.
-4. Check the frozen version, target resolution, actual duration and quote before confirming enhancement. Aspect ratio and frame rate are preserved. Source and HD files remain separate; matching successful results are reused without another enhancement charge. Chat uses the same tools and requires confirmation of the specific export and quote.
-5. Background collection continues after the browser closes. A download failure retries saving the existing result; an uncertain submission requires review rather than another paid submission. Prepare a new source version after changing shots.
-
-Enhancement has its own usage records, based on reported duration, output specifications and configured prices. Quotes and application records are not independently verified provider invoices. Missing usage is flagged for review rather than treated as verified zero cost. The application checks output dimensions, duration and frame rate and preserves the source audio. Evaluate quality and identity consistency on your actual footage; fixed savings are not guaranteed.
-
-Local exports use `CHAPTER_EXPORT_PATH` (default `./data/chapter-exports`), outside public `MEDIA_PATH`, with project-scoped downloads. The default Docker data volume includes this directory; persist and back up custom paths and never expose them as static files. Local input uses MediaKit temporary uploads, so no public local port is needed. OSS uses existing private storage and signed URLs. Keep credentials out of Skills, task snapshots and source code.
-
-See the [development plan](docs/superpowers/plans/2026-10-27-mediakit-video-enhancement.md) and [execution and acceptance record](docs/superpowers/verification/2026-10-27-mediakit-video-enhancement.md) for contracts, recovery and rollback. Individual generated videos and complete episodes are supported. Canvas video cards offer configured resolution targets, and matching source/service/target combinations reuse tasks and results. Frame interpolation and automatic per-shot processing remain outside scope. See the [official API](https://docs.volcengine.com/docs/intelligent-processing/enhance-video-generative?lang=en) and [pricing](https://docs.volcengine.com/docs/Intelligentprocessing/video-tool-billing?lang=en).
-
-### Models and costs
-
-- Configure and enable multiple text, image and video models.
-- Keep capabilities, limits, protocols, defaults and pricing in backend configuration.
-- Record tokens, image counts, video duration, input references, pricing snapshots, discounts, costs and request duration.
-- Filter costs by project and inspect paginated usage records.
-- Group assistant costs by conversation while retaining original call records and avoiding duplicate billing.
-- In team mode, check balances before submission and charge completed usage. Currency units are preserved when switching language.
-
-## Creation assistant
-
-### Capabilities
-
-- **Find, create, edit and remove:** manage characters, locations, props, variants and shots within selected-object, chapter or project scope.
-- **Shared prompt standards:** reuse the application's image and storyboard rules. Precise edits preserve unrelated actions, audio and references.
-- **Memory:** retain recent conversation and save explicit ongoing user requirements for the relevant project, chapters or objects.
-- **Bounded context:** query objects as needed, read long text in pages and compact older working context while retaining original records.
-- **Inspectable changes:** show diffs and undo actions. Idempotent requests avoid duplicate writes; version conflicts prevent overwriting newer edits.
-
-The assistant coordinates settings, storyboards, images, videos and composition. Existing workspace buttons and chat share the same skills and execution boundaries. An explicit generation request authorizes the corresponding model calls.
-
-### Enable and use
-
-1. Add an LLM under **Settings → Model settings**. Select **Creation assistant** and enable **Multi-turn tool calling**.
-2. Enable the assistant under **Settings → General settings → Creation assistant**. With authentication enabled, global assistant configuration is managed by the super administrator.
-3. Open the assistant from the settings workspace, storyboard or canvas. **Edit with assistant** can reference a specific object directly.
-4. Select the scope and describe your request, such as “Make only this shot's lighting warmer; preserve the action and sound.”
-5. Review the recorded changes, expand diffs or undo. Conversations can be created, switched, deleted and restored.
-
-On desktop, the assistant sits beside the workspace. Messages, query results, changes, memory, usage and references can be collapsed. See the [UI attribution notice](web/src/features/creation-agent/beautiful-ui.NOTICE.md).
-
-### Default budgets
-
-These are application presets for long-context conversations, not universal provider limits. Adjust them under **Advanced settings** to match the configured model.
-
-| Setting | Default |
+| Start with | What you can do |
 | --- | --- |
-| Working context budget | 840,000 estimated input tokens |
-| Context character limit | 2,000,000 characters |
-| Compaction trigger / target | 70% / 45% |
-| Output per call / total per turn | 64,000 / 2,000,000 tokens |
-| Model calls / tool calls per turn | 20 / 50 |
-| Objects per turn / run timeout | 32 / 600 seconds |
-| Recent history turns / text page length | 12 / 4,000 characters |
-| Summary output / timeout | 4,000 tokens / 30 seconds |
+| A story or manuscript | Import TXT, Markdown, DOCX or PDF, review chapter boundaries and story analysis, then work chapter by chapter |
+| Characters, locations and props | Manage reference images, aliases and variants; reuse the same assets and voice bindings |
+| A storyboard | Edit shot descriptions, complete prompts, reference media and generation parameters; inspect each result |
+| An infinite canvas | Connect assets, videos and enhanced results; switch between storyboard and workflow views |
+| A revision in mind | Ask the assistant to change selected objects, inspect diffs and recorded changes, and undo supported edits |
+| Generated footage | Track tasks and versions, connect shots, assemble episodes and optionally enhance resolution |
 
-Lower model-level limits still apply. Per-turn usage includes multiple calls; compaction does not refund consumed tokens. Original conversation records remain available. Cache usage and charges depend on provider reports and configured prices.
+You can also use **Remake studio** to analyze reference videos you are authorized to use and turn their shots into an editable project.
 
-### Page routes
+### Why a workspace?
 
-Routes use hash navigation: append `/#` followed by a path to the application URL.
+- **Reusable settings.** Characters, variants, locations and voices stay linked to shots across chapters.
+- **Editable steps.** Keep prompts and generation versions. Revise one shot before deciding whether to generate it again.
+- **Shared capabilities for buttons and chat.** The assistant orchestrates creation; image and video models generate the media. Tasks and usage remain recorded.
+- **Customizable creative rules.** One Chinese skill pack guides story analysis, assets, images and storyboards, with Chinese or English output selected by system language.
+- **Your deployment, your providers.** Run on your computer or server and configure models for your budget and visual style.
 
-| Page | Path |
+### Real interface
+
+**Infinite canvas: organize characters, locations, props and shots together.**
+
+[![NovelVids infinite canvas connecting assets and video shots](docs/images/screenshots/workbench.png)](docs/images/screenshots/workbench.png)
+
+| Character and location assets | Assistant and storyboard editing |
 | --- | --- |
-| Short drama creation | `/create/short-drama` |
-| Remake studio | `/create/remake` |
-| Agent workspace | `/create/short-drama/agent/:projectId` |
-| Manual workspace | `/create/short-drama/manual/:projectId` |
-| Storyboard / canvas | `/create/short-drama/storyboard/:projectId` |
-| Settings | `/settings` |
-| Cost dashboard | `/billing` |
+| [![Asset management](docs/images/screenshots/asset.png)](docs/images/screenshots/asset.png) | [![A recorded storyboard revision by the assistant](docs/images/screenshots/creation-agent.png)](docs/images/screenshots/creation-agent.png) |
 
-## Screenshots
-
-The screenshots below show the Chinese interface; the same workflows are available in English through System language.
-
-![Storyboard workspace and creation assistant](docs/images/screenshots/creation-agent.png)
-
-![Creation assistant settings](docs/images/screenshots/creation-agent-settings.png)
-
-<table>
-  <tr><td align="center"><b>Home</b></td><td align="center"><b>Projects</b></td></tr>
-  <tr><td><img src="docs/images/screenshots/home.png" alt="Home" width="480"></td><td><img src="docs/images/screenshots/projects.png" alt="Projects" width="480"></td></tr>
-  <tr><td align="center"><b>Novel details</b></td><td align="center"><b>Assets</b></td></tr>
-  <tr><td><img src="docs/images/screenshots/novel.png" alt="Novel details" width="480"></td><td><img src="docs/images/screenshots/asset.png" alt="Assets" width="480"></td></tr>
-  <tr><td align="center"><b>Storyboard</b></td><td align="center"><b>Infinite canvas</b></td></tr>
-  <tr><td><img src="docs/images/screenshots/storyboard.png" alt="Storyboard" width="480"></td><td><img src="docs/images/screenshots/workbench.png" alt="Infinite canvas" width="480"></td></tr>
-  <tr><td align="center"><b>Video generation</b></td><td align="center"><b>Model settings</b></td></tr>
-  <tr><td><img src="docs/images/screenshots/video.png" alt="Video generation" width="480"></td><td><img src="docs/images/screenshots/settings.png" alt="Model settings" width="480"></td></tr>
-  <tr><td align="center" colspan="2"><b>Cost dashboard</b></td></tr>
-  <tr><td colspan="2"><img src="docs/images/screenshots/billing.png" alt="Cost dashboard" width="960"></td></tr>
-</table>
+Click an image for full size. [More screenshots](docs/screenshots.md). These captures show Chinese; the interface also supports English.
 
 ## Quick start
 
-### Requirements
+You need Docker with Docker Compose and access to model services. **Self-hosting is not offline inference:** AI features call the APIs you configure, and providers may charge for them.
 
-- Docker 20.10+ with Docker Compose, or Python 3.12+ and Node.js 22+ for local development.
-- [uv](https://docs.astral.sh/uv/) for Python dependencies.
-- FFmpeg and ffprobe for media inspection, trimming, shot splitting, episode composition and last-frame extraction.
-
-### Docker
-
-```sh
+```bash
 git clone https://github.com/Anning01/novelvids.git
 cd novelvids
 docker compose up -d --build
 ```
 
-Open [localhost:8080](http://localhost:8080). API documentation is available at [localhost:8080/docs](http://localhost:8080/docs) when enabled.
+Open **[http://localhost:8080](http://localhost:8080)** when startup completes.
 
-The default deployment persists SQLite data in `./data` and media in `./media`. Configure your model endpoints and keys under **Settings → Model settings** before generating content.
+Before creating your first project:
 
-```sh
-# Stop containers; bind-mounted data and media remain.
-docker compose down
+1. Under **Settings → Model settings**, enable a text model, select **Creation assistant**, and enable **Multi-turn tool calling**. Enable the assistant in General settings.
+2. Configure the image/video models you want and their prices. A text model alone is enough to start planning stories, assets and storyboards.
+3. Start with a short story or one chapter. Review extraction and storyboard results before generating media. Explicit generation requests can incur model charges; editing a prompt does not automatically generate images or videos.
 
-# Rebuild and restart after updating the source.
-docker compose up -d --build
+The current Docker backend image does not include FFmpeg. Before video probing, composition, remake analysis or enhancement, install it in the backend container:
+
+```bash
+docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
+docker compose exec backend ffprobe -version
 ```
 
-### Local development
+Repeat this preparation after rebuilding the backend image. See [model setup and first run](docs/model-configuration.en.md) for configuration and troubleshooting.
 
-Start the backend from the repository root:
+- **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
+- **No login by default:** intended for personal local use. Before public exposure, configure authentication and HTTPS using the [team deployment guide](docs/team-auth-deployment.md) (Chinese).
+- **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See the [development guide](docs/development.en.md).
 
-```sh
-uv sync --dev
-make dev PORT=9000
+## Creative workflow
+
+```mermaid
+flowchart LR
+    A[Story / manuscript] --> B[Analysis and chapters]
+    B --> C[Characters · locations · props]
+    C --> D[Editable storyboard]
+    D --> E[Image and video generation]
+    E --> F[Review and revise]
+    F --> D
+    F --> G[Episode / video enhancement]
 ```
 
-In another terminal:
+Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
 
-```sh
-cd web
-npm ci
-npm run dev
-```
+## Documentation
 
-Open [localhost:3000](http://localhost:3000). The frontend proxies `/api` and `/media` to port 9000. Retain `uv.lock` and `web/package-lock.json` for reproducible installation.
-
-## Optional authentication and teams
-
-Authentication is disabled by default. Set `AUTH_ENABLED=true` to require login and enable team features:
-
-- Super administrator, team administrator, creator and viewer roles.
-- Team data isolation and member management.
-- Platform-managed and team-specific model configurations with protected keys.
-- Team balance checks before tasks and usage charging after completion.
-- Username/password login, with initial super-administrator setup through `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD`.
-
-For deployment variables and reverse-proxy examples, see the [team deployment guide](docs/team-auth-deployment.md) (Chinese). Do not commit real credentials.
-
-## Model configuration
-
-Model configurations are stored in the database and managed under **Settings → Model settings**. Configure task capabilities, pricing, discounts and activation there.
-
-### Language and video-understanding models
-
-The text-model integration uses the OpenAI-compatible protocol. Configure the display name, base URL, API key, model ID and supported capabilities.
-
-| Setting | Purpose |
+| What you want to do | Guide |
 | --- | --- |
-| Capabilities | Select extraction, storyboard planning, project analysis, remake or creation assistant as appropriate. |
-| JSON output | Enables structured JSON response mode for compatible models. |
-| Multi-turn tool calling | Required for the creation assistant; JSON output alone is insufficient. |
-| Context characters / output tokens | Set limits supported by the provider or proxy. |
-| Thinking mode | Use the model default or explicitly enable/disable supported reasoning behavior. |
-| Concurrency | Controls parallel requests, including remake shot analysis. |
+| Learn the workflow, assistant, voices and workspace | [Creation guide](docs/creation-guide.en.md) |
+| Configure models, prices and assistant budgets | [Model setup and first run](docs/model-configuration.en.md) |
+| Produce English dialogue and reuse uploaded MP3/WAV voices | [English production](docs/english-production.md) |
+| Improve image/storyboard prompts or add visual styles | [One skill pack](docs/agent-skills-workflow.en.md) |
+| Enhance a clip or an episode | [Video enhancement](docs/video-enhancement.en.md) |
+| Configure PostgreSQL, OSS, persistent media and backfills | [Database and storage](docs/storage.en.md) |
+| Enable authentication, teams and deployment protections | [Team deployment](docs/team-auth-deployment.md) (Chinese) |
+| Develop, understand the structure and run tests | [Development](docs/development.en.md) · [Contributing](CONTRIBUTING.md) |
+| Check specific behavior | [Media library](docs/resource-library.md) · [Project metrics](docs/project-overview.md) · [Project name migration](docs/project-name-scoping.md) (Chinese) |
 
-Select **Remake** only for models that support video input. The model name alone does not establish its capabilities.
+## Development and community
 
-### Image models
+The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
 
-| Configured type | Protocols |
-| --- | --- |
-| Doubao Seedream 5.0 Lite / Pro | `volcengine_ark`, `openrouter_compatible` |
-| GPT Image 2 | `openai_compatible`, `openrouter_compatible` |
+Bring a real creative problem: [report a bug](https://github.com/Anning01/novelvids/issues/new), [discuss an idea](https://github.com/Anning01/novelvids/issues), or [contribute](CONTRIBUTING.md). For generation problems, include a shareable minimal example, model configuration type and reproduction steps. Keep keys and private media out of reports.
 
-### Video models
+Directions for discussion include **asset consistency, reproducible workflows, deployment and recovery, model/skill extensibility and production quality checks**. The [roadmap](ROADMAP.md) distinguishes current capabilities from proposed work; it is not a release commitment.
 
-The selected `video_model_type` determines the adapter. Backend capabilities validate media, duration, aspect ratio, resolution and protocol.
-
-| Configured family | Integration | Protocol |
-| --- | --- | --- |
-| Doubao Seedance 2.0 / Fast / Mini | Reference media, keyframes and synchronized audio | `volcengine_ark` |
-| Doubao Seedance 2.5 | Extended reference limits and system audio assets | `volcengine_ark` |
-| MiniMax H3 | Image/video/audio references and keyframes | `minimax` |
-| Wan3 | Text/image/keyframe/reference modes and temporary media uploads | `dashscope` |
-
-Available settings and limits come from the configured capabilities. Provider availability and generated quality must be verified for your deployment. Multiple configurations can be enabled for the same task type.
-
-## English production
-
-1. An administrator selects **Settings → General settings → System language → English**, then saves.
-2. Import an English manuscript with clear headings, such as `Chapter 1: Arrival` and `Chapter 2: The Signal`.
-3. Review analysis and extracted assets. Reuse each recurring character across chapters, adding appearance variants where needed.
-4. Upload authorized English MP3/WAV references and assign them to characters and, if used, the narrator.
-5. Generate storyboards and select a video model supporting reference audio, with audio generation enabled.
-6. Review the actual spoken language, accent, voice consistency and lip movement before composing an episode.
-
-The [English production guide](docs/english-production.md) explains the full workflow and answers [Issue #19](https://github.com/Anning01/novelvids/issues/19). This release does not add a certified built-in English voice pack or a new TTS provider.
-
-## Database and media storage
-
-Configure storage through environment variables. Use [`.env.example`](.env.example) as a template for your private `.env` file.
-
-### SQLite and PostgreSQL
-
-Development defaults to SQLite:
-
-```dotenv
-DATABASE_URL=sqlite://./data/novelvids.db
-```
-
-For PostgreSQL:
-
-```dotenv
-DATABASE_URL=postgres://novelvids:your-password@127.0.0.1:5432/novelvids
-```
-
-Startup creates missing tables with `safe=True` and runs compatibility initialization. It does not delete existing tables. Back up the database before migrating an existing deployment; changing the URL does not transfer its data.
-
-Project names are unique within a team, or within a creator’s personal scope when no team is assigned. Different scopes can use the same name. Existing global name constraints require an explicitly reviewed migration; see [project name scoping and migration](docs/project-name-scoping.md). The migration defaults to preview and never runs automatically at startup.
-
-### Local media and Alibaba Cloud OSS
-
-Local storage:
-
-```dotenv
-MEDIA_PATH=./media
-OSS_PROVIDER=local
-```
-
-Alibaba Cloud OSS:
-
-```dotenv
-OSS_PROVIDER=aliyun
-OSS_BUCKET=your-bucket
-OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
-OSS_INTERNAL_ENDPOINT=oss-cn-guangzhou-internal.aliyuncs.com
-OSS_PUBLIC_BASE=https://media.example.com
-OSS_ACCESS_KEY_ID=
-OSS_ACCESS_KEY_SECRET=
-```
-
-- Browsers use signed policies to upload large files directly.
-- Server-side processing uses `OSS_INTERNAL_ENDPOINT` for downloads and uploads.
-- Models and browser previews receive public or signed URLs; the database retains stable object keys where possible.
-- `OSS_PUBLIC_BASE` can point to a CDN or CNAME. If omitted, URLs use the bucket and public endpoint.
-
-Original images are retained alongside thumbnails and previews. To backfill derivatives after upgrading:
-
-```sh
-uv run python -m scripts.backfill_media_derivatives
-```
-
-The idempotent command creates WebP image derivatives and first-frame posters for historical generated videos. Local derivatives sit beside originals; OSS derivatives use the configured internal endpoint.
-
-### Background video reconciliation
-
-```dotenv
-VIDEO_RECONCILE_INTERVAL_SECONDS=30
-VIDEO_RECONCILE_BATCH_SIZE=50
-```
-
-The backend continues querying queued and running provider tasks after the browser closes, including completion handling, usage recording, last-frame extraction and continuity updates.
-
-## Customizing prompts and rules (developers)
-
-New production uses the **creation assistant and one Chinese skill pack**. Enable the assistant and configure a model with tool calling. Buttons and chat share production capabilities; the agent writes output in the configured system language.
-
-Tune [`prompts/skills/`](prompts/skills/): `SKILL.md` is the entrypoint. Story analysis, assets, images, storyboards, remake and video production use `story.md`, `assets.md`, `image.md`, `storyboard.md`, `remake.md` and `video.md`. Shared styles and strategies live in `styles.json` and `strategies.json`.
-
-Scene reference layouts also belong in `image.md`: the default is a full-bleed 2×2 grid of cinematic views with thin dividers, no viewpoint headings, annotations, white margins or presentation-board framing. After changing this rule, ask the assistant to optimize and save an existing asset's prompt before generating again. Regeneration alone keeps the original saved prompt.
-
-The agent authors one complete shot structure. A shared serializer saves the restrictions, style, references, conditions, action and voice timelines, transition and effects as the editable Prompt, preventing a separately written summary from dropping dialogue or narration. Tune creative requirements in `storyboard.md`; `storyboard_contract.json` versions the output protocol, and `prompts/storyboard.py` serializes its columns. Video submission uses the saved text unchanged. Existing shots and task snapshots are preserved; regenerate to apply the new rules.
-
-Free-text interpretation proposes operations; ambiguous requests require confirmation of their targets before generation. Database-unique receipts and persisted unresolved client IDs protect retries across reloads.
-
-Tasks snapshot skill content and language at submission. Edits affect new tasks only. Complete saved prompts remain authoritative; editing prompts alone does not authorize paid media generation. Former Chinese/English templates, their archive and duplicate rule translations have been deleted; Skills are the only creative rule source. `prompts/locales/` contains display and serialization labels only. Tune images, storyboards and shared styles exclusively in Skills; new tasks neither prepare old templates nor fall back to them after assistant failures. See the [workflow and maintenance guide](docs/agent-skills-workflow.en.md) for file roles, recovery, billing boundaries and regression commands.
-
-## Project structure
-
-```text
-novelvids/
-├── api/                         # HTTP routes under /api
-├── controllers/                 # Business orchestration
-├── models/                      # Tortoise ORM models
-├── schemas/                     # Pydantic validation and response schemas
-├── services/
-│   ├── ai_task_executor.py      # Background AI tasks
-│   ├── extraction/              # Asset extraction
-│   ├── storyboard/              # Storyboard generation
-│   ├── reference/               # Reference image generation
-│   ├── remake/                  # Uploads, analysis, progress and persistence
-│   ├── creation_agent/          # Tools, scope, memory, context and changes
-│   ├── billing/                 # Usage, pricing and summaries
-│   ├── image_generation/        # Image protocols and capabilities
-│   ├── video/                   # Video adapters, composition and continuity
-│   ├── oss/                     # Local and OSS storage
-│   └── audio_references.py      # Audio upload and trimming
-├── prompts/                     # Central prompt templates and pure renderers
-├── seeds/                       # Initial audio and digital human data
-├── scripts/                     # Maintenance tools
-├── test/                        # Backend tests
-├── web/
-│   ├── src/
-│   │   ├── pages/               # Application pages
-│   │   ├── features/workbench/  # Infinite canvas
-│   │   ├── features/creation-agent/ # Assistant UI
-│   │   ├── components/          # Shared components
-│   │   ├── i18n/                # Language state and translation catalog
-│   │   ├── shared/              # Shared state and utilities
-│   │   ├── api.ts               # API client
-│   │   └── router.ts            # Routes
-│   └── public/                  # Static assets
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── pyproject.toml
-├── README.md                    # Chinese documentation
-└── README.en.md                 # English documentation
-```
-
-## Technology stack
-
-| Backend | Purpose |
-| --- | --- |
-| FastAPI / Uvicorn | Asynchronous API and ASGI server |
-| Tortoise ORM / asyncpg / aiosqlite | Database models and drivers |
-| Pydantic | Validation and serialization |
-| Pydantic AI / AG-UI | Assistant tool loop, typed output and streaming events |
-| OpenAI SDK / HTTPX | Model calls and media transport |
-| PySceneDetect / FFmpeg | Shot detection, media processing and composition |
-| uv / pytest | Dependency management and testing |
-
-| Frontend | Purpose |
-| --- | --- |
-| Vue 3 / TypeScript / Vite | Application framework, types and build tooling |
-| Pinia / Vue Router | State and navigation |
-| Element Plus / vue-element-plus-x / AG-UI Client | Assistant and settings components |
-| Vue Flow | Infinite canvas |
-| vue-i18n | Chinese and English interface text |
-| Vitest | Unit and component tests |
-
-## Tests
-
-From the repository root:
-
-```sh
-# Backend suite, including coverage reporting
-uv run pytest
-
-# Targeted backend tests
-uv run pytest test/test_services/test_storyboard_handler.py -q
-```
-
-Frontend checks:
-
-```sh
-cd web
-npm run test
-npm run typecheck
-npm run build
-```
-
-Authentication-specific tests target deployments with authentication enabled. Real-model tests require local provider configuration and can incur charges. Keep `test/.test.env` private. Automated request-contract tests do not establish actual voice fidelity, accent or lip synchronization.
+If NovelVids helps you, consider a Star, report your experience, or share work and production notes you are authorized to publish.
 
 ## License
 
-This project is licensed under [Creative Commons Attribution–NonCommercial 4.0 International (CC BY-NC 4.0)](LICENSE).
+Project code and documentation use the **[MIT License](LICENSE)**. Commercial use, modification and redistribution are permitted with the copyright and license notice retained. The software is provided as is, without warranty.
 
-- Learning, research and personal noncommercial use are permitted.
-- Noncommercial redistribution and derivative works require attribution to the author and project.
-- Commercial use of the project or derivative works requires the author's prior written authorization. This includes selling the software, offering it as a paid service, paid customization and advertising-supported commercial use.
-
-For commercial licensing, contact [anningforchina@gmail.com](mailto:anningforchina@gmail.com). Consult the [license text](LICENSE) for the full terms.
+Third-party dependencies, fonts, media and model services retain their own terms. Demonstration content is not a grant of rights to underlying stories, music or voices. See [third-party notices](NOTICE.md).
 
 ## Star history
 
-<p align="center">
-  <a href="https://github.com/Anning01/novelvids/stargazers">
-    <img src="https://novelvids-star-history.864399407.workers.dev/card.svg" width="920" alt="NovelVids GitHub star history">
-  </a>
-</p>
-
----
-
-<p align="center">
-  <sub>Built with passion by <a href="https://github.com/Anning01">Anning</a></sub>
-</p>
+[![NovelVids Star history](https://novelvids-star-history.864399407.workers.dev/card.svg)](https://github.com/Anning01/novelvids/stargazers)
