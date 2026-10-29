@@ -6,9 +6,33 @@ from models.creation_agent import PromptChange
 from models.novel import Novel
 from models.scene import Scene
 from schemas.creation_objects import CreationObjectQuery
-from services.creation_agent.catalog import CreationCatalog
+from services.creation_agent.catalog import CreationCatalog, _JsonText
 from services.creation_objects import CreationObjects, project_write
 from test.test_services.test_creation_object_lifecycle import objects
+
+
+def test_alias_cast_does_not_bind_the_expression_as_an_extra_argument():
+    # Python 3.14 binds partial class attributes; this SQL callable must stay static.
+    expression = _JsonText('aliases')
+    assert expression.database_func is _JsonText.database_func
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('term', ['林夏', '旅人', 'Alex Chen', '"quoted"'])
+async def test_named_asset_search_keeps_scope_pagination_and_aliases(term):
+    novel, chapter, asset, _ = await objects()
+    await Asset.filter(id=asset.id).update(aliases=['雨夜旅人', 'Alex Chen', 'a "quoted" alias'])
+    other = await Novel.create(name='其他项目')
+    await Asset.create(novel=other, canonical_name='林夏', asset_type=1,
+                       aliases=['雨夜旅人', 'Alex Chen', 'a "quoted" alias'], source_chapters=[1])
+    await Asset.create(novel=novel, canonical_name='其他章节人物', asset_type=1,
+                       aliases=['林夏', '雨夜旅人', 'Alex Chen', 'a "quoted" alias'],
+                       is_global=False, source_chapters=[2])
+    result = await CreationCatalog(novel.id, chapter.id).search(CreationObjectQuery(
+        kind='asset', asset_type=1, search=term, page_size=1))
+    assert [item['id'] for item in result['items']] == [asset.id]
+    assert result['total'] == 1 and result['next_page'] is None
+    assert await PromptChange.all().count() == 0
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,8 @@ from services.creation_agent.context import chapter_context
 
 class _JsonText(Function):
     """Portable text search over aliases on SQLite and PostgreSQL."""
-    database_func = partial(Cast, as_type='TEXT')
+    # Python 3.14 binds partial class attributes unless explicitly kept static.
+    database_func = staticmethod(partial(Cast, as_type='TEXT'))
 
 
 class CreationCatalog:
