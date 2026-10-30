@@ -54,6 +54,50 @@ async def _create_scene_with_config(
     return scene, config
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('video_model_type', ['seedance_2', 'seedance_2_fast', 'seedance_2_mini'])
+async def test_previous_tail_frame_has_an_exact_reference_number_in_the_outbound_payload(monkeypatch, language, video_model_type):
+    import json
+    import httpx
+    from models.config import GeneralConfig
+
+    frame = 'https://cdn.example.com/previous-tail.png'
+    mention = reference_mention_syntax('image', frame)
+    saved = json.dumps({'first_frame_reference': mention}) + '\n\n@{甲}与@{乙}继续向前。'
+    scene, config = await _create_scene_with_config(prompt=saved, video_model_type=video_model_type)
+    await GeneralConfig.create(id=1, prompt_language=language)
+    shared_image = 'https://cdn.example.com/shared-character.png'
+    monkeypatch.setattr('controllers.video.resolve_assets', AsyncMock(return_value=[
+        {'name':'甲','images':[shared_image],'description':'角色甲'},
+        {'name':'乙','images':[shared_image],'description':'角色乙'},
+    ]))
+    outbound = []
+    real_client = httpx.AsyncClient
+
+    def respond(request):
+        outbound.append(json.loads(request.content))
+        return httpx.Response(200, json={'id':'mock-accepted'})
+
+    def client_factory(*args, **kwargs):
+        kwargs['transport'] = httpx.MockTransport(respond)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr('services.video.seedance.httpx.AsyncClient', client_factory)
+    await video_controller._submit_generation(VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id,
+        generate_audio=False, reference_media=[VideoReferenceMedia(type='image',url=frame,name='前一镜头尾帧.png')]))
+    assert len(outbound) == 1
+    content = outbound[0]['content']
+    assert [item['image_url']['url'] for item in content if item['type']=='image_url'] == [shared_image, frame]
+    assert all(item['role']=='reference_image' for item in content if item['type']=='image_url')
+    assert ('首帧参考：[图2]' if language=='zh' else 'First-frame reference: [图2]') in content[0]['text']
+    assert '[图1]与[图1]继续向前' in content[0]['text']
+    assert 'first_frame_reference' not in content[0]['text']
+    assert frame not in content[0]['text']
+    await scene.refresh_from_db()
+    assert scene.prompt == saved
+
+
 # =====================================================================
 # generate 方法
 # =====================================================================
@@ -706,8 +750,7 @@ async def test_返回尾帧_注入同章下一分镜参考图():
     assert references[1]["url"] == "https://cdn.example.com/manual.png"
     assert result.metadata["last_frame_injected_scene_id"] == next_scene.id
     mention = reference_mention_syntax("image", references[0]["url"])
-    import json
-    assert json.loads(next_scene.prompt.split("\n", 1)[0]) == {"first_frame_reference": mention}
+    assert next_scene.prompt.startswith(f'【首帧衔接】\n首帧参考：{mention}')
     assert next_scene.prompt.endswith("下一镜头")
     assert result.metadata["last_frame_prompt_instruction"] in next_scene.prompt
     assert select_referenced_media(
@@ -825,8 +868,7 @@ async def test_返回尾帧_章节末镜头注入下一章首镜头():
 
     await next_scene.refresh_from_db()
     assert next_scene.metadata["video_reference_media"][0]["source_scene_id"] == scene.id
-    import json
-    assert "first_frame_reference" in json.loads(next_scene.prompt.split("\n", 1)[0])
+    assert next_scene.prompt.startswith('【首帧衔接】\n首帧参考：')
 
 
 @pytest.mark.asyncio

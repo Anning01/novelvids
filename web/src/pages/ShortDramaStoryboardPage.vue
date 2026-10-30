@@ -1814,7 +1814,9 @@ async function refreshVideoHistory(scene: Scene) {
     if (pendingRecords.length) {
       await Promise.allSettled(pendingRecords.map(record => api.queryVideo(record.id)))
     }
-    videos.value[scene.id] = (await api.videoGenerationHistory(scene.id)).data
+    const [history, current] = await Promise.all([api.videoGenerationHistory(scene.id), api.scene(scene.id)])
+    videos.value[scene.id] = history.data
+    scene.metadata = current.data.metadata
     setSceneVideoError(scene.id)
   } catch (error) {
     notice.error(tr('刷新生成记录失败：{p0}', { p0: (error as Error).message }))
@@ -2209,7 +2211,7 @@ onBeforeUnmount(() => {
               </section>
 
               <aside class="preview-panel">
-                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" /><RefreshCw :size="15" /></header>
+                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" @applied="refreshVideoHistory(scene)" /><RefreshCw :size="15" /></header>
                 <div class="preview-stage">
                   <VideoGenerationErrorState
                     v-if="sceneVideoError(scene)"

@@ -30,6 +30,7 @@ def test_有声与无声分镜可以生成混合音轨合并命令(tmp_path, mon
     audio_states = iter([True, False])
     monkeypatch.setattr(merge_module, "_check_audio_stream", lambda _path: next(audio_states))
     monkeypatch.setattr(merge_module, "_probe_duration", lambda _path: 1.25)
+    monkeypatch.setattr(merge_module, "_video_dimensions", lambda _path: (864, 496))
     captured: dict[str, list[str]] = {}
 
     def fake_run(command, **_kwargs):
@@ -97,3 +98,27 @@ async def test_oss视频经内网物化后合并并上传且清理临时文件(m
     }
     assert transferred_paths
     assert all(not path.exists() for path in transferred_paths)
+
+
+@pytest.mark.parametrize('audio', ['both', 'mixed', 'none'])
+def test_mixed_resolution_clips_merge_at_hd_without_stretching_or_losing_audio(tmp_path, audio):
+    import subprocess
+    from services.video_enhancement.media import inspect_media, file_digest
+    from test.test_services.test_video_enhancement_media import fixture_video
+
+    paths = [tmp_path / '480p.mp4', tmp_path / '1080p.mp4']
+    fixture_video(paths[0], size='864x496')
+    fixture_video(paths[1], size='1920x1080')
+    for index in ([1] if audio == 'mixed' else [0, 1] if audio == 'none' else []):
+        silent = tmp_path / f'silent-{index}.mp4'
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(paths[index]),
+                        '-an', '-c:v', 'copy', str(silent)], check=True, capture_output=True)
+        paths[index] = silent
+    original_hashes = [file_digest(path) for path in paths]
+    output = tmp_path / 'merged.mp4'
+    VideoMerger().merge_paths([str(path) for path in paths], str(output))
+    probe = inspect_media(output)
+    assert (probe.width, probe.height) == (1920, 1080)
+    assert abs(float(probe.duration) - 1) < .15
+    assert bool(probe.audio_streams) == (audio != 'none')
+    assert [file_digest(path) for path in paths] == original_hashes

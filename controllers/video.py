@@ -165,9 +165,11 @@ def _compose_video_prompt(
     style_key: str | None,
     custom_style_prompt: str | None = None,
     language: str = "zh",
+    image_indices: dict[str, int] | None = None,
 ) -> str:
     """组合视频生成提示词：分镜提示词 + 参考素材提及 + 风格定调。"""
-    prompt = render_reference_mentions(scene_prompt, referenced_media)
+    from prompts.video import normalize_last_frame_continuity_prompt
+    prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(scene_prompt, language), referenced_media, image_indices=image_indices)
     style_suffix = video_project_style_suffix(style_key, custom_style_prompt, language)
     if style_suffix:
         prompt = f"{prompt}\n\n{style_suffix}".strip()
@@ -309,7 +311,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
         )
 
         # 解析 @资产昵称，并采用分镜中显式选择的资产衍生状态。
-        prompt = scene.prompt or ""
+        from services.language import generation_language
+        from prompts.video import normalize_last_frame_continuity_prompt
+        prompt_language = await generation_language()
+        prompt = normalize_last_frame_continuity_prompt(scene.prompt or "", prompt_language)
         metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
         subjects = await resolve_assets(
             prompt,
@@ -356,13 +361,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 raise HTTPException(400, detail=localized_message('首尾帧图片不存在：{p1}', p1=f'{error}')) from error
         capabilities = capabilities_for(config.video_model_type)
         reference_images: list[str] = []
+        image_mentions: dict[str, str] = {}
         reference_videos: list[str] = []
         reference_video_duration = 0.0
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
         novel = await Novel.get_or_none(id=novel_id)
-        from services.language import generation_language
-        prompt_language = await generation_language()
         voice_references = await resolve_voice_references(
             scene=scene,
             novel=novel,
@@ -370,15 +374,6 @@ class VideoController(CRUDBase[Video, dict, dict]):
             capabilities=capabilities,
         ) if novel and req.generation_mode == "reference" and selection.generate_audio else []
         from services.creation_agent.skill_execution import current_execution
-        provider_prompt = _compose_video_prompt(
-            prompt,
-            referenced_media,
-            novel.style_key if novel else None,
-            novel.custom_style_prompt if novel else None,
-            language=prompt_language,
-        )
-        if current_execution.get():
-            provider_prompt = render_reference_mentions(prompt, referenced_media)
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
             scene.id,
@@ -409,6 +404,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     reference_images.append(
                         resolve_image_source(resolve_media_url(reference.url) or reference.url)
                     )
+                    image_mentions[reference.mention_url or reference.url] = reference_images[-1]
                 except FileNotFoundError as error:
                     raise HTTPException(400, detail=localized_message('参考图片不存在：{p1}', p1=f'{error}')) from error
                 continue
@@ -426,8 +422,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
             else:
                 reference_videos.append(resolve_media_url(reference.url) or reference.url)
 
-        asset_reference_image_count = sum(len(subject.get("images", [])) for subject in subjects)
-        if asset_reference_image_count + len(reference_images) > capabilities.max_reference_images:
+        ordered_images = list(dict.fromkeys([image for subject in subjects for image in subject.get('images', [])] + reference_images))
+        if len(ordered_images) > capabilities.max_reference_images:
             raise HTTPException(
                 400,
                 detail=(
@@ -453,6 +449,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     localized_message('当前模型要求输入参考视频与输出视频总时长不超过 {p1} 秒', p1=f'{capabilities.input_output_video_duration_max}')
                 ),
             )
+        image_indices = {mention: ordered_images.index(url) + 1 for mention, url in image_mentions.items()}
+        provider_prompt = _compose_video_prompt(prompt, referenced_media, novel.style_key if novel else None,
+            novel.custom_style_prompt if novel else None, language=prompt_language, image_indices=image_indices)
+        if current_execution.get():
+            from prompts.video import normalize_last_frame_continuity_prompt
+            provider_prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(prompt, prompt_language), referenced_media, image_indices=image_indices)
         if req.generation_mode == "keyframes":
             input_image_count = int(bool(first_frame)) + int(bool(last_frame))
         else:

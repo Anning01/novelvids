@@ -58,5 +58,7 @@
   "location_references": "场景参考",
   "location_design": "场景概念图",
   "sound_design": "【声音设计】",
-  "asset_definitions_for_this_request": "【当前请求资产定义】"
+  "asset_definitions_for_this_request": "【当前请求资产定义】",
+  "first_frame_continuity": "【首帧衔接】",
+  "first_frame_reference": "首帧参考："
 }

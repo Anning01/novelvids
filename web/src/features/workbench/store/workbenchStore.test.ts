@@ -5,7 +5,7 @@ import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', () => ({
-  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn(), workbenchBootstrap: vi.fn() },
+  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn(), scene: vi.fn(), workbenchBootstrap: vi.fn() },
   sleep: vi.fn(),
 }))
 
@@ -25,6 +25,28 @@ beforeEach(() => {
   store = useWorkbenchStore()
   store.chapterId = 2162
   store.novelId = 9
+})
+
+it('adopts the enhanced selection without removing the source video or local prompt', async () => {
+  const scene = { id: 10, chapter_id: store.chapterId, sequence: 1, prompt: '保留当前提示词',
+    metadata: { current_video_id: 1 }, created_at: '', updated_at: '' }
+  const source = { id: 1, scene_id: 10, model_type: 1, status: 3, url: '/media/480p.mp4', created_at: '', updated_at: '' }
+  const enhanced = { ...source, id: 2, url: '/media/1080p.mp4', metadata: { width: 1920, height: 1080 } }
+  store.scenes = [scene]; store.videos = { 10: [source] }
+  store.chapter = { id: store.chapterId, novel_id: 9, number: 1, name: '第一章', content: '', created_at: '', updated_at: '' }
+  store.rebuildGraph()
+  store.nodeByKey('shot-10')!.data = { ...store.nodeByKey('shot-10')!.data,
+    prompt_dirty: true, scene: { ...scene, prompt: '尚未保存的画布修改' } }
+  queryVideoMock.mockResolvedValue({ data: enhanced } as never)
+  vi.mocked(api.scene).mockResolvedValue({ data: { ...scene, prompt: '远端提示词', metadata: { current_video_id: 2 } } } as never)
+  await store.refreshEnhancedVideo(2)
+  expect(store.scenes[0]?.metadata?.current_video_id).toBe(2)
+  expect(store.scenes[0]?.prompt).toBe('保留当前提示词')
+  expect(store.videos[10]?.map(video => video.id)).toEqual([2, 1])
+  expect(store.nodeByKey('shot-10')!.data.scene).toMatchObject({ prompt: '尚未保存的画布修改', metadata: { current_video_id: 2 } })
+  expect(store.nodeByKey('video-1')!.data.video).toMatchObject({ id: 1, url: '/media/480p.mp4' })
+  await store.refreshEnhancedVideo(2)
+  expect(store.videos[10]).toHaveLength(2)
 })
 
 it('keeps unsaved node content across agent removal and restoration, clearing stale selection', async () => {

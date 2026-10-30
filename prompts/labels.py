@@ -3,6 +3,8 @@
 from prompts.catalog import catalog
 
 LABEL_KEYS = {
+    "【首帧衔接】": "first_frame_continuity",
+    "首帧参考：": "first_frame_reference",
     "本镜头未引用已登记资产。": "no_registered_assets_are_referenced_in_this_shot",
     "保持当前可见状态": "maintain_the_current_visible_state",
     "无人物台词、旁白或人物内心 OS": "no_dialogue_narration_or_inner_monologue",

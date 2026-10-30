@@ -10,6 +10,7 @@ import { tr } from '@/i18n'
 import { exportApi, type ChapterExport } from './api'
 
 const props = defineProps<{ chapterId?: number; videoId?: number }>()
+const emit = defineEmits<{ applied: [videoId: number] }>()
 const singleVideo = computed(() => Boolean(props.videoId))
 const auth = useAuthStore()
 const canWrite = computed(() => !auth.enabled || auth.isSuperAdmin || ['admin', 'creator'].includes(auth.role || ''))
@@ -19,10 +20,12 @@ const modelId = ref(0)
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
+const panel = ref<HTMLElement | null>(null)
 const previewUrl = ref('')
 const previewBusy = ref(false)
 let generation = 0
 let alive = true
+const reportedVideos = new Set<number>()
 let timer: ReturnType<typeof setInterval> | undefined
 const scope = computed(() => `${props.videoId ? 'video:' + props.videoId : 'chapter:' + props.chapterId}:${auth.activeTeamId}:${auth.user?.id}`)
 const active = computed(() => exports.value.some(row => [1, 2, 6].includes(row.status || 0) || row.stage === 'billing_pending'))
@@ -47,6 +50,12 @@ async function load(quiet = false) {
     const [history, available] = await Promise.all([props.videoId ? exportApi.listVideo(props.videoId) : exportApi.list(props.chapterId!), exportApi.models()])
     if (!alive || version !== generation || currentScope !== scope.value) return
     exports.value = history.data
+    for (const row of history.data) {
+      if (row.applied_to_scene && row.result_video_id && !reportedVideos.has(row.result_video_id)) {
+        reportedVideos.add(row.result_video_id)
+        emit('applied', row.result_video_id)
+      }
+    }
     models.value = available.data
     if (!models.value.some(model => model.id === modelId.value)) modelId.value = models.value[0]?.id || 0
     error.value = ''
@@ -98,6 +107,27 @@ async function download(row: ChapterExport, source: boolean) {
     await downloadFile(`${API_BASE}/video/exports/${row.id}/download${source ? '?source=true' : ''}`, `${target}-export-${row.id}-${source ? 'source' : row.recipe.resolution || '1080p'}.mp4`, authHeaders())
   } catch (caught) { error.value = (caught as Error).message }
 }
+async function apply(row: ChapterExport) {
+  const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const currentScope = scope.value
+  busy.value = true; error.value = ''
+  try {
+    const video = (await exportApi.apply(row.id)).data
+    if (alive && currentScope === scope.value) {
+      reportedVideos.add(video.id)
+      emit('applied', video.id)
+      await load(true)
+    }
+  } catch (caught) { if (currentScope === scope.value) error.value = (caught as Error).message }
+  finally {
+    busy.value = false
+    await nextTick()
+    if (alive && currentScope === scope.value) {
+      if (trigger?.isConnected) trigger.focus()
+      else panel.value?.querySelector<HTMLButtonElement>('button')?.focus()
+    }
+  }
+}
 function clearPreview() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
@@ -122,7 +152,7 @@ async function initialize() {
   if (alive && currentScope === scope.value && singleVideo.value && canWrite.value && !exports.value.length && !error.value) await prepare()
 }
 function focus() { if (document.visibilityState !== 'hidden') void load(true) }
-watch(scope, () => { generation++; exports.value = []; error.value = ''; clearPreview(); void initialize() })
+watch(scope, () => { generation++; exports.value = []; reportedVideos.clear(); error.value = ''; clearPreview(); void initialize() })
 onMounted(() => {
   void initialize()
   window.addEventListener('focus', focus)
@@ -132,8 +162,8 @@ onUnmounted(() => { alive = false; generation++; clearPreview(); clearInterval(t
 </script>
 
 <template>
-  <section class="chapter-exports" :aria-label="singleVideo ? tr('视频高清化') : tr('高清成片')">
-    <header><div><strong>{{ singleVideo ? tr('视频高清化') : tr('高清成片') }}</strong><p>{{ singleVideo ? tr('只增强当前视频，无需等本集完成。确认费用后提交，原视频保留。') : tr('先准备本集原片，确认后再付费增强。原片与高清版分别保留。') }}</p></div>
+  <section ref="panel" class="chapter-exports" :aria-label="singleVideo ? tr('视频高清化') : tr('高清成片')">
+    <header><div><strong>{{ singleVideo ? tr('视频高清化') : tr('高清成片') }}</strong><p>{{ singleVideo ? tr('无需等本集完成。高清化完成后自动设为当前视频，原视频保留在历史记录中。') : tr('先准备本集原片，确认后再付费增强。原片与高清版分别保留。') }}</p></div>
       <div class="export-actions">
         <AppButton size="sm" variant="ghost" :aria-label="tr('刷新导出记录')" @click="load()"><RefreshCw :size="16" /></AppButton>
         <AppButton v-if="canWrite" size="sm" variant="secondary" :disabled="busy || loading || (!chapterId && !videoId)" @click="prepare"><LoaderCircle v-if="busy" class="spin" :size="15" />{{ singleVideo ? tr('读取当前视频') : tr('准备当前原片') }}</AppButton>
@@ -150,11 +180,13 @@ onUnmounted(() => { alive = false; generation++; clearPreview(); clearInterval(t
       <div class="export-description"><strong>{{ row.parent_export_id ? `${String(row.recipe.resolution || '1080p').toUpperCase()} ${tr('高清版')}` : tr('原片版本') }} · #{{ row.id }}</strong>
         <small v-if="row.selection_current === false">{{ tr('当前镜头选择已更新，此版本保留原内容。') }}</small>
         <span role="status"><LoaderCircle v-if="[1, 2, 6].includes(row.status || 0)" class="spin" :size="14" />{{ status(row) }}</span>
+        <small v-if="row.applied_to_scene" role="status">{{ tr('已设为当前视频') }}</small>
         <small v-if="row.source_probe.width">{{ tr('原片') }} {{ row.source_probe.width }}×{{ row.source_probe.height }} · {{ Number(row.source_probe.duration).toFixed(2) }}s · {{ row.source_probe.fps }}fps</small>
         <small v-if="row.parent_export_id && row.output_probe.width">{{ tr('高清版') }} {{ row.output_probe.width }}×{{ row.output_probe.height }} · {{ row.output_probe.fps }}fps</small>
         <p v-if="row.error" class="export-error">{{ row.error }}</p>
       </div>
       <div class="export-actions">
+        <AppButton v-if="canWrite && singleVideo && row.parent_export_id && row.url && row.status === 3 && !row.applied_to_scene" variant="primary" size="sm" :disabled="busy" @click="apply(row)">{{ tr('设为当前视频') }}</AppButton>
         <AppButton v-if="row.source_url" variant="ghost" size="sm" @click="download(row, true)"><Download :size="15" />{{ tr('下载原片') }}</AppButton>
         <AppButton v-if="row.parent_export_id && row.url && row.status !== 5" variant="secondary" size="sm" @click="download(row, false)"><Download :size="15" />{{ tr('下载高清版') }}</AppButton>
         <AppButton v-if="row.parent_export_id && row.url && row.status !== 5" variant="ghost" size="sm" :disabled="previewBusy" @click="preview(row)">{{ tr('预览高清版') }}</AppButton>

@@ -36,8 +36,12 @@ async def backfill_last_frame_continuity() -> dict[str, int]:
         scanned += 1
         mention_url = str(reference.get("mention_url") or reference["url"])
         mention = reference_mention_syntax("image", mention_url)
-        prompt = inject_last_frame_continuity_prompt(scene.prompt or "", mention)
-        instruction = render_last_frame_continuity_instruction(mention)
+        existing_instruction = metadata.get('previous_scene_last_frame_prompt_instruction')
+        if reference.get('mention_url') and isinstance(existing_instruction, str) and existing_instruction and existing_instruction in (scene.prompt or ''):
+            continue
+        language = (scene.prompt_params or {}).get('prompt_language', 'zh')
+        prompt = inject_last_frame_continuity_prompt(scene.prompt or "", mention, language)
+        instruction = render_last_frame_continuity_instruction(mention, language)
         changed = False
         if reference.get("mention_url") != mention_url:
             reference["mention_url"] = mention_url

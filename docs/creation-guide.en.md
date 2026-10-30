@@ -70,6 +70,7 @@ Voice bindings persist across chapters when the same project assets are reused. 
 - Set each shot's model, duration, aspect ratio, resolution, audio and continuity options.
 - Generate selected shots in bulk. Sequential mode feeds each shot's last frame into the next shot automatically.
 - Extract a last frame with FFmpeg when the provider does not return one.
+- In reference mode, upload that image and bind its first-frame purpose to its final image index. This guides continuity without strictly locking the opening frame. For strict keyframes, use the model's first-frame or first/last-frame mode; the modes cannot be mixed. Legacy `first_frame_reference` JSON is converted for submission without rewriting saved shots.
 - Reconcile queued and running provider tasks in the background even after the browser closes.
 - Compose available shot videos in episode order and download the result.
 - Browse images, audio, videos and generation versions in the media library.

@@ -1,4 +1,5 @@
 import { request } from '@/api'
+import type { Video } from '@/types'
 
 export interface ExportProbe { duration: string | number; width: number; height: number; fps: string | number }
 export interface ChapterExport {
@@ -8,6 +9,8 @@ export interface ChapterExport {
   stage: string | null; error: string | null; created_at: string; recipe: Record<string, unknown>
   selection_current?: boolean
   source_video_id?: number | null
+  result_video_id?: number | null
+  applied_to_scene?: boolean
 }
 export interface ExportQuote { amount: string; currency: string; source_sha256: string; quote_version: string; reused_export_id?: number | null }
 export interface ExportTask { export_id: number; task_id: string; status: number }
@@ -24,6 +27,7 @@ export const exportApi = {
   prepareVideo: (videoId: number) => request<Response<ExportTask>>(`/video/exports/video/${videoId}`, { method: 'POST' }),
   models: () => request<Response<EnhancementModel[]>>('/video/exports/models'),
   get: (id: number) => request<Response<ChapterExport>>(`/video/exports/${id}`),
+  apply: (id: number) => request<Response<Video>>(`/video/exports/${id}/apply`, { method: 'POST' }),
   prepare: (chapter_id: number) => request<Response<ExportTask>>('/video/exports', { method: 'POST', body: JSON.stringify({ chapter_id }) }),
   quote: (id: number, model: number, resolution = '1080p') => request<Response<ExportQuote>>(`/video/exports/${id}/quote?model_config_id=${model}&resolution=${encodeURIComponent(resolution)}`),
   enhance: (id: number, model: number, quote: ExportQuote, resolution = '1080p') => request<Response<ExportTask>>(`/video/exports/${id}/enhance`, {

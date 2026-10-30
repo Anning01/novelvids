@@ -9,6 +9,7 @@ import { tr } from '@/i18n'
 import ChapterExportPanel from './ChapterExportPanel.vue'
 
 const props = defineProps<{ video: Video; pixelSize?: { width: number; height: number } | null }>()
+const emit = defineEmits<{ applied: [videoId: number] }>()
 const auth = useAuthStore()
 const open = ref(false)
 const dialog = ref<HTMLElement | null>(null)
@@ -44,7 +45,7 @@ onBeforeUnmount(() => previousFocus?.focus())
     <div v-if="open" class="video-enhance-backdrop" @click.self="open = false">
       <section ref="dialog" class="video-enhance-dialog nodrag nowheel" role="dialog" aria-modal="true" :aria-labelledby="titleId" @keydown="onKeydown">
         <header><h2 :id="titleId">{{ tr('视频高清化') }} · #{{ video.id }}</h2><AppButton variant="ghost" icon-only size="sm" :aria-label="tr('关闭')" @click="open = false"><X :size="18" /></AppButton></header>
-        <ChapterExportPanel :video-id="video.id" />
+        <ChapterExportPanel :video-id="video.id" @applied="emit('applied', $event)" />
       </section>
     </div>
   </Teleport>

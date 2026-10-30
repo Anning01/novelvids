@@ -67,6 +67,18 @@ it('creates a directly playable new video using the selected target only after c
   expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
 })
 
+it('refreshes the selected storyboard video once when the HD result is applied', async () => {
+  store.nodes.find(item => item.kind === 'video_enhancement')!.data.export_id = 20
+  vi.mocked(exportApi.get).mockResolvedValue({ data: { ...output, result_video_id: 30, applied_to_scene: true } })
+  const refresh = vi.spyOn(store, 'refreshEnhancedVideo').mockResolvedValue()
+  vi.useFakeTimers()
+  await render()
+  expect(refresh).toHaveBeenCalledExactlyOnceWith(30)
+  await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+  expect(refresh).toHaveBeenCalledOnce()
+  expect(exportApi.enhance).not.toHaveBeenCalled()
+})
+
 it('does not charge on cancelled confirmation, changed source, or read-only accounts', async () => {
   vi.mocked(appConfirm).mockResolvedValueOnce(false)
   const wrapper = await render()

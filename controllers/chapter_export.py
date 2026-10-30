@@ -179,6 +179,16 @@ class ChapterExports:
         return await resolve_scope_configs(8, ctx.team_id,
             capability_filter=lambda row: row.api_protocol == 'volcengine_mediakit' and row.model == 'enhance-video-generative')
 
+    async def apply_video(self, export_id: int, ctx: AuthContext):
+        await require_roles('admin', 'creator')(ctx)
+        export = await self.get(export_id, ctx)
+        await require_generation_scope(export.novel_id, ctx.team_id)
+        from services.video_enhancement.current_video import apply_enhanced_video
+        video = await apply_enhanced_video(export, select=True)
+        if video is None:
+            raise ValueError(localized_message('请先选择已生成成功的视频'))
+        return video
+
     async def describe(self, export: ChapterExport, selection: list[dict] | None = None) -> dict:
         from models.ai_task import AiTask
         task = await AiTask.get_or_none(id=export.task_id)
@@ -188,7 +198,16 @@ class ChapterExports:
             from services.video_enhancement.sources import current_selection
             selection = await current_selection(export.chapter_id)
         recorded = [{key:item.get(key) for key in ('scene_id','sequence','video_id')} for item in export.manifest]
+        from models.agent_operation import AgentOperation
+        from models.scene import Scene
+        operation = await AgentOperation.get_or_none(task_id=export.task_id, key='apply:enhanced_video', state='completed') if export.task_id else None
+        result_video_id = operation.result.get('video_id') if operation else None
+        applied_to_scene = False
+        if result_video_id:
+            scene = await Scene.get_or_none(id=operation.result['scene_id'], chapter_id=export.chapter_id)
+            applied_to_scene = bool(scene and (scene.metadata or {}).get('current_video_id') == result_video_id)
         return {'id': export.id, 'chapter_id': export.chapter_id, 'source_video_id':export.source_video_id, 'parent_export_id': export.parent_export_id,
+            'result_video_id': result_video_id, 'applied_to_scene': applied_to_scene,
             'selection_current': selection == recorded,
             'source_version': export.source_version, 'source_sha256': export.source_sha256,
             'source_probe': export.source_probe, 'output_probe': export.output_probe,

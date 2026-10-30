@@ -36,13 +36,11 @@ def process_subject_prompt(
     name_to_index: dict[str, int] = {}
 
     for subject in subjects or []:
-        if len(reference_images) >= max_ref_images:
-            break
-        images = subject.get("images", [])
-        if images:
-            name_to_index[subject["name"]] = len(reference_images) + 1
-            remaining = max_ref_images - len(reference_images)
-            reference_images.extend(images[:remaining])
+        for image in subject.get('images', []):
+            if image not in reference_images and len(reference_images) < max_ref_images:
+                reference_images.append(image)
+            if image in reference_images:
+                name_to_index.setdefault(subject['name'], reference_images.index(image) + 1)
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)

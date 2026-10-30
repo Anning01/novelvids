@@ -46,6 +46,12 @@ def _probe_duration(video_path: str) -> float:
         return 0.01
 
 
+def _video_dimensions(video_path: str) -> tuple[int, int]:
+    from services.video.reference_media import _probe, _video_stream
+    stream = _video_stream(_probe(Path(video_path)))
+    return int(stream['width']), int(stream['height'])
+
+
 class VideoMerger:
     """视频合并器 - 将多个视频按顺序合并为一个。"""
 
@@ -193,6 +199,19 @@ class VideoMerger:
 
         # 两个及以上片段才需要检测音轨并调用 FFmpeg。
         has_audio_list = [_check_audio_stream(path) for path in video_paths]
+        sizes = [_video_dimensions(path) for path in video_paths]
+        normalization = ''
+        if len(set(sizes)) > 1:
+            # Chapters can mix enhanced clips and original low-resolution shots.
+            width, height = max(sizes, key=lambda size: size[0] * size[1])
+            width += width % 2
+            height += height % 2
+            normalization = ''.join(f'[{i}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,'
+                f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1[normalized{i}];'
+                for i in range(len(video_paths)))
+
+        def video_input(index):
+            return f'[normalized{index}]' if normalization else f'[{index}:v]'
 
         # 构建 FFmpeg 命令 - 根据是否有音频决定 filter
         input_args = []
@@ -202,8 +221,8 @@ class VideoMerger:
             # 所有视频都有音频 - 标准模式
             for i, path in enumerate(video_paths):
                 input_args.extend(['-i', path])
-                filter_parts.append(f'[{i}:v][{i}:a]')
-            filter_complex = ''.join(filter_parts) + f'concat=n={len(video_paths)}:v=1:a=1[outv][outa]'
+                filter_parts.append(f'{video_input(i)}[{i}:a]')
+            filter_complex = normalization + ''.join(filter_parts) + f'concat=n={len(video_paths)}:v=1:a=1[outv][outa]'
             cmd = [
                 'ffmpeg', '-y'
             ] + input_args + [
@@ -216,8 +235,8 @@ class VideoMerger:
             # 所有视频都没有音频 - 纯视频合并
             for i, path in enumerate(video_paths):
                 input_args.extend(['-i', path])
-                filter_parts.append(f'[{i}:v]')
-            filter_complex = ''.join(filter_parts) + f'concat=n={len(video_paths)}:v=1:a=0[v]'
+                filter_parts.append(video_input(i))
+            filter_complex = normalization + ''.join(filter_parts) + f'concat=n={len(video_paths)}:v=1:a=0[v]'
             cmd = [
                 'ffmpeg', '-y'
             ] + input_args + [
@@ -229,7 +248,7 @@ class VideoMerger:
             # 混合情况 - 添加静音音频流
             for i, (path, has_audio) in enumerate(zip(video_paths, has_audio_list)):
                 input_args.extend(['-i', path])
-                filter_parts.append(f'[{i}:v:0]setpts=PTS-STARTPTS[v{i}];')
+                filter_parts.append(f'{video_input(i)}setpts=PTS-STARTPTS[v{i}];')
                 if has_audio:
                     filter_parts.append(
                         f'[{i}:a:0]aformat=sample_rates=44100:channel_layouts=stereo,'
@@ -244,7 +263,7 @@ class VideoMerger:
                     )
 
             concat_inputs = ''.join(f'[v{i}][a{i}]' for i in range(len(video_paths)))
-            filter_complex = ''.join(filter_parts) + concat_inputs + f'concat=n={len(video_paths)}:v=1:a=1[outv][outa]'
+            filter_complex = normalization + ''.join(filter_parts) + concat_inputs + f'concat=n={len(video_paths)}:v=1:a=1[outv][outa]'
             cmd = [
                 'ffmpeg', '-y'
             ] + input_args + [

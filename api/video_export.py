@@ -85,6 +85,16 @@ async def download_export(export_id:int, source:bool=False,ctx:AuthContext=Depen
     return RedirectResponse(resolve_media_url(ref), status_code=307)
 
 
+@router.post('/{export_id}/apply')
+async def apply_enhanced_video(export_id: int, ctx: AuthContext=Depends(get_auth_context), _=EDITOR):
+    from schemas.video import VideoOut
+    try:
+        video = await chapter_exports.apply_video(export_id, ctx)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    return ResponseSchema(data=VideoOut.model_validate(video))
+
+
 @router.get('/{export_id}/quote')
 async def quote_export(export_id:int,model_config_id:int,resolution:EnhancementResolution='1080p',ctx:AuthContext=Depends(get_auth_context),_=EDITOR):
     source=await chapter_exports.get(export_id,ctx)

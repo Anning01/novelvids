@@ -146,3 +146,49 @@ it('previews the saved HD file through the authenticated endpoint and releases i
     expect(wrapper.find('.export-preview video').exists()).toBe(false)
   } finally { wrapper.unmount(); vi.unstubAllGlobals() }
 })
+
+it.each(['light', 'dark'])('reports the selected HD video and reuses theme surfaces in %s mode', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.spyOn(exportApi, 'listVideo').mockResolvedValue({ data: [{ ...source, id: 3, source_video_id: 9,
+    parent_export_id: 1, result_video_id: 12, applied_to_scene: true }] })
+  const wrapper = mount(ChapterExportPanel, { props: { videoId: 9 }, global: { plugins: [createPinia()] } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('已设为当前视频')
+  expect(wrapper.emitted('applied')).toEqual([[12]])
+  await wrapper.get('[aria-label="刷新导出记录"]').trigger('click'); await flushPromises()
+  expect(wrapper.emitted('applied')).toHaveLength(1)
+  expect(wrapper.findAll('button').some(button => button.text() === '设为当前视频')).toBe(false)
+  wrapper.unmount(); delete document.documentElement.dataset.appTheme
+})
+
+it('selects a historical completed HD result without quoting or generating again', async () => {
+  vi.spyOn(exportApi, 'listVideo').mockResolvedValue({ data: [{ ...source, id: 3, source_video_id: 9,
+    parent_export_id: 1, applied_to_scene: false }] })
+  const apply = vi.spyOn(exportApi, 'apply').mockResolvedValue({ data: { id: 12, scene_id: 2, status: 3, url: '/media/hd.mp4' } as never })
+  const quote = vi.spyOn(exportApi, 'quote')
+  const enhance = vi.spyOn(exportApi, 'enhance')
+  const wrapper = mount(ChapterExportPanel, { props: { videoId: 9 }, global: { plugins: [createPinia()] } })
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '设为当前视频')!.trigger('click')
+  await flushPromises()
+  expect(apply).toHaveBeenCalledExactlyOnceWith(3)
+  expect(wrapper.emitted('applied')).toEqual([[12]])
+  expect(quote).not.toHaveBeenCalled(); expect(enhance).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('keeps the previous video on apply failure and hides selection from viewers', async () => {
+  vi.spyOn(exportApi, 'listVideo').mockResolvedValue({ data: [{ ...source, id: 3, source_video_id: 9, parent_export_id: 1 }] })
+  vi.spyOn(exportApi, 'apply').mockRejectedValue(new Error('文件尚未就绪'))
+  const pinia = createPinia()
+  const wrapper = mount(ChapterExportPanel, { props: { videoId: 9 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '设为当前视频')!.trigger('click'); await flushPromises()
+  expect(wrapper.get('[role="alert"]').text()).toContain('文件尚未就绪')
+  expect(wrapper.emitted('applied')).toBeUndefined()
+  useAuthStore(pinia).$patch({ enabled: true, user: { id: 1, username: 'viewer', nickname: '', avatar_url: '', is_super_admin: false },
+    activeTeamId: 1, memberships: [{ team_id: 1, team_name: 'Team', role: 'viewer' }] })
+  await flushPromises()
+  expect(wrapper.findAll('button').some(button => button.text() === '设为当前视频')).toBe(false)
+  wrapper.unmount()
+})

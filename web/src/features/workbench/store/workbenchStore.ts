@@ -1305,5 +1305,21 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const updated = (await api.queryVideo(videoId)).data
       this.videos[updated.scene_id] = (this.videos[updated.scene_id] || []).map(item => item.id === updated.id ? updated : item); this.rebuildGraph()
     },
+    async refreshEnhancedVideo(videoId: number) {
+      const chapterId = this.chapterId
+      const epoch = this.loadEpoch.snapshot()
+      const video = (await api.queryVideo(videoId)).data
+      if (!this.scenes.some(scene => scene.id === video.scene_id)) return
+      const scene = (await api.scene(video.scene_id)).data
+      if (this.chapterId !== chapterId || !this.loadEpoch.isCurrent(epoch)) return
+      this.videos[scene.id] = [video, ...(this.videos[scene.id] || []).filter(item => item.id !== video.id)]
+      this.scenes = this.scenes.map(item => item.id === scene.id ? { ...item, metadata: scene.metadata } : item)
+      for (const item of this.nodes) {
+        if (item.kind === 'shot' && item.id === scene.id) {
+          item.data.scene = { ...(item.data.scene as Scene), metadata: scene.metadata }
+          item.data.videos = this.videos[scene.id]
+        }
+      }
+    },
   },
 })
