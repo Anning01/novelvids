@@ -49,7 +49,7 @@ import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
-import { api, mediaUrl, sleep, retryableStatusError } from '@/api'
+import { api, ApiRequestError, mediaUrl, sleep, retryableStatusError } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { appConfirm } from '@/shared/confirmDialog'
 import { fallbackImage } from '@/shared/mediaFallback'
@@ -64,7 +64,7 @@ import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
-import { injectLastFrameContinuityInstruction } from '@/shared/lastFrameContinuity'
+import { injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -191,7 +191,7 @@ let sceneScrollFrame = 0
 let sceneScrollUnlockTimer: ReturnType<typeof setTimeout> | undefined
 let programmaticSceneId = 0
 const sceneAutoSaveTimers = new Map<number, ReturnType<typeof setTimeout>>()
-const sceneSaveQueues = new Map<number, Promise<void>>()
+const sceneSaveQueues = new Map<number, Promise<boolean>>()
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
@@ -1704,11 +1704,11 @@ async function saveScene(
   const previous = sceneSaveQueues.get(scene.id) ?? Promise.resolve()
   const queued = previous.then(async () => {
     const draft = draftFor(scene)
-    const currentScene = scenes.value.find(item => item.id === scene.id) ?? scene
+    let currentScene = scenes.value.find(item => item.id === scene.id) ?? scene
     const duration = sceneDuration(currentScene, model)
     draft.duration = duration
     try {
-      const updated = (await api.updateScene(scene.id, {
+      const persist = () => api.updateScene(scene.id, {
         description: draft.description,
         prompt: draft.prompt,
         duration,
@@ -1724,17 +1724,38 @@ async function saveScene(
           video_aspect_ratio: sceneAspectRatio(currentScene, model),
           return_last_frame: draft.returnLastFrame,
         },
-      }, draft.basePrompt)).data
+      }, draft.basePrompt)
+      let updated: Scene
+      try {
+        updated = (await persist()).data
+      } catch (error) {
+        if (!(error instanceof ApiRequestError) || error.code !== 409) throw error
+        const latest = (await api.scene(scene.id)).data
+        const instruction = latest.metadata?.previous_scene_last_frame_prompt_instruction
+        const rebased = typeof instruction === 'string'
+          ? rebaseLastFrameContinuity(draft.basePrompt, draft.prompt, latest.prompt, instruction) : null
+        if (!rebased || typeof instruction !== 'string') throw error
+        Object.assign(draft, rebased)
+        const tailReferences = readReferenceMedia(latest.metadata?.video_reference_media)
+          .filter(reference => instruction.includes(videoReferenceMentionSyntax(reference)))
+        draft.referenceMedia = [...tailReferences, ...draft.referenceMedia.filter(reference =>
+          !tailReferences.some(tail => tail.type === reference.type && (tail.mention_url || tail.url) === (reference.mention_url || reference.url)))]
+        currentScene = latest
+        updated = (await persist()).data
+      }
       draft.basePrompt = updated.prompt ?? null
       scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
       if (showNotice) notice.success(tr('分镜已保存'))
+      return true
     } catch (error) {
       notice.error(tr('自动保存失败：{p0}', { p0: (error as Error).message }))
+      return false
     }
   })
   sceneSaveQueues.set(scene.id, queued)
-  await queued
+  const saved = await queued
   if (sceneSaveQueues.get(scene.id) === queued) sceneSaveQueues.delete(scene.id)
+  return saved
 }
 
 async function flushPendingSceneSaves() {
@@ -1846,7 +1867,7 @@ async function generateVideo(
   const version = chapterLoadVersion
   try {
     ensureSceneVoiceReferencePrompt(scene)
-    await saveScene(scene, false, selectedModel)
+    if (!await saveScene(scene, false, selectedModel)) return false
     if (!alive || version !== chapterLoadVersion) return false
     let result = (await api.generateVideo(scene.id, selectedModel.config_id, {
       generation_mode: draft.videoGenerationMode,
@@ -1953,8 +1974,9 @@ function syncInjectedLastFrame(result: VideoResult) {
     draft.referenceMedia = [reference, ...draft.referenceMedia]
   }
   if (promptInstruction) {
+    draft.basePrompt = injectLastFrameContinuityInstruction(draft.basePrompt || '', promptInstruction)
     draft.prompt = injectLastFrameContinuityInstruction(draft.prompt, promptInstruction)
-    targetScene.prompt = draft.prompt
+    targetScene.prompt = injectLastFrameContinuityInstruction(targetScene.prompt || '', promptInstruction)
   }
   targetScene.metadata = {
     ...(targetScene.metadata || {}),
