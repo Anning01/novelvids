@@ -69,7 +69,9 @@ Voice bindings persist across chapters when the same project assets are reused. 
 - Use a configuration-driven factory for reference-based or first/last-frame video generation.
 - Set each shot's model, duration, aspect ratio, resolution, audio and continuity options.
 - Generate selected shots in bulk. Sequential mode feeds each shot's last frame into the next shot automatically.
+- Video status is polled automatically. Reopening a chapter resumes pending queries, returning to the window synchronizes immediately, and temporary network failures or status-request timeouts reconnect without submitting another generation. Use “Refresh video status” to synchronize manually.
 - Extract a last frame with FFmpeg when the provider does not return one.
+- If you forgot to enable returning the last frame, click “Extract last frame” in the completed video's preview. It extracts from the existing video and adds the image to the next shot's references; “Download last frame” then saves a copy. It does not invoke a generation model, incur model charges or change the original video. If the next shot does not exist yet, download the image and add it manually later.
 - In reference mode, upload that image and bind its first-frame purpose to its final image index. This guides continuity without strictly locking the opening frame. For strict keyframes, use the model's first-frame or first/last-frame mode; the modes cannot be mixed. Legacy `first_frame_reference` JSON is converted for submission without rewriting saved shots.
 - Reconcile queued and running provider tasks in the background even after the browser closes.
 - Compose available shot videos in episode order and download the result.

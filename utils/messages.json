@@ -1,4 +1,6 @@
 {
+  "只有已完成且包含视频文件的记录可以提取尾帧": "Only completed records with a video file can supply a last frame",
+  "尾帧提取失败，原视频未更改，请稍后重试": "Could not extract the last frame. The original video is unchanged. Please try again later.",
   "运行不存在": "Run not found",
   "事件订阅不接受客户端历史、工具或状态": "Event subscriptions do not accept client history, tools or state",
   "配置不存在或无权操作": "Configuration not found or access denied",

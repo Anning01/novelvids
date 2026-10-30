@@ -2,7 +2,7 @@
 import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
-import { api, mediaUrl, persistedMediaRef } from '@/api'
+import { api, mediaUrl, persistedMediaRef, retryableStatusError } from '@/api'
 import { libraryApi } from '@/features/resource-library/api'
 import type { VideoResource } from '@/features/resource-library/types'
 import { readVideoReferenceMedia } from '@/shared/scenePromptReferences'
@@ -1248,14 +1248,15 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         this.rebuildGraph()
         if (!terminal.has(video.status)) {
           this.pollingVideoIds.push(video.id)
-          video = await pollUntilTerminal(async () => {
-            const current = (await api.queryVideo(video.id)).data
+          video = await pollUntilTerminal(async signal => {
+            const current = (await api.queryVideo(video.id, signal)).data
             if (!controller.signal.aborted) {
               this.videos[sceneId] = this.videos[sceneId].map(item => item.id === current.id ? current : item)
               this.rebuildGraph()
             }
             return current
-          }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal })
+          }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal,
+            retryOnError: retryableStatusError, requestTimeoutMs: 45_000 })
         }
         video.status === TaskStatusEnum.COMPLETED ? notice.success(tr('视频生成完成')) : notice.error(String(video.metadata?.error || tr('视频生成失败')))
       } catch (error) {
@@ -1276,15 +1277,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.pollingVideoIds.push(videoId)
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
       try {
-        const video = await pollUntilTerminal(async () => {
-          const current = (await api.queryVideo(videoId)).data
+        const video = await pollUntilTerminal(async signal => {
+          const current = (await api.queryVideo(videoId, signal)).data
           if (this.chapterId !== chapterId) controller.abort()
           if (!controller.signal.aborted) {
             this.videos[sceneId] = (this.videos[sceneId] || []).map(item => item.id === current.id ? current : item)
             this.rebuildGraph()
           }
           return current
-        }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal })
+        }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminal,
+          retryOnError: retryableStatusError, requestTimeoutMs: 45_000 })
         if (!controller.signal.aborted) {
           video.status === TaskStatusEnum.COMPLETED
             ? notice.success(tr('视频生成完成'))

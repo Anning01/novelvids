@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
+from tortoise.transactions import in_transaction
 
 from controllers.config import ai_model_config_controller
 from config import settings
@@ -272,6 +273,43 @@ class VideoController(CRUDBase[Video, dict, dict]):
         scene = await Scene.get(id=video.scene_id)
         await self._set_scene_current_video(scene, video.id)
         return video
+
+    async def extract_last_frame(self, video_id: int) -> Video:
+        """补提已完成视频的尾帧，复用衔接写入，不查询或提交供应商任务。"""
+        lock = self._query_locks.setdefault(video_id, asyncio.Lock())
+        async with lock:
+            video = await self.get(video_id)
+            if video.status != TaskStatusEnum.completed.value or not video.url:
+                raise HTTPException(400, detail=localized_message('只有已完成且包含视频文件的记录可以提取尾帧'))
+            metadata = video.metadata or {}
+            # last_frame_url 也可能是生成请求的输入尾帧，只有带输出来源的才可复用。
+            frame = metadata.get("last_frame_url") if metadata.get("last_frame_source") in {"provider", "ffmpeg"} else None
+            source = metadata.get("last_frame_source") if frame else "ffmpeg"
+            if not isinstance(frame, str) or not frame:
+                source = "ffmpeg"
+                scene = await Scene.get(id=video.scene_id)
+                chapter = await Chapter.get(id=scene.chapter_id)
+                novel = await Novel.get(id=chapter.novel_id)
+                try:
+                    frame = await last_frame_service.extract_and_store(video.url, video.id, team_id=novel.team_id)
+                except Exception as error:
+                    logger.warning("Last frame recovery failed: video_id=%s error=%s", video.id, type(error).__name__)
+                    raise HTTPException(503, detail=localized_message('尾帧提取失败，原视频未更改，请稍后重试')) from error
+            async with in_transaction():
+                video = await self.get(video_id)
+                propagation = await _inject_last_frame_reference(video, frame)
+                video.metadata = {
+                    **(video.metadata or {}),
+                    "last_frame_url": frame,
+                    "last_frame_source": source,
+                    "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
+                    "last_frame_reference": propagation["reference"] if propagation else None,
+                    "last_frame_prompt_instruction": propagation["prompt_instruction"] if propagation else None,
+                }
+                video.metadata.pop("last_frame_extraction_error", None)
+                video.metadata.pop("last_frame_propagation_error", None)
+                await video.save(update_fields=["metadata", "updated_at"])
+            return video
 
     async def generate(self, req: VideoGenerateRequest, media_base_url: str = "", team_id=None, user_id=None):
         from services.creation_agent.video_jobs import submit_video

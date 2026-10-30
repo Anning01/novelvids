@@ -1,5 +1,10 @@
 {
   "common": {
+    "提取尾帧": "Extract last frame",
+    "下载尾帧": "Download last frame",
+    "从现有视频提取并加入下一分镜参考图，不重新生成": "Extract from the existing video and add to the next shot's references, without generating again",
+    "尾帧已提取，并加入下一分镜参考图": "Last frame extracted and added to the next shot's references",
+    "尾帧已提取，可下载使用": "Last frame extracted and ready to download",
     "用量正在结算": "Usage settlement pending",
     "读取创作规范": "Read creative guidance",
     "正在读取创作规范": "Reading creative guidance",
@@ -210,6 +215,10 @@
     "后续步骤已停止，已人工核对": "Stopped; manually reviewed",
     "封面加载失败": "Cover unavailable",
     "视频高清化": "Video enhancement",
+    "连接暂时中断，正在重新同步；后台任务会继续。": "Connection interrupted. Reconnecting to the task; generation continues in the background.",
+    "刷新视频状态": "Refresh video status",
+    "视频状态暂未同步": "Video status is not synchronized",
+    "可刷新视频状态，不必重新生成": "Refresh the video status without generating again",
     "无需等本集完成。高清化完成后自动设为当前视频，原视频保留在历史记录中。": "No need to finish the episode. A completed enhancement becomes the current video; the original remains in history.",
     "已设为当前视频": "Current video",
     "设为当前视频": "Use as current video",

@@ -4,7 +4,8 @@ import { api } from '@/api'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import { useWorkbenchStore } from './workbenchStore'
 
-vi.mock('@/api', () => ({
+vi.mock('@/api', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api')>(),
   api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn(), scene: vi.fn(), workbenchBootstrap: vi.fn() },
   sleep: vi.fn(),
 }))
@@ -437,7 +438,7 @@ it('resumes polling a non-terminal video and refreshes its canvas state', async 
 
   await store.resumeVideoPolling(10, 92)
 
-  expect(queryVideoMock).toHaveBeenCalledWith(92)
+  expect(queryVideoMock).toHaveBeenCalledWith(92, expect.any(AbortSignal))
   expect(store.videos[10]?.[0]).toMatchObject({ status: TaskStatusEnum.COMPLETED, url: '/media/videos/92.mp4' })
   expect(store.busySceneIds).not.toContain(10)
   expect(store.pollingVideoIds).not.toContain(92)

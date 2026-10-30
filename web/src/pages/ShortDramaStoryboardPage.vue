@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 import VideoEnhanceButton from '@/features/video-export/VideoEnhanceButton.vue'
+import VideoLastFrameButton from '@/components/VideoLastFrameButton.vue'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -48,7 +49,8 @@ import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
-import { api, mediaUrl, sleep } from '@/api'
+import { api, mediaUrl, sleep, retryableStatusError } from '@/api'
+import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { appConfirm } from '@/shared/confirmDialog'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
@@ -135,6 +137,10 @@ const refreshingVideoHistorySceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
 const disconnectedStoryboardTasks = ref<Record<number, string>>({})
 const videoGenerationErrors = ref<Record<number, string>>({})
+const videoSyncErrors = ref<Record<number, { message: string; stopped: boolean }>>({})
+const videoPolls = new Map<number, { controller: AbortController; promise: Promise<VideoResult | null> }>()
+const submittingVideoSceneIds = new Set<number>()
+const focusedVideoSyncs = new Set<number>()
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
 const focusedPromptSceneId = ref(0)
 const highlightedReferenceKey = ref('')
@@ -428,6 +434,79 @@ function setSceneBusy(target: typeof generatingVideoSceneIds, sceneId: number, v
   const next = new Set(target.value)
   value ? next.add(sceneId) : next.delete(sceneId)
   target.value = next
+}
+
+function updateVideoSnapshot(current: VideoResult) {
+  const records = videos.value[current.scene_id] || []
+  const previous = records.find(item => item.id === current.id)
+  // A late processing response must not replace a completion obtained on focus.
+  if (previous && terminalTaskStatuses.has(previous.status) && !terminalTaskStatuses.has(current.status)) return previous
+  videos.value[current.scene_id] = records.map(item => item.id === current.id ? current : item)
+  delete videoSyncErrors.value[current.scene_id]
+  if (current.status === TaskStatusEnum.COMPLETED) {
+    setSceneVideoError(current.scene_id)
+    syncInjectedLastFrame(current)
+  }
+  if (!submittingVideoSceneIds.has(current.scene_id) && !videos.value[current.scene_id].some(item => !terminalTaskStatuses.has(item.status))) setSceneBusy(generatingVideoSceneIds, current.scene_id, false)
+  return current
+}
+
+function pollVideo(sceneId: number, videoId: number): Promise<VideoResult | null> {
+  const existing = videoPolls.get(videoId)
+  if (existing) return existing.promise
+  const version = chapterLoadVersion
+  const controller = new AbortController()
+  setSceneBusy(generatingVideoSceneIds, sceneId, true)
+  const currentScope = () => alive && !controller.signal.aborted && version === chapterLoadVersion
+  const promise = (async () => {
+    try {
+      return await pollUntilTerminal(async signal => {
+        const current = (await api.queryVideo(videoId, signal)).data
+        if (!currentScope()) throw new DOMException('Video view changed', 'AbortError')
+        return updateVideoSnapshot(current)
+      }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminalTaskStatuses,
+        requestTimeoutMs: 45_000, retryOnError: retryableStatusError,
+        onRetry: () => { if (currentScope()) videoSyncErrors.value[sceneId] = { message: tr('连接暂时中断，正在重新同步；后台任务会继续。'), stopped: false } },
+      })
+    } catch (error) {
+      if (!isAbortError(error) && currentScope()) videoSyncErrors.value[sceneId] = { message: (error as Error).message, stopped: true }
+      return null
+    } finally {
+      if (videoPolls.get(videoId)?.controller === controller) videoPolls.delete(videoId)
+      if (currentScope() && (videoSyncErrors.value[sceneId]?.stopped || !(videos.value[sceneId] || []).some(item => !terminalTaskStatuses.has(item.status)))) setSceneBusy(generatingVideoSceneIds, sceneId, false)
+    }
+  })()
+  videoPolls.set(videoId, { controller, promise })
+  return promise
+}
+
+function stopVideoPolling() {
+  for (const entry of videoPolls.values()) entry.controller.abort()
+  videoPolls.clear()
+}
+
+function resumeVideoPolling() {
+  for (const scene of scenes.value) {
+    for (const video of videos.value[scene.id] || []) {
+      if (!terminalTaskStatuses.has(video.status)) void pollVideo(scene.id, video.id)
+    }
+  }
+}
+
+function syncVisibleVideoTasks() {
+  if (document.visibilityState === 'hidden') return
+  const version = chapterLoadVersion
+  for (const records of Object.values(videos.value)) {
+    for (const video of records.filter(item => !terminalTaskStatuses.has(item.status))) {
+      if (focusedVideoSyncs.has(video.id)) continue
+      focusedVideoSyncs.add(video.id)
+      void api.queryVideo(video.id, videoPolls.get(video.id)?.controller.signal).then(response => {
+        if (alive && version === chapterLoadVersion) updateVideoSnapshot(response.data)
+      }).catch(() => { /* The active poller owns reconnect feedback and retries. */ })
+        .finally(() => focusedVideoSyncs.delete(video.id))
+    }
+  }
+  resumeVideoPolling()
 }
 
 function currentVideoId(scene: Scene) {
@@ -1219,6 +1298,7 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   const requestedScene = result.scenes.find(scene => scene.id === requestedSceneId)
   activeSceneId.value = requestedScene?.id || result.scenes[0]?.id || 0
   initializeSceneDrafts(result.scenes)
+  resumeVideoPolling()
   result.scenes.forEach(scene => ensureSceneVoiceReferencePrompt(scene))
   void hydrateSceneAudioReferences(result.scenes)
   void nextTick(() => {
@@ -1398,6 +1478,10 @@ async function regenerateStoryboard() {
 
 async function loadChapter(chapterId: number) {
   const loadVersion = ++chapterLoadVersion
+  stopVideoPolling()
+  submittingVideoSceneIds.clear()
+  generatingVideoSceneIds.value = new Set()
+  videoSyncErrors.value = {}
   focusedPromptSceneId.value = 0
   activeChapterId.value = chapterId
   activeChapter.value = chapters.value.find(item => item.id === chapterId) ?? null
@@ -1748,6 +1832,7 @@ async function generateVideo(
   showNotice = true,
   settings?: SceneVideoGenerationSettings,
 ): Promise<boolean> {
+  if (!alive || scene.chapter_id !== activeChapterId.value || !scenes.value.some(item => item.id === scene.id)) return false
   const draft = draftFor(scene)
   const selectedModel = settings?.model || selectedVideoModelConfig.value
   if (!selectedModel) {
@@ -1757,9 +1842,12 @@ async function generateVideo(
   if (generatingVideoSceneIds.value.has(scene.id)) return false
   setSceneVideoError(scene.id)
   setSceneBusy(generatingVideoSceneIds, scene.id, true)
+  submittingVideoSceneIds.add(scene.id)
+  const version = chapterLoadVersion
   try {
     ensureSceneVoiceReferencePrompt(scene)
     await saveScene(scene, false, selectedModel)
+    if (!alive || version !== chapterLoadVersion) return false
     let result = (await api.generateVideo(scene.id, selectedModel.config_id, {
       generation_mode: draft.videoGenerationMode,
       first_frame_url: draft.firstFrameUrl || undefined,
@@ -1774,20 +1862,23 @@ async function generateVideo(
         ? referencedVideoMedia(draft.prompt, draft.referenceMedia)
         : [],
     })).data
-    videos.value[scene.id] = [result, ...(videos.value[scene.id] || [])]
-    scene.metadata = { ...(scene.metadata || {}), current_video_id: result.id }
-    while (alive && !terminalTaskStatuses.has(result.status)) {
-      await sleep(4000)
-      result = (await api.queryVideo(result.id)).data
-      videos.value[scene.id] = videos.value[scene.id].map(item => item.id === result.id ? result : item)
+    if (!alive || version !== chapterLoadVersion) return false
+    submittingVideoSceneIds.delete(scene.id)
+    videos.value[scene.id] = [result, ...(videos.value[scene.id] || []).filter(item => item.id !== result.id)]
+    scenes.value = scenes.value.map(item => item.id === scene.id
+      ? { ...item, metadata: { ...(item.metadata || {}), current_video_id: result.id } } : item)
+    if (!terminalTaskStatuses.has(result.status)) {
+      const finished = await pollVideo(scene.id, result.id)
+      if (!finished) return false
+      result = finished
     }
-    if (!alive) return false
+    if (!alive || version !== chapterLoadVersion) return false
     const completed = result.status === TaskStatusEnum.COMPLETED
     if (completed) {
       setSceneVideoError(scene.id)
       syncInjectedLastFrame(result)
     } else {
-      setSceneVideoError(scene.id, sceneVideoError(scene))
+      setSceneVideoError(scene.id, sceneVideoError(scenes.value.find(item => item.id === scene.id) || scene))
     }
     if (showNotice) {
       completed
@@ -1796,17 +1887,22 @@ async function generateVideo(
     }
     return completed
   } catch (error) {
+    if (!alive || version !== chapterLoadVersion) return false
     const message = error instanceof Error ? error.message : tr('视频生成失败')
     setSceneVideoError(scene.id, message)
     if (showNotice) notice.error(tr('视频生成失败，详情已显示在预览区'))
     return false
   } finally {
-    setSceneBusy(generatingVideoSceneIds, scene.id, false)
+    if (alive && version === chapterLoadVersion) {
+      submittingVideoSceneIds.delete(scene.id)
+      setSceneBusy(generatingVideoSceneIds, scene.id, false)
+    }
   }
 }
 
 async function refreshVideoHistory(scene: Scene) {
   if (refreshingVideoHistorySceneIds.value.has(scene.id)) return
+  const version = chapterLoadVersion
   setSceneBusy(refreshingVideoHistorySceneIds, scene.id, true)
   try {
     const records = videos.value[scene.id] || []
@@ -1815,13 +1911,17 @@ async function refreshVideoHistory(scene: Scene) {
       await Promise.allSettled(pendingRecords.map(record => api.queryVideo(record.id)))
     }
     const [history, current] = await Promise.all([api.videoGenerationHistory(scene.id), api.scene(scene.id)])
+    if (!alive || version !== chapterLoadVersion) return
     videos.value[scene.id] = history.data
-    scene.metadata = current.data.metadata
+    scenes.value = scenes.value.map(item => item.id === scene.id ? { ...item, metadata: current.data.metadata } : item)
     setSceneVideoError(scene.id)
+    delete videoSyncErrors.value[scene.id]
+    resumeVideoPolling()
   } catch (error) {
+    if (!alive || version !== chapterLoadVersion) return
     notice.error(tr('刷新生成记录失败：{p0}', { p0: (error as Error).message }))
   } finally {
-    setSceneBusy(refreshingVideoHistorySceneIds, scene.id, false)
+    if (alive && version === chapterLoadVersion) setSceneBusy(refreshingVideoHistorySceneIds, scene.id, false)
   }
 }
 
@@ -1988,12 +2088,17 @@ async function saveChapterDetails(value: { name: string; content: string }) {
 
 onMounted(load)
 onMounted(() => {
+  window.addEventListener('focus', syncVisibleVideoTasks)
+  document.addEventListener('visibilitychange', syncVisibleVideoTasks)
   window.addEventListener('pointerdown', closeAssetActionsFromOutside)
   window.addEventListener('keydown', closeAssetActionsFromEscape)
 })
 onBeforeUnmount(() => {
   void flushPendingSceneSaves()
   alive = false
+  stopVideoPolling()
+  window.removeEventListener('focus', syncVisibleVideoTasks)
+  document.removeEventListener('visibilitychange', syncVisibleVideoTasks)
   chapterToolbarObserver?.disconnect()
   sceneScrollContainer?.removeEventListener('scroll', handleSceneScroll)
   if (sceneScrollFrame) cancelAnimationFrame(sceneScrollFrame)
@@ -2211,7 +2316,13 @@ onBeforeUnmount(() => {
               </section>
 
               <aside class="preview-panel">
-                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" @applied="refreshVideoHistory(scene)" /><RefreshCw :size="15" /></header>
+                <header>
+                  <strong>{{ tr('视频预览') }}</strong>
+                  <SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" />
+                  <VideoLastFrameButton v-if="selectedVideoFor(scene)" :key="selectedVideoFor(scene)!.id" :video="selectedVideoFor(scene)!" @extracted="updateVideoSnapshot" />
+                  <VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" @applied="refreshVideoHistory(scene)" />
+                  <AppButton variant="ghost" icon-only size="sm" :aria-label="tr('刷新视频状态')" :disabled="refreshingVideoHistorySceneIds.has(scene.id)" @click="refreshVideoHistory(scene)"><RefreshCw :size="15" /></AppButton>
+                </header>
                 <div class="preview-stage">
                   <VideoGenerationErrorState
                     v-if="sceneVideoError(scene)"
@@ -2227,9 +2338,11 @@ onBeforeUnmount(() => {
                     :poster="videoCoverUrl(selectedVideoFor(scene)!)"
                     :title="tr('分镜 {p0} 视频预览', { p0: scene.sequence })"
                   />
+                  <div v-else-if="videoSyncErrors[scene.id]?.stopped" class="preview-empty"><RefreshCw :size="30" /><strong>{{ tr('视频状态暂未同步') }}</strong><span>{{ tr('可刷新视频状态，不必重新生成') }}</span></div>
                   <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>{{ tr('视频生成中') }}</strong><span>{{ tr('完成后将在这里自动播放') }}</span></div>
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>{{ tr('等待生成视频') }}</strong><span>{{ tr('完善提示词后点击“生成视频”') }}</span></div>
                 </div>
+                <p v-if="videoSyncErrors[scene.id]" class="video-sync-note" role="status">{{ videoSyncErrors[scene.id].message }}</p>
                 <SceneVideoGenerationHistory
                   :records="videos[scene.id] || []"
                   :current-id="currentVideoId(scene)"
@@ -2293,6 +2406,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.video-sync-note { margin:8px 12px; color:var(--app-text-secondary); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .storyboard-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f7f8fb; }
 .storyboard-page.is-workflow-view { height: 100vh; overflow: hidden; }
 .storyboard-shell { min-height: calc(100vh - 72px); }
@@ -2406,8 +2520,8 @@ onBeforeUnmount(() => {
 .prompt-panel > footer > div { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .prompt-panel > footer > div > span { display: inline-flex; min-height: 34px; align-items: center; gap: 4px; padding: 0 10px; border-radius: 9px; color: #777d8d; background: #fff; box-shadow: 0 1px 3px rgb(35 39 55 / 8%); font-size: 10px; }
 .prompt-panel input { width: 23px; padding: 0; border: 0; outline: 0; color: #555b6a; background: transparent; font: inherit; text-align: right; }
-.preview-panel { display: grid; grid-template-rows: 48px minmax(0,1fr) auto; overflow: hidden; }
-.preview-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 0 15px; }
+.preview-panel { display: grid; grid-template-rows: minmax(48px,auto) minmax(0,1fr) auto; overflow: hidden; }
+.preview-panel > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px; padding: 7px 15px; }
 .preview-panel > header svg { color: #9197a6; }
 .preview-stage { display: grid; min-height: 520px; overflow: hidden; place-items: center; background: #292e39; }
 .preview-stage :deep(.deferred-video-player),.preview-stage video { width: 100%; height: 100%; object-fit: contain; }
