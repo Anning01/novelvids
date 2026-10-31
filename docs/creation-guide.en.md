@@ -75,6 +75,7 @@ Voice bindings persist across chapters when the same project assets are reused. 
 - In reference mode, upload that image and bind its first-frame purpose to its final image index. This guides continuity without strictly locking the opening frame. For strict keyframes, use the model's first-frame or first/last-frame mode; the modes cannot be mixed. Legacy `first_frame_reference` JSON is converted for submission without rewriting saved shots.
 - Reconcile queued and running provider tasks in the background even after the browser closes.
 - Compose available shot videos in episode order and download the result.
+- Episode previews buffer the next video while the current shot plays and reuse the players at clip boundaries. Missing shots retain their original duration as black placeholders. If the next clip is not ready, the previous frame stays visible with a buffering indicator. Preview playback does not automatically compose or regenerate media.
 - Browse images, audio, videos and generation versions in the media library.
 
 ### Models and costs

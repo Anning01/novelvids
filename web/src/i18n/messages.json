@@ -1,5 +1,7 @@
 {
   "common": {
+    "正在缓冲视频": "Buffering video",
+    "视频播放失败，请检查网络或重新选择分镜": "Video playback failed. Check your connection or select the shot again.",
     "提取尾帧": "Extract last frame",
     "下载尾帧": "Download last frame",
     "从现有视频提取并加入下一分镜参考图，不重新生成": "Extract from the existing video and add to the next shot's references, without generating again",

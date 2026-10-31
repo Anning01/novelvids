@@ -24,6 +24,7 @@ import {
 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import VideoThumbnail from '@/components/VideoThumbnail.vue'
+import BufferedVideoPlayer from '@/components/BufferedVideoPlayer.vue'
 import ChapterExportPanel from '@/features/video-export/ChapterExportPanel.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { api, mediaUrl } from '@/api'
@@ -54,8 +55,8 @@ const videos = ref<Record<number, VideoResult[]>>({})
 const activeSceneId = ref(0)
 const loading = ref(true)
 const loadError = ref('')
-const player = ref<HTMLVideoElement | null>(null)
-const loadedVideoId = ref(0)
+const player = ref<InstanceType<typeof BufferedVideoPlayer> | null>(null)
+const playbackActivated = ref(false)
 const stage = ref<HTMLElement | null>(null)
 const timelineScroll = ref<HTMLElement | null>(null)
 const playing = ref(false)
@@ -65,6 +66,8 @@ const clipCurrentTime = ref(0)
 const timelineScale = ref(1)
 const downloadingChapter = ref(false)
 let loadVersion = 0
+let playbackVersion = 0
+let playbackErrorShown = false
 
 const MIN_TIMELINE_SCALE = 1
 const MAX_TIMELINE_SCALE = 5
@@ -74,6 +77,7 @@ const videoEnabled = computed(() => chapterHasCompletedVideo(scenes.value, video
 const playableItems = computed(() => timelineItems.value.filter(item => item.state === 'completed' && item.video?.url))
 const activeItem = computed(() => timelineItems.value.find(item => item.scene.id === activeSceneId.value) || null)
 const activeTimelineIndex = computed(() => timelineItems.value.findIndex(item => item.scene.id === activeSceneId.value))
+const nextVideoUrl = computed(() => timelineItems.value.slice(activeTimelineIndex.value + 1).find(item => item.video?.url)?.video?.url || '')
 const totalDuration = computed(() => timelineItems.value.reduce((sum, item) => sum + item.duration, 0))
 const timelinePixelsPerSecond = computed(() => 10 + timelineScale.value * 12)
 const timelineContentWidth = computed(() => Math.max(1, totalDuration.value * timelinePixelsPerSecond.value))
@@ -147,6 +151,7 @@ async function loadChapter(chapterId: number) {
   loading.value = true
   loadError.value = ''
   pause()
+  playbackActivated.value = false
   try {
     const response = await api.workbenchBootstrap(projectId.value, chapterId)
     if (version !== loadVersion) return
@@ -157,7 +162,6 @@ async function loadChapter(chapterId: number) {
     const requestedSceneId = Number(route.query.scene)
     const requested = items.find(item => item.scene.id === requestedSceneId)
     activeSceneId.value = (requested || items.find(item => item.state === 'completed') || items[0])?.scene.id || 0
-    loadedVideoId.value = 0
     clipCurrentTime.value = 0
   } catch (error) {
     if (version !== loadVersion) return
@@ -217,35 +221,34 @@ function startVirtualClipPlayback(startTime = clipCurrentTime.value) {
   })
 }
 
-function startVideoPlayback(item: ChapterVideoTimelineItem, startTime: number, autoplay: boolean) {
-  if (item.video?.id && loadedVideoId.value !== item.video.id) {
-    loadedVideoId.value = item.video.id
-    void nextTick(() => startVideoPlayback(item, startTime, autoplay))
-    return
+async function startVideoPlayback(item: ChapterVideoTimelineItem, startTime: number, autoplay: boolean) {
+  const version = ++playbackVersion
+  playbackActivated.value = true
+  playbackErrorShown = false
+  playing.value = autoplay
+  await nextTick()
+  if (version !== playbackVersion || activeSceneId.value !== item.scene.id) return
+  try {
+    await player.value?.start(startTime, autoplay)
+  } catch (error) {
+    if (version === playbackVersion && !(error instanceof DOMException && error.name === 'AbortError')) handlePlaybackError()
   }
-  const video = player.value
-  if (!video || activeSceneId.value !== item.scene.id) return
-  const prepare = () => {
-    video.currentTime = Math.min(startTime, Math.max(0, video.duration || item.duration))
-    if (autoplay) void video.play().catch(() => { playing.value = false })
-  }
-  if (video.readyState >= HTMLMediaElement.HAVE_METADATA) prepare()
-  else video.addEventListener('loadedmetadata', prepare, { once: true })
 }
 
 function selectTimelineItem(item: ChapterVideoTimelineItem, autoplay = false, startTime = 0) {
   gapPlaybackClock.stop()
+  ++playbackVersion
   player.value?.pause()
   playing.value = false
   const changed = activeSceneId.value !== item.scene.id
-  if (changed) loadedVideoId.value = 0
   activeSceneId.value = item.scene.id
   clipCurrentTime.value = Math.min(item.duration, Math.max(0, startTime))
   if (changed) void router.replace({ query: { ...route.query, chapter: String(activeChapter.value?.id || ''), scene: String(item.scene.id) } })
   void nextTick(() => {
     revealPlayhead()
-    if (item.video?.url && (autoplay || loadedVideoId.value === item.video.id)) {
-      startVideoPlayback(item, clipCurrentTime.value, autoplay)
+    if (activeSceneId.value !== item.scene.id) return
+    if (item.video?.url && (autoplay || playbackActivated.value)) {
+      void startVideoPlayback(item, clipCurrentTime.value, autoplay)
     }
     else if (autoplay) startVirtualClipPlayback(clipCurrentTime.value)
   })
@@ -274,15 +277,12 @@ function togglePlayback() {
     else startVirtualClipPlayback()
     return
   }
-  if (!player.value) {
-    startVideoPlayback(item, clipCurrentTime.value, true)
-    return
-  }
-  if (player.value.paused) void player.value.play().catch(() => { playing.value = false })
-  else player.value.pause()
+  if (playing.value) pause()
+  else void startVideoPlayback(item, clipCurrentTime.value, true)
 }
 
 function pause() {
+  ++playbackVersion
   gapPlaybackClock.pause()
   player.value?.pause()
   playing.value = false
@@ -292,17 +292,10 @@ function cyclePlaybackRate() {
   const rates = [1, 1.25, 1.5, 2]
   const next = rates[(rates.indexOf(playbackRate.value) + 1) % rates.length] || 1
   playbackRate.value = next
-  if (player.value) player.value.playbackRate = next
 }
 
-function updatePlayerMetadata() {
-  if (!player.value) return
-  player.value.muted = muted.value
-  player.value.playbackRate = playbackRate.value
-}
-
-function updatePlaybackPosition() {
-  clipCurrentTime.value = player.value?.currentTime || 0
+function updatePlaybackPosition(seconds: number) {
+  clipCurrentTime.value = seconds
 }
 
 function handlePlayerPlay() {
@@ -311,6 +304,12 @@ function handlePlayerPlay() {
 
 function handlePlayerPause() {
   if (activeItem.value?.video?.url) playing.value = false
+}
+
+function handlePlaybackError() {
+  playing.value = false
+  if (!playbackErrorShown) notice.error(tr('视频播放失败，请检查网络或重新选择分镜'))
+  playbackErrorShown = true
 }
 
 function seekChapter(event: Event) {
@@ -366,10 +365,6 @@ function returnToStoryboard(sceneId = activeSceneId.value) {
   })
 }
 
-watch(muted, value => {
-  if (player.value) player.value.muted = value
-})
-
 watch(timelineScale, () => {
   void nextTick(() => revealPlayhead(true))
 })
@@ -379,7 +374,7 @@ watch(chapterCurrentTime, () => {
 })
 
 onMounted(load)
-onUnmounted(() => gapPlaybackClock.stop())
+onUnmounted(() => { ++playbackVersion; gapPlaybackClock.stop() })
 </script>
 
 <template>
@@ -422,24 +417,25 @@ onUnmounted(() => gapPlaybackClock.stop())
             </header>
 
             <div ref="stage" class="video-stage" :class="{ 'has-video': Boolean(activeItem?.video?.url), 'is-blackout': Boolean(activeItem && !activeItem.video?.url) }">
-              <video
-                v-if="activeItem?.video?.url && loadedVideoId === activeItem.video.id"
+              <BufferedVideoPlayer
+                v-if="playbackActivated"
+                v-show="Boolean(activeItem?.video?.url)"
                 ref="player"
-                :key="activeItem.video.id"
-                :src="activeItem.video.url"
-                :poster="activeItem.coverUrl || undefined"
-                preload="metadata"
-                playsinline
-                :aria-label="tr('{p0} 视频预览', { p0: sceneLabel(activeItem) })"
-                @loadedmetadata="updatePlayerMetadata"
+                :src="activeItem?.video?.url || ''"
+                :next-src="nextVideoUrl"
+                :poster="activeItem?.coverUrl || ''"
+                :title="tr('{p0} 视频预览', { p0: activeItem ? sceneLabel(activeItem) : '' })"
+                :muted="muted"
+                :playback-rate="playbackRate"
                 @timeupdate="updatePlaybackPosition"
                 @play="handlePlayerPlay"
                 @pause="handlePlayerPause"
                 @ended="advanceTimeline(true)"
+                @error="handlePlaybackError"
                 @click="togglePlayback"
               />
               <button
-                v-else-if="activeItem?.video?.url"
+                v-if="activeItem?.video?.url && !playbackActivated"
                 type="button"
                 class="video-stage-poster"
                 :aria-label="tr('播放{p0}', { p0: sceneLabel(activeItem) })"
@@ -453,7 +449,7 @@ onUnmounted(() => gapPlaybackClock.stop())
                 />
                 <i><Play :size="24" fill="currentColor" /></i>
               </button>
-              <div v-else class="video-stage-blackout" role="img" :aria-label="activeItem ? tr('{p0}无视频，使用黑屏占位', { p0: sceneLabel(activeItem) }) : tr('黑屏占位')" />
+              <div v-else-if="!activeItem?.video?.url" class="video-stage-blackout" role="img" :aria-label="activeItem ? tr('{p0}无视频，使用黑屏占位', { p0: sceneLabel(activeItem) }) : tr('黑屏占位')" />
 
               <div v-if="activeItem?.video?.url" class="video-stage-overlay">
                 <AppButton variant="dark" size="sm" icon-only :aria-label="muted ? tr('打开声音') : tr('静音')" :title="muted ? tr('打开声音') : tr('静音')" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></AppButton>
@@ -546,7 +542,7 @@ onUnmounted(() => gapPlaybackClock.stop())
 .video-stage-header strong { font-size: 14px; }
 .video-stage-header small { overflow: hidden; color: var(--app-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .video-stage { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; background: #090a0d; }
-.video-stage video { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; cursor: pointer; }
+.video-stage > .buffered-video-player { width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .video-stage-poster { position: relative; display: grid; width: 100%; height: 100%; min-height: 230px; place-items: center; overflow: hidden; padding: 0; border: 0; color: #fff; background: #11141b; cursor: pointer; }
 .video-stage-poster > i { position: absolute; display: grid; width: 60px; height: 60px; place-items: center; border: 1px solid rgb(255 255 255 / 45%); border-radius: 50%; background: rgb(26 29 38 / 72%); font-style: normal; backdrop-filter: blur(8px); }
 .video-stage-poster:hover > i,.video-stage-poster:focus-visible > i { background: rgb(83 78 236 / 90%); transform: scale(1.06); }
