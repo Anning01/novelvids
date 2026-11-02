@@ -10,7 +10,7 @@ import DashboardPage from './DashboardPage.vue'
 
 vi.mock('@/api', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/api')>()
-  return { ...original, api: { ...original.api, projectOverview: vi.fn(), deleteNovel: vi.fn() } }
+  return { ...original, api: { ...original.api, projectOverview: vi.fn(), billingProjects: vi.fn(), deleteNovel: vi.fn() } }
 })
 vi.mock('@/shared/confirmDialog', () => ({ appConfirm: vi.fn() }))
 vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn() } }))
@@ -49,6 +49,10 @@ beforeEach(() => {
   setLocale('zh')
   vi.clearAllMocks()
   vi.mocked(api.projectOverview).mockResolvedValue(response([project(1, '星河来信', 'ready'), project(2, '未开始的故事')]))
+  vi.mocked(api.billingProjects).mockResolvedValue({ code: 0, message: 'ok', data: {
+    items: [{ novel_id: 1, novel_name: '星河来信', total_cost: 12.345678, record_count: 5 }],
+    pagination: { total: 1, page: 1, page_size: 100, pages: 1 },
+  } })
 })
 
 it('shows a creation link, real totals and video episode counts without invented percentages', async () => {
@@ -56,12 +60,15 @@ it('shows a creation link, real totals and video episode counts without invented
   await flushPromises()
   expect(wrapper.get('a[href="/create/short-drama"]').text()).toContain('新建项目')
   expect(wrapper.find('form').exists()).toBe(false)
-  expect(wrapper.findAll('.projects-summary__item')).toHaveLength(4)
+  expect(wrapper.findAll('.projects-summary__item')).toHaveLength(5)
   expect(wrapper.findAll('.project-overview-card')).toHaveLength(2)
   expect(wrapper.text()).toContain('已完成 1 集')
   expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('%')
   expect(wrapper.get('.projects-summary__item.is-chapters p').text()).toBe('10')
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('¥12.35')
+  const costs = wrapper.findAll('.project-overview-card__cost')
+  expect(costs.map(node => node.text())).toEqual(['已花费¥0', '已花费¥12.35'])
   wrapper.unmount()
 })
 
@@ -158,6 +165,9 @@ it('does not expose create or delete controls to a viewer', async () => {
   await flushPromises()
   expect(wrapper.find('a[href="/create/short-drama"]').exists()).toBe(false)
   expect(wrapper.find('[aria-haspopup="menu"]').exists()).toBe(false)
+  expect(api.billingProjects).not.toHaveBeenCalled()
+  expect(wrapper.find('.projects-summary__item.is-cost').exists()).toBe(false)
+  expect(wrapper.find('.project-overview-card__cost').exists()).toBe(false)
   wrapper.unmount()
 })
 
@@ -176,6 +186,102 @@ it('exposes full long titles, English labels and unknown actual runtime', async 
   expect(wrapper.get('.project-overview-card h2').attributes('title')).toBe(value.name)
   expect(wrapper.text()).toContain('Unconfirmed')
   expect(wrapper.text()).toContain('Actual runtime is unconfirmed')
+  expect(wrapper.text()).toContain('Spent')
+  expect(wrapper.text()).toContain('Total spent')
+  wrapper.unmount()
+})
+
+it('reads every cost page and totals only existing projects, independently of the search filter', async () => {
+  vi.mocked(api.billingProjects).mockResolvedValueOnce({ code: 0, message: 'ok', data: {
+    items: [{ novel_id: 999, novel_name: 'Deleted', total_cost: 999, record_count: 1 }],
+    pagination: { total: 2, page: 1, page_size: 100, pages: 2 },
+  } }).mockResolvedValueOnce({ code: 0, message: 'ok', data: {
+    items: [{ novel_id: 1, novel_name: '星河来信', total_cost: 0.001234, record_count: 1 }],
+    pagination: { total: 2, page: 2, page_size: 100, pages: 2 },
+  } })
+  const wrapper = render()
+  await flushPromises()
+  expect(api.billingProjects).toHaveBeenNthCalledWith(1, 1, 100)
+  expect(api.billingProjects).toHaveBeenNthCalledWith(2, 2, 100)
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('¥0.001234')
+  await wrapper.get('input[type="search"]').setValue('未开始')
+  expect(wrapper.get('.project-overview-card__cost dd').text()).toBe('¥0')
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('¥0.001234')
+  wrapper.unmount()
+})
+
+it('keeps projects usable while costs load and never presents failed costs as zero', async () => {
+  let rejectCosts: ((reason: Error) => void) | undefined
+  vi.mocked(api.billingProjects).mockImplementationOnce(() => new Promise((_, reject) => { rejectCosts = reject }))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(2)
+  expect(wrapper.get('.project-overview-card__cost dd').text()).toBe('正在读取…')
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('正在读取…')
+  rejectCosts?.(new Error('Cost service offline'))
+  await flushPromises()
+  expect(wrapper.get('.project-overview-card__cost dd').text()).toBe('读取失败')
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('读取失败')
+  expect(wrapper.get('.projects-page__cost-error').text()).toContain('Cost service offline')
+  await wrapper.get('.projects-page__cost-error button').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('¥12.35')
+  expect(wrapper.find('.projects-page__cost-error').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it('discards late cost responses from an old team', async () => {
+  let finishOld: ((result: Awaited<ReturnType<typeof api.billingProjects>>) => void) | undefined
+  vi.mocked(api.billingProjects).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+  const wrapper = render()
+  await flushPromises()
+  useAuthStore().activeTeamId = 2
+  await flushPromises()
+  finishOld?.({ code: 0, message: 'ok', data: {
+    items: [{ novel_id: 1, novel_name: '星河来信', total_cost: 999, record_count: 1 }],
+    pagination: { total: 1, page: 1, page_size: 100, pages: 1 },
+  } })
+  await flushPromises()
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('¥12.35')
+  expect(wrapper.text()).not.toContain('¥999')
+  wrapper.unmount()
+})
+
+it('uses the existing cost endpoint for creators and labels its personal scope', async () => {
+  const auth = useAuthStore()
+  auth.enabled = true
+  auth.memberships = [{ team_id: 1, role: 'creator' } as typeof auth.memberships[number]]
+  auth.activeTeamId = 1
+  const wrapper = render()
+  await flushPromises()
+  expect(api.billingProjects).toHaveBeenCalledWith(1, 100)
+  expect(wrapper.get('.projects-summary__item.is-cost').text()).toContain('仅本人已入账费用')
+  wrapper.unmount()
+})
+
+it('translates cost loading and failure states in English', async () => {
+  let rejectCosts: ((reason: Error) => void) | undefined
+  vi.mocked(api.billingProjects).mockImplementationOnce(() => new Promise((_, reject) => { rejectCosts = reject }))
+  setLocale('en')
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('.project-overview-card__cost dd').text()).toBe('Loading…')
+  rejectCosts?.(new Error('Offline'))
+  await flushPromises()
+  expect(wrapper.get('.project-overview-card__cost dd').text()).toBe('Could not load')
+  expect(wrapper.get('.projects-page__cost-error').text()).toContain('Could not load costs: Offline')
+  wrapper.unmount()
+})
+
+it('does not present a partial ledger when a later cost page fails', async () => {
+  vi.mocked(api.billingProjects).mockResolvedValueOnce({ code: 0, message: 'ok', data: {
+    items: [{ novel_id: 1, novel_name: '星河来信', total_cost: 999, record_count: 1 }],
+    pagination: { total: 2, page: 1, page_size: 100, pages: 2 },
+  } }).mockRejectedValueOnce(new Error('Second page failed'))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('.projects-summary__item.is-cost p').text()).toBe('读取失败')
+  expect(wrapper.text()).not.toContain('¥999')
   wrapper.unmount()
 })
 

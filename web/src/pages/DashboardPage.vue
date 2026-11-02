@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowRight, BookOpen, Clock3, FolderOpen, Image, Info, Plus, Search, X } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, X } from 'lucide-vue-next'
 import { api } from '@/api'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
@@ -8,6 +8,7 @@ import AppPagination from '@/components/AppPagination.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import ProjectOverviewCard from '@/components/ProjectOverviewCard.vue'
 import { useAuthStore } from '@/features/auth/authStore'
+import { money } from '@/features/billing/recordDisplay'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { projectKind, projectNumber, projectRuntime } from '@/shared/projectOverview'
@@ -17,6 +18,9 @@ const auth = useAuthStore()
 const overview = ref<ProjectOverview | null>(null)
 const loading = ref(true)
 const errorMessage = ref('')
+const costs = ref(new Map<number, number>())
+const costState = ref<'loading' | 'ready' | 'error'>('loading')
+const costError = ref('')
 const search = ref('')
 const typeFilter = ref('all')
 const stateFilter = ref('all')
@@ -42,11 +46,15 @@ const filtered = computed(() => {
 const visible = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const hasFilters = computed(() => Boolean(search.value.trim()) || typeFilter.value !== 'all' || stateFilter.value !== 'all')
 const runtime = computed(() => projectRuntime(overview.value?.summary.video_seconds ?? 0, overview.value?.summary.unknown_duration_count ?? 0))
+const costHint = computed(() => auth.role === 'creator' ? tr('仅本人已入账费用') : tr('当前项目已入账费用'))
+// Sum the same visible projects as the cards, including historical calls and versions.
+const totalCost = computed(() => (overview.value?.items ?? []).reduce((sum, project) => sum + Math.round((costs.value.get(project.id) ?? 0) * 1_000_000), 0) / 1_000_000)
 const stats = computed(() => [
   { key: 'projects', label: tr('项目总数'), value: projectNumber(overview.value?.summary.project_count ?? 0), unit: '', hint: tr('个创作项目'), icon: FolderOpen },
   { key: 'chapters', label: tr('累计章节'), value: projectNumber(overview.value?.summary.chapter_count ?? 0), unit: '', hint: tr('已有文字章节'), icon: BookOpen },
   { key: 'assets', label: tr('累计资产'), value: projectNumber(overview.value?.summary.asset_count ?? 0), unit: '', hint: tr('项目内文件去重'), icon: Image },
   { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已确认的视频时长'), icon: Clock3 },
+  ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
 ])
 const typeOptions = computed(() => [
   { value: 'all', label: tr('全部类型') }, { value: 'agent', label: tr('AI 创作') },
@@ -65,6 +73,7 @@ async function load() {
   const revision = ++requestRevision
   loading.value = true
   errorMessage.value = ''
+  void loadCosts(revision)
   try {
     const result = (await api.projectOverview()).data
     if (revision === requestRevision) overview.value = result
@@ -72,6 +81,30 @@ async function load() {
     if (revision === requestRevision) errorMessage.value = (error as Error).message
   } finally {
     if (revision === requestRevision) loading.value = false
+  }
+}
+
+async function loadCosts(revision: number) {
+  costs.value = new Map()
+  costState.value = 'loading'
+  costError.value = ''
+  if (!auth.canAccessBilling) return
+  try {
+    const values = new Map<number, number>()
+    let pages = 1
+    for (let current = 1; current <= pages; current++) {
+      // Reuse the billing endpoint's server-side role, team and user scope.
+      const { data } = await api.billingProjects(current, 100)
+      if (revision !== requestRevision) return
+      for (const item of data.items) values.set(item.novel_id, item.total_cost)
+      pages = data.pagination.pages
+    }
+    costs.value = values
+    costState.value = 'ready'
+  } catch (error) {
+    if (revision !== requestRevision) return
+    costState.value = 'error'
+    costError.value = (error as Error).message
   }
 }
 
@@ -103,7 +136,7 @@ async function remove(project: ProjectOverviewItem) {
 
 watch([search, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })
-watch(() => auth.activeTeamId, () => { overview.value = null; void load() })
+watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { overview.value = null; void load() })
 function refreshOnFocus() { if (!loading.value) void load() }
 onMounted(() => { void load(); window.addEventListener('focus', refreshOnFocus) })
 onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', refreshOnFocus) })
@@ -117,17 +150,18 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
     </header>
 
     <div v-if="loading && !overview" class="projects-page__loading" role="status">
-      <div class="projects-page__summary-skeleton"><span v-for="n in 4" :key="n" /></div>
+      <div class="projects-page__summary-skeleton" :class="{ 'has-cost': auth.canAccessBilling }"><span v-for="n in stats.length" :key="n" /></div>
       <p>{{ tr('正在加载项目…') }}</p>
     </div>
     <template v-else-if="overview">
-      <section class="projects-summary" :aria-label="tr('全部项目统计')" :aria-busy="loading">
+      <section class="projects-summary" :class="{ 'has-cost': auth.canAccessBilling }" :aria-label="tr('全部项目统计')" :aria-busy="loading || (auth.canAccessBilling && costState === 'loading')">
         <article v-for="stat in stats" :key="stat.key" class="projects-summary__item" :class="`is-${stat.key}`">
           <span class="projects-summary__icon"><component :is="stat.icon" :size="23" :stroke-width="1.7" aria-hidden="true" /></span>
-          <div><h2>{{ stat.label }}</h2><p :class="{ 'is-pending': stat.key === 'runtime' && runtime.incomplete && !runtime.unit }">{{ stat.value }}<small v-if="stat.unit">{{ stat.unit }}</small></p><span>{{ stat.hint }}</span></div>
+          <div><h2>{{ stat.label }}</h2><p :class="{ 'is-pending': (stat.key === 'runtime' && runtime.incomplete && !runtime.unit) || (stat.key === 'cost' && costState !== 'ready') }">{{ stat.value }}<small v-if="stat.unit">{{ stat.unit }}</small></p><span>{{ stat.hint }}</span></div>
         </article>
       </section>
       <p v-if="overview.summary.unknown_duration_count" class="projects-page__duration-note"><Info :size="13" aria-hidden="true" />{{ tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: overview.summary.unknown_duration_count }) }}</p>
+      <div v-if="auth.canAccessBilling && costError" class="projects-page__cost-error" role="alert"><span>{{ tr('费用读取失败：{p0}', { p0: costError }) }}</span><AppButton variant="ghost" size="sm" @click="loadCosts(requestRevision)">{{ tr('重试') }}</AppButton></div>
 
       <section class="projects-library" :aria-label="tr('项目列表')">
         <div class="projects-library__toolbar">
@@ -141,7 +175,7 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
         </div>
 
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
-          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :deleting="deletingIds.has(project.id)" @remove="remove" />
+          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :deleting="deletingIds.has(project.id)" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
         </div>
         <div v-else class="projects-page__empty">
           <span class="projects-page__empty-icon"><Search v-if="hasFilters" :size="28" aria-hidden="true" /><BookOpen v-else :size="28" aria-hidden="true" /></span>
@@ -165,6 +199,7 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
 .projects-page__create:hover { background: #4d4ee5; }
 .projects-page__create:focus-visible, .projects-page__empty-link:focus-visible { outline: 3px solid var(--app-accent); outline-offset: 3px; }
 .projects-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+.projects-summary.has-cost, .projects-page__summary-skeleton.has-cost { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .projects-summary__item { display: flex; min-width: 0; min-height: 119px; align-items: center; gap: 16px; padding: 21px; border: 1px solid var(--app-border); border-radius: 16px; background: var(--app-surface); box-shadow: 0 2px 10px rgb(35 39 55 / 2%); }
 .projects-summary__icon { display: grid; width: 48px; height: 48px; flex: 0 0 auto; place-items: center; border-radius: 13px; color: var(--app-accent); background: var(--app-accent-soft); }
 .projects-summary__item.is-chapters .projects-summary__icon { color: #2878c2; background: color-mix(in srgb, #4095e5 11%, var(--app-surface)); }
@@ -178,6 +213,7 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
 .projects-summary__item > div > span { color: var(--app-text-secondary); font-size: 11px; }
 .projects-page__duration-note { display: flex; align-items: start; gap: 6px; margin: 12px 0 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.5; }
 .projects-page__duration-note svg { flex: 0 0 auto; margin-top: 2px; }
+.projects-page__cost-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: var(--app-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .projects-library { margin-top: 32px; }
 .projects-library__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
 .projects-library__heading { display: flex; flex: 0 0 auto; align-items: baseline; gap: 12px; }
@@ -205,7 +241,8 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
 .projects-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @container projects (min-width: 1800px) { .projects-library__grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @container projects (max-width: 1160px) { .projects-library__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .projects-summary__item { padding: 17px; gap: 11px; } }
-@container projects (max-width: 870px) { .projects-library__grid, .projects-summary, .projects-page__summary-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); } .projects-library__filters { flex-basis: 100%; } }
+@container projects (max-width: 1100px) { .projects-summary.has-cost, .projects-page__summary-skeleton.has-cost { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container projects (max-width: 870px) { .projects-library__grid, .projects-summary, .projects-summary.has-cost, .projects-page__summary-skeleton, .projects-page__summary-skeleton.has-cost { grid-template-columns: repeat(2, minmax(0, 1fr)); } .projects-library__filters { flex-basis: 100%; } }
 @container projects (max-width: 560px) { .projects-library__grid { grid-template-columns: minmax(0, 1fr); } .projects-library__filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .projects-search, .projects-library__filters :deep(.app-select:last-child) { grid-column: 1 / -1; } .projects-summary__item { min-height: 112px; gap: 9px; padding: 14px; } .projects-summary__icon { width: 34px; height: 34px; border-radius: 9px; } .projects-summary__icon svg { width: 19px; } .projects-summary p { font-size: 23px; } .projects-summary__item > div > span { font-size: 11px; } }
 @container projects (max-width: 380px) { .projects-summary__icon { display: none; } .projects-summary__item > div > span { font-size: 11px; } }
 @media (max-width: 720px) { .projects-page { padding: 24px 16px 45px; } .projects-page__header { gap: 10px; margin-bottom: 23px; } .projects-page__create { padding: 0 12px; font-size: 12px; } }

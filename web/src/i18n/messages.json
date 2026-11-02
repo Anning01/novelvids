@@ -1,5 +1,13 @@
 {
   "common": {
+    "已花费": "Spent",
+    "累计已花费": "Total spent",
+    "正在读取…": "Loading…",
+    "读取失败": "Could not load",
+    "仅本人已入账费用": "Your recorded costs only",
+    "当前项目已入账费用": "Recorded costs for current projects",
+    "按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。": "Matches recorded costs on the Costs page, including past generations and enhancement; unrecorded usage is excluded.",
+    "费用读取失败：{p0}": "Could not load costs: {p0}",
     "分镜文件 ZIP": "Shot files ZIP",
     "合并成片 MP4": "Merged video MP4",
     "下载方式": "Download format",

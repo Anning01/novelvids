@@ -14,7 +14,7 @@ export function hasRoleAccess(role: TeamRole | 'super' | null, required: TeamRol
   if (!required || required.length === 0) return true
   if (role === 'super') return true
   if (role === null) return false
-  return ROLE_RANK[role] >= Math.max(...required.map(item => ROLE_RANK[item]))
+  return required.some(item => ROLE_RANK[role] >= ROLE_RANK[item])
 }
 
 /**
