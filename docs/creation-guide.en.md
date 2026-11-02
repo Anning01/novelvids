@@ -74,9 +74,12 @@ Voice bindings persist across chapters when the same project assets are reused. 
 - If you forgot to enable returning the last frame, click “Extract last frame” in the completed video's preview. It extracts from the existing video and adds the image to the next shot's references; “Download last frame” then saves a copy. It does not invoke a generation model, incur model charges or change the original video. If the next shot does not exist yet, download the image and add it manually later.
 - In reference mode, upload that image and bind its first-frame purpose to its final image index. This guides continuity without strictly locking the opening frame. For strict keyframes, use the model's first-frame or first/last-frame mode; the modes cannot be mixed. Legacy `first_frame_reference` JSON is converted for submission without rewriting saved shots.
 - Reconcile queued and running provider tasks in the background even after the browser closes.
-- Compose available shot videos in episode order and download the result.
+- Choose “Shot files ZIP” (default) or “Merged video MP4”. The browser downloads the selected shot versions directly from OSS and packages them as numbered files such as `001-Shot1.mp4`. Missing shots are omitted; progress and cancellation are available. ZIP downloads do not call backend composition or generation models.
+- Only merged MP4 downloads use server-side FFmpeg. Interrupted local composition can resume on an explicit download retry; paid external submissions retain their existing protections. Sources are staged on the media disk and normalized sequentially with bounded encoder threads; only complete output replaces the prior file.
 - Episode previews buffer the next video while the current shot plays and reuse the players at clip boundaries. Missing shots retain their original duration as black placeholders. If the next clip is not ready, the previous frame stays visible with a buffering indicator. Preview playback does not automatically compose or regenerate media.
 - Browse images, audio, videos and generation versions in the media library.
+
+Browser ZIP downloads require storage CORS to allow GET from the web app's origin. Browsers with the file save API stream the archive to disk; others retain it locally until download. MP4 bytes are stored unchanged. ZIP32 currently requires the complete archive to stay under 4 GiB; larger exports can be downloaded separately from shot generation history. Files are not proxied through the application backend.
 
 ### Models and costs
 

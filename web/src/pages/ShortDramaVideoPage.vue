@@ -23,17 +23,19 @@ import {
   ZoomOut,
 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import BufferedVideoPlayer from '@/components/BufferedVideoPlayer.vue'
 import ChapterExportPanel from '@/features/video-export/ChapterExportPanel.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { api, mediaUrl } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
+import { downloadVideoZip } from '@/shared/downloadZip'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { buildChapterVideoTimeline, chapterHasCompletedVideo, type ChapterVideoTimelineItem } from '@/shared/chapterVideoTimeline'
-import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
+import { videoCoverUrl, videoDownloadFilename } from '@/features/workbench/graph/videoMedia'
 import { VirtualClipPlaybackClock } from '@/shared/virtualClipPlaybackClock'
 import type { Chapter, Novel, Scene, Video as VideoResult } from '@/types'
 
@@ -65,6 +67,11 @@ const playbackRate = ref(1)
 const clipCurrentTime = ref(0)
 const timelineScale = ref(1)
 const downloadingChapter = ref(false)
+const downloadMode = ref('zip')
+const zipProgress = ref(0)
+const zipTotal = ref(0)
+let zipDownload: AbortController | null = null
+let downloadDisposed = false
 let loadVersion = 0
 let playbackVersion = 0
 let playbackErrorShown = false
@@ -93,6 +100,9 @@ const chapterCurrentTime = computed(() => Math.min(totalDuration.value, activeOf
 const progressPercent = computed(() => totalDuration.value > 0 ? chapterCurrentTime.value / totalDuration.value * 100 : 0)
 const canGoPrevious = computed(() => activeTimelineIndex.value > 0)
 const canGoNext = computed(() => activeTimelineIndex.value >= 0 && activeTimelineIndex.value < timelineItems.value.length - 1)
+const downloadLabel = computed(() => downloadMode.value === 'zip' ? tr('按序号打包下载分镜视频') : tr('合成并下载本集已有视频'))
+const downloadProgress = computed(() => downloadMode.value === 'zip'
+  ? tr('正在打包 {p0}/{p1}', { p0: zipProgress.value, p1: zipTotal.value }) : tr('正在合成'))
 
 const gapPlaybackClock = new VirtualClipPlaybackClock(
   currentTime => { clipCurrentTime.value = currentTime },
@@ -332,30 +342,51 @@ function toggleFullscreen() {
   else if (document.fullscreenElement) void document.exitFullscreen()
 }
 
-function chapterDownloadFilename() {
+function chapterDownloadFilename(mode = 'merged') {
   const projectName = project.value?.name || tr('短剧')
   const chapterTitle = stripChapterOrdinal(activeChapter.value?.name)
   const chapterName = activeChapter.value
     ? tr('第{p0}集{p1}', { p0: activeChapter.value.number, p1: chapterTitle ? `-${chapterTitle}` : '' })
     : tr('当前集')
-  const safeTitle = `${projectName}-${chapterName}-完整视频`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ')
-  return `${safeTitle}.mp4`
+  const suffix = mode === 'zip' ? tr('分镜视频') : tr('完整视频')
+  const safeTitle = `${projectName}-${chapterName}-${suffix}`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ')
+  return `${safeTitle}.${mode === 'zip' ? 'zip' : 'mp4'}`
 }
 
 async function downloadCurrentChapterVideo() {
   const chapterId = activeChapter.value?.id
   if (!chapterId || playableItems.value.length === 0 || downloadingChapter.value) return
   downloadingChapter.value = true
+  zipProgress.value = 0
+  const mode = downloadMode.value
   try {
+    if (mode === 'zip') {
+      zipDownload = new AbortController()
+      const digits = Math.max(3, String(timelineItems.value.at(-1)?.scene.sequence || 1).length)
+      const files = playableItems.value.map(item => ({ url: mediaUrl(item.video!.url),
+        filename: videoDownloadFilename(item.video!, `${String(item.scene.sequence).padStart(digits, '0')}-${sceneLabel(item).replace(/\s+/g, '')}`) }))
+      zipTotal.value = files.length
+      await downloadVideoZip(files, chapterDownloadFilename('zip'), {
+        signal: zipDownload.signal, onProgress: completed => { zipProgress.value = completed },
+      })
+      if (downloadDisposed) return
+      notice.success(tr('已按序号打包下载 {p0} 个分镜视频', { p0: files.length }))
+      return
+    }
     const result = (await api.mergeChapterVideos(chapterId)).data
     await downloadFile(mediaUrl(result.merged_url), chapterDownloadFilename())
     notice.success(tr('已按顺序合成并下载 {p0} 个分镜视频', { p0: result.video_count }))
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : tr('完整视频合成下载失败'))
+    if (downloadDisposed) return
+    if (error instanceof DOMException && error.name === 'AbortError') notice.info(tr('已取消分镜打包下载'))
+    else notice.error(error instanceof Error ? error.message : tr('视频下载失败'))
   } finally {
     downloadingChapter.value = false
+    zipDownload = null
   }
 }
+
+function cancelZipDownload() { zipDownload?.abort() }
 
 function returnToStoryboard(sceneId = activeSceneId.value) {
   void router.push({
@@ -374,7 +405,7 @@ watch(chapterCurrentTime, () => {
 })
 
 onMounted(load)
-onUnmounted(() => { ++playbackVersion; gapPlaybackClock.stop() })
+onUnmounted(() => { downloadDisposed = true; ++playbackVersion; gapPlaybackClock.stop(); zipDownload?.abort() })
 </script>
 
 <template>
@@ -395,7 +426,9 @@ onUnmounted(() => { ++playbackVersion; gapPlaybackClock.stop() })
       <template #header-end>
         <div class="video-header-actions">
           <AppButton variant="secondary" size="sm" @click="returnToStoryboard()"><Clapperboard :size="15" />{{ tr('返回分镜') }}</AppButton>
-          <AppButton variant="secondary" size="sm" :disabled="playableItems.length === 0 || downloadingChapter" :aria-busy="downloadingChapter" :aria-label="tr('合成并下载本集已有视频')" :title="tr('合成并下载本集已有视频')" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="15" /><Download v-else :size="15" />{{ downloadingChapter ? tr('正在合成') : tr('下载当前') }}</AppButton>
+          <AppSelect v-model="downloadMode" class="video-download-mode" :options="[{ value: 'zip', label: tr('分镜文件 ZIP') }, { value: 'merged', label: tr('合并成片 MP4') }]" :ariaLabel="tr('下载方式')" density="compact" :disabled="downloadingChapter" />
+          <AppButton variant="secondary" size="sm" :disabled="playableItems.length === 0 || downloadingChapter" :aria-busy="downloadingChapter" :aria-label="downloadLabel" :title="downloadLabel" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="15" /><Download v-else :size="15" />{{ downloadingChapter ? downloadProgress : tr('下载本集') }}</AppButton>
+          <AppButton v-if="downloadingChapter && downloadMode === 'zip'" variant="ghost" size="sm" @click="cancelZipDownload">{{ tr('取消打包') }}</AppButton>
         </div>
       </template>
 
@@ -454,7 +487,7 @@ onUnmounted(() => { ++playbackVersion; gapPlaybackClock.stop() })
               <div v-if="activeItem?.video?.url" class="video-stage-overlay">
                 <AppButton variant="dark" size="sm" icon-only :aria-label="muted ? tr('打开声音') : tr('静音')" :title="muted ? tr('打开声音') : tr('静音')" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></AppButton>
                 <AppButton variant="dark" size="sm" :aria-label="tr('播放速度 {p0} 倍', { p0: playbackRate })" @click="cyclePlaybackRate">{{ playbackRate }}x</AppButton>
-                <AppButton variant="dark" size="sm" icon-only :disabled="downloadingChapter" :aria-busy="downloadingChapter" :aria-label="tr('合成并下载本集已有视频')" :title="tr('合成并下载本集已有视频')" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="16" /><ArrowDownToLine v-else :size="16" /></AppButton>
+                <AppButton variant="dark" size="sm" icon-only :disabled="downloadingChapter" :aria-busy="downloadingChapter" :aria-label="downloadLabel" :title="downloadLabel" @click="downloadCurrentChapterVideo"><LoaderCircle v-if="downloadingChapter" class="is-spinning" :size="16" /><ArrowDownToLine v-else :size="16" /></AppButton>
                 <AppButton variant="dark" size="sm" icon-only :aria-label="tr('全屏预览')" :title="tr('全屏预览')" @click="toggleFullscreen"><Maximize2 :size="16" /></AppButton>
               </div>
             </div>
@@ -526,7 +559,8 @@ onUnmounted(() => { ++playbackVersion; gapPlaybackClock.stop() })
 
 <style scoped>
 .video-editor-page { min-height: 100vh; color: var(--app-text); background: var(--app-bg); }
-.video-header-actions { display: flex; align-items: center; gap: 8px; }
+.video-header-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.video-download-mode { width: 148px; }
 .video-editor-workspace { display: grid; height: calc(100vh - 72px); min-height: 0; overflow: hidden; grid-template-rows: minmax(0,1fr) auto; gap: 14px; padding: 18px 22px 20px; }
 .video-page-state { display: grid; min-height: calc(100vh - 150px); place-content: center; justify-items: center; gap: 10px; padding: 40px; color: var(--app-text-muted); text-align: center; }
 .video-page-state strong { color: var(--app-text); font-size: 17px; }

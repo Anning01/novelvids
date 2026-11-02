@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from pathlib import Path
+import subprocess
 
 import pytest
 import services.video.merge as merge_module
@@ -31,10 +32,11 @@ def test_有声与无声分镜可以生成混合音轨合并命令(tmp_path, mon
     monkeypatch.setattr(merge_module, "_check_audio_stream", lambda _path: next(audio_states))
     monkeypatch.setattr(merge_module, "_probe_duration", lambda _path: 1.25)
     monkeypatch.setattr(merge_module, "_video_dimensions", lambda _path: (864, 496))
-    captured: dict[str, list[str]] = {}
+    monkeypatch.setattr(merge_module, '_video_frame_rate', lambda _path: 24)
+    captured = []
 
     def fake_run(command, **_kwargs):
-        captured["command"] = command
+        captured.append(command)
         output = command[-1]
         with open(output, "wb") as target:
             target.write(b"merged")
@@ -47,13 +49,58 @@ def test_有声与无声分镜可以生成混合音轨合并命令(tmp_path, mon
         337,
     )
 
-    filter_complex = captured["command"][captured["command"].index("-filter_complex") + 1]
-    assert "[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]" in filter_complex
-    assert "atrim=duration=1.25" in filter_complex
+    assert len(captured) == 3
+    assert '0:a:0' in captured[0]
+    assert '1:a:0' in captured[1]
+    assert 'anullsrc=channel_layout=stereo:sample_rate=44100' in captured[1]
+    assert all('-t' in command and command[command.index('-t') + 1] == '1.25' for command in captured[:2])
+    assert all(command[:7] == ['ffmpeg', '-v', 'error', '-nostdin', '-y', '-filter_threads', '1'] for command in captured[:2])
+    assert all(command.count('-i') <= 2 for command in captured)
+    assert 'concat' in captured[-1] and captured[-1][captured[-1].index('-c') + 1] == 'copy'
+
+
+def test_failed_merge_does_not_replace_the_previous_download(tmp_path, monkeypatch):
+    source = tmp_path / 'source.mp4'
+    source.write_bytes(b'video')
+    output = tmp_path / 'episode.mp4'
+    output.write_bytes(b'previous-complete-video')
+    monkeypatch.setattr(merge_module, '_check_audio_stream', lambda _path: False)
+    monkeypatch.setattr(merge_module, '_video_dimensions', lambda _path: (640, 360))
+    monkeypatch.setattr(merge_module, '_video_frame_rate', lambda _path: 24)
+    monkeypatch.setattr(merge_module, '_probe_duration', lambda _path: 2)
+
+    def fail(command, **kwargs):
+        Path(command[-1]).write_bytes(b'incomplete-new-video')
+        assert kwargs['timeout'] == 1200
+        return SimpleNamespace(returncode=1, stdout='', stderr='Synthetic encoder failure')
+
+    monkeypatch.setattr(merge_module.subprocess, 'run', fail)
+    with pytest.raises(RuntimeError, match='Synthetic encoder failure'):
+        VideoMerger().merge_paths([str(source), str(source)], str(output))
+    assert output.read_bytes() == b'previous-complete-video'
+    assert not list(tmp_path.glob('.merge-*'))
+
+
+def test_merge_timeout_is_bounded_and_keeps_previous_output(tmp_path, monkeypatch):
+    source = tmp_path / 'source.mp4'; source.write_bytes(b'video')
+    output = tmp_path / 'episode.mp4'; output.write_bytes(b'previous')
+    monkeypatch.setattr(merge_module, '_check_audio_stream', lambda _path: False)
+    monkeypatch.setattr(merge_module, '_video_dimensions', lambda _path: (640, 360))
+    monkeypatch.setattr(merge_module, '_video_frame_rate', lambda _path: 24)
+    monkeypatch.setattr(merge_module, '_probe_duration', lambda _path: 2)
+
+    def timeout(command, **kwargs):
+        assert kwargs['timeout'] == 1200
+        raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+
+    monkeypatch.setattr(merge_module.subprocess, 'run', timeout)
+    with pytest.raises(subprocess.TimeoutExpired):
+        VideoMerger().merge_paths([str(source), str(source)], str(output))
+    assert output.read_bytes() == b'previous'
 
 
 @pytest.mark.asyncio
-async def test_oss视频经内网物化后合并并上传且清理临时文件(monkeypatch):
+async def test_oss视频经内网物化后合并并上传且清理临时文件(monkeypatch, tmp_path):
     transferred_paths: list[Path] = []
     uploaded: dict[str, object] = {}
 
@@ -80,6 +127,7 @@ async def test_oss视频经内网物化后合并并上传且清理临时文件(m
 
     monkeypatch.setattr(merge_module, "oss", FakeOSS())
     merger = VideoMerger()
+    merger.output_dir = str(tmp_path / 'disk-media/merged')
 
     url = await merger.merge_videos_from_storage(
         [SimpleNamespace(id=3, url="uploads/7/20260822/video-3.mp4")],
@@ -97,6 +145,7 @@ async def test_oss视频经内网物化后合并并上传且清理临时文件(m
         "content": b"video:uploads/7/20260822/video-3.mp4",
     }
     assert transferred_paths
+    assert all(path.is_relative_to(Path(merger.output_dir)) for path in transferred_paths)
     assert all(not path.exists() for path in transferred_paths)
 
 

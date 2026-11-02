@@ -7,6 +7,9 @@ import ShortDramaVideoPage from './ShortDramaVideoPage.vue'
 import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { api } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
+import { downloadVideoZip } from '@/shared/downloadZip'
+import AppSelect from '@/components/AppSelect.vue'
+import AppButton from '@/components/AppButton.vue'
 import { TaskStatusEnum } from '@/types'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -24,6 +27,7 @@ vi.mock('@/api', async (importOriginal) => {
 })
 
 vi.mock('@/shared/downloadFile', () => ({ downloadFile: vi.fn() }))
+vi.mock('@/shared/downloadZip', () => ({ downloadVideoZip: vi.fn() }))
 
 const chapter = {
   id: 337,
@@ -44,6 +48,7 @@ async function mountPage() {
   return mount(ShortDramaVideoPage, {
     global: {
       plugins: [router, createPinia()],
+      components: { AppButton },
       stubs: {
         ShortDramaWorkspaceShell: {
           template: '<div><slot name="header-end" /><slot /></div>',
@@ -92,13 +97,16 @@ describe('短剧视频页完整视频下载', () => {
       data: { chapter_id: 337, merged_url: '/media/videos/merged/chapter_337_merged.mp4', video_count: 2, total_duration: 9 },
     })
     vi.mocked(downloadFile).mockResolvedValue(undefined)
+    vi.mocked(downloadVideoZip).mockResolvedValue(undefined)
   })
 
   it('合并当前章节已有分镜后下载，不再下载选中的单个分镜', async () => {
     const wrapper = await mountPage()
     await flushPromises()
 
-    const downloadButton = wrapper.findAll('button').find(button => button.text().includes('下载当前'))
+    wrapper.findComponent(AppSelect).vm.$emit('update:modelValue', 'merged')
+    await flushPromises()
+    const downloadButton = wrapper.findAll('button').find(button => button.text().includes('下载本集'))
     expect(downloadButton).toBeTruthy()
     await downloadButton!.trigger('click')
     await flushPromises()
@@ -110,6 +118,34 @@ describe('短剧视频页完整视频下载', () => {
     )
     expect(downloadFile).not.toHaveBeenCalledWith('/media/videos/100.mp4', expect.anything())
     wrapper.unmount()
+  })
+
+  it('defaults to numbered shot ZIP, preserving scene order and requiring no merge request', async () => {
+    const wrapper = await mountPage(); await flushPromises()
+    await wrapper.get('button[aria-label="按序号打包下载分镜视频"]').trigger('click'); await flushPromises()
+    expect(downloadVideoZip).toHaveBeenCalledWith([
+      { url: '/media/videos/100.mp4', filename: '001-分镜1.mp4' },
+      { url: '/media/videos/101.mp4', filename: '002-分镜2.mp4' },
+    ], '雾城-第12集-山雨欲来-分镜视频.zip', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(api.mergeChapterVideos).not.toHaveBeenCalled()
+    expect(downloadFile).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows progress and cancels the browser download when leaving the page', async () => {
+    let signal: AbortSignal | undefined
+    vi.mocked(downloadVideoZip).mockImplementation(async (_files, _name, options) => {
+      signal = options?.signal
+      options?.onProgress?.(1, 2)
+      await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const wrapper = await mountPage(); await flushPromises()
+    await wrapper.get('button[aria-label="按序号打包下载分镜视频"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('正在打包 1/2')
+    expect(wrapper.find('button[aria-label="下载方式"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount(); await flushPromises()
+    expect(signal?.aborted).toBe(true)
+    expect(api.mergeChapterVideos).not.toHaveBeenCalled()
   })
 
   it('shows a first-frame thumbnail for every completed clip even without poster metadata', async () => {

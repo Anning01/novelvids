@@ -1,4 +1,5 @@
 {
+  "无法读取视频帧率": "Could not read the video frame rate",
   "只有已完成且包含视频文件的记录可以提取尾帧": "Only completed records with a video file can supply a last frame",
   "尾帧提取失败，原视频未更改，请稍后重试": "Could not extract the last frame. The original video is unchanged. Please try again later.",
   "运行不存在": "Run not found",

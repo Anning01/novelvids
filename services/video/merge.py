@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -52,12 +53,21 @@ def _video_dimensions(video_path: str) -> tuple[int, int]:
     return int(stream['width']), int(stream['height'])
 
 
+def _video_frame_rate(video_path: str) -> float:
+    from services.video.reference_media import _probe, _video_stream, _fps
+    rate = _fps(_video_stream(_probe(Path(video_path))))
+    if not rate:
+        raise ValueError(localized_message('无法读取视频帧率'))
+    return rate
+
+
 class VideoMerger:
     """视频合并器 - 将多个视频按顺序合并为一个。"""
 
     def __init__(self):
         self.output_dir = os.path.join(settings.MEDIA_PATH, "videos", "merged")
         os.makedirs(self.output_dir, exist_ok=True)
+        self._merge_lock = threading.Lock()
 
     def _get_video_path(self, video: Video) -> str | None:
         """获取视频文件的本地路径。
@@ -142,7 +152,9 @@ class VideoMerger:
             return await asyncio.to_thread(self.merge_videos, videos, chapter_id)
 
         output_filename = f"chapter_{chapter_id}_merged.mp4"
-        with TemporaryDirectory(prefix=f"novelvids-merge-{chapter_id}-") as directory:
+        # /tmp may be tmpfs on small servers; large source videos belong on the media volume.
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(dir=self.output_dir, prefix=f".storage-merge-{chapter_id}-") as directory:
             temporary_dir = Path(directory)
             video_paths: list[str] = []
 
@@ -186,6 +198,16 @@ class VideoMerger:
             return oss.resolve_url(output_key) or output_key
 
     def _merge_video_paths(self, video_paths: list[str], output_path: str) -> None:
+        # Bound concurrent encoders and publish only a complete file on the media volume.
+        destination = Path(output_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with self._merge_lock, TemporaryDirectory(dir=destination.parent, prefix='.merge-') as directory:
+            staged = Path(directory) / 'complete.mp4'
+            self._render_video_paths(video_paths, str(staged))
+            staged.chmod(0o644)
+            os.replace(staged, destination)
+
+    def _render_video_paths(self, video_paths: list[str], output_path: str) -> None:
         """将已物化的本地视频合并到指定路径。"""
         if not video_paths:
             raise ValueError(localized_message('当前没有可合并的视频'))
@@ -197,107 +219,51 @@ class VideoMerger:
             shutil.copyfile(video_paths[0], output_path)
             return
 
-        # 两个及以上片段才需要检测音轨并调用 FFmpeg。
-        has_audio_list = [_check_audio_stream(path) for path in video_paths]
+        # Normalize one clip at a time: a chapter must not keep every HD decoder in memory.
         sizes = [_video_dimensions(path) for path in video_paths]
-        normalization = ''
-        if len(set(sizes)) > 1:
-            # Chapters can mix enhanced clips and original low-resolution shots.
-            width, height = max(sizes, key=lambda size: size[0] * size[1])
-            width += width % 2
-            height += height % 2
-            normalization = ''.join(f'[{i}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,'
-                f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1[normalized{i}];'
-                for i in range(len(video_paths)))
+        width, height = max(sizes, key=lambda size: size[0] * size[1])
+        width += width % 2
+        height += height % 2
+        audio_states = [_check_audio_stream(path) for path in video_paths]
+        include_audio = any(audio_states)
+        fps = _video_frame_rate(video_paths[0])
+        staged = Path(output_path).parent
+        segments = []
+        for index, (path, has_audio) in enumerate(zip(video_paths, audio_states)):
+            segment = staged / f'segment-{index:04d}.mp4'
+            duration = _probe_duration(path)
+            cmd = ['ffmpeg', '-v', 'error', '-nostdin', '-y', '-filter_threads', '1',
+                   '-threads', '1', '-i', path]
+            if include_audio and not has_audio:
+                cmd += ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100']
+            cmd += ['-map', '0:v:0', '-vf',
+                    f'scale={width}:{height}:force_original_aspect_ratio=decrease,'
+                    f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}',
+                    # A short encoder lookahead bounds RAM; CRF 18 preserves detail during normalization.
+                    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '2']
+            if include_audio:
+                cmd += ['-map', '0:a:0' if has_audio else '1:a:0', '-af', 'apad',
+                        '-c:a', 'aac', '-ar', '44100', '-ac', '2']
+            else:
+                cmd += ['-an']
+            cmd += ['-t', str(duration), str(segment)]
+            self._run_merge_command(cmd)
+            segments.append(segment)
+        manifest = staged / 'segments.txt'
+        manifest.write_text(''.join(f"file '{segment.name}'\n" for segment in segments), encoding='utf-8')
+        self._run_merge_command(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-f', 'concat',
+                                 '-safe', '0', '-i', str(manifest), '-c', 'copy',
+                                 '-movflags', '+faststart', output_path])
 
-        def video_input(index):
-            return f'[normalized{index}]' if normalization else f'[{index}:v]'
-
-        # 构建 FFmpeg 命令 - 根据是否有音频决定 filter
-        input_args = []
-        filter_parts = []
-
-        if all(has_audio_list):
-            # 所有视频都有音频 - 标准模式
-            for i, path in enumerate(video_paths):
-                input_args.extend(['-i', path])
-                filter_parts.append(f'{video_input(i)}[{i}:a]')
-            filter_complex = normalization + ''.join(filter_parts) + f'concat=n={len(video_paths)}:v=1:a=1[outv][outa]'
-            cmd = [
-                'ffmpeg', '-y'
-            ] + input_args + [
-                '-filter_complex', filter_complex,
-                '-map', '[outv]',
-                '-map', '[outa]',
-                output_path
-            ]
-        elif not any(has_audio_list):
-            # 所有视频都没有音频 - 纯视频合并
-            for i, path in enumerate(video_paths):
-                input_args.extend(['-i', path])
-                filter_parts.append(video_input(i))
-            filter_complex = normalization + ''.join(filter_parts) + f'concat=n={len(video_paths)}:v=1:a=0[v]'
-            cmd = [
-                'ffmpeg', '-y'
-            ] + input_args + [
-                '-filter_complex', filter_complex,
-                '-map', '[v]',
-                output_path
-            ]
-        else:
-            # 混合情况 - 添加静音音频流
-            for i, (path, has_audio) in enumerate(zip(video_paths, has_audio_list)):
-                input_args.extend(['-i', path])
-                filter_parts.append(f'{video_input(i)}setpts=PTS-STARTPTS[v{i}];')
-                if has_audio:
-                    filter_parts.append(
-                        f'[{i}:a:0]aformat=sample_rates=44100:channel_layouts=stereo,'
-                        f'asetpts=PTS-STARTPTS[a{i}];'
-                    )
-                else:
-                    # 没有音频的视频，用 anullsrc 添加静音
-                    duration = _probe_duration(path)
-                    filter_parts.append(
-                        f'anullsrc=channel_layout=stereo:sample_rate=44100,'
-                        f'atrim=duration={duration},asetpts=PTS-STARTPTS[a{i}];'
-                    )
-
-            concat_inputs = ''.join(f'[v{i}][a{i}]' for i in range(len(video_paths)))
-            filter_complex = normalization + ''.join(filter_parts) + concat_inputs + f'concat=n={len(video_paths)}:v=1:a=1[outv][outa]'
-            cmd = [
-                'ffmpeg', '-y'
-            ] + input_args + [
-                '-filter_complex', filter_complex,
-                '-map', '[outv]',
-                '-map', '[outa]',
-                output_path
-            ]
-
-        # Windows 命令行长度限制检查 (约 8000 字符安全边界)
-        cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd)
-        if len(cmd_str) > 8000:
-            raise RuntimeError(localized_message('视频数量过多（{p1}个），命令行超过Windows限制，请分批合并', p1=f'{len(video_paths)}'))
-
-        # 执行合并
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace'
-        )
-
+    @staticmethod
+    def _run_merge_command(command: list[str]) -> None:
+        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8',
+                                errors='replace', timeout=1200)
         if result.returncode != 0:
-            logger.error(f"FFmpeg returncode: {result.returncode}")
-            logger.error(f"FFmpeg stderr: {result.stderr}")
-            logger.error(f"FFmpeg stdout: {result.stdout}")
-            raise RuntimeError(localized_message('视频合并失败: {p1}', p1=f'{result.stderr}'))
-
-        # 验证输出文件是否真的创建成功
-        if not os.path.exists(output_path):
-            logger.error(f"Output file not created: {output_path}")
-            logger.error(f"FFmpeg stdout: {result.stdout}")
-            logger.error(f"FFmpeg stderr: {result.stderr}")
+            logger.error('Video merge failed: returncode=%s', result.returncode)
+            raise RuntimeError(localized_message('视频合并失败: {p1}', p1=result.stderr[-4000:]))
+        output = Path(command[-1])
+        if not output.is_file() or not output.stat().st_size:
             raise RuntimeError(localized_message('视频合并失败：输出文件未创建'))
 
     def merge_paths(self, video_paths: list[str], output_path: str) -> None:
