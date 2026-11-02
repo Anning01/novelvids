@@ -190,6 +190,7 @@ async function streamRemakeProgress(
 }
 
 export const api = {
+  applyVideoDefaults: (id: number, chapterId: number, settings: import('./types').VideoDefaults, remember: boolean) => request<SingleResponse<{ settings: import('./types').VideoDefaults; scene_count: number; remembered: boolean }>>(`/novel/${id}/video-defaults`, { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, settings, remember }) }),
   projectOverview: () => request<SingleResponse<ProjectOverview>>('/novel/overview'),
   remakeCapabilities: () => request<SingleResponse<RemakeCapabilities>>('/remake/capabilities'),
   async uploadRemakeVideo(file: File, onProgress?: (percent: number) => void): Promise<RemakeUpload> {

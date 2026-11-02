@@ -26,12 +26,18 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
     if scene is None:
         raise HTTPException(404, localized_message("分镜不存在"))
     await ensure_solvent(team_id, user_id)
+    auto_snapshot = None
+    if req.auto_enhancement:
+        from services.video_enhancement.automatic import enhancement_snapshot
+        from services.video_enhancement.sources import require_generation_scope
+        await require_generation_scope(scene.chapter.novel_id, team_id)
+        auto_snapshot = await enhancement_snapshot(req.auto_enhancement, team_id)
     config = await ai_model_config_controller.get_active(
         AiTaskTypeEnum.video.value, req.model_config_id, team_id=team_id
     )
     from services.video.capabilities import validate_selection
 
-    validate_selection(
+    selection = validate_selection(
         config.video_model_type,
         generation_mode=req.generation_mode,
         resolution=req.resolution,
@@ -41,6 +47,10 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
         generate_audio=req.generate_audio,
         return_last_frame=req.return_last_frame,
     )
+    if req.auto_enhancement:
+        from services.video_enhancement.contract import RESOLUTION_SHORT_SIDE, resolution_short_side
+        if (resolution_short_side(selection.resolution) or 0) >= RESOLUTION_SHORT_SIDE[req.auto_enhancement.resolution]:
+            raise HTTPException(422, localized_message('自动高清化目标必须高于生成分辨率'))
     if req.generation_mode == "keyframes" and (
         not req.first_frame_url or not req.last_frame_url or req.reference_media
     ):
@@ -58,6 +68,7 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
             "video_request": req.model_dump(mode="json"),
             "media_base_url": media_base_url,
             "prompt_language": await configured_language(),
+            **({'auto_enhancement_snapshot': auto_snapshot} if auto_snapshot else {}),
         }
     )
     async with creation_write(scene.chapter.novel_id) as connection:
@@ -119,6 +130,12 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
             )
             task.request_params = {**params, "video_id": video.id}
             await task.save(using_db=connection, update_fields=["request_params"])
+            if req.auto_enhancement:
+                from models.agent_operation import AgentOperation
+                from services.video_enhancement.automatic import KEY
+                await AgentOperation.create(task=task, key=KEY, result={'stage': 'waiting_video'}, using_db=connection)
+                video.metadata = {**video.metadata, 'auto_enhancement': {'stage': 'waiting_video'}}
+                await video.save(using_db=connection, update_fields=['metadata'])
             return task
 
         task = await submit_once(4, params, create)

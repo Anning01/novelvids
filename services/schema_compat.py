@@ -144,6 +144,10 @@ async def ensure_usage_record_schema() -> None:
 
 async def ensure_novel_analysis_schema() -> None:
     """为已有 SQLite 项目补齐分析字段与工作台偏好。"""
+    if settings.DATABASE_URL.startswith(('postgres://', 'postgresql://')):
+        await Tortoise.get_connection('default').execute_script(
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS video_generation_defaults JSONB;')
+        return
     if not settings.DATABASE_URL.startswith("sqlite"):
         return
 
@@ -162,6 +166,7 @@ async def ensure_novel_analysis_schema() -> None:
         "storyboard_setting": "TEXT",
         "style_key": "VARCHAR(64)",
         "video_model_config_id": "INT",
+        "video_generation_defaults": "JSON",
         "narrator_audio_reference_id": "INT",
     }
     statements = [

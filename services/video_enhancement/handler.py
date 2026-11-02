@@ -66,6 +66,9 @@ class EnhanceExportHandler(BaseTaskHandler):
 
         async def submit():
             nonlocal started
+            origin = request_params.get('origin_run_id')
+            if origin and await AiTask.filter(id=origin, status__in=[4, 5]).exists():
+                raise ValueError(localized_message('运行已停止，不能提交后续步骤'))
             from services.creation_agent.skill_execution import current_execution
             execution = current_execution.get()
             if execution:

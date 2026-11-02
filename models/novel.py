@@ -84,6 +84,7 @@ class Novel(AbstractBaseModel):
         null=True,
         description="分镜页面默认视频模型配置 ID",
     )
+    video_generation_defaults = fields.JSONField(null=True, description="项目视频生成默认参数；不触发生成")
     narrator_audio_reference_id = fields.IntField(
         null=True,
         description="旁白模式使用的参考音频 ID",

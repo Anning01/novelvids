@@ -55,10 +55,14 @@ class ProductionRecovery:
             await AiTask.filter(id=task.id).update(status=6, stage="resuming")
 
     async def start(self):
+        from services.video_enhancement.automatic import automatic_enhancements
+        await automatic_enhancements.start()
         await self.recover()
         self.worker = asyncio.create_task(self.loop())
 
     async def stop(self):
+        from services.video_enhancement.automatic import automatic_enhancements
+        await automatic_enhancements.stop()
         from services.video_enhancement.recovery import stop_collectors
         await stop_collectors()
         if self.worker:
@@ -83,6 +87,8 @@ class ProductionRecovery:
                 await retry_review_evidence()
                 from services.video_enhancement.recovery import collect_exports
                 await collect_exports()
+                from services.video_enhancement.automatic import automatic_enhancements
+                await automatic_enhancements.collect()
 
                 for pending in await AiTask.filter(
                     stage__in=["billing_pending", "needs_review", "review_closed"]
@@ -108,12 +114,17 @@ class ProductionRecovery:
                         id=waiting.request_params.get("video_id")
                     )
                     if video and video.status == 3:
+                        from services.video_enhancement.automatic import KEY
+                        continuation = await AgentOperation.get_or_none(task=waiting, key=KEY)
+                        if continuation and continuation.state != 'completed':
+                            continue
                         await ai_task_executor._complete(
                             waiting,
                             {
                                 **(waiting.response_data or {}),
                                 "video_id": video.id,
                                 "url": video.url,
+                                **({'auto_enhancement': continuation.result} if continuation else {}),
                             },
                         )
                     elif video and video.status in {4, 5}:

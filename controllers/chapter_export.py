@@ -136,7 +136,7 @@ class ChapterExports:
             return export.media_ref, export.media_sha256, export.output_probe
         return export.source_media_ref, export.source_sha256, export.source_probe
 
-    async def enhance(self, export_id: int, request, ctx: AuthContext):
+    async def enhance(self, export_id: int, request, ctx: AuthContext, *, origin_task_id=None):
         await require_roles('admin', 'creator')(ctx)
         source = await self.get(export_id, ctx)
         quote = await self.quote(source, request.model_config_id, ctx, request.resolution)
@@ -156,6 +156,15 @@ class ChapterExports:
         from models.ai_task import AiTask
         from services.ai_task_executor import ai_task_executor
         async with project_write(source.novel_id) as db:
+            if origin_task_id is not None:
+                parent = await AiTask.filter(id=origin_task_id).using_db(db).select_for_update().get()
+                if parent.status in {4, 5} or parent.request_params.get('novel_id') != source.novel_id:
+                    raise HTTPException(409, localized_message('运行已停止，不能提交后续步骤'))
+                from services.video_enhancement.automatic import CONFIG_FIELDS
+                admitted = {key: quote['config_snapshot'][key] for key in CONFIG_FIELDS}
+                if admitted != parent.request_params.get('auto_enhancement_snapshot'):
+                    raise HTTPException(409, localized_message('增强配置已变化，请重新确认高清化'))
+                params['origin_run_id'] = str(origin_task_id)
             previous = await previous_submission(8, params, db)
             if previous:
                 return await ChapterExport.get(task=previous), previous

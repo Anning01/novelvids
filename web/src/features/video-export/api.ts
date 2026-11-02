@@ -1,5 +1,5 @@
 import { request } from '@/api'
-import type { Video } from '@/types'
+import type { Video, ModelPricing } from '@/types'
 
 export interface ExportProbe { duration: string | number; width: number; height: number; fps: string | number }
 export interface ChapterExport {
@@ -15,6 +15,8 @@ export interface ChapterExport {
 export interface ExportQuote { amount: string; currency: string; source_sha256: string; quote_version: string; reused_export_id?: number | null }
 export interface ExportTask { export_id: number; task_id: string; status: number }
 export interface EnhancementModel {
+  config_version?: string
+  pricing?: ModelPricing | null
   id: number; name: string; input_short_side_max?: number
   resolutions: Array<{ value: string; short_side: number }>
   supported_resolutions?: Array<{ value: string; short_side: number }>

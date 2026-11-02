@@ -3,6 +3,7 @@ from typing import Literal, Optional
 from schemas._base import BaseResponse
 from services.cover_derivatives import cover_derivative_reference
 from services.oss import normalize_media_url, resolve_media_url
+from schemas.video_defaults import VideoDefaults
 
 
 def _cover_urls(cover: str | None) -> tuple[str | None, str | None, str | None]:
@@ -26,6 +27,7 @@ class NovelProperties(BaseModel):
     description: Optional[str] = Field(None, description="描述")
     cover: Optional[str] = Field(None, description="封面图URL")
     total_chapters: Optional[int] = Field(None, description="总章节数")
+    video_generation_defaults: VideoDefaults | None = None
     video_model_config_id: Optional[int] = Field(
         None,
         description="分镜页面默认视频模型配置 ID",

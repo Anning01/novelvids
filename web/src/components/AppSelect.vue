@@ -41,12 +41,14 @@ const menu = ref<HTMLElement | null>(null)
 const open = ref(false)
 const opensUp = ref(false)
 const menuPosition = ref({ top: 0, left: 0, width: 0 })
+const menuTheme = ref<Record<string, string>>({})
 
 const normalizedOptions = computed<AppSelectOption[]>(() => props.options.map(option => (
   typeof option === 'string' ? { value: option, label: option } : option
 )))
 const selectedOption = computed(() => normalizedOptions.value.find(option => option.value === props.modelValue) ?? normalizedOptions.value[0])
 const menuStyle = computed(() => ({
+  ...menuTheme.value,
   zIndex: props.menuZIndex,
   maxHeight: `${props.maxMenuHeight}px`,
   width: `${props.menuWidth || menuPosition.value.width}px`,
@@ -58,6 +60,12 @@ async function toggleMenu() {
   if (props.disabled) return
   open.value = !open.value
   if (!open.value) return
+  if (root.value) {
+    const style = getComputedStyle(root.value)
+    const properties = ['--app-surface', '--app-surface-raised', '--app-surface-muted', '--app-surface-hover',
+      '--app-border', '--app-border-strong', '--app-text', '--app-text-secondary', '--app-text-muted', '--app-accent', '--app-accent-soft', '--app-shadow']
+    menuTheme.value = Object.fromEntries(properties.map(name => [name, style.getPropertyValue(name).trim()]).filter(([, value]) => value))
+  }
   updatePlacement()
   await nextTick()
   updatePlacement()

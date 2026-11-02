@@ -1,5 +1,7 @@
 export enum AssetTypeEnum { PERSON = 1, SCENE = 2, ITEM = 3, PRODUCT = 4, STYLE = 5 }
 export enum TaskStatusEnum { PENDING = 1, PROCESSING = 2, COMPLETED = 3, FAILED = 4, CANCELLED = 5, QUEUED = 6 }
+export interface AutoEnhancement { config_version?: string | null; model_config_id: number; resolution: '720p' | '1080p' | '2k' | '4k' }
+export interface VideoDefaults { model_config_id: number; resolution: string; aspect_ratio: string; return_last_frame: boolean; auto_enhancement: AutoEnhancement | null }
 
 export interface WorkbenchCapabilities {
   upload_media: boolean
@@ -26,6 +28,7 @@ export interface WorkbenchCapabilities {
 }
 
 export interface NovelMeta {
+  video_generation_defaults?: VideoDefaults | null
   id: number
   name: string
   author?: string
@@ -49,7 +52,7 @@ export interface NovelMeta {
   updated_at: string
 }
 export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
-export interface Novel { id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface Novel { video_generation_defaults?: VideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface ProjectProduction {
   chapter_count: number
   storyboard_chapter_count: number
@@ -141,6 +144,7 @@ export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratio
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3' | 'wan_3'
 export interface VideoGenerationOptions {
+  auto_enhancement?: AutoEnhancement | null
   generation_mode?: 'reference' | 'keyframes'
   first_frame_url?: string
   last_frame_url?: string

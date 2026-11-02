@@ -85,10 +85,10 @@ async def _initialize_database_schema() -> None:
     await ensure_creation_agent_schema()
     # Ownership columns must exist before generating the scoped project-name index.
     await ensure_shared_team_columns()
+    await ensure_novel_analysis_schema()
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
-    await ensure_novel_analysis_schema()
     await ensure_usage_record_schema()
     from services.schema_compat import ensure_agent_operation_schema
     await ensure_agent_operation_schema()

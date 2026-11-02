@@ -7,12 +7,15 @@ import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import ScenePromptEditor from '@/components/ScenePromptEditor.vue'
 import { injectLastFrameContinuityInstruction } from '@/shared/lastFrameContinuity'
 import type { Scene, VideoGenerationModel } from '@/types'
+import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
+import ShortDramaBatchVideoDialog from '@/components/ShortDramaBatchVideoDialog.vue'
+import { exportApi } from '@/features/video-export/api'
 
 vi.mock('@/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/api')>()
   return { ...original, api: { ...original.api, novelMeta: vi.fn(), chapters: vi.fn(),
     videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(),
-    extractVideoLastFrame: vi.fn(), videoGenerationHistory: vi.fn(), scene: vi.fn(), updateScene: vi.fn() } }
+    extractVideoLastFrame: vi.fn(), videoGenerationHistory: vi.fn(), scene: vi.fn(), updateScene: vi.fn(), applyVideoDefaults: vi.fn() } }
 })
 
 const chapter = { id: 450, novel_id: 9, number: 1, name: '第一章', content: '', created_at: '', updated_at: '' }
@@ -46,6 +49,7 @@ beforeEach(() => {
   vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [structuredClone(scene)], assets: [], videos: { 109: [pending] } } } as never)
   vi.mocked(api.updateScene).mockReset()
   vi.mocked(api.scene).mockReset()
+  vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [] })
 })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); delete document.documentElement.dataset.appTheme })
 
@@ -61,6 +65,62 @@ async function render() {
   wrappers.push(wrapper); await flushPromises()
   return { wrapper, router }
 }
+
+it('inherits project defaults for fresh chapters while respecting explicitly saved shot overrides', async () => {
+  const defaults = { model_config_id: 11, resolution: '480p', aspect_ratio: '16:9', return_last_frame: true,
+    auto_enhancement: { model_config_id: 8, resolution: '1080p' as const } }
+  vi.mocked(api.novelMeta).mockResolvedValue({ data: { id: 9, name: 'Defaults', video_model_config_id: 11,
+    video_generation_defaults: defaults, created_at: '', updated_at: '' } } as never)
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ code: 0, message: '', data: [model] })
+  vi.mocked(exportApi.models).mockResolvedValue({ data: [{ id: 8, name: 'HD', resolutions: [{ value: '1080p', short_side: 1080 }] }] })
+  const override = { ...scene, id: 110, sequence: 2, metadata: { return_last_frame: false, auto_enhancement: null } }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [scene, override], assets: [], videos: { 109: [completed], 110: [] } } } as never)
+  const { wrapper } = await render()
+  const pickers = wrapper.findAllComponents(SceneVideoParameterPicker)
+  expect(pickers[0]!.props()).toMatchObject({ returnLastFrame: true, resolution: '480p', aspectRatio: '16:9', autoEnhancement: defaults.auto_enhancement })
+  expect(pickers[1]!.props()).toMatchObject({ returnLastFrame: false, autoEnhancement: null })
+  expect(wrapper.text()).toContain('→ 1080P')
+})
+
+it('applies bulk settings through the dedicated endpoint and never generates on save', async () => {
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ code: 0, message: '', data: [model] })
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [scene], assets: [], videos: { 109: [completed] } } } as never)
+  const settings = { model_config_id: 11, resolution: '480p', aspect_ratio: '16:9', return_last_frame: true, auto_enhancement: null }
+  vi.mocked(api.applyVideoDefaults).mockResolvedValue({ code: 0, message: '', data: { settings, scene_count: 1, remembered: true } })
+  const { wrapper } = await render()
+  await wrapper.findAll('button').find(button => button.text() === '批量参数')!.trigger('click')
+  const dialog = wrapper.getComponent(ShortDramaBatchVideoDialog)
+  expect(dialog.props('parametersOnly')).toBe(true)
+  dialog.vm.$emit('applyDefaults', settings, true); await flushPromises()
+  expect(api.applyVideoDefaults).toHaveBeenCalledExactlyOnceWith(9, 450, settings, true)
+  expect(api.generateVideo).not.toHaveBeenCalled()
+  expect(wrapper.getComponent(SceneVideoParameterPicker).props('returnLastFrame')).toBe(true)
+})
+
+it('restores a chapter-only model selection instead of another chapter project default', async () => {
+  const defaultModel = { ...model, config_id: 12, name: 'Project default model' }
+  vi.mocked(api.novelMeta).mockResolvedValue({ data: { id: 9, name: 'Chapter overrides', video_model_config_id: 12,
+    created_at: '', updated_at: '' } } as never)
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ code: 0, message: '', data: [defaultModel, model] })
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [{ ...scene, metadata: { video_model_config_id: 11 } }],
+    assets: [], videos: { 109: [completed] } } } as never)
+  const { wrapper } = await render()
+  expect(wrapper.getComponent(SceneVideoParameterPicker).props('model')?.config_id).toBe(11)
+})
+
+it('continues polling through automatic enhancement and selects the finished HD result without a page refresh', async () => {
+  const source = { ...completed, metadata: { auto_enhancement: { stage: 'enhancing' } } }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [scene], assets: [], videos: { 109: [source] } } } as never)
+  vi.mocked(api.queryVideo).mockResolvedValueOnce({ data: source } as never).mockResolvedValue({ data: { ...completed,
+    metadata: { auto_enhancement: { stage: 'completed', result_video_id: 38, applied_to_scene: true } } } } as never)
+  vi.mocked(api.videoGenerationHistory).mockResolvedValue({ code: 0, message: '', data: [{ ...completed, id: 38, url: '/media/hd.mp4' }, source] })
+  vi.mocked(api.scene).mockResolvedValue({ code: 0, message: '', data: { ...scene, metadata: { current_video_id: 38 } } })
+  const { wrapper } = await render()
+  expect(wrapper.text()).toContain('正在自动高清化')
+  await vi.advanceTimersByTimeAsync(4000); await flushPromises()
+  expect(wrapper.get('[data-testid="preview"]').attributes('src')).toBe('/media/hd.mp4')
+  expect(api.generateVideo).not.toHaveBeenCalled()
+})
 
 it('resumes an existing task and displays a background completion without refreshing or generating', async () => {
   vi.mocked(api.queryVideo).mockResolvedValue({ data: completed } as never)

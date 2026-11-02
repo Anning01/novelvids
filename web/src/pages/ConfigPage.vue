@@ -721,8 +721,6 @@ onMounted(load)
               <input v-model.number="tier.price" type="number" min="0" step="0.01" />
             </label>
           </div>
-          <p>{{ tr('本地成片通过MediaKit临时上传读取；OSS成片使用签名地址。无需开放本地媒体目录。') }}</p>
-          <p>{{ tr('保持原片帧率，不自动插帧。默认价格来自后台能力配置，保存后按此配置估价。') }}</p>
         </section>
         <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
           <span class="pricing-title">{{ tr('费用设置（元 / 百万 token）') }}</span>

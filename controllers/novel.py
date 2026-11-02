@@ -53,6 +53,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "resolution": getattr(novel, "resolution", None),
             "custom_style_prompt": getattr(novel, "custom_style_prompt", None),
             "video_model_config_id": getattr(novel, "video_model_config_id", None),
+            "video_generation_defaults": novel.video_generation_defaults,
             "narrator_audio_reference_id": getattr(novel, "narrator_audio_reference_id", None),
             "content_length": len(novel.content or ""),
             "created_at": novel.created_at,
@@ -74,6 +75,9 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         避免书稿正文经浏览器中转（也避免超大 JSON 请求体）。
         """
         data = obj_in.model_dump(exclude_unset=True)
+        if obj_in.video_generation_defaults:
+            from services.video_defaults import validate_defaults
+            await validate_defaults(obj_in.video_generation_defaults, team_id)
         source_key = data.pop("source_key", None)
         source_filename = data.pop("source_filename", None) or "书稿.txt"
         if source_key:
@@ -170,6 +174,9 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         instance: Novel,
         obj_in: NovelUpdate | NovelPatch,
     ) -> None:
+        if obj_in.video_generation_defaults:
+            from services.video_defaults import validate_defaults
+            await validate_defaults(obj_in.video_generation_defaults, instance.team_id)
         if (
             "video_model_config_id" in obj_in.model_fields_set
             and obj_in.video_model_config_id is not None

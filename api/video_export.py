@@ -39,8 +39,11 @@ async def list_exports(chapter_id: int, page: int=1, ctx: AuthContext=Depends(ge
 
 @router.get('/models')
 async def export_models(ctx: AuthContext=Depends(get_auth_context)):
+    from services.video_enhancement.automatic import configuration_version
     return ResponseSchema(data=[{'id':row.id,'name':row.name,
         'input_short_side_max': EnhancementOptions.model_validate(row.processing_options or {}).input_short_side_max,
+        'pricing': row.pricing,
+        'config_version': configuration_version(row),
         'supported_resolutions':[{'value':value,'short_side':short} for value,short in RESOLUTION_SHORT_SIDE.items()],
         'resolutions':[{'value':value,'short_side':RESOLUTION_SHORT_SIDE[value]} for value in
             EnhancementOptions.model_validate(row.processing_options or {}).output_resolutions]}

@@ -72,6 +72,7 @@ async def test_novel_analysis_schema_adds_editable_fields_once_across_repeated_s
         {"name": "storyboard_setting"},
         {"name": "style_key"},
         {"name": "video_model_config_id"},
+        {"name": "video_generation_defaults"},
         {"name": "narrator_audio_reference_id"},
     ]
     connection.execute_query_dict.side_effect = [existing, completed]
@@ -97,6 +98,7 @@ async def test_novel_analysis_schema_adds_editable_fields_once_across_repeated_s
     assert "ADD COLUMN storyboard_setting TEXT" in script
     assert "ADD COLUMN style_key VARCHAR(64)" in script
     assert "ADD COLUMN video_model_config_id INT" in script
+    assert "ADD COLUMN video_generation_defaults JSON" in script
     assert "ADD COLUMN narrator_audio_reference_id INT" in script
 
 

@@ -100,7 +100,7 @@ function selectScene(sceneId: number) {
   padding: 10px 0 14px;
   scrollbar-color: transparent transparent;
   scrollbar-width: none;
-  transform: translateX(4px);
+  transform: translateX(2px);
 }
 
 .scene-status-rail__list::-webkit-scrollbar { display: none; width: 0; height: 0; }

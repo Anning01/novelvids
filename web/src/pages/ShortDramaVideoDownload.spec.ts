@@ -132,6 +132,18 @@ describe('短剧视频页完整视频下载', () => {
     wrapper.unmount()
   })
 
+  it('opens the video workspace without the episode enhancement panel or its background requests', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('高清成片')
+    expect(wrapper.text()).not.toContain('准备当前原片')
+    expect(exportApi.list).not.toHaveBeenCalled()
+    expect(exportApi.models).not.toHaveBeenCalled()
+    expect(wrapper.find('.video-timeline').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="按序号打包下载分镜视频"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('shows progress and cancels the browser download when leaving the page', async () => {
     let signal: AbortSignal | undefined
     vi.mocked(downloadVideoZip).mockImplementation(async (_files, _name, options) => {

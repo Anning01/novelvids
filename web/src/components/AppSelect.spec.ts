@@ -7,6 +7,18 @@ const options = ['wan3', 'minimax-h3', 'seedance-2.5', 'seedance-mini', 'seedanc
 const rect = (top: number, height: number): DOMRect => ({ top, bottom: top + height, left: 100, right: 320, width: 220, height, x: 100, y: top, toJSON: () => ({}) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('keeps the trigger surface theme when its menu is teleported', async () => {
+  const wrapper = mount(AppSelect, { props: { modelValue: 'one', options: ['one', 'two'], ariaLabel: '主题菜单' },
+    attrs: { style: '--app-surface: #211e1b; --app-text: #eee9e2; --app-accent: #b8a7ff' },
+    global: { components: { AppButton } } })
+  await wrapper.get('button').trigger('click'); await flushPromises()
+  const menu = document.querySelector<HTMLElement>('[role="listbox"][aria-label="主题菜单"]')!
+  expect(menu.style.getPropertyValue('--app-surface')).toBe('#211e1b')
+  expect(menu.style.getPropertyValue('--app-text')).toBe('#eee9e2')
+  expect(menu.style.getPropertyValue('--app-accent')).toBe('#b8a7ff')
+  wrapper.unmount()
+})
+
 it.each([['compact', 206], ['default', 254]] as const)('anchors an upward %s menu using its rendered height', async (density, height) => {
   vi.stubGlobal('innerHeight', 650)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {

@@ -11,5 +11,8 @@ describe('resolveSceneGenerationState', () => {
     expect(resolveSceneGenerationState()).toBe('pending')
     expect(resolveSceneGenerationState(undefined, true)).toBe('error')
     expect(resolveSceneGenerationState({ status: TaskStatusEnum.COMPLETED }, true)).toBe('error')
+    expect(resolveSceneGenerationState({ status: 3, metadata: { auto_enhancement: { stage: 'enhancing' } } })).toBe('pending')
+    expect(resolveSceneGenerationState({ status: 3, metadata: { auto_enhancement: { stage: 'failed' } } })).toBe('error')
+    expect(resolveSceneGenerationState({ status: 3, metadata: { auto_enhancement: { stage: 'completed' } } })).toBe('completed')
   })
 })

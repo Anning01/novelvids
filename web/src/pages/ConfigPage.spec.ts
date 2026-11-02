@@ -263,6 +263,8 @@ it('enables higher output tiers from server presets while preserving existing co
   await wrapper.get('.model-category-card.is-enhancement').trigger('click')
   await wrapper.get('[aria-label="编辑配置"]').trigger('click')
   const input = wrapper.findAll('.enhancement-resolution-options label').find(item => item.text() === '2K')!.get('input')
+  expect(wrapper.text()).not.toContain('本地成片通过MediaKit临时上传读取')
+  expect(wrapper.text()).not.toContain('默认价格来自后台能力配置')
   await input.setValue(true); await input.setValue(false); await input.setValue(true)
   await wrapper.get('form.model-modal').trigger('submit'); await flushPromises()
   expect(update).toHaveBeenCalledWith(12, expect.objectContaining({ processing_options: { output_resolutions: ['1080p','2k'] },
