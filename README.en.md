@@ -29,9 +29,17 @@
 
 ## See the result
 
-[![A short drama made with NovelVids; click to watch the complete clip](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
+**Commercial remake example**
 
-[Watch the complete clip on YouTube](https://youtu.be/fdiw__J19uk). Manuscript → characters and locations → storyboard → generated shots → episode. Results depend on the material, models and creative revisions.
+[![Commercial remake preview; click to watch on YouTube](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
+
+[Watch the commercial remake on YouTube](https://youtu.be/fdiw__J19uk)
+
+**Illustrated drama example**
+
+[![Illustrated drama preview; click to watch on YouTube](docs/videos/comic-preview.gif)](https://youtu.be/NAuIKfsSero)
+
+[Watch the illustrated drama on YouTube](https://youtu.be/NAuIKfsSero) · Visual style: 3D xianxia; storyboard strategy: narrated storytelling. Generated automatically from story to finished video, without manually editing prompts or AI-generated prompts. Results depend on the material, models and creative revisions.
 
 **Explore before installing:** [open the live demo](https://demo.xiazq.com), username `demo`, password `NovelVids-Demo-2026`. Browse existing projects, assets, storyboards and videos. The demo is read-only and does not offer free generation; it resets daily at 00:00 Asia/Shanghai. Do not enter private data.
 

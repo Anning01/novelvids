@@ -29,9 +29,17 @@
 
 ## 先看效果
 
-[![由 NovelVids 制作的短剧片段，点击观看完整视频](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
+**商业复刻示例**
 
-[观看完整片段（YouTube）](https://youtu.be/fdiw__J19uk) · 书稿导入 → 角色与场景 → 分镜 → 逐镜头生成 → 成片。实际效果取决于素材、模型和创作调整。
+[![商业复刻示例预览，点击在 B 站观看](docs/videos/demo-preview.gif)](https://www.bilibili.com/video/BV1U74P6hEpx/)
+
+[在 B 站观看商业复刻示例](https://www.bilibili.com/video/BV1U74P6hEpx/)
+
+**漫剧制作示例**
+
+[![漫剧制作示例预览，点击在 B 站观看](docs/videos/comic-preview.gif)](https://www.bilibili.com/video/BV1U74P6hEzD/)
+
+[在 B 站观看漫剧制作示例](https://www.bilibili.com/video/BV1U74P6hEzD/) · 视觉风格：3D仙侠；分镜策略：旁白叙事。从故事到成片自动生成，全程没有人工修改提示词或 AI 生成的 Prompt。实际效果取决于素材、模型和创作调整。
 
 **先逛一遍再决定安装：**[打开在线演示](https://demo.xiazq.com)，账号 `demo`，密码 `NovelVids-Demo-2026`。演示站只读，可看已有项目、资产、分镜和视频，不提供免费生成；每天北京时间 00:00 重置。请勿填写私人数据。
 
