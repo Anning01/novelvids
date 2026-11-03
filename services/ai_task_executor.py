@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
 from services.creation_agent.waiting import WaitingForMedia
+from services.task_signals import task_signals
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,7 @@ class AiTaskExecutor:
             updated_at=datetime.now(timezone.utc),
         )
         await task.refresh_from_db()
+        await task_signals.publish(str(task.id))
         if task.status == TaskStatusEnum.cancelled.value and task.request_params.get('workflow_version') == 'agent-skills-v1':
             await AiTask.filter(id=task.id).update(response_data=result)
         versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
@@ -342,6 +344,7 @@ class AiTaskExecutor:
             updated_at=datetime.now(timezone.utc),
         )
         await task.refresh_from_db()
+        await task_signals.publish(str(task.id))
         partial_result = getattr(error, 'partial_result', None)
         if isinstance(partial_result, dict):
             await AiTask.filter(id=task.id).update(response_data=partial_result)

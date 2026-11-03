@@ -15,6 +15,7 @@ from services.creation_agent.handler import CreationAgentTaskHandler, chapter_co
 from services.creation_agent.sessions import agent_sessions
 from test.test_services.test_creation_agent_sessions import session_fixture
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from services.creation_agent.event_log import agent_event_log
 
 
 def test_truncated_output_stays_actionable_after_a_failed_automatic_retry():
@@ -79,9 +80,9 @@ async def test_handler_persists_events_history_and_usage_without_exposing_privat
     assert request.message not in str(task.response_data)
     assistant = await AgentMessage.get(task=task, role='assistant')
     assert assistant.content == '已调暖当前镜头。'
-    assert 'Internal planning' not in str(assistant.events)
+    assert 'Internal planning' not in str(await agent_event_log.load(assistant))
     assert assistant.native_messages
-    assert assistant.events[-1]['type'] == 'RUN_FINISHED'
+    assert (await agent_event_log.load(assistant))[-1]['type'] == 'RUN_FINISHED'
     assert len(assistant.usage['calls']) == 3
     assert assistant.billing_record_id is not None
     assert await ModelUsageRecord.filter(ai_task_id=task.id).count() == 1
@@ -105,7 +106,7 @@ async def test_model_error_is_redacted_and_recorded_as_missing_usage(monkeypatch
     assert task.status == TaskStatusEnum.failed.value
     assistant = await AgentMessage.get(task=task, role='assistant')
     assert assistant.usage['missing_usage'] is True
-    assert 'secret-provider-payload' not in str(assistant.events)
+    assert 'secret-provider-payload' not in str(await agent_event_log.load(assistant))
     assert 'secret-provider-payload' not in task.error_message
 
 
@@ -274,7 +275,7 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
     assert assistant.usage['missing_usage'] is False
     assert assistant.content == '已调暖灯光。'
     assert 'synthetic-reasoning' not in assistant.content
-    assert not any(event['type'].startswith('THINKING') for event in assistant.events)
+    assert not any(event['type'].startswith('THINKING') for event in await agent_event_log.load(assistant))
     if reasoning:
         assert all(call['usage']['details']['reasoning_tokens'] == 7 for call in assistant.usage['calls'])
 

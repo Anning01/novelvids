@@ -21,7 +21,7 @@ def test_standard_agui_query_receipt_produces_safe_navigation_cards():
                   {'kind': 'variant', 'id': 8, 'asset_id': 7, 'name': '夜景形态'}],
         'total': 3, 'next_page': 2,
     })
-    assert query_results(message) == [{'items': [
+    assert query_results(message.events) == [{'items': [
         {'kind': 'asset', 'id': 7, 'name': '蓝色雨衣'},
         {'kind': 'variant', 'id': 8, 'asset_id': 7, 'name': '夜景形态'},
     ], 'total': 3, 'has_more': True}]
@@ -29,13 +29,13 @@ def test_standard_agui_query_receipt_produces_safe_navigation_cards():
 
 def test_standard_agui_undo_receipt_is_recoverable_from_history():
     receipt = {'change_id': 8, 'status': 'reverted'}
-    assert list(tool_results(recorded_message('undo_creation_change', receipt))) == [('undo_creation_change', receipt)]
+    assert list(tool_results(recorded_message('undo_creation_change', receipt).events)) == [('undo_creation_change', receipt)]
 
 
 def test_malformed_or_unrelated_tool_receipts_do_not_create_query_cards():
     message = recorded_message('get_creation_context', {'items': []})
     message.events.append({'type': 'TOOL_CALL_RESULT', 'toolCallId': 'query', 'content': 'invalid'})
-    assert query_results(message) == []
+    assert query_results(message.events) == []
 
 
 @pytest.mark.asyncio
@@ -56,6 +56,6 @@ async def test_undo_message_projects_only_receipts_from_its_own_conversation():
     task = await AiTask.create(task_type=1, status=3)
     message = recorded_message('undo_creation_change', {'change_id': receipts[0].id, 'status': 'reverted'})
     message.conversation_id, message.task_id = own.id, task.id
-    assert [row.id for row in await message_changes(message, novel.id)] == [receipts[0].id]
+    assert [row.id for row in await message_changes(message, novel.id, message.events)] == [receipts[0].id]
     message.events[-1]['content'] = json.dumps({'change_id': receipts[1].id, 'status': 'reverted'})
-    assert await message_changes(message, novel.id) == []
+    assert await message_changes(message, novel.id, message.events) == []
