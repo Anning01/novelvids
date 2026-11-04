@@ -19,3 +19,21 @@ it('shows scoped saved rules without exposing internal identifiers', () => {
   expect(wrapper.text()).toContain('本章：统一冷光')
   expect(wrapper.text()).not.toContain('42')
 })
+
+it.each(['light', 'dark'])('shows integer K/M with exact hover values and a unit key (%s)', async theme => {
+  document.documentElement.dataset.theme = theme
+  const wrapper = mount(AgentUsageDetails, { props: { usage: {
+    requests: 9, input_tokens: 438265, output_tokens: 5368, cache_read_tokens: 310920, cache_usage_reported: true,
+  } } })
+  await wrapper.get('button[aria-expanded]').trigger('click')
+  expect(wrapper.text()).toContain('438K / 5K token')
+  expect(wrapper.text()).toContain('311K / 127K token')
+  expect(wrapper.text()).toContain('70.9%')
+  expect(wrapper.get('dd[title]').attributes('title')).toBe('438,265 / 5,368 token')
+  expect(wrapper.text()).toContain('1K = 1,000 token')
+  await wrapper.setProps({ usage: { requests: 1, input_tokens: 2000000, output_tokens: 999, cache_usage_reported: false } })
+  expect(wrapper.text()).toContain('2M / 999 token')
+  expect(wrapper.text()).toContain('供应商未完整报告')
+  wrapper.unmount()
+  delete document.documentElement.dataset.theme
+})

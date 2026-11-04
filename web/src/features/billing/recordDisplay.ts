@@ -2,6 +2,7 @@
 import { tr } from '@/i18n'
 import type { BillingRecord } from '@/types'
 import { statusLabel } from '@/api'
+import { formatTokenCount } from '@/shared/tokenCount'
 
 export function money(value: number, currency = 'CNY'): string {
   const symbol = currency === 'CNY' ? '¥' : currency === 'USD' ? '$' : `${currency} `
@@ -11,9 +12,7 @@ export function money(value: number, currency = 'CNY'): string {
 }
 
 export function formatTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-  return String(value)
+  return formatTokenCount(value, 1)
 }
 
 export function usageLabel(item: BillingRecord): string {

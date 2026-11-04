@@ -1,5 +1,6 @@
 {
   "common": {
+    "1K = 1,000 token；1M = 1,000,000 token": "1K = 1,000 tokens; 1M = 1,000,000 tokens",
     "填入官方基准价": "Use official base prices",
     "缓存命中输入单价（可选）": "Cached input price (optional)",
     "留空按普通输入价计费，填 0 表示缓存命中免费；按接口实际返回的命中 token 计算。": "Leave blank to use the regular input price; 0 makes cache hits free. Usage comes from the provider's reported cached tokens.",
