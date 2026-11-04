@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from config import settings
 from schemas.video_edit import EditDocument, StickerClip, SubtitleClip
+from services.video_editor.fonts import cached_subtitle_font
 from services.video_editor.sources import source_key
 from services.video_editor.subtitles import wrap_subtitle, subtitle_ass_many
 from services.video_enhancement.media import inspect_media
@@ -143,7 +144,18 @@ class EditRenderer:
         for path in paths:
             path.unlink()
         overlay_clips = [c for c in document.clips if c.type in {'subtitle', 'sticker'}]
-        font = await asyncio.to_thread(subtitle_font) if any(c.type == 'subtitle' for c in overlay_clips) else None
+        font_ids = {clip.font for clip in overlay_clips if clip.type == 'subtitle'}
+        fonts_dir = directory / 'fonts'
+        if font_ids:
+            default_font = await asyncio.to_thread(subtitle_font)
+            if font_ids == {'sans'}:
+                fonts_dir = default_font.parent
+            else:
+                fonts_dir.mkdir()
+                (fonts_dir / default_font.name).symlink_to(default_font)
+                for font_id in sorted(font_ids - {'sans'}):
+                    font = await cached_subtitle_font(font_id)
+                    (fonts_dir / font.name).symlink_to(font)
         # Consecutive captions share one ASS pass, preserving their order relative to stickers.
         overlay_groups: list[StickerClip | list[SubtitleClip]] = []
         for clip in overlay_clips:
@@ -163,7 +175,7 @@ class EditRenderer:
                 if isinstance(clip, list):
                     textfile = directory / f'subtitle-{offset+i}.ass'
                     textfile.write_text(subtitle_ass_many(clip, document.width, document.height), encoding='utf-8')
-                    filters.append(f"[{current}]ass=filename='{filter_path(textfile)}':fontsdir='{filter_path(font.parent)}'[{out}]")
+                    filters.append(f"[{current}]ass=filename='{filter_path(textfile)}':fontsdir='{filter_path(fonts_dir)}'[{out}]")
                 else:
                     enabled = f'gte(t,{clip.start:.8f})*lt(t,{clip.start + clip.duration:.8f})'
                     path, _ = sources[source_key(clip.source)]

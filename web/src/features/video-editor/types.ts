@@ -3,7 +3,7 @@ export interface EditSource { kind: 'video' | 'asset' | 'library' | 'missing'; i
 interface ClipBase { id: string; type: ClipKind; name: string; start: number; duration: number }
 export interface VideoClip extends ClipBase { type: 'video'; source: EditSource; trim_in: number; trim_out?: number | null; speed: number; volume: number; scale: number; fit: 'contain' | 'cover'; rotation?: number }
 export interface AudioClip extends ClipBase { type: 'audio'; source: EditSource; trim_in: number; volume: number; fade_in: number; fade_out: number; loop: boolean }
-export interface SubtitleClip extends ClipBase { type: 'subtitle'; text: string; font: 'sans'; font_size: number; color: string; bottom: number; x?: number; bold?: boolean; italic?: boolean; underline?: boolean; letter_spacing?: number; line_spacing?: number; align?: 'left' | 'center' | 'right'; opacity?: number; stroke_color?: string; stroke_width?: number; shadow?: number }
+export interface SubtitleClip extends ClipBase { type: 'subtitle'; text: string; font: string; font_size: number; color: string; bottom: number; x?: number; bold?: boolean; italic?: boolean; underline?: boolean; letter_spacing?: number; line_spacing?: number; align?: 'left' | 'center' | 'right'; opacity?: number; stroke_color?: string; stroke_width?: number; shadow?: number }
 export interface StickerClip extends ClipBase { type: 'sticker'; source: EditSource; x: number; y: number; scale: number; opacity: number; scale_y?: number | null; lock_aspect?: boolean; rotation?: number }
 export type EditClip = VideoClip | AudioClip | SubtitleClip | StickerClip
 export interface EditDocument { version: 1; width: number; height: number; fps: 24 | 25 | 30 | 60; clips: EditClip[] }

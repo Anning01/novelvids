@@ -459,3 +459,22 @@ it('splits existing long subtitles through the local endpoint and preserves undo
   expect(wrapper.findComponent(EditorTimeline).props('document').clips.find(c=>c.id==='s')).toMatchObject({text:long,font_size:48})
   wrapper.unmount()
 })
+
+it('keeps the selected subtitle group when dragging a selected caption in the preview',async()=>{
+  const fixture=editorFixture()
+  const subtitle={type:'subtitle' as const,name:'',duration:1,text:'第一句',font:'sans',font_size:42,color:'#ffffff',bottom:10}
+  fixture.document.clips.push({...subtitle,id:'s1',start:0},{...subtitle,id:'s2',start:3,x:35},{...subtitle,id:'s3',start:5,x:20})
+  vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
+  const wrapper=render();await flushPromises()
+  const timeline=wrapper.findComponent(EditorTimeline), preview=wrapper.findComponent(EditorPreview)
+  timeline.vm.$emit('selectMany',['s1','s2','v1']);await flushPromises()
+  preview.vm.$emit('select','s2')
+  preview.vm.$emit('position','s2',{x:65,bottom:24});await flushPromises()
+  expect(timeline.props('selectedIds')).toEqual(['s1','s2','v1'])
+  expect(timeline.props('document').clips.filter(c=>c.type==='subtitle')).toMatchObject([
+    {id:'s1',start:0,x:65,bottom:24},{id:'s2',start:3,x:65,bottom:24},{id:'s3',start:5,x:20,bottom:10},
+  ])
+  expect(timeline.props('document').clips.find(c=>c.id==='v1')).not.toHaveProperty('bottom')
+  timeline.vm.$emit('undo');await flushPromises()
+  expect(timeline.props('document').clips.find(c=>c.id==='s2')).toMatchObject({x:35,bottom:10})
+})

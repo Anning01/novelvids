@@ -78,3 +78,20 @@ it('ends an input gesture after native change and marks mixed selection text rep
   expect(wrapper.emitted('change')?.at(-1)).toEqual([{font_size:36}])
   wrapper.unmount()
 })
+
+it.each(['light','dark'])('uses the shared font selector for batch caption editing (%s)',async theme=>{
+  const { default:AppSelect }=await import('@/components/AppSelect.vue')
+  const { default:AppButton }=await import('@/components/AppButton.vue')
+  document.documentElement.dataset.appTheme=theme
+  const clip={id:'s',type:'subtitle' as const,name:'',start:0,duration:2,text:'测试',font:'sans',font_size:42,color:'#ffffff',bottom:10}
+  const wrapper=mount(EditorInspector,{props:{clip,selectionCount:2,readOnly:false,open:true,subtitleFonts:[{value:'sans',label:'系统中文黑体'},{value:'source-han-serif',label:'思源宋体'}]},global:{components:{AppButton}}})
+  const picker=wrapper.getComponent(AppSelect)
+  expect(picker.props('modelValue')).toBe('sans')
+  await picker.get('button').trigger('click')
+  const option=Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(el=>el.textContent?.trim()==='思源宋体')!
+  option.click()
+  expect(wrapper.emitted('change')?.at(-1)).toEqual([{font:'source-han-serif'}])
+  await wrapper.setProps({readOnly:true})
+  expect(picker.get('button').attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})

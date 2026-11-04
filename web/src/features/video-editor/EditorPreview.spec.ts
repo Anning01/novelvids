@@ -195,3 +195,16 @@ it('updates audio gain during playback without pausing or seeking the current vi
   expect(wrapper.emitted('update:playing')?.some(([value])=>value===false)).toBeFalsy()
   wrapper.unmount()
 })
+
+it('previews a group move on all visible selected captions and commits once on release',async()=>{
+  const wrapper=await overlayPreview('subtitle')
+  const doc=wrapper.props('document'), original=doc.clips.find(c=>c.id==='overlay')!
+  await wrapper.setProps({document:{...doc,clips:[...doc.clips,{...original,id:'second'},{...original,id:'unselected'}]},selectedIds:['overlay','second']})
+  const captions=wrapper.findAll<HTMLButtonElement>('.editor-subtitle')
+  captions[0]!.element.dispatchEvent(pointer('pointerdown',100,100))
+  window.dispatchEvent(pointer('pointermove',132,82));await flushPromises()
+  expect(captions.map(node=>node.element.style.left)).toEqual(['60%','60%','50%'])
+  expect(wrapper.emitted('position')).toBeUndefined()
+  window.dispatchEvent(pointer('pointerup',132,82));await flushPromises()
+  expect(wrapper.emitted('position')).toEqual([['overlay',{x:60,bottom:20}]])
+})

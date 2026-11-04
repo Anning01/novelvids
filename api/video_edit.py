@@ -1,5 +1,6 @@
 """Editor endpoints: typed data only, scoped by existing chapter/project checks."""
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from auth.deps import AuthContext, get_auth_context
 from models.chapter_export import ChapterExport
 from schemas.video_edit import EditSave, EditExportIn, EditLibraryIn, EditSource, SubtitleRecognizeIn, SubtitleSplitIn
@@ -8,6 +9,8 @@ from services.video_editor.assets import editor_storage, FORMATS
 from services.video_editor.sources import EditSources, public_media
 from services.video_editor.exports import submit_export, describe_export
 from utils.response_format import ResponseSchema
+from utils.subtitle_fonts import SUBTITLE_FONTS, subtitle_font_options
+from utils.messages import localized_message as msg
 
 router = APIRouter()
 
@@ -20,7 +23,19 @@ async def capabilities(ctx: AuthContext = Depends(get_auth_context)):
         'max_duration': settings.VIDEO_EDITOR_MAX_DURATION_SECONDS, 'max_overlays': settings.VIDEO_EDITOR_MAX_OVERLAYS,
         'max_audio_tracks': settings.VIDEO_EDITOR_MAX_AUDIO_TRACKS, 'fps': [24, 25, 30, 60],
         'max_source_mb': settings.VIDEO_EDITOR_MAX_SOURCE_MB,
-        'resolutions': [480, 720, 1080, 1440, 2160], 'fonts': [{'value': 'sans', 'label': '系统中文黑体'}]})
+        'resolutions': [480, 720, 1080, 1440, 2160], 'fonts': subtitle_font_options()})
+
+
+@router.get('/subtitle-fonts/{font_id}', response_class=FileResponse)
+async def subtitle_font_file(font_id: str, ctx: AuthContext = Depends(get_auth_context)):
+    from services.video_editor.fonts import cached_subtitle_font
+    if font_id not in SUBTITLE_FONTS:
+        raise HTTPException(404, msg('字幕字体不存在'))
+    try:
+        path = await cached_subtitle_font(font_id)
+    except ValueError as error:
+        raise HTTPException(502, str(error)) from None
+    return FileResponse(path, media_type=f'font/{path.suffix[1:]}', headers={'Cache-Control': 'private, max-age=86400'})
 
 
 @router.get('/chapters/{chapter_id}')

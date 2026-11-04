@@ -1,5 +1,7 @@
 {
   "common": {
+    "系统中文黑体": "Default Chinese sans",
+    "字幕字体加载失败，请稍后重试": "The caption font could not be loaded. Please try again.",
     "批量属性": "Batch properties",
     "已选 {p0} 个": "{p0} selected",
     "以首个片段为初始值，仅同步修改的兼容属性。": "Values come from the first clip. Only changed, compatible properties are applied.",
@@ -1662,6 +1664,8 @@
     "{p0}.mp4": "{p0}.mp4",
     "下载成片": "Download final video",
     "{p0} 秒": "{p0} seconds",
+    "{p0} 毫秒": "{p0} ms",
+    "{p0} 分 {p1} 秒": "{p0}m {p1}s",
     "视频上传失败": "Video upload failed",
     "视频不可用": "Video unavailable",
     "上传资产视频": "Upload asset video",

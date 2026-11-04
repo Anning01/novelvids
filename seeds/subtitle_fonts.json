@@ -1,0 +1,125 @@
+{
+  "revision": "8de624069342f03a78e83e81636126e37c9c7ac9",
+  "fonts": [
+    {
+      "value": "source-han-sans",
+      "label": "思源黑体",
+      "family": "Source Han Sans CN",
+      "path": "assets/font/中文/思源字体系列/思源黑体/SourceHanSansCN-Regular.otf",
+      "sha256": "14ec9d09dad83098938370be17170a747d63084022b05710e3d34b4ddb359091",
+      "size": 8364840,
+      "license": "Apache-2.0",
+      "copyright": "Copyright © 2014 Adobe Systems Incorporated. All Rights Reserved."
+    },
+    {
+      "value": "source-han-serif",
+      "label": "思源宋体",
+      "family": "Source Han Serif CN",
+      "path": "assets/font/中文/思源字体系列/思源宋体/SourceHanSerifCN-Regular.ttf",
+      "sha256": "da293f645cabeaba88468ef3aab9d0326a679fc0c3539cbf0797c6f5c0121f80",
+      "size": 14495132,
+      "license": "OFL-1.1",
+      "copyright": "Copyright © 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name 'Source'."
+    },
+    {
+      "value": "genjyuu",
+      "label": "思源柔黑",
+      "family": "Gen Jyuu GothicL",
+      "path": "assets/font/中文/思源字体系列/思源柔黑/GenJyuuGothicL-Regular.ttf",
+      "sha256": "37ada3c8642f7c28b8c93356a3f170d92067b087df8b80319fc702602c5d4830",
+      "size": 10694700,
+      "license": "OFL-1.1",
+      "copyright": "[Source Han Sans] Copyright © 2014, 2015 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name 'Source'. [M+ OUTLINE FONTS] Copyright(c) 2015 M+ FONTS PROJECT"
+    },
+    {
+      "value": "genshin",
+      "label": "思源真黑",
+      "family": "Gen Shin Gothic",
+      "path": "assets/font/中文/思源字体系列/思源真黑/GenShinGothic-Regular.ttf",
+      "sha256": "d85cb9a8622e17226080a8fb4f946e2f669777de8969196a81e06dcc1376c5ea",
+      "size": 4971568,
+      "license": "OFL-1.1",
+      "copyright": "[Source Han Sans] Copyright © 2014, 2015 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name 'Source'. [M+ OUTLINE FONTS] Copyright(c) 2015 M+ FONTS PROJECT"
+    },
+    {
+      "value": "genryu",
+      "label": "源流明体",
+      "family": "GenRyuMin TW TTF",
+      "path": "assets/font/中文/明体系列/明体系列/GenRyuMinTW-Regular.ttf",
+      "sha256": "9178c199d633075b8bb91902216c3e1bc977a11fde12471a2c9a250434402927",
+      "size": 15976964,
+      "license": "OFL-1.1",
+      "copyright": "This is a modified font of Source Han Serif'."
+    },
+    {
+      "value": "genyo",
+      "label": "源样明体",
+      "family": "GenYoMin TW TTF",
+      "path": "assets/font/中文/明体系列/源样明体/GenYoMinTW-Regular.ttf",
+      "sha256": "392b0bbe91336fd2ae66182d0fb5b2c3156e9eaf996a1f19a692ab06db77f3d9",
+      "size": 12658224,
+      "license": "OFL-1.1",
+      "copyright": "This is a modified font of Source Han Serif'."
+    },
+    {
+      "value": "genwan",
+      "label": "源云明体",
+      "family": "GenWanMin TW TTF",
+      "path": "assets/font/中文/明体系列/源云明体/GenWanMinTW-Regular.ttf",
+      "sha256": "815dc5a8e5d7694f99d3204b83f024202d61b80d0109290acb44eb9d26d6a7c6",
+      "size": 27318552,
+      "license": "OFL-1.1",
+      "copyright": "This is a modified font of Source Han Serif'."
+    },
+    {
+      "value": "soukou",
+      "label": "装甲明朝",
+      "family": "SoukouMincho",
+      "path": "assets/font/日文/装甲明朝体.ttf",
+      "sha256": "82c7d5fe924966c231adb4275d86ef0176390e755ccaaca9b3f3407516229657",
+      "size": 9815820,
+      "license": "OFL-1.1",
+      "copyright": "Adobe Systems Incorporated"
+    },
+    {
+      "value": "qingsong-1",
+      "label": "清松手写体 1",
+      "family": "清松手寫體1",
+      "path": "assets/font/中文/其他字体/清松手寫體/清松手寫體1.ttf",
+      "sha256": "5d3dda6cd030d7fdccec7dc0312c0e58dce16faa72f5394304d4e1291d1053d2",
+      "size": 8260608,
+      "license": "OFL-1.1",
+      "copyright": "www.writes.com.tw - JasonHandwriting1"
+    },
+    {
+      "value": "qingsong-2",
+      "label": "清松手写体 2",
+      "family": "清松手寫體2",
+      "path": "assets/font/中文/其他字体/清松手寫體/清松手寫體2.ttf",
+      "sha256": "13a4931c6bde502dd8e73929f6e78cef9385bc187cb333ebfa43bf039b33b928",
+      "size": 5138956,
+      "license": "OFL-1.1",
+      "copyright": "www.writes.com.tw - JasonWriting2"
+    },
+    {
+      "value": "qiji",
+      "label": "黄令东齐伋体",
+      "family": "QIJIFALLBACK",
+      "path": "assets/font/中文/其他字体/令东齐伋体.ttf",
+      "sha256": "f9d91a37c0b1ef103b7060f1c4c087e8735655f7cc1c394ac05c32c34a0fc3e0",
+      "size": 38846356,
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2020, Lingdong Huang"
+    },
+    {
+      "value": "zhimang",
+      "label": "钟齐志莽行书",
+      "family": "Zhi Mang Xing",
+      "path": "assets/font/中文/其他字体/钟齐志莽行书.ttf",
+      "sha256": "644e0cae9b40f0b10ab729a01bd32032e3973bac22be3dccae01bf6ae7fde969",
+      "size": 4063532,
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2018 The ZhiMangXing Project Authors (https://github.com/googlefonts/zhimangxing)"
+    }
+  ]
+}

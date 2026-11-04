@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from schemas.video_edit import SubtitleClip
+from utils.subtitle_fonts import SUBTITLE_FONTS
 
 
 @lru_cache(maxsize=1)
@@ -79,7 +80,8 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
             x += block_width / 2
         top = height * (1 - clip.bottom / 100) - len(lines) * line_height
         alignment = {'left': 7, 'center': 8, 'right': 9}[clip.align]
-        styles.append(f"Style: Text{clip_index},sans-serif,{size:.5f},{ass_color(clip.color,clip.opacity)},{ass_color(clip.color,clip.opacity)},{ass_color(clip.stroke_color,clip.opacity)},{ass_color('#000000',clip.opacity)},{-int(clip.bold)},{-int(clip.italic)},{-int(clip.underline)},0,100,100,{spacing:.5f},0,1,{clip.stroke_width*scale:.5f},{clip.shadow*scale:.5f},{alignment},0,0,0,1")
+        family = SUBTITLE_FONTS[clip.font]['family'] if clip.font != 'sans' else 'sans-serif'
+        styles.append(f"Style: Text{clip_index},{family},{size:.5f},{ass_color(clip.color,clip.opacity)},{ass_color(clip.color,clip.opacity)},{ass_color(clip.stroke_color,clip.opacity)},{ass_color('#000000',clip.opacity)},{-int(clip.bold)},{-int(clip.italic)},{-int(clip.underline)},0,100,100,{spacing:.5f},0,1,{clip.stroke_width*scale:.5f},{clip.shadow*scale:.5f},{alignment},0,0,0,1")
         for index, line in enumerate(lines):
             if line:
                 position = f'{{\\an{alignment}\\pos({x:.5f},{top + index * line_height:.5f})}}'

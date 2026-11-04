@@ -107,3 +107,34 @@ it('lists enhancement usage separately and preserves an unknown-usage warning', 
   expect(wrapper.text()).not.toContain('任务 8')
   wrapper.unmount()
 })
+
+it.each(['light', 'dark'])('中文调用流水显示语音识别名称和实际用量（%s）', async theme => {
+  const previousTheme = document.documentElement.dataset.appTheme
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.billingSummary).mockResolvedValue({
+    code: 0, message: '', data: { total_cost: 0.0451, total_records: 1, by_billing_type: [], by_task_type: [], by_model: [], daily_trend: [] },
+  })
+  vi.mocked(api.billingProjects).mockResolvedValue({
+    code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 20, pages: 0 } },
+  })
+  vi.mocked(api.billingRecords).mockResolvedValue({
+    code: 0, message: '', data: {
+      items: [{
+        id: 1, novel_id: 1, task_type: 9, billing_type: 'asr', model: 'volc-seedasr-2.0',
+        usage: { duration_seconds: 180.25 }, duration_seconds: 180, cost: 0.0451,
+        currency: 'CNY', status: 3, created_at: '', updated_at: '',
+      }],
+      pagination: { total: 1, page: 1, page_size: 20, pages: 1 },
+    },
+  })
+  const wrapper = mount(BillingPage, { global: { plugins: [createPinia()], stubs: { AppSelect: true } } })
+  try {
+    await flushPromises()
+    const cells = wrapper.findAll('.data-table > tbody > tr > td').map(cell => cell.text())
+    expect(cells.slice(2, 7)).toEqual(['语音识别', '语音识别', 'volc-seedasr-2.0', '180.25 秒', '3 分 0 秒'])
+  } finally {
+    wrapper.unmount()
+    if (previousTheme) document.documentElement.dataset.appTheme = previousTheme
+    else delete document.documentElement.dataset.appTheme
+  }
+})

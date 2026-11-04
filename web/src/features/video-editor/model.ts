@@ -201,7 +201,7 @@ export function subtitleLines(clip: SubtitleClip, document: EditDocument): strin
   const limit = document.width * .88
   const spacing = (clip.letter_spacing ?? 0) * document.height / 1080
   const lines: string[] = []; let line = '', used = 0
-  for (const char of clip.text.replace(/\r/g, '')) {
+  for (const char of clip.text.replace(/^[\s，。,.．、]+|[\s，。,.．、]+$/gu, '').replace(/\r/g, '')) {
     const weight = (/[\u3000-\u9fff\uff01-\uff60\uac00-\ud7af\p{Extended_Pictographic}]/u.test(char) ? 1 : .55) * size
     if (char === '\n' || (line && used + weight + spacing > limit)) { lines.push(line); line = ''; used = 0; if (char === '\n') continue }
     if (char.charCodeAt(0) >= 32 || char === '\t') { used += weight + (line ? spacing : 0); line += char }
