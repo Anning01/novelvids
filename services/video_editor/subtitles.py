@@ -50,19 +50,10 @@ def escape_ass(text: str) -> str:
 
 
 def subtitle_ass(clip: SubtitleClip, width: int, height: int) -> str:
-    scale = height / 1080
-    size, spacing = clip.font_size * scale, clip.letter_spacing * scale
-    lines = wrap_subtitle(clip.text, width, size, spacing).split('\n')
-    widths = [sum(char_width(c, size) for c in line) + max(0, len(line)-1)*spacing for line in lines]
-    block_width = max(widths, default=0)
-    line_height = size * 1.2 + clip.line_spacing * scale
-    x = width * clip.x / 100
-    if clip.align == 'left':
-        x -= block_width / 2
-    elif clip.align == 'right':
-        x += block_width / 2
-    top = height * (1 - clip.bottom / 100) - len(lines) * line_height
-    alignment = {'left': 7, 'center': 8, 'right': 9}[clip.align]
+    return subtitle_ass_many([clip], width, height)
+
+
+def subtitle_ass_many(clips: list[SubtitleClip], width: int, height: int) -> str:
     header = f'''[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -72,14 +63,25 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Text,sans-serif,{size:.5f},{ass_color(clip.color,clip.opacity)},{ass_color(clip.color,clip.opacity)},{ass_color(clip.stroke_color,clip.opacity)},{ass_color('#000000',clip.opacity)},{-int(clip.bold)},{-int(clip.italic)},{-int(clip.underline)},0,100,100,{spacing:.5f},0,1,{clip.stroke_width*scale:.5f},{clip.shadow*scale:.5f},{alignment},0,0,0,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 '''
-    events = []
-    for index, line in enumerate(lines):
-        if line:
-            position = f'{{\\an{alignment}\\pos({x:.5f},{top + index * line_height:.5f})}}'
-            events.append(f'Dialogue: 0,{ass_time(clip.start)},{ass_time(clip.start+clip.duration)},Text,,0,0,0,,{position}{escape_ass(line)}')
-    return header + '\n'.join(events) + '\n'
+    styles, events = [], []
+    for clip_index, clip in enumerate(clips):
+        scale = height / 1080
+        size, spacing = clip.font_size * scale, clip.letter_spacing * scale
+        lines = wrap_subtitle(clip.text, width, size, spacing).split('\n')
+        widths = [sum(char_width(c, size) for c in line) + max(0, len(line)-1)*spacing for line in lines]
+        block_width = max(widths, default=0)
+        line_height = size * 1.2 + clip.line_spacing * scale
+        x = width * clip.x / 100
+        if clip.align == 'left':
+            x -= block_width / 2
+        elif clip.align == 'right':
+            x += block_width / 2
+        top = height * (1 - clip.bottom / 100) - len(lines) * line_height
+        alignment = {'left': 7, 'center': 8, 'right': 9}[clip.align]
+        styles.append(f"Style: Text{clip_index},sans-serif,{size:.5f},{ass_color(clip.color,clip.opacity)},{ass_color(clip.color,clip.opacity)},{ass_color(clip.stroke_color,clip.opacity)},{ass_color('#000000',clip.opacity)},{-int(clip.bold)},{-int(clip.italic)},{-int(clip.underline)},0,100,100,{spacing:.5f},0,1,{clip.stroke_width*scale:.5f},{clip.shadow*scale:.5f},{alignment},0,0,0,1")
+        for index, line in enumerate(lines):
+            if line:
+                position = f'{{\\an{alignment}\\pos({x:.5f},{top + index * line_height:.5f})}}'
+                events.append(f'Dialogue: {clip_index},{ass_time(clip.start)},{ass_time(clip.start+clip.duration)},Text{clip_index},,0,0,0,,{position}{escape_ass(line)}')
+    return header + '\n'.join(styles) + '\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n' + '\n'.join(events) + '\n'

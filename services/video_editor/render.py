@@ -5,9 +5,9 @@ import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from config import settings
-from schemas.video_edit import EditDocument
+from schemas.video_edit import EditDocument, StickerClip, SubtitleClip
 from services.video_editor.sources import source_key
-from services.video_editor.subtitles import wrap_subtitle, subtitle_ass
+from services.video_editor.subtitles import wrap_subtitle, subtitle_ass_many
 from services.video_enhancement.media import inspect_media
 from utils.messages import localized_message as msg
 
@@ -144,18 +144,28 @@ class EditRenderer:
             path.unlink()
         overlay_clips = [c for c in document.clips if c.type in {'subtitle', 'sticker'}]
         font = await asyncio.to_thread(subtitle_font) if any(c.type == 'subtitle' for c in overlay_clips) else None
+        # Consecutive captions share one ASS pass, preserving their order relative to stickers.
+        overlay_groups: list[StickerClip | list[SubtitleClip]] = []
+        for clip in overlay_clips:
+            if clip.type == 'subtitle':
+                if overlay_groups and isinstance(overlay_groups[-1], list):
+                    overlay_groups[-1].append(clip)
+                else:
+                    overlay_groups.append([clip])
+            else:
+                overlay_groups.append(clip)
         # A bounded number of still-image decoders prevents large sticker sets exhausting memory.
-        for offset in range(0, len(overlay_clips), 4):
-            batch = overlay_clips[offset:offset + 4]
+        for offset in range(0, len(overlay_groups), 4):
+            batch = overlay_groups[offset:offset + 4]
             args, filters, current, input_index = ['-threads', '1', '-i', str(base)], [], '0:v', 1
             for i, clip in enumerate(batch):
                 out = f'o{i}'
-                enabled = f'gte(t,{clip.start:.8f})*lt(t,{clip.start + clip.duration:.8f})'
-                if clip.type == 'subtitle':
+                if isinstance(clip, list):
                     textfile = directory / f'subtitle-{offset+i}.ass'
-                    textfile.write_text(subtitle_ass(clip, document.width, document.height), encoding='utf-8')
+                    textfile.write_text(subtitle_ass_many(clip, document.width, document.height), encoding='utf-8')
                     filters.append(f"[{current}]ass=filename='{filter_path(textfile)}':fontsdir='{filter_path(font.parent)}'[{out}]")
                 else:
+                    enabled = f'gte(t,{clip.start:.8f})*lt(t,{clip.start + clip.duration:.8f})'
                     path, _ = sources[source_key(clip.source)]
                     args += ['-loop', '1', '-framerate', str(document.fps), '-threads', '1', '-i', str(path)]
                     sw = max(2, round(document.width * .25 * clip.scale / 2) * 2)
@@ -175,7 +185,7 @@ class EditRenderer:
             await self.command([*args, '-filter_complex', ';'.join(filters), '-map', f'[{current}]', '-map', '0:a',
                 '-t', str(duration), *self.encoding(document), str(rendered)], cwd=directory)
             base.unlink(); base = rendered
-            await self.progress(65 + int(15 * min(offset + 4, len(overlay_clips)) / len(overlay_clips)), 'editor_overlays')
+            await self.progress(65 + int(15 * min(offset + 4, len(overlay_groups)) / len(overlay_groups)), 'editor_overlays')
         audio_clips = [c for c in document.clips if c.type == 'audio']
         if audio_clips:
             args, filters, labels = ['-i', str(base)], [], ['[0:a]']
