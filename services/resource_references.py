@@ -8,8 +8,9 @@ from services.oss import resolve_media_url
 from services.video.reference_media import _validate_probe, media_kind_for_extension
 
 
-async def resource_for(team_id: int, resource_id: int, *, ready: bool = True, kind: str | None = 'video') -> VideoResource:
-    resource = await VideoResource.get_or_none(id=resource_id, team_id=team_id)
+async def resource_for(team_id: int | None, resource_id: int, *, ready: bool = True, kind: str | None = 'video', writable: bool = False) -> VideoResource:
+    from services.resource_permissions import readable_scope, owner_scope
+    resource = await VideoResource.filter(owner_scope(team_id) if writable else readable_scope(team_id), id=resource_id).first()
     if resource is None or (ready and resource.state != "ready") or (kind is not None and resource.kind != kind):
         raise HTTPException(404, detail="资源视频不存在、正在删除或已删除，请重新选择")
     return resource

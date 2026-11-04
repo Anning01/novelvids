@@ -7,6 +7,7 @@ from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
 from config import settings
+from auth.deps import AuthContext
 from utils.media_name import video_display_name
 from models.scene import Scene
 from models.video import Video
@@ -15,6 +16,7 @@ from schemas.resource_library import FolderWrite, ResourceImport
 from services.oss import normalize_media_url, resolve_media_url
 from services.resource_storage import resource_storage, library_media_storage
 from services.resource_references import resource_for, reference_dict, validate_resource_model
+from services.resource_permissions import owner_scope, readable_scope, ensure_resource_write
 
 
 def resource_dict(resource: VideoResource) -> dict:
@@ -28,15 +30,18 @@ def resource_dict(resource: VideoResource) -> dict:
 
 
 class ResourceLibraryController:
-    async def folder(self, team_id: int, folder_id: int) -> ResourceFolder | None:
+    async def folder(self, team_id: int | None, folder_id: int, *, readable: bool = False) -> ResourceFolder | None:
         if not folder_id:
             return None
-        folder = await ResourceFolder.get_or_none(id=folder_id, team_id=team_id, deleting=False)
+        folder = await ResourceFolder.filter(readable_scope(team_id) if readable else owner_scope(team_id), id=folder_id, deleting=False).first()
         if folder is None:
             raise HTTPException(404, detail="文件夹不存在或正在删除")
         return folder
 
     async def write_folder(self, team_id: int, user_id: int | None, payload: FolderWrite, folder_id: int | None = None):
+        if team_id is None:
+            target = await self.folder(None, folder_id or payload.parent_id)
+            team_id = target.team_id if target else 0
         try:
             async with in_transaction():
                 folders = await ResourceFolder.filter(team_id=team_id).select_for_update()
@@ -60,6 +65,9 @@ class ResourceLibraryController:
             raise HTTPException(409, detail="同一目录下已有同名文件夹") from exc
 
     async def reserve(self, team_id: int, user_id: int | None, filename: str, folder_id: int = 0, *, kind='video'):
+        if team_id is None:
+            target = await self.folder(None, folder_id)
+            team_id = target.team_id if target else 0
         if not filename or len(Path(filename).name)>255:
             raise HTTPException(422, detail=localized_message('文件名不能为空且不能超过 255 个字符'))
         if kind == 'video':
@@ -77,7 +85,8 @@ class ResourceLibraryController:
             )
 
     async def finalize(self, team_id: int, resource_id: int):
-        resource = await resource_for(team_id, resource_id, ready=False, kind=None)
+        resource = await resource_for(team_id, resource_id, ready=False, kind=None, writable=True)
+        team_id = resource.team_id
         if resource.state in {"ready", "source"}:
             return resource
         if resource.state != "uploading":
@@ -108,6 +117,14 @@ class ResourceLibraryController:
             raise
 
     async def move(self, team_id: int, ids: list[int], folder_id: int):
+        if team_id is None:
+            target = await self.folder(None, folder_id)
+            rows = await VideoResource.filter(id__in=ids, state='ready')
+            if len(rows) != len(ids) or (target and any(row.team_id != target.team_id for row in rows)):
+                raise HTTPException(422, detail=localized_message('请选择资源所属团队的文件夹'))
+            async with in_transaction():
+                await VideoResource.filter(id__in=ids, state='ready').update(folder_id=folder_id)
+            return
         async with in_transaction():
             if folder_id:
                 await ResourceFolder.filter(id=folder_id, team_id=team_id).select_for_update()
@@ -118,7 +135,8 @@ class ResourceLibraryController:
             await VideoResource.filter(id__in=ids, team_id=team_id).update(folder_id=folder_id)
 
     async def cancel_upload(self, team_id: int, resource_id: int):
-        resource = await resource_for(team_id, resource_id, ready=False, kind=None)
+        resource = await resource_for(team_id, resource_id, ready=False, kind=None, writable=True)
+        team_id = resource.team_id
         if resource.state != "uploading":
             return
         await VideoResource.filter(id=resource_id, team_id=team_id, state="uploading").update(state="delete_failed")
@@ -126,6 +144,13 @@ class ResourceLibraryController:
 
     async def delete_resources(self, team_id: int, ids: list[int]):
         existing = await VideoResource.filter(id__in=ids)
+        if team_id is None:
+            if any(item.state in {'source', 'uploading'} for item in existing):
+                raise HTTPException(409, detail=localized_message('部分资源正在上传或无法删除'))
+            results = []
+            for owner in {item.team_id for item in existing}:
+                results.extend(await self.delete_resources(owner, [item.id for item in existing if item.team_id == owner]))
+            return results
         if any(item.team_id != team_id or item.state == "source" for item in existing):
             raise HTTPException(404, detail="资源不存在")
         if any(item.state == "uploading" for item in existing):
@@ -149,18 +174,25 @@ class ResourceLibraryController:
         return results
 
     async def folder_contents(self, team_id: int, folder_id: int):
-        folder = await ResourceFolder.get_or_none(id=folder_id, team_id=team_id)
+        folder = await ResourceFolder.filter(owner_scope(team_id), id=folder_id).first()
         if folder is None:
             return [], []
+        team_id = folder.team_id
         children = await ResourceFolder.filter(team_id=team_id, parent_id=folder_id)
         folder_ids = [folder.id, *[child.id for child in children]]
         resources = await VideoResource.filter(team_id=team_id, folder_id__in=folder_ids).exclude(state="source")
         return folder_ids, [item.id for item in resources]
 
-    async def delete_folder(self, team_id: int, folder_id: int):
+    async def delete_folder(self, team_id: int | None, folder_id: int, *, ctx: AuthContext | None = None):
+        if team_id is None:
+            folder = await self.folder(None, folder_id)
+            team_id = folder.team_id if folder else 0
         async with in_transaction():
             await ResourceFolder.filter(team_id=team_id).select_for_update()
             folder_ids, resource_ids = await self.folder_contents(team_id, folder_id)
+            if ctx is not None:
+                await ensure_resource_write(ctx, await ResourceFolder.filter(id__in=folder_ids))
+                await ensure_resource_write(ctx, await VideoResource.filter(id__in=resource_ids))
             if await ResourcePlacement.filter(team_id=team_id, folder_id__in=folder_ids).exists():
                 raise HTTPException(409, detail=localized_message('文件夹内包含角色或参考音色，请先移出这些资源'))
             if await VideoResource.filter(id__in=resource_ids, state="uploading").exists():
@@ -184,16 +216,16 @@ class ResourceLibraryController:
         source_ref = None
         filename = "video.mp4"
         if payload.source == "upload":
-            source = await VideoResource.get_or_none(id=payload.source_id, team_id=team, state="source")
+            source = await VideoResource.filter(owner_scope(team), id=payload.source_id, state="source").first()
             if source:
                 source_ref, filename = source.storage_ref, source.filename
         elif payload.source == "video":
             video = await Video.get_or_none(id=payload.source_id).select_related("scene__chapter__novel")
-            if video and (not settings.AUTH_ENABLED or (video.scene.chapter.novel.team_id or 0) == team) and video.url:
+            if video and (not settings.AUTH_ENABLED or team is None or (video.scene.chapter.novel.team_id or 0) == team) and video.url:
                 source_ref = video.url
         else:
             scene = await Scene.get_or_none(id=payload.source_id).select_related("chapter__novel")
-            if scene and (not settings.AUTH_ENABLED or (scene.chapter.novel.team_id or 0) == team):
+            if scene and (not settings.AUTH_ENABLED or team is None or (scene.chapter.novel.team_id or 0) == team):
                 requested = normalize_media_url(payload.media_url)
                 for item in (scene.metadata or {}).get("video_reference_media", []):
                     if item.get("type") == "video" and normalize_media_url(item.get("url")) == requested:

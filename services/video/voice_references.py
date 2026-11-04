@@ -198,7 +198,7 @@ async def resolve_voice_references(
     references = {
         row.id: row
         for row in rows
-        if audio_reference_accessible(
+        if await audio_reference_accessible(
             row,
             team_id=novel.team_id,
             created_by=novel.created_by,

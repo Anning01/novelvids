@@ -27,17 +27,16 @@ SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".wav"}
 MAX_TRIM_SOURCE_BYTES = 200 * 1024 * 1024
 
 
-def audio_reference_accessible(
+async def audio_reference_accessible(
     reference: AudioReference,
     *,
     team_id: int | None,
     created_by: int | None,
 ) -> bool:
-    """判断音色是否可用于指定项目作用域。
-
-    旧版本中超级管理员上传的音色可能没有 team_id；仅当上传人与项目创建人
-    相同时兼容，避免把历史无团队音色放宽给其他项目或团队。
-    """
+    """公共音色可跨团队复用，普通用户历史音色仍按原归属隔离。"""
+    from services.resource_permissions import is_public_resource
+    if await is_public_resource(reference):
+        return True
     if reference.source == "system":
         return True
     if reference.team_id is not None:
@@ -53,7 +52,8 @@ def audio_reference_scope_query(
     created_by: int | None,
 ) -> Q:
     """构造与 ``audio_reference_accessible`` 一致的音色库查询范围。"""
-    scope = Q(source="system")
+    from services.resource_permissions import public_scope
+    scope = Q(source="system") | public_scope()
     if team_id is not None:
         scope |= Q(team_id=team_id)
     elif created_by is None:

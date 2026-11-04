@@ -70,9 +70,8 @@ class CatalogUpload(ResourceUpload):
     kind: MediaKind
 
 
-class CatalogMove(BaseModel):
+class CatalogKeys(BaseModel):
     keys: list[str] = Field(min_length=1, max_length=100)
-    folder_id: int = Field(default=0, ge=0)
 
     @field_validator('keys')
     @classmethod
@@ -81,6 +80,10 @@ class CatalogMove(BaseModel):
         if any(not re.fullmatch(r'(media|voice|human|asset):[1-9][0-9]*', value) for value in values):
             raise ValueError(localized_message('资源标识无效'))
         return list(dict.fromkeys(values))
+
+
+class CatalogMove(CatalogKeys):
+    folder_id: int = Field(default=0, ge=0)
 
 
 class CatalogPublish(BaseModel):
