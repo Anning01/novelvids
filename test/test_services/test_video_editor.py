@@ -355,3 +355,26 @@ async def test_sticker_stretch_rotation_and_opacity_survive_draft_save_and_rende
     assert pixel(158,55)[1]>180  # A tall, narrow sticker after stretching and rotation.
     assert pixel(125,88)[1]<80
     assert pixel(188,55)[0]>180 and pixel(188,55)[1]<80  # Transparent rotation corners retain the video.
+
+
+@pytest.mark.asyncio
+async def test_export_concatenates_short_fast_segment_with_following_gap(media, tmp_path):
+    from services.video_editor.render import EditRenderer
+
+    async def cancelled():
+        return False
+
+    document = EditDocument(width=320, height=180, clips=[
+        video_clip(1, duration=.1, speed=20),
+        {'id': 'subtitle', 'type': 'subtitle', 'start': 0, 'duration': 1, 'text': '字幕'},
+    ])
+    directory = tmp_path / 'short-segment'
+    directory.mkdir()
+    renderer = EditRenderer(cancelled=cancelled, progress=AsyncMock())
+    output = await renderer.render(document, {'video:1': (media[0], {'has_audio': True})}, directory)
+    ffmpeg('-xerror', '-i', output, '-f', 'null', '-')
+    duration = subprocess.check_output([
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', str(output),
+    ], text=True)
+    assert float(duration) == pytest.approx(1, abs=.1)
