@@ -106,3 +106,16 @@ it('shows audio playback rejection in the library footer',async()=>{
   expect(wrapper.emitted('select')).toBeUndefined()
   wrapper.unmount()
 })
+
+it('disables local caption splitting during recognition and for read-only users',async()=>{
+  const wrapper=mount(EditorLibrary,{props:{media:[],busy:false,progress:0,readOnly:false,recognizing:true}})
+  await wrapper.findAll('.editor-library-nav button')[2]!.trigger('click')
+  const button=()=>wrapper.findAll('button').find(row=>row.text()==='拆分长字幕')!
+  expect(button().attributes('disabled')).toBeDefined()
+  await wrapper.setProps({recognizing:false,readOnly:true})
+  expect(button().attributes('disabled')).toBeDefined()
+  await wrapper.setProps({readOnly:false})
+  await button().trigger('click')
+  expect(wrapper.emitted('splitSubtitles')).toHaveLength(1)
+  wrapper.unmount()
+})

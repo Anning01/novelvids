@@ -176,3 +176,22 @@ it('retries BGM without cross-origin processing and keeps the video playing', as
   expect(wrapper.emitted('update:playing')).toBeUndefined()
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 })
+
+it('updates audio gain during playback without pausing or seeking the current video',async()=>{
+  const fixture=editorFixture()
+  fixture.document.clips.push({id:'a',type:'audio',name:'BGM',start:0,duration:2,source:{kind:'asset',id:9},trim_in:0,volume:.5,fade_in:0,fade_out:0,loop:false})
+  fixture.media.push({key:'asset:9',source:{kind:'asset',id:9},kind:'audio',name:'BGM',duration:2,url:'/music.wav'})
+  const wrapper=mount(EditorPreview,{props:{document:fixture.document,media:fixture.media,time:.5,playing:false,muted:false,selectedId:'v1'},global:{stubs:{VideoThumbnail:true}}})
+  await wrapper.setProps({playing:true});await flushPromises()
+  const video=wrapper.get('video[src="/media/clip-1.mp4"]').element as HTMLVideoElement
+  video.currentTime=.6
+  vi.mocked(HTMLMediaElement.prototype.pause).mockClear()
+  const document={...fixture.document,clips:fixture.document.clips.map(clip=>clip.id==='a'?{...clip,volume:.2}:clip)}
+  await wrapper.setProps({document});await flushPromises()
+  callback?.(100);await flushPromises()
+  expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+  expect(video.currentTime).toBe(.6)
+  expect(wrapper.get<HTMLAudioElement>('audio').element.volume).toBeCloseTo(.2)
+  expect(wrapper.emitted('update:playing')?.some(([value])=>value===false)).toBeFalsy()
+  wrapper.unmount()
+})

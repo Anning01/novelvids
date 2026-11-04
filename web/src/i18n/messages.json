@@ -1,5 +1,15 @@
 {
   "common": {
+    "批量属性": "Batch properties",
+    "已选 {p0} 个": "{p0} selected",
+    "以首个片段为初始值，仅同步修改的兼容属性。": "Values come from the first clip. Only changed, compatible properties are applied.",
+    "修改内容会替换所有选中字幕的文字。": "Editing the text replaces the content of every selected caption.",
+    "拆分长字幕": "Split long captions",
+    "拆分中…": "Splitting…",
+    "剪辑已修改，请重试拆分": "The edit changed. Please try splitting again.",
+    "已拆分 {p0} 条长字幕": "Split {p0} long captions",
+    "已选 {p0} 个片段 · 修改右侧属性可批量应用 · Delete/⌫ 移除": "{p0} clips selected · Apply properties on the right · Delete/⌫ to remove",
+    "拖动空白处框选 · Shift 连选 · ⌘/Ctrl 多选 · 空格播放 · Delete/⌫ 移除": "Drag empty space to select · Shift for a range · ⌘/Ctrl to select more · Space to play · Delete/⌫ to remove",
     "关闭试听": "Close audio preview",
     "在右侧编辑内容与样式，在时间线调整时间。": "Edit text and style on the right. Adjust timing on the timeline.",
     "BGM 已复制，粘贴将接在片段末尾": "BGM copied. Paste to append after the clip.",

@@ -13,6 +13,8 @@ export function useEditorDraft(identity: () => string) {
   const undoStack = ref<string[]>([]), redoStack = ref<string[]>([])
   let chapterId = 0, scope = 0, disposed = false, timer: ReturnType<typeof setTimeout> | undefined
   let inFlight: Promise<boolean> | null = null, controller: AbortController | null = null
+  const editing = ref(false)
+  let editBaseline: string | null = null
   const dirty = computed(() => document.value !== null && JSON.stringify(document.value) !== baseline.value)
   const selected = computed(() => document.value?.clips.find(clip => clip.id === selectedId.value) || null)
   const storageKey = () => `novelvids-editor-v1:${identity()}:${chapterId}`
@@ -29,6 +31,7 @@ export function useEditorDraft(identity: () => string) {
     } catch { /* Keep unsaved edits in memory if browser storage is full or unavailable. */ }
   }
   async function load(id: number) {
+    editBaseline = null; editing.value = false
     const version = ++scope; chapterId = id; controller?.abort(); clearTimeout(timer); inFlight = null
     controller = new AbortController(); loading.value = true; error.value = ''; saveError.value = ''; conflict.value = false
     document.value = null; media.value = []; saving.value = false; undoStack.value = []; redoStack.value = []; recovery.value = null
@@ -53,7 +56,28 @@ export function useEditorDraft(identity: () => string) {
     selectedId.value = value.document.clips[0]?.id || ''
   }
   function schedule() { clearTimeout(timer); if (!conflict.value) timer = setTimeout(() => { void save() }, 800) }
+  function beginEdit() {
+    if (!document.value || editing.value) return
+    editBaseline = JSON.stringify(document.value); editing.value = true; clearTimeout(timer)
+  }
+  function endEdit() {
+    if (!editing.value) return
+    editing.value = false
+    const before = editBaseline; editBaseline = null
+    if (before && document.value && JSON.stringify(document.value) !== before) {
+      undoStack.value = [...undoStack.value, before].slice(-60); redoStack.value = []
+      backup(); schedule()
+    }
+  }
   function commit(next: EditDocument, nextSelectedId?: string) {
+    if (disposed) return
+    if (editing.value) {
+      bounds(next)
+      document.value = next
+      if (nextSelectedId !== undefined) selectedId.value = nextSelectedId
+      saveError.value = ''
+      return
+    }
     next = compactVideoTrack(next)
     bounds(next)
     if (JSON.stringify(next) === JSON.stringify(document.value)) return
@@ -63,12 +87,14 @@ export function useEditorDraft(identity: () => string) {
     saveError.value = ''; backup(); schedule()
   }
   function history(from: typeof undoStack, to: typeof redoStack) {
+    endEdit()
     if (!from.value.length || !document.value) return
     to.value.push(JSON.stringify(document.value)); document.value = JSON.parse(from.value.pop()!) as EditDocument
     if (!document.value.clips.some(c => c.id === selectedId.value)) selectedId.value = document.value.clips[0]?.id || ''
     backup(); schedule()
   }
   async function save(): Promise<boolean> {
+    endEdit()
     clearTimeout(timer)
     if (inFlight) { const result = await inFlight; return result && dirty.value ? save() : result }
     if (!document.value || conflict.value || disposed) return false
@@ -102,6 +128,6 @@ export function useEditorDraft(identity: () => string) {
   window.addEventListener('beforeunload', unload)
   onBeforeUnmount(() => { backup(); disposed = true; ++scope; clearTimeout(timer); controller?.abort(); window.removeEventListener('beforeunload', unload) })
   return { document, media, selectedId, selected, revision, loading, saving, error, saveError, conflict, dirty, recovery,
-    undoStack, redoStack, load, commit, save, addMedia, recoverLocal, ignoreRecovery,
+    undoStack, redoStack, editing, beginEdit, endEdit, load, commit, save, addMedia, recoverLocal, ignoreRecovery,
     undo: () => history(undoStack, redoStack), redo: () => history(redoStack, undoStack) }
 }

@@ -14,6 +14,7 @@ import EditorLibrary from './EditorLibrary.vue'
 import EditorInspector from './EditorInspector.vue'
 import EditorPreview from './EditorPreview.vue'
 import EditorTimeline from './EditorTimeline.vue'
+import { patchClips, retimeClips } from './batchEdit'
 import { editorApi } from './api'
 import { useEditorDraft } from './useEditorDraft'
 import { activeAt, addMedia, addSubtitle, changeClip, cloneDocument, duplicateClip, frameTime, moveClip, orderedVideos, parseSrt, pasteClip, resizeClip, sourceKey, splitClip, totalDuration, trimClip, videoSourceEnd } from './model'
@@ -25,13 +26,24 @@ defineEmits<{ editScene: [sceneId?: number] }>()
 const auth = useAuthStore()
 const draft = useEditorDraft(() => `${auth.user?.id || 'anonymous'}:${auth.activeTeamId || 0}:${props.projectId}`)
 const { document: editDocument, media, selectedId, selected, loading, saving, error, saveError, conflict, dirty, recovery, undoStack, redoStack } = draft
+const selectedIds = ref<string[]>([])
+const selectedClips = computed(() => {
+  const indexed = new Map(editDocument.value?.clips.map(clip => [clip.id, clip]))
+  return selectedIds.value.map(id => indexed.get(id)).filter((clip): clip is EditClip => !!clip)
+})
+watch(selectedId, id => { if (!selectedIds.value.includes(id)) selectedIds.value = id ? [id] : [] }, { immediate: true })
+watch(editDocument, value => {
+  const valid = new Set(value?.clips.map(clip => clip.id))
+  const ids = selectedIds.value.filter(id => valid.has(id))
+  if (ids.length !== selectedIds.value.length) { selectedIds.value = ids; selectedId.value = ids[0] || '' }
+})
 const readOnly = computed(() => auth.enabled === true && !['admin', 'creator', 'super'].includes(auth.role || ''))
 const time = ref(0), playing = ref(false), muted = ref(false), inspectorOpen = ref(false), libraryOpen = ref(false)
 const browsing = ref<EditorMedia | null>(null), browseTime = ref(0)
 const copiedClip = ref<EditClip | null>(null)
 const preview = ref<InstanceType<typeof EditorPreview> | null>(null), timeline = ref<InstanceType<typeof EditorTimeline> | null>(null), previewStage = ref<HTMLElement | null>(null)
 const uploadInput = ref<HTMLInputElement | null>(null), srtInput = ref<HTMLInputElement | null>(null)
-const uploading = ref(false), uploadProgress = ref(0), capabilities = ref<EditorCapabilities | null>(null), recognizingSubtitles = ref(false)
+const uploading = ref(false), uploadProgress = ref(0), capabilities = ref<EditorCapabilities | null>(null), recognizingSubtitles = ref(false), splittingSubtitles = ref(false)
 const exports = ref<EditorExport[]>([]), exportOpen = ref(false), exporting = ref(false), exportError = ref('')
 const timelineHeight = ref(310), downloading = ref(false)
 let uploadKind: Exclude<ClipKind, 'subtitle'> = 'video', scope = 0, disposed = false, polling: ReturnType<typeof setTimeout> | undefined
@@ -52,13 +64,40 @@ const pendingExport = computed(() => exports.value.find(row => [1, 2, 6].include
 const missingClips = computed(() => editDocument.value?.clips.filter(clip => 'source' in clip && (!media.value.find(item => item.key === sourceKey(clip.source))?.url || media.value.find(item => item.key === sourceKey(clip.source))?.missing)) || [])
 const status = computed(() => saving.value ? tr('正在保存') : dirty.value ? tr('有未保存修改') : tr('已保存'))
 function showError(reason: unknown) { notice.error(reason instanceof Error ? reason.message : tr('剪辑操作失败')) }
+let propertyFrame = 0, pendingPatch: ClipPatch | null = null, pendingSpeed: number | null = null
+function flushProperties() {
+  cancelAnimationFrame(propertyFrame); propertyFrame = 0
+  const patch = pendingPatch, speed = pendingSpeed
+  pendingPatch = null; pendingSpeed = null
+  if (readOnly.value || !editDocument.value || disposed || !selectedClips.value.length) return
+  try {
+    let next = editDocument.value
+    if (patch) next = patchClips(next, selectedIds.value, patch)
+    if (speed !== null) next = retimeClips(next, selectedIds.value, speed, media.value)
+    if (next !== editDocument.value) draft.commit(next)
+  } catch (reason) { showError(reason) }
+}
+function beginProperties() { if (!readOnly.value) draft.beginEdit() }
+function endProperties() { flushProperties(); draft.endEdit() }
+function queueProperties() {
+  if (!draft.editing.value) { flushProperties(); return }
+  if (!propertyFrame) propertyFrame = requestAnimationFrame(flushProperties)
+}
+function selectMany(ids: string[]) {
+  endProperties()
+  const known = new Set(editDocument.value?.clips.map(clip => clip.id))
+  selectedIds.value = [...new Set(ids)].filter(id => known.has(id))
+  selectedId.value = selectedIds.value[0] || ''; browsing.value = null
+  if (selectedIds.value.length && innerWidth <= 1000) inspectorOpen.value = true
+}
 function action(fn: () => EditDocument | [EditDocument, string]) {
   if (readOnly.value || !editDocument.value) return
-  playing.value = false; browsing.value = null
+  endProperties(); playing.value = false; browsing.value = null
   try { const result = fn(); if (Array.isArray(result)) draft.commit(result[0], result[1]); else draft.commit(result); return true }
   catch (reason) { showError(reason); return false }
 }
 function select(id: string, seek = true) {
+  endProperties(); selectedIds.value = id ? [id] : []
   browsing.value = null
   selectedId.value = id
   const clip = editDocument.value?.clips.find(item => item.id === id)
@@ -68,13 +107,13 @@ function select(id: string, seek = true) {
 async function seekTo(value: number) { browsing.value = null; time.value = Math.min(duration.value, Math.max(0, value)); await nextTick(); await preview.value?.seek() }
 async function seekPreview(value: number) { previewTime.value = Math.min(previewDuration.value, Math.max(0, value)); await nextTick(); await preview.value?.seek() }
 function positionOverlay(id:string,patch:ClipPatch) { action(()=>changeClip(editDocument.value!,id,patch)) }
-function change(patch: ClipPatch) { if (selected.value && editDocument.value) action(() => changeClip(editDocument.value!, selected.value!.id, patch, selectedMedia.value)) }
-function trim(trimIn: number, trimOut: number, speed: number) { if (selected.value && selectedMedia.value) action(() => trimClip(editDocument.value!, selected.value!.id, trimIn, trimOut, speed, selectedMedia.value!)) }
+function change(patch: ClipPatch) { if (readOnly.value || !selectedClips.value.length) return; pendingPatch = { ...pendingPatch, ...patch }; queueProperties() }
+function trim(trimIn: number, trimOut: number, speed: number) { if (selected.value?.type === 'video') { pendingSpeed = speed; queueProperties() } else if (selected.value && selectedMedia.value) action(() => trimClip(editDocument.value!, selected.value!.id, trimIn, trimOut, speed, selectedMedia.value!)) }
 function move(id: string, start: number) { action(() => moveClip(editDocument.value!, id, start)) }
-function remove() { if (!selected.value) return; action(() => ({ ...cloneDocument(editDocument.value!), clips: editDocument.value!.clips.filter(c => c.id !== selectedId.value) })) ; selectedId.value = editDocument.value?.clips[0]?.id || '' }
-function duplicate() { action(() => duplicateClip(editDocument.value!, selectedId.value)) }
+function remove() { if (!selected.value) return; action(() => ({ ...cloneDocument(editDocument.value!), clips: editDocument.value!.clips.filter(c => !selectedIds.value.includes(c.id)) })) ; selectedId.value = editDocument.value?.clips[0]?.id || '' }
+function duplicate() { if (selectedIds.value.length > 1) return; action(() => duplicateClip(editDocument.value!, selectedId.value)) }
 function copy() {
-  if (readOnly.value || !selected.value || selected.value.type === 'video' && selected.value.source.kind === 'missing') return
+  if (selectedIds.value.length > 1 || readOnly.value || !selected.value || selected.value.type === 'video' && selected.value.source.kind === 'missing') return
   copiedClip.value = JSON.parse(JSON.stringify(selected.value)) as EditClip
   notice.success(tr(copiedClip.value.type === 'audio' ? 'BGM 已复制，粘贴将接在片段末尾' : '片段已复制，移动播放头后粘贴'))
 }
@@ -92,7 +131,7 @@ function paste() {
   }
   if (action(() => pasteClip(editDocument.value!, clip, start)) && selected.value) void seekTo(selected.value.start + selected.value.duration)
 }
-function split() { action(() => splitClip(editDocument.value!, selectedId.value, time.value)) }
+function split() { if (selectedIds.value.length > 1) return; action(() => splitClip(editDocument.value!, selectedId.value, time.value)) }
 function edge(id: string, side: 'left' | 'right', delta: number) {
   const clip = editDocument.value?.clips.find(item => item.id === id)
   if (!clip || !editDocument.value) return
@@ -109,6 +148,7 @@ function chooseMedia(item: EditorMedia) {
 function subtitle() { action(() => addSubtitle(editDocument.value!, time.value)) }
 async function recognizeSubtitles() {
   if (readOnly.value || !editDocument.value || recognizingSubtitles.value) return
+  endProperties()
   const videos = editDocument.value.clips.filter(c => c.type === 'video')
   if (!videos.length) {
     showError(new Error(tr('时间线上没有可识别的视频素材')))
@@ -124,7 +164,7 @@ async function recognizeSubtitles() {
       return
     }
     if (res.data?.document) {
-      action(() => res.data.document)
+      if (!action(() => res.data.document)) return
       const count = res.data.subtitles_created || 0
       notice.success(tr('已识别生成 {p0} 条字幕', { p0: count }))
       const firstSub = res.data.document.clips.find(c => c.type === 'subtitle')
@@ -135,6 +175,21 @@ async function recognizeSubtitles() {
   } finally {
     if (version === scope) recognizingSubtitles.value = false
   }
+}
+async function splitLongSubtitles() {
+  if (readOnly.value || !editDocument.value || splittingSubtitles.value) return
+  endProperties()
+  const version = scope, snapshot = JSON.stringify(editDocument.value)
+  const ids = selectedClips.value.filter(clip => clip.type === 'subtitle').map(clip => clip.id)
+  splittingSubtitles.value = true
+  try {
+    const result = await editorApi.splitSubtitles(props.chapterId, cloneDocument(editDocument.value), ids.length ? ids : undefined)
+    if (version !== scope || disposed) return
+    if (JSON.stringify(editDocument.value) !== snapshot) { showError(new Error(tr('剪辑已修改，请重试拆分'))); return }
+    if (!action(() => result.data.document)) return
+    notice.success(tr('已拆分 {p0} 条长字幕', { p0: result.data.split_count }))
+  } catch (reason) { if (version === scope) showError(reason) }
+  finally { if (version === scope) splittingSubtitles.value = false }
 }
 function requestUpload(kind: Exclude<ClipKind, 'subtitle'>) {
   if (uploading.value || readOnly.value) return
@@ -199,6 +254,7 @@ function changeFps(fps: EditDocument['fps']) {
   })
 }
 async function load() {
+  endProperties(); selectedIds.value = []; splittingSubtitles.value = false
   recognizingSubtitles.value = false
   const version = ++scope; copiedClip.value = null; playing.value = false; time.value = 0; browsing.value = null; uploading.value = false; exportError.value = ''; clearTimeout(polling)
   await draft.load(props.chapterId)
@@ -248,6 +304,7 @@ function keys(event: KeyboardEvent) {
   }
   if (!readOnly.value && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && target?.closest('.editor-workspace') && !target.closest('[role=dialog]')) {
     const key = event.key.toLowerCase()
+    if (key === 'a' && target?.closest('.editor-timeline')) { event.preventDefault(); selectMany(editDocument.value?.clips.map(clip => clip.id) || []); return }
     if (((key === 'c' || key === 'd') && selected.value) || (key === 'v' && copiedClip.value)) {
       event.preventDefault()
       if (!event.repeat) { if (key === 'c') copy(); else if (key === 'v') paste(); else duplicate() }
@@ -277,8 +334,9 @@ watch(() => [props.projectId, props.chapterId, auth.activeTeamId], () => { if (p
 watch(time, () => { if (playing.value) timeline.value?.reveal() })
 watch(duration, value => { time.value = Math.min(time.value, value) })
 onMounted(() => window.addEventListener('keydown', keys))
-onBeforeUnmount(() => { disposed = true; ++scope; clearTimeout(polling); resizeCleanup?.(); window.removeEventListener('keydown', keys) })
-defineExpose({ flush: draft.save, openExport: () => { exportOpen.value = true }, dirty })
+onBeforeUnmount(() => { cancelAnimationFrame(propertyFrame); disposed = true; ++scope; clearTimeout(polling); resizeCleanup?.(); window.removeEventListener('keydown', keys) })
+async function flushDraft() { endProperties(); return draft.save() }
+defineExpose({ flush: flushDraft, openExport: () => { exportOpen.value = true }, dirty })
 function format(value: number) { return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(Math.floor(value % 60)).padStart(2, '0')}` }
 </script>
 
@@ -290,12 +348,12 @@ function format(value: number) { return `${String(Math.floor(value / 60)).padSta
       <div class="editor-statusbar"><span>{{ readOnly ? tr('只读预览') : status }}</span><div class="editor-canvas-settings"><label>{{ tr('比例') }}<AppSelect :model-value="aspect" :options="[...(aspect==='custom'?[{value:'custom',label:ratio}]:[]),...(['16:9','9:16','1:1','4:3','3:4','21:9'])]" :ariaLabel="tr('比例')" :disabled="readOnly" density="compact" @update:model-value="dimensions" /></label><label>{{ tr('画布尺寸') }}<AppSelect :model-value="String(Math.min(editDocument.width,editDocument.height))" :options="[...(!capabilities?.resolutions.includes(Math.min(editDocument.width,editDocument.height))?[Math.min(editDocument.width,editDocument.height)]:[]),...(capabilities?.resolutions||[])].map(value=>({value:String(value),label:`${value}P`}))" :ariaLabel="tr('画布尺寸')" :disabled="readOnly" density="compact" @update:model-value="dimensions(`${editDocument.width}:${editDocument.height}`,Number($event))" /></label><label>FPS<AppSelect :model-value="String(editDocument.fps)" :options="(capabilities?.fps||[24]).map(value=>({value:String(value),label:String(value)}))" ariaLabel="FPS" :disabled="readOnly" density="compact" @update:model-value="changeFps(Number($event) as EditDocument['fps'])" /></label><button class="editor-icon-btn" :disabled="readOnly || saving || conflict" :aria-label="tr('保存剪辑草稿')" @click="draft.save"><Save :size="15" /></button></div></div>
       <div v-if="saveError || recovery" class="editor-save-alert" role="alert"><span>{{ saveError || tr('发现尚未保存的本地剪辑草稿') }}</span><template v-if="recovery"><button @click="draft.recoverLocal">{{ tr('恢复本地修改') }}</button><button @click="draft.ignoreRecovery">{{ tr('使用已保存版本') }}</button></template><template v-else><button v-if="conflict" @click="load">{{ tr('重新读取并核对') }}</button><button v-else @click="draft.save">{{ tr('重试保存') }}</button></template></div>
       <div class="editor-editing-row">
-        <EditorLibrary :media="media" :selected-key="selectedMedia?.key" :read-only="readOnly" :busy="uploading" :progress="uploadProgress" :recognizing="recognizingSubtitles" @select="chooseMedia" @add="insert" @upload="requestUpload" @subtitle="subtitle" @srt="srtInput?.click()" @recognize="recognizeSubtitles" @library="libraryOpen = true" @library-add="item => libraryChosen([{ id: item.source.id }])" @publish="publishMedia" />
+        <EditorLibrary :media="media" :selected-key="selectedMedia?.key" :read-only="readOnly" :busy="uploading" :progress="uploadProgress" :recognizing="recognizingSubtitles" :splitting="splittingSubtitles" @select="chooseMedia" @add="insert" @upload="requestUpload" @subtitle="subtitle" @srt="srtInput?.click()" @recognize="recognizeSubtitles" @split-subtitles="splitLongSubtitles" @library="libraryOpen = true" @library-add="item => libraryChosen([{ id: item.source.id }])" @publish="publishMedia" />
         <section class="editor-preview-panel"><header class="editor-panel-heading video-stage-header"><h2>{{ browsing ? tr('素材预览') : tr('本集预览') }}</h2><span>{{ browsing?.name || activeVideo?.name }}</span><button class="editor-icon-btn" :aria-label="tr('全屏预览')" @click="previewStage?.requestFullscreen()"><Maximize2 :size="15" /></button></header><div ref="previewStage" class="editor-preview-area video-stage"><EditorPreview ref="preview" :document="previewDocument!" :media="media" v-model:time="previewTime" v-model:playing="playing" :muted="muted" :selected-id="selectedId" :read-only="readOnly" @position="positionOverlay" @select="id => select(id, false)" /></div><footer class="editor-transport"><span>{{ format(previewTime) }} <small>/ {{ format(previewDuration) }}</small></span><div><button class="editor-icon-btn" :aria-label="tr('上一个分镜')" @click="adjacent(-1)"><SkipBack :size="17" /></button><button class="editor-icon-btn" :aria-label="playing ? tr('暂停') : tr('播放')" @click="toggle"><Pause v-if="playing" :size="18" /><Play v-else :size="18" /></button><button class="editor-icon-btn" :aria-label="tr('下一个分镜')" @click="adjacent(1)"><SkipForward :size="17" /></button></div><div><button class="editor-icon-btn" :aria-label="muted ? tr('取消静音') : tr('静音')" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></button><button class="editor-btn secondary editor-mobile-only" @click="inspectorOpen = true"><SlidersHorizontal :size="14" />{{ tr('属性') }}</button></div></footer><div class="editor-playback-seek-row"><input class="editor-playback-seek" type="range" min="0" :max="previewDuration || 1" step=".04" :value="previewTime" :aria-label="tr('本集视频播放进度')" @input="seekPreview(Number(($event.target as HTMLInputElement).value))" /></div></section>
-        <EditorInspector :subtitle-styles="capabilities?.subtitle_styles || []" :clip="browsing ? null : selected" :browsing="browsing" :media="selectedMedia" :open="inspectorOpen" :read-only="readOnly" @close="inspectorOpen = false" @change="change" @trim="trim" />
+        <EditorInspector :subtitle-styles="capabilities?.subtitle_styles || []" :clip="browsing ? null : selected" :selection-count="selectedIds.length" :browsing="browsing" :media="selectedMedia" :open="inspectorOpen" :read-only="readOnly" @close="inspectorOpen = false" @edit-start="beginProperties" @edit-end="endProperties" @change="change" @trim="trim" />
       </div>
       <div class="editor-timeline-resizer" role="separator" tabindex="0" :aria-label="tr('调整时间线高度')" aria-orientation="horizontal" @pointerdown="resized" @keydown.up.prevent="timelineHeight = Math.min(480, timelineHeight + 20)" @keydown.down.prevent="timelineHeight = Math.max(230, timelineHeight - 20)"><GripHorizontal :size="15" /></div>
-      <EditorTimeline ref="timeline" :document="editDocument" :media="media" :time="time" :selected-id="selectedId" :read-only="readOnly" :can-undo="!!undoStack.length" :can-redo="!!redoStack.length" @select="select" @seek="seekTo" @move="move" @edge="edge" @add="add" @split="split" @remove="remove" @duplicate="duplicate" @undo="playing = false; draft.undo()" @redo="playing = false; draft.redo()" />
+      <EditorTimeline ref="timeline" :document="editDocument" :media="media" :time="time" :selected-id="selectedId" :selected-ids="selectedIds" :read-only="readOnly" :can-undo="!!undoStack.length" :can-redo="!!redoStack.length" @select="select" @select-many="selectMany" @seek="seekTo" @move="move" @edge="edge" @add="add" @split="split" @remove="remove" @duplicate="duplicate" @undo="playing = false; draft.undo()" @redo="playing = false; draft.redo()" />
     </template>
     <input ref="uploadInput" type="file" multiple class="editor-hidden" @change="uploaded" /><input ref="srtInput" type="file" accept=".srt" class="editor-hidden" @change="srtChanged" />
     <ResourceLibraryPicker :open="libraryOpen" @close="libraryOpen = false" @choose="libraryChosen" />
