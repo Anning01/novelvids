@@ -234,6 +234,13 @@ class SkillExecution:
                 "aspect_ratio": project.aspect_ratio,
                 "storyboard_strategy": project.storyboard_strategy,
             }
+            if skill in ("assets", "image"):
+                styles = json.loads(self.snapshot.read("styles"))
+                selected_style = styles.get(project.style_key, {})
+                project_facts["image_style"] = (
+                    (project.custom_style_prompt or "").strip()
+                    or selected_style.get("image", "")
+                )
             request_facts = {
                 "input": facts,
                 "project": project_facts,

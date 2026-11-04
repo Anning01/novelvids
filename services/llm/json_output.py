@@ -27,6 +27,8 @@ class JsonCompletionError(ValueError):
 
 
 def completion_usage(completion: Any) -> dict[str, int]:
+    from services.llm.usage import completion_cache_usage
+
     usage = getattr(completion, "usage", None)
     if usage is None:
         return {}
@@ -34,6 +36,7 @@ def completion_usage(completion: Any) -> dict[str, int]:
         "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
         "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
         "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+        **completion_cache_usage(usage),
     }
 
 

@@ -34,7 +34,7 @@ class Person(BaseModel):
         description="资产形态",
     )
     description: str = Field(default="", description="任务指定语言的剧情语义说明")
-    base_traits: str = Field(description="目标提示词语言的稳定视觉描述")
+    base_traits: str = Field(description="任务语言的完整生图提示词：具体稳定体貌、五官发型、服饰材质配色、群像个体差异（如适用）、项目风格与参考图版式；不能只给身份概述")
 
     @field_validator("label", mode="before")
     @classmethod
@@ -58,14 +58,14 @@ class Scene(BaseModel):
     name: str = Field(description="场景名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
     description: str = Field(default="", description="任务指定语言的剧情语义说明")
-    base_traits: str = Field(description="目标提示词语言的稳定场景视觉描述")
+    base_traits: str = Field(description="任务语言的完整场景生图提示词：空间规模拓扑、分层位置关系、固定陈设、材质光照、项目风格与四格透视版式")
 
 
 class Item(BaseModel):
     name: str = Field(description="道具名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
     description: str = Field(default="", description="任务指定语言的剧情语义说明")
-    base_traits: str = Field(description="目标提示词语言的稳定道具视觉描述")
+    base_traits: str = Field(description="任务语言的完整道具生图提示词：轮廓比例、材质配色、部件结构、纹样磨损、识别特征、项目风格与参考图背景")
 
 
 class AssetExtractionResult(BaseModel):

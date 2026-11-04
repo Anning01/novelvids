@@ -68,6 +68,9 @@ def snapshot_skills() -> dict:
 
 def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
     contract = ""
+    if skill == "assets":
+        # Extraction writes final image prompts, so layout rules cannot be optional tool reads.
+        contract = "\n" + snapshot.read("image")
     if skill == "storyboard" and "storyboard_contract" in snapshot.contents:
         from prompts.labels import prompt_label
         specification = json.loads(snapshot.read("storyboard_contract"))

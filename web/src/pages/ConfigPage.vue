@@ -149,7 +149,17 @@ function toggleEnhancementResolution(value: string, shortSide: number, enabled: 
   }
 }
 const asrPrice = ref(0)
-const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
+const textPricing = ref({ input_price_per_1m: 0, cache_input_price_per_1m: '' as number | '', output_price_per_1m: 0 })
+const selectedTextPricingPreset = computed(() => generationCapabilities.value.text_pricing?.[form.value.model.trim().toLowerCase()])
+function applyTextPricingPreset() {
+  const preset = selectedTextPricingPreset.value
+  if (!preset) return
+  textPricing.value = {
+    input_price_per_1m: preset.input_price_per_1m ?? 0,
+    cache_input_price_per_1m: preset.cache_input_price_per_1m ?? '',
+    output_price_per_1m: preset.output_price_per_1m ?? 0,
+  }
+}
 const tierPrices = ref<Record<string, number>>({})
 const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
 const videoRefPrices = ref<Record<string, number>>({})
@@ -262,7 +272,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   const asrPreset = generationCapabilities.value.audio_recognition
   asrPrice.value = asrPreset?.pricing.price_per_minute ?? 0
   if (category.id === 'asr' && asrPreset) Object.assign(form.value, { base_url: asrPreset.base_url, model: asrPreset.model, api_protocol: asrPreset.api_protocol })
-  textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
+  textPricing.value = { input_price_per_1m: 0, cache_input_price_per_1m: '', output_price_per_1m: 0 }
   tierPrices.value = category.id === 'llm' || category.id === 'enhancement'
     ? {}
     : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
@@ -308,8 +318,8 @@ function openEdit(item: AiModelConfig) {
     max_tokens: item.max_tokens ?? '',
   }
   textPricing.value = item.pricing?.type === 'text'
-    ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
-    : { input_price_per_1m: 0, output_price_per_1m: 0 }
+    ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, cache_input_price_per_1m: item.pricing.cache_input_price_per_1m ?? '', output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
+    : { input_price_per_1m: 0, cache_input_price_per_1m: '', output_price_per_1m: 0 }
   asrPrice.value = item.pricing?.price_per_minute ?? 0
   tierPrices.value = item.pricing?.prices ? { ...item.pricing.prices } : {}
   inputImagePricing.value = item.pricing?.input_image
@@ -393,6 +403,9 @@ async function saveConfig() {
         currency: 'CNY',
         input_price_per_1m: Number(textPricing.value.input_price_per_1m) || 0,
         output_price_per_1m: Number(textPricing.value.output_price_per_1m) || 0,
+        ...(textPricing.value.cache_input_price_per_1m !== ''
+          ? { cache_input_price_per_1m: Number(textPricing.value.cache_input_price_per_1m) }
+          : {}),
       }
     } else if (selectedCategoryId.value === 'image') {
       pricing = {
@@ -745,10 +758,14 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
         <section v-if="selectedCategoryId === 'asr'" class="pricing-editor"><span class="pricing-title">{{ tr('语音识别费用（元 / 分钟）') }}</span><div class="pricing-grid"><label><span>{{ tr('每分钟单价') }}</span><input v-model.number="asrPrice" aria-label="ASR price per minute" type="number" min="0" step="0.001" /></label></div></section>
         <section v-else-if="selectedCategoryId === 'llm'" class="pricing-editor">
           <span class="pricing-title">{{ tr('费用设置（元 / 百万 token）') }}</span>
+          <AppButton v-if="selectedTextPricingPreset" variant="secondary" size="sm" type="button" @click="applyTextPricingPreset">{{ tr('填入官方基准价') }}</AppButton>
           <div class="pricing-grid">
-            <label><span>{{ tr('输入单价') }}</span><input v-model.number="textPricing.input_price_per_1m" type="number" min="0" step="0.01" /></label>
-            <label><span>{{ tr('输出单价') }}</span><input v-model.number="textPricing.output_price_per_1m" type="number" min="0" step="0.01" /></label>
+            <label><span>{{ tr('输入单价') }}</span><input v-model.number="textPricing.input_price_per_1m" type="number" min="0" step="any" required /></label>
+            <label><span>{{ tr('缓存命中输入单价（可选）') }}</span><input v-model.number="textPricing.cache_input_price_per_1m" type="number" min="0" step="any" aria-describedby="cache-price-hint" /></label>
+            <label><span>{{ tr('输出单价') }}</span><input v-model.number="textPricing.output_price_per_1m" type="number" min="0" step="any" required /></label>
           </div>
+          <small id="cache-price-hint">{{ tr('留空按普通输入价计费，填 0 表示缓存命中免费；按接口实际返回的命中 token 计算。') }}</small>
+          <small v-if="selectedTextPricingPreset">{{ tr('基准价由后台提供，DeepSeek 固定使用高峰价；填入基准价不改变收费倍率。') }}</small>
         </section>
         <section v-else-if="selectedCategoryId === 'image' && pricingTierOptions.length" class="pricing-editor">
           <span class="pricing-title">{{ tr('输出图费用（元 / 张）') }}</span>
@@ -794,9 +811,9 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
         </section>
 
         <section class="pricing-editor">
-          <span class="pricing-title">{{ tr('折扣设置（1=无折扣，0.9=9折，大于 1=加价倍数）') }}</span>
+          <span class="pricing-title">{{ tr('收费倍率（1=原价，0.9=9折，大于 1=加价倍数）') }}</span>
           <div class="pricing-grid">
-            <label><span>{{ tr('折扣倍数') }}</span><input v-model.number="discountPricing.discount" type="number" min="0.01" step="0.01" /></label>
+            <label><span>{{ tr('收费倍率') }}</span><input v-model.number="discountPricing.discount" type="number" min="0.01" step="0.01" required /></label>
             <label><span>{{ tr('折扣描述（可选）') }}</span><input v-model="discountPricing.description" type="text" :placeholder="tr('例如：限时9折')" /></label>
           </div>
         </section>

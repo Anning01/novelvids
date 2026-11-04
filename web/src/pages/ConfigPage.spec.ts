@@ -53,6 +53,62 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     vi.restoreAllMocks()
   })
 
+  it.each(['light', 'dark'])('保留缓存价并独立调整倍率，官方价使用后台配置（%s）', async (theme) => {
+    document.documentElement.dataset.theme = theme
+    baseMocks()
+    vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: {}, video: {}, text_pricing: {
+      'deepseek-flash': { type: 'text', currency: 'CNY', input_price_per_1m: 2, cache_input_price_per_1m: 0.04, output_price_per_1m: 8 },
+    } } } as never)
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{
+      id: 1, name: 'DeepSeek', task_type: 7, task_types: [7], model: 'deepseek-flash', base_url: 'https://test.invalid',
+      api_key: 'test', api_protocol: 'openai_compatible', concurrency: 1, is_active: false,
+      pricing: { type: 'text', currency: 'CNY', input_price_per_1m: 12, output_price_per_1m: 24, cache_input_price_per_1m: 0.15, discount: 1.5 },
+    }], pagination: { total: 1, page: 1, page_size: 100, pages: 1 } } } as never)
+    const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+    const wrapper = mountPage(createPinia())
+    await flushPromises()
+    await wrapper.get('[aria-label="编辑配置"]').trigger('click')
+    const cache = wrapper.get<HTMLInputElement>('[aria-describedby="cache-price-hint"]')
+    expect(cache.element.value).toBe('0.15')
+    expect(wrapper.get('#cache-price-hint').text()).toContain('填 0')
+    await wrapper.findAll('button').find(button => button.text() === '填入官方基准价')!.trigger('click')
+    expect(cache.element.value).toBe('0.04')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(1, expect.objectContaining({ pricing: expect.objectContaining({
+      input_price_per_1m: 2, cache_input_price_per_1m: 0.04, output_price_per_1m: 8, discount: 1.5,
+    }) }))
+    wrapper.unmount()
+    delete document.documentElement.dataset.theme
+  })
+
+  it.each(['', '0', '0.001'])('任意文本模型保存可选缓存价 %s 并显示失败/加载反馈', async (value) => {
+    baseMocks()
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } } } as never)
+    let rejectSave: (error: Error) => void = () => {}
+    const create = vi.spyOn(api, 'createConfig').mockImplementation(() => new Promise((_resolve, reject) => { rejectSave = reject }))
+    const wrapper = mountPage(createPinia())
+    await flushPromises()
+    await wrapper.get('.model-config-section button').trigger('click')
+    await wrapper.get('input[name="model-config-name"]').setValue('Other model')
+    await wrapper.get('input[name="model-service-base-url"]').setValue('https://test.invalid')
+    await wrapper.get('input[name="model-service-api-key"]').setValue('test')
+    await wrapper.get('input[name="model-id"]').setValue('another-provider-model')
+    expect(wrapper.text()).not.toContain('填入官方基准价')
+    await wrapper.get('[aria-describedby="cache-price-hint"]').setValue(value)
+    await wrapper.get('form.model-modal').trigger('submit')
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    const saved = create.mock.calls[0]![0].pricing!
+    if (value === '') expect(saved).not.toHaveProperty('cache_input_price_per_1m')
+    else expect(saved.cache_input_price_per_1m).toBe(Number(value))
+    rejectSave(new Error('Save failed'))
+    await flushPromises()
+    expect(notice.error).toHaveBeenCalledWith('Save failed')
+    expect(wrapper.find('form.model-modal').exists()).toBe(true)
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('creates MediaKit processing configuration with server-provided minute prices', async () => {
     baseMocks()
     vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: {}, video: {}, media_processing: {

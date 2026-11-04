@@ -12,6 +12,7 @@ from schemas.scene import SceneEntity, Storyboard
 from services.llm.json_output import (
     JsonCompletionTruncatedError,
     create_json_completion,
+    completion_usage,
 )
 from services.storyboard.chunking import NarrativeChunker
 from services.storyboard.strategies import storyboard_strategy_factory
@@ -25,14 +26,7 @@ def _message_characters(messages: list[dict[str, str]]) -> int:
 
 
 def _usage_values(completion: Any) -> dict[str, int]:
-    usage = getattr(completion, "usage", None)
-    if usage is None:
-        return {}
-    return {
-        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
-        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
-        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
-    }
+    return completion_usage(completion)
 
 
 def _aggregate_metadata(completions: list[Any]) -> dict[str, Any]:

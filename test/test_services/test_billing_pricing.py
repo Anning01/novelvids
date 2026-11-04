@@ -65,6 +65,16 @@ def test_compute_text_cost_missing_pricing_is_zero():
     assert compute_text_cost({}, {"type": "image", "prices": {}}) == Decimal("0")
 
 
+@pytest.mark.parametrize('cache_price,expected', [(None, '0.560000'), (0, '0.160000'), (0.04, '0.168000')])
+def test_cache_price_optional_or_free_and_multiplier_applies_to_all_tokens(cache_price, expected):
+    pricing = {**TEXT_PRICING, 'input_price_per_1m': 2, 'output_price_per_1m': 8, 'discount': 2}
+    if cache_price is not None:
+        pricing['cache_input_price_per_1m'] = cache_price
+    # 100K input (all cached), 10K output; missing cache price uses normal input price.
+    assert compute_text_cost({'input_tokens': 100000, 'cache_read_tokens': 100000,
+                              'output_tokens': 10000}, pricing) == Decimal(expected)
+
+
 def test_compute_image_cost_multiplies_count_by_tier():
     assert compute_image_cost(3, "1K", IMAGE_PRICING) == Decimal("0.300000")
     assert compute_image_cost(1, "2K", IMAGE_PRICING) == Decimal("0.200000")

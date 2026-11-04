@@ -217,6 +217,7 @@ export interface ModelPricing {
   type: 'text' | 'image' | 'video' | 'media_processing' | 'asr'
   currency: string
   input_price_per_1m?: number
+  cache_input_price_per_1m?: number
   output_price_per_1m?: number
   price_per_minute?: number
   prices?: Record<string, number>
@@ -228,6 +229,7 @@ export interface ModelPricing {
   discount_description?: string
 }
 export interface GenerationCapabilities {
+  text_pricing?: Record<string, ModelPricing>
   audio_recognition?: { base_url: string; model: string; api_protocol: ImageApiProtocol; pricing: ModelPricing }
   media_processing?: { base_url: string; model: string; api_protocol: ImageApiProtocol; processing_options: Record<string, unknown>; pricing: ModelPricing; resolutions?: Array<{ value: string; short_side: number }> }
   image: Record<string, string[]>

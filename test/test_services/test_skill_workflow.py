@@ -260,7 +260,8 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
 
 
 @pytest.mark.asyncio
-async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result():
+@pytest.mark.parametrize("language,custom_style", [("zh", ""), ("en", "Custom ink rendering")])
+async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result(language, custom_style):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.models.function import FunctionModel
@@ -268,9 +269,26 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     from models.asset import Asset
 
     novel, chapter, assistant = await enabled_project()
+    novel.style_key = "realistic-general"
+    novel.custom_style_prompt = custom_style
+    await novel.save()
+    from models.config import GeneralConfig
+    await GeneralConfig.create(id=1, prompt_language=language)
+    snapshot = snapshot_skills()
+    snapshot["contents"]["image"] = "Frozen mandatory image layout rules"
+    snapshot["contents"]["styles"] = '{"realistic-general":{"image":"Frozen project rendering"}}'
 
     def respond(messages, info):
-        assert "任务语言 language=" in info.instructions
+        import json
+        from pydantic_ai.messages import UserPromptPart
+        assert f"任务语言 language={language}" in info.instructions
+        assert "Frozen mandatory image layout rules" in info.instructions
+        assert snapshot["contents"]["assets"] in info.instructions
+        facts = next(json.loads(part.content)["untrusted_task_facts"]
+                     for message in messages for part in message.parts
+                     if isinstance(part, UserPromptPart))
+        assert facts["project"]["image_style"] == (custom_style or "Frozen project rendering")
+        assert facts["project"]["aspect_ratio"] == novel.aspect_ratio
         tool = info.output_tools[0]
         return ModelResponse(
             parts=[
@@ -297,6 +315,8 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     model.client = AsyncMock()
     with patch("services.creation_agent.handler.configured_model", return_value=model):
         task = await chapter_controller.extract(chapter.id)
+        task.request_params["skill_snapshot"] = snapshot
+        await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
