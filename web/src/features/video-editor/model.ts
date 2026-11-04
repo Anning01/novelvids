@@ -128,6 +128,22 @@ export function trimClip(value: EditDocument, id: string, trimIn: number, trimOu
   return changeClip(next, id, { trim_in: trimIn, duration, ...(old.type === 'video' ? { speed } : {}) }, media)
 }
 
+export function snapAudioStart(clip: AudioClip, start: number, clips: readonly EditClip[], tolerance: number): number {
+  let snapped = start
+  let nearest = tolerance
+  for (const other of clips) {
+    if (other.type !== 'audio' || other.id === clip.id) continue
+    for (const edge of [other.start + other.duration, other.start - clip.duration]) {
+      const distance = Math.abs(edge - start)
+      if (edge >= 0 && distance <= nearest) {
+        snapped = edge
+        nearest = distance
+      }
+    }
+  }
+  return snapped
+}
+
 export function moveClip(value: EditDocument, id: string, start: number): EditDocument {
   return changeClip(value, id, { start: Math.max(0, frameTime(start, value.fps)) })
 }

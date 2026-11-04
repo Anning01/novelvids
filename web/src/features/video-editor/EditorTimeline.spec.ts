@@ -2,12 +2,13 @@ import { mount } from '@vue/test-utils'
 import { expect, it, vi } from 'vitest'
 import EditorTimeline from './EditorTimeline.vue'
 import { editorFixture } from './fixtures'
+import type { AudioClip } from './types'
 
 function render(readOnly = false) {
   const fixture = editorFixture()
   const wrapper = mount(EditorTimeline, { props: { document: fixture.document, media: [], time: 2, selectedId: 'v1', readOnly, canUndo: false, canRedo: false } })
   const viewport = wrapper.get('.editor-timeline-scroll').element
-  vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect)
+  vi.spyOn(wrapper.get('.editor-tracks-canvas').element, 'getBoundingClientRect').mockImplementation(() => ({ left: 100 - viewport.scrollLeft } as DOMRect))
   viewport.scrollLeft = 24
   return wrapper
 }
@@ -98,4 +99,50 @@ it('accounts for timeline scrolling during a drag and cancels without a document
   expect(wrapper.emitted('move')).toBeUndefined()
   window.dispatchEvent(pointer('pointerup',124))
   expect(wrapper.emitted('move')).toBeUndefined()
+})
+
+it.each(['light', 'dark'])('shows overlapping BGM on separate selectable rows in the shared scroll area (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const wrapper = render()
+  const documentValue = editorFixture().document
+  const music: AudioClip = { id: 'music', type: 'audio', name: 'Music', start: 0, duration: 4,
+    source: { kind: 'asset', id: 9 }, trim_in: 0, volume: 1, fade_in: 0, fade_out: 0, loop: false }
+  documentValue.clips.push(music, { ...music, id: 'second', name: 'Second', start: 1 },
+    { ...music, id: 'continued', name: 'Continued', start: 4 })
+  const scroll = wrapper.get<HTMLElement>('.editor-timeline-scroll')
+  Object.defineProperties(scroll.element, { clientWidth: { value: 300 }, clientHeight: { value: 160 } })
+  vi.spyOn(scroll.element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 100 } as DOMRect)
+  await wrapper.setProps({ document: documentValue })
+  expect(scroll.findAll('.editor-track-name strong').map(label => label.text())).toEqual(['贴纸', '字幕', '视频', 'BGM 1', 'BGM 2'])
+  const [first, second, continued] = scroll.findAll<HTMLButtonElement>('.clip-audio')
+  expect(first?.element.style.top).toBe('4px')
+  expect(second?.element.style.top).toBe('52px')
+  expect(continued?.element.style.top).toBe('4px')
+  vi.spyOn(second!.element, 'getBoundingClientRect').mockReturnValue({ left: 125, right: 220, top: 280, bottom: 324, width: 95, height: 44 } as DOMRect)
+  await second!.trigger('click')
+  expect(wrapper.emitted('select')).toEqual([['second']])
+  await wrapper.setProps({ selectedId: 'second' })
+  expect(scroll.element.scrollTop).toBe(64)
+})
+
+it('snaps BGM edges during the drag and shows another row only for intentional overlap', async () => {
+  const wrapper = render()
+  const documentValue = editorFixture().document
+  const audio: AudioClip = { id: 'first', type: 'audio', name: 'First', start: 0, duration: 4,
+    source: { kind: 'asset', id: 1 }, trim_in: 0, volume: 1, fade_in: 0, fade_out: 0, loop: false }
+  documentValue.clips.push(audio, { ...audio, id: 'second', name: 'Second', start: 5 })
+  await wrapper.setProps({ document: documentValue, selectedId: 'second' })
+  await wrapper.get('input[type=range]').setValue(24)
+  const second = wrapper.get<HTMLButtonElement>('[aria-label="选择BGM：Second"]')
+  second.element.dispatchEvent(pointer('pointerdown', 200))
+  window.dispatchEvent(pointer('pointermove', 172)); await wrapper.vm.$nextTick()
+  expect(second.element.style.transform).toBe('translateX(-24px)')
+  expect(wrapper.text()).not.toContain('BGM 2')
+  window.dispatchEvent(pointer('pointermove', 160)); await wrapper.vm.$nextTick()
+  expect(second.element.style.top).toBe('52px')
+  expect(wrapper.text()).toContain('BGM 2')
+  window.dispatchEvent(pointer('pointermove', 180)); await wrapper.vm.$nextTick()
+  expect(second.element.style.top).toBe('4px')
+  window.dispatchEvent(pointer('pointerup', 180))
+  expect(wrapper.emitted('move')).toEqual([['second', 4]])
 })

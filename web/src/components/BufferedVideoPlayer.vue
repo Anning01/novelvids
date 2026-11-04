@@ -24,6 +24,7 @@ const emit = defineEmits<{
   buffering: [value: boolean]
 }>()
 const sources = ref(['', ''])
+const nativeSources = ref(new Set<string>())
 const activeSlot = ref(0)
 const visibleSlot = ref(0)
 const buffering = ref(false)
@@ -35,7 +36,13 @@ let wantsPlayback = false
 let disposed = false
 
 function setElement(index: number, element: unknown) {
+  const previous = elements[index]
+  if (previous && previous !== element) gain.release(previous)
   elements[index] = element instanceof HTMLVideoElement ? element : null
+}
+
+function usesCors(index: number) {
+  return props.audioProcessing && !nativeSources.value.has(sources.value[index] ?? '')
 }
 
 function preloadNext() {
@@ -60,7 +67,7 @@ function configure() {
     if (!element) return
     element.muted = index !== activeSlot.value || props.muted
     element.playbackRate = Math.min(16, Math.max(.1, props.playbackRate))
-    if (props.audioProcessing) gain.set(element, props.volume)
+    if (usesCors(index) && element.crossOrigin === 'anonymous') gain.set(element, props.volume)
     else element.volume = Math.min(1, Math.max(0, props.volume))
   })
 }
@@ -119,11 +126,21 @@ async function start(startTime = 0, autoplay = true) {
   buffering.value = autoplay
   await nextTick()
   const index = activeSlot.value
-  const video = elements[index]
+  let video = elements[index]
   if (!video || !props.src || request.signal.aborted) return
   try {
-    if (video.error) video.load()
-    await waitForMetadata(video, request.signal)
+    if (video.error && !usesCors(index)) video.load()
+    try {
+      await waitForMetadata(video, request.signal)
+    } catch (error) {
+      if (request.signal.aborted || !usesCors(index)) throw error
+      // Some media hosts allow playback but reject cross-origin audio processing.
+      nativeSources.value.add(props.src)
+      await nextTick()
+      video = elements[index]
+      if (!video || request.signal.aborted) return
+      await waitForMetadata(video, request.signal)
+    }
     if (request.signal.aborted) return
     configure()
     const target = Math.min(Math.max(0, startTime), Number.isFinite(video.duration) ? video.duration : startTime)
@@ -136,6 +153,8 @@ async function start(startTime = 0, autoplay = true) {
   } catch (error) {
     if (command === request) { buffering.value = false; wantsPlayback = false }
     throw error
+  } finally {
+    if (command === request) command = null
   }
 }
 
@@ -147,6 +166,14 @@ function onPause(index: number) {
 }
 function onError(index: number) {
   if (index !== activeSlot.value || !props.src) return
+  if (usesCors(index)) {
+    if (!command) {
+      const time = elements[index]?.currentTime ?? 0
+      nativeSources.value.add(props.src)
+      void start(time, wantsPlayback).catch(() => {})
+    }
+    return
+  }
   wantsPlayback = false
   buffering.value = false
   emit('error')
@@ -170,10 +197,11 @@ defineExpose({ start, pause, seekFrame: (time: number) => { const element = elem
 
 <template>
   <div class="buffered-video-player" :aria-busy="buffering || undefined">
-    <video v-for="index in [0, 1]" :key="index" :ref="element => setElement(index, element)"
+    <video v-for="index in [0, 1]" :key="`${index}:${usesCors(index)}`" :ref="element => setElement(index, element)"
+      :crossorigin="usesCors(index) ? 'anonymous' : undefined"
       :src="sources[index] || undefined" :poster="index === activeSlot ? poster || undefined : undefined"
       :class="{ 'is-visible': Boolean(src) && index === visibleSlot }"
-      :crossorigin="audioProcessing ? 'anonymous' : undefined" :muted="index !== activeSlot || muted" preload="auto" playsinline
+      :muted="index !== activeSlot || muted" preload="auto" playsinline
       :aria-label="index === activeSlot ? title : undefined" :aria-hidden="index !== activeSlot || !src"
       tabindex="-1" @loadedmetadata="configure" @loadeddata="present(index)" @seeked="present(index)"
       @playing="present(index)" @waiting="onWaiting(index)" @stalled="onWaiting(index)" @error="onError(index)"

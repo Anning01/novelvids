@@ -150,14 +150,14 @@ function musicFixture() {
   vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
   return music
 }
-it.each(['metaKey','ctrlKey'] as const)('copies a snapshot and pastes music repeatedly at the playhead with undo and redo (%s)',async modifier=>{
+it.each(['metaKey','ctrlKey'] as const)('copies a snapshot and appends music despite the playhead being inside the source, with undo and redo (%s)',async modifier=>{
   const music=musicFixture()
   const wrapper=render(false,document.body);await flushPromises()
   try {
     await wrapper.get('.clip-audio').trigger('click')
     await wrapper.get('.clip-audio').trigger('keydown',{key:'c',[modifier]:true})
     wrapper.findComponent(EditorInspector).vm.$emit('change',{volume:.2});await flushPromises()
-    wrapper.findComponent(EditorTimeline).vm.$emit('seek',4);await flushPromises()
+    wrapper.findComponent(EditorTimeline).vm.$emit('seek',1);await flushPromises()
     await wrapper.get('.clip-audio').trigger('keydown',{key:'v',[modifier]:true})
     const timeline=wrapper.findComponent(EditorTimeline)
     let clips=timeline.props('document').clips.filter(clip=>clip.type==='audio')
@@ -165,6 +165,7 @@ it.each(['metaKey','ctrlKey'] as const)('copies a snapshot and pastes music repe
     expect(clips[1]).toEqual({...music,id:expect.any(String),start:4})
     expect(clips[0].volume).toBe(.2)
     expect(timeline.props('time')).toBe(8)
+    expect(wrapper.findAll<HTMLButtonElement>('.clip-audio').map(clip => clip.element.style.top)).toEqual(['4px', '4px'])
     await wrapper.get('.clip-audio.selected').trigger('keydown',{key:'v',[modifier]:true})
     clips=timeline.props('document').clips.filter(clip=>clip.type==='audio')
     expect(clips.map(clip=>clip.start)).toEqual([0,4,8])
