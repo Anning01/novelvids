@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 import VideoEnhanceButton from '@/features/video-export/VideoEnhanceButton.vue'
+import VideoLastFrameButton from '@/components/VideoLastFrameButton.vue'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -48,7 +49,8 @@ import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
-import { api, mediaUrl, sleep } from '@/api'
+import { api, ApiRequestError, mediaUrl, sleep, retryableStatusError } from '@/api'
+import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { appConfirm } from '@/shared/confirmDialog'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
@@ -59,14 +61,17 @@ import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/
 import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
 import { readVideoReferenceMedia as readReferenceMedia, buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
+import { readAutoEnhancement, isVideoGenerationActive, autoEnhancementLabel, preserveAutoEnhancement, autoEnhancementAvailable, currentAutoEnhancement, enhancementEstimate } from '@/shared/autoEnhancement'
+import { money } from '@/features/billing/recordDisplay'
+import { exportApi, type EnhancementModel } from '@/features/video-export/api'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
-import { injectLastFrameContinuityInstruction } from '@/shared/lastFrameContinuity'
+import { injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { Asset, AssetVariant, AudioReference, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia } from '@/types'
+import type { Asset, AssetVariant, AudioReference, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia, AutoEnhancement, VideoDefaults } from '@/types'
 
 interface ProjectView extends Novel {
   aspectRatio: string
@@ -90,6 +95,7 @@ interface SceneDraft {
   videoResolution: string
   videoAspectRatio: string
   returnLastFrame: boolean
+  autoEnhancement: AutoEnhancement | null
 }
 
 interface SceneVideoGenerationSettings {
@@ -97,6 +103,7 @@ interface SceneVideoGenerationSettings {
   resolution: string
   aspectRatio: string
   returnLastFrame: boolean
+  autoEnhancement?: AutoEnhancement | null
 }
 
 interface AssetVoicePickerTarget {
@@ -124,6 +131,9 @@ const activeSceneId = ref(0)
 const chapterToolbarHeight = ref(104)
 const videoModels = ref<VideoGenerationModel[]>([])
 const selectedVideoModel = ref('')
+const enhancementModels = ref<EnhancementModel[]>([])
+const batchParametersOnly = ref(false)
+const savingVideoDefaults = ref(false)
 const persistedVideoModelId = ref<number | null>(null)
 let videoModelPreferenceSaveQueue: Promise<void> = Promise.resolve()
 const videos = ref<Record<number, VideoResult[]>>({})
@@ -135,6 +145,10 @@ const refreshingVideoHistorySceneIds = ref<Set<number>>(new Set())
 const generationErrors = ref<Record<number, string>>({})
 const disconnectedStoryboardTasks = ref<Record<number, string>>({})
 const videoGenerationErrors = ref<Record<number, string>>({})
+const videoSyncErrors = ref<Record<number, { message: string; stopped: boolean }>>({})
+const videoPolls = new Map<number, { controller: AbortController; promise: Promise<VideoResult | null> }>()
+const submittingVideoSceneIds = new Set<number>()
+const focusedVideoSyncs = new Set<number>()
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
 const focusedPromptSceneId = ref(0)
 const highlightedReferenceKey = ref('')
@@ -185,7 +199,7 @@ let sceneScrollFrame = 0
 let sceneScrollUnlockTimer: ReturnType<typeof setTimeout> | undefined
 let programmaticSceneId = 0
 const sceneAutoSaveTimers = new Map<number, ReturnType<typeof setTimeout>>()
-const sceneSaveQueues = new Map<number, Promise<void>>()
+const sceneSaveQueues = new Map<number, Promise<boolean>>()
 
 const isAgent = computed(() => project.value?.creationMode === 'agent')
 const workspaceView = computed<'workflow' | 'storyboard'>(() => route.query.view === 'workflow' ? 'workflow' : 'storyboard')
@@ -376,6 +390,7 @@ async function persistVideoModelPreference(modelId: number) {
 
 function makeSceneDraft(scene: Scene): SceneDraft {
   const metadata = scene?.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}
+  const defaults = project.value?.video_generation_defaults
   // 资产引用统一以持久化的 scene.assets / asset_ids 为准，与画布工作流共用同一份数据。
   const linkedAssetIds = scene.assets?.map(item => item.id) ?? scene.asset_ids ?? []
   return {
@@ -389,9 +404,10 @@ function makeSceneDraft(scene: Scene): SceneDraft {
     firstFrameUrl: typeof metadata.first_frame_url === 'string' ? metadata.first_frame_url : '',
     lastFrameUrl: typeof metadata.last_frame_url === 'string' ? metadata.last_frame_url : '',
     referenceMedia: readReferenceMedia(metadata.video_reference_media),
-    videoResolution: typeof metadata.video_resolution === 'string' ? metadata.video_resolution : '',
-    videoAspectRatio: typeof metadata.video_aspect_ratio === 'string' ? metadata.video_aspect_ratio : '',
-    returnLastFrame: metadata.return_last_frame === true,
+    videoResolution: typeof metadata.video_resolution === 'string' ? metadata.video_resolution : defaults?.resolution || '',
+    videoAspectRatio: typeof metadata.video_aspect_ratio === 'string' ? metadata.video_aspect_ratio : defaults?.aspect_ratio || '',
+    returnLastFrame: typeof metadata.return_last_frame === 'boolean' ? metadata.return_last_frame : defaults?.return_last_frame === true,
+    autoEnhancement: readAutoEnhancement('auto_enhancement' in metadata ? metadata.auto_enhancement : defaults?.auto_enhancement),
   }
 }
 
@@ -428,6 +444,86 @@ function setSceneBusy(target: typeof generatingVideoSceneIds, sceneId: number, v
   const next = new Set(target.value)
   value ? next.add(sceneId) : next.delete(sceneId)
   target.value = next
+}
+
+function updateVideoSnapshot(current: VideoResult) {
+  const records = videos.value[current.scene_id] || []
+  const previous = records.find(item => item.id === current.id)
+  current = preserveAutoEnhancement(previous, current)
+  // A late processing response must not replace a completion obtained on focus.
+  if (previous && terminalTaskStatuses.has(previous.status) && !terminalTaskStatuses.has(current.status)) return previous
+  videos.value[current.scene_id] = records.map(item => item.id === current.id ? current : item)
+  delete videoSyncErrors.value[current.scene_id]
+  if (current.status === TaskStatusEnum.COMPLETED) {
+    setSceneVideoError(current.scene_id)
+    syncInjectedLastFrame(current)
+  }
+  if (!submittingVideoSceneIds.has(current.scene_id) && !videos.value[current.scene_id].some(isVideoGenerationActive)) setSceneBusy(generatingVideoSceneIds, current.scene_id, false)
+  return current
+}
+
+function pollVideo(sceneId: number, videoId: number): Promise<VideoResult | null> {
+  const existing = videoPolls.get(videoId)
+  if (existing) return existing.promise
+  const version = chapterLoadVersion
+  const controller = new AbortController()
+  setSceneBusy(generatingVideoSceneIds, sceneId, true)
+  const currentScope = () => alive && !controller.signal.aborted && version === chapterLoadVersion
+  const promise = (async () => {
+    try {
+      return await pollUntilTerminal(async signal => {
+        const current = (await api.queryVideo(videoId, signal)).data
+        if (!currentScope()) throw new DOMException('Video view changed', 'AbortError')
+        const updated = updateVideoSnapshot(current)
+        const followup = updated.metadata?.auto_enhancement as { stage?: string; applied_to_scene?: boolean; result_video_id?: number } | undefined
+        if (followup?.stage === 'completed' && followup.applied_to_scene && followup.result_video_id) {
+          const scene = scenes.value.find(item => item.id === sceneId)
+          if (scene) await refreshVideoHistory(scene)
+        }
+        return isVideoGenerationActive(updated) ? { ...updated, status: TaskStatusEnum.PROCESSING } : updated
+      }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminalTaskStatuses,
+        requestTimeoutMs: 45_000, retryOnError: retryableStatusError,
+        onRetry: () => { if (currentScope()) videoSyncErrors.value[sceneId] = { message: tr('连接暂时中断，正在重新同步；后台任务会继续。'), stopped: false } },
+      })
+    } catch (error) {
+      if (!isAbortError(error) && currentScope()) videoSyncErrors.value[sceneId] = { message: (error as Error).message, stopped: true }
+      return null
+    } finally {
+      if (videoPolls.get(videoId)?.controller === controller) videoPolls.delete(videoId)
+      if (currentScope() && (videoSyncErrors.value[sceneId]?.stopped || !(videos.value[sceneId] || []).some(isVideoGenerationActive))) setSceneBusy(generatingVideoSceneIds, sceneId, false)
+    }
+  })()
+  videoPolls.set(videoId, { controller, promise })
+  return promise
+}
+
+function stopVideoPolling() {
+  for (const entry of videoPolls.values()) entry.controller.abort()
+  videoPolls.clear()
+}
+
+function resumeVideoPolling() {
+  for (const scene of scenes.value) {
+    for (const video of videos.value[scene.id] || []) {
+      if (isVideoGenerationActive(video)) void pollVideo(scene.id, video.id)
+    }
+  }
+}
+
+function syncVisibleVideoTasks() {
+  if (document.visibilityState === 'hidden') return
+  const version = chapterLoadVersion
+  for (const records of Object.values(videos.value)) {
+    for (const video of records.filter(isVideoGenerationActive)) {
+      if (focusedVideoSyncs.has(video.id)) continue
+      focusedVideoSyncs.add(video.id)
+      void api.queryVideo(video.id, videoPolls.get(video.id)?.controller.signal).then(response => {
+        if (alive && version === chapterLoadVersion) updateVideoSnapshot(response.data)
+      }).catch(() => { /* The active poller owns reconnect feedback and retries. */ })
+        .finally(() => focusedVideoSyncs.delete(video.id))
+    }
+  }
+  resumeVideoPolling()
 }
 
 function currentVideoId(scene: Scene) {
@@ -467,6 +563,7 @@ function canGenerateSceneVideo(scene: Scene) {
   const draft = draftFor(scene)
   const model = selectedVideoModelConfig.value
   return Boolean(model
+    && autoEnhancementAvailable(draft.autoEnhancement, enhancementModels.value, sceneResolution(scene, model))
     && model.capabilities.generation_modes.includes(draft.videoGenerationMode)
     && !referenceLimitError(scene, model)
     && draft.prompt.trim()
@@ -532,6 +629,14 @@ function sceneVideoEstimate(scene: Scene) {
       ? Number(Boolean(draft.firstFrameUrl)) + Number(Boolean(draft.lastFrameUrl))
       : videoInputImageReferences(scene).length,
   )
+}
+
+function sceneEnhancementEstimate(scene: Scene) {
+  const setting = draftFor(scene).autoEnhancement
+  const model = enhancementModels.value.find(item => item.id === setting?.model_config_id)
+  const target = model?.resolutions.find(item => item.value === setting?.resolution)
+  const estimate = target ? enhancementEstimate(model?.pricing, target.short_side, sceneDuration(scene)) : null
+  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待核对')
 }
 
 function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
@@ -1140,6 +1245,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
+  if (combined.filter(item => item.type === 'image').length + selectedAssetReferenceImageCount(scene) > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
   if (videos.length > model.capabilities.max_reference_videos || videos.reduce((total, item) => total + (item.duration || 0), 0) > model.capabilities.reference_video_total_duration_max + 0.001) {
     notice.error(tr('参考视频数量或总时长超过当前模型限制'))
     return
@@ -1214,11 +1320,16 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   assets.value = result.assets
   scenes.value = result.scenes
   videos.value = result.videos
+  const chapterModelId = Number(result.scenes[0]?.metadata?.video_model_config_id)
+  const chapterModel = videoModels.value.find(item => item.config_id === chapterModelId)
+  const projectModel = videoModels.value.find(item => item.config_id === project.value?.video_model_config_id)
+  selectedVideoModel.value = String(chapterModel?.config_id || projectModel?.config_id || videoModels.value[0]?.config_id || '')
   videoGenerationErrors.value = {}
   const requestedSceneId = Number(route.query.scene)
   const requestedScene = result.scenes.find(scene => scene.id === requestedSceneId)
   activeSceneId.value = requestedScene?.id || result.scenes[0]?.id || 0
   initializeSceneDrafts(result.scenes)
+  resumeVideoPolling()
   result.scenes.forEach(scene => ensureSceneVoiceReferencePrompt(scene))
   void hydrateSceneAudioReferences(result.scenes)
   void nextTick(() => {
@@ -1398,6 +1509,10 @@ async function regenerateStoryboard() {
 
 async function loadChapter(chapterId: number) {
   const loadVersion = ++chapterLoadVersion
+  stopVideoPolling()
+  submittingVideoSceneIds.clear()
+  generatingVideoSceneIds.value = new Set()
+  videoSyncErrors.value = {}
   focusedPromptSceneId.value = 0
   activeChapterId.value = chapterId
   activeChapter.value = chapters.value.find(item => item.id === chapterId) ?? null
@@ -1445,6 +1560,7 @@ async function load() {
     }
     chapters.value = chapterResponse.data.items
     videoModels.value = videoModelResponse.data
+    void exportApi.models().then(response => { if (alive) enhancementModels.value = response.data }).catch(() => { enhancementModels.value = [] })
     const savedVideoModel = videoModels.value.find(item => item.config_id === novelResponse.data.video_model_config_id)
     persistedVideoModelId.value = savedVideoModel?.config_id ?? null
     selectedVideoModel.value = String(savedVideoModel?.config_id || videoModels.value[0]?.config_id || '')
@@ -1620,11 +1736,11 @@ async function saveScene(
   const previous = sceneSaveQueues.get(scene.id) ?? Promise.resolve()
   const queued = previous.then(async () => {
     const draft = draftFor(scene)
-    const currentScene = scenes.value.find(item => item.id === scene.id) ?? scene
+    let currentScene = scenes.value.find(item => item.id === scene.id) ?? scene
     const duration = sceneDuration(currentScene, model)
     draft.duration = duration
     try {
-      const updated = (await api.updateScene(scene.id, {
+      const persist = () => api.updateScene(scene.id, {
         description: draft.description,
         prompt: draft.prompt,
         duration,
@@ -1639,18 +1755,40 @@ async function saveScene(
           video_resolution: sceneResolution(currentScene, model),
           video_aspect_ratio: sceneAspectRatio(currentScene, model),
           return_last_frame: draft.returnLastFrame,
+          auto_enhancement: draft.autoEnhancement,
         },
-      }, draft.basePrompt)).data
+      }, draft.basePrompt)
+      let updated: Scene
+      try {
+        updated = (await persist()).data
+      } catch (error) {
+        if (!(error instanceof ApiRequestError) || error.code !== 409) throw error
+        const latest = (await api.scene(scene.id)).data
+        const instruction = latest.metadata?.previous_scene_last_frame_prompt_instruction
+        const rebased = typeof instruction === 'string'
+          ? rebaseLastFrameContinuity(draft.basePrompt, draft.prompt, latest.prompt, instruction) : null
+        if (!rebased || typeof instruction !== 'string') throw error
+        Object.assign(draft, rebased)
+        const tailReferences = readReferenceMedia(latest.metadata?.video_reference_media)
+          .filter(reference => instruction.includes(videoReferenceMentionSyntax(reference)))
+        draft.referenceMedia = [...tailReferences, ...draft.referenceMedia.filter(reference =>
+          !tailReferences.some(tail => tail.type === reference.type && (tail.mention_url || tail.url) === (reference.mention_url || reference.url)))]
+        currentScene = latest
+        updated = (await persist()).data
+      }
       draft.basePrompt = updated.prompt ?? null
       scenes.value = scenes.value.map(item => item.id === updated.id ? updated : item)
       if (showNotice) notice.success(tr('分镜已保存'))
+      return true
     } catch (error) {
       notice.error(tr('自动保存失败：{p0}', { p0: (error as Error).message }))
+      return false
     }
   })
   sceneSaveQueues.set(scene.id, queued)
-  await queued
+  const saved = await queued
   if (sceneSaveQueues.get(scene.id) === queued) sceneSaveQueues.delete(scene.id)
+  return saved
 }
 
 async function flushPendingSceneSaves() {
@@ -1748,6 +1886,7 @@ async function generateVideo(
   showNotice = true,
   settings?: SceneVideoGenerationSettings,
 ): Promise<boolean> {
+  if (!alive || scene.chapter_id !== activeChapterId.value || !scenes.value.some(item => item.id === scene.id)) return false
   const draft = draftFor(scene)
   const selectedModel = settings?.model || selectedVideoModelConfig.value
   if (!selectedModel) {
@@ -1757,9 +1896,12 @@ async function generateVideo(
   if (generatingVideoSceneIds.value.has(scene.id)) return false
   setSceneVideoError(scene.id)
   setSceneBusy(generatingVideoSceneIds, scene.id, true)
+  submittingVideoSceneIds.add(scene.id)
+  const version = chapterLoadVersion
   try {
     ensureSceneVoiceReferencePrompt(scene)
-    await saveScene(scene, false, selectedModel)
+    if (!await saveScene(scene, false, selectedModel)) return false
+    if (!alive || version !== chapterLoadVersion) return false
     let result = (await api.generateVideo(scene.id, selectedModel.config_id, {
       generation_mode: draft.videoGenerationMode,
       first_frame_url: draft.firstFrameUrl || undefined,
@@ -1770,56 +1912,75 @@ async function generateVideo(
       output_format: selectedModel.capabilities.default_output_format,
       generate_audio: selectedModel.capabilities.default_generate_audio,
       return_last_frame: settings?.returnLastFrame ?? draft.returnLastFrame,
+      auto_enhancement: currentAutoEnhancement(settings?.autoEnhancement === undefined ? draft.autoEnhancement : settings.autoEnhancement, enhancementModels.value),
       reference_media: draft.videoGenerationMode === 'reference'
         ? referencedVideoMedia(draft.prompt, draft.referenceMedia)
         : [],
     })).data
-    videos.value[scene.id] = [result, ...(videos.value[scene.id] || [])]
-    scene.metadata = { ...(scene.metadata || {}), current_video_id: result.id }
-    while (alive && !terminalTaskStatuses.has(result.status)) {
-      await sleep(4000)
-      result = (await api.queryVideo(result.id)).data
-      videos.value[scene.id] = videos.value[scene.id].map(item => item.id === result.id ? result : item)
+    if (!alive || version !== chapterLoadVersion) return false
+    submittingVideoSceneIds.delete(scene.id)
+    videos.value[scene.id] = [result, ...(videos.value[scene.id] || []).filter(item => item.id !== result.id)]
+    scenes.value = scenes.value.map(item => item.id === scene.id
+      ? { ...item, metadata: { ...(item.metadata || {}), current_video_id: result.id } } : item)
+    if (isVideoGenerationActive(result)) {
+      const finished = await pollVideo(scene.id, result.id)
+      if (!finished) return false
+      result = finished
     }
-    if (!alive) return false
+    if (!alive || version !== chapterLoadVersion) return false
     const completed = result.status === TaskStatusEnum.COMPLETED
+    const autoSetting = settings?.autoEnhancement === undefined ? draft.autoEnhancement : settings.autoEnhancement
+    const autoStage = (result.metadata?.auto_enhancement as { stage?: string } | undefined)?.stage
+    const enhancementCompleted = !autoSetting || autoStage === 'completed' || autoStage === 'skipped'
     if (completed) {
       setSceneVideoError(scene.id)
       syncInjectedLastFrame(result)
     } else {
-      setSceneVideoError(scene.id, sceneVideoError(scene))
+      setSceneVideoError(scene.id, sceneVideoError(scenes.value.find(item => item.id === scene.id) || scene))
     }
     if (showNotice) {
-      completed
+      if (completed && !enhancementCompleted) notice.info(tr('视频已生成，但自动高清化未完成，原视频已保留'))
+      else completed
         ? notice.success(tr('分镜视频生成完成'))
         : notice.error(tr('视频生成失败，详情已显示在预览区'))
     }
-    return completed
+    return completed && enhancementCompleted
   } catch (error) {
+    if (!alive || version !== chapterLoadVersion) return false
     const message = error instanceof Error ? error.message : tr('视频生成失败')
     setSceneVideoError(scene.id, message)
     if (showNotice) notice.error(tr('视频生成失败，详情已显示在预览区'))
     return false
   } finally {
-    setSceneBusy(generatingVideoSceneIds, scene.id, false)
+    if (alive && version === chapterLoadVersion) {
+      submittingVideoSceneIds.delete(scene.id)
+      setSceneBusy(generatingVideoSceneIds, scene.id, false)
+    }
   }
 }
 
 async function refreshVideoHistory(scene: Scene) {
   if (refreshingVideoHistorySceneIds.value.has(scene.id)) return
+  const version = chapterLoadVersion
   setSceneBusy(refreshingVideoHistorySceneIds, scene.id, true)
   try {
     const records = videos.value[scene.id] || []
-    const pendingRecords = records.filter(record => !terminalTaskStatuses.has(record.status))
+    const pendingRecords = records.filter(isVideoGenerationActive)
     if (pendingRecords.length) {
       await Promise.allSettled(pendingRecords.map(record => api.queryVideo(record.id)))
     }
-    videos.value[scene.id] = (await api.videoGenerationHistory(scene.id)).data
+    const [history, current] = await Promise.all([api.videoGenerationHistory(scene.id), api.scene(scene.id)])
+    if (!alive || version !== chapterLoadVersion) return
+    videos.value[scene.id] = history.data
+    scenes.value = scenes.value.map(item => item.id === scene.id ? { ...item, metadata: current.data.metadata } : item)
     setSceneVideoError(scene.id)
+    delete videoSyncErrors.value[scene.id]
+    resumeVideoPolling()
   } catch (error) {
+    if (!alive || version !== chapterLoadVersion) return
     notice.error(tr('刷新生成记录失败：{p0}', { p0: (error as Error).message }))
   } finally {
-    setSceneBusy(refreshingVideoHistorySceneIds, scene.id, false)
+    if (alive && version === chapterLoadVersion) setSceneBusy(refreshingVideoHistorySceneIds, scene.id, false)
   }
 }
 
@@ -1851,8 +2012,9 @@ function syncInjectedLastFrame(result: VideoResult) {
     draft.referenceMedia = [reference, ...draft.referenceMedia]
   }
   if (promptInstruction) {
+    draft.basePrompt = injectLastFrameContinuityInstruction(draft.basePrompt || '', promptInstruction)
     draft.prompt = injectLastFrameContinuityInstruction(draft.prompt, promptInstruction)
-    targetScene.prompt = draft.prompt
+    targetScene.prompt = injectLastFrameContinuityInstruction(targetScene.prompt || '', promptInstruction)
   }
   targetScene.metadata = {
     ...(targetScene.metadata || {}),
@@ -1888,6 +2050,7 @@ function batchVideoDisabledReason(
 }
 
 function openBatchVideoDialog() {
+  batchParametersOnly.value = false
   if (!videoModels.value.length || batchGeneratingVideos.value) {
     if (!videoModels.value.length) notice.error(tr('请先在设置中启用一个视频模型'))
     return
@@ -1897,6 +2060,36 @@ function openBatchVideoDialog() {
     return
   }
   batchVideoDialogOpen.value = true
+}
+
+function openVideoDefaults() { batchParametersOnly.value = true; batchVideoDialogOpen.value = true }
+
+async function applyVideoDefaults(settings: VideoDefaults, remember: boolean) {
+  if (savingVideoDefaults.value || !activeChapterId.value) return
+  const version = chapterLoadVersion, chapterId = activeChapterId.value
+  savingVideoDefaults.value = true
+  try {
+    // Drain existing autosaves before atomically merging parameters; prompts remain untouched.
+    for (const scene of scenes.value.filter(item => sceneAutoSaveTimers.has(item.id))) {
+      if (!await saveScene(scene)) throw new Error(tr('请先保存或核对未保存的分镜修改'))
+    }
+    await Promise.all([...sceneSaveQueues.values()])
+    const response = await api.applyVideoDefaults(projectId.value, chapterId, settings, remember)
+    if (!alive || version !== chapterLoadVersion) return
+    for (const scene of scenes.value) {
+      const draft = draftFor(scene)
+      draft.videoResolution = settings.resolution; draft.videoAspectRatio = settings.aspect_ratio
+      draft.returnLastFrame = settings.return_last_frame; draft.autoEnhancement = settings.auto_enhancement
+      scene.metadata = { ...(scene.metadata || {}), video_model_config_id: settings.model_config_id,
+        video_resolution: settings.resolution, video_aspect_ratio: settings.aspect_ratio,
+        return_last_frame: settings.return_last_frame, auto_enhancement: settings.auto_enhancement }
+    }
+    selectedVideoModel.value = String(settings.model_config_id)
+    if (remember && project.value) project.value = { ...project.value, video_model_config_id: settings.model_config_id, video_generation_defaults: settings }
+    batchVideoDialogOpen.value = false
+    notice.success(tr('已更新本章 {p0} 个分镜的生成参数', { p0: response.data.scene_count }))
+  } catch (error) { notice.error((error as Error).message) }
+  finally { savingVideoDefaults.value = false }
 }
 
 async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
@@ -1918,12 +2111,14 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     draft.videoResolution = request.resolution
     draft.videoAspectRatio = request.aspectRatio
     draft.returnLastFrame = request.returnLastFrame
+    draft.autoEnhancement = request.autoEnhancement || null
   }
   const generationSettings: SceneVideoGenerationSettings = {
     model,
     resolution: request.resolution,
     aspectRatio: request.aspectRatio,
     returnLastFrame: request.returnLastFrame,
+    autoEnhancement: request.autoEnhancement || null,
   }
   try {
     const completedCount = await runVideoGenerationQueue(
@@ -1934,7 +2129,7 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     )
     const failedCount = targets.length - completedCount
     failedCount
-      ? notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
+      ? notice.error(request.autoEnhancement ? tr('批量处理结束：完成 {p0} 条，另有 {p1} 条视频或高清化未完成，原视频保留', { p0: completedCount, p1: failedCount }) : tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
       : notice.success(tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
   } finally {
     batchGeneratingVideos.value = false
@@ -1986,12 +2181,17 @@ async function saveChapterDetails(value: { name: string; content: string }) {
 
 onMounted(load)
 onMounted(() => {
+  window.addEventListener('focus', syncVisibleVideoTasks)
+  document.addEventListener('visibilitychange', syncVisibleVideoTasks)
   window.addEventListener('pointerdown', closeAssetActionsFromOutside)
   window.addEventListener('keydown', closeAssetActionsFromEscape)
 })
 onBeforeUnmount(() => {
   void flushPendingSceneSaves()
   alive = false
+  stopVideoPolling()
+  window.removeEventListener('focus', syncVisibleVideoTasks)
+  document.removeEventListener('visibilitychange', syncVisibleVideoTasks)
   chapterToolbarObserver?.disconnect()
   sceneScrollContainer?.removeEventListener('scroll', handleSceneScroll)
   if (sceneScrollFrame) cancelAnimationFrame(sceneScrollFrame)
@@ -2051,6 +2251,7 @@ onBeforeUnmount(() => {
           </button>
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
+            <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
             <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
             <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建分镜') }}</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
@@ -2198,18 +2399,27 @@ onBeforeUnmount(() => {
                       :resolution="sceneResolution(scene)"
                       :aspect-ratio="sceneAspectRatio(scene)"
                       :return-last-frame="draftFor(scene).returnLastFrame"
+                      :auto-enhancement="draftFor(scene).autoEnhancement"
+                      :enhancement-models="enhancementModels"
                       @update:duration="updateSceneDraft(scene, 'duration', $event)"
                       @update:resolution="updateSceneDraft(scene, 'videoResolution', $event)"
                       @update:aspect-ratio="updateSceneDraft(scene, 'videoAspectRatio', $event)"
                       @update:return-last-frame="updateSceneDraft(scene, 'returnLastFrame', $event)"
+                      @update:auto-enhancement="updateSceneDraft(scene, 'autoEnhancement', $event)"
                     />
                   </div>
-                  <AppButton variant="primary" size="md" :aria-label="tr('生成视频')" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? tr('生成中') : tr('生成') }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
+                  <span v-if="draftFor(scene).autoEnhancement" class="scene-video-cost">{{ sceneEnhancementEstimate(scene) }}</span><AppButton variant="primary" size="md" :aria-label="tr('生成视频')" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? tr('生成中') : tr('生成') }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
                 </footer>
               </section>
 
               <aside class="preview-panel">
-                <header><strong>{{ tr('视频预览') }}</strong><SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" /><VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" /><RefreshCw :size="15" /></header>
+                <header>
+                  <strong>{{ tr('视频预览') }}</strong>
+                  <SaveVideoToLibrary v-if="selectedVideoFor(scene)?.url" :source="{ source: 'video', source_id: selectedVideoFor(scene)!.id, name: tr('分镜 {p0} 视频', { p0: scene.sequence }) }" />
+                  <VideoLastFrameButton v-if="selectedVideoFor(scene)" :key="selectedVideoFor(scene)!.id" :video="selectedVideoFor(scene)!" @extracted="updateVideoSnapshot" />
+                  <VideoEnhanceButton v-if="selectedVideoFor(scene)" :video="selectedVideoFor(scene)!" :scene-sequence="scene.sequence" @applied="refreshVideoHistory(scene)" />
+                  <AppButton variant="ghost" icon-only size="sm" :aria-label="tr('刷新视频状态')" :disabled="refreshingVideoHistorySceneIds.has(scene.id)" @click="refreshVideoHistory(scene)"><RefreshCw :size="15" /></AppButton>
+                </header>
                 <div class="preview-stage">
                   <VideoGenerationErrorState
                     v-if="sceneVideoError(scene)"
@@ -2225,9 +2435,12 @@ onBeforeUnmount(() => {
                     :poster="videoCoverUrl(selectedVideoFor(scene)!)"
                     :title="tr('分镜 {p0} 视频预览', { p0: scene.sequence })"
                   />
+                  <div v-else-if="videoSyncErrors[scene.id]?.stopped" class="preview-empty"><RefreshCw :size="30" /><strong>{{ tr('视频状态暂未同步') }}</strong><span>{{ tr('可刷新视频状态，不必重新生成') }}</span></div>
                   <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>{{ tr('视频生成中') }}</strong><span>{{ tr('完成后将在这里自动播放') }}</span></div>
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>{{ tr('等待生成视频') }}</strong><span>{{ tr('完善提示词后点击“生成视频”') }}</span></div>
                 </div>
+                <p v-if="videoSyncErrors[scene.id]" class="video-sync-note" role="status">{{ videoSyncErrors[scene.id].message }}</p>
+                <p v-if="autoEnhancementLabel(selectedVideoFor(scene))" class="video-sync-note" role="status">{{ autoEnhancementLabel(selectedVideoFor(scene)) }}</p>
                 <SceneVideoGenerationHistory
                   :records="videos[scene.id] || []"
                   :current-id="currentVideoId(scene)"
@@ -2256,11 +2469,17 @@ onBeforeUnmount(() => {
       :open="batchVideoDialogOpen"
       :scenes="batchVideoSceneOptions"
       :models="videoModels"
+      :parameters-only="batchParametersOnly"
+      :saving="savingVideoDefaults"
+      :enhancement-models="enhancementModels"
+      :initial-return-last-frame="project?.video_generation_defaults?.return_last_frame"
+      :initial-auto-enhancement="project?.video_generation_defaults?.auto_enhancement"
       :initial-model-config-id="selectedVideoModelConfig?.config_id"
-      :initial-resolution="selectedVideoModelConfig ? modelResolution(selectedVideoModelConfig) : project?.resolution"
-      :initial-aspect-ratio="selectedVideoModelConfig ? modelAspectRatio(selectedVideoModelConfig, 'reference') : project?.aspectRatio"
+      :initial-resolution="project?.video_generation_defaults?.resolution || (selectedVideoModelConfig ? modelResolution(selectedVideoModelConfig) : project?.resolution)"
+      :initial-aspect-ratio="project?.video_generation_defaults?.aspect_ratio || (selectedVideoModelConfig ? modelAspectRatio(selectedVideoModelConfig, 'reference') : project?.aspectRatio)"
       @close="batchVideoDialogOpen = false"
       @generate="batchGenerateVideos"
+      @apply-defaults="applyVideoDefaults"
     />
     <AssetCreateDialog
       :open="Boolean(editingAsset)"
@@ -2291,13 +2510,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.video-sync-note { margin:8px 12px; color:var(--app-text-secondary); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .storyboard-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f7f8fb; }
 .storyboard-page.is-workflow-view { height: 100vh; overflow: hidden; }
 .storyboard-shell { min-height: calc(100vh - 72px); }
 .storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
-.storyboard-main { min-width: 0; padding: 16px 16px 42px; }
+.storyboard-main { --storyboard-right-gutter: 2px; min-width: 0; padding: 16px var(--storyboard-right-gutter) 42px 16px; }
 .storyboard-main.is-workflow-view { height: 100%; padding: 0; }
-.chapter-toolbar { flex-wrap: wrap; position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px -16px 2px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
+.chapter-toolbar { flex-wrap: wrap; position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px calc(-1 * var(--storyboard-right-gutter)) 2px -16px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
 .chapter-summary { position: relative; display: block; min-width: 0; max-width: min(840px,calc(100% - 540px)); padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
 .chapter-summary:hover { background: color-mix(in srgb,var(--app-surface) 72%,transparent); box-shadow: inset 0 0 0 1px var(--app-border); }
 .chapter-summary:focus-visible { outline: 3px solid rgb(91 92 246 / 18%); outline-offset: 1px; }
@@ -2404,8 +2624,8 @@ onBeforeUnmount(() => {
 .prompt-panel > footer > div { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .prompt-panel > footer > div > span { display: inline-flex; min-height: 34px; align-items: center; gap: 4px; padding: 0 10px; border-radius: 9px; color: #777d8d; background: #fff; box-shadow: 0 1px 3px rgb(35 39 55 / 8%); font-size: 10px; }
 .prompt-panel input { width: 23px; padding: 0; border: 0; outline: 0; color: #555b6a; background: transparent; font: inherit; text-align: right; }
-.preview-panel { display: grid; grid-template-rows: 48px minmax(0,1fr) auto; overflow: hidden; }
-.preview-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 0 15px; }
+.preview-panel { display: grid; grid-template-rows: minmax(48px,auto) minmax(0,1fr) auto; overflow: hidden; }
+.preview-panel > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px; padding: 7px 15px; }
 .preview-panel > header svg { color: #9197a6; }
 .preview-stage { display: grid; min-height: 520px; overflow: hidden; place-items: center; background: #292e39; }
 .preview-stage :deep(.deferred-video-player),.preview-stage video { width: 100%; height: 100%; object-fit: contain; }

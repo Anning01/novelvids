@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from utils.messages import localized_message
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fastapi import HTTPException
 
@@ -316,6 +316,24 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
 }
 
 
+# 独立渠道能力，避免向 AutoDL 暴露官方接口专属参数。
+CAPABILITIES[VideoGenerationModelTypeEnum.minimax_h3_autodl] = replace(
+    CAPABILITIES[VideoGenerationModelTypeEnum.minimax_h3],
+    resolutions=("480p", "768p"),
+    aspect_ratios=("16:9", "9:16", "1:1"),
+    aspect_ratios_by_mode={"reference": ("16:9", "9:16", "1:1")},
+    generation_modes=("reference",),
+    duration_min=1,
+    max_reference_videos=0,
+    reference_video_duration_max=0,
+    reference_video_total_duration_max=0,
+    reference_image_formats=("jpg", "jpeg", "png", "webp"),
+    supports_audio_data_uri=False,
+    default_resolution="768p",
+    api_protocol=ImageApiProtocol.autodl,
+)
+
+
 def capabilities_for(model_type: str | VideoGenerationModelTypeEnum | None) -> VideoModelCapabilities:
     try:
         return CAPABILITIES[VideoGenerationModelTypeEnum(model_type)]
@@ -329,6 +347,7 @@ def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: 
         label = {
             ImageApiProtocol.volcengine_ark: "火山方舟",
             ImageApiProtocol.minimax: "MiniMax 官方",
+            ImageApiProtocol.autodl: "AutoDL ComfyUI",
             ImageApiProtocol.dashscope: "阿里云百炼 DashScope",
         }.get(capabilities.api_protocol, capabilities.api_protocol.value)
         raise HTTPException(status_code=400, detail=localized_message('当前视频模型仅支持{p1}接口协议', p1=f'{label}'))

@@ -25,3 +25,18 @@ def test_truncated_chapter_instructions_require_scoped_reading():
 def test_crud_and_selected_edit_use_the_same_skill():
     assert render_creation_instructions(language="zh", crud=True) == render_creation_instructions(language="zh")
     assert "计费" in read_skill("editing") and "回执" in read_skill("base")
+
+
+def test_turn_limited_instructions_tell_the_model_tools_are_withdrawn():
+    normal = render_creation_instructions(language="zh")
+    limited = render_creation_instructions(language="zh", turn_limited=True)
+    assert "工具已收起" not in normal
+    assert limited.startswith(normal)
+    assert "工具已收起" in limited and "直接" in limited and "最终回复" in limited
+    assert "工具已收起" in render_creation_instructions(language="en", turn_limited=True)
+
+
+def test_editing_skill_stops_sending_authorized_writes_through_a_declaration():
+    rules = read_skill("editing")
+    assert "仅“删除”需要在 get_creation_context 的 capabilities 里声明" in rules
+    assert "复杂操作再通过 capabilities 启用" not in rules

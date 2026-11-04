@@ -83,15 +83,19 @@ async def _initialize_database_schema() -> None:
     await ensure_remake_schema(include_indexes=include_compat_indexes)
     await ensure_voice_reference_schema(include_indexes=include_compat_indexes)
     await ensure_creation_agent_schema()
+    from services.schema_compat import ensure_resource_library_schema
+    await ensure_resource_library_schema()
     # Ownership columns must exist before generating the scoped project-name index.
     await ensure_shared_team_columns()
+    await ensure_novel_analysis_schema()
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
-    await ensure_novel_analysis_schema()
     await ensure_usage_record_schema()
     from services.schema_compat import ensure_agent_operation_schema
     await ensure_agent_operation_schema()
+    from services.schema_compat import ensure_video_editor_schema
+    await ensure_video_editor_schema()
 
 
 @asynccontextmanager
@@ -114,9 +118,12 @@ async def lifespan(_: FastAPI):
     await video_task_reconciler.start()
     from services.creation_agent.recovery import production_recovery
     await production_recovery.start()
+    from services.video_editor.exports import editor_export_worker
+    await editor_export_worker.start()
     try:
         yield
     finally:
+        await editor_export_worker.stop()
         await production_recovery.stop()
         await video_task_reconciler.stop()
         await Tortoise.close_connections()

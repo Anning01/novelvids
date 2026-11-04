@@ -13,6 +13,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 FROM python:3.12-slim AS runtime
 
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \

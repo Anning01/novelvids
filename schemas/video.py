@@ -4,6 +4,7 @@ from typing import Any, Literal, Optional
 from schemas._base import BaseResponse
 from utils.enums import VideoModelTypeEnum, TaskStatusEnum
 from services.oss import resolve_media_url
+from schemas.video_defaults import AutoEnhancement
 
 
 def _resolve_video_metadata(metadata: Any) -> None:
@@ -75,6 +76,7 @@ class VideoGenerationOptions(BaseModel):
     generate_audio: Optional[bool] = Field(None, description="是否生成同步音频")
     return_last_frame: Optional[bool] = Field(False, description="是否返回尾帧并注入下一分镜参考图")
     reference_media: list[VideoReferenceMedia] = Field(default_factory=list, description="用户上传的参考图片与视频")
+    auto_enhancement: AutoEnhancement | None = None
 
 
 class VideoGenerateRequest(VideoGenerationOptions):

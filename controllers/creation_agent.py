@@ -1,6 +1,6 @@
 """Creation-assistant application flows and private response projections."""
 
-from services.creation_agent.authorization import public_run_input, pending_production
+from services.creation_agent.authorization import pending_productions, public_run_input
 from utils.messages import localized_message
 
 
@@ -16,8 +16,9 @@ from services.creation_agent.handler import authorize_run
 from services.creation_agent.sessions import ACTIVE_STATUSES, agent_sessions, agent_configuration, agent_models
 from services.creation_agent.tools import PromptEditService, PromptEditConflict
 from services.creation_agent.changes import CreationChanges
-from services.creation_agent.receipts import production_receipts, usage_summary
-from services.creation_agent.results import message_changes, query_results
+from services.creation_agent.event_log import agent_event_log
+from services.creation_agent.receipts import production_receipts_for, usage_summaries
+from services.creation_agent.results import changes_by_message, message_changes, query_results
 
 
 def change_projection(change: PromptChange) -> dict:
@@ -77,11 +78,13 @@ class CreationAgentController:
     async def snapshot(self, task_id, ctx: AuthContext) -> AgentRunOut:
         conversation, assistant = await agent_sessions.for_task(task_id, ctx)
         task = await AiTask.get(id=task_id)
-        changes = await message_changes(assistant, conversation.novel_id)
-        return AgentRunOut(pending_production=await pending_production(task.id), production=await production_receipts(task.id), task_id=task.id, conversation_id=conversation.id, status=task.status,
+        events = await agent_event_log.load(assistant)
+        changes = await message_changes(assistant, conversation.novel_id, events)
+        return AgentRunOut(pending_production=(await pending_productions([task]))[str(task.id)],
+            production=(await production_receipts_for([task]))[str(task.id)], task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
-            changes=[change_projection(change) for change in changes], usage=await usage_summary(assistant),
-            event_count=len(assistant.events), query_results=query_results(assistant))
+            changes=[change_projection(change) for change in changes], usage=(await usage_summaries([assistant]))[assistant.id],
+            event_count=len(events), query_results=query_results(events))
 
     async def messages(self, conversation_id: int, ctx: AuthContext, before: int | None):
         conversation = await agent_sessions.get(conversation_id, ctx)
@@ -89,16 +92,22 @@ class CreationAgentController:
         if before is not None:
             query = query.filter(id__lt=before)
         rows = await query.order_by('-id').select_related('task').limit(50)
-        changes = {row.id: await message_changes(row, conversation.novel_id) for row in rows if row.role == 'assistant'}
+        visible = [row for row in rows if not (row.run_input or {}).get("internal_production_step")]
+        assistants = [row for row in visible if row.role == 'assistant']
+        events = await agent_event_log.load_many(assistants)
+        changes = await changes_by_message(assistants, conversation.novel_id, events)
+        usages = await usage_summaries(assistants)
+        pending = await pending_productions([row.task for row in assistants])
+        production = await production_receipts_for([row.task for row in assistants])
         return {"items": [{"id": row.id, "role": row.role, "content": row.content,
                            "task_id": str(row.task_id), "status": row.task.status,
                            "created_at": row.created_at,
                            "changes": [change_projection(change) for change in changes.get(row.id, [])],
-                           "query_results": query_results(row) if row.role == 'assistant' else [],
-                           "usage": await usage_summary(row) if row.role == 'assistant' else {},
-                           "pending_production": await pending_production(row.task_id) if row.role == 'assistant' else None,
-                           "production": await production_receipts(row.task_id) if row.role == 'assistant' else []}
-                          for row in reversed(rows) if not (row.run_input or {}).get("internal_production_step")],
+                           "query_results": query_results(events[row.id]) if row.role == 'assistant' else [],
+                           "usage": usages.get(row.id, {}) if row.role == 'assistant' else {},
+                           "pending_production": pending.get(str(row.task_id)) if row.role == 'assistant' else None,
+                           "production": production.get(str(row.task_id), []) if row.role == 'assistant' else []}
+                          for row in reversed(visible)],
                 "next_before": rows[-1].id if len(rows) == 50 else None}
 
     async def stop(self, task_id, ctx: AuthContext):

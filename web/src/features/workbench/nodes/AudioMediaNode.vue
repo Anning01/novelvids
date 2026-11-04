@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import { useLibraryMedia } from '@/features/resource-library/useLibraryMedia'
 
 import type { NodeProps } from '@vue-flow/core'
 import { Upload, Volume2 } from 'lucide-vue-next'
@@ -12,7 +13,7 @@ import { useWorkbenchStore } from '../store/workbenchStore'
 const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
 const uploading = ref(false)
-const url = computed(() => typeof props.data.url === 'string' ? props.data.url : '')
+const { url, error: libraryError } = useLibraryMedia(() => props.data)
 const title = computed(() => String(props.data.title || props.data.originalFilename || tr('上传音频')))
 const durationSeconds = computed(() => Number(props.data.durationSeconds) || 0)
 
@@ -36,8 +37,8 @@ async function replace(event: Event) {
   <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'audio_media', title, status: uploading ? tr('上传中') : 'ready' }">
     <div class="workbench-uploaded-media-node workbench-uploaded-audio-node">
       <span class="workbench-uploaded-media-node__type"><Volume2 :size="14" aria-hidden="true" />{{ tr('音频') }}</span>
-      <WorkbenchAudioMedia v-if="url" :src="url" :title="title" :source-label="tr('上传音频')" :duration-seconds="durationSeconds" />
-      <div v-else class="workbench-media-placeholder">{{ tr('音频不可用') }}</div>
+      <WorkbenchAudioMedia v-if="url && !libraryError" :src="url" :title="title" :source-label="tr('上传音频')" :duration-seconds="durationSeconds" />
+      <div v-else class="workbench-media-placeholder">{{ libraryError || tr('音频不可用') }}</div>
       <label class="workbench-uploaded-media-node__replace" :class="{ 'is-disabled': uploading }">
         <Upload :size="14" aria-hidden="true" />{{ uploading ? tr('上传中…') : tr('重新上传') }}
         <input type="file" accept="audio/mpeg,audio/wav,audio/mp4,audio/webm" :aria-label="tr('上传资产音频')" :disabled="uploading" @change="replace">

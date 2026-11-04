@@ -1,10 +1,63 @@
 from pathlib import Path
+import errno
+import os
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
 import services.video.last_frame as last_frame_module
 from services.video.last_frame import LastFrameService
+
+
+@pytest.mark.asyncio
+async def test_local_tail_is_published_atomically_when_system_temp_is_on_another_filesystem(tmp_path, monkeypatch):
+    media_root = tmp_path / 'media'
+    media_root.mkdir()
+    source = media_root / 'video.mp4'
+    source.write_bytes(b'video')
+    monkeypatch.setattr(last_frame_module.settings, 'MEDIA_PATH', str(media_root))
+    monkeypatch.setattr(last_frame_module, 'oss', SimpleNamespace(enabled=False, normalize_media_ref=lambda value: value))
+    service = LastFrameService()
+    monkeypatch.setattr(service, '_extract_with_ffmpeg', lambda _video, frame: frame.write_bytes(b'complete-png'))
+    real_replace = os.replace
+    publications = []
+
+    def reject_cross_device_replace(source_path, destination):
+        publications.append((Path(source_path), Path(destination)))
+        if not Path(source_path).is_relative_to(media_root):
+            raise OSError(errno.EXDEV, 'Invalid cross-device link')
+        real_replace(source_path, destination)
+
+    monkeypatch.setattr(last_frame_module.os, 'replace', reject_cross_device_replace)
+    result = await service.extract_and_store('/media/video.mp4', 37)
+    destination = media_root / 'video-references/last-frame-37.png'
+    assert result == '/media/video-references/last-frame-37.png'
+    assert destination.read_bytes() == b'complete-png'
+    assert len(publications) == 1 and publications[0][0].parent.parent == destination.parent
+    assert list(destination.parent.iterdir()) == [destination]
+
+
+@pytest.mark.asyncio
+async def test_staging_failure_keeps_existing_tail_and_removes_temporary_files(tmp_path, monkeypatch):
+    media_root = tmp_path / 'media'
+    destination = media_root / 'video-references/last-frame-37.png'
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b'previous-png')
+    (media_root / 'video.mp4').write_bytes(b'video')
+    monkeypatch.setattr(last_frame_module.settings, 'MEDIA_PATH', str(media_root))
+    monkeypatch.setattr(last_frame_module, 'oss', SimpleNamespace(enabled=False, normalize_media_ref=lambda value: value))
+    service = LastFrameService()
+    monkeypatch.setattr(service, '_extract_with_ffmpeg', lambda _video, frame: frame.write_bytes(b'new-png'))
+
+    def fail_copy(*_args):
+        raise OSError(errno.ENOSPC, 'No space left on device')
+
+    monkeypatch.setattr('shutil.copyfile', fail_copy)
+    with pytest.raises(OSError):
+        await service.extract_and_store('/media/video.mp4', 37)
+    assert destination.read_bytes() == b'previous-png'
+    assert list(destination.parent.iterdir()) == [destination]
 
 
 @pytest.mark.asyncio
@@ -106,3 +159,23 @@ def test_ffmpeg只解码视频尾部并输出真实最后一帧(tmp_path, monkey
     assert command[:5] == ["ffmpeg", "-y", "-sseof", "-1", "-i"]
     assert command[command.index("-vf") + 1] == "reverse"
     assert command[command.index("-frames:v") + 1] == "1"
+
+
+@pytest.mark.asyncio
+async def test_real_ffmpeg_extracts_the_blue_ending_not_the_red_opening(tmp_path, monkeypatch):
+    media_root = tmp_path / "media"
+    source = media_root / "videos" / "real-tail.mp4"
+    source.parent.mkdir(parents=True)
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=red:s=32x32:r=10:d=1",
+        "-f", "lavfi", "-i", "color=blue:s=32x32:r=10:d=1", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0",
+        "-pix_fmt", "yuv420p", str(source),
+    ], check=True, capture_output=True, timeout=30)
+    monkeypatch.setattr(last_frame_module.settings, "MEDIA_PATH", str(media_root))
+    monkeypatch.setattr(last_frame_module, "oss", SimpleNamespace(enabled=False, normalize_media_ref=lambda value: value))
+    result = await LastFrameService().extract_and_store("/media/videos/real-tail.mp4", 37)
+    image = media_root / result.removeprefix("/media/")
+    rgb = subprocess.run(["ffmpeg", "-v", "error", "-i", str(image), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         check=True, capture_output=True, timeout=30).stdout
+    assert len(rgb) == 32 * 32 * 3
+    assert rgb[0] < 20 and rgb[2] > 230

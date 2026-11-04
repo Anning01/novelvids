@@ -1,5 +1,14 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { api, clearAuthToken, getAuthToken, setAuthToken } from './api'
+import { api, ApiRequestError, retryableStatusError, clearAuthToken, getAuthToken, setAuthToken } from './api'
+
+it('preserves response codes so status polling retries only temporary failures', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 503, message: 'Temporarily unavailable' }), { status: 200 })))
+  await expect(api.queryVideo(37)).rejects.toMatchObject({ code: 503, httpStatus: 200 })
+  for (const code of [401, 403, 404, 422]) expect(retryableStatusError(new ApiRequestError('permanent', code, 200))).toBe(false)
+  for (const code of [408, 429, 500, 502, 503]) expect(retryableStatusError(new ApiRequestError('temporary', code, 200))).toBe(true)
+  expect(retryableStatusError(new TypeError('Failed to fetch'))).toBe(true)
+  expect(retryableStatusError(new Error('programming failure'))).toBe(false)
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()

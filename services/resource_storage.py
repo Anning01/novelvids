@@ -2,6 +2,7 @@
 import asyncio
 import shutil
 import subprocess
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -76,7 +77,8 @@ class ResourceStorage:
                     output.write(chunk)
             if not size:
                 raise HTTPException(400, detail="视频文件为空")
-            await self.put(ref, path, "video/quicktime" if self.check_filename(file.filename or "") == "mov" else "video/mp4")
+            self.check_filename(file.filename or "")
+            await self.put(ref, path, mimetypes.guess_type(file.filename or '')[0] or 'application/octet-stream')
 
     async def inspect(self, ref: str, filename: str) -> tuple[dict, str]:
         extension = self.check_filename(filename)
@@ -122,4 +124,30 @@ class ResourceStorage:
             raise HTTPException(400, detail="拒绝删除非资源库文件")
 
 
+class LibraryMediaStorage(ResourceStorage):
+    formats_by_kind = {
+        'video': ('mp4', 'mov'), 'image': ('jpg', 'jpeg', 'png', 'webp'),
+        'bgm': ('mp3', 'wav', 'm4a'), 'sound': ('mp3', 'wav', 'm4a'),
+        'sticker': ('png', 'webp'),
+    }
+    formats = tuple(dict.fromkeys(ext for group in formats_by_kind.values() for ext in group))
+
+    def check_kind(self, filename: str, kind: str) -> str:
+        extension = Path(filename).suffix.lower().lstrip('.')
+        if extension not in self.formats_by_kind.get(kind, ()):
+            from utils.messages import localized_message
+            raise HTTPException(422, localized_message('文件类型不符合所选素材分类'))
+        return extension
+
+    async def inspect(self, ref: str, filename: str, kind='video'):
+        extension = self.check_kind(filename, kind)
+        if kind == 'video':
+            return await super().inspect(ref, filename)
+        from services.media_inspection import inspect_static_or_audio
+        async with self.materialize(ref) as path:
+            media = await inspect_static_or_audio(path, extension, kind, self.max_bytes)
+        return media, ''
+
+
 resource_storage = ResourceStorage()
+library_media_storage = LibraryMediaStorage()

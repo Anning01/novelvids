@@ -67,6 +67,7 @@ let refreshingScope = ''
 let previewScope = ''
 let previewId = 0
 let timer: ReturnType<typeof setInterval> | undefined
+let refreshedVideoId = 0
 
 function patch(value: Record<string, unknown>) { store.updateManualNodeData(props.id, value); store.persistLayout() }
 function clearPreview() {
@@ -96,6 +97,10 @@ async function refresh() {
     row.value = result
     patch({ enhancement_result: result })
     await showResult(result, currentScope)
+    if (result.applied_to_scene && result.result_video_id && refreshedVideoId !== result.result_video_id) {
+      await store.refreshEnhancedVideo(result.result_video_id)
+      if (scope.value === currentScope) refreshedVideoId = result.result_video_id
+    }
   } catch (caught) { if (alive && scope.value === currentScope) error.value = (caught as Error).message }
   finally { if (refreshingScope === currentScope) refreshingScope = '' }
 }
@@ -149,7 +154,7 @@ async function download() {
   catch (caught) { error.value = (caught as Error).message }
 }
 registerWorkbenchNodeRun(props.id, { enabled: canRun, run })
-watch(scope, () => { row.value = null; models.value = []; error.value = ''; clearPreview(); void initialize() })
+watch(scope, () => { row.value = null; models.value = []; error.value = ''; refreshedVideoId = 0; clearPreview(); void initialize() })
 onMounted(() => { void initialize(); timer = setInterval(() => { if (active.value && document.visibilityState !== 'hidden') void refresh() }, 5000) })
 onUnmounted(() => { alive = false; clearInterval(timer); clearPreview() })
 </script>

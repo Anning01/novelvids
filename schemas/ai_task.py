@@ -25,6 +25,7 @@ class AiTaskOut(BaseResponse):
                 "skill_snapshot",
                 "agent_configuration",
                 "config_snapshot",
+                "auto_enhancement_snapshot",
                 "replace_versions",
                 "replaced_scene_snapshots",
             }

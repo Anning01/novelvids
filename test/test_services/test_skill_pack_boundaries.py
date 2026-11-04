@@ -174,5 +174,5 @@ def test_video_enhancement_skill_keeps_targets_authorization_and_source_identity
     snapshot=SkillSnapshot.model_validate(snapshot_skills())
     rendered=instructions(snapshot,language,'video')
     assert f'language={language}' in rendered
-    for rule in ('720p、1080p、2k或4k','目标清晰度与服务端报价','无须中间转换器','不能再转1080p','不能为了绕过限制悄悄换回原片'):
+    for rule in ('720p、1080p、2k或4k','目标清晰度与服务端报价','无须中间转换器','不能再转1080p','不能为了绕过限制悄悄换回原片','自动设为当前分镜视频','不覆盖用户的新选择'):
         assert rule in rendered

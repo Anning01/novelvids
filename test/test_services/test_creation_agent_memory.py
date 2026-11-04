@@ -12,6 +12,7 @@ from schemas.creation_agent import AgentRunRequest, CreationConstraintProposal, 
 from services.creation_agent.memory import creation_memory
 from services.creation_agent.sessions import agent_sessions
 from test.test_services.test_creation_agent_sessions import session_fixture
+from services.creation_agent.event_log import agent_event_log
 
 
 async def memory_fixture():
@@ -160,4 +161,4 @@ async def test_structured_agent_reply_persists_memory_and_emits_user_facing_text
     assistant = await AgentMessage.get(task=task, role='assistant')
     assert '已记住' in assistant.content
     assert await CreationConstraint.filter(novel_id=conversation.novel_id).count() == 1
-    assert any(event['type'] == 'TEXT_MESSAGE_CONTENT' for event in assistant.events)
+    assert any(event['type'] == 'TEXT_MESSAGE_CONTENT' for event in await agent_event_log.load(assistant))

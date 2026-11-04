@@ -1,17 +1,14 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { applySavedLocale } from '@/i18n'
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Bot,
-  Check,
   CheckCircle2,
   Eye,
   EyeOff,
   Image,
   KeyRound,
-  Languages,
   Pencil,
   Plus,
   Power,
@@ -24,19 +21,15 @@ import {
 } from 'lucide-vue-next'
 import AppMultiSelect from '@/components/AppMultiSelect.vue'
 import AppIconTile from '@/components/AppIconTile.vue'
-import AppSettingsCard from '@/components/AppSettingsCard.vue'
-import AppTabs, { type AppTabItem } from '@/components/AppTabs.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import { api } from '@/api'
 import { defaultPricing } from '@/shared/modelPricing'
 import { useAuthStore } from '@/features/auth/authStore'
-import { appConfirm } from '@/shared/confirmDialog'
+import { appConfirm, appConfirmState } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import type { AiModelConfig, ConfigEnumItem, EnumItem, GeneralConfig, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
-
-const AgentSettingsPanel = defineAsyncComponent(() => import('@/features/creation-agent/AgentSettingsPanel.vue'))
+import type { AiModelConfig, ConfigEnumItem, EnumItem, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
 
 type ModelCategoryId = 'llm' | 'image' | 'video' | 'enhancement'
-type SettingsSection = 'models' | 'general'
 
 interface ModelCategory {
   id: ModelCategoryId
@@ -78,27 +71,21 @@ categories.push({
   get description() { return tr('单条视频或成片提升清晰度，按后台配置选择输出档位。') },
   taskTypes: [8], icon: Zap,
 })
-const settingsTabs: AppTabItem[] = [
-  { value: 'models', get label() { return tr('模型配置') }, icon: Bot },
-  { value: 'general', get label() { return tr('通用配置') }, icon: Settings2 },
-]
-
 const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; model: string; protocol: ImageApiProtocol }> = {
   seedance_2: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-260128', protocol: 'volcengine_ark' },
   seedance_2_fast: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-fast-260128', protocol: 'volcengine_ark' },
   seedance_2_mini: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-mini-260615', protocol: 'volcengine_ark' },
   seedance_2_5: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-5-260817', protocol: 'volcengine_ark' },
+  minimax_h3_autodl: { baseUrl: 'https://autodl.art/api/v1/comfyui', model: 'minimax_h3_zm_u24', protocol: 'autodl' },
   minimax_h3: { baseUrl: 'https://api.minimaxi.com', model: 'MiniMax-H3', protocol: 'minimax' },
   wan_3: { baseUrl: 'https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com', model: 'wan3.0-video', protocol: 'dashscope' },
 }
 
 const configs = ref<AiModelConfig[]>([])
-const generalConfig = ref<GeneralConfig | null>(null)
 const taskTypes = ref<EnumItem[]>([])
 const imageModelTypes = ref<ConfigEnumItem[]>([])
 const videoModelTypes = ref<ConfigEnumItem[]>([])
 const loading = ref(true)
-const savingGeneral = ref(false)
 const auth = useAuthStore()
 // 平台级配置仅超管可见；团队管理员只看到/管理本团队自定义配置
 const isTeamAdmin = computed(() => auth.role === 'admin')
@@ -106,8 +93,6 @@ function canManage(item: AiModelConfig) {
   if (!isTeamAdmin.value) return true
   return item.scope === 'team'
 }
-const activeSection = ref<SettingsSection>('models')
-const promptLanguage = ref<'zh' | 'en'>('en')
 const showCreate = ref(false)
 const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
@@ -126,6 +111,24 @@ const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value =>
   value: String(value),
   label: tr(taskTypes.value.find(item => item.value === value)?.label || '') || ({ get 1() { return tr('内容理解与人物提取') }, get 2() { return tr('角色与场景参考图') }, get 3() { return tr('分镜规划与提示词') }, get 4() { return tr('视频片段生成') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') } }[value] ?? tr('任务 {p0}', { p0: value })),
 })))
+const imageModelTypeOptions = computed(() => [
+  { value: '', label: tr('请选择受支持的模型') },
+  ...imageModelTypes.value.map(item => ({ value: String(item.value), label: tr(item.label) })),
+])
+const videoModelTypeOptions = computed(() => [
+  { value: '', label: tr('请选择受支持的视频模型') },
+  ...videoModelTypes.value.map(item => ({ value: String(item.value), label: tr(item.label) })),
+])
+const imageProtocolOptions = computed(() => [
+  { value: 'openai_compatible', label: tr('OpenAI 兼容（GPT Image / 中转服务）') },
+  { value: 'openrouter_compatible', label: tr('OpenRouter 兼容（/images）') },
+  { value: 'volcengine_ark', label: tr('火山方舟 Seedream') },
+])
+const thinkingOptions = computed(() => [
+  { value: '', label: tr('按模型默认') },
+  { value: 'enabled', label: tr('开启思考（enabled）') },
+  { value: 'disabled', label: tr('关闭思考（disabled）') },
+])
 
 const generationCapabilities = ref<GenerationCapabilities>({ image: {}, video: {} })
 const enhancementPricing = ref<NonNullable<ModelPricing['tiers']>>([])
@@ -190,6 +193,7 @@ function taskLabel(value: number) {
 
 function protocolLabel(value: ImageApiProtocol) {
   if (value === 'volcengine_mediakit') return 'AI MediaKit'
+  if (value === 'autodl') return 'AutoDL ComfyUI'
   if (value === 'minimax') return tr('MiniMax 官方')
   if (value === 'dashscope') return tr('阿里云百炼 DashScope')
   if (value === 'volcengine_ark') return tr('火山方舟 Seedream')
@@ -203,6 +207,9 @@ function videoProtocolFor(modelType: VideoGenerationModelType | ''): ImageApiPro
 
 const selectedVideoProtocolLabel = computed(() => protocolLabel(videoProtocolFor(form.value.video_model_type)))
 const selectedVideoProtocolHint = computed(() => {
+  if (form.value.video_model_type === 'minimax_h3_autodl') {
+    return tr('填写 ComfyUI 分组 Token；模型名称填写工作流 ID。支持参考图和音频，不支持参考视频或首尾帧。')
+  }
   if (form.value.video_model_type === 'minimax_h3') {
     return tr('提交到 /v2/video_generation，并从 /v2/query/video_generation/{task_id} 查询结果。')
   }
@@ -224,43 +231,21 @@ function providerHost(baseUrl?: string) {
 async function load() {
   loading.value = true
   try {
-    const [configResponse, enumResponse, generalResponse, capabilitiesResponse] = await Promise.all([
+    const [configResponse, enumResponse, capabilitiesResponse] = await Promise.all([
       api.configs(),
       api.enums(),
-      api.generalConfig(),
       api.generationCapabilities(),
     ])
     configs.value = configResponse.data.items
     taskTypes.value = enumResponse.data.ai_task_type || []
     imageModelTypes.value = enumResponse.data.image_model_type || []
     videoModelTypes.value = enumResponse.data.video_model_type || []
-    generalConfig.value = generalResponse.data
-    promptLanguage.value = generalResponse.data.prompt_language
     generationCapabilities.value = capabilitiesResponse.data
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
     loading.value = false
   }
-}
-
-async function saveGeneralConfig() {
-  savingGeneral.value = true
-  try {
-    const response = await api.updateGeneralConfig({ prompt_language: promptLanguage.value })
-    generalConfig.value = response.data
-    applySavedLocale(response.data.prompt_language)
-    promptLanguage.value = response.data.prompt_language
-    notice.success(tr('通用配置已保存，新提交的生成任务将使用该语言'))
-  } catch (error) {
-    notice.error((error as Error).message)
-  } finally {
-    savingGeneral.value = false
-  }
-}
-
-function changeSettingsSection(value: string) {
-  activeSection.value = value as SettingsSection
 }
 
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
@@ -345,9 +330,36 @@ function changeVideoModelType() {
   applyVideoPricingPreset()
 }
 
+function selectImageModelType(value: string) {
+  form.value.image_model_type = value as ImageModelType | ''
+  changeImageModelType()
+}
+
+function selectVideoModelType(value: string) {
+  form.value.video_model_type = value as VideoGenerationModelType | ''
+  changeVideoModelType()
+}
+
+function selectImageProtocol(value: string) {
+  form.value.api_protocol = value as ImageApiProtocol
+}
+
+function selectThinking(value: string) {
+  form.value.thinking = value as 'enabled' | 'disabled' | ''
+}
+
 async function saveConfig() {
   if (!form.value.task_types.length) {
     notice.error(tr('请至少选择一个能力用途'))
+    return
+  }
+  // 原生 select 的 required 校验由共享选择器接管，避免空模型类型被提交。
+  if (selectedCategoryId.value === 'image' && !form.value.image_model_type) {
+    notice.error(tr('请选择受支持的模型'))
+    return
+  }
+  if (selectedCategoryId.value === 'video' && !form.value.video_model_type) {
+    notice.error(tr('请选择受支持的视频模型'))
     return
   }
   creating.value = true
@@ -463,23 +475,50 @@ async function remove(item: AiModelConfig) {
   }
 }
 
-onMounted(load)
+// 模型弹窗：Esc 快速取消，并把焦点收进弹窗、关闭后归还给触发按钮。
+const modelDialog = ref<HTMLElement | null>(null)
+let dialogTrigger: HTMLElement | null = null
+
+function closeModelDialog() {
+  showCreate.value = false
+}
+
+function onWindowKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.repeat || !showCreate.value) return
+  if (appConfirmState.open) return
+  event.preventDefault()
+  closeModelDialog()
+}
+
+watch(showCreate, async open => {
+  if (open) {
+    dialogTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    modelDialog.value?.querySelector<HTMLInputElement>('input[name="model-config-name"]')?.focus()
+    return
+  }
+  dialogTrigger?.focus()
+  dialogTrigger = null
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', onWindowKeydown)
+  load()
+})
+onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
 </script>
 
 <template>
   <main class="model-settings-page">
     <header class="model-settings-header">
       <div>
-        <span>APPLICATION SETTINGS</span>
-        <h1>{{ tr('设置') }}</h1>
-        <p>{{ tr('统一管理生成模型与全局创作偏好。') }}</p>
+        <span>MODEL CONFIGURATION</span>
+        <h1>{{ tr('模型配置') }}</h1>
+        <p>{{ tr('统一管理文本、图片、视频与画质增强模型。') }}</p>
       </div>
-      <AppButton v-if="activeSection === 'models'" variant="primary" size="lg" type="button" @click="openCreate()"><Plus :size="16" />{{ tr('添加模型') }}</AppButton>
+      <AppButton variant="primary" size="lg" type="button" @click="openCreate()"><Plus :size="16" />{{ tr('添加模型') }}</AppButton>
     </header>
 
-    <AppTabs class="settings-section-tabs" :model-value="activeSection" :items="settingsTabs" :label="tr('设置分类')" @update:model-value="changeSettingsSection" />
-
-    <template v-if="activeSection === 'models'">
     <section v-if="isTeamAdmin" class="model-source-banner">
       <div class="model-source-copy">
         <strong>{{ configs.length ? tr('本团队已配置 {p0} 个模型', { p0: configs.length }) : tr('尚未配置团队模型') }}</strong>
@@ -558,61 +597,19 @@ onMounted(load)
         <AppButton variant="primary" size="sm" type="button" @click="openCreate(selectedCategory.id)"><Plus :size="15" />{{ tr('添加第一个配置') }}</AppButton>
       </div>
     </section>
-    </template>
-
-    <section v-else class="general-settings-section">
-      <header>
-        <div>
-          <h2>{{ tr('创作偏好') }}</h2>
-          <p>{{ tr('设置输出语言与助手的工作方式。') }}</p>
-        </div>
-      </header>
-
-      <AppSettingsCard class="general-setting-card" :title="tr('系统语言')" :description="tr('统一所有用户的界面语言与后续生成内容的语言。')">
-        <template #icon><Languages :size="20" /></template>
-        <template #status><span class="general-setting-status">{{ tr('生成偏好') }}</span></template>
-
-        <div class="prompt-language-options" role="radiogroup" :aria-label="tr('系统语言')">
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="promptLanguage === 'zh'"
-            :class="{ 'is-selected': promptLanguage === 'zh' }"
-            @click="promptLanguage = 'zh'"
-          >
-            <span class="language-mark">ZH</span>
-            <span><strong>{{ tr('中文') }}</strong><small>{{ tr('界面与新生成内容使用简体中文') }}</small></span>
-            <Check v-if="promptLanguage === 'zh'" :size="17" />
-          </button>
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="promptLanguage === 'en'"
-            :class="{ 'is-selected': promptLanguage === 'en' }"
-            @click="promptLanguage = 'en'"
-          >
-            <span class="language-mark">EN</span>
-            <span><strong>English</strong><small>Use English for the interface and generated content</small></span>
-            <Check v-if="promptLanguage === 'en'" :size="17" />
-          </button>
-        </div>
-
-        <p class="general-setting-note">{{ tr('由管理员统一设置。切换后影响全站界面和后续任务；已有内容及运行中的任务保持不变。') }}</p>
-
-        <template #footer>
-          <span v-if="generalConfig">{{ tr('当前已保存：') }}{{ generalConfig.prompt_language === 'zh' ? tr('中文') : 'English' }}</span>
-          <AppButton variant="primary" size="sm" type="button" :loading="savingGeneral" @click="saveGeneralConfig">
-            {{ savingGeneral ? tr('保存中…') : tr('保存通用配置') }}
-          </AppButton>
-        </template>
-      </AppSettingsCard>
-      <AgentSettingsPanel v-if="auth.enabled === false || auth.isSuperAdmin" />
-    </section>
-
     <div v-if="showCreate" class="model-modal-backdrop" @click.self="showCreate = false">
-      <form class="model-modal" autocomplete="off" @submit.prevent="saveConfig">
+      <form
+        ref="modelDialog"
+        class="model-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="model-modal-title"
+        autocomplete="off"
+        @submit.prevent="saveConfig"
+        @keydown.esc.stop="closeModelDialog"
+      >
         <header>
-          <div><AppIconTile :tone="iconTone(selectedCategory.id)" size="sm"><component :is="selectedCategory.icon" :size="18" /></AppIconTile><div><small>{{ isEditing ? 'EDIT MODEL' : 'ADD MODEL' }}</small><h2>{{ isEditing ? tr('编辑') : tr('添加') }}{{ selectedCategory.label }}</h2></div></div>
+          <div><AppIconTile :tone="iconTone(selectedCategory.id)" size="sm"><component :is="selectedCategory.icon" :size="18" /></AppIconTile><div><small>{{ isEditing ? 'EDIT MODEL' : 'ADD MODEL' }}</small><h2 id="model-modal-title">{{ isEditing ? tr('编辑') : tr('添加') }}{{ selectedCategory.label }}</h2></div></div>
           <AppButton variant="soft" size="sm" icon-only type="button" :aria-label="tr('关闭')" @click="showCreate = false"><X :size="18" /></AppButton>
         </header>
 
@@ -639,18 +636,24 @@ onMounted(load)
           <label><span>{{ tr('并发数') }}</span><input v-model.number="form.concurrency" name="model-concurrency" type="number" min="1" required /></label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">
             <span>{{ tr('生图模型类型') }}</span>
-            <select v-model="form.image_model_type" name="image-model-type" required @change="changeImageModelType">
-              <option disabled value="">{{ tr('请选择受支持的模型') }}</option>
-              <option v-for="item in imageModelTypes" :key="String(item.value)" :value="item.value">{{ tr(item.label) }}</option>
-            </select>
+            <AppSelect
+              :model-value="form.image_model_type"
+              :options="imageModelTypeOptions"
+              :ariaLabel="tr('生图模型类型')"
+              :menu-z-index="2000"
+              @update:model-value="selectImageModelType"
+            />
             <small>{{ tr('仅支持 Lite、Pro 和 GPT Image 2；清晰度、比例与格式由所选类型的后台能力定义。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
             <span>{{ tr('视频模型类型') }}</span>
-            <select v-model="form.video_model_type" name="video-model-type" required @change="changeVideoModelType">
-              <option disabled value="">{{ tr('请选择受支持的视频模型') }}</option>
-              <option v-for="item in videoModelTypes" :key="String(item.value)" :value="item.value">{{ tr(item.label) }}</option>
-            </select>
+            <AppSelect
+              :model-value="form.video_model_type"
+              :options="videoModelTypeOptions"
+              :ariaLabel="tr('视频模型类型')"
+              :menu-z-index="2000"
+              @update:model-value="selectVideoModelType"
+            />
             <small>{{ tr('支持 Seedance 系列与 MiniMax H3；分辨率、比例、时长和请求格式由后台能力与适配器定义。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
@@ -660,11 +663,13 @@ onMounted(load)
           </label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">
             <span>{{ tr('接口协议') }}</span>
-            <select v-model="form.api_protocol" name="image-api-protocol">
-              <option value="openai_compatible">{{ tr('OpenAI 兼容（GPT Image / 中转服务）') }}</option>
-              <option value="openrouter_compatible">{{ tr('OpenRouter 兼容（/images）') }}</option>
-              <option value="volcengine_ark">{{ tr('火山方舟 Seedream') }}</option>
-            </select>
+            <AppSelect
+              :model-value="form.api_protocol"
+              :options="imageProtocolOptions"
+              :ariaLabel="tr('接口协议')"
+              :menu-z-index="2000"
+              @update:model-value="selectImageProtocol"
+            />
             <small>{{ tr('协议决定请求字段与尺寸适配，不依赖模型名称猜测供应商。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'llm'">
@@ -679,11 +684,13 @@ onMounted(load)
           </label>
           <label v-if="selectedCategory.id === 'llm'">
             <span>{{ tr('思考模式') }}</span>
-            <select v-model="form.thinking" name="model-thinking">
-              <option value="">{{ tr('按模型默认') }}</option>
-              <option value="enabled">{{ tr('开启思考（enabled）') }}</option>
-              <option value="disabled">{{ tr('关闭思考（disabled）') }}</option>
-            </select>
+            <AppSelect
+              :model-value="form.thinking"
+              :options="thinkingOptions"
+              :ariaLabel="tr('思考模式')"
+              :menu-z-index="2000"
+              @update:model-value="selectThinking"
+            />
             <small>{{ tr('深度思考/推理模型可关闭思考以提速并避免正文被 reasoning 挤占。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'llm'">
@@ -721,8 +728,6 @@ onMounted(load)
               <input v-model.number="tier.price" type="number" min="0" step="0.01" />
             </label>
           </div>
-          <p>{{ tr('本地成片通过MediaKit临时上传读取；OSS成片使用签名地址。无需开放本地媒体目录。') }}</p>
-          <p>{{ tr('保持原片帧率，不自动插帧。默认价格来自后台能力配置，保存后按此配置估价。') }}</p>
         </section>
         <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
           <span class="pricing-title">{{ tr('费用设置（元 / 百万 token）') }}</span>
@@ -782,7 +787,7 @@ onMounted(load)
           </div>
         </section>
 
-        <footer><AppButton variant="secondary" size="sm" type="button" @click="showCreate = false">{{ tr('取消') }}</AppButton><AppButton variant="primary" size="sm" type="submit" :loading="creating">{{ creating ? tr('保存中…') : (isEditing ? tr('保存修改') : tr('创建配置')) }}</AppButton></footer>
+        <footer><span class="model-modal-hint">{{ tr('关闭（Esc）') }}</span><AppButton variant="secondary" size="sm" type="button" @click="showCreate = false">{{ tr('取消') }}</AppButton><AppButton variant="primary" size="sm" type="submit" :loading="creating">{{ creating ? tr('保存中…') : (isEditing ? tr('保存修改') : tr('创建配置')) }}</AppButton></footer>
       </form>
     </div>
   </main>
@@ -795,22 +800,6 @@ onMounted(load)
 .model-settings-header span, .model-config-section > header > div > span { color: #686af0; font-size: 9px; font-weight: 750; letter-spacing: .16em; }
 .model-settings-header h1 { margin: 0; color: #252937; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.035em; }
 .model-settings-header p, .model-config-section > header p { margin: 0; color: #848a9a; font-size: 12px; line-height: 1.6; }
-.settings-section-tabs { margin: 0 0 28px; }
-.general-settings-section { display: grid; width: min(1000px, 100%); gap: 20px; padding-bottom: 24px; }
-.general-settings-section > header > div { display: grid; gap: 5px; }
-.general-settings-section > header h2 { margin: 0; color: var(--app-text); font-size: 16px; }
-.general-settings-section > header p { margin: 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
-.general-setting-status { display: inline-flex; padding: 4px 9px; border-radius: 6px; background: var(--app-surface-muted); color: var(--app-text-secondary); font-size: 11px; }
-.prompt-language-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.prompt-language-options button { display: grid; min-height: 64px; grid-template-columns: 32px minmax(0, 1fr) 18px; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--app-border); border-radius: 10px; outline: none; color: var(--app-text-secondary); background: var(--app-surface); cursor: pointer; text-align: left; transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
-.prompt-language-options button:hover { border-color: var(--app-border-strong); color: var(--app-text); background: var(--app-surface-hover); }
-.prompt-language-options button:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 18%,transparent); }
-.prompt-language-options button.is-selected { border-color: color-mix(in srgb,var(--app-accent) 58%,var(--app-border)); color: var(--app-accent); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--app-accent) 18%,transparent); }
-.prompt-language-options button > span:nth-child(2) { display: grid; gap: 4px; }
-.prompt-language-options button strong { color: inherit; font-size: 13px; }
-.prompt-language-options button small { color: var(--app-text-secondary); font-size: 11px; line-height: 1.45; }
-.language-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 8px; color: var(--app-accent); background: var(--app-surface-muted); font-size: 11px; font-weight: 650; }
-.general-setting-note { margin: 12px 0 0; color: var(--app-text-muted); font-size: 11px; line-height: 1.6; }
 .settings-primary-button, .model-config-section > header > button, .model-empty-state button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid #5b5cf6; border-radius: 10px; color: #fff; background: #5b5cf6; box-shadow: 0 8px 20px rgb(91 92 246 / 18%); cursor: pointer; font-size: 12px; font-weight: 600; }
 .settings-primary-button:hover, .model-config-section > header > button:hover, .model-empty-state button:hover { background: #4d4ee8; }
 .model-source-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; padding: 14px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
@@ -873,12 +862,15 @@ onMounted(load)
 .model-form-grid label.is-full { grid-column: 1 / -1; }
 .model-form-grid label > span:first-child { font-weight: 600; }
 .model-form-grid label > small { color: var(--app-text-muted); font-size: 9px; }
-.model-form-grid input, .model-form-grid select { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid var(--app-border); border-radius: 9px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); caret-color: var(--app-text); font-size: 11px; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.model-form-grid input { width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid var(--app-border); border-radius: 9px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); caret-color: var(--app-text); font-size: 11px; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.model-form-grid :deep(.app-select) { width: 100%; }
+.model-form-grid :deep(.app-select__trigger) { min-height: 39px; padding: 0 11px; background: var(--app-surface-muted); font-size: 11px; }
+.model-form-grid :deep(.app-select__trigger:hover) { background: var(--app-surface-hover); }
+.model-form-grid :deep(.app-select.is-open .app-select__trigger) { background: var(--app-surface-hover); }
 .model-readonly-value { display: flex; width: 100%; min-height: 39px; align-items: center; padding: 0 11px; border-radius: 9px; color: var(--app-text); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 11px; }
 .model-form-grid input::placeholder { color: var(--app-text-muted); opacity: 1; }
-.model-form-grid input:hover, .model-form-grid select:hover { border-color: var(--app-border-strong); }
+.model-form-grid input:hover { border-color: var(--app-border-strong); }
 .model-form-grid input:focus { border-color: var(--app-accent); color: var(--app-text); background: var(--app-surface-hover); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
-.model-form-grid select:focus { border-color: var(--app-accent); color: var(--app-text); background: var(--app-surface-hover); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 10%,transparent); }
 .model-form-grid input:-webkit-autofill,
 .model-form-grid input:-webkit-autofill:hover,
 .model-form-grid input:-webkit-autofill:focus { border-color: var(--app-border-strong); -webkit-text-fill-color: var(--app-text); caret-color: var(--app-text); box-shadow: 0 0 0 1000px var(--app-surface-muted) inset; }
@@ -898,6 +890,7 @@ onMounted(load)
 .secret-input > button { position: absolute; right: 5px; display: grid; width: 32px; height: 30px; place-items: center; border: 0; border-radius: 7px; color: var(--app-text-muted); background: transparent; cursor: pointer; }
 .secret-input > button:hover { color: var(--app-accent); background: var(--app-accent-soft); }
 .model-modal > footer { justify-content: flex-end; padding-top: 3px; }
+.model-modal-hint { margin-right: auto; color: var(--app-text-muted); font-size: 10px; }
 .model-modal > footer .app-button { min-height: 38px; padding: 0 14px; border-radius: 9px; cursor: pointer; font-size: 11px; }
 .model-modal > footer button:disabled { cursor: not-allowed; opacity: .55; }
 .pricing-editor { display: grid; gap: 10px; margin-top: 2px; padding: 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
@@ -929,7 +922,6 @@ onMounted(load)
   .config-actions { grid-column: 1 / -1; justify-content: flex-end; padding-top: 10px; border-top: 1px solid #eff0f4; }
   .model-form-grid { grid-template-columns: 1fr; }
   .model-form-grid label, .model-form-grid label.is-full { grid-column: 1; }
-  .prompt-language-options { grid-template-columns: 1fr; }
 }
 .enhancement-resolution-options{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.enhancement-resolution-options label{display:flex;gap:6px;align-items:center}.enhancement-resolution-options input{width:auto;min-height:auto}
 </style>

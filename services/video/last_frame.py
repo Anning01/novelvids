@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -59,7 +60,11 @@ class LastFrameService:
             destination_dir = Path(settings.MEDIA_PATH) / "video-references"
             destination_dir.mkdir(parents=True, exist_ok=True)
             destination = destination_dir / frame_path.name
-            await asyncio.to_thread(os.replace, frame_path, destination)
+            # 临时目录和媒体卷可能跨磁盘；先在目标卷暂存，再原子发布完整图片。
+            with TemporaryDirectory(dir=destination_dir, prefix=".last-frame-") as staging:
+                staged = Path(staging) / frame_path.name
+                await asyncio.to_thread(shutil.copyfile, frame_path, staged)
+                await asyncio.to_thread(os.replace, staged, destination)
             return f"/media/video-references/{destination.name}"
 
     async def _materialize_video(self, video_ref: str, destination: Path) -> Path:

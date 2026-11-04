@@ -11,8 +11,8 @@ import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, provide, ref, 
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import type { WorkbenchCapabilities } from '@/types'
-import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
-import type { VideoResource } from '@/features/resource-library/types'
+import CatalogResourcePicker from '@/features/resource-library/CatalogResourcePicker.vue'
+import type { CatalogResource } from '@/features/resource-library/catalog'
 import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
 import ConnectionNodePicker from '../components/ConnectionNodePicker.vue'
 import WorkbenchRunStatus from '../components/WorkbenchRunStatus.vue'
@@ -65,8 +65,8 @@ const props = withDefaults(defineProps<{ novelId: number; chapterId: number; asp
 })
 const store = useWorkbenchStore()
 const libraryOpen = ref(false)
-function addLibraryVideos(items: VideoResource[]) {
-  for (const item of items) store.addLibraryVideo(item, visibleNodePosition({ width: 360, height: 340 }))
+async function addLibraryVideos(items: CatalogResource[]) {
+  try { for (const item of items) await store.addCatalogResource(item, visibleNodePosition({ width: 360, height: 340 })) } catch (reason) { notice.error(reason instanceof Error ? reason.message : tr('资源引用失败')); return }
   libraryOpen.value = false
 }
 const canvasTool = ref<'select' | 'pan'>('select')
@@ -757,7 +757,7 @@ onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); windo
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
       <Controls position="bottom-right" />
       <CanvasToolSwitcher v-model="canvasTool" />
-      <ResourceLibraryPicker :open="libraryOpen" @close="libraryOpen = false" @choose="addLibraryVideos" />
+      <CatalogResourcePicker :open="libraryOpen" @close="libraryOpen = false" @choose="addLibraryVideos" />
       <WorkbenchToolbar @choose-library="libraryOpen = true" :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div class="workbench-status-stack"><WorkbenchRunStatus :status="generating ? 'RUNNING' : 'IDLE'" :progress="generating ? 0 : undefined" /></div>
       <ConnectionNodePicker v-if="connectionPicker" :options="connectionPicker.options" :x="connectionPicker.x" :y="connectionPicker.y" :accent-class="connectionPicker.accentClass" @select="createCompatibleNode" @close="connectionPicker = null" />

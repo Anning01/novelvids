@@ -4,9 +4,13 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import AppButton from '@/components/AppButton.vue'
 import AppMultiSelect from '@/components/AppMultiSelect.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import ConfigPage from './ConfigPage.vue'
 import { api } from '@/api'
 import { useAuthStore } from '@/features/auth/authStore'
+import { notice } from '@/shared/notice'
+
+vi.mock('@/shared/notice', () => ({ notice: { success: vi.fn(), error: vi.fn() } }))
 
 function baseMocks() {
   vi.spyOn(api, 'enums').mockResolvedValue({
@@ -15,9 +19,6 @@ function baseMocks() {
       image_model_type: [],
       video_model_type: [],
     },
-  } as never)
-  vi.spyOn(api, 'generalConfig').mockResolvedValue({
-    data: { id: 1, prompt_language: 'zh', created_at: '', updated_at: '' },
   } as never)
   vi.spyOn(api, 'generationCapabilities').mockResolvedValue({
     data: { image: {}, video: {} },
@@ -230,7 +231,10 @@ describe('ConfigPage 平台配置仅超管可见', () => {
 
     await wrapper.get('.model-category-card.is-video').trigger('click')
     await wrapper.get('.model-config-section button').trigger('click')
-    await wrapper.get('select[name="video-model-type"]').setValue('minimax_h3')
+    const videoTypeSelect = wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === '视频模型类型')
+    expect(videoTypeSelect).toBeTruthy()
+    videoTypeSelect!.vm.$emit('update:modelValue', 'minimax_h3')
+    await flushPromises()
 
     expect((wrapper.get('input[name="model-service-base-url"]').element as HTMLInputElement).value).toBe('https://api.minimaxi.com')
     expect((wrapper.get('input[name="model-id"]').element as HTMLInputElement).value).toBe('MiniMax-H3')
@@ -263,9 +267,222 @@ it('enables higher output tiers from server presets while preserving existing co
   await wrapper.get('.model-category-card.is-enhancement').trigger('click')
   await wrapper.get('[aria-label="编辑配置"]').trigger('click')
   const input = wrapper.findAll('.enhancement-resolution-options label').find(item => item.text() === '2K')!.get('input')
+  expect(wrapper.text()).not.toContain('本地成片通过MediaKit临时上传读取')
+  expect(wrapper.text()).not.toContain('默认价格来自后台能力配置')
   await input.setValue(true); await input.setValue(false); await input.setValue(true)
   await wrapper.get('form.model-modal').trigger('submit'); await flushPromises()
   expect(update).toHaveBeenCalledWith(12, expect.objectContaining({ processing_options: { output_resolutions: ['1080p','2k'] },
     pricing: expect.objectContaining({ tiers: [...rates,...higher] }) }))
+  wrapper.unmount()
+})
+
+it('模型配置表单统一使用共享选择器组件，不再渲染原生下拉框', async () => {
+  baseMocks()
+  vi.mocked(api.enums).mockResolvedValue({
+    data: {
+      ai_task_type: [{ value: 1, label: '内容理解' }],
+      image_model_type: [{ value: 'seedream_5_lite', label: 'Doubao Seedream 5.0 Lite' }],
+      video_model_type: [{ value: 'minimax_h3', label: 'MiniMax H3' }],
+    },
+  } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+
+  const openModal = async (category: string) => {
+    await wrapper.get(`.model-category-card.is-${category}`).trigger('click')
+    await wrapper.get('.model-config-section button').trigger('click')
+    await flushPromises()
+  }
+  const closeModal = async () => {
+    await wrapper.get('.model-modal header [aria-label="关闭"]').trigger('click')
+    await flushPromises()
+  }
+  const selectorLabels = () => wrapper.findAllComponents(AppSelect).map(item => item.props('ariaLabel'))
+
+  await openModal('llm')
+  expect(wrapper.findAll('form.model-modal select')).toHaveLength(0)
+  expect(selectorLabels()).toContain('思考模式')
+
+  await closeModal()
+  await openModal('image')
+  expect(wrapper.findAll('form.model-modal select')).toHaveLength(0)
+  expect(selectorLabels()).toContain('生图模型类型')
+  expect(selectorLabels()).toContain('接口协议')
+
+  await closeModal()
+  await openModal('video')
+  expect(wrapper.findAll('form.model-modal select')).toHaveLength(0)
+  expect(selectorLabels()).toContain('视频模型类型')
+  wrapper.unmount()
+})
+
+it('Esc 关闭模型配置弹窗，展开的下拉菜单优先收起', async () => {
+  baseMocks()
+  vi.mocked(api.enums).mockResolvedValue({
+    data: {
+      ai_task_type: [{ value: 2, label: '角色与场景参考图' }],
+      image_model_type: [{ value: 'seedream_5_lite', label: 'Doubao Seedream 5.0 Lite' }],
+      video_model_type: [],
+    },
+  } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+
+  await wrapper.get('.model-category-card.is-image').trigger('click')
+  await wrapper.get('.model-config-section button').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('form.model-modal').exists()).toBe(true)
+
+  // 下拉菜单展开时，Esc 只收起菜单，弹窗保持打开
+  const imageTypeSelect = wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === '生图模型类型')!
+  await imageTypeSelect.get('button').trigger('click')
+  await flushPromises()
+  expect(document.querySelector('.app-select__menu')).not.toBeNull()
+  await imageTypeSelect.get('button').trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(document.querySelector('.app-select__menu')).toBeNull()
+  expect(wrapper.find('form.model-modal').exists()).toBe(true)
+
+  // 焦点在弹窗内时 Esc 直接关闭弹窗
+  await wrapper.get('input[name="model-config-name"]').trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(wrapper.find('form.model-modal').exists()).toBe(false)
+
+  // 焦点不在弹窗内时 Esc 同样关闭弹窗
+  await wrapper.get('.model-config-section button').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('form.model-modal').exists()).toBe(true)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(wrapper.find('form.model-modal').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it.each([
+  ['image', '生图模型类型', '请选择受支持的模型'],
+  ['video', '视频模型类型', '请选择受支持的视频模型'],
+] as const)('未选择 %s 模型类型时阻止提交并提示缺少模型类型', async (category, label, message) => {
+  baseMocks()
+  vi.mocked(api.enums).mockResolvedValue({
+    data: {
+      ai_task_type: [{ value: 2, label: '角色与场景参考图' }],
+      image_model_type: [{ value: 'seedream_5_lite', label: 'Doubao Seedream 5.0 Lite' }],
+      video_model_type: [],
+    },
+  } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const createConfig = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+
+  await wrapper.get(`.model-category-card.is-${category}`).trigger('click')
+  await wrapper.get('.model-config-section button').trigger('click')
+  await flushPromises()
+
+  const typeSelect = wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === label)
+  expect(typeSelect).toBeTruthy()
+  typeSelect!.vm.$emit('update:modelValue', '')
+  await flushPromises()
+
+  await wrapper.get('input[name="model-config-name"]').setValue('缺少模型类型')
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+
+  expect(createConfig).not.toHaveBeenCalled()
+  expect(notice.error).toHaveBeenCalledWith(message)
+  wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('selects a video model from the shared popup and submits its preset (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.mocked(api.enums).mockResolvedValue({ data: {
+    ai_task_type: [{ value: 4, label: '视频片段生成' }], image_model_type: [],
+    video_model_type: [{ value: 'seedance_2', label: 'Doubao Seedance 2.0' }, { value: 'minimax_h3', label: 'MiniMax H3' }],
+  } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const createConfig = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-video').trigger('click')
+  await wrapper.get('.model-config-section button').trigger('click')
+  await wrapper.get('button[aria-label="视频模型类型"]').trigger('click')
+  await flushPromises()
+  const menu = document.querySelector<HTMLElement>('[role="listbox"][aria-label="视频模型类型"]')!
+  expect(menu.style.zIndex).toBe('2000')
+  const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.trim() === 'MiniMax H3')!
+  option.click()
+  await flushPromises()
+  expect(wrapper.get('button[aria-label="视频模型类型"]').text()).toBe('MiniMax H3')
+  expect(document.querySelector('[role="listbox"][aria-label="视频模型类型"]')).toBeNull()
+  await wrapper.get('input[name="model-config-name"]').setValue('Video model')
+  await wrapper.get('input[name="model-service-api-key"]').setValue('test-only-key')
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(createConfig).toHaveBeenCalledWith(expect.objectContaining({ video_model_type: 'minimax_h3', base_url: 'https://api.minimaxi.com', model: 'MiniMax-H3', api_protocol: 'minimax' }))
+  wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('selects AutoDL from the shared popup and submits its workflow (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.mocked(api.enums).mockResolvedValue({ data: {
+    ai_task_type: [{ value: 4, label: '视频片段生成' }], image_model_type: [],
+    video_model_type: [{ value: 'seedance_2', label: 'Doubao Seedance 2.0' }, { value: 'minimax_h3_autodl', label: 'MiniMax H3 · AutoDL' }],
+  } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const createConfig = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-video').trigger('click')
+  await wrapper.get('.model-config-section button').trigger('click')
+  await wrapper.get('button[aria-label="视频模型类型"]').trigger('click')
+  await flushPromises()
+  const menu = document.querySelector<HTMLElement>('[role="listbox"][aria-label="视频模型类型"]')!
+  expect(menu.style.zIndex).toBe('2000')
+  const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.trim() === 'MiniMax H3 · AutoDL')!
+  option.click()
+  await flushPromises()
+  expect(wrapper.get('button[aria-label="视频模型类型"]').text()).toBe('MiniMax H3 · AutoDL')
+  expect(document.querySelector('[role="listbox"][aria-label="视频模型类型"]')).toBeNull()
+  await wrapper.get('input[name="model-config-name"]').setValue('Video model')
+  await wrapper.get('input[name="model-service-api-key"]').setValue('test-only-key')
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(createConfig).toHaveBeenCalledWith(expect.objectContaining({ video_model_type: 'minimax_h3_autodl', base_url: 'https://autodl.art/api/v1/comfyui', model: 'minimax_h3_zm_u24', api_protocol: 'autodl' }))
+  wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('只展示模型配置，不加载旧通用配置（%s）', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const generalConfig = vi.spyOn(api, 'generalConfig')
+  const wrapper = mountPage(teamAdminStore())
+  await flushPromises()
+
+  expect(wrapper.get('h1').text()).toBe('模型配置')
+  expect(wrapper.find('.model-category-grid').exists()).toBe(true)
+  expect(wrapper.find('.model-config-section').exists()).toBe(true)
+  expect(wrapper.find('.settings-section-tabs').exists()).toBe(false)
+  expect(wrapper.find('.general-settings-section').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('通用配置')
+  expect(wrapper.text()).not.toContain('创作偏好')
+  expect(generalConfig).not.toHaveBeenCalled()
   wrapper.unmount()
 })

@@ -31,8 +31,23 @@ async def test_旧尾帧引用启动时补齐_prompt_且重复执行幂等():
     reference = scene.metadata["video_reference_media"][0]
     mention = reference_mention_syntax("image", reference["url"])
     assert reference["mention_url"] == reference["url"]
-    import json
-    assert json.loads(scene.prompt.split("\n", 1)[0]) == {"first_frame_reference": mention}
+    assert scene.prompt.startswith(f'【首帧衔接】\n首帧参考：{mention}')
     assert scene.prompt.endswith("人物继续前行")
 
     assert await backfill_last_frame_continuity() == {"scanned": 1, "updated": 0}
+
+
+@pytest.mark.asyncio
+async def test_already_bound_legacy_json_is_not_rewritten_on_startup():
+    import json
+    novel = await Novel.create(name='已有尾帧记录')
+    chapter = await Chapter.create(novel=novel, number=1, name='第一章', content='')
+    mention = reference_mention_syntax('image', 'uploads/1/old-frame.png')
+    prefix = json.dumps({'first_frame_reference': mention})
+    scene = await Scene.create(chapter=chapter, sequence=1, prompt=prefix+'\n\nUser-saved content.',
+        metadata={'previous_scene_last_frame_prompt_instruction': prefix, 'video_reference_media':[
+            {'type':'image','url':'uploads/1/old-frame.png','mention_url':'uploads/1/old-frame.png','source':'previous_scene_last_frame'}]})
+    original = scene.prompt
+    assert await backfill_last_frame_continuity() == {'scanned':1,'updated':0}
+    await scene.refresh_from_db()
+    assert scene.prompt == original

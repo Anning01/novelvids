@@ -42,3 +42,24 @@ it('keeps URL mentions from storyboard and name mentions from canvas for the sam
   expect(store.libraryVideoReferences(3)).toHaveLength(1)
   expect(store.libraryVideoReferences(3)[0]).toMatchObject({ mention_name: '动作参考', mention_url: resource.storage_ref })
 })
+
+it('adds team BGM and sticker nodes while keeping their durable resource identity', async () => {
+  const store = useWorkbenchStore()
+  const music = await store.addCatalogResource({ key: 'media:12', catalog: 'media', id: 12, kind: 'bgm', name: 'Team BGM', url: 'https://cdn.invalid/signed.wav', storage_ref: 'uploads/1/music.wav', origin: 'team', folder_id: 0, created_at: '', editable: true, duration: 4 })
+  const sticker = await store.addCatalogResource({ key: 'media:13', catalog: 'media', id: 13, kind: 'sticker', name: 'Team sticker', url: 'https://cdn.invalid/signed.png', storage_ref: 'uploads/1/sticker.png', origin: 'team', folder_id: 0, created_at: '', editable: true, width: 640, height: 480 })
+  expect(music?.kind).toBe('audio_media')
+  expect(music?.data).toMatchObject({ library_resource_id: 12, storage_ref: 'uploads/1/music.wav' })
+  expect(sticker?.kind).toBe('image_media')
+  expect(sticker?.data).toMatchObject({ library_resource_id: 13, storage_ref: 'uploads/1/sticker.png' })
+  const persisted = JSON.parse(localStorage.getItem(store.layoutKey()) || '{}')
+  expect(persisted.manualNodes).toHaveLength(2)
+})
+
+it('includes library images on reference-image edges and omits prompt-only edges', async () => {
+  const store = useWorkbenchStore()
+  const image = await store.addCatalogResource({ key: 'media:14', catalog: 'media', id: 14, kind: 'image', name: 'Team image', url: 'https://cdn.invalid/signed.png', storage_ref: 'uploads/1/image.png', origin: 'team', folder_id: 0, created_at: '', editable: true, width: 1280, height: 720 })
+  store.edges.push({ key: 'img-ref', id: 1, type: 'asset_reference', source: image!.key, target: 'shot-3', orderIndex: 0, config: { inputMode: 'reference_image' }, backendType: 'asset_reference', sourceHandle: null, targetHandle: null, createdAt: '', updatedAt: '' } as typeof store.edges[number])
+  expect(store.libraryVideoReferences(3)).toMatchObject([{ type: 'image', library_resource_id: 14, url: 'uploads/1/image.png' }])
+  store.edges[0]!.config = { inputMode: 'prompt_injection' }
+  expect(store.libraryVideoReferences(3)).toEqual([])
+})

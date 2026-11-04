@@ -83,3 +83,16 @@ The current backend Dockerfile does not install FFmpeg. In the running container
 Existing complete prompts are reused by default. If you change a style or skill, optimize and save the prompt before regenerating existing assets. See [skill customization](agent-skills-workflow.en.md).
 
 MediaKit is a separate **Video enhancement** configuration, not a video-generation model. See [video enhancement](video-enhancement.en.md).
+
+### MiniMax H3 · AutoDL
+
+Select **MiniMax H3 · AutoDL**, or edit the `minimax-h3-autodl` entry added at startup (disabled, with an empty key).
+
+- Base URL: `https://autodl.art/api/v1/comfyui`
+- Model / workflow ID: `minimax_h3_zm_u24`
+- API key: an AutoDL **ComfyUI group** token, without a `Bearer` prefix.
+- Supports 480p/768p, 16:9/9:16/1:1, 1–15 seconds, up to 9 reference images and 3 audio clips. Reference videos and keyframes are unavailable. Text-only requests use the workflow's blank image.
+- Reference media must have publicly accessible HTTP(S) URLs. Configure OSS for local images and audio; Base64 inputs are rejected.
+- **Manual pricing review required:** billing uses output seconds, with zero initial rates. Set resolution rates to the applicable contract or peak/off-peak rates. Official MiniMax image fees do not apply. The query response's `duration` is processing time, not output duration.
+
+See the [AutoDL API documentation](https://autodl.art/docs/comfyui_api/) and [workflow](https://www.autodl.art/large-model/comfyui/minimax_h3_zm_u24). The existing completion flow downloads the short-lived result URL.

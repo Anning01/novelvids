@@ -183,21 +183,8 @@ async def resolve_production_intents(request, novel_id, user_message):
     return request.model_copy(update={"production_intents": checked if granted else []})
 
 
-async def pending_production(task_id):
-    from models.creation_agent import AgentMessage
-
-    message = await AgentMessage.get_or_none(task_id=task_id, role="user")
-    if not message or not message.run_input.get("production_proposals"):
-        return None
-    confirmation_id = uuid5(UUID(str(task_id)), "production-confirmation")
-    if await AgentMessage.filter(
-        conversation_id=message.conversation_id, request_id=confirmation_id, role="user"
-    ).exists():
-        return None
+async def _production_proposal_detail(message, task):
     original = public_run_input(message.run_input)
-    from models.ai_task import AiTask
-
-    task = await AiTask.get(id=task_id)
     from utils.messages import localized_message
 
     intents = [
@@ -253,7 +240,7 @@ async def pending_production(task_id):
         labels.append({"operation": intent.operation, "target_label": label})
     return {
         "confirmation_request_id": str(
-            uuid5(UUID(str(task_id)), "production-confirmation")
+            uuid5(UUID(str(task.id)), "production-confirmation")
         ),
         "message": localized_message(
             "确认执行所列生成任务",
@@ -266,3 +253,40 @@ async def pending_production(task_id):
         "write_scope": original.get("write_scope", "selected"),
         "model_config_id": original.get("model_config_id"),
     }
+
+
+
+async def pending_productions(tasks) -> dict[str, dict | None]:
+    """Batch the confirmation gate for a history page; only real proposals resolve labels."""
+    from models.creation_agent import AgentMessage
+
+    pending: dict[str, dict | None] = {str(task.id): None for task in tasks}
+    if not tasks:
+        return pending
+    proposals: dict[str, object] = {}
+    confirmation_ids: dict[str, object] = {}
+    for message in await AgentMessage.filter(task_id__in=[task.id for task in tasks], role="user"):
+        if not (message.run_input or {}).get("production_proposals"):
+            continue
+        key = str(message.task_id)
+        proposals[key] = message
+        confirmation_ids[key] = uuid5(UUID(key), "production-confirmation")
+    confirmed = set()
+    if confirmation_ids:
+        rows = await AgentMessage.filter(
+            request_id__in=list(confirmation_ids.values()), role="user"
+        ).values_list("conversation_id", "request_id")
+        confirmed = {(conversation_id, str(request_id)) for conversation_id, request_id in rows}
+    for task in tasks:
+        message = proposals.get(str(task.id))
+        if message is None or (message.conversation_id, str(confirmation_ids[str(task.id)])) in confirmed:
+            continue
+        pending[str(task.id)] = await _production_proposal_detail(message, task)
+    return pending
+
+
+async def pending_production(task_id):
+    from models.ai_task import AiTask
+
+    task = await AiTask.get(id=task_id)
+    return (await pending_productions([task]))[str(task.id)]

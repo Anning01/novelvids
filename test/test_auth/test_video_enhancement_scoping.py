@@ -56,6 +56,9 @@ async def test_export_history_is_team_scoped_and_viewer_cannot_create_paid_opera
     response=await client.post(f'/api/video/exports/{export.id}/enhance',json={
         'model_config_id':1,'source_sha256':'a'*64,'quote_version':'b'*64},headers=viewer_headers)
     assert response.json()['code']==403
+    assert (await client.post(f'/api/video/exports/{export.id}/apply', headers=viewer_headers)).json()['code'] == 403
+    assert (await client.post(f'/api/video/exports/{export.id}/apply', headers=outsider_headers)).json()['code'] == 404
+    assert (await client.post(f'/api/video/exports/{export.id}/apply')).json()['code'] == 401
     run.assert_not_awaited()
     assert await AiTask.all().count()==1  # Only the pre-existing shared task; viewer submissions created none.
 

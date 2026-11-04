@@ -2,7 +2,6 @@
 
 from utils.messages import localized_message
 
-import asyncio
 from uuid import UUID
 
 from ag_ui.core import Event, RunAgentInput, RunErrorEvent
@@ -14,17 +13,19 @@ from pydantic import TypeAdapter
 from auth.deps import AuthContext, get_auth_context, require_super_admin
 from controllers.creation_agent import creation_agent_controller
 from models.ai_task import AiTask
-from models.creation_agent import AgentMessage
 from schemas.creation_agent import AgentConfiguration, AgentConversationCreate, AgentConversationOut, AgentMessagePage, AgentRunOut, AgentRunRequest, PromptChangeOut, PromptStatusRequest, PromptTargetStatusOut
 from services.ai_task_executor import ai_task_executor
+from services.creation_agent.event_log import agent_event_log
 from services.creation_agent.sessions import ACTIVE_STATUSES, agent_sessions
+from services.task_signals import task_signals
 from utils.enums import TaskStatusEnum
 from utils.response_format import ResponseSchema
 
 
 router = APIRouter()
 _EVENT_ADAPTER = TypeAdapter(Event)
-_STREAM_POLL_SECONDS = 0.15
+_STREAM_BATCH = 200
+_STREAM_IDLE_FALLBACK_SECONDS = 15.0
 
 
 @router.get('/capabilities', response_model=ResponseSchema)
@@ -108,29 +109,39 @@ async def stream(task_id: UUID, request: Request, body: RunAgentInput | None = B
             raise HTTPException(422, localized_message('事件订阅不接受客户端历史、工具或状态'))
     encoder = EventEncoder()
 
+    def closing_error(task: AiTask, fallback_code: str) -> RunErrorEvent:
+        return RunErrorEvent(message=task.error_message or '运行已停止',
+            code='CANCELLED' if task.status == TaskStatusEnum.cancelled.value else fallback_code)
+
     async def events():
         cursor = after
         while not await request.is_disconnected():
-            row = await AgentMessage.get(id=assistant.id)
-            task = await AiTask.get(id=task_id)
-            active = task.status in ACTIVE_STATUSES
-            while cursor < len(row.events):
-                event = row.events[cursor]
-                if event['type'] in {'RUN_ERROR', 'RUN_FINISHED'}:
-                    if active:
+            async with task_signals.subscription(str(task_id)) as signal:
+                task = await AiTask.get(id=task_id)
+                active = task.status in ACTIVE_STATUSES
+                while True:
+                    batch = await agent_event_log.page(assistant, cursor, _STREAM_BATCH)
+                    if not batch:
                         break
-                    if task.status != TaskStatusEnum.completed.value:
-                        yield encoder.encode(RunErrorEvent(message=task.error_message or '运行已停止',
-                            code='CANCELLED' if task.status == TaskStatusEnum.cancelled.value else 'FAILED'))
-                        return
-                yield encoder.encode(_EVENT_ADAPTER.validate_python(event))
-                cursor += 1
-            if not active:
-                if not row.events or row.events[-1]['type'] not in {'RUN_FINISHED', 'RUN_ERROR'}:
-                    yield encoder.encode(RunErrorEvent(message=task.error_message or '运行已停止',
-                        code='CANCELLED' if task.status == TaskStatusEnum.cancelled.value else 'INTERRUPTED'))
-                return
-            await asyncio.sleep(_STREAM_POLL_SECONDS)
+                    halted = False
+                    for event in batch:
+                        if event['type'] in {'RUN_ERROR', 'RUN_FINISHED'}:
+                            if active:
+                                halted = True
+                                break
+                            if task.status != TaskStatusEnum.completed.value:
+                                yield encoder.encode(closing_error(task, 'FAILED'))
+                                return
+                        yield encoder.encode(_EVENT_ADAPTER.validate_python(event))
+                        cursor += 1
+                    if halted or len(batch) < _STREAM_BATCH:
+                        break
+                if not active:
+                    last = await agent_event_log.last(assistant)
+                    if last is None or last['type'] not in {'RUN_FINISHED', 'RUN_ERROR'}:
+                        yield encoder.encode(closing_error(task, 'INTERRUPTED'))
+                    return
+                await task_signals.wait(signal, _STREAM_IDLE_FALLBACK_SECONDS)
 
     return StreamingResponse(events(), media_type='text/event-stream',
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

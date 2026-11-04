@@ -108,4 +108,32 @@ describe('ShortDramaBatchVideoDialog', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
+
+  it('applies all chapter parameters and remembers them without generating media', async () => {
+    const auto = { model_config_id: 8, resolution: '2k' as const }
+    const wrapper = mount(ShortDramaBatchVideoDialog, { props: { open: true, parametersOnly: true, scenes, models,
+      initialReturnLastFrame: true, initialAspectRatio: '16:9', initialResolution: '720p', initialAutoEnhancement: auto,
+      enhancementModels: [{ id: 8, name: 'HD', resolutions: [{ value: '2k', short_side: 1440 }] }] }, global })
+    expect(wrapper.find('.batch-video-dialog__scroller').exists()).toBe(false)
+    expect(wrapper.get('.batch-video-last-frame').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain('保存为本项目后续章节的默认参数')
+    await wrapper.get('.batch-video-dialog__submit').trigger('click')
+    expect(wrapper.emitted('applyDefaults')).toEqual([[{ model_config_id: 7, resolution: '720p', aspect_ratio: '16:9',
+      return_last_frame: true, auto_enhancement: auto }, true]])
+    expect(wrapper.emitted('generate')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('includes explicitly selected automatic enhancement in batch generation but blocks equal targets', async () => {
+    const auto = { model_config_id: 8, resolution: '1080p' as const }
+    const wrapper = mount(ShortDramaBatchVideoDialog, { props: { open: true, scenes, models, initialResolution: '720p',
+      initialAutoEnhancement: auto, enhancementModels: [{ id: 8, name: 'HD', resolutions: [{ value: '1080p', short_side: 1080 }] }] }, global })
+    await wrapper.get('.batch-video-dialog__select-all').trigger('click')
+    await wrapper.get('.batch-video-dialog__submit').trigger('click')
+    expect(wrapper.emitted('generate')?.[0]?.[0]).toEqual(expect.objectContaining({ autoEnhancement: auto }))
+    await wrapper.setProps({ open: false }); await wrapper.setProps({ open: true, initialResolution: '1080p' })
+    await wrapper.get('.batch-video-dialog__select-all').trigger('click')
+    expect(wrapper.get('.batch-video-dialog__submit').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
 })

@@ -209,6 +209,27 @@ async def test_anonymous_gets_401_on_protected_routes(client, rbac_world):
 # ---------------------------------------------------------------- 成本可见性
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("username,total", [
+    ("rbac_viewer", None), ("rbac_creator", 10), ("rbac_admin", 30), ("rbac_boss", 129),
+])
+async def test_dashboard_project_costs_keep_billing_visibility(client, rbac_world, username, total):
+    response = await client.get('/api/billing/projects?page_size=100',
+                                headers=_auth(rbac_world['tokens'][username]))
+    payload = response.json()
+    if total is None:
+        assert payload['code'] == 403
+        assert not payload.get('data')
+        return
+    assert payload['code'] == 0
+    items = payload['data']['items']
+    assert sum(item['total_cost'] for item in items) == total
+    assert {item['novel_id'] for item in items} == (
+        {rbac_world['novel_a'].id, rbac_world['novel_b'].id}
+        if username == 'rbac_boss' else {rbac_world['novel_a'].id}
+    )
+
+
+@pytest.mark.asyncio
 async def test_billing_admin_sees_whole_team(client, rbac_world):
     token = rbac_world["tokens"]["rbac_admin"]
     response = await client.get("/api/billing/summary", headers=_auth(token))

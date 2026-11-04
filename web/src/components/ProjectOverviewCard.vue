@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { BookOpen, Clapperboard, Clock3, Ellipsis, Image, Trash2 } from 'lucide-vue-next'
+import { BookOpen, Clapperboard, Clock3, Coins, Ellipsis, Image, Trash2 } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import { mediaUrl } from '@/api'
 import { fallbackImage } from '@/shared/mediaFallback'
+import { money } from '@/features/billing/recordDisplay'
 import { projectDate, projectKindLabel, projectNumber, projectRuntime } from '@/shared/projectOverview'
 import { projectEntryRoute, readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { ProjectOverviewItem } from '@/types'
 
-const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; deleting?: boolean }>()
+const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; deleting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error'; costHint?: string }>()
 const emit = defineEmits<{ remove: [project: ProjectOverviewItem] }>()
 const menuOpen = ref(false)
 const actions = ref<HTMLElement | null>(null)
@@ -83,6 +84,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
         <div><dt><BookOpen :size="13" aria-hidden="true" />{{ tr('章节数') }}</dt><dd>{{ projectNumber(project.production.chapter_count) }}</dd></div>
         <div :title="tr('当前绑定的图片、声音和视频，项目内按文件去重；已移除的素材不计入。')"><dt><Image :size="13" aria-hidden="true" />{{ tr('资产数') }}</dt><dd>{{ projectNumber(project.production.asset_count) }}</dd></div>
         <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_duration_count }) : tr('当前成功视频已确认的实际时长，不重复累计历史版本。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
+        <div v-if="costState" class="project-overview-card__cost" :title="[costHint, tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')].filter(Boolean).join(' ')" :aria-busy="costState === 'loading'"><dt><Coins :size="13" aria-hidden="true" />{{ tr('已花费') }}</dt><dd :class="{ 'is-pending': costState !== 'ready' }">{{ costState === 'ready' ? money(cost ?? 0) : costState === 'loading' ? tr('正在读取…') : tr('读取失败') }}</dd></div>
       </dl>
     </RouterLink>
 
@@ -126,6 +128,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 .project-overview-card__stats dd { margin: 6px 0 0; font-size: 17px; font-weight: 650; line-height: 1.3; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .project-overview-card__stats small { margin-left: 3px; font-size: 11px; font-weight: 500; }
 .project-overview-card__stats dd.is-pending { font-size: 13px; font-weight: 500; line-height: 22px; }
+.project-overview-card__cost { display: flex; grid-column: 1 / -1; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 3px; padding-top: 12px; border-top: 1px solid var(--app-border); }
+.project-overview-card__cost dd { margin: 0; color: var(--app-accent); }
 .project-overview-card__actions { position: absolute; top: 13px; right: 12px; z-index: 2; }
 .project-overview-card__actions > .app-button { width: 32px; min-height: 32px; color: var(--app-text-secondary); opacity: 0; transition: opacity 140ms ease, background-color 140ms ease; }
 .project-overview-card:hover .project-overview-card__actions > .app-button, .project-overview-card:focus-within .project-overview-card__actions > .app-button, .project-overview-card__actions.is-open > .app-button { opacity: 1; }

@@ -2,9 +2,32 @@
 
 from models.chapter import Chapter
 from models.ai_task import AiTask
+from models.agent_operation import AgentOperation
 from services.creation_objects import project_write as creation_write
 from services.creation_agent.operation_receipts import execute_step
-from utils.enums import AiTaskTypeEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+
+
+async def resume_local_composition(task, connection):
+    """Explicit download retries may resume this deterministic step, never paid media."""
+    if (task.task_type != AiTaskTypeEnum.video.value
+        or task.request_params.get('operation') != 'compose'
+        or task.request_params.get('workflow_version') != 'agent-skills-v1'
+        or task.status != TaskStatusEnum.failed.value
+        or task.stage not in {'failed', 'needs_review'}):
+        return task
+    row = await AgentOperation.get_or_none(task=task, key='media:compose').using_db(connection)
+    if row is None or row.state not in {'running', 'uncertain', 'failed'}:
+        return task
+    if await AgentOperation.filter(task=task, external=True).exclude(key='media:compose').using_db(connection).exists():
+        return task
+    audit = {'previous_stage': task.stage, 'previous_step_state': row.state, 'previous_external': row.external}
+    await AgentOperation.filter(id=row.id).using_db(connection).update(external=False, state='pending')
+    await AiTask.filter(id=task.id).using_db(connection).update(status=TaskStatusEnum.queued.value,
+        stage='resuming', error_message=None, started_at=None, finished_at=None,
+        request_params={**task.request_params, 'composition_recovery': task.request_params.get('composition_recovery') or audit})
+    await task.refresh_from_db(using_db=connection)
+    return task
 
 
 async def submit_composition(chapter_id, *, strict=False, team_id=None, user_id=None):
@@ -31,7 +54,7 @@ async def submit_composition(chapter_id, *, strict=False, team_id=None, user_id=
 
         previous = await previous_submission(4, params, connection)
         if previous:
-            return previous
+            return await resume_local_composition(previous, connection)
         for task in await AiTask.filter(
             task_type=AiTaskTypeEnum.video.value, status__in=[1, 2, 6]
         ).using_db(connection):
@@ -58,5 +81,5 @@ class CompositionHandler:
             )
 
         return await execute_step(
-            params["task_id"], "media:compose", compose, external=True
+            params["task_id"], "media:compose", compose
         )

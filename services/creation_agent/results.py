@@ -5,9 +5,9 @@ import json
 from models.creation_agent import AgentMessage, PromptChange
 
 
-def tool_results(message: AgentMessage):
-    names = {event.get('toolCallId'): event.get('toolCallName') for event in message.events or [] if event.get('type') == 'TOOL_CALL_START'}
-    for event in message.events or []:
+def tool_results(events: list[dict]):
+    names = {event.get('toolCallId'): event.get('toolCallName') for event in events if event.get('type') == 'TOOL_CALL_START'}
+    for event in events:
         if event.get('type') != 'TOOL_CALL_RESULT':
             continue
         value = event.get('content')
@@ -20,9 +20,9 @@ def tool_results(message: AgentMessage):
             yield names.get(event.get('toolCallId')), value
 
 
-def query_results(message: AgentMessage) -> list[dict]:
+def query_results(events: list[dict]) -> list[dict]:
     results = []
-    for name, value in tool_results(message):
+    for name, value in tool_results(events):
         if name == 'get_creation_context':
             value = value.get('catalog') or {}
         elif name != 'query_creation_objects':
@@ -40,12 +40,42 @@ def query_results(message: AgentMessage) -> list[dict]:
     return results
 
 
-async def message_changes(message: AgentMessage, novel_id: int) -> list[PromptChange]:
+def undo_change_ids(events: list[dict]) -> set[int]:
+    return {value['change_id'] for name, value in tool_results(events)
+            if name == 'undo_creation_change' and isinstance(value.get('change_id'), int)}
+
+
+async def message_changes(message: AgentMessage, novel_id: int, events: list[dict]) -> list[PromptChange]:
     rows = await PromptChange.filter(task_id=message.task_id, novel_id=novel_id).order_by('id')
-    ids = {value['change_id'] for name, value in tool_results(message)
-           if name == 'undo_creation_change' and isinstance(value.get('change_id'), int)}
+    ids = undo_change_ids(events)
     if ids:
         own_tasks = await AgentMessage.filter(conversation_id=message.conversation_id).values_list('task_id', flat=True)
         extra = await PromptChange.filter(id__in=ids, novel_id=novel_id, task_id__in=own_tasks).order_by('id')
         rows.extend(row for row in extra if row.id not in {item.id for item in rows})
     return rows
+
+
+async def changes_by_message(messages: list[AgentMessage], novel_id: int,
+                             events_by_message: dict[int, list[dict]]) -> dict[int, list[PromptChange]]:
+    """Batch projection for history pages: one receipt query instead of one per message."""
+    if not messages:
+        return {}
+    grouped: dict[int, list[PromptChange]] = {}
+    for change in await PromptChange.filter(task_id__in=[message.task_id for message in messages],
+                                            novel_id=novel_id).order_by('id'):
+        grouped.setdefault(change.task_id, []).append(change)
+    result = {message.id: list(grouped.get(message.task_id, [])) for message in messages}
+    referenced: dict[int, list[int]] = {}
+    for message in messages:
+        for change_id in undo_change_ids(events_by_message.get(message.id, [])):
+            referenced.setdefault(change_id, []).append(message.id)
+    if referenced:
+        own_tasks = await AgentMessage.filter(conversation_id__in={message.conversation_id for message in messages}
+                                              ).values_list('task_id', flat=True)
+        extra = await PromptChange.filter(id__in=list(referenced), novel_id=novel_id, task_id__in=own_tasks).order_by('id')
+        for change in extra:
+            for message_id in referenced[change.id]:
+                holder = result[message_id]
+                if change.id not in {item.id for item in holder}:
+                    holder.append(change)
+    return result

@@ -59,7 +59,7 @@ def select_referenced_media(prompt: str, references: Sequence[ReferenceT]) -> li
     return selected
 
 
-def render_reference_mentions(prompt: str, references: Sequence[Any]) -> str:
+def render_reference_mentions(prompt: str, references: Sequence[Any], *, image_indices: dict[str, int] | None = None) -> str:
     """将内部素材标记转换为供应商可读文本，避免泄露媒体 URL。"""
     rendered = prompt
     for index, reference in enumerate(references, start=1):
@@ -74,7 +74,8 @@ def render_reference_mentions(prompt: str, references: Sequence[Any]) -> str:
             rendered = rendered.replace(f"@{{{canvas_name}}}", f"【参考视频：{name}】")
         rendered = rendered.replace(
             reference_mention_syntax(kind, _reference_mention_url(reference)),
-            f"【参考{'图片' if kind == 'image' else '视频'}：{name}】",
+            f"[图{image_indices[_reference_mention_url(reference)]}]" if kind == 'image' and image_indices and _reference_mention_url(reference) in image_indices
+            else f"【参考{'图片' if kind == 'image' else '视频'}：{name}】",
         )
     # 已从素材池删除的旧标记不能作为 URL 或伪引用继续进入供应商 prompt。
     return REFERENCE_MENTION_PATTERN.sub("", rendered)

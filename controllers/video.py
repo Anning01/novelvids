@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
+from tortoise.transactions import in_transaction
 
 from controllers.config import ai_model_config_controller
 from config import settings
@@ -165,9 +166,11 @@ def _compose_video_prompt(
     style_key: str | None,
     custom_style_prompt: str | None = None,
     language: str = "zh",
+    image_indices: dict[str, int] | None = None,
 ) -> str:
     """组合视频生成提示词：分镜提示词 + 参考素材提及 + 风格定调。"""
-    prompt = render_reference_mentions(scene_prompt, referenced_media)
+    from prompts.video import normalize_last_frame_continuity_prompt
+    prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(scene_prompt, language), referenced_media, image_indices=image_indices)
     style_suffix = video_project_style_suffix(style_key, custom_style_prompt, language)
     if style_suffix:
         prompt = f"{prompt}\n\n{style_suffix}".strip()
@@ -271,6 +274,43 @@ class VideoController(CRUDBase[Video, dict, dict]):
         await self._set_scene_current_video(scene, video.id)
         return video
 
+    async def extract_last_frame(self, video_id: int) -> Video:
+        """补提已完成视频的尾帧，复用衔接写入，不查询或提交供应商任务。"""
+        lock = self._query_locks.setdefault(video_id, asyncio.Lock())
+        async with lock:
+            video = await self.get(video_id)
+            if video.status != TaskStatusEnum.completed.value or not video.url:
+                raise HTTPException(400, detail=localized_message('只有已完成且包含视频文件的记录可以提取尾帧'))
+            metadata = video.metadata or {}
+            # last_frame_url 也可能是生成请求的输入尾帧，只有带输出来源的才可复用。
+            frame = metadata.get("last_frame_url") if metadata.get("last_frame_source") in {"provider", "ffmpeg"} else None
+            source = metadata.get("last_frame_source") if frame else "ffmpeg"
+            if not isinstance(frame, str) or not frame:
+                source = "ffmpeg"
+                scene = await Scene.get(id=video.scene_id)
+                chapter = await Chapter.get(id=scene.chapter_id)
+                novel = await Novel.get(id=chapter.novel_id)
+                try:
+                    frame = await last_frame_service.extract_and_store(video.url, video.id, team_id=novel.team_id)
+                except Exception as error:
+                    logger.warning("Last frame recovery failed: video_id=%s error=%s", video.id, type(error).__name__)
+                    raise HTTPException(503, detail=localized_message('尾帧提取失败，原视频未更改，请稍后重试')) from error
+            async with in_transaction():
+                video = await self.get(video_id)
+                propagation = await _inject_last_frame_reference(video, frame)
+                video.metadata = {
+                    **(video.metadata or {}),
+                    "last_frame_url": frame,
+                    "last_frame_source": source,
+                    "last_frame_injected_scene_id": propagation["scene_id"] if propagation else None,
+                    "last_frame_reference": propagation["reference"] if propagation else None,
+                    "last_frame_prompt_instruction": propagation["prompt_instruction"] if propagation else None,
+                }
+                video.metadata.pop("last_frame_extraction_error", None)
+                video.metadata.pop("last_frame_propagation_error", None)
+                await video.save(update_fields=["metadata", "updated_at"])
+            return video
+
     async def generate(self, req: VideoGenerateRequest, media_base_url: str = "", team_id=None, user_id=None):
         from services.creation_agent.video_jobs import submit_video
         return await submit_video(req, media_base_url=media_base_url, team_id=team_id, user_id=user_id)
@@ -309,7 +349,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
         )
 
         # 解析 @资产昵称，并采用分镜中显式选择的资产衍生状态。
-        prompt = scene.prompt or ""
+        from services.language import generation_language
+        from prompts.video import normalize_last_frame_continuity_prompt
+        prompt_language = await generation_language()
+        prompt = normalize_last_frame_continuity_prompt(scene.prompt or "", prompt_language)
         metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
         subjects = await resolve_assets(
             prompt,
@@ -356,13 +399,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 raise HTTPException(400, detail=localized_message('首尾帧图片不存在：{p1}', p1=f'{error}')) from error
         capabilities = capabilities_for(config.video_model_type)
         reference_images: list[str] = []
+        image_mentions: dict[str, str] = {}
         reference_videos: list[str] = []
         reference_video_duration = 0.0
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
         novel = await Novel.get_or_none(id=novel_id)
-        from services.language import generation_language
-        prompt_language = await generation_language()
         voice_references = await resolve_voice_references(
             scene=scene,
             novel=novel,
@@ -370,15 +412,6 @@ class VideoController(CRUDBase[Video, dict, dict]):
             capabilities=capabilities,
         ) if novel and req.generation_mode == "reference" and selection.generate_audio else []
         from services.creation_agent.skill_execution import current_execution
-        provider_prompt = _compose_video_prompt(
-            prompt,
-            referenced_media,
-            novel.style_key if novel else None,
-            novel.custom_style_prompt if novel else None,
-            language=prompt_language,
-        )
-        if current_execution.get():
-            provider_prompt = render_reference_mentions(prompt, referenced_media)
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
             scene.id,
@@ -388,11 +421,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
         for reference in referenced_media:
             library_verified = None
             if reference.library_resource_id is not None:
-                from services.resource_references import resource_for, validate_resource_model
-                resource = await resource_for((novel.team_id or 0) if settings.AUTH_ENABLED and novel else 0, reference.library_resource_id)
+                from services.resource_references import resource_for, validate_resource_model, reference_kind
+                resource = await resource_for((novel.team_id or 0) if settings.AUTH_ENABLED and novel else 0, reference.library_resource_id, kind=None)
                 validate_resource_model(resource, capabilities)
-                if reference.type != "video":
-                    raise HTTPException(400, detail="资源库仅支持参考视频")
+                if reference.type != reference_kind(resource):
+                    raise HTTPException(400, detail=localized_message("引用类型与资源类型不一致"))
                 reference.mention_url = reference.mention_url or reference.url
                 reference.url = resource.storage_ref
                 for field in ("duration", "width", "height", "fps", "codec", "content_type", "size_bytes"):
@@ -409,6 +442,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     reference_images.append(
                         resolve_image_source(resolve_media_url(reference.url) or reference.url)
                     )
+                    image_mentions[reference.mention_url or reference.url] = reference_images[-1]
                 except FileNotFoundError as error:
                     raise HTTPException(400, detail=localized_message('参考图片不存在：{p1}', p1=f'{error}')) from error
                 continue
@@ -426,8 +460,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
             else:
                 reference_videos.append(resolve_media_url(reference.url) or reference.url)
 
-        asset_reference_image_count = sum(len(subject.get("images", [])) for subject in subjects)
-        if asset_reference_image_count + len(reference_images) > capabilities.max_reference_images:
+        ordered_images = list(dict.fromkeys([image for subject in subjects for image in subject.get('images', [])] + reference_images))
+        if len(ordered_images) > capabilities.max_reference_images:
             raise HTTPException(
                 400,
                 detail=(
@@ -453,6 +487,12 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     localized_message('当前模型要求输入参考视频与输出视频总时长不超过 {p1} 秒', p1=f'{capabilities.input_output_video_duration_max}')
                 ),
             )
+        image_indices = {mention: ordered_images.index(url) + 1 for mention, url in image_mentions.items()}
+        provider_prompt = _compose_video_prompt(prompt, referenced_media, novel.style_key if novel else None,
+            novel.custom_style_prompt if novel else None, language=prompt_language, image_indices=image_indices)
+        if current_execution.get():
+            from prompts.video import normalize_last_frame_continuity_prompt
+            provider_prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(prompt, prompt_language), referenced_media, image_indices=image_indices)
         if req.generation_mode == "keyframes":
             input_image_count = int(bool(first_frame)) + int(bool(last_frame))
         else:

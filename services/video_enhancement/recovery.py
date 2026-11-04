@@ -100,6 +100,10 @@ async def _collect_export(task: AiTask, export: ChapterExport):
         else:
             await AiTask.filter(id=task.id).exclude(status=5).update(status=3, stage='completed', progress=100,
                 response_data={'export_id': export.id}, error_message=None, finished_at=datetime.now(timezone.utc))
+            await task.refresh_from_db()
+            if task.status == 3 and export.source_video_id is not None:
+                from services.video_enhancement.current_video import apply_enhanced_video
+                await apply_enhanced_video(export)
         export.collection_complete = True
         await export.save(update_fields=['collection_complete', 'updated_at'])
         from services.creation_agent.production import finish_production_message

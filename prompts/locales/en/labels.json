@@ -58,5 +58,7 @@
   "location_references": "Location references",
   "location_design": "Location design",
   "sound_design": "[Sound design]",
-  "asset_definitions_for_this_request": "[Asset definitions for this request]"
+  "asset_definitions_for_this_request": "[Asset definitions for this request]",
+  "first_frame_continuity": "[First-frame continuity]",
+  "first_frame_reference": "First-frame reference: "
 }

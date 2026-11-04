@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from models.ai_task import AiTask
+from services.task_signals import task_signals
 from utils.enums import TaskStatusEnum
 
 
@@ -32,6 +33,7 @@ class AiTaskController:
         await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value, TaskStatusEnum.queued.value]).update(
             status=TaskStatusEnum.cancelled.value, finished_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
         await task.refresh_from_db()
+        await task_signals.publish(str(task.id))
         if task.request_params.get('workflow_version') == 'agent-skills-v1':
             children = [child for child in await AiTask.filter(status__in=[1, 2, 6])
                         if child.request_params.get('origin_run_id') == str(task.id)]

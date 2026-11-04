@@ -5,6 +5,9 @@ import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { Check, ChevronDown, ChevronUp, Monitor, TimerReset } from 'lucide-vue-next'
 import type { VideoGenerationModel } from '@/types'
 import { claimExclusivePopover } from '@/shared/exclusivePopover'
+import AutoEnhancementPicker from '@/components/AutoEnhancementPicker.vue'
+import type { AutoEnhancement } from '@/types'
+import type { EnhancementModel } from '@/features/video-export/api'
 
 const props = withDefaults(defineProps<{
   model: VideoGenerationModel | null
@@ -14,8 +17,11 @@ const props = withDefaults(defineProps<{
   resolution: string
   returnLastFrame: boolean
   showReturnLastFrame?: boolean
+  autoEnhancement?: AutoEnhancement | null
+  enhancementModels?: EnhancementModel[]
 }>(), {
   showReturnLastFrame: true,
+  autoEnhancement: null,
 })
 
 const emit = defineEmits<{
@@ -23,6 +29,7 @@ const emit = defineEmits<{
   'update:aspectRatio': [value: string]
   'update:resolution': [value: string]
   'update:returnLastFrame': [value: boolean]
+  'update:autoEnhancement': [value: AutoEnhancement | null]
 }>()
 
 const trigger = ref<HTMLElement | null>(null)
@@ -50,7 +57,7 @@ const selectedDuration = computed(() => {
   const maximum = capabilities.value?.duration_max || 30
   return Math.max(minimum, Math.min(maximum, Math.round(props.duration || minimum)))
 })
-const summary = computed(() => tr('{p0}秒 · {p1} · {p2}', { p0: selectedDuration.value, p1: selectedRatio.value === 'adaptive' ? tr('自适应') : selectedRatio.value, p2: selectedResolution.value }))
+const summary = computed(() => tr('{p0}秒 · {p1} · {p2}', { p0: selectedDuration.value, p1: selectedRatio.value === 'adaptive' ? tr('自适应') : selectedRatio.value, p2: selectedResolution.value }) + (props.autoEnhancement ? ` → ${props.autoEnhancement.resolution.toUpperCase()}` : ''))
 const summaryIconStyle = computed(() => {
   if (selectedRatio.value === 'adaptive') return { width: '20px', height: '12px' }
   const [rawWidth, rawHeight] = selectedRatio.value.split(':').map(Number)
@@ -147,6 +154,7 @@ function close() {
 
 function closeFromOutside(event: PointerEvent) {
   const target = event.target
+  if (target instanceof Element && target.closest('.video-parameter-child-menu')) return
   if (!(target instanceof Node)) return
   if (trigger.value?.contains(target) || panel.value?.contains(target)) return
   close()
@@ -258,6 +266,7 @@ onBeforeUnmount(close)
           <span><strong>{{ tr('返回尾帧') }}</strong><small>{{ tr('完成后自动作为下一镜头的参考图，章节末尾会衔接下一章') }}</small></span>
           <i><Check v-if="returnLastFrame" :size="13" /></i>
         </button>
+        <AutoEnhancementPicker v-if="enhancementModels" :model-value="autoEnhancement" :models="enhancementModels" :duration="selectedDuration" :source-resolution="selectedResolution" menu-class="video-parameter-child-menu" :menu-z-index="1500" @update:model-value="emit('update:autoEnhancement', $event)" />
       </section>
     </Transition>
   </Teleport>

@@ -1,4 +1,5 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import AppButton from './AppButton.vue'
 import { defineComponent } from 'vue'
 import { describe, expect, it } from 'vitest'
 import SceneVideoParameterPicker from './SceneVideoParameterPicker.vue'
@@ -32,6 +33,25 @@ const model = {
 } satisfies VideoGenerationModel
 
 describe('SceneVideoParameterPicker', () => {
+  it('can select an enhancement target from a nested teleported menu without closing the parameter panel', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const wrapper = mount(SceneVideoParameterPicker, { attachTo: host, props: { model,
+      mode: 'reference', duration: 8, aspectRatio: '16:9', resolution: '720p', returnLastFrame: false,
+      autoEnhancement: { model_config_id: 8, resolution: '1080p' },
+      enhancementModels: [{ id: 8, name: 'HD', resolutions: [{ value: '1080p', short_side: 1080 }, { value: '2k', short_side: 1440 }] }] },
+      global: { components: { AppButton } } })
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    document.querySelector<HTMLButtonElement>('[aria-label="自动高清化目标"][aria-haspopup="listbox"]')!.click()
+    await flushPromises()
+    const menu = document.querySelector<HTMLElement>('.video-parameter-child-menu')!
+    expect(menu.style.zIndex).toBe('1500')
+    const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.includes('2K'))!
+    option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); option.click(); await flushPromises()
+    expect(document.querySelector('[role="dialog"][aria-label="视频生成参数"]')).not.toBeNull()
+    expect(wrapper.emitted('update:autoEnhancement')).toEqual([[{ model_config_id: 8, resolution: '2k' }]])
+    wrapper.unmount(); host.remove()
+  })
   it('renders model capabilities and emits parameter changes', async () => {
     const wrapper = mount(SceneVideoParameterPicker, {
       props: {

@@ -11,6 +11,15 @@ EnhancementResolution = Literal['720p', '1080p', '2k', '4k']
 RESOLUTION_SHORT_SIDE = {'720p': 720, '1080p': 1080, '2k': 1440, '4k': 2160}
 
 
+def resolution_short_side(value: str) -> int | None:
+    import re
+    normalized = value.lower()
+    if normalized in RESOLUTION_SHORT_SIDE:
+        return RESOLUTION_SHORT_SIDE[normalized]
+    match = re.fullmatch(r'(\d+)p', normalized)
+    return int(match[1]) if match else None
+
+
 class EnhancementOptions(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     input_short_side_min: int = Field(360, ge=1)

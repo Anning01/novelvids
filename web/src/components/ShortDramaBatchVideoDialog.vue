@@ -9,6 +9,10 @@ import AppScrollArea from '@/components/AppScrollArea.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { estimateVideoCost } from '@/shared/modelPricing'
 import type { VideoGenerationModel } from '@/types'
+import type { AutoEnhancement, VideoDefaults } from '@/types'
+import type { EnhancementModel } from '@/features/video-export/api'
+import AutoEnhancementPicker from '@/components/AutoEnhancementPicker.vue'
+import { currentAutoEnhancement, autoEnhancementAvailable } from '@/shared/autoEnhancement'
 
 export interface BatchVideoSceneOption {
   id: number
@@ -28,6 +32,7 @@ export interface BatchVideoGenerationRequest {
   resolution: string
   aspectRatio: string
   returnLastFrame: boolean
+  autoEnhancement?: AutoEnhancement | null
 }
 
 const props = defineProps<{
@@ -37,11 +42,17 @@ const props = defineProps<{
   initialModelConfigId?: number
   initialResolution?: string
   initialAspectRatio?: string
+  initialReturnLastFrame?: boolean
+  initialAutoEnhancement?: AutoEnhancement | null
+  enhancementModels?: EnhancementModel[]
+  parametersOnly?: boolean
+  saving?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   generate: [request: BatchVideoGenerationRequest]
+  applyDefaults: [settings: VideoDefaults, remember: boolean]
 }>()
 
 const dialog = ref<HTMLElement | null>(null)
@@ -50,10 +61,14 @@ const selectedModelId = ref('')
 const selectedResolution = ref('')
 const selectedAspectRatio = ref('')
 const returnLastFrame = ref(false)
+const autoEnhancement = ref<AutoEnhancement | null>(null)
+const rememberDefaults = ref(true)
+const autoInvalid = computed(() => !autoEnhancementAvailable(autoEnhancement.value, props.enhancementModels || [], selectedResolution.value))
 const selectedModel = computed(() => props.models.find(model => String(model.config_id) === selectedModelId.value) || null)
 const modelOptions = computed(() => props.models.map(model => ({ value: String(model.config_id), label: model.name })))
 const resolutionOptions = computed(() => selectedModel.value?.capabilities.resolutions || [])
 const parameterScenes = computed(() => {
+  if (props.parametersOnly) return props.scenes
   const selected = props.scenes.filter(scene => selectedIds.value.includes(scene.id) && !scene.disabled)
   return selected.length ? selected : props.scenes.filter(scene => !scene.disabled)
 })
@@ -106,13 +121,18 @@ function toggleAll() {
 
 function submit() {
   const modelConfigId = Number(selectedModelId.value)
-  if (!selectedIds.value.length || !modelConfigId || !selectedResolution.value || !selectedAspectRatio.value) return
+  if ((!props.parametersOnly && !selectedIds.value.length) || !modelConfigId || !selectedResolution.value || !selectedAspectRatio.value || autoInvalid.value) return
+  if (props.parametersOnly) {
+    emit('applyDefaults', { model_config_id: modelConfigId, resolution: selectedResolution.value, aspect_ratio: selectedAspectRatio.value, return_last_frame: returnLastFrame.value, auto_enhancement: currentAutoEnhancement(autoEnhancement.value, props.enhancementModels || []) }, rememberDefaults.value)
+    return
+  }
   emit('generate', {
     sceneIds: [...selectedIds.value],
     modelConfigId,
     resolution: selectedResolution.value,
     aspectRatio: selectedAspectRatio.value,
     returnLastFrame: returnLastFrame.value,
+    ...(autoEnhancement.value ? { autoEnhancement: currentAutoEnhancement(autoEnhancement.value, props.enhancementModels || []) } : {}),
   })
 }
 
@@ -146,7 +166,9 @@ function handleKeydown(event: KeyboardEvent) {
 watch(() => props.open, async open => {
   if (!open) return
   selectedIds.value = []
-  returnLastFrame.value = false
+  returnLastFrame.value = props.initialReturnLastFrame === true
+  autoEnhancement.value = props.initialAutoEnhancement || null
+  rememberDefaults.value = true
   selectedModelId.value = String(
     props.models.some(model => model.config_id === props.initialModelConfigId)
       ? props.initialModelConfigId
@@ -176,6 +198,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         <section
           ref="dialog"
           class="batch-video-dialog"
+          :class="{ 'is-parameters': parametersOnly }"
           role="dialog"
           aria-modal="true"
           aria-labelledby="batch-video-dialog-title"
@@ -184,15 +207,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <header class="batch-video-dialog__header">
             <span class="batch-video-dialog__icon" aria-hidden="true"><ListChecks :size="22" /></span>
             <div>
-              <h2 id="batch-video-dialog-title">{{ tr('批量生视频') }}</h2>
+              <h2 id="batch-video-dialog-title">{{ parametersOnly ? tr('批量修改本章参数') : tr('批量生视频') }}</h2>
             </div>
-            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭批量生视频')" @click="close"><X :size="18" /></AppButton>
+            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="parametersOnly ? tr('关闭批量参数') : tr('关闭批量生视频')" @click="close"><X :size="18" /></AppButton>
           </header>
 
+          <AppScrollArea class="batch-video-dialog__body" :aria-label="tr('生成参数与分镜选择')">
           <section class="batch-video-dialog__settings" :aria-label="tr('统一生成设置')">
             <label><span>{{ tr('统一模型') }}</span><AppSelect v-model="selectedModelId" :options="modelOptions" :ariaLabel="tr('批量视频模型')" density="compact" /></label>
             <label><span>{{ tr('统一比例') }}</span><AppSelect v-model="selectedAspectRatio" :options="aspectRatioOptions" :ariaLabel="tr('批量视频比例')" density="compact" /></label>
             <label><span>{{ tr('统一分辨率') }}</span><AppSelect v-model="selectedResolution" :options="resolutionOptions" :ariaLabel="tr('批量视频分辨率')" density="compact" /></label>
+          </section>
+
+          <div class="batch-video-toggles">
             <button
               type="button"
               class="batch-video-last-frame"
@@ -206,9 +233,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               <span><strong>{{ tr('尾帧连续生成') }}</strong><small>{{ returnLastFrame ? tr('按分镜顺序逐个执行，完成后自动衔接下一镜头') : tr('开启后无需值守，上一镜头尾帧会注入下一镜头') }}</small></span>
               <i><Check v-if="returnLastFrame" :size="13" /></i>
             </button>
-          </section>
+            <AutoEnhancementPicker class="batch-video-auto-enhancement" v-model="autoEnhancement" :models="enhancementModels || []" :duration="scenes.filter(scene => selectedIds.includes(scene.id)).reduce((sum, scene) => sum + scene.duration, 0)" :source-resolution="selectedResolution" />
+          </div>
 
-          <AppScrollArea class="batch-video-dialog__scroller" :aria-label="tr('可选择的分镜列表')">
+          <label v-if="parametersOnly" class="batch-video-remember"><input v-model="rememberDefaults" type="checkbox" />{{ tr('保存为本项目后续章节的默认参数') }}</label>
+
+          <AppScrollArea v-if="!parametersOnly" class="batch-video-dialog__scroller" :aria-label="tr('可选择的分镜列表')">
             <div class="batch-video-dialog__grid">
               <label
                 v-for="scene in scenes"
@@ -233,9 +263,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               </label>
             </div>
           </AppScrollArea>
+          </AppScrollArea>
 
           <footer class="batch-video-dialog__footer">
-            <AppButton type="button" class="batch-video-dialog__select-all" variant="soft" :disabled="!eligibleScenes.length" @click="toggleAll">
+            <AppButton v-if="!parametersOnly" type="button" class="batch-video-dialog__select-all" variant="soft" :disabled="!eligibleScenes.length" @click="toggleAll">
               {{ allSelected ? tr('取消全选') : tr('全选') }}
             </AppButton>
             <div>
@@ -244,11 +275,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
                 type="button"
                 class="batch-video-dialog__submit"
                 variant="primary"
-                :disabled="!selectedIds.length"
-                :aria-label="tr('生成所选 {p0} 条分镜视频', { p0: selectedIds.length })"
+                :disabled="(!parametersOnly && !selectedIds.length) || Boolean(autoInvalid) || saving"
+                :aria-label="parametersOnly ? tr('应用本章参数') : tr('生成所选 {p0} 条分镜视频', { p0: selectedIds.length })"
                 @click="submit"
               >
-                <Sparkles :size="15" />{{ tr('开始') }}<BillingPriceTag :cost="estimatedTotal" :pricing="selectedModel?.pricing" />
+                <Sparkles :size="15" />{{ parametersOnly ? tr('应用到本章') : tr('开始') }}<BillingPriceTag v-if="!parametersOnly" :cost="estimatedTotal" :pricing="selectedModel?.pricing" />
               </AppButton>
             </div>
           </footer>
@@ -273,7 +304,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   display: grid;
   width: min(720px,100%);
   max-height: min(620px,calc(100vh - 44px));
-  grid-template-rows: auto auto minmax(0,1fr) auto;
+  grid-template-rows: auto minmax(0,1fr) auto;
   overflow: hidden;
   border: 1px solid var(--app-border);
   border-radius: 22px;
@@ -305,17 +336,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 .batch-video-dialog__header > button { color: var(--app-text-secondary); }
 .batch-video-dialog__settings { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding: 14px 20px 12px; border-top: 1px solid var(--app-border); border-bottom: 1px solid var(--app-border); background: var(--app-surface); }
 .batch-video-dialog__settings > label { display: grid; min-width: 0; gap: 6px; color: var(--app-text-muted); font-size: 10px; font-weight: 650; }
+.batch-video-toggles { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 10px; padding: 12px 20px; }
+.batch-video-auto-enhancement { min-width: 0; margin-top: 0; }
+.batch-video-auto-enhancement :deep(.auto-enhancement-toggle) { min-height: 84px; border-radius: 11px; }
+.batch-video-remember{display:flex;align-items:center;gap:8px;margin:0 20px 12px;color:var(--app-text-secondary);font-size:12px}.batch-video-dialog__body{min-height:0;overflow-y:auto}.batch-video-dialog.is-parameters .batch-video-dialog__footer{justify-content:flex-end}
 .batch-video-dialog__settings :deep(.app-select) { min-width: 0; }
-.batch-video-last-frame { display: grid; min-height: 58px; grid-column: 1/-1; grid-template-columns: 28px minmax(0,1fr) 38px; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--app-border); border-radius: 11px; color: var(--app-text-secondary); background: var(--app-surface-muted); text-align: left; cursor: pointer; }
+.batch-video-last-frame { display: grid; min-height: 84px; grid-template-columns: 17px minmax(0,1fr) 34px; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--app-border); border-radius: 11px; color: var(--app-text-secondary); background: var(--app-surface-muted); text-align: left; cursor: pointer; }
 .batch-video-last-frame > svg { color: var(--app-accent); }
 .batch-video-last-frame > span { display: grid; gap: 3px; }
-.batch-video-last-frame strong { color: var(--app-text); font-size: 11px; }
-.batch-video-last-frame small { color: var(--app-text-muted); font-size: 9px; line-height: 1.4; }
-.batch-video-last-frame > i { display: flex; width: 36px; height: 22px; align-items: center; justify-content: flex-start; padding: 3px; border-radius: 999px; color: #fff; background: var(--app-border-strong); }
-.batch-video-last-frame > i::before { width: 16px; height: 16px; border-radius: 50%; background: #fff; content: ''; }
+.batch-video-last-frame strong { color: var(--app-text); font-size: 12px; }
+.batch-video-last-frame small { color: var(--app-text-secondary); font-size: 11px; line-height: 1.5; }
+.batch-video-last-frame > i { display: flex; width: 34px; height: 21px; align-items: center; justify-content: flex-start; padding: 3px; border-radius: 999px; color: #fff; background: var(--app-border-strong); }
+.batch-video-last-frame > i::before { width: 15px; height: 15px; border-radius: 50%; background: #fff; content: ''; }
 .batch-video-last-frame.is-selected { border-color: color-mix(in srgb,var(--app-accent) 38%,var(--app-border)); background: var(--app-accent-soft); }
 .batch-video-last-frame.is-selected > i { justify-content: flex-end; background: var(--app-accent); }
 .batch-video-last-frame.is-selected > i::before { display: none; }
+.batch-video-last-frame:hover:not(:disabled) { border-color: var(--app-accent); }
+.batch-video-last-frame:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
 .batch-video-last-frame:disabled { opacity: .5; cursor: not-allowed; }
 .batch-video-dialog :deep(.app-button--ghost) { color: var(--app-text-secondary); background: transparent; }
 .batch-video-dialog :deep(.app-button--ghost:hover:not(:disabled)) { color: var(--app-text); background: var(--app-surface-hover); }
@@ -383,6 +420,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   .batch-video-dialog__header h2 { font-size: 19px; }
   .batch-video-dialog__grid { grid-template-columns: 1fr; gap: 10px; }
   .batch-video-dialog__settings { grid-template-columns: 1fr; padding: 12px 14px; }
+  .batch-video-toggles { grid-template-columns: 1fr; padding: 12px 14px; }
+  .batch-video-remember { margin-inline: 14px; }
   .batch-video-dialog__scroller { margin: 0 10px; }
   .batch-video-scene { min-height: 56px; }
   .batch-video-dialog__footer { min-height: 72px; padding: 12px 14px 14px; }

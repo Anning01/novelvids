@@ -128,6 +128,20 @@ async def get_video_generation_history(
 
 
 @router.post(
+    "/{video_id}/last-frame",
+    summary="补提已完成视频尾帧并衔接下一分镜（不重新生成）",
+    response_model=ResponseSchema[VideoOut],
+)
+async def extract_video_last_frame(
+    video_id: int,
+    _: AuthContext = Depends(require_video_access),
+    __: AuthContext = _EDITOR,
+):
+    video = await video_controller.extract_last_frame(video_id)
+    return ResponseSchema(data=VideoOut.model_validate(video))
+
+
+@router.post(
     "/{video_id}/select-current",
     summary="将视频生成记录设为当前版本",
     response_model=ResponseSchema[VideoOut],

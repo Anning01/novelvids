@@ -1,28 +1,45 @@
 <p align="center">
-  <img src="docs/images/logo.png" width="88" alt="猫影短剧 · NovelVids Logo">
+  <img src="docs/images/logo.png" width="200" alt="猫影短剧 · NovelVids Logo">
 </p>
 
-# 猫影短剧 · NovelVids
+<h1 align="center">猫影短剧 · NovelVids</h1>
 
-**开源 AI 漫剧与短剧创作工作台。**
+<p align="center">
+  <strong>开源 AI 漫剧与短剧创作工作台。</strong>
+</p>
 
-从故事、角色资产、分镜设计，到 AI 图片、视频生成与成片，把整个创作过程放进一个**可编辑、可追踪、能反复打磨的项目**。
+<p align="center">
+  从故事、角色资产、分镜设计，到 AI 图片、视频生成与成片，<br>
+  把整个创作过程放进一个<strong>可编辑、可追踪、能反复打磨的项目</strong>。
+</p>
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#快速开始)
-[![中文 / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="#快速开始"><img src="https://img.shields.io/badge/deploy-self--hosted-555" alt="Self-hosted"></a>
+  <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="中文 / English"></a>
+</p>
 
 <p align="center">
   <a href="README.en.md">English</a> &nbsp;|&nbsp; <strong>简体中文</strong>
 </p>
 
-[看成品](#先看效果) · [在线体验](https://demo.xiazq.com) · [本地部署](#快速开始) · [文档](#文档中心) · [参与贡献](CONTRIBUTING.md)
+<p align="center">
+  <a href="#先看效果">看成品</a> · <a href="https://demo.xiazq.com">在线体验</a> · <a href="#快速开始">本地部署</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+</p>
 
 ## 先看效果
 
-[![由 NovelVids 制作的短剧片段，点击观看完整视频](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
+**商业复刻示例**
 
-[观看完整片段（YouTube）](https://youtu.be/fdiw__J19uk) · 书稿导入 → 角色与场景 → 分镜 → 逐镜头生成 → 成片。实际效果取决于素材、模型和创作调整。
+[![商业复刻示例预览，点击在 B 站观看](docs/videos/demo-preview.gif)](https://www.bilibili.com/video/BV1U74P6hEpx/)
+
+[在 B 站观看商业复刻示例](https://www.bilibili.com/video/BV1U74P6hEpx/)
+
+**漫剧制作示例**
+
+[![漫剧制作示例预览，点击在 B 站观看](docs/videos/comic-preview.gif)](https://www.bilibili.com/video/BV1U74P6hEzD/)
+
+[在 B 站观看漫剧制作示例](https://www.bilibili.com/video/BV1U74P6hEzD/) · 视觉风格：3D仙侠；分镜策略：旁白叙事。从故事到成片自动生成，全程没有人工修改提示词或 AI 生成的 Prompt。实际效果取决于素材、模型和创作调整。
 
 **先逛一遍再决定安装：**[打开在线演示](https://demo.xiazq.com)，账号 `demo`，密码 `NovelVids-Demo-2026`。演示站只读，可看已有项目、资产、分镜和视频，不提供免费生成；每天北京时间 00:00 重置。请勿填写私人数据。
 

@@ -308,7 +308,8 @@ def test_english_continuity_is_idempotent_and_does_not_rewrite_dialogue():
     second = inject_last_frame_continuity_prompt(
         first, "@{参考图片:https://example.test/two.png}", "en"
     )
-    assert second.count('"first_frame_reference"') == 1
+    assert second.count('[First-frame continuity]') == 1
+    assert 'First-frame reference: ' in second
     assert "one.png" not in second and "two.png" in second
     assert original in second
 

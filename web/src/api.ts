@@ -60,6 +60,15 @@ export function authHeaders(): Record<string, string> {
 
 const isGenerationRequest = (url: string) => /^\/(?:asset\/reference\/\d+|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/generate\/|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly code: number, readonly httpStatus: number) { super(message) }
+}
+
+export function retryableStatusError(error: unknown) {
+  if (error instanceof ApiRequestError) return error.code === 408 || error.code === 429 || error.code >= 500
+  return error instanceof TypeError || error instanceof SyntaxError || error instanceof DOMException && error.name === 'TimeoutError'
+}
+
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
   const generation = isGenerationRequest(url)
@@ -73,7 +82,7 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
       clearAuthToken()
       redirectToLogin()
     }
-    throw new Error(payload.message || payload.detail || tr('请求失败'))
+    throw new ApiRequestError(payload.message || payload.detail || tr('请求失败'), Number(payload.code) || response.status, response.status)
   }
   if (generation) finishGenerationRequest(generation.key)
   return payload
@@ -108,7 +117,7 @@ export function uploadWithProgress(
   })
 }
 
-async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) => string, pageSize = 100): Promise<PaginationResponse<T>> {
+export async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) => string, pageSize = 100): Promise<PaginationResponse<T>> {
   const first = await request<PaginationResponse<T>>(urlForPage(1, pageSize))
   const pageCount = first.data.pagination.pages
   if (pageCount <= 1) return first
@@ -181,6 +190,7 @@ async function streamRemakeProgress(
 }
 
 export const api = {
+  applyVideoDefaults: (id: number, chapterId: number, settings: import('./types').VideoDefaults, remember: boolean) => request<SingleResponse<{ settings: import('./types').VideoDefaults; scene_count: number; remembered: boolean }>>(`/novel/${id}/video-defaults`, { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, settings, remember }) }),
   projectOverview: () => request<SingleResponse<ProjectOverview>>('/novel/overview'),
   remakeCapabilities: () => request<SingleResponse<RemakeCapabilities>>('/remake/capabilities'),
   async uploadRemakeVideo(file: File, onProgress?: (percent: number) => void): Promise<RemakeUpload> {
@@ -278,7 +288,7 @@ export const api = {
   assets: (novelId: number, page = 1, pageSize = 100, chapterId?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, chapter_id: chapterId })}`),
   referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),
   projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24, assetType?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, asset_type: assetType, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
-  publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, is_global: true, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
+  publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/resource-library/catalog/project-assets${qs({ asset_type: assetType, page, page_size: pageSize, search })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
   assetGenerationHistory: (id: number) => request<SingleResponse<AssetGenerationRecord[]>>(`/asset/${id}/generation-history`),
   recordAssetImageEdit: (id: number, data: { image_url: string; source_image_url?: string; output_format?: string }) => request<SingleResponse<Asset>>(`/asset/${id}/generation-history/edit`, { method: 'POST', body: JSON.stringify(data) }),
@@ -310,6 +320,7 @@ export const api = {
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
+  extractVideoLastFrame: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/last-frame`, { method: 'POST' }),
   generateVideo: (sceneId: number, modelConfigId: number, options: VideoGenerationOptions = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
   async uploadVideoReference(file: File, modelConfigId: number) {
     const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
@@ -340,7 +351,7 @@ export const api = {
     }
     return payload.data as VideoReferenceMedia
   },
-  queryVideo: (id: number) => request<SingleResponse<Video>>(`/video/query/${id}`),
+  queryVideo: (id: number, signal?: AbortSignal) => request<SingleResponse<Video>>(`/video/query/${id}`, signal ? { signal } : undefined),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
   mergeChapterVideos: (chapterId: number, strict = false) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(strict ? { strict: true } : {}) }) }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}, novelId?: number) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: '-id', novel_id: novelId, ...filters })}`),

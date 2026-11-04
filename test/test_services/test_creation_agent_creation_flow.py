@@ -1,15 +1,46 @@
 import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.usage import UsageLimits
 
 from models.asset import Asset
 from schemas.creation_agent import AgentConfiguration
-from services.creation_agent.runtime import CreationAgentDeps, creation_agent
+from services.creation_agent.runtime import CreationAgentDeps, creation_agent, stream_creation_agent
 from services.creation_agent.tools import PromptEditService
 from services.creation_objects import CreationObjects, project_write
 from test.test_services.test_creation_agent_crud import crud
 from test.test_services.creation_prompt_fixtures import person_traits
+
+
+@pytest.mark.asyncio
+async def test_streamed_followup_can_find_a_named_character_without_selected_targets():
+    import json
+
+    changes, scene, asset, _, task = await crud()
+    legacy = PromptEditService(novel_id=changes.novel_id, task_id=task.id,
+                               allowed_targets=set(), max_batch_size=8)
+    calls = 0
+
+    async def respond(messages, info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            yield {0: DeltaToolCall(name='query_creation_objects', tool_call_id='find-person',
+                json_args=json.dumps({'query': {'kind': 'asset', 'scope': 'chapter',
+                    'chapter_id': scene.chapter_id, 'asset_type': 1, 'search': asset.canonical_name}}))}
+        else:
+            result = [p.content for m in messages for p in m.parts if isinstance(p, ToolReturnPart)][-1]
+            assert [item['id'] for item in result['items']] == [asset.id]
+            yield '已找到当前人物，请说明需要补充的面部特征。'
+
+    events = [event async for event in stream_creation_agent(
+        message='人物面部特征太少，不清楚', conversation_id='test-followup', run_id=str(task.id),
+        model=FunctionModel(stream_function=respond),
+        deps=CreationAgentDeps(service=legacy, changes=changes, context={}),
+        usage_limits=UsageLimits(request_limit=4))]
+    assert calls == 2
+    assert not any(event.type == 'RUN_ERROR' for event in events)
+    assert events[-1].type == 'RUN_FINISHED'
 
 
 @pytest.mark.asyncio

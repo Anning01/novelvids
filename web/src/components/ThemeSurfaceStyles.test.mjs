@@ -8,6 +8,14 @@ const iconTileStyles = readFileSync('src/components/AppIconTile.vue', 'utf8')
 const tabsStyles = readFileSync('src/components/AppTabs.vue', 'utf8')
 const assetPageStyles = readFileSync('src/pages/VideosPage.vue', 'utf8')
 const configPageStyles = readFileSync('src/pages/ConfigPage.vue', 'utf8')
+const catalogStyles = readFileSync('src/features/resource-library/catalog.css', 'utf8')
+
+it('keeps unselected resource folders transparent and preserves the selected accent on hover', () => {
+  expect(catalogStyles).toMatch(/\.catalog-folders>button\s*\{[^}]*background:\s*transparent/s)
+  expect(catalogStyles).toMatch(/\.catalog-folders>button\.active\s*\{[^}]*background:\s*var\(--soft\)/s)
+  expect(catalogStyles).not.toMatch(/\.catalog-folders>button:hover\s*\{/)
+  expect(catalogStyles).toMatch(/\.catalog-folder:hover:not\(\.active\)\s*\{[^}]*background:\s*var\(--app-surface-hover\)/s)
+})
 
 it('uses shared theme tokens for reusable search and select surfaces', () => {
   expect(searchFilterStyles).toMatch(/\.search-filter-bar__search\s*\{[^}]*background:\s*var\(--app-surface\)/s)
@@ -20,15 +28,14 @@ it('uses shared theme tokens for reusable search and select surfaces', () => {
 
 it('keeps the asset library on shared light and dark surface tokens', () => {
   expect(assetPageStyles).toMatch(/\.assets-page\s*\{[^}]*background:\s*var\(--app-canvas\)/s)
-  expect(assetPageStyles).toContain('<AppTabs class="asset-scope-tabs"')
-  expect(assetPageStyles).toContain(`:label="tr('公共资产分类')"`)
+  expect(assetPageStyles).not.toContain(`:label="tr('公共资产分类')"`)
   expect(assetPageStyles).toContain(`:label="tr('项目资产分类')"`)
-  expect(assetPageStyles.match(/<AppTabs/g)).toHaveLength(3)
+  expect(assetPageStyles.match(/<AppTabs/g)).toHaveLength(1)
   expect(tabsStyles).toMatch(/\.app-tabs\s*\{[^}]*width:\s*100%/s)
   expect(tabsStyles).toMatch(/\.app-tabs\s*\{[^}]*border-bottom:\s*1px solid var\(--app-border\)/s)
   expect(tabsStyles).toMatch(/\.app-tabs__tab\s*\{[^}]*background:\s*transparent/s)
   expect(tabsStyles).toMatch(/\.app-tabs__tab\.is-active::after\s*\{[^}]*background:\s*var\(--app-accent\)/s)
-  expect(assetPageStyles).toMatch(/\.public-character-card\s*\{[^}]*background:\s*var\(--app-surface\)/s)
+  expect(assetPageStyles).toMatch(/\.project-asset-card\s*\{[^}]*background:\s*var\(--app-surface\)/s)
   expect(assetPageStyles).not.toMatch(/\.assets-page\s*\{[^}]*background:\s*#fff/s)
 })
 

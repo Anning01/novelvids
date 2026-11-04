@@ -1,28 +1,45 @@
 <p align="center">
-  <img src="docs/images/logo.png" width="88" alt="NovelVids logo">
+  <img src="docs/images/logo.png" width="200" alt="NovelVids logo">
 </p>
 
-# NovelVids · 猫影短剧
+<h1 align="center">NovelVids · 猫影短剧</h1>
 
-**An open-source AI workspace for illustrated stories and short dramas.**
+<p align="center">
+  <strong>An open-source AI workspace for illustrated stories and short dramas.</strong>
+</p>
 
-Bring stories, character assets, storyboards, AI images, video generation and episode assembly into **one project you can edit, track and keep refining**.
+<p align="center">
+  Bring stories, character assets, storyboards, AI images, video generation and episode assembly<br>
+  into <strong>one project you can edit, track and keep refining</strong>.
+</p>
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-555)](#quick-start)
-[![Chinese / English](https://img.shields.io/badge/language-中文%20%2F%20English-555)](docs/english-production.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/deploy-self--hosted-555" alt="Self-hosted"></a>
+  <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="Chinese / English"></a>
+</p>
 
 <p align="center">
   <strong>English</strong> &nbsp;|&nbsp; <a href="README.md">简体中文</a>
 </p>
 
-[Watch a sample](#see-the-result) · [Try the demo](https://demo.xiazq.com) · [Run locally](#quick-start) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
+<p align="center">
+  <a href="#see-the-result">Watch a sample</a> · <a href="https://demo.xiazq.com">Try the demo</a> · <a href="#quick-start">Run locally</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
 ## See the result
 
-[![A short drama made with NovelVids; click to watch the complete clip](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
+**Commercial remake example**
 
-[Watch the complete clip on YouTube](https://youtu.be/fdiw__J19uk). Manuscript → characters and locations → storyboard → generated shots → episode. Results depend on the material, models and creative revisions.
+[![Commercial remake preview; click to watch on YouTube](docs/videos/demo-preview.gif)](https://youtu.be/fdiw__J19uk)
+
+[Watch the commercial remake on YouTube](https://youtu.be/fdiw__J19uk)
+
+**Illustrated drama example**
+
+[![Illustrated drama preview; click to watch on YouTube](docs/videos/comic-preview.gif)](https://youtu.be/NAuIKfsSero)
+
+[Watch the illustrated drama on YouTube](https://youtu.be/NAuIKfsSero) · Visual style: 3D xianxia; storyboard strategy: narrated storytelling. Generated automatically from story to finished video, without manually editing prompts or AI-generated prompts. Results depend on the material, models and creative revisions.
 
 **Explore before installing:** [open the live demo](https://demo.xiazq.com), username `demo`, password `NovelVids-Demo-2026`. Browse existing projects, assets, storyboards and videos. The demo is read-only and does not offer free generation; it resets daily at 00:00 Asia/Shanghai. Do not enter private data.
 

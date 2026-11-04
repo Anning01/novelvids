@@ -6,6 +6,7 @@ from controllers.novel import novel_controller
 from schemas.project_overview import ProjectOverview
 from schemas.ai_task import AiTaskOut
 from schemas.novel import NovelBriefOut, NovelCreate, NovelUpdate, NovelPatch, NovelMetaOut, NovelOut
+from schemas.video_defaults import ApplyVideoDefaults
 from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
@@ -13,6 +14,13 @@ from utils.response_format import PaginationResponse, ResponseSchema
 router = APIRouter(dependencies=[Depends(production_request)])
 
 _EDITOR = Depends(require_roles("admin", "creator"))
+
+
+@router.post('/{novel_id}/video-defaults', summary='应用本章视频参数并保存项目默认值')
+async def apply_video_defaults(novel_id: int, payload: ApplyVideoDefaults,
+    ctx: AuthContext = Depends(require_team_access), _: AuthContext = _EDITOR):
+    from services.video_defaults import apply_defaults
+    return ResponseSchema(data=await apply_defaults(novel_id, payload, ctx))
 
 
 @router.post("", summary="创建小说/剧本", response_model=ResponseSchema[NovelBriefOut])
