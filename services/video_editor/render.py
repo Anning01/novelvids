@@ -75,11 +75,12 @@ class EditRenderer:
 
     async def segment(self, clip, document, source, target, directory):
         width, height, fps = document.width, document.height, document.fps
+        # Disable frame reordering so even very short segments concatenate with monotonic DTS.
         if clip is None:
             duration = source
             await self.command(['-f', 'lavfi', '-i', f'color=c=black:s={width}x{height}:r={fps}',
                 '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', str(duration),
-                *self.encoding(document, 'pcm_s16le'), str(target)], cwd=directory)
+                *self.encoding(document, 'pcm_s16le'), '-bf', '0', str(target)], cwd=directory)
             return
         path, info = source
         duration = clip.duration
@@ -108,7 +109,7 @@ class EditRenderer:
                  f'{tempo(clip.speed)},volume={clip.volume},aresample=48000')
         args += ['-filter_complex', f'[0:v]{video}[v];[{audio_index}:a]{audio}[a]',
                  '-map', '[v]', '-map', '[a]', '-t', f'{duration:.8f}',
-                 *self.encoding(document, 'pcm_s16le'), str(target)]
+                 *self.encoding(document, 'pcm_s16le'), '-bf', '0', str(target)]
         await self.command(args, cwd=directory)
 
     async def render(self, document: EditDocument, sources: dict, directory: Path) -> Path:
