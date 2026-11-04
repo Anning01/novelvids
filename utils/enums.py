@@ -147,6 +147,7 @@ class VideoGenerationModelTypeEnum(NicknameStrEnum):
     seedance_2_mini = "seedance_2_mini", "Doubao Seedance 2.0 Mini"
     seedance_2_5 = "seedance_2_5", "Doubao Seedance 2.5"
     minimax_h3 = "minimax_h3", "MiniMax H3"
+    minimax_h3_autodl = "minimax_h3_autodl", "MiniMax H3 · AutoDL"
     wan_3 = "wan_3", "Wan 3.0"
 
 

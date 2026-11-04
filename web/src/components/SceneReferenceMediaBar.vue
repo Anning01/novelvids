@@ -4,7 +4,7 @@ import { tr } from '@/i18n'
 import { computed, ref, watch } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, X } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
-import { libraryApi } from '@/features/resource-library/api'
+import { catalogApi } from '@/features/resource-library/catalog'
 import type { VideoGenerationModel, VideoReferenceMedia } from '@/types'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
@@ -34,7 +34,7 @@ watch(() => props.media.map(item => item.library_resource_id).filter(Boolean).jo
   const request = ++librarySequence
   const ids = [...new Set(props.media.flatMap(item => item.library_resource_id ? [item.library_resource_id] : []))]
   const states = await Promise.all(ids.map(async id => {
-    try { const response = await libraryApi.get(id); return [id, { url: response.data.url, failed: false }] as const }
+    try { const response = await catalogApi.get(`media:${id}`); return [id, { url: response.data.url, failed: false }] as const }
     catch { return [id, { url: '', failed: true }] as const }
   }))
   if (request === librarySequence) libraryStates.value = Object.fromEntries(states)
@@ -98,8 +98,8 @@ function closeImagePreview() {
       <LoaderCircle v-if="uploading" :size="16" />
       <Plus v-else :size="16" />
     </button>
-    <AppButton size="sm" :disabled="unavailable || !model?.capabilities.max_reference_videos" @click="libraryOpen = true">{{ tr('资源库') }}</AppButton>
-    <ResourceLibraryPicker v-if="libraryOpen" :open="libraryOpen" :model-config-id="model?.config_id" :max-selection="Math.max(0, (model?.capabilities.max_reference_videos || 0) - uploadedVideos)" @close="libraryOpen = false" @choose="(_items, references) => { emit('chooseLibrary', references); libraryOpen = false }" />
+    <AppButton size="sm" :disabled="unavailable || (!model?.capabilities.max_reference_videos && !model?.capabilities.max_reference_images)" @click="libraryOpen = true">{{ tr('资源库') }}</AppButton>
+    <ResourceLibraryPicker v-if="libraryOpen" :open="libraryOpen" allow-images :max-image-selection="Math.max(0, (model?.capabilities.max_reference_images || 0) - assetImageCount - uploadedImages)" :max-video-selection="Math.max(0, (model?.capabilities.max_reference_videos || 0) - uploadedVideos)" :model-config-id="model?.config_id" :max-selection="Math.max(0, (model?.capabilities.max_reference_videos || 0) - uploadedVideos)" @close="libraryOpen = false" @choose="(_items, references) => { emit('chooseLibrary', references); libraryOpen = false }" />
     <div v-if="media.length" class="reference-list" :aria-label="tr('已上传参考素材')">
       <article
         v-for="(item, index) in media"

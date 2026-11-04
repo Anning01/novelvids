@@ -223,3 +223,24 @@ CI 建议两条流水线分别执行上述两态后端回归。
 ## 7. 公共演示环境
 
 仓库的 `deploy/demo/` 提供独立演示容器、非 root 运行、只读根文件系统、资源限制和每日原子重置模板；`scripts/create_demo_snapshot.py` 可从 SQLite 按项目白名单制作脱敏快照。演示数据不得直接复制生产账号、会话、账单或模型配置，详见 [deploy/demo/README.md](../deploy/demo/README.md)。
+
+## 生产部署备份保留规则
+
+服务器只保留**上一版的一套回滚文件**和**一份部署前数据库备份**。生产代码、运行数据库、媒体和证书不属于备份清理范围。
+
+每次部署使用 `/root/novelvids-deploy-backups/release-<新提交短 SHA>-<14 位时间戳>/` 保存：
+
+- `previous-commit`：部署前的完整 Git 提交 SHA。
+- `code.tar.gz`：该 SHA 的 `git archive` 代码包，不包含 `.env`、数据库、媒体和依赖目录。
+- `dist/`：部署前完整前端文件。
+- `database.dump`：部署前 PostgreSQL 自定义格式备份，用 `pg_restore --list` 验证可读。
+
+先完成备份和上线，再检查后端状态、公网站点及静态文件。**健康检查成功后必须清理旧备份**，不得只创建带时间戳的新目录而一直累积：
+
+```bash
+# 从仓库根目录执行；替换为本次已经验证完整的回滚目录名。
+python3 scripts/prune_deployment_backups.py --keep release-6841ac4-20261023192335
+python3 scripts/prune_deployment_backups.py --keep release-6841ac4-20261023192335 --apply
+```
+
+脚本先验证上一版代码包、前端、提交 SHA 和数据库备份；默认只预览。`--apply` 删除该目录以外的历史 NovelVids 备份、旧依赖副本、回滚前端与部署上传临时包。其他项目及 `/root/cert`、当前 `/root/novelvids` 不会被选入清理。失败部署先恢复服务，不清理可用回滚版本。不要再为同一次部署保留多份相同前端或整套虚拟环境。

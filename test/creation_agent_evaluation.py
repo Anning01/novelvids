@@ -35,6 +35,7 @@ from services.creation_agent.sessions import agent_sessions
 from services.creation_agent.tools import PromptEditService
 from test.test_services.test_storyboard_prompts import _shot
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
+from services.creation_agent.event_log import agent_event_log
 
 CORPUS_PATH = Path(__file__).parent / 'fixtures/creation_agent/cases.json'
 
@@ -256,7 +257,7 @@ async def run_evaluation_case(case: EvaluationCase, model_config, repetition: in
                 failures.append(f"scene:{target['id']}: current definition missing for {name}")
         records.append({'step': index + 1, 'request': request.model_dump(mode='json'), 'status': task.status,
             'hard_failures': failures, 'outcome_failures': outcome_failures, 'before': before, 'after': after, 'changes': changes, 'constraints': constraints,
-            'reply': assistant.content, 'events': assistant.events, 'usage': assistant.usage, 'current_targets': current_targets,
+            'reply': assistant.content, 'events': await agent_event_log.load(assistant), 'usage': assistant.usage, 'current_targets': current_targets,
             'retry_prompts': sum(part.get('part_kind') == 'retry-prompt' for message in assistant.native_messages for part in message.get('parts', [])) if assistant.native_messages else None,
             'cost_cny': str(compute_text_cost(assistant.usage, model_config.pricing)) if not assistant.usage.get('missing_usage') else None,
             'first_event_seconds': first_event, 'first_output_seconds': first_output, 'duration_seconds': duration,

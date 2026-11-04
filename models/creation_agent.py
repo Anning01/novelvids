@@ -44,6 +44,18 @@ class AgentMessage(AbstractBaseModel):
         unique_together = (("conversation", "request_id", "role"), ("task", "role"))
 
 
+class AgentEvent(AbstractBaseModel):
+    """Append-only AG-UI event log; legacy runs keep replaying from AgentMessage.events."""
+
+    message = fields.ForeignKeyField("models.AgentMessage", related_name="event_log", on_delete=fields.CASCADE)
+    seq = fields.IntField(description="单条消息内单调递增的事件序号，与 after 游标一致")
+    event = fields.JSONField(default=dict)
+
+    class Meta:
+        table = "creation_agent_events"
+        unique_together = (("message", "seq"),)
+
+
 class PromptChange(AbstractBaseModel):
     novel = fields.ForeignKeyField("models.Novel", related_name="prompt_changes", on_delete=fields.CASCADE)
     task = fields.ForeignKeyField("models.AiTask", related_name="prompt_changes", on_delete=fields.CASCADE)

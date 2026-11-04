@@ -66,7 +66,7 @@ async def resources(
     search: str = Query("", max_length=255), page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
 ):
-    query = VideoResource.filter(team_id=team, state__in=["ready", "delete_failed", "deleting"])
+    query = VideoResource.filter(team_id=team, kind='video', state__in=["ready", "delete_failed", "deleting"])
     if search.strip():
         query = query.filter(name__icontains=search.strip())
     elif folder_id is not None:
@@ -165,10 +165,12 @@ async def selection(payload: ResourceSelection, team: int = Depends(library_team
     caps = capabilities_for(config.video_model_type)
     selected = []
     for resource_id in payload.ids:
-        resource = await resource_for(team, resource_id)
+        resource = await resource_for(team, resource_id, kind=None)
         validate_resource_model(resource, caps)
         selected.append(reference_dict(resource))
-    if len(selected) > caps.max_reference_videos or sum(item.get("duration", 0) for item in selected) > caps.reference_video_total_duration_max + 0.001:
+    videos = [item for item in selected if item['type'] == 'video']
+    images = [item for item in selected if item['type'] == 'image']
+    if len(videos) > caps.max_reference_videos or len(images) > caps.max_reference_images or sum(item.get("duration", 0) for item in videos) > caps.reference_video_total_duration_max + 0.001:
         raise HTTPException(400, detail="所选视频数量或总时长超过当前模型限制")
     return ResponseSchema(data=selected)
 

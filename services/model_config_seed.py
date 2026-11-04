@@ -88,6 +88,13 @@ DEFAULT_MODELS: list[dict] = [
         api_protocol="minimax",
     ),
     _video_spec(
+        "minimax-h3-autodl",
+        "minimax_h3_zm_u24",
+        "minimax_h3_autodl",
+        base_url="https://autodl.art/api/v1/comfyui",
+        api_protocol="autodl",
+    ),
+    _video_spec(
         "wan3",
         "wan3.0-video",
         "wan_3",

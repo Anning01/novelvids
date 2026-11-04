@@ -138,11 +138,11 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'dashscope' | 'volcengine_mediakit'
+export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
-export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3' | 'wan_3'
+export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
 export interface VideoGenerationOptions {
   auto_enhancement?: AutoEnhancement | null
   generation_mode?: 'reference' | 'keyframes'

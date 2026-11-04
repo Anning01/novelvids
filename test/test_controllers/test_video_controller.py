@@ -133,12 +133,16 @@ async def test_生成视频_提交成功():
 
 
 @pytest.mark.asyncio
-async def test_生成_minimax_h3_视频记录正确供应商类型():
+@pytest.mark.parametrize("model_type,protocol,base_url", [
+    ("minimax_h3", "minimax", "https://api.minimaxi.com"),
+    ("minimax_h3_autodl", "autodl", "https://autodl.art/api/v1/comfyui"),
+])
+async def test_生成_minimax_h3_视频记录正确供应商类型(model_type, protocol, base_url):
     scene, config = await _create_scene_with_config(
         model_name="minimax-h3",
-        video_model_type="minimax_h3",
-        api_protocol="minimax",
-        base_url="https://api.minimaxi.com",
+        video_model_type=model_type,
+        api_protocol=protocol,
+        base_url=base_url,
     )
     req = VideoGenerateRequest(
         scene_id=scene.id,
@@ -154,7 +158,7 @@ async def test_生成_minimax_h3_视频记录正确供应商类型():
         video = await video_controller._submit_generation(req)
 
     assert video.model_type == VideoModelTypeEnum.minimax.value
-    assert video.metadata["video_model_type"] == "minimax_h3"
+    assert video.metadata["video_model_type"] == model_type
 
 
 @pytest.mark.asyncio

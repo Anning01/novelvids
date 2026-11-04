@@ -198,7 +198,9 @@ async def test_final_reply_retries_internal_ids_without_repeating_the_write():
                 'prompt': '灰色风衣，柔和逆光',
             }]}, tool_call_id='write')])
         if calls == 3:
-            return ModelResponse(parts=[TextPart(f'已保存 asset {asset.id}。')])
+            # A schema field name is the leak this validator guards. A user-visible
+            # noun followed by a number ("场景 2", "Scene 2") is ordinary wording.
+            return ModelResponse(parts=[TextPart(f'已保存 asset_id {asset.id}。')])
         assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
         return ModelResponse(parts=[TextPart('已保存女主的柔和逆光。')])
 

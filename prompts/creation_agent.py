@@ -101,8 +101,23 @@ def render_preserved_tracks(prompt: str, parameters: dict) -> str:
     return "\n".join(parts)
 
 
+TURN_LIMITED_NOTICE = (
+    "本轮模型调用次数已到上限，工具已收起，本次请求不能再调用任何工具。"
+    "请直接给出最终回复：用任务语言、以用户可见的对象名称说明已实际保存的修改、尚未完成的部分及原因。"
+    "已保存的修改以回执为准，不要把未完成的操作说成已完成。"
+)
+
+
+def render_turn_limited_notice() -> str:
+    """Fixed closing instruction for the request on which the tool loop is withdrawn."""
+    return TURN_LIMITED_NOTICE
+
+
 def render_creation_instructions(*, language: str, crud=False, turn_limited=False) -> str:
-    return render_skill("editing", language)
+    rendered = render_skill("editing", language)
+    if turn_limited:
+        rendered += "\n" + render_turn_limited_notice()
+    return rendered
 
 
 def render_summary_instructions(language: str = "zh") -> str:

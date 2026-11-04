@@ -13,6 +13,11 @@ from pydantic_ai.models.wrapper import WrapperModel
 from models.creation_agent import AgentMessage
 
 
+def main_request_count(calls) -> int:
+    """Requests charged against request_limit; summary compression runs on a separate budget."""
+    return sum(call.get('phase', 'main') != 'summary' for call in calls)
+
+
 class RecordedAgentModel(WrapperModel):
     def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
                  request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None):
@@ -28,9 +33,14 @@ class RecordedAgentModel(WrapperModel):
         self.budget = ContextBudget(limits or AgentConfiguration(max_context_characters=max_characters), message, on_compact)
         self.budget.limits = self.budget.limits.model_copy(update={'max_context_characters': max_characters})
 
+    @property
+    def main_requests(self) -> int:
+        """Requests charged against request_limit; summary compression runs on a separate budget."""
+        return main_request_count(self.calls)
+
     async def _begin(self, messages, parameters):
         await self.before_request()
-        if self.request_limit is not None and len(self.calls) >= self.request_limit:
+        if self.request_limit is not None and self.main_requests >= self.request_limit:
             raise ValueError(localized_message('本轮模型调用次数已达到配置上限'))
         used = sum(call.get('usage', {}).get('input_tokens', 0) + call.get('usage', {}).get('output_tokens', 0) for call in self.calls)
         if self.total_tokens_limit is not None and used >= self.total_tokens_limit:

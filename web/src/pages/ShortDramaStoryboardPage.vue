@@ -1245,6 +1245,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
+  if (combined.filter(item => item.type === 'image').length + selectedAssetReferenceImageCount(scene) > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
   if (videos.length > model.capabilities.max_reference_videos || videos.reduce((total, item) => total + (item.duration || 0), 0) > model.capabilities.reference_video_total_duration_max + 0.001) {
     notice.error(tr('参考视频数量或总时长超过当前模型限制'))
     return

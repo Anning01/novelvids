@@ -11,7 +11,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.usage import UsageLimits
 from models.creation_agent import AgentMessage
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills, task_facts
-from services.creation_agent.model_boundary import RecordedAgentModel
+from services.creation_agent.model_boundary import RecordedAgentModel, main_request_count
 from utils.enums import AiTaskTypeEnum
 
 WORKFLOW_VERSION = "agent-skills-v1"
@@ -163,7 +163,7 @@ class SkillExecution:
                 if m.task_id == self.message.task_id
                 or m.task.request_params.get("parent_task_id") == self.params["task_id"]
             ]
-            spent_requests = sum(len((m.usage or {}).get("calls", [])) for m in related)
+            spent_requests = sum(main_request_count((m.usage or {}).get("calls", [])) for m in related)
             spent_tokens = sum(
                 int((m.usage or {}).get("input_tokens", 0))
                 + int((m.usage or {}).get("output_tokens", 0))

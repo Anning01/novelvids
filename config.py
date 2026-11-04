@@ -92,6 +92,11 @@ class Settings:
     )
 
     RESOURCE_LIBRARY_MAX_SIZE_MB = max(1, int(os.getenv("RESOURCE_LIBRARY_MAX_SIZE_MB", "200")))
+    VIDEO_EDITOR_MAX_DURATION_SECONDS = max(1, int(os.getenv('VIDEO_EDITOR_MAX_DURATION_SECONDS', '7200')))
+    VIDEO_EDITOR_RENDER_TIMEOUT = max(60, int(os.getenv('VIDEO_EDITOR_RENDER_TIMEOUT', '7200')))
+    VIDEO_EDITOR_MAX_OVERLAYS = max(1, int(os.getenv('VIDEO_EDITOR_MAX_OVERLAYS', '32')))
+    VIDEO_EDITOR_MAX_AUDIO_TRACKS = max(1, int(os.getenv('VIDEO_EDITOR_MAX_AUDIO_TRACKS', '32')))
+    VIDEO_EDITOR_MAX_SOURCE_MB = max(1, int(os.getenv('VIDEO_EDITOR_MAX_SOURCE_MB', '2048')))
 
     # 媒体文件目录
     MEDIA_PATH = os.getenv("MEDIA_PATH", "./media")

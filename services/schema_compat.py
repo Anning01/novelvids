@@ -5,6 +5,33 @@ from tortoise import Tortoise
 from config import settings
 
 
+async def ensure_resource_library_schema() -> None:
+    from models.resource_library import ResourcePlacement
+    connection = Tortoise.get_connection('default')
+    if settings.DATABASE_URL.startswith('sqlite'):
+        columns = await connection.execute_query_dict('PRAGMA table_info(video_resources)')
+        if columns and 'kind' not in {row['name'] for row in columns}:
+            await connection.execute_script("ALTER TABLE video_resources ADD COLUMN kind VARCHAR(24) NOT NULL DEFAULT 'video';")
+        columns = await connection.execute_query_dict('PRAGMA table_info(resource_placements)')
+        if columns and 'media_resource_id' not in {row['name'] for row in columns}:
+            await connection.execute_script('ALTER TABLE resource_placements ADD COLUMN media_resource_id INT;')
+    else:
+        await connection.execute_script("ALTER TABLE IF EXISTS video_resources ADD COLUMN IF NOT EXISTS kind VARCHAR(24) NOT NULL DEFAULT 'video';")
+        await connection.execute_script('ALTER TABLE IF EXISTS resource_placements ADD COLUMN IF NOT EXISTS media_resource_id INT;')
+    generator = connection.schema_generator(connection)
+    await connection.execute_script(generator._get_table_sql(ResourcePlacement, safe=True)['table_creation_string'])
+
+
+async def ensure_video_editor_schema() -> None:
+    from models.video_edit import ChapterEditDraft, EditorAsset
+    from models.resource_library import ProjectResource
+    connection = Tortoise.get_connection('default')
+    generator = connection.schema_generator(connection)
+    for model in (ChapterEditDraft, EditorAsset, ProjectResource):
+        definition = generator._get_table_sql(model, safe=True)
+        await connection.execute_script(definition['table_creation_string'])
+
+
 async def ensure_creation_agent_schema() -> None:
     """Add the opt-in tool capability before safe schema generation on old installs."""
     connection = Tortoise.get_connection("default")

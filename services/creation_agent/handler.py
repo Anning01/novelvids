@@ -32,6 +32,8 @@ from services.creation_agent.changes import CreationChanges
 from services.creation_agent.context import chapter_context
 from services.creation_agent.memory import creation_memory
 from services.creation_agent.history import prepare_history
+from services.creation_agent.event_log import agent_event_log
+from services.task_signals import task_signals
 from utils.enums import TaskStatusEnum, UserStatusEnum
 
 
@@ -148,11 +150,11 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
             max_characters=limits.context_character_limit(chosen.max_context_characters),
             request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits)
-        persisted = []
         buffer = []
         content = ""
         last_flush = time.monotonic()
         error = ''
+        next_seq = await agent_event_log.start(assistant)
         async def notify_compaction():
             buffer.append({'type': 'CUSTOM', 'name': 'context_compaction', 'value': {'status': 'running'}})
             await flush()
@@ -160,11 +162,15 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         final_message_id = f'{task_id}:validated-reply'
 
         async def flush():
-            nonlocal last_flush
+            nonlocal last_flush, next_seq
+            appended = False
             if buffer:
-                persisted.extend(buffer)
+                next_seq = await agent_event_log.append(assistant.id, list(buffer), next_seq)
                 buffer.clear()
-            await AgentMessage.filter(id=assistant.id).update(events=persisted, content=content, updated_at=datetime.now(timezone.utc))
+                appended = True
+            await AgentMessage.filter(id=assistant.id).update(content=content, updated_at=datetime.now(timezone.utc))
+            if appended:
+                await task_signals.publish(str(task_id))
             last_flush = time.monotonic()
 
         async def complete(result):

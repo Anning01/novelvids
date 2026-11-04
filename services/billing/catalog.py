@@ -69,6 +69,14 @@ VIDEO_PRICING: dict[str, dict] = {
         "video_reference_prices": {"768P": 0.50, "2K": 0.80},
         "input_image": {"first_free": 5, "price_per_image": 0.20},
     },
+    # AutoDL 峰谷价格由后台按实际合同填写，不套用官方 MiniMax 价格。
+    "minimax_h3_autodl": {
+        "type": "video",
+        "currency": "CNY",
+        "billing_unit": "second",
+        "prices": {"480p": 0.0, "768p": 0.0},
+        "video_reference_prices": {"480p": 0.0, "768p": 0.0},
+    },
     # Wan 3 刊例价未随接口文档提供，先以零价档位初始化，由后台按实际合同价填写。
     "wan_3": {
         "type": "video",

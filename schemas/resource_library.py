@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from utils.media_name import video_display_name
+from utils.messages import localized_message
 
 
 class FolderWrite(BaseModel):
@@ -59,3 +60,39 @@ class ResourceImport(BaseModel):
 
 class ResourceSelection(ResourceIds):
     model_config_id: int = Field(ge=1)
+
+
+MediaKind = Literal['video', 'image', 'bgm', 'sound', 'sticker']
+CatalogKind = Literal['all', 'video', 'image', 'bgm', 'sound', 'sticker', 'voice', 'character']
+
+
+class CatalogUpload(ResourceUpload):
+    kind: MediaKind
+
+
+class CatalogMove(BaseModel):
+    keys: list[str] = Field(min_length=1, max_length=100)
+    folder_id: int = Field(default=0, ge=0)
+
+    @field_validator('keys')
+    @classmethod
+    def clean_keys(cls, values):
+        import re
+        if any(not re.fullmatch(r'(media|voice|human|asset):[1-9][0-9]*', value) for value in values):
+            raise ValueError(localized_message('资源标识无效'))
+        return list(dict.fromkeys(values))
+
+
+class CatalogPublish(BaseModel):
+    catalog: Literal['asset', 'editor']
+    source_id: int = Field(ge=1)
+    kind: MediaKind = 'video'
+    folder_id: int = Field(default=0, ge=0)
+
+
+class CatalogApply(BaseModel):
+    novel_id: int = Field(ge=1)
+    asset_id: int | None = Field(default=None, ge=1)
+    variant_id: int | None = Field(default=None, ge=1)
+    chapter_id: int | None = Field(default=None, ge=1)
+    canonical_name: str | None = Field(default=None, min_length=1, max_length=100)

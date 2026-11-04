@@ -4,6 +4,9 @@ import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { api } from '@/api'
 import ShortDramaVideoPage from './ShortDramaVideoPage.vue'
+import { editorApi } from '@/features/video-editor/api'
+import { editorFixture } from '@/features/video-editor/fixtures'
+vi.mock('@/features/video-editor/api', () => ({ editorApi: { get: vi.fn(), capabilities: vi.fn(), history: vi.fn() } }))
 
 vi.mock('@/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/api')>()
@@ -16,7 +19,11 @@ const videos = Object.fromEntries(scenes.map(scene => [scene.id, [{ id: scene.id
 let paused: WeakMap<HTMLMediaElement, boolean>
 
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   vi.clearAllMocks()
+  vi.mocked(editorApi.get).mockResolvedValue({ data: editorFixture() } as never)
+  vi.mocked(editorApi.capabilities).mockResolvedValue({ data: { fps: [24], resolutions: [720] } } as never)
+  vi.mocked(editorApi.history).mockResolvedValue({ data: [] } as never)
   paused = new WeakMap()
   vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) { return paused.get(this) ?? true })
   vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockReturnValue(4)
@@ -31,7 +38,7 @@ beforeEach(() => {
   vi.mocked(api.chapters).mockResolvedValue({ data: { items: [chapter] } } as never)
   vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes, assets: [], videos } } as never)
 })
-afterEach(() => { vi.restoreAllMocks(); delete document.documentElement.dataset.appTheme })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete document.documentElement.dataset.appTheme })
 
 async function render() {
   const router = createRouter({ history: createMemoryHistory(), routes: [
@@ -64,7 +71,8 @@ it.each(['light', 'dark'])('prebuffers and reuses the next clip instead of mount
 })
 
 it('preserves black gaps and primes the following real clip while the gap runs', async () => {
-  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes, assets: [], videos: { 1: videos[1], 3: videos[3] } } } as never)
+  const missing = editorFixture(); missing.media[1]!.missing = true; missing.media[1]!.url = null
+  vi.mocked(editorApi.get).mockResolvedValue({ data: missing } as never)
   const wrapper = await render()
   await wrapper.get('button[aria-label="播放"]').trigger('click'); await flushPromises()
   wrapper.get('.video-stage video[src="/media/clip-1.mp4"]').element.dispatchEvent(new Event('ended'))

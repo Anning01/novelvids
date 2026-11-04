@@ -9,6 +9,9 @@ RUN UV_INDEX_URL="${UV_INDEX_URL}" uv sync --frozen --no-dev --no-install-projec
 
 FROM python:3.12-slim AS runtime
 
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 novelvids \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin novelvids
 WORKDIR /app
