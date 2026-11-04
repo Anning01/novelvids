@@ -280,12 +280,15 @@ async def test_api_create_novel_source_key_invalid_rejected(client: AsyncClient,
 
 
 @pytest.mark.asyncio
-async def test_api_novel_meta_excludes_content(client: AsyncClient):
+@pytest.mark.parametrize('strategy', ['cinematic', 'narration'])
+async def test_api_novel_meta_excludes_content(client: AsyncClient, strategy):
     """元信息接口不返回书稿正文，但给出正文字符数用于拆分校验。"""
     created = await client.post(
         "/api/novel",
         json={
             "name": "元信息项目",
+            "storyboard_strategy": strategy,
+            "storyboard_setting": "已确认的项目分镜说明",
             "author": "x",
             "content": "第一章 开端" * 100,
             "story_outline": "可供查看者预览的故事大纲",
@@ -301,6 +304,8 @@ async def test_api_novel_meta_excludes_content(client: AsyncClient):
     assert "content" not in data
     assert data["content_length"] == len("第一章 开端" * 100)
     assert data["name"] == "元信息项目"
+    assert data['storyboard_strategy'] == strategy
+    assert data['storyboard_setting'] == '已确认的项目分镜说明'
     assert data["total_chapters"] == 0
     assert data["story_outline"] == "可供查看者预览的故事大纲"
     assert data["project_type"] == "都市短剧"
