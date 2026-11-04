@@ -76,12 +76,21 @@ function duplicate() { action(() => duplicateClip(editDocument.value!, selectedI
 function copy() {
   if (readOnly.value || !selected.value || selected.value.type === 'video' && selected.value.source.kind === 'missing') return
   copiedClip.value = JSON.parse(JSON.stringify(selected.value)) as EditClip
-  notice.success(tr('片段已复制，移动播放头后粘贴'))
+  notice.success(tr(copiedClip.value.type === 'audio' ? 'BGM 已复制，粘贴将接在片段末尾' : '片段已复制，移动播放头后粘贴'))
 }
 function paste() {
   const clip = copiedClip.value
   if (!clip) return
-  if (action(() => pasteClip(editDocument.value!, clip, time.value)) && selected.value) void seekTo(selected.value.start + selected.value.duration)
+  let start = time.value
+  if (clip.type === 'audio') {
+    const original = editDocument.value?.clips.find(item => item.id === clip.id)
+    const current = selected.value
+    const anchor = current?.type === 'audio' && sourceKey(current.source) === sourceKey(clip.source)
+      ? current
+      : original ?? clip
+    start = anchor.start + anchor.duration
+  }
+  if (action(() => pasteClip(editDocument.value!, clip, start)) && selected.value) void seekTo(selected.value.start + selected.value.duration)
 }
 function split() { action(() => splitClip(editDocument.value!, selectedId.value, time.value)) }
 function edge(id: string, side: 'left' | 'right', delta: number) {

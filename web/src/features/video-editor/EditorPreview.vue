@@ -106,6 +106,16 @@ function nudgeStickerTransform(event:KeyboardEvent,clip:StickerClip,mode:'resize
 }
 const gain = new MediaGain()
 const audioElements = new Map<string, HTMLAudioElement>()
+const nativeAudioSources = ref(new Set<string>())
+const audioUrl = (clip: AudioClip) => mediaUrl(indexed.value.get(sourceKey(clip.source))?.url)
+function audioFailed(clip: AudioClip) {
+  const url = audioUrl(clip)
+  if (url && !nativeAudioSources.value.has(url)) {
+    nativeAudioSources.value.add(url)
+    return
+  }
+  error.value = tr('音频读取失败，请检查素材')
+}
 const frameWidth = computed(() => Math.min(size.value.width, size.value.height * props.document.width / props.document.height))
 const frameHeight = computed(() => frameWidth.value * props.document.height / props.document.width)
 const video = computed(() => orderedVideos(props.document).find(clip => activeAt(clip, Math.min(props.time, Math.max(0, totalDuration(props.document) - .00001)))))
@@ -119,7 +129,12 @@ const overlays = computed(() => props.document.clips.filter(clip => (clip.type =
 const activeAudio = computed(() => props.document.clips.filter((clip): clip is AudioClip => clip.type === 'audio' && activeAt(clip, props.time)))
 const audioOnly = computed(() => !orderedVideos(props.document).length && activeAudio.value.length > 0)
 let animation = 0, lastNow = 0, command = 0, disposed = false, observer: ResizeObserver | null = null
-function audioRef(id: string, value: unknown) { if (value instanceof HTMLAudioElement) audioElements.set(id, value); else audioElements.delete(id) }
+function audioRef(id: string, value: unknown) {
+  const previous = audioElements.get(id)
+  if (previous && previous !== value) gain.release(previous)
+  if (value instanceof HTMLAudioElement) audioElements.set(id, value)
+  else audioElements.delete(id)
+}
 function silenceAudio() { audioElements.forEach(el => el.pause()) }
 async function positionPlayer(autoplay: boolean) {
   const version = ++command
@@ -145,8 +160,17 @@ function syncAudio() {
     const elapsed = Math.max(0, props.time - clip.start)
     const target = clip.trim_in + (clip.loop ? elapsed % span : elapsed)
     if (element.readyState >= 1 && Math.abs(element.currentTime - target) > .12) element.currentTime = target
-    element.muted = props.muted; gain.set(element, audioVolume(clip, props.time))
-    if (props.playing && ready.value && element.paused) void element.play().catch(() => { error.value = tr('音频播放失败，请检查素材或浏览器播放权限'); emit('update:playing', false) })
+    element.muted = props.muted
+    const volume = audioVolume(clip, props.time)
+    if (element.crossOrigin === 'anonymous' && element.readyState >= 1) gain.set(element, volume)
+    else element.volume = Math.min(1, volume)
+    if (props.playing && ready.value && element.paused && element.readyState >= 1 && !element.error) {
+      void element.play().catch(reason => {
+        if (audioElements.get(clip.id) === element && reason instanceof DOMException && reason.name === 'NotAllowedError') {
+          error.value = tr('音频播放失败，请检查素材或浏览器播放权限')
+        }
+      })
+    }
     if ((!props.playing || !ready.value) && !element.paused) element.pause()
   }
 }
@@ -205,7 +229,9 @@ defineExpose({ seek })
       </template>
       <p v-if="error" class="editor-preview-error" role="alert">{{ error }}</p>
     </div>
-    <audio v-for="clip in activeAudio" :key="clip.id" :ref="element => audioRef(clip.id, element)" :src="mediaUrl(indexed.get(sourceKey(clip.source))?.url)" crossorigin="anonymous" preload="auto" @loadedmetadata="syncAudio" @error="error = tr('音频读取失败，请检查素材'); emit('update:playing', false)" />
+    <audio v-for="clip in activeAudio" :key="`${clip.id}:${nativeAudioSources.has(audioUrl(clip))}`"
+      :ref="element => audioRef(clip.id, element)" :crossorigin="nativeAudioSources.has(audioUrl(clip)) ? undefined : 'anonymous'"
+      :src="audioUrl(clip)" preload="auto" @loadedmetadata="syncAudio" @error="audioFailed(clip)" />
   </div>
 </template>
 
