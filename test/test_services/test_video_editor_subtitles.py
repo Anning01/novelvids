@@ -91,3 +91,46 @@ async def test_capabilities_publish_the_same_thirteen_presets(client):
         assert response['data']['subtitle_styles']==subtitle_styles()
     finally:
         app.dependency_overrides.pop(get_auth_context,None)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('step', [1, 1/24])
+async def test_sequential_subtitles_above_overlay_limit_can_be_saved(monkeypatch, step):
+    from auth.deps import AuthContext
+    from test.test_services.test_video_editor import project
+    from services.video_editor.drafts import save_draft, read_draft
+    monkeypatch.setattr('config.settings.VIDEO_EDITOR_MAX_OVERLAYS',1)
+    _,chapter,_,_=await project()
+    doc=EditDocument(clips=[SubtitleClip(id=f's{i}',type='subtitle',start=i*step,duration=step,text=f'Line {i}') for i in range(80)])
+    saved=await save_draft(chapter.id,EditSave(revision=0,document=doc),AuthContext())
+    assert len(saved['document']['clips'])==80
+    assert len((await read_draft(chapter.id,AuthContext()))['document']['clips'])==80
+
+
+@pytest.mark.asyncio
+async def test_overlay_limit_counts_simultaneous_subtitles_and_stickers(monkeypatch):
+    from fastapi import HTTPException
+    from services.video_editor.sources import EditSources
+    from schemas.video_edit import StickerClip
+    monkeypatch.setattr('config.settings.VIDEO_EDITOR_MAX_OVERLAYS',2)
+    clips=[SubtitleClip(id=f's{i}',type='subtitle',start=0,duration=1,text=str(i)) for i in range(2)]
+    clips.append(StickerClip(id='sticker',type='sticker',start=.5,duration=1,source={'kind':'asset','id':1}))
+    with pytest.raises(HTTPException) as error:
+        await EditSources(1,1).validate(EditDocument(clips=clips))
+    assert error.value.status_code==422
+
+@pytest.mark.asyncio
+async def test_many_subtitles_export_with_one_overlay_pass(tmp_path):
+    from unittest.mock import AsyncMock
+    from services.video_editor.render import EditRenderer
+    from services.video_editor.subtitles import subtitle_ass_many
+    clips=[SubtitleClip(id=f's{i}',type='subtitle',start=i/24,duration=1/24,text=f'Text {i}',color='#ff0000' if i%2 else '#ffffff',bold=bool(i%2)) for i in range(80)]
+    script=subtitle_ass_many(clips,320,180)
+    assert len([line for line in script.splitlines() if line.startswith('Style: ')])==80
+    assert script.count('Dialogue: ')==80
+    assert 'Text0' in script and 'Text79' in script
+    renderer=EditRenderer(cancelled=AsyncMock(return_value=False),progress=AsyncMock())
+    renderer.command=AsyncMock(wraps=renderer.command)
+    output=await renderer.render(EditDocument(width=320,height=180,clips=clips),{},tmp_path)
+    assert output.is_file()
+    passes=[call for call in renderer.command.call_args_list if str(call.args[0][-1]).split('/')[-1].startswith('overlay-')]
+    assert len(passes)==1

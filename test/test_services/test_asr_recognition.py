@@ -8,7 +8,7 @@ from models.config import AiModelConfig
 from models.chapter import Chapter
 from models.novel import Novel
 from models.video_edit import ChapterEditDraft
-from schemas.video_edit import EditDocument, SubtitleClip, VideoClip
+from schemas.video_edit import EditDocument, SubtitleClip, VideoClip, AudioClip
 from services.audio_recognition.volc_seedasr import VolcSeedAsrClient
 from services.billing.catalog import ASR_PRICING, pricing_for
 from services.billing.pricing import compute_asr_cost
@@ -226,6 +226,7 @@ async def test_recognize_and_apply_subtitles_flow():
         mock_rec.return_value = mock_utterances
 
         res = await recognize_and_apply_subtitles(chapter.id, mock_auth)
+        mock_rec.assert_awaited_once_with(audio_bytes=b"mock-audio", format="mp3")
 
     assert res["subtitles_created"] == 2
     assert res["revision"] == 1
@@ -312,6 +313,8 @@ async def test_extracts_speed_adjusted_audio_and_silent_video(tmp_path, monkeypa
     novel,chapter,_,video=await project()
     silent=await EditorAsset.create(novel=novel,kind='video',name='Silent',media_ref='/media/silent.mp4',sha256='',probe={'duration':2})
     doc=EditDocument(clips=[VideoClip(id='v',type='video',source={'kind':'video','id':video.id},start=0,duration=1,speed=2),VideoClip(id='silent',type='video',source={'kind':'asset','id':silent.id},start=1,duration=2)])
+    # A long BGM referencing an absent source must never be resolved or mixed into ASR.
+    doc.clips.append(AudioClip(id='bgm',type='audio',source={'kind':'asset','id':999999},start=0,duration=60,volume=10,loop=True))
     data,duration=await extract_timeline_audio(doc,chapter.id,novel.id)
     path=tmp_path/'timeline.mp3';path.write_bytes(data)
     import json

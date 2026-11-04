@@ -76,8 +76,18 @@ class EditSources:
         from config import settings
         if max((c.start + c.duration for c in document.clips), default=0) > settings.VIDEO_EDITOR_MAX_DURATION_SECONDS:
             raise HTTPException(422, msg('时间线超过服务端允许的时长'))
-        if sum(c.type in {'sticker', 'subtitle'} for c in document.clips) > settings.VIDEO_EDITOR_MAX_OVERLAYS:
-            raise HTTPException(422, msg('叠加片段数量超过服务端限制'))
+        # Bound simultaneous layers, not the number of sequential caption sentences.
+        events = []
+        for clip in document.clips:
+            if clip.type in {'sticker', 'subtitle'}:
+                start = round(clip.start * document.fps)
+                end = start + max(1, round(clip.duration * document.fps))
+                events.extend(((start, 1), (end, -1)))
+        active = 0
+        for _, change in sorted(events):
+            active += change
+            if active > settings.VIDEO_EDITOR_MAX_OVERLAYS:
+                raise HTTPException(422, msg('叠加片段数量超过服务端限制'))
         if sum(c.type == 'audio' for c in document.clips) > settings.VIDEO_EDITOR_MAX_AUDIO_TRACKS:
             raise HTTPException(422, msg('音频片段数量超过服务端限制'))
         sources = {}
