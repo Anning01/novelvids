@@ -4,7 +4,7 @@ import { Film, Music2, Type, Sticker, X, RotateCcw, Bold, Underline, Italic, Ali
 import { tr } from '@/i18n'
 import { scaleSticker } from './stickerTransform'
 import { presetSelected } from './subtitleStyle'
-import { dbVolume, volumeDb, kindLabel } from './model'
+import { dbVolume, volumeDb, kindLabel, videoSourceEnd } from './model'
 import type { EditClip, EditorMedia, ClipPatch, SubtitlePreset } from './types'
 const props = defineProps<{ clip: EditClip | null; media?: EditorMedia; readOnly: boolean; open: boolean; browsing?: EditorMedia | null; subtitleStyles?: SubtitlePreset[] }>()
 const emit = defineEmits<{ change: [patch: ClipPatch]; trim: [trimIn: number, trimOut: number, speed: number]; close: [] }>()
@@ -14,7 +14,7 @@ function speed(value: number) {
   const clip = props.clip
   if (!clip || clip.type !== 'video' || !Number.isFinite(value)) return
   const rate = Math.max(.1, Math.min(20, Math.round(value * 100) / 100))
-  emit('trim', clip.trim_in, clip.trim_in + clip.duration * clip.speed, rate)
+  if (rate !== clip.speed) emit('trim', clip.trim_in, videoSourceEnd(clip), rate)
 }
 function gain(value: number) {
   if (Number.isFinite(value)) emit('change', { volume: dbVolume(Math.max(-20, Math.min(20, value))) })

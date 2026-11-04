@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { ApiRequestError } from '@/api'
 import { tr } from '@/i18n'
 import { editorApi } from './api'
-import { cloneDocument, validateDocument } from './model'
+import { cloneDocument, compactVideoTrack, validateDocument } from './model'
 import type { EditDocument, EditorDraft, EditorMedia } from './types'
 
 export function useEditorDraft(identity: () => string) {
@@ -54,6 +54,7 @@ export function useEditorDraft(identity: () => string) {
   }
   function schedule() { clearTimeout(timer); if (!conflict.value) timer = setTimeout(() => { void save() }, 800) }
   function commit(next: EditDocument, nextSelectedId?: string) {
+    next = compactVideoTrack(next)
     bounds(next)
     if (JSON.stringify(next) === JSON.stringify(document.value)) return
     if (document.value) undoStack.value.push(JSON.stringify(document.value))

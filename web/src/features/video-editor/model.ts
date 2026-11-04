@@ -6,6 +6,28 @@ export const cloneDocument = (value: EditDocument): EditDocument => JSON.parse(J
 export const totalDuration = (value: EditDocument) => Math.max(0, ...value.clips.map(item => item.start + item.duration))
 export const frameTime = (value: number, fps: number) => Math.round(Math.max(0, value) * fps) / fps
 export const orderedVideos = (value: EditDocument) => value.clips.filter((clip): clip is VideoClip => clip.type === 'video').sort((a, b) => a.start - b.start)
+export function compactVideoTrack(value: EditDocument, videos = orderedVideos(value)): EditDocument {
+  let start = 0
+  const byId = new Map(videos.map(clip => {
+    const positioned = { ...clip, start }
+    start += clip.duration
+    return [clip.id, positioned] as const
+  }))
+  return { ...value, clips: value.clips.map(clip => byId.get(clip.id) ?? clip) }
+}
+
+function videoInsertionIndex(videos: VideoClip[], at: number) {
+  let start = 0
+  for (const [index, clip] of videos.entries()) {
+    if (at < start + clip.duration / 2) return index
+    start += clip.duration
+  }
+  return videos.length
+}
+
+export const videoSourceEnd = (clip: VideoClip) => clip.trim_out ?? clip.trim_in + clip.duration * clip.speed
+export const videoPlaybackRate = (clip: VideoClip) => clip.trim_out == null ? clip.speed : (clip.trim_out - clip.trim_in) / clip.duration
+
 export const activeAt = (clip: EditClip, time: number) => time >= clip.start && time < clip.start + clip.duration
 export function validateDocument(document: EditDocument) {
   if (!Number.isFinite(document.width) || !Number.isFinite(document.height) || document.width < 64 || document.height < 64 || document.width * document.height > 3840 * 2160) throw new Error(tr('画布尺寸无效'))
@@ -17,7 +39,9 @@ export function validateDocument(document: EditDocument) {
     if (clip.type === 'video' || clip.type === 'audio') {
       if (!Number.isFinite(clip.trim_in) || clip.trim_in < 0 || !Number.isFinite(clip.volume) || clip.volume < 0 || clip.volume > 10) throw new Error(tr('片段参数无效'))
     }
-    if (clip.type === 'video' && (!Number.isFinite(clip.speed) || clip.speed < .1 || clip.speed > 20)) throw new Error(tr('片段参数无效'))
+    if (clip.type === 'video' && (!Number.isFinite(clip.speed) || clip.speed < .1 || clip.speed > 20
+      || (clip.trim_out != null && (!Number.isFinite(clip.trim_out) || clip.trim_out <= clip.trim_in
+        || Math.abs((clip.trim_out - clip.trim_in) / clip.speed - clip.duration) > 1 / document.fps + 1e-6)))) throw new Error(tr('片段参数无效'))
     if ('scale' in clip && (!Number.isFinite(clip.scale) || clip.scale < .1 || clip.scale > 4)) throw new Error(tr('片段参数无效'))
     if ((clip.type === 'video' || clip.type === 'sticker') && (!Number.isFinite(clip.rotation ?? 0) || Math.abs(clip.rotation ?? 0) > 180)) throw new Error(tr('片段参数无效'))
     if (clip.type === 'subtitle' && (!Number.isFinite(clip.x ?? 50) || (clip.x ?? 50) < 0 || (clip.x ?? 50) > 100)) throw new Error(tr('片段参数无效'))
@@ -40,20 +64,21 @@ export function validateDocument(document: EditDocument) {
 export function changeClip(value: EditDocument, id: string, patch: ClipPatch, media?: EditorMedia): EditDocument {
   const next = cloneDocument(value), clip = next.clips.find(item => item.id === id)
   if (!clip) return next
+  const videos = clip.type === 'video' ? orderedVideos(next) : undefined
   Object.assign(clip, patch)
   clip.start = frameTime(clip.start, next.fps)
   clip.duration = Math.max(1 / next.fps, frameTime(clip.duration, next.fps))
   if (clip.type === 'audio') { clip.fade_in = Math.min(clip.duration, clip.fade_in); clip.fade_out = Math.min(clip.duration, clip.fade_out) }
   if (media?.duration && (clip.type === 'video' || clip.type === 'audio') && !(clip.type === 'audio' && clip.loop)) {
-    const end = clip.trim_in + clip.duration * (clip.type === 'video' ? clip.speed : 1)
+    const end = clip.type === 'video' ? videoSourceEnd(clip) : clip.trim_in + clip.duration
     if (end > media.duration + .12 || clip.trim_in >= media.duration) throw new Error(tr('裁剪范围超过原素材'))
   }
-  return validateDocument(next)
+  return validateDocument(videos ? compactVideoTrack(next, videos) : next)
 }
 
 export function addMedia(value: EditDocument, media: EditorMedia, at: number, selectedId: string): [EditDocument, string] {
   if (media.missing || !media.url) throw new Error(tr('素材尚未就绪'))
-  const next = cloneDocument(value), id = crypto.randomUUID()
+  const next = compactVideoTrack(cloneDocument(value)), id = crypto.randomUUID()
   let start = frameTime(at, next.fps)
   const sourceDuration = frameTime(media.kind === 'sticker' ? 4 : media.duration || 4, next.fps)
   const remaining = Math.max(0, totalDuration(value) - start)
@@ -82,7 +107,10 @@ export function splitClip(value: EditDocument, id: string, time: number): [EditD
   const offset = frameTime(time - clip.start, next.fps)
   if (offset < 1 / next.fps || clip.duration - offset < 1 / next.fps) throw new Error(tr('请将播放头放在片段内部'))
   const other = { ...clip, id: crypto.randomUUID(), start: clip.start + offset, duration: clip.duration - offset }
-  if (other.type === 'video') other.trim_in += offset * other.speed
+  if (clip.type === 'video' && other.type === 'video') {
+    other.trim_in += offset * videoPlaybackRate(clip)
+    if (clip.trim_out != null) clip.trim_out = other.trim_in
+  }
   if (other.type === 'audio') { other.trim_in += offset; other.fade_in = 0 }
   clip.duration = offset
   if (clip.type === 'audio') { clip.fade_out = 0; clip.fade_in = Math.min(clip.fade_in, clip.duration); if (other.type === 'audio') other.fade_out = Math.min(other.fade_out, other.duration) }
@@ -100,17 +128,32 @@ export function pasteClip(value: EditDocument, original: EditClip, at: number): 
   if (original.type === 'video' && original.source.kind === 'missing') throw new Error(tr('请选择可编辑的片段'))
   const next = cloneDocument(value)
   const clip = { ...JSON.parse(JSON.stringify(original)) as EditClip, id: crypto.randomUUID(), start: Math.max(0, at) }
-  if (clip.type === 'video') for (const other of next.clips) if (other.start >= clip.start) other.start += clip.duration
   next.clips.push(clip)
-  return [validateDocument(next), clip.id]
+  if (clip.type !== 'video') return [validateDocument(next), clip.id]
+  const videos = orderedVideos(value)
+  const index = videoInsertionIndex(videos, clip.start)
+  const boundary = videos.slice(0, index).reduce((end, item) => end + item.duration, 0)
+  for (const other of next.clips) {
+    if (other.type !== 'video' && other.start >= boundary) other.start += clip.duration
+  }
+  videos.splice(index, 0, clip)
+  return [validateDocument(compactVideoTrack(next, videos)), clip.id]
 }
 
 export function resizeClip(value: EditDocument, id: string, side: 'left' | 'right', delta: number, media?: EditorMedia): EditDocument {
   const clip = value.clips.find(item => item.id === id)
   if (!clip) throw new Error(tr('请选择可编辑的片段'))
-  if (side === 'right') return changeClip(value, id, { duration: frameTime(clip.duration + delta, value.fps) }, media)
-  const start = frameTime(Math.max(0, clip.start + delta), value.fps), actual = start - clip.start
-  const patch: ClipPatch = { start, duration: clip.duration - actual }
+  if (side === 'right') {
+    const duration = Math.max(1 / value.fps, frameTime(clip.duration + delta, value.fps))
+    const patch: ClipPatch = { duration }
+    if (clip.type === 'video' && clip.trim_out != null) patch.trim_out = clip.trim_out + (duration - clip.duration) * clip.speed
+    return changeClip(value, id, patch, media)
+  }
+  const start = frameTime(clip.start + delta, value.fps)
+  const actual = clip.type === 'video'
+    ? Math.min(clip.duration - 1 / value.fps, Math.round(delta * value.fps) / value.fps)
+    : start - clip.start
+  const patch: ClipPatch = { start: clip.type === 'video' ? clip.start : start, duration: clip.duration - actual }
   if (clip.type === 'video' || clip.type === 'audio') patch.trim_in = clip.trim_in + actual * (clip.type === 'video' ? clip.speed : 1)
   return changeClip(value, id, patch, media)
 }
@@ -119,13 +162,14 @@ export function trimClip(value: EditDocument, id: string, trimIn: number, trimOu
   const old = value.clips.find(item => item.id === id)
   if (!old || old.type !== 'video' && old.type !== 'audio' || trimOut <= trimIn) throw new Error(tr('裁剪范围无效'))
   const next = cloneDocument(value)
-  const duration = frameTime((trimOut - trimIn) / speed, value.fps)
-  if (duration < 1 / value.fps) throw new Error(tr('片段至少保留一帧'))
+  if (old.type === 'video' && media.duration) trimOut = Math.min(trimOut, media.duration)
+  if (trimOut <= trimIn) throw new Error(tr('裁剪范围超过原素材'))
+  const duration = Math.max(1 / value.fps, frameTime((trimOut - trimIn) / speed, value.fps))
   if (old.type === 'video') {
     const delta = duration - old.duration
-    for (const other of next.clips) if (other.id !== old.id && other.start >= old.start + old.duration - .001) other.start = frameTime(other.start + delta, value.fps)
+    for (const other of next.clips) if (other.type !== 'video' && other.start >= old.start + old.duration - .001) other.start = frameTime(other.start + delta, value.fps)
   }
-  return changeClip(next, id, { trim_in: trimIn, duration, ...(old.type === 'video' ? { speed } : {}) }, media)
+  return changeClip(next, id, { trim_in: trimIn, duration, ...(old.type === 'video' ? { speed, trim_out: trimOut } : {}) }, media)
 }
 
 export function snapAudioStart(clip: AudioClip, start: number, clips: readonly EditClip[], tolerance: number): number {
@@ -145,7 +189,11 @@ export function snapAudioStart(clip: AudioClip, start: number, clips: readonly E
 }
 
 export function moveClip(value: EditDocument, id: string, start: number): EditDocument {
-  return changeClip(value, id, { start: Math.max(0, frameTime(start, value.fps)) })
+  const clip = value.clips.find(item => item.id === id)
+  if (clip?.type !== 'video') return changeClip(value, id, { start: frameTime(start, value.fps) })
+  const videos = orderedVideos(value).filter(item => item.id !== id)
+  videos.splice(videoInsertionIndex(videos, start), 0, clip)
+  return validateDocument(compactVideoTrack(value, videos))
 }
 
 export function subtitleLines(clip: SubtitleClip, document: EditDocument): string {

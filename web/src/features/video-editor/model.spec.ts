@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMedia, addSubtitle, audioVolume, changeClip, duplicateClip, pasteClip, resizeClip, moveClip, parseSrt, splitClip, subtitleLines, trimClip } from './model'
+import { addMedia, addSubtitle, audioVolume, changeClip, duplicateClip, pasteClip, resizeClip, moveClip, orderedVideos, parseSrt, splitClip, subtitleLines, trimClip, videoPlaybackRate, videoSourceEnd } from './model'
 import type { EditDocument, EditorMedia, VideoClip, AudioClip, SubtitleClip } from './types'
 const video: VideoClip = { id: 'v', type: 'video', name: 'First', start: 0, duration: 4, trim_in: 1, speed: 1, volume: 1, scale: 1, fit: 'contain', source: { kind: 'video', id: 1 } }
 const document = (): EditDocument => ({ version: 1, width: 1280, height: 720, fps: 24, clips: [{ ...video }, { ...video, id: 'v2', start: 4 }] })
@@ -19,11 +19,10 @@ describe('typed editor commands', () => {
     expect(result.clips.find(c => c.id === id)).toMatchObject({ duration: 3, trim_in: 3, start: 1 })
     expect(() => splitClip(original, 'v', 0)).toThrow()
   })
-  it('ripple trims subsequent shots but refuses overlapping moves or invalid source ranges', () => {
+  it('ripple trims subsequent shots and validates source ranges', () => {
     const result = trimClip(document(), 'v', 1, 3, 1, media)
     expect(result.clips[0]?.duration).toBe(2)
     expect(result.clips[1]?.start).toBe(2)
-    expect(() => moveClip(document(), 'v2', 3)).toThrow()
     expect(() => changeClip(document(), 'v', { duration: 13 }, media)).toThrow()
   })
   it('duplicates source references without changing source files', () => {
@@ -63,12 +62,15 @@ it('pastes a copied music snapshot at the playhead with independent IDs and sour
   expect(nextId).not.toBe(id)
   expect(again.clips.find(clip=>clip.id===nextId)?.start).toBe(94)
 })
-it('inserts pasted videos without overlaps and refuses pasting into an occupied video interval', () => {
+it('snaps pasted videos to a boundary and closes gaps even when pasted past the end', () => {
   const original=document()
   const [result,id]=pasteClip(original,video,4)
   expect(result.clips.find(clip=>clip.id===id)).toMatchObject({start:4,trim_in:1})
   expect(result.clips.find(clip=>clip.id==='v2')?.start).toBe(8)
-  expect(()=>pasteClip(original,video,2)).toThrow('视频片段不能重叠')
+  const [snapped, snappedId] = pasteClip(original, video, 1)
+  expect(orderedVideos(snapped).map(clip => [clip.id, clip.start])).toEqual([[snappedId, 0], ['v', 4], ['v2', 8]])
+  const [appended, appendedId] = pasteClip(original, video, 99)
+  expect(orderedVideos(appended).at(-1)).toMatchObject({ id: appendedId, start: 8 })
   expect(original.clips[1]?.start).toBe(4)
 })
 
@@ -86,9 +88,10 @@ it('uses the same frame-aligned resize for previews and commits and validates so
   const clip=original.clips[0] as VideoClip
   clip.speed=2
   const result=resizeClip(original,'v','left',1,media)
-  expect(result.clips[0]).toMatchObject({start:1,duration:3,trim_in:3,speed:2})
+  expect(result.clips[0]).toMatchObject({start:0,duration:3,trim_in:3,speed:2})
   expect(original.clips[0]).toMatchObject({start:0,duration:4,trim_in:1})
-  expect(()=>resizeClip(original,'v','right',1,media)).toThrow('视频片段不能重叠')
+  expect(result.clips[1]?.start).toBe(3)
+  expect(resizeClip(original,'v','right',1,media).clips[1]?.start).toBe(5)
   const single={...original,clips:[original.clips[0]!]}
   expect(()=>resizeClip(single,'v','right',3,media)).toThrow('裁剪范围超过原素材')
 })
@@ -102,4 +105,50 @@ it('supports the requested dB range and defaults newly added BGM to 0dB without 
  expect(()=>changeClip(document(),'v',{speed:.1,volume:10,rotation:-5})).not.toThrow()
  expect(()=>changeClip(document(),'v',{speed:20})).not.toThrow()
  expect(()=>changeClip(document(),'v',{speed:20.01})).toThrow()
+})
+
+it('reorders video on either side without moving independently timed tracks', () => {
+  const value = document()
+  value.clips.push({ ...video, id: 'v3', start: 8 })
+  const [withSubtitle, id] = addSubtitle(value, 3)
+  const moved = moveClip(withSubtitle, 'v', 6)
+  expect(orderedVideos(moved).map(clip => [clip.id, clip.start])).toEqual([['v2', 0], ['v3', 4], ['v', 8]])
+  expect(moved.clips.find(clip => clip.id === id)?.start).toBe(3)
+  expect(orderedVideos(moveClip(moved, 'v', -10)).map(clip => [clip.id, clip.start])).toEqual([['v', 0], ['v2', 4], ['v3', 8]])
+})
+
+it('preserves the exact source range through repeated speed changes and keeps videos touching', () => {
+  const value = document()
+  value.clips = [{ ...video, start: 0, trim_in: 0, duration: 8 }, { ...video, id: 'v2', start: 8 }]
+  const source = { ...media, duration: 8 }
+  let updated = value
+  for (const speed of [2.82, 8.74, 20, .1, 1]) {
+    const current = orderedVideos(updated)[0]!
+    updated = trimClip(updated, current.id, current.trim_in, videoSourceEnd(current), speed, source)
+    const [first, second] = orderedVideos(updated)
+    expect(first?.trim_out).toBe(8)
+    expect(first!.duration * videoPlaybackRate(first!)).toBeCloseTo(8)
+    expect(second?.start).toBe(first!.duration)
+  }
+  expect(orderedVideos(updated)[0]?.duration).toBe(8)
+})
+
+it('retimes and splits a cropped range without losing either source boundary', () => {
+  const [first, second] = orderedVideos(trimClip(document(), 'v', 1, 3.3, 8.74, media))
+  expect(first?.trim_out).toBe(3.3)
+  expect(second?.start).toBe(first!.duration)
+  const retimed = trimClip(document(), 'v', 1, 3.3, 8.74, media)
+  const [split, id] = splitClip(retimed, 'v', .125)
+  const left = orderedVideos(split)[0]!
+  const right = orderedVideos(split).find(clip => clip.id === id)!
+  expect(left.trim_out).toBe(right.trim_in)
+  expect(right.trim_out).toBe(3.3)
+})
+
+it('keeps a very short source visible for one frame at 20×', () => {
+  const value = document()
+  value.clips = [{ ...video, trim_in: 0, duration: .125 }]
+  const clip = orderedVideos(trimClip(value, 'v', 0, .125, 20, { ...media, duration: .125 }))[0]!
+  expect(clip.duration).toBe(1 / 24)
+  expect(clip.trim_out).toBe(.125)
 })
