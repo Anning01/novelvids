@@ -84,10 +84,12 @@ class EditRenderer:
             return
         path, info = source
         duration = clip.duration
+        source_duration = clip.source_end - clip.trim_in
+        speed = clip.playback_rate
         sw, sh = max(2, round(width * clip.scale / 2) * 2), max(2, round(height * clip.scale / 2) * 2)
         mode = 'decrease' if clip.fit == 'contain' else 'increase'
         # Normalize each clip before concatenating: only one video decoder/encoder is active.
-        video = (f'trim=duration={duration * clip.speed:.8f},setpts=(PTS-STARTPTS)/{clip.speed},'
+        video = (f'trim=duration={source_duration:.8f},setpts=(PTS-STARTPTS)/{speed},'
                  f'scale={width}:{height}:force_original_aspect_ratio={mode}:force_divisible_by=2,'
                  f"crop=w='min(iw,{width})':h='min(ih,{height})',"
                  f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black')
@@ -105,8 +107,8 @@ class EditRenderer:
         if not info.get('has_audio'):
             args += ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']
             audio_index = 1
-        audio = (f'atrim=duration={duration * clip.speed:.8f},asetpts=PTS-STARTPTS,'
-                 f'{tempo(clip.speed)},volume={clip.volume},aresample=48000')
+        audio = (f'atrim=duration={source_duration:.8f},asetpts=PTS-STARTPTS,'
+                 f'{tempo(speed)},volume={clip.volume},aresample=48000')
         args += ['-filter_complex', f'[0:v]{video}[v];[{audio_index}:a]{audio}[a]',
                  '-map', '[v]', '-map', '[a]', '-t', f'{duration:.8f}',
                  *self.encoding(document, 'pcm_s16le'), '-bf', '0', str(target)]

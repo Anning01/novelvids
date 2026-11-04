@@ -8,7 +8,7 @@ import { tr } from '@/i18n'
 import { resizeSticker, scaleSticker, stickerRotation } from './stickerTransform'
 import { subtitleAppearance, subtitleBlockWidth } from './subtitleStyle'
 import { MediaGain } from '@/shared/mediaGain'
-import { activeAt, audioVolume, orderedVideos, sourceKey, subtitleLines, totalDuration } from './model'
+import { activeAt, audioVolume, orderedVideos, sourceKey, subtitleLines, totalDuration, videoPlaybackRate } from './model'
 import type { AudioClip, ClipPatch, SubtitleClip, StickerClip, EditDocument, EditorMedia } from './types'
 
 const props = defineProps<{ document: EditDocument; media: EditorMedia[]; time: number; playing: boolean; muted: boolean; selectedId: string; readOnly?: boolean }>()
@@ -119,6 +119,8 @@ function audioFailed(clip: AudioClip) {
 const frameWidth = computed(() => Math.min(size.value.width, size.value.height * props.document.width / props.document.height))
 const frameHeight = computed(() => frameWidth.value * props.document.height / props.document.width)
 const video = computed(() => orderedVideos(props.document).find(clip => activeAt(clip, Math.min(props.time, Math.max(0, totalDuration(props.document) - .00001)))))
+const playbackRate = computed(() => video.value ? videoPlaybackRate(video.value) : 1)
+const sampleFrames = computed(() => playbackRate.value < .1 || playbackRate.value > 16)
 const indexed = computed(() => new Map(props.media.map(item => [item.key, item])))
 const source = computed(() => video.value ? indexed.value.get(sourceKey(video.value.source)) : null)
 const nextSource = computed(() => {
@@ -143,8 +145,8 @@ async function positionPlayer(autoplay: boolean) {
   activated.value = true
   await nextTick()
   try {
-    if ((video.value?.speed || 1) > 16) player.value?.pause()
-    await player.value?.start((video.value?.trim_in || 0) + Math.max(0, props.time - (video.value?.start || 0)) * (video.value?.speed || 1), autoplay && (video.value?.speed || 1) <= 16)
+    if (sampleFrames.value) player.value?.pause()
+    await player.value?.start((video.value?.trim_in || 0) + Math.max(0, props.time - (video.value?.start || 0)) * playbackRate.value, autoplay && !sampleFrames.value)
     if (!disposed && command === version) ready.value = !isBuffering.value
   } catch (reason) {
     if (!disposed && command === version && !(reason instanceof DOMException && reason.name === 'AbortError')) {
@@ -178,10 +180,10 @@ function tick(now: number) {
   if (props.playing && ready.value && lastNow) {
     let time = props.time
     if (video.value && source.value?.url && !source.value.missing) {
-      if (video.value.speed > 16) {
+      if (sampleFrames.value) {
         time += (now - lastNow) / 1000
-        player.value?.seekFrame(video.value.trim_in + (time - video.value.start) * video.value.speed)
-      } else time = video.value.start + Math.max(0, player.value!.time() - video.value.trim_in) / video.value.speed
+        player.value?.seekFrame(video.value.trim_in + (time - video.value.start) * playbackRate.value)
+      } else time = video.value.start + Math.max(0, player.value!.time() - video.value.trim_in) / playbackRate.value
       if (time >= video.value.start + video.value.duration - .005) time = video.value.start + video.value.duration
     } else time += (now - lastNow) / 1000
     const end = totalDuration(props.document)
@@ -211,7 +213,7 @@ defineExpose({ seek })
   <div ref="monitor" class="editor-preview-monitor">
     <div class="editor-preview-frame" :style="{ width: `${frameWidth}px`, height: `${frameHeight}px` }">
       <div class="editor-video-layer" :style="{ transform: `rotate(${video?.rotation || 0}deg) scale(${video?.scale || 1})`, '--editor-fit': video?.fit === 'cover' ? 'cover' : 'contain' }">
-        <BufferedVideoPlayer v-if="activated" ref="player" :src="source?.missing ? '' : mediaUrl(source?.url)" :next-src="mediaUrl(nextSource?.url)" :poster="mediaUrl(source?.poster)" :title="video?.name || tr('视频预览')" :muted="muted" :volume="video?.volume || 0" :audio-processing="true" :playback-rate="video?.speed || 1" @ended="ended" @error="failed" @buffering="buffering" />
+        <BufferedVideoPlayer v-if="activated" ref="player" :src="source?.missing ? '' : mediaUrl(source?.url)" :next-src="mediaUrl(nextSource?.url)" :poster="mediaUrl(source?.poster)" :title="video?.name || tr('视频预览')" :muted="muted" :volume="video?.volume || 0" :audio-processing="true" :playback-rate="playbackRate" @ended="ended" @error="failed" @buffering="buffering" />
         <VideoThumbnail v-else-if="source?.url && !source.missing" :src="mediaUrl(source.url)" :poster="mediaUrl(source.poster)" :fit="video?.fit === 'cover' ? 'cover' : 'contain'" />
       </div>
       <div v-if="audioOnly" class="video-stage-blackout editor-audio-preview"><Music2 :size="32" /><strong>{{ activeAudio[0]?.name }}</strong><span>{{ tr('音频预览') }}</span></div>

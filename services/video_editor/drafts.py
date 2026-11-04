@@ -22,6 +22,18 @@ async def chapter_scope(chapter_id, ctx, *, write=False):
     return chapter
 
 
+def compact_video_track(document: EditDocument) -> bool:
+    videos = sorted((clip for clip in document.clips if clip.type == 'video'), key=lambda clip: clip.start)
+    frame = 0
+    changed = False
+    for clip in videos:
+        start = frame / document.fps
+        changed |= clip.start != start
+        clip.start = start
+        frame += round(clip.duration * document.fps)
+    return changed
+
+
 async def initial_document(chapter, catalog):
     novel = await Novel.get(id=chapter.novel_id).only('id', 'description', 'aspect_ratio', 'resolution')
     legacy = (novel.description or '').split(' · ')
@@ -36,14 +48,15 @@ async def initial_document(chapter, catalog):
     if max(width, height) > 3840:
         scale = 3840 / max(width, height)
         width, height = round(width * scale / 2) * 2, round(height * scale / 2) * 2
-    clips, start = [], 0
+    fps = EditDocument.model_fields['fps'].default
+    clips, frame = [], 0
     for item in catalog:
         if 'sequence' not in item:
             continue
-        duration = max(.05, float(item.get('duration') or 4))
+        frames = max(1, round(float(item.get('duration') or 4) * fps))
         clips.append({'id': f"scene-{item['scene_id']}", 'type': 'video', 'name': item['name'],
-                      'start': round(start, 6), 'duration': duration, 'source': item['source']})
-        start += duration
+                      'start': frame / fps, 'duration': frames / fps, 'source': item['source']})
+        frame += frames
     return EditDocument(width=width, height=height, clips=clips)
 
 
@@ -53,6 +66,7 @@ async def read_draft(chapter_id, ctx):
     catalog = await resolver.catalog()
     draft = await ChapterEditDraft.get_or_none(chapter_id=chapter.id)
     document = EditDocument.model_validate(draft.document) if draft else await initial_document(chapter, catalog)
+    compact_video_track(document)
     known = {item['key'] for item in catalog}
     for clip in document.clips:
         source = getattr(clip, 'source', None)
@@ -71,6 +85,7 @@ async def read_draft(chapter_id, ctx):
 
 async def save_draft(chapter_id, request, ctx):
     chapter = await chapter_scope(chapter_id, ctx, write=True)
+    compact_video_track(request.document)
     await EditSources(chapter.novel_id, chapter.id).validate(request.document)
     value = request.document.model_dump(mode='json')
     async with project_write(chapter.novel_id) as db:

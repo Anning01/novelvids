@@ -23,11 +23,20 @@ class VideoClip(ClipBase):
     type: Literal['video']
     source: EditSource
     trim_in: float = Field(0, ge=0, le=86400)
+    trim_out: float | None = Field(None, ge=0, le=86400)
     speed: float = Field(1, ge=.1, le=20)
     volume: float = Field(1, ge=0, le=10)
     scale: float = Field(1, ge=.1, le=4)
     fit: Literal['contain', 'cover'] = 'contain'
     rotation: float = Field(0, ge=-180, le=180)
+
+    @property
+    def source_end(self) -> float:
+        return self.trim_out if self.trim_out is not None else self.trim_in + self.duration * self.speed
+
+    @property
+    def playback_rate(self) -> float:
+        return self.speed if self.trim_out is None else (self.trim_out - self.trim_in) / self.duration
 
 
 class AudioClip(ClipBase):
@@ -99,6 +108,10 @@ class EditDocument(EditModel):
             clip.start = round(clip.start * self.fps) / self.fps
             clip.duration = max(1, round(clip.duration * self.fps)) / self.fps
         videos = sorted((c for c in self.clips if c.type == 'video'), key=lambda c: c.start)
+        for clip in videos:
+            if clip.trim_out is not None and (clip.trim_out <= clip.trim_in or
+                    abs((clip.trim_out - clip.trim_in) / clip.speed - clip.duration) > 1 / self.fps + 1e-6):
+                raise ValueError('Video source range must match its frame-aligned duration')
         if any(a.start + a.duration > b.start + .001 for a, b in zip(videos, videos[1:])):
             raise ValueError('Main video clips cannot overlap')
         return self

@@ -109,7 +109,7 @@ class EditSources:
             if item.get('missing'):
                 continue
             if clip.type in {'video', 'audio'}:
-                wanted = clip.trim_in + clip.duration * (clip.speed if clip.type == 'video' else 1)
+                wanted = clip.source_end if clip.type == 'video' else clip.trim_in + clip.duration
                 if not (clip.type == 'audio' and clip.loop) and wanted > float(item.get('duration', 0)) + .12:
                     raise HTTPException(422, msg('片段 {p0} 的裁剪范围超过原素材', p0=clip.name or clip.id))
                 if clip.trim_in >= float(item.get('duration', 0)):

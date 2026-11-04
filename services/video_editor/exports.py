@@ -16,7 +16,7 @@ from models.video_edit import ChapterEditDraft
 from schemas.video_edit import EditDocument
 from services.creation_objects import project_write
 from services.video_editor.assets import editor_storage
-from services.video_editor.drafts import chapter_scope
+from services.video_editor.drafts import chapter_scope, compact_video_track
 from services.video_editor.sources import EditSources
 from services.video_editor.render import EditRenderer
 from services.video_enhancement.media import digest, export_media, file_digest, inspect_media
@@ -39,13 +39,14 @@ async def submit_export(chapter_id, revision, ctx):
     if not draft or draft.revision != revision:
         raise HTTPException(409, msg('请先保存当前剪辑草稿后再导出'))
     document = EditDocument.model_validate(draft.document)
+    snapshot = document.model_dump(mode='json') if compact_video_track(document) else draft.document
     if not document.clips:
         raise HTTPException(422, msg('时间线没有可导出的片段'))
     manifest = await EditSources(chapter.novel_id, chapter.id).validate(document)
     if any(item.get('missing') for item in manifest):
         raise HTTPException(422, msg('时间线仍有未生成或失效的视频，请先补全或移除对应片段'))
     manifest = [{key: value for key, value in row.items() if key not in {'url', 'poster'}} for row in manifest]
-    identity = digest(['editor-render-v1', chapter.novel_id, chapter.id, draft.document,
+    identity = digest(['editor-render-v1', chapter.novel_id, chapter.id, snapshot,
                        [(row['key'], row['ref'], row.get('sha256')) for row in manifest]])
     async with project_write(chapter.novel_id) as db:
         current = await ChapterEditDraft.filter(id=draft.id).using_db(db).get()
@@ -60,8 +61,8 @@ async def submit_export(chapter_id, revision, ctx):
             return existing
         row = await ChapterExport.create(novel_id=chapter.novel_id, chapter_id=chapter.id,
             team_id=ctx.team_id, created_by=ctx.user.id if ctx.user else None, identity_key=identity,
-            source_version=digest(draft.document), manifest=manifest,
-            recipe={'kind': 'editor_render', 'version': 1, 'revision': revision, 'document': draft.document}, using_db=db)
+            source_version=digest(snapshot), manifest=manifest,
+            recipe={'kind': 'editor_render', 'version': 1, 'revision': revision, 'document': snapshot}, using_db=db)
         task = await AiTask.create(task_type=4, status=6, stage='editor_queued', request_params={
             'operation': 'editor_render', 'editor_version': 1, 'export_id': row.id, 'novel_id': chapter.novel_id,
             'chapter_id': chapter.id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None}, using_db=db)

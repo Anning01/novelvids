@@ -378,3 +378,62 @@ async def test_export_concatenates_short_fast_segment_with_following_gap(media, 
         '-of', 'default=noprint_wrappers=1:nokey=1', str(output),
     ], text=True)
     assert float(duration) == pytest.approx(1, abs=.1)
+
+
+@pytest.mark.asyncio
+async def test_legacy_video_gaps_close_in_preview_save_and_new_exports_without_rewriting_on_startup(media):
+    from services.schema_compat import ensure_video_editor_schema
+
+    _, chapter, _, video = await project()
+    ctx = AuthContext()
+    legacy = EditDocument(clips=[
+        video_clip(video.id, start=1),
+        video_clip(video.id, id='v2', start=5),
+        {'id': 's', 'type': 'subtitle', 'start': 3, 'duration': 1, 'text': 'Caption'},
+    ]).model_dump(mode='json')
+    row = await ChapterEditDraft.create(chapter=chapter, revision=1, document=legacy)
+    for _ in range(2):
+        await Tortoise.generate_schemas(safe=True)
+        await ensure_video_editor_schema()
+        assert (await ChapterEditDraft.get(id=row.id)).document == legacy
+    preview = await read_draft(chapter.id, ctx)
+    assert [clip['start'] for clip in preview['document']['clips']] == [0, 2, 3]
+    exported = await submit_export(chapter.id, 1, ctx)
+    assert exported.recipe['document'] == preview['document']
+    assert (await ChapterEditDraft.get(id=row.id)).document == legacy
+    saved = await save_draft(chapter.id, EditSave(revision=1, document=EditDocument.model_validate(legacy)), ctx)
+    assert saved['document'] == preview['document']
+
+
+@pytest.mark.asyncio
+async def test_retimed_clip_uses_saved_source_endpoint_for_validation_and_export(media):
+    _, chapter, _, video = await project()
+    legacy = EditDocument(clips=[video_clip(video.id, duration=2)]).model_dump(mode='json')
+    legacy['clips'][0].pop('trim_out', None)
+    row = await ChapterEditDraft.create(chapter=chapter, revision=1, document=legacy)
+    from services.schema_compat import ensure_video_editor_schema
+    for _ in range(2):
+        await Tortoise.generate_schemas(safe=True)
+        await ensure_video_editor_schema()
+        assert (await ChapterEditDraft.get(id=row.id)).document == legacy
+    # One output frame at 20× would otherwise imply 0.83 seconds of source time.
+    video.metadata = {'duration': .5}
+    await video.save(update_fields=['metadata'])
+    retimed = EditDocument(clips=[video_clip(video.id, duration=1/24, speed=20, trim_out=.5)])
+    saved = await save_draft(chapter.id, EditSave(revision=1, document=retimed), AuthContext())
+    assert saved['document']['clips'][0]['trim_out'] == .5
+    draft = await read_draft(chapter.id, AuthContext())
+    assert draft['document'] == saved['document']
+    exported = await submit_export(chapter.id, saved['revision'], AuthContext())
+    await editor_export_worker.execute(exported.id)
+    task = await AiTask.get(id=exported.task_id)
+    assert task.status == 3, task.error_message
+    await exported.refresh_from_db()
+    assert float(exported.output_probe['duration']) == pytest.approx(1/24, abs=.05)
+
+
+def test_explicit_video_source_range_rejects_invalid_endpoints():
+    with pytest.raises(ValidationError):
+        EditDocument(clips=[video_clip(1, trim_in=.5, trim_out=.25)])
+    with pytest.raises(ValidationError):
+        EditDocument(clips=[video_clip(1, duration=1, trim_out=5)])

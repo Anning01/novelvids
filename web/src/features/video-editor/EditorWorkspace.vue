@@ -16,7 +16,7 @@ import EditorPreview from './EditorPreview.vue'
 import EditorTimeline from './EditorTimeline.vue'
 import { editorApi } from './api'
 import { useEditorDraft } from './useEditorDraft'
-import { activeAt, addMedia, addSubtitle, changeClip, cloneDocument, duplicateClip, moveClip, orderedVideos, parseSrt, pasteClip, resizeClip, sourceKey, splitClip, totalDuration, trimClip } from './model'
+import { activeAt, addMedia, addSubtitle, changeClip, cloneDocument, duplicateClip, frameTime, moveClip, orderedVideos, parseSrt, pasteClip, resizeClip, sourceKey, splitClip, totalDuration, trimClip, videoSourceEnd } from './model'
 import type { ClipKind, ClipPatch, EditClip, EditDocument, EditorCapabilities, EditorMedia, EditorExport } from './types'
 import './editor.css'
 
@@ -160,6 +160,15 @@ function resized(event: PointerEvent) {
   resizeCleanup?.(); const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); resizeCleanup = null }
   resizeCleanup = stop; window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop, { once: true })
 }
+function changeFps(fps: EditDocument['fps']) {
+  action(() => {
+    const current = editDocument.value!
+    const clips = current.clips.map(clip => clip.type === 'video'
+      ? { ...clip, duration: Math.max(1 / fps, frameTime((videoSourceEnd(clip) - clip.trim_in) / clip.speed, fps)) }
+      : clip)
+    return { ...current, fps, clips }
+  })
+}
 async function load() {
   const version = ++scope; copiedClip.value = null; playing.value = false; time.value = 0; browsing.value = null; uploading.value = false; exportError.value = ''; clearTimeout(polling)
   await draft.load(props.chapterId)
@@ -248,7 +257,7 @@ function format(value: number) { return `${String(Math.floor(value / 60)).padSta
     <div v-if="loading" class="editor-page-state" role="status"><LoaderCircle class="is-spinning" :size="28" />{{ tr('正在读取剪辑草稿') }}</div>
     <div v-else-if="error" class="editor-page-state" role="alert"><p>{{ error }}</p><button class="editor-btn secondary" @click="load">{{ tr('重新加载') }}</button></div>
     <template v-else-if="editDocument">
-      <div class="editor-statusbar"><span>{{ readOnly ? tr('只读预览') : status }}</span><div class="editor-canvas-settings"><label>{{ tr('比例') }}<AppSelect :model-value="aspect" :options="[...(aspect==='custom'?[{value:'custom',label:ratio}]:[]),...(['16:9','9:16','1:1','4:3','3:4','21:9'])]" :ariaLabel="tr('比例')" :disabled="readOnly" density="compact" @update:model-value="dimensions" /></label><label>{{ tr('画布尺寸') }}<AppSelect :model-value="String(Math.min(editDocument.width,editDocument.height))" :options="[...(!capabilities?.resolutions.includes(Math.min(editDocument.width,editDocument.height))?[Math.min(editDocument.width,editDocument.height)]:[]),...(capabilities?.resolutions||[])].map(value=>({value:String(value),label:`${value}P`}))" :ariaLabel="tr('画布尺寸')" :disabled="readOnly" density="compact" @update:model-value="dimensions(`${editDocument.width}:${editDocument.height}`,Number($event))" /></label><label>FPS<AppSelect :model-value="String(editDocument.fps)" :options="(capabilities?.fps||[24]).map(value=>({value:String(value),label:String(value)}))" ariaLabel="FPS" :disabled="readOnly" density="compact" @update:model-value="action(()=>({...cloneDocument(editDocument!),fps:Number($event) as EditDocument['fps']}))" /></label><button class="editor-icon-btn" :disabled="readOnly || saving || conflict" :aria-label="tr('保存剪辑草稿')" @click="draft.save"><Save :size="15" /></button></div></div>
+      <div class="editor-statusbar"><span>{{ readOnly ? tr('只读预览') : status }}</span><div class="editor-canvas-settings"><label>{{ tr('比例') }}<AppSelect :model-value="aspect" :options="[...(aspect==='custom'?[{value:'custom',label:ratio}]:[]),...(['16:9','9:16','1:1','4:3','3:4','21:9'])]" :ariaLabel="tr('比例')" :disabled="readOnly" density="compact" @update:model-value="dimensions" /></label><label>{{ tr('画布尺寸') }}<AppSelect :model-value="String(Math.min(editDocument.width,editDocument.height))" :options="[...(!capabilities?.resolutions.includes(Math.min(editDocument.width,editDocument.height))?[Math.min(editDocument.width,editDocument.height)]:[]),...(capabilities?.resolutions||[])].map(value=>({value:String(value),label:`${value}P`}))" :ariaLabel="tr('画布尺寸')" :disabled="readOnly" density="compact" @update:model-value="dimensions(`${editDocument.width}:${editDocument.height}`,Number($event))" /></label><label>FPS<AppSelect :model-value="String(editDocument.fps)" :options="(capabilities?.fps||[24]).map(value=>({value:String(value),label:String(value)}))" ariaLabel="FPS" :disabled="readOnly" density="compact" @update:model-value="changeFps(Number($event) as EditDocument['fps'])" /></label><button class="editor-icon-btn" :disabled="readOnly || saving || conflict" :aria-label="tr('保存剪辑草稿')" @click="draft.save"><Save :size="15" /></button></div></div>
       <div v-if="saveError || recovery" class="editor-save-alert" role="alert"><span>{{ saveError || tr('发现尚未保存的本地剪辑草稿') }}</span><template v-if="recovery"><button @click="draft.recoverLocal">{{ tr('恢复本地修改') }}</button><button @click="draft.ignoreRecovery">{{ tr('使用已保存版本') }}</button></template><template v-else><button v-if="conflict" @click="load">{{ tr('重新读取并核对') }}</button><button v-else @click="draft.save">{{ tr('重试保存') }}</button></template></div>
       <div class="editor-editing-row">
         <EditorLibrary :media="media" :selected-key="selectedMedia?.key" :read-only="readOnly" :busy="uploading" :progress="uploadProgress" @select="chooseMedia" @add="insert" @upload="requestUpload" @subtitle="subtitle" @srt="srtInput?.click()" @library="libraryOpen = true" @library-add="item => libraryChosen([{ id: item.source.id }])" @publish="publishMedia" />
