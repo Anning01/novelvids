@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'vue'
 import type { EditDocument, SubtitleClip, SubtitlePreset } from './types'
+import { subtitleFontFamily } from './subtitleFonts'
 import { subtitleLines } from './model'
 
 export function subtitleAppearance(clip: SubtitleClip, height: number): CSSProperties {
@@ -7,7 +8,7 @@ export function subtitleAppearance(clip: SubtitleClip, height: number): CSSPrope
   const width = (clip.stroke_width ?? 2) * scale
   const stroke = clip.stroke_color ?? '#000000'
   return {
-    color: clip.color, fontSize: `${clip.font_size * scale}px`,
+    color: clip.color, fontFamily: subtitleFontFamily(clip.font), fontSize: `${clip.font_size * scale}px`,
     fontWeight: clip.bold ? 700 : 400, fontStyle: clip.italic ? 'italic' : 'normal',
     textDecoration: clip.underline ? 'underline' : 'none', opacity: clip.opacity ?? 1,
     letterSpacing: `${(clip.letter_spacing ?? 0) * scale}px`,

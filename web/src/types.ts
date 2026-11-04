@@ -461,7 +461,7 @@ export interface BillingRecord {
   id: number
   novel_id: number
   task_type: number
-  billing_type: 'text' | 'image' | 'video' | 'media_processing'
+  billing_type: 'text' | 'image' | 'video' | 'media_processing' | 'asr'
   ai_task_id?: string | null
   video_id?: number | null
   model_config_id?: number | null

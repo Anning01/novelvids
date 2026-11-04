@@ -68,3 +68,12 @@ async def test_asr_checks_member_limit_before_extracting_audio(client, monkeypat
     response=await client.post(f'/api/video-editor/chapters/{chapter.id}/subtitles/recognize',json={'document':{'clips':[]}},headers=_auth(await _login(client,user.username)))
     assert response.json()['code']==402
     extract.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_subtitle_font_endpoint_rejects_anonymous_and_unknown_fonts(client):
+    assert (await client.get('/api/video-editor/subtitle-fonts/source-han-serif')).json()['code'] == 401
+    team = await Team.create(name='Font test', balance=1)
+    user, _ = await _create_member('font_test_user', team)
+    response = await client.get('/api/video-editor/subtitle-fonts/unknown', headers=_auth(await _login(client, user.username)))
+    assert response.json()['code'] == 404

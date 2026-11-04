@@ -58,3 +58,14 @@ async def test_splitting_existing_subtitles_is_local_preserves_style_and_respect
 @pytest.mark.parametrize('item', [None, {}, {'text': 123}, {'text':'   '}])
 def test_empty_or_invalid_utterances_do_not_create_captions(item):
     assert split_utterance(item)==[]
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('，树枝断裂。', '树枝断裂'),
+    (',我还以为你在打坐呢．', '我还以为你在打坐呢'),
+    (' 。小心，前面有树枝。 ', '小心，前面有树枝'),
+])
+def test_caption_boundary_marks_are_removed_without_stripping_internal_punctuation(text, expected):
+    pieces = split_utterance({'text':text, 'start_time':0, 'end_time':1800})
+    assert [piece.text for piece in pieces] == [expected]
+    assert SubtitleClip(id='caption', type='subtitle', start=0, duration=1, text=text).text == expected

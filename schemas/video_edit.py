@@ -1,6 +1,9 @@
 """Versioned, executable edit data. No paths, commands, markup or filter DSL."""
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from utils.subtitle_fonts import SUBTITLE_FONTS
+from utils.subtitle_text import clean_caption_edges
 
 
 class EditModel(BaseModel):
@@ -58,7 +61,7 @@ class AudioClip(ClipBase):
 class SubtitleClip(ClipBase):
     type: Literal['subtitle']
     text: str = Field(max_length=2000)
-    font: Literal['sans'] = 'sans'
+    font: str = Field('sans', max_length=40)
     font_size: float = Field(42, ge=12, le=160)
     color: str = Field('#ffffff', pattern=r'^#[a-fA-F0-9]{6}$')
     bottom: float = Field(10, ge=0, le=100)
@@ -73,6 +76,18 @@ class SubtitleClip(ClipBase):
     stroke_color: str = Field('#000000', pattern=r'^#[a-fA-F0-9]{6}$')
     stroke_width: float = Field(2, ge=0, le=10)
     shadow: float = Field(1, ge=0, le=10)
+
+    @field_validator('font')
+    @classmethod
+    def supported_font(cls, font: str) -> str:
+        if font != 'sans' and font not in SUBTITLE_FONTS:
+            raise ValueError('Unsupported subtitle font')
+        return font
+
+    @field_validator('text')
+    @classmethod
+    def clean_text(cls, text: str) -> str:
+        return clean_caption_edges(text)
 
 
 class StickerClip(ClipBase):

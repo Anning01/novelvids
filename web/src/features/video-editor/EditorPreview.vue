@@ -6,22 +6,27 @@ import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { mediaUrl } from '@/api'
 import { tr } from '@/i18n'
 import { resizeSticker, scaleSticker, stickerRotation } from './stickerTransform'
+import { loadSubtitleFont } from './subtitleFonts'
 import { subtitleAppearance, subtitleBlockWidth } from './subtitleStyle'
 import { MediaGain } from '@/shared/mediaGain'
 import { activeAt, audioVolume, orderedVideos, sourceKey, subtitleLines, totalDuration, videoPlaybackRate } from './model'
 import type { AudioClip, ClipPatch, SubtitleClip, StickerClip, EditDocument, EditorMedia } from './types'
 
-const props = defineProps<{ document: EditDocument; media: EditorMedia[]; time: number; playing: boolean; muted: boolean; selectedId: string; readOnly?: boolean }>()
+const props = defineProps<{ document: EditDocument; media: EditorMedia[]; time: number; playing: boolean; muted: boolean; selectedId: string; selectedIds?: readonly string[]; readOnly?: boolean }>()
 const emit = defineEmits<{ 'update:time': [value: number]; 'update:playing': [value: boolean]; select: [id: string]; position: [id: string, patch: ClipPatch] }>()
 const player = ref<InstanceType<typeof BufferedVideoPlayer> | null>(null), monitor = ref<HTMLElement | null>(null)
 const error = ref(''), ready = ref(false), activated = ref(false), size = ref({ width: 640, height: 360 })
 const isBuffering = ref(false)
-const overlayDrag = ref<{id:string;x:number;vertical:number}|null>(null)
+const selectedSubtitles = computed(() => new Set(props.selectedIds ?? [props.selectedId]))
+const overlayDrag = ref<{id:string;group:boolean;x:number;vertical:number}|null>(null)
+const fontError = ref('')
 const stickerPreview=ref<{id:string;patch:ClipPatch}|null>(null)
 const stickerSizes=ref<Record<string,{width:number;height:number}>>({})
 let dragCleanup: (()=>void)|null=null
 function overlayPosition(clip: SubtitleClip | StickerClip) {
-  return overlayDrag.value?.id===clip.id ? overlayDrag.value : {x:clip.x??50,vertical:clip.type==='subtitle'?clip.bottom:clip.y}
+  const drag = overlayDrag.value
+  return drag && (drag.id === clip.id || drag.group && clip.type === 'subtitle' && selectedSubtitles.value.has(clip.id))
+    ? drag : {x:clip.x??50,vertical:clip.type==='subtitle'?clip.bottom:clip.y}
 }
 function nudgeOverlay(event:KeyboardEvent,clip:SubtitleClip|StickerClip) {
   if(props.readOnly)return
@@ -36,6 +41,7 @@ function dragOverlay(event:PointerEvent,clip:SubtitleClip|StickerClip) {
   const element=event.currentTarget as HTMLElement,frame=element.parentElement!.getBoundingClientRect(),box=element.getBoundingClientRect()
   if(!frame.width||!frame.height)return
   event.preventDefault();element.focus({preventScroll:true});emit('update:playing',false);dragCleanup?.()
+  const group = clip.type === 'subtitle' && selectedSubtitles.value.has(clip.id) && selectedSubtitles.value.size > 1
   const origin=overlayPosition(clip),x=event.clientX,y=event.clientY
   let moved=false
   const clamp=(value:number,min:number,max:number)=>Math.round(Math.max(min,Math.min(max,value))*100)/100
@@ -44,7 +50,7 @@ function dragOverlay(event:PointerEvent,clip:SubtitleClip|StickerClip) {
     if(Math.hypot(current.clientX-x,current.clientY-y)>3)moved=true
     if(!moved)return
     const halfWidth=Math.min(50,box.width/frame.width*50),halfHeight=Math.min(50,box.height/frame.height*50)
-    overlayDrag.value={id:clip.id,x:clamp(origin.x+(current.clientX-x)/frame.width*100,halfWidth,100-halfWidth),vertical:clip.type==='subtitle'
+    overlayDrag.value={id:clip.id,group,x:clamp(origin.x+(current.clientX-x)/frame.width*100,halfWidth,100-halfWidth),vertical:clip.type==='subtitle'
       ?clamp(origin.vertical-(current.clientY-y)/frame.height*100,0,100-halfHeight*2)
       :clamp(origin.vertical+(current.clientY-y)/frame.height*100,halfHeight,100-halfHeight)}
   }
@@ -128,6 +134,15 @@ const nextSource = computed(() => {
   return next ? indexed.value.get(sourceKey(next.source)) : null
 })
 const overlays = computed(() => props.document.clips.filter(clip => (clip.type === 'subtitle' || clip.type === 'sticker') && activeAt(clip, props.time)))
+const visibleFonts = computed(() => [...new Set(overlays.value.flatMap(clip => clip.type === 'subtitle' && clip.font !== 'sans' ? [clip.font] : []))].sort().join(','))
+watch(visibleFonts, async (fonts, _, cleanup) => {
+  let current = true
+  cleanup(() => { current = false })
+  fontError.value = ''
+  if (!fonts) return
+  try { await Promise.all(fonts.split(',').map(loadSubtitleFont)) }
+  catch { if (current) fontError.value = tr('字幕字体加载失败，请稍后重试') }
+}, { immediate: true })
 const activeAudio = computed(() => props.document.clips.filter((clip): clip is AudioClip => clip.type === 'audio' && activeAt(clip, props.time)))
 const audioOnly = computed(() => !orderedVideos(props.document).length && activeAudio.value.length > 0)
 let animation = 0, lastNow = 0, command = 0, disposed = false, observer: ResizeObserver | null = null
@@ -220,7 +235,7 @@ defineExpose({ seek })
       <div v-else-if="source?.missing || (!video && !overlays.length)" class="video-stage-blackout"><Film :size="27" /><span>{{ video ? tr('这个分镜尚未生成或素材已失效') : tr('时间线空白') }}</span></div>
       <div v-if="playing && !ready" class="editor-buffer-state" role="status"><LoaderCircle :size="18" class="is-spinning" />{{ tr('正在缓冲视频') }}</div>
       <template v-for="clip in overlays" :key="clip.id">
-        <button v-if="clip.type === 'subtitle'" type="button" class="editor-subtitle" :class="{ 'is-selected': selectedId === clip.id, 'is-dragging':overlayDrag?.id===clip.id, 'is-readonly':readOnly }" :style="{ left:`${overlayPosition(clip).x}%`, bottom: `${overlayPosition(clip).vertical}%`, ...subtitleAppearance(clip,frameHeight), width:`${subtitleBlockWidth(clip,document,frameHeight)}px` }" :aria-label="tr('选择字幕')" @keydown.left.prevent.stop="nudgeOverlay($event,clip)" @keydown.right.prevent.stop="nudgeOverlay($event,clip)" @keydown.up.prevent.stop="nudgeOverlay($event,clip)" @keydown.down.prevent.stop="nudgeOverlay($event,clip)" @pointerdown="dragOverlay($event,clip)" @dragstart.prevent @click="emit('select', clip.id)">{{ subtitleLines(clip, document) }}</button>
+        <button v-if="clip.type === 'subtitle'" type="button" class="editor-subtitle" :class="{ 'is-selected': selectedSubtitles.has(clip.id), 'is-dragging':overlayDrag?.id===clip.id, 'is-readonly':readOnly }" :style="{ left:`${overlayPosition(clip).x}%`, bottom: `${overlayPosition(clip).vertical}%`, ...subtitleAppearance(clip,frameHeight), width:`${subtitleBlockWidth(clip,document,frameHeight)}px` }" :aria-label="tr('选择字幕')" @keydown.left.prevent.stop="nudgeOverlay($event,clip)" @keydown.right.prevent.stop="nudgeOverlay($event,clip)" @keydown.up.prevent.stop="nudgeOverlay($event,clip)" @keydown.down.prevent.stop="nudgeOverlay($event,clip)" @pointerdown="dragOverlay($event,clip)" @dragstart.prevent @click="emit('select', clip.id)">{{ subtitleLines(clip, document) }}</button>
         <div v-else-if="clip.type === 'sticker'" class="editor-sticker" role="group" tabindex="0" :class="{ 'is-selected': selectedId === clip.id, 'is-dragging':overlayDrag?.id===clip.id||stickerPreview?.id===clip.id, 'is-readonly':readOnly }" :style="stickerStyle(clip)" :aria-label="tr('选择贴纸')" @keydown.left.prevent.stop="nudgeOverlay($event,clip)" @keydown.right.prevent.stop="nudgeOverlay($event,clip)" @keydown.up.prevent.stop="nudgeOverlay($event,clip)" @keydown.down.prevent.stop="nudgeOverlay($event,clip)" @keydown.enter.prevent.stop="emit('select',clip.id)" @keydown.space.prevent.stop="emit('select',clip.id)" @pointerdown="dragOverlay($event,clip)" @dragstart.prevent @click="emit('select', clip.id)">
           <img :src="mediaUrl(indexed.get(sourceKey(clip.source))?.url)" :style="{opacity:clip.opacity}" alt="" draggable="false" @load="stickerLoaded($event,clip)"/>
           <template v-if="selectedId===clip.id&&!readOnly">
@@ -229,7 +244,7 @@ defineExpose({ seek })
           </template>
         </div>
       </template>
-      <p v-if="error" class="editor-preview-error" role="alert">{{ error }}</p>
+      <p v-if="error || fontError" class="editor-preview-error" role="alert">{{ error || fontError }}</p>
     </div>
     <audio v-for="clip in activeAudio" :key="`${clip.id}:${nativeAudioSources.has(audioUrl(clip))}`"
       :ref="element => audioRef(clip.id, element)" :crossorigin="nativeAudioSources.has(audioUrl(clip)) ? undefined : 'anonymous'"

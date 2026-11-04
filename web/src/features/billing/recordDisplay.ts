@@ -20,6 +20,13 @@ export function usageLabel(item: BillingRecord): string {
   const usage = item.usage || {}
   const num = (value: unknown) => Number(value) || 0
   if (item.billing_type === 'text') return tr('输入 {p0} · 输出 {p1} token', { p0: formatTokens(num(usage.input_tokens)), p1: formatTokens(num(usage.output_tokens)) })
+  if (item.billing_type === 'asr') {
+    const duration = usage.duration_seconds ?? item.duration_seconds
+    const seconds = Number(duration)
+    return duration != null && Number.isFinite(seconds) && seconds >= 0
+      ? tr('{p0} 秒', { p0: seconds })
+      : '—'
+  }
   if (item.billing_type === 'media_processing') {
     return usage.missing_usage ? tr('实际用量待核对') : tr('{p0}s · {p1} · {p2}fps', { p0: num(usage.seconds), p1: String(usage.resolution || '—'), p2: num(usage.fps) })
   }

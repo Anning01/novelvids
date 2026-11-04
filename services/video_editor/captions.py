@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import math
 import unicodedata
 
+from utils.subtitle_text import CAPTION_BOUNDARY_MARKS
+
 
 @dataclass(frozen=True)
 class CaptionSegment:
@@ -62,7 +64,7 @@ def split_utterance(item: dict, max_units: float = 20, max_seconds: float = 5) -
         index = stop
     pieces: list[CaptionSegment] = []
     cursor = 0
-    punctuation = '，。！？；,.!?;'
+    punctuation = CAPTION_BOUNDARY_MARKS + '！？；!?;'
     while cursor < len(text):
         stop, units, last_space = cursor, 0.0, -1
         while stop < len(text):
@@ -84,7 +86,7 @@ def split_utterance(item: dict, max_units: float = 20, max_seconds: float = 5) -
                             stop += 1
                 break
         left, right = cursor, stop
-        while left < right and text[left].isspace():
+        while left < right and (text[left].isspace() or text[left] in CAPTION_BOUNDARY_MARKS):
             left += 1
         while right > left and (text[right-1].isspace() or text[right-1] in punctuation):
             right -= 1

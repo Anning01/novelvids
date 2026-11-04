@@ -23,8 +23,8 @@ const expandedRecordId = ref<number | null>(null)
 const auth = useAuthStore()
 const showSourceColumn = computed(() => auth.enabled === true)
 
-const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') }, get media_processing() { return tr('画质增强') } }[value] || value)
-const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('画质增强') } }[value] || tr('任务 {p0}', { p0: value }))
+const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') }, get media_processing() { return tr('画质增强') }, get asr() { return tr('语音识别') } }[value] || value)
+const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('画质增强') }, get 9() { return tr('语音识别') } }[value] || tr('任务 {p0}', { p0: value }))
 
 function recordDiscount(item: BillingRecord): number {
   if (item.record_kind === 'agent_conversation') return 1
@@ -57,10 +57,10 @@ const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize
 
 function formatDuration(seconds: number | null | undefined): string {
   if (seconds == null) return '—'
-  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${Math.round(seconds % 60)}s`
+  if (seconds < 1) return tr('{p0} 毫秒', { p0: Math.round(seconds * 1000) })
+  if (seconds < 60) return tr('{p0} 秒', { p0: seconds.toFixed(1) })
+  const rounded = Math.round(seconds)
+  return tr('{p0} 分 {p1} 秒', { p0: Math.floor(rounded / 60), p1: rounded % 60 })
 }
 
 function currentNovelId(): number | undefined {

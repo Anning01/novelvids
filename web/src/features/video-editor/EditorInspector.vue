@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { Film, Music2, Type, Sticker, X, RotateCcw, Bold, Underline, Italic, AlignLeft, AlignCenter, AlignRight, Ban } from 'lucide-vue-next'
+import AppSelect from '@/components/AppSelect.vue'
 import { tr } from '@/i18n'
 import { scaleSticker } from './stickerTransform'
 import { presetSelected } from './subtitleStyle'
 import { dbVolume, volumeDb, kindLabel, videoSourceEnd } from './model'
 import type { EditClip, EditorMedia, ClipPatch, SubtitlePreset } from './types'
-const props = defineProps<{ clip: EditClip | null; media?: EditorMedia; readOnly: boolean; open: boolean; browsing?: EditorMedia | null; selectionCount?: number; subtitleStyles?: SubtitlePreset[] }>()
+const props = defineProps<{ clip: EditClip | null; media?: EditorMedia; readOnly: boolean; open: boolean; browsing?: EditorMedia | null; selectionCount?: number; subtitleFonts?: Array<{value: string; label: string}>; subtitleStyles?: SubtitlePreset[] }>()
 const emit = defineEmits<{ change: [patch: ClipPatch]; trim: [trimIn: number, trimOut: number, speed: number]; close: []; editStart: []; editEnd: [] }>()
 let controlling = false
 function beginControl(event: Event) {
@@ -18,6 +19,7 @@ function changedControl() { void nextTick(endControl) }
 function keyEnded(event: KeyboardEvent) { if (event.target instanceof HTMLInputElement && event.target.type === 'range') endControl() }
 onMounted(() => { window.addEventListener('pointerup', endControl); window.addEventListener('pointercancel', endControl) })
 onBeforeUnmount(() => { endControl(); window.removeEventListener('pointerup', endControl); window.removeEventListener('pointercancel', endControl) })
+const fontOptions = computed(() => props.subtitleFonts?.map(font => ({ ...font, label: tr(font.label) })) || [{value:'sans',label:tr('系统中文黑体')}])
 const sourceDuration = computed(() => props.media?.duration || 0)
 function number(event: Event) { return Number((event.target as HTMLInputElement).value) }
 function speed(value: number) {
@@ -45,6 +47,7 @@ function gain(value: number) {
           <template v-if="clip.type === 'subtitle'">
             <section class="editor-property editor-subtitle-content"><h3>{{ tr('文字内容') }}</h3><textarea :aria-label="tr('字幕内容')" rows="3" maxlength="2000" :value="clip.text" @input="emit('change', { text: ($event.target as HTMLTextAreaElement).value })"></textarea><p v-if="(selectionCount || 0)>1" class="editor-panel-note">{{ tr('修改内容会替换所有选中字幕的文字。') }}</p></section>
             <section class="editor-property"><h3>{{ tr('样式') }}</h3>
+              <div class="editor-control-group editor-font-control"><span class="editor-value-label">{{ tr('字体') }}</span><AppSelect :model-value="clip.font" :options="fontOptions" :ariaLabel="tr('字体')" density="compact" :disabled="readOnly" @update:model-value="font => emit('change',{font})" /></div>
               <div class="editor-control-group"><label class="editor-value-label" for="editor-font-size">{{ tr('字号') }}</label>
               <div class="editor-value-control"><input id="editor-font-size" :aria-label="tr('字号')" type="range" min="12" max="160" step="1" :value="clip.font_size" @input="emit('change',{font_size:number($event)})"/><input :aria-label="tr('字号数值')" type="number" min="12" max="160" :value="clip.font_size" @change="emit('change',{font_size:number($event)})"/></div></div>
               <div class="editor-text-format" role="group" :aria-label="tr('文字样式')">
