@@ -53,3 +53,105 @@ it('presents standalone library audio as a preview rather than an empty timeline
   expect(wrapper.get('audio').attributes('src')).toBe('/music.wav')
   wrapper.unmount()
 })
+
+async function overlayPreview(kind:'subtitle'|'sticker',readOnly=false) {
+  const fixture=editorFixture()
+  fixture.document.clips.push(kind==='subtitle'
+    ?{id:'overlay',type:'subtitle',name:'',start:0,duration:2,text:'拖拽字幕',font:'sans',font_size:42,color:'#ffffff',bottom:10}
+    :{id:'overlay',type:'sticker',name:'',start:0,duration:2,source:{kind:'asset',id:9},x:50,y:50,scale:1,opacity:1})
+  const wrapper=mount(EditorPreview,{props:{document:fixture.document,media:[],time:0,playing:false,muted:false,selectedId:'overlay',readOnly}})
+  vi.spyOn(wrapper.get('.editor-preview-frame').element,'getBoundingClientRect').mockReturnValue({left:50,top:20,width:320,height:180} as DOMRect)
+  vi.spyOn(wrapper.get('.editor-subtitle,.editor-sticker').element,'getBoundingClientRect').mockReturnValue({width:80,height:20} as DOMRect)
+  return wrapper
+}
+function pointer(type:string,x:number,y:number) {return new MouseEvent(type,{clientX:x,clientY:y,button:0,bubbles:true,cancelable:true})}
+it.each(['subtitle','sticker'] as const)('previews two-dimensional %s movement within the actual video frame and commits once',async kind=>{
+  const wrapper=await overlayPreview(kind)
+  const overlay=wrapper.get<HTMLButtonElement>('.editor-subtitle,.editor-sticker')
+  overlay.element.dispatchEvent(pointer('pointerdown',100,100))
+  window.dispatchEvent(pointer('pointermove',132,82));await flushPromises()
+  expect(overlay.element.style.left).toBe('60%')
+  expect(kind==='subtitle'?overlay.element.style.bottom:overlay.element.style.top).toBe(kind==='subtitle'?'20%':'40%')
+  expect(wrapper.emitted('position')).toBeUndefined()
+  expect(wrapper.props('document').clips.find(clip=>clip.id==='overlay')).not.toHaveProperty('x',60)
+  window.dispatchEvent(pointer('pointerup',132,82));await flushPromises()
+  expect(wrapper.emitted('position')).toEqual([['overlay',kind==='subtitle'?{x:60,bottom:20}:{x:60,y:40}]])
+})
+it.each(['subtitle','sticker'] as const)('keeps %s inside the frame and discards a cancelled drag',async kind=>{
+  const wrapper=await overlayPreview(kind)
+  const overlay=wrapper.get<HTMLButtonElement>('.editor-subtitle,.editor-sticker')
+  overlay.element.dispatchEvent(pointer('pointerdown',100,100))
+  window.dispatchEvent(pointer('pointermove',2000,2000));await flushPromises()
+  expect(overlay.element.style.left).toBe('87.5%')
+  expect(kind==='subtitle'?overlay.element.style.bottom:overlay.element.style.top).toBe(kind==='subtitle'?'0%':'94.44%')
+  window.dispatchEvent(pointer('pointercancel',2000,2000));await flushPromises()
+  expect(overlay.element.style.left).toBe('50%')
+  expect(wrapper.emitted('position')).toBeUndefined()
+})
+it('allows viewers to select overlays but not reposition them',async()=>{
+  const wrapper=await overlayPreview('subtitle',true)
+  wrapper.get('.editor-subtitle').element.dispatchEvent(pointer('pointerdown',100,100))
+  window.dispatchEvent(pointer('pointermove',132,82));window.dispatchEvent(pointer('pointerup',132,82));await flushPromises()
+  expect(wrapper.emitted('position')).toBeUndefined()
+  expect(wrapper.get<HTMLButtonElement>('.editor-subtitle').element.style.left).toBe('50%')
+})
+
+it('previews 20x clips with frame seeking when native media playback cannot reach that rate',async()=>{
+  const fixture=editorFixture();fixture.document.clips=fixture.document.clips.slice(0,1)
+  const clip=fixture.document.clips[0]!
+  if(clip.type==='video')clip.speed=20
+  const wrapper=mount(EditorPreview,{props:{document:fixture.document,media:fixture.media,time:0,playing:false,muted:false,selectedId:'v1'},global:{stubs:{VideoThumbnail:true}}})
+  await wrapper.setProps({playing:true});await flushPromises()
+  callback?.(100);callback?.(200);await flushPromises()
+  expect(wrapper.emitted('update:time')?.at(-1)?.[0]).toBeCloseTo(.1)
+  const video=wrapper.get('video[src="/media/clip-1.mp4"]').element as HTMLVideoElement
+  expect(video.playbackRate).toBe(16)
+  expect(video.currentTime).toBeCloseTo(2)
+  wrapper.unmount()
+})
+
+it('rotates the fitted video viewport around its center for preview',()=>{
+ const fixture=editorFixture();const clip=fixture.document.clips[0]!
+ if(clip.type==='video'){clip.rotation=-5;clip.scale=1.2}
+ const wrapper=mount(EditorPreview,{props:{document:fixture.document,media:fixture.media,time:0,playing:false,muted:false,selectedId:'v1'},global:{stubs:{VideoThumbnail:true}}})
+ expect(wrapper.get<HTMLElement>('.editor-video-layer').element.style.transform).toBe('rotate(-5deg) scale(1.2)')
+ wrapper.unmount()
+})
+
+it('shows sticker resize and rotation during dragging and commits only on release',async()=>{
+ const wrapper=await overlayPreview('sticker')
+ const sticker=wrapper.get<HTMLElement>('.editor-sticker')
+ wrapper.get('.editor-sticker-resize').element.dispatchEvent(pointer('pointerdown',250,150))
+ window.dispatchEvent(pointer('pointermove',290,150));await flushPromises()
+ expect(sticker.element.style.width).toBe('37.5%')
+ expect(wrapper.emitted('position')).toBeUndefined()
+ window.dispatchEvent(pointer('pointerup',290,150));await flushPromises()
+ expect(wrapper.emitted('position')?.at(-1)).toEqual(['overlay',{scale:1.5,scale_y:1.5}])
+ wrapper.get('.editor-sticker-rotate').element.dispatchEvent(pointer('pointerdown',210,50))
+ window.dispatchEvent(pointer('pointermove',270,110));await flushPromises()
+ expect(sticker.element.style.transform).toBe('translate(-50%,-50%) rotate(90deg)')
+ expect(wrapper.emitted('position')).toHaveLength(1)
+ window.dispatchEvent(pointer('pointerup',270,110))
+ expect(wrapper.emitted('position')?.at(-1)).toEqual(['overlay',{rotation:90}])
+})
+it('restores sticker transforms when cancelled and hides handles for viewers',async()=>{
+ const wrapper=await overlayPreview('sticker')
+ wrapper.get('.editor-sticker-rotate').element.dispatchEvent(pointer('pointerdown',210,50))
+ window.dispatchEvent(pointer('pointermove',270,110));await flushPromises()
+ window.dispatchEvent(pointer('pointercancel',270,110));await flushPromises()
+ expect(wrapper.get<HTMLElement>('.editor-sticker').element.style.transform).toBe('translate(-50%,-50%) rotate(0deg)')
+ expect(wrapper.emitted('position')).toBeUndefined()
+ await wrapper.setProps({readOnly:true})
+ expect(wrapper.find('.editor-sticker-handle').exists()).toBe(false)
+})
+it('keeps sticker controls visible at zero opacity and supports keyboard resizing and rotation',async()=>{
+ const wrapper=await overlayPreview('sticker')
+ const document={...wrapper.props('document'),clips:wrapper.props('document').clips.map(clip=>clip.id==='overlay'?{...clip,opacity:0}:clip)}
+ await wrapper.setProps({document})
+ expect(wrapper.get<HTMLElement>('.editor-sticker img').element.style.opacity).toBe('0')
+ expect(wrapper.get<HTMLElement>('.editor-sticker').element.style.opacity).toBe('')
+ await wrapper.get('.editor-sticker-resize').trigger('keydown',{key:'ArrowRight'})
+ expect(wrapper.emitted('position')?.at(-1)).toEqual(['overlay',{scale:1.01,scale_y:1.01}])
+ await wrapper.get('.editor-sticker-rotate').trigger('keydown',{key:'ArrowRight',shiftKey:true})
+ expect(wrapper.emitted('position')?.at(-1)).toEqual(['overlay',{rotation:15}])
+})

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMedia, addSubtitle, audioVolume, changeClip, duplicateClip, moveClip, parseSrt, splitClip, subtitleLines, trimClip } from './model'
+import { addMedia, addSubtitle, audioVolume, changeClip, duplicateClip, pasteClip, resizeClip, moveClip, parseSrt, splitClip, subtitleLines, trimClip } from './model'
 import type { EditDocument, EditorMedia, VideoClip, AudioClip, SubtitleClip } from './types'
 const video: VideoClip = { id: 'v', type: 'video', name: 'First', start: 0, duration: 4, trim_in: 1, speed: 1, volume: 1, scale: 1, fit: 'contain', source: { kind: 'video', id: 1 } }
 const document = (): EditDocument => ({ version: 1, width: 1280, height: 720, fps: 24, clips: [{ ...video }, { ...video, id: 'v2', start: 4 }] })
@@ -48,4 +48,58 @@ describe('typed editor commands', () => {
     expect(audioVolume(clip, 6)).toBeCloseTo(.6)
     expect(audioVolume(clip, 9)).toBeCloseTo(.3)
   })
+})
+
+it('pastes a copied music snapshot at the playhead with independent IDs and source objects', () => {
+  const music: AudioClip = { id:'music', type:'audio', name:'Music', start:0, duration:47, trim_in:2, source:{kind:'asset',id:9}, volume:.6, fade_in:1, fade_out:2, loop:false }
+  const original = document()
+  const [result, id] = pasteClip(original, music, 47)
+  expect(result.clips.find(clip=>clip.id===id)).toEqual({...music,id,start:47})
+  expect(original.clips).toHaveLength(2)
+  const pasted = result.clips.find(clip=>clip.id===id) as AudioClip
+  pasted.source.id=10
+  expect(music.source.id).toBe(9)
+  const [again, nextId] = duplicateClip(result,id)
+  expect(nextId).not.toBe(id)
+  expect(again.clips.find(clip=>clip.id===nextId)?.start).toBe(94)
+})
+it('inserts pasted videos without overlaps and refuses pasting into an occupied video interval', () => {
+  const original=document()
+  const [result,id]=pasteClip(original,video,4)
+  expect(result.clips.find(clip=>clip.id===id)).toMatchObject({start:4,trim_in:1})
+  expect(result.clips.find(clip=>clip.id==='v2')?.start).toBe(8)
+  expect(()=>pasteClip(original,video,2)).toThrow('视频片段不能重叠')
+  expect(original.clips[1]?.start).toBe(4)
+})
+
+it('keeps duplicates adjacent for imported clips whose duration is not a whole number of frames', () => {
+  const original=document()
+  original.clips[0]!.duration=4.01
+  original.clips[1]!.start=4.01
+  const [result,id]=duplicateClip(original,'v')
+  expect(result.clips.find(clip=>clip.id===id)?.start).toBe(4.01)
+  expect(result.clips.find(clip=>clip.id==='v2')?.start).toBeCloseTo(8.02)
+})
+
+it('uses the same frame-aligned resize for previews and commits and validates source bounds', () => {
+  const original=document()
+  const clip=original.clips[0] as VideoClip
+  clip.speed=2
+  const result=resizeClip(original,'v','left',1,media)
+  expect(result.clips[0]).toMatchObject({start:1,duration:3,trim_in:3,speed:2})
+  expect(original.clips[0]).toMatchObject({start:0,duration:4,trim_in:1})
+  expect(()=>resizeClip(original,'v','right',1,media)).toThrow('视频片段不能重叠')
+  const single={...original,clips:[original.clips[0]!]}
+  expect(()=>resizeClip(single,'v','right',3,media)).toThrow('裁剪范围超过原素材')
+})
+
+it('supports the requested dB range and defaults newly added BGM to 0dB without changing old clips',()=>{
+ const music:EditorMedia={...media,key:'asset:8',source:{kind:'asset',id:8},kind:'audio'}
+ const [result,id]=addMedia(document(),music,0,'')
+ expect(result.clips.find(clip=>clip.id===id)).toMatchObject({volume:1})
+ const clip:AudioClip={id:'a',type:'audio',name:'',start:0,duration:2,trim_in:0,source:music.source,volume:10,fade_in:1,fade_out:0,loop:false}
+ expect(audioVolume(clip,.5)).toBe(5)
+ expect(()=>changeClip(document(),'v',{speed:.1,volume:10,rotation:-5})).not.toThrow()
+ expect(()=>changeClip(document(),'v',{speed:20})).not.toThrow()
+ expect(()=>changeClip(document(),'v',{speed:20.01})).toThrow()
 })

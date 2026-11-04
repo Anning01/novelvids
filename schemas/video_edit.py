@@ -16,24 +16,25 @@ class ClipBase(EditModel):
     id: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
     name: str = Field(default='', max_length=255)
     start: float = Field(ge=0, le=86400)
-    duration: float = Field(ge=.05, le=86400)
+    duration: float = Field(ge=1/60, le=86400)
 
 
 class VideoClip(ClipBase):
     type: Literal['video']
     source: EditSource
     trim_in: float = Field(0, ge=0, le=86400)
-    speed: float = Field(1, ge=.25, le=4)
-    volume: float = Field(1, ge=0, le=1)
+    speed: float = Field(1, ge=.1, le=20)
+    volume: float = Field(1, ge=0, le=10)
     scale: float = Field(1, ge=.1, le=4)
     fit: Literal['contain', 'cover'] = 'contain'
+    rotation: float = Field(0, ge=-180, le=180)
 
 
 class AudioClip(ClipBase):
     type: Literal['audio']
     source: EditSource
     trim_in: float = Field(0, ge=0, le=86400)
-    volume: float = Field(.3, ge=0, le=1)
+    volume: float = Field(1, ge=0, le=10)
     fade_in: float = Field(0, ge=0, le=86400)
     fade_out: float = Field(0, ge=0, le=86400)
     loop: bool = False
@@ -51,7 +52,18 @@ class SubtitleClip(ClipBase):
     font: Literal['sans'] = 'sans'
     font_size: float = Field(42, ge=12, le=160)
     color: str = Field('#ffffff', pattern=r'^#[a-fA-F0-9]{6}$')
-    bottom: float = Field(10, ge=0, le=90)
+    bottom: float = Field(10, ge=0, le=100)
+    x: float = Field(50, ge=0, le=100)
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    letter_spacing: float = Field(0, ge=-5, le=50)
+    line_spacing: float = Field(0, ge=0, le=100)
+    align: Literal['left', 'center', 'right'] = 'center'
+    opacity: float = Field(1, ge=0, le=1)
+    stroke_color: str = Field('#000000', pattern=r'^#[a-fA-F0-9]{6}$')
+    stroke_width: float = Field(2, ge=0, le=10)
+    shadow: float = Field(1, ge=0, le=10)
 
 
 class StickerClip(ClipBase):
@@ -61,6 +73,9 @@ class StickerClip(ClipBase):
     y: float = Field(50, ge=0, le=100)
     scale: float = Field(1, ge=.1, le=4)
     opacity: float = Field(1, ge=0, le=1)
+    scale_y: float | None = Field(None, ge=.1, le=4)
+    lock_aspect: bool = True
+    rotation: float = Field(0, ge=-180, le=180)
 
 
 EditClip = Annotated[VideoClip | AudioClip | SubtitleClip | StickerClip, Field(discriminator='type')]
