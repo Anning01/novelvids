@@ -155,3 +155,24 @@ it('keeps sticker controls visible at zero opacity and supports keyboard resizin
  await wrapper.get('.editor-sticker-rotate').trigger('keydown',{key:'ArrowRight',shiftKey:true})
  expect(wrapper.emitted('position')?.at(-1)).toEqual(['overlay',{rotation:15}])
 })
+
+it('retries BGM without cross-origin processing and keeps the video playing', async () => {
+  const fixture = editorFixture()
+  fixture.document.clips.push({ id: 'a', type: 'audio', name: 'BGM', start: 0, duration: 2,
+    source: { kind: 'asset', id: 9 }, trim_in: 0, volume: 2, fade_in: 0, fade_out: 0, loop: false })
+  fixture.media.push({ key: 'asset:9', source: { kind: 'asset', id: 9 }, kind: 'audio', name: 'BGM',
+    duration: 2, url: 'https://media.example.test/music.wav' })
+  const wrapper = mount(EditorPreview, { props: { document: fixture.document, media: fixture.media, time: 0,
+    playing: true, muted: false, selectedId: 'v1' }, global: { stubs: { VideoThumbnail: true } } })
+  await flushPromises()
+  const audio = wrapper.get<HTMLAudioElement>('audio')
+  expect(audio.element.crossOrigin).toBe('anonymous')
+  await audio.trigger('error')
+  const fallback = wrapper.get<HTMLAudioElement>('audio')
+  expect(fallback.element).not.toBe(audio.element)
+  expect(fallback.element.crossOrigin).toBeNull()
+  await fallback.trigger('loadedmetadata')
+  expect(fallback.element.volume).toBe(1)
+  expect(wrapper.emitted('update:playing')).toBeUndefined()
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+})

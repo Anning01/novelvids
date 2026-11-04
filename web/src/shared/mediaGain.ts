@@ -16,6 +16,13 @@ export class MediaGain {
       if (this.context?.state === 'suspended') void this.context.resume().catch(() => {})
     }
   }
+  release(element: HTMLMediaElement) {
+    const node = this.nodes.get(element)
+    if (!node) return
+    node.source.disconnect()
+    node.gain.disconnect()
+    this.nodes.delete(element)
+  }
   dispose() {
     for (const { source, gain } of this.nodes.values()) { source.disconnect(); gain.disconnect() }
     this.nodes.clear()

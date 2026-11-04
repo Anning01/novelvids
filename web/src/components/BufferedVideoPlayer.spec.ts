@@ -180,3 +180,23 @@ it('ignores the old metadata arrival after jumping to an unbuffered clip', async
   expect(d.play).toHaveBeenCalledTimes(playCount)
   wrapper.unmount()
 })
+
+it('falls back to native playback when a media host rejects audio processing', async () => {
+  const src = 'https://media.example.test/clip.mp4'
+  const wrapper = mount(BufferedVideoPlayer, { props: { ...initial, src, audioProcessing: true, volume: 2 } })
+  const video = wrapper.get<HTMLVideoElement>('video[aria-label]').element
+  expect(video.crossOrigin).toBe('anonymous')
+  ready.set(video, 0)
+  const playback = wrapper.vm.start(1.5)
+  await flushPromises()
+  video.dispatchEvent(new Event('error'))
+  await playback
+  const fallback = wrapper.get<HTMLVideoElement>('video[aria-label]').element
+  expect(fallback).not.toBe(video)
+  expect(fallback.crossOrigin).toBeNull()
+  expect(fallback.currentTime).toBe(1.5)
+  expect(fallback.volume).toBe(1)
+  expect(paused.get(fallback)).toBe(false)
+  expect(wrapper.emitted('error')).toBeUndefined()
+  wrapper.unmount()
+})
