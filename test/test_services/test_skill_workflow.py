@@ -261,7 +261,8 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language,custom_style", [("zh", ""), ("en", "Custom ink rendering")])
-async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result(language, custom_style):
+@pytest.mark.parametrize("repair_format", [True, False])
+async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result(language, custom_style, repair_format):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.models.function import FunctionModel
@@ -277,8 +278,15 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     snapshot = snapshot_skills()
     snapshot["contents"]["image"] = "Frozen mandatory image layout rules"
     snapshot["contents"]["styles"] = '{"realistic-general":{"image":"Frozen project rendering"}}'
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_asset_contract
+    import json
+    snapshot["contents"]["asset_contract"] = json.dumps(synthetic_asset_contract())
+    visual = fixed_asset_prompt(language)
+    attempts = 0
 
     def respond(messages, info):
+        nonlocal attempts
+        attempts += 1
         import json
         from pydantic_ai.messages import UserPromptPart
         assert f"任务语言 language={language}" in info.instructions
@@ -301,7 +309,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
                                 "label": "人物",
                                 "aliases": [],
                                 "description": "Detective",
-                                "base_traits": "A complete natural visual prompt, without fixed labels.",
+                                "base_traits": "A natural prose description without the task or fixed fields." if attempts == 1 or not repair_format else visual,
                             }
                         ],
                         "scenes": [],
@@ -319,10 +327,16 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
         await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
+    if not repair_format:
+        assert task.status == 4
+        assert attempts == 3
+        assert not await Asset.filter(novel=novel).exists()
+        return
     assert task.status == 3, task.error_message
     assert (
         await Asset.get(novel=novel, canonical_name="Alex")
-    ).base_traits == "A complete natural visual prompt, without fixed labels."
+    ).base_traits == visual
+    assert attempts == 2  # Invalid format is retried before any asset is saved.
     assert task.response_data["conversation_id"]
 
 

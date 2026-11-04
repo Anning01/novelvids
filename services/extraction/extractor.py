@@ -1,12 +1,15 @@
 """Schema-validated model gateway for prepared asset extraction messages."""
 
 import asyncio
+import json
+import re
 from typing import Literal
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 
 from services.llm.json_output import create_json_completion, completion_usage
+from prompts.skill_pack import SkillSnapshot
 
 
 ASSET_EXTRACTION_GATEWAY_ERROR_CODE = "asset_extraction_gateway_error"
@@ -74,6 +77,43 @@ class AssetExtractionResult(BaseModel):
     persons: list[Person] = Field(description="人物资产列表")
     scenes: list[Scene] = Field(description="场景资产列表")
     items: list[Item] = Field(description="道具资产列表")
+
+
+def validate_asset_prompt_contract(result: AssetExtractionResult, snapshot: SkillSnapshot, language: str, aspect_ratio: str) -> None:
+    """Validate new extraction output without rewriting saved or historical prompts."""
+    if "asset_contract" not in snapshot.contents:
+        return
+    contracts = json.loads(snapshot.read("asset_contract")).get(language)
+    if not contracts:
+        return
+    assets = [(person, "group" if person.label == "群像" else "person") for person in result.persons]
+    assets += [(scene, "scene") for scene in result.scenes]
+    assets += [(item, "item") for item in result.items]
+    for asset, kind in assets:
+        contract = contracts[kind]
+        text = asset.base_traits.strip()
+        task = contract["task"].format(aspect_ratio=aspect_ratio)
+        if not text.startswith(task or contract["heading"]):
+            raise ValueError(f"{kind}: use the complete task template verbatim at the start, with aspect_ratio={aspect_ratio}")
+        heading = text.find(contract["heading"], len(task))
+        if heading < 0:
+            raise ValueError(f"{kind}: missing description heading {contract['heading']}")
+        details = text[heading + len(contract["heading"]):].strip()
+        suffix = contract.get("suffix", "")
+        if suffix:
+            if not details.endswith(suffix):
+                raise ValueError(f"{kind}: preserve the complete template suffix: {suffix}")
+            details = details[:-len(suffix)].strip()
+        if not details:
+            raise ValueError(f"{kind}: visual description must not be empty")
+        fields = contract["fields"]
+        if fields:
+            lines = [line.strip() for line in details.splitlines() if line.strip()]
+            matches = [re.fullmatch(r"\*\*(.+?)\*\*\s*[:：]\s*(.+)", line) for line in lines]
+            if len(matches) != len(fields) or any(match is None or match[1] != field for match, field in zip(matches, fields)):
+                raise ValueError(f"{kind}: description must contain exactly these ordered fields: {', '.join(fields)}")
+            if any(match[2].strip().casefold() in {"", "无", "none", "未知", "unknown", "未提及", "not mentioned", "无法确认"} for match in matches):
+                raise ValueError(f"{kind}: replace placeholders with concrete visual design")
 
 
 # 保留结果容器，兼容已有内部调用和历史测试数据构造。

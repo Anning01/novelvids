@@ -197,6 +197,7 @@ class SkillExecution:
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
         )
+        request_aspect_ratio = "16:9"
         agent = Agent(
             deps_type=SkillSnapshot,
             instructions=instructions(self.snapshot, self.language, skill),
@@ -211,6 +212,14 @@ class SkillExecution:
 
         @agent.output_validator
         def validate_output(ctx: RunContext[SkillSnapshot], output):
+            if skill == "assets":
+                from pydantic_ai import ModelRetry
+                from services.extraction.extractor import validate_asset_prompt_contract
+
+                try:
+                    validate_asset_prompt_contract(output, ctx.deps, self.language, request_aspect_ratio)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
             if skill == "storyboard" and hasattr(output, "shots"):
                 from pydantic_ai import ModelRetry
                 from services.storyboard.validation import validate_skill_storyboard_timing
@@ -224,9 +233,11 @@ class SkillExecution:
             return output
 
         async def invoke():
+            nonlocal request_aspect_ratio
             from models.novel import Novel
 
             project = await Novel.get(id=self.params["novel_id"])
+            request_aspect_ratio = project.aspect_ratio or "16:9"
             project_facts = {
                 "name": project.name,
                 "style_key": project.style_key,

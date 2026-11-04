@@ -1,4 +1,4 @@
-"""One Chinese skill pack; pure rendering from an immutable run snapshot."""
+"""Public skill resources with optional local overrides and immutable run snapshots."""
 
 from pathlib import Path
 import hashlib
@@ -24,6 +24,7 @@ FILES = {
         )
     },
     "styles": "styles.json",
+    "asset_contract": "asset_contract.json",
     "strategies": "strategies.json",
     "storyboard_contract": "storyboard_contract.json",
 }
@@ -41,13 +42,25 @@ class SkillSnapshot(BaseModel):
 
 
 def read_skill(name: str) -> str:
-    content = (ROOT / FILES[name]).read_text(encoding="utf-8")
-    private_styles = ROOT / "styles.anning.json"
-    if name == "styles" and private_styles.is_file():
-        # Local overrides also enter task snapshots, keeping generation reproducible.
+    path = ROOT / FILES[name]
+    content = path.read_text(encoding="utf-8")
+    private_path = path.with_name(f"{path.stem}.anning{path.suffix}")
+    if not private_path.is_file():
+        return content
+    private_content = private_path.read_text(encoding="utf-8")
+    if path.suffix == ".md":
+        if not private_content.strip():
+            raise ValueError(f"Invalid private {name}: instructions must not be empty")
+        return private_content
+    if path.suffix == ".json":
         public = json.loads(content)
-        private = json.loads(private_styles.read_text(encoding="utf-8"))
-        if not isinstance(private, dict) or any(
+        try:
+            private = json.loads(private_content)
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid private {name}: expected a JSON object") from None
+        if not isinstance(private, dict):
+            raise ValueError(f"Invalid private {name}: expected a JSON object")
+        if name == "styles" and any(
             not isinstance(style, dict)
             or any(not isinstance(style.get(field), str) or not style[field].strip()
                    for field in ("label", "image", "video"))
@@ -71,6 +84,10 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
     if skill == "assets":
         # Extraction writes final image prompts, so layout rules cannot be optional tool reads.
         contract = "\n" + snapshot.read("image")
+        if "asset_contract" in snapshot.contents:
+            specification = json.loads(snapshot.read("asset_contract")).get(language)
+            if specification:
+                contract += "\n资产输出协议：\n" + json.dumps(specification, ensure_ascii=False)
     if skill == "storyboard" and "storyboard_contract" in snapshot.contents:
         from prompts.labels import prompt_label
         specification = json.loads(snapshot.read("storyboard_contract"))

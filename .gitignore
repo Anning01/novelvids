@@ -95,4 +95,5 @@ test.py
 .worktrees/
 .workbuddy
 
-styles.anning.json
+*.anning.json
+*.anning.md
