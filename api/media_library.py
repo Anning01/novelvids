@@ -133,7 +133,7 @@ async def trim_uploaded_audio_reference(
 ):
     team_id, created_by = await _audio_project_scope(payload.novel_id, ctx)
     reference = await AudioReference.get_or_none(id=reference_id, is_active=True)
-    if reference is None or not audio_reference_accessible(
+    if reference is None or not await audio_reference_accessible(
         reference,
         team_id=team_id,
         created_by=created_by,

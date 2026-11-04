@@ -7,7 +7,7 @@ export type CatalogKind = MediaKind | 'voice' | 'character'
 export interface CatalogResource {
   key: string; catalog: 'media' | 'voice' | 'human' | 'asset'; id: number; kind: CatalogKind
   name: string; url: string; storage_ref?: string; poster_url?: string; origin: 'team' | 'system' | 'personal'
-  folder_id: number; created_at: string; editable: boolean; filename?: string; state?: string
+  folder_id: number; created_at: string; editable: boolean; deletable?: boolean; is_public?: boolean; team_id?: number; filename?: string; state?: string
   duration?: number; width?: number; height?: number; size_bytes?: number; gender?: string
   country?: string; occupation?: string; age?: number; asset_id?: string; source_asset_id?: number
   description?: string; asset_type?: number; payload?: AudioReference | DigitalHuman
@@ -34,6 +34,7 @@ export const catalogApi={
   capabilities:()=>request<SingleResponse<CatalogCapabilities>>(`${root}/capabilities`),
   get:(key:string)=>request<SingleResponse<CatalogResource>>(`${root}/${encodeURIComponent(key)}`),
   rename:(key:string,name:string)=>request<SingleResponse<CatalogResource>>(`${root}/${encodeURIComponent(key)}`,json('PATCH',{name})),
+  delete:(keys:string[])=>request<SingleResponse<{id:number;deleted:boolean}[]>>(`${root}/delete`,json('POST',{keys})),
   move:(keys:string[],folder_id:number)=>request(`${root}/move`,json('POST',{keys,folder_id})),
   publish:(catalog:'asset'|'editor',source_id:number,folder_id=0,kind:MediaKind='video')=>request<SingleResponse<CatalogResource>>(`${root}/publish`,json('POST',{catalog,source_id,folder_id,kind})),
   apply:(key:string,novel_id:number,asset_id?:number,variant_id?:number,chapter_id?:number,canonical_name?:string)=>request<SingleResponse<{novel_id:number;asset_id?:number}>>(`${root}/${encodeURIComponent(key)}/apply`,json('POST',{novel_id,asset_id,variant_id,chapter_id,canonical_name})),

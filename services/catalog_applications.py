@@ -25,7 +25,7 @@ def bound_voice_metadata(value, voice):
 async def apply_catalog_resource(team,ctx,key,payload):
     await ensure_novel_access(payload.novel_id,ctx)
     novel=await Novel.get_or_none(id=payload.novel_id)
-    if novel is None or (novel.team_id or 0)!=team:
+    if novel is None or (not ctx.is_super_admin and (novel.team_id or 0)!=team):
         raise HTTPException(404,msg('项目不存在'))
     if payload.chapter_id:
         from models.chapter import Chapter
@@ -36,7 +36,7 @@ async def apply_catalog_resource(team,ctx,key,payload):
         link,_=await ProjectResource.get_or_create(novel_id=novel.id,resource_id=row.id)
         return {'novel_id':novel.id,'resource_key':key,'link_id':link.id}
     if catalog=='voice':
-        if not audio_reference_accessible(row,team_id=novel.team_id,created_by=novel.created_by):
+        if not await audio_reference_accessible(row,team_id=novel.team_id,created_by=novel.created_by):
             raise HTTPException(404,msg('选择的旁白音色不存在'))
         if payload.asset_id:
             target=await Asset.get_or_none(id=payload.asset_id,novel_id=novel.id,asset_type=1)
@@ -78,7 +78,7 @@ async def apply_catalog_resource(team,ctx,key,payload):
             reference_id=metadata_dict(metadata).get('voice_reference_id')
             if reference_id:
                 voice=await AudioReference.get_or_none(id=reference_id,is_active=True)
-                if voice is None or not audio_reference_accessible(voice,team_id=novel.team_id,created_by=novel.created_by):
+                if voice is None or not await audio_reference_accessible(voice,team_id=novel.team_id,created_by=novel.created_by):
                     raise HTTPException(409,msg('角色绑定了目标项目不可用的音色，请先核对'))
     if not name:
         raise HTTPException(422,msg('名称不能为空'))

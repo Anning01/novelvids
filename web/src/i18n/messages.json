@@ -1,5 +1,7 @@
 {
   "common": {
+    "公共资源": "Public resources",
+    "将从资源库移除所选资源，已有引用可能失效。": "Selected resources will be removed from the library. Existing references may stop working.",
     "填写 ComfyUI 分组 Token；模型名称填写工作流 ID。支持参考图和音频，不支持参考视频或首尾帧。": "Use a ComfyUI group token and enter the workflow ID as the model name. Supports reference images and audio, but not reference videos or keyframes.",
     "统一管理文本、图片、视频与画质增强模型。": "Manage text, image, video, and video enhancement models.",
     "语言": "Language",

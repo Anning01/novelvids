@@ -109,7 +109,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 is_active=True,
             )
             if reference is None or (
-                not audio_reference_accessible(
+                not await audio_reference_accessible(
                     reference,
                     team_id=team_id,
                     created_by=created_by,
@@ -200,7 +200,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         reference = await AudioReference.get_or_none(id=reference_id, is_active=True)
         if reference is None:
             raise HTTPException(400, detail=localized_message('选择的旁白音色不存在或已停用'))
-        if not audio_reference_accessible(
+        if not await audio_reference_accessible(
             reference,
             team_id=instance.team_id,
             created_by=instance.created_by,

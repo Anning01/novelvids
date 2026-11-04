@@ -103,9 +103,12 @@ async def get_novel(
 )
 async def delete_novel(
     novel_id: int,
-    _: AuthContext = Depends(require_team_access),
+    ctx: AuthContext = Depends(require_team_access),
     __: AuthContext = _EDITOR,
 ):
+    from models.novel import Novel
+    from services.resource_permissions import ensure_resource_write
+    await ensure_resource_write(ctx, [await Novel.get_or_none(id=novel_id)])
     await novel_controller.remove(novel_id)
     return ResponseSchema()
 

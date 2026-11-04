@@ -204,10 +204,14 @@ function editSource() { const scene = selectedMedia.value?.scene_id; if (scene) 
 function toggle() { if (!editDocument.value) return; if (previewTime.value >= previewDuration.value) previewTime.value = 0; playing.value = !playing.value }
 function adjacent(delta: number) { const videos = editDocument.value ? orderedVideos(editDocument.value) : []; const i = videos.findIndex(clip => activeAt(clip, time.value)); const next = videos[Math.min(videos.length - 1, Math.max(0, i + delta))]; if (next) void seekTo(next.start) }
 function keys(event: KeyboardEvent) {
-  if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable],button,[role=separator]')) return
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (target?.closest('input,textarea,select,[contenteditable]')) return
+  if (!readOnly.value && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault(); playing.value = false; event.shiftKey ? draft.redo() : draft.undo(); return
+  }
+  if (target?.closest('button,[role=separator]')) return
   if (event.code === 'Space') { event.preventDefault(); toggle() }
   if (readOnly.value) return
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); playing.value = false; event.shiftKey ? draft.redo() : draft.undo() }
   if (event.key === 'Delete') { event.preventDefault(); remove() }
 }
 function modalKeys(event: KeyboardEvent) {

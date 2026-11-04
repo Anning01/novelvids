@@ -115,8 +115,8 @@ async def test_音色访问范围兼容同一创建人但不放宽给其他创�
         is_active=True,
     )
 
-    assert audio_reference_accessible(reference, team_id=7, created_by=9) is True
-    assert audio_reference_accessible(reference, team_id=7, created_by=10) is False
+    assert await audio_reference_accessible(reference, team_id=7, created_by=9) is True
+    assert await audio_reference_accessible(reference, team_id=7, created_by=10) is False
 
 
 @pytest.mark.asyncio
