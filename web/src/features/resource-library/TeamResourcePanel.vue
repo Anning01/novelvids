@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Plus, Play, FolderOpen, RefreshCw } from 'lucide-vue-next'
+import AppSelect from '@/components/AppSelect.vue'
 import { mediaUrl } from '@/api'
 import { tr } from '@/i18n'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -21,6 +22,11 @@ const orderedFolders = computed(() => folders.value.filter(f => !f.parent_id).fl
   { ...parent, label: parent.name },
   ...folders.value.filter(f => f.parent_id === parent.id).map(child => ({ ...child, label: `${parent.name} / ${child.name}` })),
 ]))
+const folderOptions = computed(() => [
+  { value: '', label: tr('全部文件夹') },
+  { value: '0', label: tr('未分类') },
+  ...orderedFolders.value.map(row => ({ value: String(row.id), label: row.label })),
+])
 let sequence = 0, folderSequence = 0, failedPage = 1, disposed = false
 let observer: IntersectionObserver | undefined
 function convert(item: CatalogResource): EditorMedia {
@@ -77,7 +83,7 @@ onBeforeUnmount(() => { disposed = true; ++sequence; ++folderSequence; observer?
 <template>
   <section class="team-resource-panel">
     <nav v-if="kind === 'audio'"><button :aria-pressed="audioType === 'bgm'" @click="audioType = 'bgm'">BGM</button><button :aria-pressed="audioType === 'sound'" @click="audioType = 'sound'">{{ tr('音效') }}</button></nav>
-    <label class="team-resource-folder"><FolderOpen :size="14"/><select v-model="folder" :aria-label="tr('文件夹')"><option value="">{{ tr('全部文件夹') }}</option><option value="0">{{ tr('未分类') }}</option><option v-for="row in orderedFolders" :key="row.id" :value="String(row.id)">{{ row.label }}</option></select></label>
+    <AppSelect v-model="folder" class="team-resource-folder" :options="folderOptions" :ariaLabel="tr('文件夹')" density="compact"><template #leading><FolderOpen :size="14"/></template></AppSelect>
     <p v-if="folderError" role="alert">{{ folderError }} <button @click="loadFolders">{{ tr('重新加载') }}</button></p>
     <form @submit.prevent="keyword = search.trim(); load()"><input v-model="search" :placeholder="tr('搜索团队资源')" :aria-label="tr('搜索团队资源')"/><button type="submit" :aria-label="tr('搜索')"><RefreshCw :size="13"/></button></form>
     <article v-for="item in items" :key="item.key">
@@ -95,5 +101,5 @@ onBeforeUnmount(() => { disposed = true; ++sequence; ++folderSequence; observer?
   </section>
 </template>
 <style scoped>
-.team-resource-panel{display:grid;gap:8px;min-width:0;color:var(--app-text);font-size:11px}nav{display:flex;gap:12px}button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;padding:5px}button:disabled{opacity:.4;cursor:not-allowed}button:hover:not(:disabled){background:var(--app-surface-hover)}button[aria-pressed=true]{color:var(--app-accent);border-bottom:1px solid var(--app-accent)}form{display:flex;align-items:center;border:1px solid var(--app-border);border-radius:5px;overflow:hidden}form:focus-within{outline:2px solid var(--app-accent);outline-offset:2px}form input{min-width:0;width:100%;height:28px;border:0!important;background:var(--app-surface)!important;color:var(--app-text);padding:0 8px}.team-resource-folder{display:flex;align-items:center;gap:6px;min-width:0;color:var(--app-text-secondary)}select{flex:1;min-width:0;width:100%;height:28px;color:var(--app-text);background:var(--app-surface-muted);border:1px solid var(--app-border);border-radius:5px}article{display:flex;align-items:center;gap:8px;min-width:0}article>button:last-child{flex-shrink:0}.team-resource-preview{width:36px;height:36px;padding:0;background:var(--app-surface-muted);border:1px solid var(--app-border);border-radius:5px;flex-shrink:0;overflow:hidden;display:grid;place-items:center;color:var(--app-accent)}img{width:100%;height:100%;object-fit:contain}article>div{min-width:0;flex:1}strong{display:block;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}small{display:block;color:var(--app-text-secondary);font-size:10px;margin-top:3px}.team-resource-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;min-height:90px;color:var(--app-text-secondary)}.team-resource-sentinel{height:1px}a{font-size:10px;color:var(--app-accent);text-decoration:none;margin-top:4px}p{margin:0;font-size:11px;color:var(--app-text-secondary)}[role=alert]{color:var(--app-danger)}
+.team-resource-panel{display:grid;gap:8px;min-width:0;color:var(--app-text);font-size:11px}nav{display:flex;gap:12px}button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;padding:5px}button:disabled{opacity:.4;cursor:not-allowed}button:hover:not(:disabled){background:var(--app-surface-hover)}button[aria-pressed=true]{color:var(--app-accent);border-bottom:1px solid var(--app-accent)}form{display:flex;align-items:center;border:1px solid var(--app-border);border-radius:5px;overflow:hidden}form:focus-within{outline:2px solid var(--app-accent);outline-offset:2px}form input{min-width:0;width:100%;height:28px;border:0!important;background:var(--app-surface)!important;color:var(--app-text);padding:0 8px}.team-resource-folder{min-width:0;width:100%}article{display:flex;align-items:center;gap:8px;min-width:0}article>button:last-child{flex-shrink:0}.team-resource-preview{width:36px;height:36px;padding:0;background:var(--app-surface-muted);border:1px solid var(--app-border);border-radius:5px;flex-shrink:0;overflow:hidden;display:grid;place-items:center;color:var(--app-accent)}img{width:100%;height:100%;object-fit:contain}article>div{min-width:0;flex:1}strong{display:block;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}small{display:block;color:var(--app-text-secondary);font-size:10px;margin-top:3px}.team-resource-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;min-height:90px;color:var(--app-text-secondary)}.team-resource-sentinel{height:1px}a{font-size:10px;color:var(--app-accent);text-decoration:none;margin-top:4px}p{margin:0;font-size:11px;color:var(--app-text-secondary)}[role=alert]{color:var(--app-danger)}
 </style>
