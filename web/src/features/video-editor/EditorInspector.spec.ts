@@ -65,3 +65,16 @@ it.each(['light','dark'])('keeps sticker controls limited to scale, aspect lock,
  await wrapper.findAll('button').find(button=>button.text()==='重置贴纸')!.trigger('click')
  expect(wrapper.emitted('change')?.at(-1)).toEqual([{x:50,y:50,scale:1,scale_y:null,lock_aspect:true,rotation:0,opacity:1}])
 })
+
+it('ends an input gesture after native change and marks mixed selection text replacement explicitly',async()=>{
+  const clip={id:'s',type:'subtitle' as const,name:'',start:0,duration:2,text:'First',font:'sans' as const,font_size:42,color:'#ffffff',bottom:10}
+  const wrapper=mount(EditorInspector,{props:{clip,selectionCount:5,readOnly:false,open:true}})
+  expect(wrapper.text()).toContain('修改内容会替换所有选中字幕的文字。')
+  await wrapper.get('[aria-label="字号"]').trigger('pointerdown')
+  await wrapper.get('[aria-label="字号"]').setValue(36)
+  await wrapper.vm.$nextTick()
+  expect(wrapper.emitted('editStart')).toHaveLength(1)
+  expect(wrapper.emitted('editEnd')).toHaveLength(1)
+  expect(wrapper.emitted('change')?.at(-1)).toEqual([{font_size:36}])
+  wrapper.unmount()
+})

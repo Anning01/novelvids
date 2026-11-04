@@ -167,3 +167,27 @@ it.each(['light', 'dark'])('previews the snapped video order and restores it on 
   window.dispatchEvent(pointer('pointerup', 172))
   expect(wrapper.emitted('move')).toEqual([['v1', 3]])
 })
+
+it('supports modifier selection and a same-track shift range',async()=>{
+  const wrapper=render()
+  await wrapper.setProps({selectedIds:['v1']})
+  wrapper.findAll('.clip-video')[2]!.element.dispatchEvent(new MouseEvent('pointerdown',{button:0,clientX:150,shiftKey:true,bubbles:true}))
+  expect(wrapper.emitted('selectMany')?.at(-1)).toEqual([['v1','v2','v3']])
+  wrapper.findAll('.clip-video')[1]!.element.dispatchEvent(new MouseEvent('pointerdown',{button:0,clientX:150,metaKey:true,bubbles:true}))
+  expect(wrapper.emitted('selectMany')?.at(-1)).toEqual([['v1','v2']])
+  wrapper.unmount()
+})
+
+it.each(['light','dark'])('box selects clips using cached geometry and commits once on release (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  const wrapper=render()
+  const canvas=wrapper.get('.editor-tracks-canvas')
+  vi.spyOn(canvas.element,'getBoundingClientRect').mockReturnValue({left:0,top:0} as DOMRect)
+  await wrapper.get('input[type=range]').setValue(24)
+  canvas.element.dispatchEvent(new MouseEvent('pointerdown',{button:0,clientX:0,clientY:110,bubbles:true}))
+  for(let i=0;i<100;i++)window.dispatchEvent(new MouseEvent('pointermove',{clientX:95,clientY:170,bubbles:true}))
+  expect(wrapper.emitted('selectMany')).toBeUndefined()
+  window.dispatchEvent(new MouseEvent('pointerup',{clientX:95,clientY:170,bubbles:true}))
+  expect(wrapper.emitted('selectMany')).toEqual([[['v1','v2']]])
+  wrapper.unmount()
+})

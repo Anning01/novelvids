@@ -12,7 +12,7 @@ import AppSelect from '@/components/AppSelect.vue'
 import EditorInspector from './EditorInspector.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 
-vi.mock('./api', () => ({ editorApi: { get: vi.fn(), save: vi.fn(), capabilities: vi.fn(), history: vi.fn(), export: vi.fn(), upload: vi.fn(), cancel: vi.fn(), recognizeSubtitles: vi.fn() } }))
+vi.mock('./api', () => ({ editorApi: { get: vi.fn(), save: vi.fn(), capabilities: vi.fn(), history: vi.fn(), export: vi.fn(), upload: vi.fn(), cancel: vi.fn(), recognizeSubtitles: vi.fn(), splitSubtitles: vi.fn() } }))
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear()
   vi.mocked(editorApi.get).mockResolvedValue({ data: editorFixture() } as never)
@@ -397,5 +397,65 @@ it('keeps edits made while speech recognition is pending',async()=>{
   finish({data:{document:editorFixture().document,subtitles_created:0,revision:1}} as never)
   await flushPromises()
   expect(JSON.stringify(wrapper.findComponent(EditorTimeline).props('document'))).toBe(before)
+  wrapper.unmount()
+})
+
+it.each(['light','dark'])('applies multi-clip volume changes without pausing and undoes the gesture once (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  const fixture=editorFixture()
+  const music:AudioClip={id:'music',type:'audio',name:'BGM',source:{kind:'asset',id:5},start:0,duration:6,volume:.4,trim_in:0,fade_in:0,fade_out:0,loop:false}
+  fixture.document.clips.push(music)
+  vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
+  const wrapper=render();await flushPromises()
+  wrapper.findComponent(EditorTimeline).vm.$emit('selectMany',['v1','music']);await flushPromises()
+  expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({id:'v1',volume:1})
+  expect(wrapper.findComponent(EditorInspector).props('selectionCount')).toBe(2)
+  wrapper.findComponent(EditorPreview).vm.$emit('update:playing',true);await flushPromises()
+  const inspector=wrapper.findComponent(EditorInspector)
+  inspector.vm.$emit('editStart')
+  for(let i=0;i<50;i++)inspector.vm.$emit('change',{volume:.2+i/1000})
+  inspector.vm.$emit('editEnd');await flushPromises()
+  expect(wrapper.find('.editor-transport button[aria-label="暂停"]').exists()).toBe(true)
+  const clips=wrapper.findComponent(EditorTimeline).props('document').clips
+  expect(clips.find(c=>c.id==='v1')).toMatchObject({volume:.249})
+  expect(clips.find(c=>c.id==='music')).toMatchObject({volume:.249})
+  expect(clips.find(c=>c.id==='v2')).toMatchObject({volume:1})
+  wrapper.findComponent(EditorTimeline).vm.$emit('undo');await flushPromises()
+  const restored=wrapper.findComponent(EditorTimeline).props('document').clips
+  expect(restored.find(c=>c.id==='v1')).toMatchObject({volume:1})
+  expect(restored.find(c=>c.id==='music')).toMatchObject({volume:.4})
+  wrapper.unmount()
+})
+
+it('uses the first selected subtitle as the initial style and preserves other text when batch formatting',async()=>{
+  const fixture=editorFixture()
+  fixture.document.clips.push(...[{id:'a',font_size:35,text:'First'},{id:'b',font_size:60,text:'Second'}].map(item=>({...item,type:'subtitle' as const,name:'',start:0,duration:1,font:'sans' as const,color:'#ffffff',bottom:10})))
+  vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
+  const wrapper=render();await flushPromises()
+  wrapper.findComponent(EditorTimeline).vm.$emit('selectMany',['b','a']);await flushPromises()
+  expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({id:'b',font_size:60,text:'Second'})
+  wrapper.findComponent(EditorInspector).vm.$emit('change',{font_size:48,bold:true});await flushPromises()
+  const subtitles=wrapper.findComponent(EditorTimeline).props('document').clips.filter(c=>c.type==='subtitle')
+  expect(subtitles.map(c=>c.text)).toEqual(['First','Second'])
+  expect(subtitles.every(c=>c.font_size===48&&c.bold)).toBe(true)
+  wrapper.findComponent(EditorTimeline).vm.$emit('remove');await flushPromises()
+  expect(wrapper.findComponent(EditorTimeline).props('document').clips.filter(c=>c.type==='subtitle')).toHaveLength(0)
+  wrapper.unmount()
+})
+
+it('splits existing long subtitles through the local endpoint and preserves undo without ASR calls',async()=>{
+  const fixture=editorFixture(),long='这是一段较长的字幕内容'.repeat(5)
+  const subtitle={id:'s',type:'subtitle' as const,name:'',start:0,duration:6,text:long,font:'sans' as const,font_size:48,color:'#ffffff',bottom:10}
+  fixture.document.clips.push(subtitle)
+  const result={...fixture.document,clips:[...fixture.document.clips.filter(c=>c.type!=='subtitle'),{...subtitle,text:'第一句',duration:3},{...subtitle,id:'s2',text:'第二句',start:3,duration:3}]}
+  vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
+  vi.mocked(editorApi.splitSubtitles).mockResolvedValue({data:{document:result,split_count:1}} as never)
+  const wrapper=render();await flushPromises()
+  wrapper.findComponent(EditorLibrary).vm.$emit('splitSubtitles');await flushPromises()
+  expect(editorApi.splitSubtitles).toHaveBeenCalledWith(450,expect.any(Object),undefined)
+  expect(editorApi.recognizeSubtitles).not.toHaveBeenCalled()
+  expect(wrapper.findComponent(EditorTimeline).props('document').clips.filter(c=>c.type==='subtitle')).toHaveLength(2)
+  wrapper.findComponent(EditorTimeline).vm.$emit('undo');await flushPromises()
+  expect(wrapper.findComponent(EditorTimeline).props('document').clips.find(c=>c.id==='s')).toMatchObject({text:long,font_size:48})
   wrapper.unmount()
 })

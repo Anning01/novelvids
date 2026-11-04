@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { Film, Music2, Type, Sticker, Upload, Search, Plus, FolderOpen, ArrowRight, X, Sparkles } from 'lucide-vue-next'
+import { Film, Music2, Type, Sticker, Upload, Search, Plus, FolderOpen, ArrowRight, X, Sparkles, Scissors } from 'lucide-vue-next'
 import TeamResourcePanel from '@/features/resource-library/TeamResourcePanel.vue'
 import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { mediaUrl } from '@/api'
 import { tr } from '@/i18n'
 import type { ClipKind, EditorMedia } from './types'
-const props = defineProps<{ media: EditorMedia[]; selectedKey?: string; busy: boolean; progress: number; readOnly: boolean; recognizing?: boolean }>()
-const emit = defineEmits<{ select: [item: EditorMedia]; add: [item: EditorMedia]; upload: [kind: Exclude<ClipKind, 'subtitle'>]; subtitle: []; srt: []; recognize: []; library: []; libraryAdd: [item: EditorMedia]; publish: [item: EditorMedia] }>()
+const props = defineProps<{ media: EditorMedia[]; selectedKey?: string; busy: boolean; progress: number; readOnly: boolean; recognizing?: boolean; splitting?: boolean }>()
+const emit = defineEmits<{ select: [item: EditorMedia]; add: [item: EditorMedia]; upload: [kind: Exclude<ClipKind, 'subtitle'>]; subtitle: []; srt: []; recognize: []; splitSubtitles: []; library: []; libraryAdd: [item: EditorMedia]; publish: [item: EditorMedia] }>()
 const audition = ref<EditorMedia | null>(null), auditionError = ref(''), auditionPlayer = ref<HTMLAudioElement | null>(null)
 const tab = ref<ClipKind>('video'), sourceTab = ref('chapter'), search = ref(''), open = ref(false)
 const tabs = computed(() => [{ id: 'video' as const, label: tr('媒体'), icon: Film }, { id: 'audio' as const, label: 'BGM', icon: Music2 }, { id: 'subtitle' as const, label: tr('字幕'), icon: Type }, { id: 'sticker' as const, label: tr('贴纸'), icon: Sticker }])
@@ -40,7 +40,8 @@ function format(seconds = 0) { return `${String(Math.floor(seconds / 60)).padSta
         <p class="editor-panel-note">{{ tr('在右侧编辑内容与样式，在时间线调整时间。') }}</p>
         <button class="editor-btn secondary full-width" :disabled="readOnly" @click="emit('subtitle')"><Plus :size="15" />{{ tr('添加字幕') }}</button>
         <button class="editor-btn secondary full-width" :disabled="readOnly" @click="emit('srt')"><Upload :size="14" />{{ tr('导入 SRT') }}</button>
-        <button class="editor-btn secondary full-width editor-ai-btn" :disabled="readOnly || recognizing" @click="emit('recognize')"><Sparkles :size="14" />{{ recognizing ? tr('识别中...') : tr('AI 识别') }}</button>
+        <button class="editor-btn secondary full-width editor-ai-btn" :disabled="readOnly || recognizing || splitting" @click="emit('recognize')"><Sparkles :size="14" />{{ recognizing ? tr('识别中...') : tr('AI 识别') }}</button>
+        <button class="editor-btn secondary full-width" :disabled="readOnly || recognizing || splitting" @click="emit('splitSubtitles')"><Scissors :size="14"/>{{ splitting ? tr('拆分中…') : tr('拆分长字幕') }}</button>
         <p class="editor-panel-note">{{ tr('字幕会独立保存到时间线，不改写原视频。') }}</p>
       </template>
       <template v-else>

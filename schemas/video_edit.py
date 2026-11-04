@@ -132,3 +132,8 @@ class EditLibraryIn(EditModel):
 
 class SubtitleRecognizeIn(EditModel):
     document: EditDocument | None = None
+
+
+class SubtitleSplitIn(EditModel):
+    document: EditDocument
+    ids: list[str] | None = Field(None, max_length=500)

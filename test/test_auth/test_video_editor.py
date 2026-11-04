@@ -25,6 +25,7 @@ async def test_editor_preserves_team_isolation_and_read_only_roles(client):
         body={**payload,'revision':1 if await ChapterEditDraft.all().exists() else 0}
         assert (await client.put(f'/api/video-editor/chapters/{chapter.id}',json=body,headers=headers)).json()['code']==write
         if write:
+            assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/subtitles/split',json={'document':{'clips':[]}},headers=headers)).json()['code']==write
             assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/subtitles/recognize',json={},headers=headers)).json()['code']==write
             assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/exports',json={'revision':1},headers=headers)).json()['code']==write
             assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/assets?kind=audio',

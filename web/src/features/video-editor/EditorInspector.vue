@@ -1,31 +1,41 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { Film, Music2, Type, Sticker, X, RotateCcw, Bold, Underline, Italic, AlignLeft, AlignCenter, AlignRight, Ban } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import { scaleSticker } from './stickerTransform'
 import { presetSelected } from './subtitleStyle'
 import { dbVolume, volumeDb, kindLabel, videoSourceEnd } from './model'
 import type { EditClip, EditorMedia, ClipPatch, SubtitlePreset } from './types'
-const props = defineProps<{ clip: EditClip | null; media?: EditorMedia; readOnly: boolean; open: boolean; browsing?: EditorMedia | null; subtitleStyles?: SubtitlePreset[] }>()
-const emit = defineEmits<{ change: [patch: ClipPatch]; trim: [trimIn: number, trimOut: number, speed: number]; close: [] }>()
+const props = defineProps<{ clip: EditClip | null; media?: EditorMedia; readOnly: boolean; open: boolean; browsing?: EditorMedia | null; selectionCount?: number; subtitleStyles?: SubtitlePreset[] }>()
+const emit = defineEmits<{ change: [patch: ClipPatch]; trim: [trimIn: number, trimOut: number, speed: number]; close: []; editStart: []; editEnd: [] }>()
+let controlling = false
+function beginControl(event: Event) {
+  if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) || props.readOnly) return
+  if (!controlling) { controlling = true; emit('editStart') }
+}
+function endControl() { if (controlling) { controlling = false; emit('editEnd') } }
+function changedControl() { void nextTick(endControl) }
+function keyEnded(event: KeyboardEvent) { if (event.target instanceof HTMLInputElement && event.target.type === 'range') endControl() }
+onMounted(() => { window.addEventListener('pointerup', endControl); window.addEventListener('pointercancel', endControl) })
+onBeforeUnmount(() => { endControl(); window.removeEventListener('pointerup', endControl); window.removeEventListener('pointercancel', endControl) })
 const sourceDuration = computed(() => props.media?.duration || 0)
 function number(event: Event) { return Number((event.target as HTMLInputElement).value) }
 function speed(value: number) {
   const clip = props.clip
   if (!clip || clip.type !== 'video' || !Number.isFinite(value)) return
   const rate = Math.max(.1, Math.min(20, Math.round(value * 100) / 100))
-  if (rate !== clip.speed) emit('trim', clip.trim_in, videoSourceEnd(clip), rate)
+  if (rate !== clip.speed || (props.selectionCount || 0)>1) emit('trim', clip.trim_in, videoSourceEnd(clip), rate)
 }
 function gain(value: number) {
   if (Number.isFinite(value)) emit('change', { volume: dbVolume(Math.max(-20, Math.min(20, value))) })
 }
 </script>
 <template>
-  <aside class="editor-inspector" :class="{ 'is-open': open }" :aria-label="tr('选中项属性')">
-    <header class="editor-panel-heading"><h2>{{ clip ? tr('{p0}属性', { p0: kindLabel(clip.type) }) : tr('片段属性') }}</h2><button class="editor-icon-btn editor-mobile-only" :aria-label="tr('关闭属性')" @click="emit('close')"><X :size="16" /></button></header>
+  <aside class="editor-inspector" :class="{ 'is-open': open }" :aria-label="tr('选中项属性')" @pointerdown.capture="beginControl" @input.capture="beginControl" @focusin.capture="beginControl" @focusout.capture="endControl" @change.capture="changedControl" @keydown.capture="beginControl" @keyup.capture="keyEnded">
+    <header class="editor-panel-heading"><h2>{{ (selectionCount || 0) > 1 ? tr('批量属性') : clip ? tr('{p0}属性', { p0: kindLabel(clip.type) }) : tr('片段属性') }}</h2><button class="editor-icon-btn editor-mobile-only" :aria-label="tr('关闭属性')" @click="emit('close')"><X :size="16" /></button></header>
     <template v-if="clip">
-      <div class="editor-inspector-item"><component :is="{ video: Film, audio: Music2, subtitle: Type, sticker: Sticker }[clip.type]" :size="19" /><div><strong :title="clip.type === 'subtitle' ? clip.text : clip.name">{{ clip.type === 'subtitle' ? tr('字幕片段') : clip.name }}</strong><small v-if="clip.type!=='subtitle'">{{ clip.duration.toFixed(2) }}s</small></div></div>
-      <div class="editor-inspector-scroll">
+      <div class="editor-inspector-item"><component :is="{ video: Film, audio: Music2, subtitle: Type, sticker: Sticker }[clip.type]" :size="19" /><div><strong :title="clip.type === 'subtitle' ? clip.text : clip.name">{{ clip.type === 'subtitle' ? tr('字幕片段') : clip.name }}</strong><small v-if="(selectionCount || 0)>1">{{ tr('已选 {p0} 个', {p0:selectionCount}) }}</small><small v-else-if="clip.type!=='subtitle'">{{ clip.duration.toFixed(2) }}s</small></div></div>
+      <div class="editor-inspector-scroll"><p v-if="(selectionCount || 0)>1" class="editor-panel-note">{{ tr('以首个片段为初始值，仅同步修改的兼容属性。') }}</p>
         <section v-if="clip.type!=='subtitle'&&clip.type!=='sticker'" class="editor-property"><h3>{{ tr('素材信息') }}</h3><dl class="editor-media-info"><dt>{{ tr('时长') }}</dt><dd>{{ (sourceDuration || clip.duration).toFixed(2) }}s</dd><template v-if="media?.width && media?.height"><dt>{{ tr('分辨率') }}</dt><dd>{{ media.width }} × {{ media.height }}</dd></template><template v-if="media?.fps"><dt>{{ tr('帧率') }}</dt><dd>{{ media.fps }} fps</dd></template></dl></section>
         <fieldset :disabled="readOnly">
           <section v-if="clip.type === 'video'" class="editor-property"><h3>{{ tr('变速') }}</h3><div class="editor-control-group"><label class="editor-value-label" for="editor-speed">{{ tr('倍数') }}</label><div class="editor-value-control"><input id="editor-speed" :aria-label="tr('倍数')" type="range" min=".1" max="20" step=".01" :value="clip.speed" @input="speed(number($event))" /><div class="editor-number-unit"><input :aria-label="tr('倍速数值')" type="number" min=".1" max="20" step=".01" :value="clip.speed" @change="speed(number($event))" /><span>×</span></div></div></div><p v-if="clip.speed>16" class="editor-panel-note">{{ tr('超过 16× 使用静音抽帧预览，导出保留设定倍速与音频。') }}</p></section>
@@ -33,7 +43,7 @@ function gain(value: number) {
           <section v-if="clip.type === 'video'" class="editor-property"><h3>{{ tr('画面') }}</h3><label class="editor-slider"><span>{{ tr('缩放') }}</span><output>{{ Math.round(clip.scale * 100) }}%</output><input type="range" min=".1" max="4" step=".01" :value="clip.scale" @input="emit('change', { scale: number($event) })" /></label><div class="editor-control-group"><label class="editor-value-label" for="editor-rotation">{{ tr('旋转') }}</label><div class="editor-value-control"><input id="editor-rotation" :aria-label="tr('旋转')" type="range" min="-180" max="180" step=".01" :value="clip.rotation || 0" @input="emit('change', { rotation: number($event) })" /><div class="editor-number-unit"><input :aria-label="tr('旋转角度')" type="number" min="-180" max="180" step=".01" :value="clip.rotation || 0" @change="emit('change', { rotation: number($event) })" /><span>°</span></div></div></div><button class="editor-link" @click="emit('change', { scale: 1, fit: 'contain', rotation: 0 })"><RotateCcw :size="13" />{{ tr('重置画面') }}</button></section>
           <section v-if="clip.type === 'audio'" class="editor-property"><h3>{{ tr('淡入淡出') }}</h3><div class="editor-field-pair"><label>{{ tr('淡入（秒）') }}<input type="number" min="0" step=".1" :max="clip.duration" :value="clip.fade_in" @input="emit('change', { fade_in: number($event) })" /></label><label>{{ tr('淡出（秒）') }}<input type="number" min="0" step=".1" :max="clip.duration" :value="clip.fade_out" @input="emit('change', { fade_out: number($event) })" /></label></div><label class="editor-check"><input type="checkbox" :checked="clip.loop" @input="emit('change', { loop: ($event.target as HTMLInputElement).checked })" />{{ tr('循环到片段结束') }}</label></section>
           <template v-if="clip.type === 'subtitle'">
-            <section class="editor-property editor-subtitle-content"><h3>{{ tr('文字内容') }}</h3><textarea :aria-label="tr('字幕内容')" rows="3" maxlength="2000" :value="clip.text" @input="emit('change', { text: ($event.target as HTMLTextAreaElement).value })"></textarea></section>
+            <section class="editor-property editor-subtitle-content"><h3>{{ tr('文字内容') }}</h3><textarea :aria-label="tr('字幕内容')" rows="3" maxlength="2000" :value="clip.text" @input="emit('change', { text: ($event.target as HTMLTextAreaElement).value })"></textarea><p v-if="(selectionCount || 0)>1" class="editor-panel-note">{{ tr('修改内容会替换所有选中字幕的文字。') }}</p></section>
             <section class="editor-property"><h3>{{ tr('样式') }}</h3>
               <div class="editor-control-group"><label class="editor-value-label" for="editor-font-size">{{ tr('字号') }}</label>
               <div class="editor-value-control"><input id="editor-font-size" :aria-label="tr('字号')" type="range" min="12" max="160" step="1" :value="clip.font_size" @input="emit('change',{font_size:number($event)})"/><input :aria-label="tr('字号数值')" type="number" min="12" max="160" :value="clip.font_size" @change="emit('change',{font_size:number($event)})"/></div></div>

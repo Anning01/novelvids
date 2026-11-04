@@ -14,6 +14,7 @@ from controllers.config import ai_model_config_controller
 from services.balance import ensure_solvent
 from services.video_editor.drafts import chapter_scope, initial_document
 from services.video_editor.sources import EditSources
+from services.video_editor.captions import split_utterance
 from utils.enums import AiTaskTypeEnum
 from utils.messages import localized_message as msg
 
@@ -83,32 +84,13 @@ async def recognize_and_apply_subtitles(
     new_subtitles: list[SubtitleClip] = []
     fps = document.fps or 24
     for item in utterances:
-        raw_text = (item.get("text") or "").strip()
-        clean_text = raw_text.rstrip("，。！？,.!? \t\r\n")
-        if not clean_text:
-            continue
-        start_sec = max(0.0, float(item.get("start_time", 0)) / 1000.0)
-        end_sec = max(start_sec + 0.1, float(item.get("end_time", 0)) / 1000.0)
-        dur = max(1.0 / fps, end_sec - start_sec)
-
-        new_subtitles.append(
-            SubtitleClip(
-                id=uuid4().hex,
-                type="subtitle",
-                name="",
-                start=round(start_sec, 3),
-                duration=round(dur, 3),
-                text=clean_text,
-                font="sans",
-                font_size=42,
-                color="#ffffff",
-                stroke_color="#000000",
-                stroke_width=2.0,
-                shadow=1.0,
-                bottom=10.0,
-                align="center",
-            )
-        )
+        for segment in split_utterance(item):
+            new_subtitles.append(SubtitleClip(
+                id=uuid4().hex, type="subtitle", name="", start=round(segment.start, 3),
+                duration=round(max(1/fps, segment.end-segment.start), 3), text=segment.text,
+                font="sans", font_size=42, color="#ffffff", stroke_color="#000000",
+                stroke_width=2, shadow=1, bottom=10, align="center",
+            ))
 
     # 7. 同时清空已有字幕，并追加生成的一段一段字幕
     non_subtitle_clips = [c for c in document.clips if c.type != "subtitle"]
@@ -135,3 +117,25 @@ async def recognize_and_apply_subtitles(
         "subtitles_created": len(new_subtitles),
         "revision": draft.revision if draft else 0,
     }
+
+
+async def split_document_subtitles(chapter_id: int, ctx: AuthContext, document: EditDocument, ids: list[str] | None = None) -> dict:
+    """Split existing captions locally, retaining their style and their original interval."""
+    await chapter_scope(chapter_id, ctx, write=True)
+    chosen = set(ids) if ids else None
+    clips, count = [], 0
+    for clip in document.clips:
+        if clip.type != 'subtitle' or chosen is not None and clip.id not in chosen:
+            clips.append(clip)
+            continue
+        pieces = split_utterance({'text': clip.text, 'start_time': clip.start*1000, 'end_time': (clip.start+clip.duration)*1000})
+        if len(pieces) <= 1:
+            clips.append(clip)
+            continue
+        count += 1
+        for index, piece in enumerate(pieces):
+            clips.append(clip.model_copy(update={'id': clip.id if index == 0 else uuid4().hex, 'text': piece.text, 'start': piece.start, 'duration': max(1/document.fps, piece.end-piece.start)}))
+    if len(clips)>500:
+        raise HTTPException(422, msg('拆分后片段数量超过单集上限，请缩小选择范围'))
+    result = EditDocument.model_validate({**document.model_dump(), 'clips': clips})
+    return {'document': result.model_dump(mode='json'), 'split_count': count}

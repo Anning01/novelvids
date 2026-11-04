@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from auth.deps import AuthContext, get_auth_context
 from models.chapter_export import ChapterExport
-from schemas.video_edit import EditSave, EditExportIn, EditLibraryIn, EditSource, SubtitleRecognizeIn
+from schemas.video_edit import EditSave, EditExportIn, EditLibraryIn, EditSource, SubtitleRecognizeIn, SubtitleSplitIn
 from services.video_editor.drafts import chapter_scope, read_draft, save_draft
 from services.video_editor.assets import editor_storage, FORMATS
 from services.video_editor.sources import EditSources, public_media
@@ -75,3 +75,9 @@ async def recognize_subtitles(
     document = payload.document if payload else None
     result = await recognize_and_apply_subtitles(chapter_id, ctx, client_document=document)
     return ResponseSchema(data=result)
+
+
+@router.post('/chapters/{chapter_id}/subtitles/split')
+async def split_subtitles(chapter_id: int, payload: SubtitleSplitIn, ctx: AuthContext = Depends(get_auth_context)):
+    from services.video_editor.recognition import split_document_subtitles
+    return ResponseSchema(data=await split_document_subtitles(chapter_id, ctx, payload.document, payload.ids))

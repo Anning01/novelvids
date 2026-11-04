@@ -197,9 +197,9 @@ function failed() { error.value = tr('视频读取失败，请检查素材或重
 function buffering(value: boolean) { isBuffering.value = value; ready.value = !value; if (value) silenceAudio() }
 function seek() { return positionPlayer(props.playing) }
 function visibility() { if (document.visibilityState === 'hidden') emit('update:playing', false) }
-watch(() => [video.value?.id, source.value?.url, video.value?.trim_in, video.value?.speed], () => { if (activated.value || props.playing) void positionPlayer(props.playing) })
+watch([() => video.value?.id, () => source.value?.url, () => video.value?.trim_in, () => playbackRate.value, () => video.value?.start, () => video.value?.duration], () => { if (activated.value || props.playing) void positionPlayer(props.playing) })
 watch(() => props.playing, playing => { if (playing) { lastNow = 0; void positionPlayer(true) } else { player.value?.pause(); silenceAudio() } })
-watch(() => props.document, () => { if (activated.value) void positionPlayer(props.playing) })
+// Sound and appearance changes update in place; they must not restart the playhead.
 onMounted(() => {
   animation = requestAnimationFrame(tick); document.addEventListener('visibilitychange', visibility)
   observer = new ResizeObserver(entries => { const entry = entries[0]; if (entry) size.value = { width: entry.contentRect.width, height: entry.contentRect.height } })
