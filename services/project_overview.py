@@ -114,7 +114,7 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
     for voice in voices:
         for project_id in voice_projects[voice.id]:
             project = project_by_id[project_id]
-            if audio_reference_accessible(voice, team_id=project["team_id"], created_by=project["created_by"]):
+            if await audio_reference_accessible(voice, team_id=project["team_id"], created_by=project["created_by"]):
                 add_media(project_id, voice.audio_url)
 
     scenes_by_chapter = defaultdict(list)

@@ -286,12 +286,13 @@ async def test_roles_and_active_team_scope(client, monkeypatch, role, can_write)
 
 
 @pytest.mark.asyncio
-async def test_super_admin_requires_explicit_team(client, monkeypatch):
+async def test_super_admin_can_browse_all_teams_without_selection(client, monkeypatch):
     monkeypatch.setattr(settings, "AUTH_ENABLED", True)
     app.dependency_overrides[get_auth_context] = lambda: AuthContext(user=SimpleNamespace(id=1), is_super_admin=True)
     try:
         response = await client.get("/api/resource-library/folders")
-        assert response.json()["code"] == 400
+        assert response.json()["code"] == 0
+        assert response.json()["data"] == []
     finally:
         app.dependency_overrides.pop(get_auth_context, None)
 

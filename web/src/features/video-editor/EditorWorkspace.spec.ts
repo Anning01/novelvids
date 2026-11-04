@@ -6,6 +6,7 @@ import { editorFixture } from './fixtures'
 import EditorWorkspace from './EditorWorkspace.vue'
 import EditorLibrary from './EditorLibrary.vue'
 import EditorTimeline from './EditorTimeline.vue'
+import EditorPreview from './EditorPreview.vue'
 import EditorInspector from './EditorInspector.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 
@@ -17,10 +18,10 @@ beforeEach(() => {
   vi.mocked(editorApi.history).mockResolvedValue({ data: [] } as never)
   vi.mocked(editorApi.save).mockImplementation(async (_id, revision, document) => ({ data: { revision: revision + 1, document, updated_at: '' } }) as never)
 })
-function render(readOnly = false) {
+function render(readOnly = false, attachTo?: HTMLElement) {
   const pinia = createPinia(); const auth = useAuthStore(pinia)
   if (readOnly) { auth.enabled = true; auth.memberships = [{ team_id: 1, role: 'viewer' }] as never }
-  return mount(EditorWorkspace, { props: { projectId: 9, chapterId: 450, filename: 'episode' }, global: { plugins: [pinia], stubs: { ResourceLibraryPicker: true, EditorPreview: { template: '<div></div>', methods: { seek() {} }, expose: ['seek'] } } } })
+  return mount(EditorWorkspace, { attachTo, props: { projectId: 9, chapterId: 450, filename: 'episode' }, global: { plugins: [pinia], stubs: { ResourceLibraryPicker: true, EditorPreview: { template: '<div></div>', methods: { seek() {} }, expose: ['seek'] } } } })
 }
 it.each(['dark', 'light'])('connects library, inspector and timeline while preserving source media (%s)', async theme => {
   document.documentElement.dataset.appTheme = theme
@@ -84,5 +85,58 @@ it('pins the media category for an upload batch while other add controls are use
   resolve(item); await flushPromises()
   expect(vi.mocked(editorApi.upload).mock.calls.map(call => call[2])).toEqual(['audio', 'audio'])
   expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(3)
+  wrapper.unmount()
+})
+
+it.each([
+  ['dark', 'metaKey'],
+  ['light', 'ctrlKey'],
+] as const)('undoes and redoes keyboard edits while timeline controls retain focus (%s, %s)', async (theme, modifier) => {
+  document.documentElement.dataset.appTheme = theme
+  const wrapper = render(false, document.body); await flushPromises()
+  try {
+    const clip = wrapper.findAll('.editor-track-clip').at(-1)!
+    await clip.trigger('click')
+    await clip.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+    const undo = wrapper.get('button[aria-label="撤销"]')
+    expect(undo.attributes('disabled')).toBeUndefined()
+    await undo.trigger('click')
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(4)
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+
+    for (const selector of ['.editor-track-clip.selected', '.editor-clip-handle.left', 'button[aria-label="撤销"]']) {
+      await wrapper.get(selector).trigger('keydown', { key: 'z', [modifier]: true })
+      expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(4)
+      await wrapper.get('.editor-track-clip.selected').trigger('keydown', { key: 'z', [modifier]: true, shiftKey: true })
+      expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+    }
+    const input = wrapper.get('.editor-search input')
+    const event = new KeyboardEvent('keydown', { key: 'z', [modifier]: true, bubbles: true, cancelable: true })
+    input.element.dispatchEvent(event); await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+  } finally { wrapper.unmount() }
+})
+
+it('keeps timeline undo shortcuts inactive for read-only viewers', async () => {
+  const wrapper = render(true, document.body); await flushPromises()
+  try {
+    const event = new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })
+    wrapper.get('.editor-track-clip').element.dispatchEvent(event); await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(wrapper.findComponent(EditorTimeline).props('document')).toEqual(editorFixture().document)
+    expect(wrapper.get('button[aria-label="撤销"]').attributes('disabled')).toBeDefined()
+  } finally { wrapper.unmount() }
+})
+
+it('updates the preview when the timeline playhead seeks', async () => {
+  const wrapper = render(); await flushPromises()
+  const preview = wrapper.findComponent(EditorPreview)
+  const seek = vi.spyOn(preview.vm, 'seek')
+  wrapper.findComponent(EditorTimeline).vm.$emit('seek', 3.5); await flushPromises()
+  expect(wrapper.findComponent(EditorTimeline).props('time')).toBe(3.5)
+  expect(seek).toHaveBeenCalledOnce()
   wrapper.unmount()
 })

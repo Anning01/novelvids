@@ -14,6 +14,7 @@ from auth.deps import (
 )
 from controllers.asset import asset_controller
 from models.asset import Asset
+from services.resource_permissions import ensure_resource_write
 from schemas.ai_task import AiTaskOut
 from schemas.asset import (
     AssetBriefOut,
@@ -154,6 +155,7 @@ async def merge_assets(
 ):
     for asset_id in (payload.source_asset_id, payload.target_asset_id):
         await require_asset_access(asset_id, ctx)
+    await ensure_resource_write(ctx, [await Asset.get_or_none(id=payload.source_asset_id)])
     result = await asset_controller.merge(
         payload.source_asset_id,
         payload.target_asset_id,
@@ -304,9 +306,10 @@ async def assign_asset_variant_to_chapter(
 async def delete_asset_variant(
     asset_id: int,
     variant_id: int,
-    _: AuthContext = Depends(require_asset_access),
+    ctx: AuthContext = Depends(require_asset_access),
     __: AuthContext = _EDITOR,
 ):
+    await ensure_resource_write(ctx, [await Asset.get_or_none(id=asset_id)])
     await asset_controller.remove_variant(asset_id, variant_id)
     return ResponseSchema()
 
@@ -316,9 +319,10 @@ async def delete_asset_variant(
 )
 async def delete_asset(
     asset_id: int,
-    _: AuthContext = Depends(require_asset_access),
+    ctx: AuthContext = Depends(require_asset_access),
     __: AuthContext = _EDITOR,
 ):
+    await ensure_resource_write(ctx, [await Asset.get_or_none(id=asset_id)])
     await asset_controller.remove(asset_id)
     return ResponseSchema()
 

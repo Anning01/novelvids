@@ -20,15 +20,16 @@ async def publish_editor_resource(team,ctx,payload):
     await ensure_novel_access(source.novel_id,ctx)
     novel=await Novel.get(id=source.novel_id).only('id','team_id')
     allowed={'audio':{'bgm','sound'},'sticker':{'sticker'},'video':{'video'}}
-    if (novel.team_id or 0)!=team or payload.kind not in allowed.get(source.kind,set()):
+    if (not ctx.is_super_admin and (novel.team_id or 0)!=team) or payload.kind not in allowed.get(source.kind,set()):
         raise HTTPException(422,msg('文件类型不符合所选素材分类'))
+    team = novel.team_id or 0
     async with creation_write(novel.id):
         publication=await ResourcePlacement.get_or_none(team_id=team,catalog='editor',source_id=source.id)
         if publication:
             previous=await VideoResource.get_or_none(id=publication.media_resource_id,team_id=team)
             if previous:
                 if previous.state=='ready':
-                    return await resource_catalog.describe(team,'media',previous)
+                    return await resource_catalog.describe(team,'media',previous,ctx=ctx)
                 raise HTTPException(409,msg('此素材正在存入资源库或等待清理，请稍后刷新'))
             await publication.delete()
         reserved=await library.reserve(team,ctx.user.id if ctx.user else None,source.name,payload.folder_id,kind=payload.kind)
@@ -43,4 +44,4 @@ async def publish_editor_resource(team,ctx,payload):
         await VideoResource.filter(id=reserved.id,state='uploading').update(state='delete_failed')
         await library.delete_resources(team,[reserved.id])
         raise
-    return await resource_catalog.describe(team,'media',reserved)
+    return await resource_catalog.describe(team,'media',reserved,ctx=ctx)

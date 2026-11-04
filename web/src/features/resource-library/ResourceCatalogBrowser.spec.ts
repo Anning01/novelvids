@@ -3,15 +3,17 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { catalogApi, type CatalogResource } from './catalog'
 import { libraryApi } from './api'
+import { appConfirm } from '@/shared/confirmDialog'
 import AppSelect from '@/components/AppSelect.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 import ResourceCatalogBrowser from './ResourceCatalogBrowser.vue'
-vi.mock('./catalog',()=>({catalogApi:{list:vi.fn(),capabilities:vi.fn(),rename:vi.fn(),move:vi.fn(),projects:vi.fn(),upload:vi.fn()}}))
+vi.mock('@/shared/confirmDialog',()=>({appConfirm:vi.fn().mockResolvedValue(true)}))
+vi.mock('./catalog',()=>({catalogApi:{list:vi.fn(),capabilities:vi.fn(),rename:vi.fn(),move:vi.fn(),delete:vi.fn(),projects:vi.fn(),upload:vi.fn()}}))
 vi.mock('./api',()=>({libraryApi:{folders:vi.fn(),writeFolder:vi.fn(),delete:vi.fn()}}))
 const item:CatalogResource={key:'media:1',catalog:'media',id:1,kind:'bgm',name:'Shared music',url:'/music.wav',origin:'team',folder_id:0,created_at:'',editable:true,duration:3,state:'ready'}
 const page=(items:CatalogResource[])=>({code:0,message:'',data:{items,pagination:{total:items.length,page:1,page_size:24,pages:1}}})
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(catalogApi.list).mockResolvedValue(page([item]) as never);vi.mocked(catalogApi.capabilities).mockResolvedValue({data:{kinds:{video:{formats:['mp4'],max_size_mb:100},bgm:{formats:['wav'],max_size_mb:100}},voice:{formats:['mp3','wav'],max_size_mb:15},folder_depth:2}} as never);vi.mocked(libraryApi.folders).mockResolvedValue({data:[{id:2,name:'音乐',parent_id:0,deleting:false}]} as never)})
-function render(viewer=false){const pinia=createPinia(),auth=useAuthStore(pinia);auth.enabled=viewer;auth.memberships=viewer?[{team_id:1,role:'viewer'}] as never:[];return mount(ResourceCatalogBrowser,{global:{plugins:[pinia],stubs:{AppButton:{template:'<button><slot/></button>'},ElDialog:{props:['modelValue'],template:'<section v-if="modelValue"><slot/><slot name="footer"/></section>'},CatalogApplyDialog:true,RouterLink:{template:'<a><slot/></a>'}}}})}
+function render(viewer=false,superAdmin=false){const pinia=createPinia(),auth=useAuthStore(pinia);auth.enabled=viewer||superAdmin;if(superAdmin)auth.user={id:1,is_super_admin:true} as never;auth.memberships=viewer?[{team_id:1,role:'viewer'}] as never:[];return mount(ResourceCatalogBrowser,{global:{plugins:[pinia],stubs:{AppButton:{template:'<button><slot/></button>'},ElDialog:{props:['modelValue'],template:'<section v-if="modelValue"><slot/><slot name="footer"/></section>'},CatalogApplyDialog:true,RouterLink:{template:'<a><slot/></a>'}}}})}
 it.each(['light','dark'])('lists typed team resources and applies kind + folder + search together (%s)',async theme=>{document.documentElement.dataset.appTheme=theme;const wrapper=render();await flushPromises();await wrapper.findAll('.catalog-tabs button').find(b=>b.text()==='BGM')!.trigger('click');await flushPromises();await wrapper.findAll('.catalog-folder>button')[0]!.trigger('click');await flushPromises();await wrapper.get('[aria-label="搜索资源"]').setValue('Shared');await wrapper.get('.catalog-filter').trigger('submit');await flushPromises();expect(catalogApi.list).toHaveBeenLastCalledWith(expect.objectContaining({kind:'bgm',folder_id:2,search:'Shared'}));expect(wrapper.text()).toContain('Shared music');wrapper.unmount()})
 it.each(['light','dark'])('marks only the current folder and sends its exact scope (%s)',async theme=>{
  document.documentElement.dataset.appTheme=theme
@@ -51,5 +53,41 @@ it('keeps the voice upload action in the dialog footer and disabled until a usab
  expect(action!.attributes('disabled')).toBeDefined()
  expect(wrapper.find('.catalog-upload__actions').exists()).toBe(true)
  expect(wrapper.get('.catalog-upload__hint').text()).toContain('选择 1–30 秒音频')
+ wrapper.unmount()
+})
+
+it.each(['light','dark'])('lets a super administrator manage public voices without choosing a team (%s)',async theme=>{
+ document.documentElement.dataset.appTheme=theme
+ const voice:CatalogResource={...item,key:'voice:3',catalog:'voice',id:3,kind:'voice',name:'公共音色',origin:'system',is_public:true,editable:true,deletable:true}
+ vi.mocked(catalogApi.list).mockResolvedValue(page([voice]) as never)
+ vi.mocked(catalogApi.delete).mockResolvedValue({data:[{id:3,deleted:true}]} as never)
+ const wrapper=render(false,true);await flushPromises()
+ expect(useAuthStore().activeTeamId).toBeNull()
+ await wrapper.get('[aria-label="预览 公共音色"]').trigger('click')
+ expect(wrapper.findAll('button').find(button=>button.text()==='重命名')!.attributes('disabled')).toBeUndefined()
+ await wrapper.get('input[type="checkbox"]').trigger('click')
+ const remove=wrapper.findAll('button').find(button=>button.text()==='删除')!
+ expect(remove.attributes('disabled')).toBeUndefined()
+ await remove.trigger('click');await flushPromises()
+ expect(appConfirm).toHaveBeenCalled()
+ expect(catalogApi.delete).toHaveBeenCalledWith(['voice:3'])
+ expect(libraryApi.delete).not.toHaveBeenCalled()
+ wrapper.unmount()
+})
+it.each(['light','dark'])('shows public resources to creators while disabling original edits and deletion (%s)',async theme=>{
+ document.documentElement.dataset.appTheme=theme
+ vi.mocked(catalogApi.list).mockResolvedValue(page([{...item,origin:'system',editable:false,deletable:false,is_public:true}]) as never)
+ vi.mocked(libraryApi.folders).mockResolvedValue({data:[{id:2,name:'公共目录',parent_id:0,deleting:false,editable:false}]} as never)
+ const wrapper=render();const auth=useAuthStore();auth.enabled=true;auth.memberships=[{team_id:1,role:'creator'}] as never
+ await flushPromises()
+ expect(wrapper.get('.catalog-folder').find('details').exists()).toBe(false)
+ await wrapper.get('[aria-label="预览 Shared music"]').trigger('click')
+ expect(wrapper.findAll('button').find(button=>button.text()==='用于项目')!.attributes('disabled')).toBeUndefined()
+ expect(wrapper.findAll('button').find(button=>button.text()==='重命名')!.attributes('disabled')).toBeDefined()
+ await wrapper.get('input[type="checkbox"]').trigger('click')
+ const remove=wrapper.findAll('button').find(button=>button.text()==='删除')!
+ expect(remove.attributes('disabled')).toBeDefined()
+ await remove.trigger('click');await flushPromises()
+ expect(catalogApi.delete).not.toHaveBeenCalled()
  wrapper.unmount()
 })
