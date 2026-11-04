@@ -6,7 +6,9 @@ import logging
 
 from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
+from services.billing.catalog import ASR_PRICING
 from services.billing.pricing import (
+    compute_asr_cost,
     compute_image_cost,
     compute_input_image_cost,
     compute_text_cost,
@@ -201,6 +203,40 @@ class BillingRecorder:
             status=status,
             duration_seconds=duration_seconds,
             video_id=video_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
+
+    async def record_asr(
+        self,
+        *,
+        novel_id: int,
+        seconds: float,
+        model_config_id=None,
+        fallback_model="volc.seedasr.auc",
+        status: int = TaskStatusEnum.completed.value,
+        duration_seconds=None,
+        team_id=None,
+        user_id=None,
+        config_snapshot: AiModelConfig | None = None,
+    ) -> ModelUsageRecord | None:
+        config = config_snapshot or await self._config(model_config_id)
+        pricing = config.pricing if config else ASR_PRICING.get("volc.seedasr.auc")
+        cost = compute_asr_cost(seconds, pricing)
+        usage = {
+            "duration_seconds": round(seconds, 3),
+            "minutes": round(seconds / 60, 4),
+        }
+        return await self._create(
+            novel_id=novel_id,
+            task_type=AiTaskTypeEnum.audio_recognition.value,
+            billing_type="asr",
+            config=config,
+            fallback_model=fallback_model,
+            usage=usage,
+            cost=cost,
+            status=status,
+            duration_seconds=int(duration_seconds if duration_seconds is not None else seconds),
             team_id=team_id,
             user_id=user_id,
         )

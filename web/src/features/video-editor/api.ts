@@ -8,6 +8,7 @@ export const editorApi = {
   get: (chapterId: number, signal?: AbortSignal) => request<SingleResponse<EditorDraft>>(`${root}/chapters/${chapterId}`, { signal }),
   save: (chapterId: number, revision: number, document: EditDocument) => request<SingleResponse<{ revision: number; document: EditDocument; updated_at: string }>>(`${root}/chapters/${chapterId}`, { method: 'PUT', body: JSON.stringify({ revision, document }) }),
   library: (chapterId: number, resourceId: number) => request<SingleResponse<EditorMedia>>(`${root}/chapters/${chapterId}/library`, { method: 'POST', body: JSON.stringify({ resource_id: resourceId }) }),
+  recognizeSubtitles: (chapterId: number, document?: EditDocument) => request<SingleResponse<{ document: EditDocument; subtitles_created: number; revision: number }>>(`${root}/chapters/${chapterId}/subtitles/recognize`, { method: 'POST', body: JSON.stringify({ document }) }),
   export: (chapterId: number, revision: number) => request<SingleResponse<EditorExport>>(`${root}/chapters/${chapterId}/exports`, { method: 'POST', body: JSON.stringify({ revision }) }),
   history: (chapterId: number) => request<SingleResponse<EditorExport[]>>(`${root}/chapters/${chapterId}/exports`),
   cancel: (taskId: string) => request(`/task/${taskId}/cancel`, { method: 'POST' }),

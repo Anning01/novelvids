@@ -11,3 +11,4 @@ class ImageApiProtocol(StrEnum):
     autodl = "autodl"
     dashscope = "dashscope"
     volcengine_mediakit = "volcengine_mediakit"
+    volcengine_openspeech = "volcengine_openspeech"

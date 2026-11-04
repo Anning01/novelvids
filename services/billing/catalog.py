@@ -87,12 +87,28 @@ VIDEO_PRICING: dict[str, dict] = {
     },
 }
 
+# 语音识别模型：按分钟计费（元 / 分钟）
+ASR_PRICING: dict[str, dict] = {
+    "volc.seedasr.auc": {
+        "type": "asr",
+        "currency": "CNY",
+        "billing_unit": "minute",
+        "price_per_minute": 0.015,
+    },
+}
+
 def pricing_for(config: AiModelConfig) -> dict | None:
     """返回给定模型的官方默认定价；未知模型返回 None。"""
     if config.image_model_type and config.image_model_type in IMAGE_PRICING:
         return IMAGE_PRICING[config.image_model_type]
     if config.video_model_type and config.video_model_type in VIDEO_PRICING:
         return VIDEO_PRICING[config.video_model_type]
+    if getattr(config, "task_type", None) == 9 or 9 in (getattr(config, "task_types", None) or []):
+        model = (config.model or "").lower()
+        for key, prices in ASR_PRICING.items():
+            if key in model:
+                return prices
+        return None
     model = (config.model or "").lower()
     for key, prices in LLM_PRICING.items():
         if key in model:

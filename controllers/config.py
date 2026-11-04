@@ -1,5 +1,6 @@
 
 from utils.messages import localized_message
+import math
 from fastapi import HTTPException
 
 from models.config import AiModelConfig, GeneralConfig
@@ -86,6 +87,14 @@ def _validate_video_pricing(pricing: dict, model_type) -> None:
     _validate_input_image_pricing(pricing, "视频")
 
 
+def _validate_asr_pricing(pricing: dict) -> None:
+    if pricing.get("type") != "asr":
+        raise HTTPException(status_code=400, detail=localized_message('语音识别模型的费用配置 type 必须为 asr'))
+    price_per_minute = pricing.get("price_per_minute")
+    if price_per_minute is None or isinstance(price_per_minute, bool) or not isinstance(price_per_minute, (int, float)) or not math.isfinite(price_per_minute) or price_per_minute < 0:
+        raise HTTPException(status_code=400, detail=localized_message('语音识别费用缺少合法的 price_per_minute'))
+
+
 class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiModelConfigUpdate]):
     def __init__(self):
         super().__init__(model=AiModelConfig)
@@ -168,6 +177,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 instance.video_model_type if instance else None
             )
             _validate_video_pricing(pricing, model_type)
+            return
+        if AiTaskTypeEnum.audio_recognition.value in task_types:
+            _validate_asr_pricing(pricing)
             return
         _validate_text_pricing(pricing)
 
@@ -326,7 +338,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
 
     async def list_generation_capabilities(self) -> dict:
         from services.video_enhancement.contract import ENHANCEMENT_PRESET, RESOLUTION_SHORT_SIDE
+        from services.model_config_seed import DEFAULT_MODELS
         return {
+            'audio_recognition': {key: value for key, value in next(item for item in DEFAULT_MODELS if item['task_type'] == 9).items() if key in {'base_url', 'model', 'api_protocol', 'pricing'}},
             'media_processing': {**ENHANCEMENT_PRESET, 'resolutions': [
                 {'value': value, 'short_side': short} for value, short in RESOLUTION_SHORT_SIDE.items()]},
             "image": {

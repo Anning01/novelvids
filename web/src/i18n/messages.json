@@ -1,5 +1,7 @@
 {
   "common": {
+    "关闭试听": "Close audio preview",
+    "在右侧编辑内容与样式，在时间线调整时间。": "Edit text and style on the right. Adjust timing on the timeline.",
     "BGM 已复制，粘贴将接在片段末尾": "BGM copied. Paste to append after the clip.",
     "拖动旋转贴纸": "Drag to rotate sticker",
     "拖动缩放贴纸": "Drag to resize sticker",
@@ -3073,6 +3075,12 @@
     "字幕文件过大": "Subtitle file is too large",
     "字幕片段": "Subtitle clip",
     "导入 SRT": "Import SRT",
+    "AI 识别": "AI Recognition",
+    "识别中...": "Recognizing...",
+    "语音识别": "Speech Recognition",
+    "时间线上没有可识别的视频素材": "No recognizable video clips on timeline",
+    "已识别生成 {p0} 条字幕": "Recognized and generated {p0} subtitles",
+    "请在系统设置中配置并启用语音识别模型（volc.seedasr.auc）": "Please configure and activate speech recognition model (volc.seedasr.auc) in settings",
     "导入素材": "Import media",
     "导出中 {p0}%": "Exporting {p0}%",
     "导出成片": "Export video",

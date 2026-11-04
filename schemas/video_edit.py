@@ -128,3 +128,7 @@ class EditExportIn(EditModel):
 
 class EditLibraryIn(EditModel):
     resource_id: int = Field(gt=0)
+
+
+class SubtitleRecognizeIn(EditModel):
+    document: EditDocument | None = None

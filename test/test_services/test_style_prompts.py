@@ -18,6 +18,14 @@ from prompts.styles import (
     video_project_style_suffix,
 )
 
+@pytest.fixture(autouse=True)
+def public_style_pack(tmp_path, monkeypatch):
+    """Public contract tests must not depend on a developer's private overrides."""
+    import prompts.skill_pack as pack
+    (tmp_path / "styles.json").write_text((pack.ROOT / "styles.json").read_text())
+    monkeypatch.setattr(pack, "ROOT", tmp_path)
+
+
 EXPECTED_KEYS = {
     "realistic-general",
     "realistic-urban",
@@ -37,8 +45,9 @@ EXPECTED_KEYS = {
 
 
 def test_registry_covers_all_builtin_styles():
-    assert set(STYLE_KEYS) == EXPECTED_KEYS
-    assert len(STYLE_PROMPTS) == 14
+    assert EXPECTED_KEYS <= set(STYLE_KEYS)
+    assert EXPECTED_KEYS <= set(STYLE_PROMPTS)
+    assert {item["key"] for item in list_styles()} == EXPECTED_KEYS
 
 
 @pytest.mark.parametrize("key", sorted(EXPECTED_KEYS))

@@ -1,5 +1,5 @@
 import pytest
-from auth.models import Team
+from auth.models import Team, TeamMember
 from config import settings
 from models.novel import Novel
 from models.chapter import Chapter
@@ -25,6 +25,7 @@ async def test_editor_preserves_team_isolation_and_read_only_roles(client):
         body={**payload,'revision':1 if await ChapterEditDraft.all().exists() else 0}
         assert (await client.put(f'/api/video-editor/chapters/{chapter.id}',json=body,headers=headers)).json()['code']==write
         if write:
+            assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/subtitles/recognize',json={},headers=headers)).json()['code']==write
             assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/exports',json={'revision':1},headers=headers)).json()['code']==write
             assert (await client.post(f'/api/video-editor/chapters/{chapter.id}/assets?kind=audio',
                 files={'file':('test.mp3',b'x','audio/mpeg')},headers=headers)).json()['code']==write
@@ -47,3 +48,22 @@ async def test_another_project_asset_cannot_be_bound_by_guessing_its_id(client):
         headers=_auth(await _login(client,creator.username)))
     assert response.json()['code']==404
     assert not await ChapterEditDraft.all().exists()
+
+
+@pytest.mark.asyncio
+async def test_asr_checks_member_limit_before_extracting_audio(client, monkeypatch):
+    from unittest.mock import AsyncMock
+    from models.config import AiModelConfig
+    team=await Team.create(name='ASR limits',balance=1)
+    user,_=await _create_member('asr_limit_creator',team)
+    membership=await TeamMember.get(team_id=team.id,user_id=user.id)
+    membership.cost_limit=0
+    await membership.save(update_fields=['cost_limit'])
+    novel=await Novel.create(name='ASR limit project',team_id=team.id)
+    chapter=await Chapter.create(novel=novel,number=1,name='ASR',content='')
+    await AiModelConfig.create(name='Official ASR',base_url='https://openspeech.bytedance.com/api/v3/auc/bigmodel',api_key='test',task_type=9,task_types=[9],model='volc.seedasr.auc',scope='official',is_active=True)
+    extract=AsyncMock()
+    monkeypatch.setattr('services.video_editor.recognition.extract_timeline_audio',extract)
+    response=await client.post(f'/api/video-editor/chapters/{chapter.id}/subtitles/recognize',json={'document':{'clips':[]}},headers=_auth(await _login(client,user.username)))
+    assert response.json()['code']==402
+    extract.assert_not_awaited()

@@ -125,6 +125,7 @@ class AiTaskTypeEnum(NicknameIntEnum):
     remake_decomposition = 6, "重制"
     creation_agent = 7, "创作助手"
     video_enhancement = 8, "视频画质增强"
+    audio_recognition = 9, "语音识别"
 
 
 @enum_description

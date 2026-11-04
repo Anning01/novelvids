@@ -1,8 +1,11 @@
 import type { ModelPricing } from '@/types'
 
-export function defaultPricing(category: 'llm' | 'image' | 'video', tiers: string[] = []): ModelPricing {
+export function defaultPricing(category: 'llm' | 'image' | 'video' | 'asr', tiers: string[] = []): ModelPricing {
   if (category === 'llm') {
     return { type: 'text', currency: 'CNY', input_price_per_1m: 0, output_price_per_1m: 0 }
+  }
+  if (category === 'asr') {
+    return { type: 'asr', currency: 'CNY', billing_unit: 'minute', price_per_minute: 0 }
   }
   const prices: Record<string, number> = {}
   tiers.forEach(tier => { prices[tier] = 0 })

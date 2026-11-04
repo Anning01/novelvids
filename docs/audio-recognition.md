@@ -1,0 +1,9 @@
+# 火山语音识别 2.0
+
+在设置的「语音识别」分类中填写并启用配置。默认模型为 `volc.seedasr.auc`，协议为 `volcengine_openspeech`，地址为 `https://openspeech.bytedance.com/api/v3/auc/bigmodel`。默认初始化配置未启用、Key 为空，不会自动调用供应商。
+
+新版控制台填写 API Key。旧版控制台可填写 `APP_ID:ACCESS_TOKEN`。凭据仅由服务端持有，不写进代码或日志。任务提交、状态轮询及分句时间戳遵循[官方接口文档](https://docs.volcengine.com/docs/doubao-voice/large-model-recording-file-recognition-standard-version-api?lang=zh)。
+
+编辑器字幕栏的「AI 识别」提取主视频轨原声，按裁剪、变速、静音片段和实际时长对齐，不混入 BGM。识别成功后通过原有剪辑草稿流程保存，可撤销。无识别文本时保留原字幕。识别过程中切换章节或修改剪辑，会丢弃过期结果以保留当前编辑。
+
+模型选择复用团队的官方/自定义来源规则。官方模型调用前检查余额和成员限额，成功后按本次配置快照中的每分钟单价记录用量、折算实际秒数并扣费。团队自有 Key 的用量单独记录，不扣团队余额。识别已完成但因期间编辑而丢弃结果时，供应商用量仍会记录。
