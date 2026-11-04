@@ -91,3 +91,20 @@ it.each(['light','dark'])('shows public resources to creators while disabling or
  expect(catalogApi.delete).not.toHaveBeenCalled()
  wrapper.unmount()
 })
+
+it.each(['light','dark'])('lays out folder settings like the upload dialog with labelled fields and a footer action (%s)',async theme=>{
+ document.documentElement.dataset.appTheme=theme
+ const wrapper=render();await flushPromises()
+ await wrapper.findAll('button').find(button=>button.text()==='新建文件夹')!.trigger('click');await flushPromises()
+ const dialog=wrapper.get('.resource-library-dialog--form')
+ const form=dialog.get('form.catalog-form')
+ const labels=form.findAll('label')
+ expect(form.attributes('id')).toBe('catalog-folder-form')
+ expect(labels[0]!.text()).toBe('文件夹名称')
+ expect(labels[1]!.text()).toContain('上级目录')
+ expect(labels[1]!.find('.app-select').exists()).toBe(true)
+ expect(dialog.findAll('.catalog-dialog__actions button').map(button=>button.text())).toEqual(['保存'])
+ await form.trigger('submit');await flushPromises()
+ expect(libraryApi.writeFolder).toHaveBeenCalledWith('',0,undefined)
+ wrapper.unmount()
+})
