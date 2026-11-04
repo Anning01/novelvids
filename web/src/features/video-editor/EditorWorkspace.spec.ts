@@ -8,6 +8,7 @@ import EditorWorkspace from './EditorWorkspace.vue'
 import EditorLibrary from './EditorLibrary.vue'
 import EditorTimeline from './EditorTimeline.vue'
 import EditorPreview from './EditorPreview.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import EditorInspector from './EditorInspector.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 
@@ -32,7 +33,7 @@ it.each(['dark', 'light'])('connects library, inspector and timeline while prese
   wrapper.findComponent(EditorTimeline).vm.$emit('select', 'v2'); await flushPromises()
   expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({ id: 'v2' })
   wrapper.findComponent(EditorTimeline).vm.$emit('remove'); await flushPromises()
-  expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(2)
+  expect(wrapper.findComponent(EditorTimeline).props('document').clips.map(clip => [clip.id, clip.start])).toEqual([['v1', 0], ['v3', 2]])
   expect(wrapper.findComponent(EditorLibrary).props('media')).toHaveLength(3)
   wrapper.findComponent(EditorTimeline).vm.$emit('undo'); await flushPromises()
   expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(3)
@@ -98,26 +99,26 @@ it.each([
   try {
     const clip = wrapper.findAll('.editor-track-clip').at(-1)!
     await clip.trigger('click')
-    await clip.trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+    await clip.trigger('keydown', { key: 'ArrowLeft' })
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(2)
     const undo = wrapper.get('button[aria-label="撤销"]')
     expect(undo.attributes('disabled')).toBeUndefined()
     await undo.trigger('click')
     expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(4)
     await wrapper.get('button[aria-label="重做"]').trigger('click')
-    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(2)
 
     for (const selector of ['.editor-track-clip.selected', '.editor-clip-handle.left', 'button[aria-label="撤销"]']) {
       await wrapper.get(selector).trigger('keydown', { key: 'z', [modifier]: true })
       expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(4)
       await wrapper.get('.editor-track-clip.selected').trigger('keydown', { key: 'z', [modifier]: true, shiftKey: true })
-      expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+      expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(2)
     }
     const input = wrapper.get('.editor-search input')
     const event = new KeyboardEvent('keydown', { key: 'z', [modifier]: true, bubbles: true, cancelable: true })
     input.element.dispatchEvent(event); await flushPromises()
     expect(event.defaultPrevented).toBe(false)
-    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBeCloseTo(4 + 1 / 24)
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips[2].start).toBe(2)
   } finally { wrapper.unmount() }
 })
 
@@ -275,4 +276,46 @@ it('undoes sticker size and rotation changes as a single transform',async()=>{
  wrapper.findComponent(EditorTimeline).vm.$emit('redo');await flushPromises()
  expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({scale:2,rotation:90})
  wrapper.unmount()
+})
+
+it('keeps the video track gapless when the frame rate changes', async () => {
+  const fixture = editorFixture()
+  fixture.document.clips[0]!.duration = 1 / 24
+  fixture.document.clips[1]!.start = 1 / 24
+  fixture.document.clips[1]!.duration = 2 / 24
+  fixture.document.clips[2]!.start = 3 / 24
+  vi.mocked(editorApi.get).mockResolvedValue({ data: fixture } as never)
+  const wrapper = render()
+  await flushPromises()
+  const fps = wrapper.findAllComponents(AppSelect).find(select => select.props('ariaLabel') === 'FPS')
+  fps!.vm.$emit('update:modelValue', '30')
+  await flushPromises()
+  const result = wrapper.findComponent(EditorTimeline).props('document')
+  expect(result.fps).toBe(30)
+  expect(result.clips.map(clip => Math.round(clip.start * result.fps))).toEqual([0, 1, 4])
+  wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('changes speed with the real inspector and saves without opening gaps (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const fixture = editorFixture()
+  fixture.document.clips[0]!.duration = 8
+  fixture.document.clips[1]!.start = 8
+  fixture.document.clips[2]!.start = 10
+  fixture.media[0]!.duration = 8
+  vi.mocked(editorApi.get).mockResolvedValue({ data: fixture } as never)
+  const wrapper = render()
+  await flushPromises()
+  const rate = wrapper.get('input[aria-label="倍速数值"]')
+  const timeline = wrapper.findComponent(EditorTimeline)
+  for (const speed of [2.82, 18.3, 1]) {
+    await rate.setValue(speed)
+    const [first, second] = timeline.props('document').clips
+    expect(first).toMatchObject({ speed, trim_in: 0, trim_out: 8 })
+    expect(second?.start).toBe(first!.duration)
+  }
+  await wrapper.get('button[aria-label="保存剪辑草稿"]').trigger('click')
+  await flushPromises()
+  expect(vi.mocked(editorApi.save).mock.lastCall?.[2].clips[0]).toMatchObject({ duration: 8, trim_out: 8 })
+  wrapper.unmount()
 })
