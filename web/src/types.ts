@@ -138,7 +138,7 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit'
+export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
@@ -214,10 +214,11 @@ export interface VideoGenerationCapabilities {
 }
 export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
 export interface ModelPricing {
-  type: 'text' | 'image' | 'video' | 'media_processing'
+  type: 'text' | 'image' | 'video' | 'media_processing' | 'asr'
   currency: string
   input_price_per_1m?: number
   output_price_per_1m?: number
+  price_per_minute?: number
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
@@ -227,6 +228,7 @@ export interface ModelPricing {
   discount_description?: string
 }
 export interface GenerationCapabilities {
+  audio_recognition?: { base_url: string; model: string; api_protocol: ImageApiProtocol; pricing: ModelPricing }
   media_processing?: { base_url: string; model: string; api_protocol: ImageApiProtocol; processing_options: Record<string, unknown>; pricing: ModelPricing; resolutions?: Array<{ value: string; short_side: number }> }
   image: Record<string, string[]>
   video: Record<string, string[]>

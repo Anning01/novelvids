@@ -4,6 +4,7 @@ import logging
 
 from models.config import AiModelConfig
 from services.billing.catalog import (
+    ASR_PRICING,
     IMAGE_PRICING,
     LLM_PRICING,
     VIDEO_PRICING,
@@ -101,6 +102,16 @@ DEFAULT_MODELS: list[dict] = [
         base_url="https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com",
         api_protocol="dashscope",
     ),
+    {
+        "name": "volc-seedasr-2.0",
+        "task_type": AiTaskTypeEnum.audio_recognition.value,
+        "task_types": [AiTaskTypeEnum.audio_recognition.value],
+        "base_url": "https://openspeech.bytedance.com/api/v3/auc/bigmodel",
+        "api_key": "",
+        "model": "volc.seedasr.auc",
+        "api_protocol": "volcengine_openspeech",
+        "pricing": ASR_PRICING["volc.seedasr.auc"],
+    },
 ]
 
 

@@ -31,7 +31,7 @@ const browsing = ref<EditorMedia | null>(null), browseTime = ref(0)
 const copiedClip = ref<EditClip | null>(null)
 const preview = ref<InstanceType<typeof EditorPreview> | null>(null), timeline = ref<InstanceType<typeof EditorTimeline> | null>(null), previewStage = ref<HTMLElement | null>(null)
 const uploadInput = ref<HTMLInputElement | null>(null), srtInput = ref<HTMLInputElement | null>(null)
-const uploading = ref(false), uploadProgress = ref(0), capabilities = ref<EditorCapabilities | null>(null)
+const uploading = ref(false), uploadProgress = ref(0), capabilities = ref<EditorCapabilities | null>(null), recognizingSubtitles = ref(false)
 const exports = ref<EditorExport[]>([]), exportOpen = ref(false), exporting = ref(false), exportError = ref('')
 const timelineHeight = ref(310), downloading = ref(false)
 let uploadKind: Exclude<ClipKind, 'subtitle'> = 'video', scope = 0, disposed = false, polling: ReturnType<typeof setTimeout> | undefined
@@ -107,6 +107,35 @@ function chooseMedia(item: EditorMedia) {
   else { playing.value = false; browsing.value = item; browseTime.value = 0 }
 }
 function subtitle() { action(() => addSubtitle(editDocument.value!, time.value)) }
+async function recognizeSubtitles() {
+  if (readOnly.value || !editDocument.value || recognizingSubtitles.value) return
+  const videos = editDocument.value.clips.filter(c => c.type === 'video')
+  if (!videos.length) {
+    showError(new Error(tr('时间线上没有可识别的视频素材')))
+    return
+  }
+  const version = scope, snapshot = JSON.stringify(editDocument.value)
+  recognizingSubtitles.value = true
+  try {
+    const res = await editorApi.recognizeSubtitles(props.chapterId, cloneDocument(editDocument.value))
+    if (version !== scope || disposed) return
+    if (JSON.stringify(editDocument.value) !== snapshot) {
+      showError(new Error(tr('识别期间剪辑已修改，本地内容已保留，请重试')))
+      return
+    }
+    if (res.data?.document) {
+      action(() => res.data.document)
+      const count = res.data.subtitles_created || 0
+      notice.success(tr('已识别生成 {p0} 条字幕', { p0: count }))
+      const firstSub = res.data.document.clips.find(c => c.type === 'subtitle')
+      if (firstSub) select(firstSub.id)
+    }
+  } catch (reason) {
+    if (version === scope) showError(reason)
+  } finally {
+    if (version === scope) recognizingSubtitles.value = false
+  }
+}
 function requestUpload(kind: Exclude<ClipKind, 'subtitle'>) {
   if (uploading.value || readOnly.value) return
   uploadKind = kind
@@ -170,6 +199,7 @@ function changeFps(fps: EditDocument['fps']) {
   })
 }
 async function load() {
+  recognizingSubtitles.value = false
   const version = ++scope; copiedClip.value = null; playing.value = false; time.value = 0; browsing.value = null; uploading.value = false; exportError.value = ''; clearTimeout(polling)
   await draft.load(props.chapterId)
   if (version !== scope || disposed) return
@@ -260,7 +290,7 @@ function format(value: number) { return `${String(Math.floor(value / 60)).padSta
       <div class="editor-statusbar"><span>{{ readOnly ? tr('只读预览') : status }}</span><div class="editor-canvas-settings"><label>{{ tr('比例') }}<AppSelect :model-value="aspect" :options="[...(aspect==='custom'?[{value:'custom',label:ratio}]:[]),...(['16:9','9:16','1:1','4:3','3:4','21:9'])]" :ariaLabel="tr('比例')" :disabled="readOnly" density="compact" @update:model-value="dimensions" /></label><label>{{ tr('画布尺寸') }}<AppSelect :model-value="String(Math.min(editDocument.width,editDocument.height))" :options="[...(!capabilities?.resolutions.includes(Math.min(editDocument.width,editDocument.height))?[Math.min(editDocument.width,editDocument.height)]:[]),...(capabilities?.resolutions||[])].map(value=>({value:String(value),label:`${value}P`}))" :ariaLabel="tr('画布尺寸')" :disabled="readOnly" density="compact" @update:model-value="dimensions(`${editDocument.width}:${editDocument.height}`,Number($event))" /></label><label>FPS<AppSelect :model-value="String(editDocument.fps)" :options="(capabilities?.fps||[24]).map(value=>({value:String(value),label:String(value)}))" ariaLabel="FPS" :disabled="readOnly" density="compact" @update:model-value="changeFps(Number($event) as EditDocument['fps'])" /></label><button class="editor-icon-btn" :disabled="readOnly || saving || conflict" :aria-label="tr('保存剪辑草稿')" @click="draft.save"><Save :size="15" /></button></div></div>
       <div v-if="saveError || recovery" class="editor-save-alert" role="alert"><span>{{ saveError || tr('发现尚未保存的本地剪辑草稿') }}</span><template v-if="recovery"><button @click="draft.recoverLocal">{{ tr('恢复本地修改') }}</button><button @click="draft.ignoreRecovery">{{ tr('使用已保存版本') }}</button></template><template v-else><button v-if="conflict" @click="load">{{ tr('重新读取并核对') }}</button><button v-else @click="draft.save">{{ tr('重试保存') }}</button></template></div>
       <div class="editor-editing-row">
-        <EditorLibrary :media="media" :selected-key="selectedMedia?.key" :read-only="readOnly" :busy="uploading" :progress="uploadProgress" @select="chooseMedia" @add="insert" @upload="requestUpload" @subtitle="subtitle" @srt="srtInput?.click()" @library="libraryOpen = true" @library-add="item => libraryChosen([{ id: item.source.id }])" @publish="publishMedia" />
+        <EditorLibrary :media="media" :selected-key="selectedMedia?.key" :read-only="readOnly" :busy="uploading" :progress="uploadProgress" :recognizing="recognizingSubtitles" @select="chooseMedia" @add="insert" @upload="requestUpload" @subtitle="subtitle" @srt="srtInput?.click()" @recognize="recognizeSubtitles" @library="libraryOpen = true" @library-add="item => libraryChosen([{ id: item.source.id }])" @publish="publishMedia" />
         <section class="editor-preview-panel"><header class="editor-panel-heading video-stage-header"><h2>{{ browsing ? tr('素材预览') : tr('本集预览') }}</h2><span>{{ browsing?.name || activeVideo?.name }}</span><button class="editor-icon-btn" :aria-label="tr('全屏预览')" @click="previewStage?.requestFullscreen()"><Maximize2 :size="15" /></button></header><div ref="previewStage" class="editor-preview-area video-stage"><EditorPreview ref="preview" :document="previewDocument!" :media="media" v-model:time="previewTime" v-model:playing="playing" :muted="muted" :selected-id="selectedId" :read-only="readOnly" @position="positionOverlay" @select="id => select(id, false)" /></div><footer class="editor-transport"><span>{{ format(previewTime) }} <small>/ {{ format(previewDuration) }}</small></span><div><button class="editor-icon-btn" :aria-label="tr('上一个分镜')" @click="adjacent(-1)"><SkipBack :size="17" /></button><button class="editor-icon-btn" :aria-label="playing ? tr('暂停') : tr('播放')" @click="toggle"><Pause v-if="playing" :size="18" /><Play v-else :size="18" /></button><button class="editor-icon-btn" :aria-label="tr('下一个分镜')" @click="adjacent(1)"><SkipForward :size="17" /></button></div><div><button class="editor-icon-btn" :aria-label="muted ? tr('取消静音') : tr('静音')" @click="muted = !muted"><VolumeX v-if="muted" :size="16" /><Volume2 v-else :size="16" /></button><button class="editor-btn secondary editor-mobile-only" @click="inspectorOpen = true"><SlidersHorizontal :size="14" />{{ tr('属性') }}</button></div></footer><div class="editor-playback-seek-row"><input class="editor-playback-seek" type="range" min="0" :max="previewDuration || 1" step=".04" :value="previewTime" :aria-label="tr('本集视频播放进度')" @input="seekPreview(Number(($event.target as HTMLInputElement).value))" /></div></section>
         <EditorInspector :subtitle-styles="capabilities?.subtitle_styles || []" :clip="browsing ? null : selected" :browsing="browsing" :media="selectedMedia" :open="inspectorOpen" :read-only="readOnly" @close="inspectorOpen = false" @change="change" @trim="trim" />
       </div>

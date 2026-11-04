@@ -41,7 +41,21 @@ class SkillSnapshot(BaseModel):
 
 
 def read_skill(name: str) -> str:
-    return (ROOT / FILES[name]).read_text(encoding="utf-8")
+    content = (ROOT / FILES[name]).read_text(encoding="utf-8")
+    private_styles = ROOT / "styles.anning.json"
+    if name == "styles" and private_styles.is_file():
+        # Local overrides also enter task snapshots, keeping generation reproducible.
+        public = json.loads(content)
+        private = json.loads(private_styles.read_text(encoding="utf-8"))
+        if not isinstance(private, dict) or any(
+            not isinstance(style, dict)
+            or any(not isinstance(style.get(field), str) or not style[field].strip()
+                   for field in ("label", "image", "video"))
+            for style in private.values()
+        ):
+            raise ValueError("Invalid private styles: expected label, image and video strings")
+        content = json.dumps({**public, **private}, ensure_ascii=False)
+    return content
 
 
 def snapshot_skills() -> dict:

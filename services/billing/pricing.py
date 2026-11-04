@@ -151,3 +151,18 @@ def compute_video_cost(
         * _discount(pricing)
     )
     return _money(token_cost + image_cost)
+
+
+def compute_asr_cost(seconds: float, pricing: dict | None) -> Decimal:
+    """按配置的单价计算语音识别（ASR）费用。
+
+    默认 pricing 格式：
+    {"type": "asr", "currency": "CNY", "billing_unit": "minute", "price_per_minute": 0.015}
+    按实际秒数折算分钟：seconds / 60。
+    """
+    if not isinstance(pricing, dict) or pricing.get("type") != "asr":
+        return Decimal("0")
+    price_per_minute = _as_decimal(pricing.get("price_per_minute"))
+    minutes = _as_decimal(seconds) / Decimal("60")
+    cost = minutes * price_per_minute
+    return _money(cost * _discount(pricing))

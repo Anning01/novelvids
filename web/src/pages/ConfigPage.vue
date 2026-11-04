@@ -18,6 +18,7 @@ import {
   Video,
   X,
   Zap,
+  Mic,
 } from 'lucide-vue-next'
 import AppMultiSelect from '@/components/AppMultiSelect.vue'
 import AppIconTile from '@/components/AppIconTile.vue'
@@ -29,7 +30,7 @@ import { appConfirm, appConfirmState } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { AiModelConfig, ConfigEnumItem, EnumItem, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
 
-type ModelCategoryId = 'llm' | 'image' | 'video' | 'enhancement'
+type ModelCategoryId = 'llm' | 'image' | 'video' | 'enhancement' | 'asr'
 
 interface ModelCategory {
   id: ModelCategoryId
@@ -71,6 +72,11 @@ categories.push({
   get description() { return tr('单条视频或成片提升清晰度，按后台配置选择输出档位。') },
   taskTypes: [8], icon: Zap,
 })
+categories.push({
+  id: 'asr', get label() { return tr('语音识别') }, eyebrow: 'SPEECH',
+  get description() { return tr('负责视频原声转写、智能字幕与时间轴对齐（火山引擎 SeedASR 2.0 等）。') },
+  taskTypes: [9], icon: Mic,
+})
 const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; model: string; protocol: ImageApiProtocol }> = {
   seedance_2: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-260128', protocol: 'volcengine_ark' },
   seedance_2_fast: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-fast-260128', protocol: 'volcengine_ark' },
@@ -109,7 +115,7 @@ const isEditing = computed(() => editingConfigId.value !== null)
 const selectedConfigs = computed(() => configs.value.filter(item => configTaskTypes(item).some(value => selectedCategory.value.taskTypes.includes(value))))
 const taskOptions = computed(() => selectedCategory.value.taskTypes.map(value => ({
   value: String(value),
-  label: tr(taskTypes.value.find(item => item.value === value)?.label || '') || ({ get 1() { return tr('内容理解与人物提取') }, get 2() { return tr('角色与场景参考图') }, get 3() { return tr('分镜规划与提示词') }, get 4() { return tr('视频片段生成') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') } }[value] ?? tr('任务 {p0}', { p0: value })),
+  label: tr(taskTypes.value.find(item => item.value === value)?.label || '') || ({ get 1() { return tr('内容理解与人物提取') }, get 2() { return tr('角色与场景参考图') }, get 3() { return tr('分镜规划与提示词') }, get 4() { return tr('视频片段生成') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('视频画质增强') }, get 9() { return tr('语音识别') } }[value] ?? tr('任务 {p0}', { p0: value })),
 })))
 const imageModelTypeOptions = computed(() => [
   { value: '', label: tr('请选择受支持的模型') },
@@ -142,6 +148,7 @@ function toggleEnhancementResolution(value: string, shortSide: number, enabled: 
     enhancementPricing.value.push(...preset.filter(tier => tier.short_side_max === shortSide).map(tier => ({ ...tier })))
   }
 }
+const asrPrice = ref(0)
 const textPricing = ref({ input_price_per_1m: 0, output_price_per_1m: 0 })
 const tierPrices = ref<Record<string, number>>({})
 const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
@@ -252,6 +259,9 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
   form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_json_output: false, supports_tool_calls: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' }
+  const asrPreset = generationCapabilities.value.audio_recognition
+  asrPrice.value = asrPreset?.pricing.price_per_minute ?? 0
+  if (category.id === 'asr' && asrPreset) Object.assign(form.value, { base_url: asrPreset.base_url, model: asrPreset.model, api_protocol: asrPreset.api_protocol })
   textPricing.value = { input_price_per_1m: 0, output_price_per_1m: 0 }
   tierPrices.value = category.id === 'llm' || category.id === 'enhancement'
     ? {}
@@ -300,6 +310,7 @@ function openEdit(item: AiModelConfig) {
   textPricing.value = item.pricing?.type === 'text'
     ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
     : { input_price_per_1m: 0, output_price_per_1m: 0 }
+  asrPrice.value = item.pricing?.price_per_minute ?? 0
   tierPrices.value = item.pricing?.prices ? { ...item.pricing.prices } : {}
   inputImagePricing.value = item.pricing?.input_image
     ? { first_free: item.pricing.input_image.first_free, price_per_image: item.pricing.input_image.price_per_image }
@@ -374,6 +385,8 @@ async function saveConfig() {
     let pricing: ModelPricing
     if (selectedCategoryId.value === 'enhancement') {
       pricing = { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: enhancementPricing.value }
+    } else if (selectedCategoryId.value === 'asr') {
+      pricing = { type: 'asr', currency: 'CNY', billing_unit: 'minute', price_per_minute: asrPrice.value }
     } else if (selectedCategoryId.value === 'llm') {
       pricing = {
         type: 'text',
@@ -729,7 +742,8 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             </label>
           </div>
         </section>
-        <section v-if="selectedCategoryId === 'llm'" class="pricing-editor">
+        <section v-if="selectedCategoryId === 'asr'" class="pricing-editor"><span class="pricing-title">{{ tr('语音识别费用（元 / 分钟）') }}</span><div class="pricing-grid"><label><span>{{ tr('每分钟单价') }}</span><input v-model.number="asrPrice" aria-label="ASR price per minute" type="number" min="0" step="0.001" /></label></div></section>
+        <section v-else-if="selectedCategoryId === 'llm'" class="pricing-editor">
           <span class="pricing-title">{{ tr('费用设置（元 / 百万 token）') }}</span>
           <div class="pricing-grid">
             <label><span>{{ tr('输入单价') }}</span><input v-model.number="textPricing.input_price_per_1m" type="number" min="0" step="0.01" /></label>

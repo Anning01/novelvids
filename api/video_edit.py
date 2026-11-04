@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from auth.deps import AuthContext, get_auth_context
 from models.chapter_export import ChapterExport
-from schemas.video_edit import EditSave, EditExportIn, EditLibraryIn, EditSource
+from schemas.video_edit import EditSave, EditExportIn, EditLibraryIn, EditSource, SubtitleRecognizeIn
 from services.video_editor.drafts import chapter_scope, read_draft, save_draft
 from services.video_editor.assets import editor_storage, FORMATS
 from services.video_editor.sources import EditSources, public_media
@@ -63,3 +63,15 @@ async def history(chapter_id: int, ctx: AuthContext = Depends(get_auth_context))
         offset += 100
     rows = rows[:20]
     return ResponseSchema(data=[await describe_export(row) for row in rows])
+
+
+@router.post('/chapters/{chapter_id}/subtitles/recognize')
+async def recognize_subtitles(
+    chapter_id: int,
+    payload: SubtitleRecognizeIn | None = None,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    from services.video_editor.recognition import recognize_and_apply_subtitles
+    document = payload.document if payload else None
+    result = await recognize_and_apply_subtitles(chapter_id, ctx, client_document=document)
+    return ResponseSchema(data=result)

@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { editorApi } from './api'
 import { editorFixture } from './fixtures'
-import type { AudioClip } from './types'
+import type { AudioClip, EditDocument } from './types'
 import EditorWorkspace from './EditorWorkspace.vue'
 import EditorLibrary from './EditorLibrary.vue'
 import EditorTimeline from './EditorTimeline.vue'
@@ -12,7 +12,7 @@ import AppSelect from '@/components/AppSelect.vue'
 import EditorInspector from './EditorInspector.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 
-vi.mock('./api', () => ({ editorApi: { get: vi.fn(), save: vi.fn(), capabilities: vi.fn(), history: vi.fn(), export: vi.fn(), upload: vi.fn(), cancel: vi.fn() } }))
+vi.mock('./api', () => ({ editorApi: { get: vi.fn(), save: vi.fn(), capabilities: vi.fn(), history: vi.fn(), export: vi.fn(), upload: vi.fn(), cancel: vi.fn(), recognizeSubtitles: vi.fn() } }))
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear()
   vi.mocked(editorApi.get).mockResolvedValue({ data: editorFixture() } as never)
@@ -317,5 +317,85 @@ it.each(['light', 'dark'])('changes speed with the real inspector and saves with
   await wrapper.get('button[aria-label="保存剪辑草稿"]').trigger('click')
   await flushPromises()
   expect(vi.mocked(editorApi.save).mock.lastCall?.[2].clips[0]).toMatchObject({ duration: 8, trim_out: 8 })
+  wrapper.unmount()
+})
+
+it('clears existing subtitles and applies recognized speech segments when AI recognition completes', async () => {
+  const fixture = editorFixture()
+  // 增加一条旧字幕
+  fixture.document.clips.push({
+    id: 'old-sub-1',
+    type: 'subtitle',
+    name: '',
+    start: 0,
+    duration: 2,
+    text: '旧字幕待清空',
+    font: 'sans',
+    font_size: 42,
+    color: '#ffffff',
+    bottom: 10,
+  })
+  vi.mocked(editorApi.get).mockResolvedValue({ data: fixture } as never)
+  const recognizedDoc = JSON.parse(JSON.stringify(fixture.document)) as EditDocument
+  recognizedDoc.clips = recognizedDoc.clips.filter(c => c.type !== 'subtitle')
+  recognizedDoc.clips.push(
+    {
+      id: 'sub-new-1',
+      type: 'subtitle',
+      name: '',
+      start: 0.2,
+      duration: 1.5,
+      text: '大家好今天给大家介绍一款软件',
+      font: 'sans',
+      font_size: 42,
+      color: '#ffffff',
+      bottom: 10,
+    },
+    {
+      id: 'sub-new-2',
+      type: 'subtitle',
+      name: '',
+      start: 1.8,
+      duration: 2.1,
+      text: '如果你平时有在做短视频',
+      font: 'sans',
+      font_size: 42,
+      color: '#ffffff',
+      bottom: 10,
+    },
+  )
+  vi.mocked(editorApi.recognizeSubtitles).mockResolvedValue({
+    code: 0,
+    data: { document: recognizedDoc, subtitles_created: 2, revision: 2 },
+  } as never)
+
+  const wrapper = render()
+  await flushPromises()
+
+  // 触发 AI 识别
+  wrapper.findComponent(EditorLibrary).vm.$emit('recognize')
+  await flushPromises()
+
+  expect(editorApi.recognizeSubtitles).toHaveBeenCalled()
+  const timelineClips = wrapper.findComponent(EditorTimeline).props('document').clips
+  const subClips = timelineClips.filter(c => c.type === 'subtitle')
+  expect(subClips).toHaveLength(2)
+  expect(subClips[0]).toMatchObject({ id: 'sub-new-1', text: '大家好今天给大家介绍一款软件' })
+  expect(subClips[1]).toMatchObject({ id: 'sub-new-2', text: '如果你平时有在做短视频' })
+  // 检查首个字幕被选中
+  expect(wrapper.findComponent(EditorTimeline).props('selectedId')).toBe('sub-new-1')
+  wrapper.unmount()
+})
+
+it('keeps edits made while speech recognition is pending',async()=>{
+  let finish!: (value:never)=>void
+  vi.mocked(editorApi.recognizeSubtitles).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  const wrapper=render();await flushPromises()
+  wrapper.findComponent(EditorLibrary).vm.$emit('recognize');await flushPromises()
+  wrapper.findComponent(EditorLibrary).vm.$emit('subtitle');await flushPromises()
+  const before=JSON.stringify(wrapper.findComponent(EditorTimeline).props('document'))
+  finish({data:{document:editorFixture().document,subtitles_created:0,revision:1}} as never)
+  await flushPromises()
+  expect(JSON.stringify(wrapper.findComponent(EditorTimeline).props('document'))).toBe(before)
   wrapper.unmount()
 })
