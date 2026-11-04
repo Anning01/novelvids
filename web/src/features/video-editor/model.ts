@@ -15,12 +15,21 @@ export function validateDocument(document: EditDocument) {
     ids.add(clip.id)
     if (!Number.isFinite(clip.start) || clip.start < 0 || !Number.isFinite(clip.duration) || clip.duration < 1 / document.fps - .000001) throw new Error(tr('片段时间无效'))
     if (clip.type === 'video' || clip.type === 'audio') {
-      if (!Number.isFinite(clip.trim_in) || clip.trim_in < 0 || !Number.isFinite(clip.volume) || clip.volume < 0 || clip.volume > 1) throw new Error(tr('片段参数无效'))
+      if (!Number.isFinite(clip.trim_in) || clip.trim_in < 0 || !Number.isFinite(clip.volume) || clip.volume < 0 || clip.volume > 10) throw new Error(tr('片段参数无效'))
     }
-    if (clip.type === 'video' && (!Number.isFinite(clip.speed) || clip.speed < .25 || clip.speed > 4)) throw new Error(tr('片段参数无效'))
+    if (clip.type === 'video' && (!Number.isFinite(clip.speed) || clip.speed < .1 || clip.speed > 20)) throw new Error(tr('片段参数无效'))
     if ('scale' in clip && (!Number.isFinite(clip.scale) || clip.scale < .1 || clip.scale > 4)) throw new Error(tr('片段参数无效'))
+    if ((clip.type === 'video' || clip.type === 'sticker') && (!Number.isFinite(clip.rotation ?? 0) || Math.abs(clip.rotation ?? 0) > 180)) throw new Error(tr('片段参数无效'))
+    if (clip.type === 'subtitle' && (!Number.isFinite(clip.x ?? 50) || (clip.x ?? 50) < 0 || (clip.x ?? 50) > 100)) throw new Error(tr('片段参数无效'))
+    if (clip.type === 'sticker' && clip.scale_y != null && (!Number.isFinite(clip.scale_y) || clip.scale_y < .1 || clip.scale_y > 4)) throw new Error(tr('片段参数无效'))
     if (clip.type === 'sticker' && (!Number.isFinite(clip.x) || !Number.isFinite(clip.y) || clip.x < 0 || clip.x > 100 || clip.y < 0 || clip.y > 100 || clip.opacity < 0 || clip.opacity > 1)) throw new Error(tr('片段参数无效'))
-    if (clip.type === 'subtitle' && (!Number.isFinite(clip.font_size) || clip.font_size < 12 || clip.font_size > 160 || clip.bottom < 0 || clip.bottom > 90)) throw new Error(tr('片段参数无效'))
+    if (clip.type === 'subtitle') {
+      const within = (value: number, min: number, max: number) => Number.isFinite(value) && value >= min && value <= max
+      if (!within(clip.letter_spacing ?? 0, -5, 50) || !within(clip.line_spacing ?? 0, 0, 100) || !within(clip.opacity ?? 1, 0, 1)
+        || !within(clip.stroke_width ?? 2, 0, 10) || !within(clip.shadow ?? 1, 0, 10)
+        || !['left','center','right'].includes(clip.align ?? 'center') || !/^#[a-fA-F0-9]{6}$/.test(clip.stroke_color ?? '#000000')) throw new Error(tr('片段参数无效'))
+    }
+    if (clip.type === 'subtitle' && (!Number.isFinite(clip.font_size) || clip.font_size < 12 || clip.font_size > 160 || clip.bottom < 0 || clip.bottom > 100)) throw new Error(tr('片段参数无效'))
     if (clip.type === 'audio' && (clip.fade_in < 0 || clip.fade_out < 0 || Math.max(clip.fade_in, clip.fade_out) > clip.duration)) throw new Error(tr('淡入淡出时长不能超过片段时长'))
   }
   const videos = orderedVideos(document)
@@ -55,7 +64,7 @@ export function addMedia(value: EditDocument, media: EditorMedia, at: number, se
     start = selected ? selected.start + selected.duration : 0
     for (const other of next.clips) if (other.start >= start) other.start += duration
     clip = { id, name: media.name, type: 'video', source: media.source, start, duration, trim_in: 0, speed: 1, volume: 1, scale: 1, fit: 'contain' }
-  } else if (media.kind === 'audio') clip = { id, name: media.name, type: 'audio', source: media.source, start, duration, trim_in: 0, volume: .3, fade_in: 0, fade_out: 0, loop: false }
+  } else if (media.kind === 'audio') clip = { id, name: media.name, type: 'audio', source: media.source, start, duration, trim_in: 0, volume: 1, fade_in: 0, fade_out: 0, loop: false }
   else clip = { id, name: media.name, type: 'sticker', source: media.source, start, duration, x: 50, y: 50, scale: 1, opacity: 1 }
   next.clips.push(clip)
   return [validateDocument(next), id]
@@ -84,10 +93,26 @@ export function splitClip(value: EditDocument, id: string, time: number): [EditD
 export function duplicateClip(value: EditDocument, id: string): [EditDocument, string] {
   const original = value.clips.find(item => item.id === id)
   if (!original || original.type === 'video' && original.source.kind === 'missing') throw new Error(tr('请选择可编辑的片段'))
-  const next = cloneDocument(value), clip = { ...original, id: crypto.randomUUID(), start: original.start + original.duration }
+  return pasteClip(value, original, original.start + original.duration)
+}
+
+export function pasteClip(value: EditDocument, original: EditClip, at: number): [EditDocument, string] {
+  if (original.type === 'video' && original.source.kind === 'missing') throw new Error(tr('请选择可编辑的片段'))
+  const next = cloneDocument(value)
+  const clip = { ...JSON.parse(JSON.stringify(original)) as EditClip, id: crypto.randomUUID(), start: Math.max(0, at) }
   if (clip.type === 'video') for (const other of next.clips) if (other.start >= clip.start) other.start += clip.duration
   next.clips.push(clip)
   return [validateDocument(next), clip.id]
+}
+
+export function resizeClip(value: EditDocument, id: string, side: 'left' | 'right', delta: number, media?: EditorMedia): EditDocument {
+  const clip = value.clips.find(item => item.id === id)
+  if (!clip) throw new Error(tr('请选择可编辑的片段'))
+  if (side === 'right') return changeClip(value, id, { duration: frameTime(clip.duration + delta, value.fps) }, media)
+  const start = frameTime(Math.max(0, clip.start + delta), value.fps), actual = start - clip.start
+  const patch: ClipPatch = { start, duration: clip.duration - actual }
+  if (clip.type === 'video' || clip.type === 'audio') patch.trim_in = clip.trim_in + actual * (clip.type === 'video' ? clip.speed : 1)
+  return changeClip(value, id, patch, media)
 }
 
 export function trimClip(value: EditDocument, id: string, trimIn: number, trimOut: number, speed: number, media: EditorMedia): EditDocument {
@@ -108,12 +133,14 @@ export function moveClip(value: EditDocument, id: string, start: number): EditDo
 }
 
 export function subtitleLines(clip: SubtitleClip, document: EditDocument): string {
-  const limit = document.width * .88 / (clip.font_size * document.height / 1080)
+  const size = clip.font_size * document.height / 1080
+  const limit = document.width * .88
+  const spacing = (clip.letter_spacing ?? 0) * document.height / 1080
   const lines: string[] = []; let line = '', used = 0
   for (const char of clip.text.replace(/\r/g, '')) {
-    const weight = /[\u3000-\u9fff\uff01-\uff60\uac00-\ud7af\p{Extended_Pictographic}]/u.test(char) ? 1 : .55
-    if (char === '\n' || used + weight > limit) { lines.push(line); line = ''; used = 0; if (char === '\n') continue }
-    if (char.charCodeAt(0) >= 32 || char === '\t') { line += char; used += weight }
+    const weight = (/[\u3000-\u9fff\uff01-\uff60\uac00-\ud7af\p{Extended_Pictographic}]/u.test(char) ? 1 : .55) * size
+    if (char === '\n' || (line && used + weight + spacing > limit)) { lines.push(line); line = ''; used = 0; if (char === '\n') continue }
+    if (char.charCodeAt(0) >= 32 || char === '\t') { used += weight + (line ? spacing : 0); line += char }
   }
   lines.push(line)
   return lines.join('\n')
@@ -142,5 +169,8 @@ export function kindLabel(kind: ClipKind): string { return ({ video: tr('视频'
 export function audioVolume(clip: AudioClip, time: number) {
   if (!activeAt(clip, time)) return 0
   const offset = time - clip.start
-  return Math.max(0, Math.min(1, clip.volume)) * (clip.fade_in ? Math.min(1, offset / clip.fade_in) : 1) * (clip.fade_out ? Math.min(1, (clip.duration - offset) / clip.fade_out) : 1)
+  return Math.max(0, Math.min(10, clip.volume)) * (clip.fade_in ? Math.min(1, offset / clip.fade_in) : 1) * (clip.fade_out ? Math.min(1, (clip.duration - offset) / clip.fade_out) : 1)
 }
+
+export const volumeDb = (volume: number) => volume > 0 ? Math.round(20 * Math.log10(volume) * 10) / 10 : -20
+export const dbVolume = (db: number) => 10 ** (db / 20)

@@ -2,31 +2,14 @@
 import asyncio
 import os
 import subprocess
-import unicodedata
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from config import settings
 from schemas.video_edit import EditDocument
 from services.video_editor.sources import source_key
+from services.video_editor.subtitles import wrap_subtitle, subtitle_ass
 from services.video_enhancement.media import inspect_media
 from utils.messages import localized_message as msg
-
-
-def wrap_subtitle(text: str, width: int, font_size: float) -> str:
-    limit = width * .88 / font_size
-    lines, line, used = [], '', 0.0
-    for char in text.replace('\r', ''):
-        weight = 1 if unicodedata.east_asian_width(char) in {'W', 'F'} else .55
-        if char == '\n' or used + weight > limit:
-            lines.append(line)
-            line, used = '', 0
-            if char == '\n':
-                continue
-        if ord(char) >= 32 or char == '\t':
-            line += char
-            used += weight
-    lines.append(line)
-    return '\n'.join(lines)
 
 
 def subtitle_font() -> Path:
@@ -108,8 +91,12 @@ class EditRenderer:
                  f"crop=w='min(iw,{width})':h='min(ih,{height})',"
                  f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black')
         if clip.scale != 1:
-            # Preview transforms the fitted viewport, including its padding, before cropping.
-            video += (f",scale={sw}:{sh},crop=w='min(iw,{width})':h='min(ih,{height})',"
+            video += f',scale={sw}:{sh}'
+        if clip.rotation:
+            angle = f'{clip.rotation:.8f}*PI/180'
+            video += f",rotate={angle}:ow='ceil(rotw({angle})/2)*2':oh='ceil(roth({angle})/2)*2':fillcolor=black"
+        if clip.scale != 1 or clip.rotation:
+            video += (f",crop=w='min(iw,{width})':h='min(ih,{height})',"
                       f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black')
         video += f',setsar=1,fps={fps}'
         args = ['-ss', str(clip.trim_in), '-threads', '1', '-i', str(path)]
@@ -162,18 +149,21 @@ class EditRenderer:
                 out = f'o{i}'
                 enabled = f'gte(t,{clip.start:.8f})*lt(t,{clip.start + clip.duration:.8f})'
                 if clip.type == 'subtitle':
-                    textfile = directory / f'subtitle-{offset+i}.txt'
-                    size = clip.font_size * document.height / 1080
-                    textfile.write_text(wrap_subtitle(clip.text, document.width, size), encoding='utf-8')
-                    filters.append(f"[{current}]drawtext=fontfile='{filter_path(font)}':textfile='{textfile.name}':"
-                        f"expansion=none:fontsize={size:.8f}:fontcolor={clip.color}:borderw={max(1,size/18):.6f}:"
-                        f"bordercolor=black:x=(w-text_w)/2:y=h*(1-{clip.bottom/100:.8f})-text_h:"
-                        f"line_spacing={size*.2:.4f}:enable='{enabled}'[{out}]")
+                    textfile = directory / f'subtitle-{offset+i}.ass'
+                    textfile.write_text(subtitle_ass(clip, document.width, document.height), encoding='utf-8')
+                    filters.append(f"[{current}]ass=filename='{filter_path(textfile)}':fontsdir='{filter_path(font.parent)}'[{out}]")
                 else:
                     path, _ = sources[source_key(clip.source)]
                     args += ['-loop', '1', '-framerate', str(document.fps), '-threads', '1', '-i', str(path)]
                     sw = max(2, round(document.width * .25 * clip.scale / 2) * 2)
-                    filters.append(f'[{input_index}:v]scale={sw}:-2,format=rgba,colorchannelmixer=aa={clip.opacity}[s{i}]')
+                    sticker = f'[{input_index}:v]scale={sw}:-2'
+                    if clip.scale_y is not None and clip.scale_y != clip.scale:
+                        sticker += f",scale=iw:'max(2,round(ih*{clip.scale_y/clip.scale:.8f}/2)*2)'"
+                    sticker += f',format=rgba,colorchannelmixer=aa={clip.opacity}'
+                    if clip.rotation:
+                        angle = f'{clip.rotation:.8f}*PI/180'
+                        sticker += f",rotate={angle}:ow='ceil(rotw({angle})/2)*2':oh='ceil(roth({angle})/2)*2':fillcolor=none"
+                    filters.append(f'{sticker}[s{i}]')
                     filters.append(f"[{current}][s{i}]overlay=x=W*{clip.x/100:.8f}-w/2:y=H*{clip.y/100:.8f}-h/2:"
                                    f"eof_action=repeat:enable='{enabled}'[{out}]")
                     input_index += 1

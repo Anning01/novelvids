@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { editorApi } from './api'
 import { editorFixture } from './fixtures'
+import type { AudioClip } from './types'
 import EditorWorkspace from './EditorWorkspace.vue'
 import EditorLibrary from './EditorLibrary.vue'
 import EditorTimeline from './EditorTimeline.vue'
@@ -139,4 +140,138 @@ it('updates the preview when the timeline playhead seeks', async () => {
   expect(wrapper.findComponent(EditorTimeline).props('time')).toBe(3.5)
   expect(seek).toHaveBeenCalledOnce()
   wrapper.unmount()
+})
+
+function musicFixture() {
+  const fixture=editorFixture()
+  const music:AudioClip={id:'music',type:'audio',name:'月影.mp3',start:0,duration:4,trim_in:1,source:{kind:'asset',id:9},volume:.6,fade_in:.5,fade_out:1,loop:false}
+  fixture.document.clips.push(music)
+  fixture.media.push({key:'asset:9',source:music.source,kind:'audio',name:music.name,url:'/music.mp3',duration:5})
+  vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
+  return music
+}
+it.each(['metaKey','ctrlKey'] as const)('copies a snapshot and pastes music repeatedly at the playhead with undo and redo (%s)',async modifier=>{
+  const music=musicFixture()
+  const wrapper=render(false,document.body);await flushPromises()
+  try {
+    await wrapper.get('.clip-audio').trigger('click')
+    await wrapper.get('.clip-audio').trigger('keydown',{key:'c',[modifier]:true})
+    wrapper.findComponent(EditorInspector).vm.$emit('change',{volume:.2});await flushPromises()
+    wrapper.findComponent(EditorTimeline).vm.$emit('seek',4);await flushPromises()
+    await wrapper.get('.clip-audio').trigger('keydown',{key:'v',[modifier]:true})
+    const timeline=wrapper.findComponent(EditorTimeline)
+    let clips=timeline.props('document').clips.filter(clip=>clip.type==='audio')
+    expect(clips).toHaveLength(2)
+    expect(clips[1]).toEqual({...music,id:expect.any(String),start:4})
+    expect(clips[0].volume).toBe(.2)
+    expect(timeline.props('time')).toBe(8)
+    await wrapper.get('.clip-audio.selected').trigger('keydown',{key:'v',[modifier]:true})
+    clips=timeline.props('document').clips.filter(clip=>clip.type==='audio')
+    expect(clips.map(clip=>clip.start)).toEqual([0,4,8])
+    expect(new Set(clips.map(clip=>clip.id)).size).toBe(3)
+    await wrapper.get('.clip-audio.selected').trigger('keydown',{key:'z',[modifier]:true})
+    expect(timeline.props('document').clips).toHaveLength(5)
+    await wrapper.get('.editor-workspace').trigger('keydown',{key:'z',[modifier]:true,shiftKey:true})
+    expect(timeline.props('document').clips).toHaveLength(6)
+  } finally {wrapper.unmount()}
+})
+it.each(['metaKey','ctrlKey'] as const)('duplicates selected music end to end using the shortcut (%s)',async modifier=>{
+  musicFixture()
+  const wrapper=render(false,document.body);await flushPromises()
+  try {
+    await wrapper.get('.clip-audio').trigger('click')
+    for(let i=0;i<2;i++)await wrapper.get('.clip-audio.selected').trigger('keydown',{key:'d',[modifier]:true})
+    const clips=wrapper.findComponent(EditorTimeline).props('document').clips.filter(clip=>clip.type==='audio')
+    expect(clips.map(clip=>clip.start)).toEqual([0,4,8])
+  } finally {wrapper.unmount()}
+})
+it('preserves native text clipboard shortcuts and clears copied clips when chapters change',async()=>{
+  musicFixture()
+  const wrapper=render(false,document.body);await flushPromises()
+  try {
+    await wrapper.get('.clip-audio').trigger('click')
+    await wrapper.get('.clip-audio').trigger('keydown',{key:'c',metaKey:true})
+    for(const key of ['c','v','d']){
+      const event=new KeyboardEvent('keydown',{key,metaKey:true,bubbles:true,cancelable:true})
+      wrapper.get('.editor-search input').element.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    await wrapper.setProps({chapterId:451});await flushPromises()
+    const event=new KeyboardEvent('keydown',{key:'v',metaKey:true,bubbles:true,cancelable:true})
+    wrapper.get('.editor-workspace').element.dispatchEvent(event);await flushPromises()
+    expect(event.defaultPrevented).toBe(false)
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(4)
+  } finally {wrapper.unmount()}
+})
+it('does not paste or duplicate clips for viewers',async()=>{
+  musicFixture()
+  const wrapper=render(true,document.body);await flushPromises()
+  try {
+    for(const key of ['c','v','d'])await wrapper.get('.clip-audio').trigger('keydown',{key,metaKey:true})
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(4)
+  } finally {wrapper.unmount()}
+})
+
+it.each([
+  ['light','Delete'],['dark','Delete'],['light','Backspace'],['dark','Backspace'],
+])('removes the selected music from focused clips and trim handles and supports undo (%s, %s)',async(theme,key)=>{
+  document.documentElement.dataset.appTheme=theme
+  musicFixture()
+  const wrapper=render(false,document.body);await flushPromises()
+  try {
+    for(const selector of ['.clip-audio','.clip-audio .editor-clip-handle.left']){
+      await wrapper.get('.clip-audio').trigger('click')
+      const event=new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true})
+      wrapper.get(selector).element.dispatchEvent(event);await flushPromises()
+      expect(event.defaultPrevented).toBe(true)
+      expect(wrapper.findComponent(EditorTimeline).props('document').clips.map(clip=>clip.id)).toEqual(['v1','v2','v3'])
+      expect(wrapper.findComponent(EditorLibrary).props('media')).toHaveLength(4)
+      await wrapper.get('.editor-workspace').trigger('keydown',{key:'z',metaKey:true})
+      expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(4)
+    }
+  } finally {wrapper.unmount()}
+})
+it.each(['Delete','Backspace'])('does not remove clips when editing text, outside the editor, read-only or holding the key (%s)',async key=>{
+  musicFixture()
+  const wrapper=render(false,document.body);await flushPromises()
+  try {
+    await wrapper.get('.clip-audio').trigger('click')
+    for(const element of [wrapper.get('.editor-search input').element,document.body]){
+      const event=new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true})
+      element.dispatchEvent(event);await flushPromises()
+      expect(event.defaultPrevented).toBe(false)
+    }
+    await wrapper.get('.clip-audio').trigger('keydown',{key,repeat:true})
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(4)
+    useAuthStore().enabled=true;useAuthStore().memberships=[{team_id:1,role:'viewer'}] as never
+    await wrapper.get('.clip-audio').trigger('keydown',{key})
+    expect(wrapper.findComponent(EditorTimeline).props('document').clips).toHaveLength(4)
+  } finally {wrapper.unmount()}
+})
+
+it('commits overlay positions through the preview contract and undo restores the original placement',async()=>{
+ const wrapper=render();await flushPromises()
+ wrapper.findComponent(EditorLibrary).vm.$emit('subtitle');await flushPromises()
+ const clip=wrapper.findComponent(EditorInspector).props('clip')!
+ wrapper.findComponent(EditorPreview).vm.$emit('position',clip.id,{x:25,bottom:40});await flushPromises()
+ expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({x:25,bottom:40})
+ wrapper.findComponent(EditorTimeline).vm.$emit('undo');await flushPromises()
+ expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({bottom:10})
+ wrapper.unmount()
+})
+
+it('undoes sticker size and rotation changes as a single transform',async()=>{
+ const fixture=editorFixture()
+ fixture.document.clips.push({id:'sticker',type:'sticker',name:'Sticker',source:{kind:'asset',id:9},start:0,duration:4,x:50,y:50,scale:1,opacity:1})
+ fixture.media.push({key:'asset:9',source:{kind:'asset',id:9},kind:'sticker',name:'Sticker',url:'/sticker.png',width:80,height:40})
+ vi.mocked(editorApi.get).mockResolvedValue({data:fixture} as never)
+ const wrapper=render();await flushPromises()
+ wrapper.findComponent(EditorPreview).vm.$emit('select','sticker');await flushPromises()
+ wrapper.findComponent(EditorPreview).vm.$emit('position','sticker',{scale:2,scale_y:1,rotation:90});await flushPromises()
+ expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({scale:2,scale_y:1,rotation:90})
+ wrapper.findComponent(EditorTimeline).vm.$emit('undo');await flushPromises()
+ expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({scale:1,x:50,y:50})
+ wrapper.findComponent(EditorTimeline).vm.$emit('redo');await flushPromises()
+ expect(wrapper.findComponent(EditorInspector).props('clip')).toMatchObject({scale:2,rotation:90})
+ wrapper.unmount()
 })

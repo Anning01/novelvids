@@ -246,3 +246,112 @@ async def test_worker_discovers_queued_jobs_and_keeps_running_after_user_cancels
         assert (await AiTask.get(id=row.task_id)).status==5
     finally:
         await worker.stop()
+
+
+def test_legacy_subtitle_position_defaults_and_coordinate_validation():
+    legacy={'id':'caption','type':'subtitle','start':0,'duration':1,'text':'Legacy'}
+    value=EditDocument(clips=[legacy])
+    assert value.clips[0].x == 50 and value.clips[0].bottom == 10
+    moved=EditDocument(clips=[{**legacy,'x':25,'bottom':95}])
+    assert moved.clips[0].x == 25 and moved.clips[0].bottom == 95
+    for patch in ({'x':-1},{'x':101},{'x':float('nan')},{'bottom':101}):
+        with pytest.raises(ValidationError): EditDocument(clips=[{**legacy,**patch}])
+
+
+def test_extended_controls_preserve_legacy_defaults_and_reject_invalid_values():
+    old=EditDocument(clips=[video_clip(1),{'id':'a','type':'audio','source':{'kind':'asset','id':1},'start':0,'duration':1}])
+    assert old.clips[0].rotation == 0 and old.clips[1].volume == 1
+    for patch in ({'speed':.1,'volume':.1,'rotation':-180},{'speed':20,'volume':10,'rotation':180}):
+        assert EditDocument(clips=[video_clip(1,**patch)]).clips[0].speed == patch['speed']
+    assert EditDocument(clips=[video_clip(1,duration=1/24,speed=20)]).clips[0].duration == 1/24
+    for patch in ({'speed':.09},{'speed':20.01},{'volume':10.01},{'rotation':181},{'rotation':float('nan')}):
+        with pytest.raises(ValidationError): EditDocument(clips=[video_clip(1,**patch)])
+
+
+@pytest.mark.asyncio
+async def test_overlay_position_defaults_survive_save_and_repeated_initialization():
+    _,chapter,_,_=await project()
+    legacy={'version':1,'clips':[{'id':'legacy','type':'subtitle','start':0,'duration':1,'text':'Original','bottom':10}]}
+    draft=await ChapterEditDraft.create(chapter=chapter,document=legacy)
+    from services.schema_compat import ensure_video_editor_schema
+    for _ in range(2):
+        await Tortoise.generate_schemas(safe=True)
+        await ensure_video_editor_schema()
+        assert (await ChapterEditDraft.get(id=draft.id)).document == legacy
+        assert (await read_draft(chapter.id,AuthContext()))['document']['clips'][0]['x'] == 50
+    value=EditDocument.model_validate(legacy)
+    value.clips[0].x=25;value.clips[0].bottom=60
+    await save_draft(chapter.id,EditSave(revision=draft.revision,document=value),AuthContext())
+    reloaded=(await read_draft(chapter.id,AuthContext()))['document']['clips'][0]
+    assert reloaded['x'] == 25 and reloaded['bottom'] == 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('speed,rotation',[(.1,0),(20,90)])
+async def test_real_render_extended_speed_rotation_gain_and_subtitle_coordinates(media,speed,rotation):
+    from services.video_editor.render import EditRenderer
+    import array,math
+    async def no_cancel(): return False
+    renderer=EditRenderer(cancelled=no_cancel,progress=AsyncMock())
+    value=EditDocument(width=320,height=180,clips=[video_clip(1,duration=min(.5,2/speed),speed=speed,rotation=rotation,volume=2)])
+    clip=value.clips[0]
+    output=media[1].parent/f'speed-{speed}.mp4'
+    await renderer.segment(clip,value,(media[0],{'has_audio':True}),output,output.parent)
+    info=ffmpeg('-ss','0.04','-i',output,'-frames:v','1','-vf','crop=4:4:4:88','-pix_fmt','rgb24','-f','rawvideo','-')
+    assert (max(info)<25) if rotation==90 else (sum(info[0::3])/len(info[0::3])>180)
+    audio=array.array('f',ffmpeg('-i',output,'-vn','-f','f32le','-ac','1','-ar','8000','-'))
+    assert math.sqrt(sum(sample*sample for sample in audio)/len(audio))>.05
+
+
+@pytest.mark.asyncio
+async def test_exported_subtitle_uses_dragged_horizontal_and_vertical_position(tmp_path):
+    from services.video_editor.render import EditRenderer
+    async def no_cancel(): return False
+    renderer=EditRenderer(cancelled=no_cancel,progress=AsyncMock())
+    document=EditDocument(width=320,height=180,clips=[{'id':'s','type':'subtitle','start':0,'duration':1,'text':'XXXX','font_size':90,'x':25,'bottom':70}])
+    output=await renderer.render(document,{},tmp_path)
+    pixels=ffmpeg('-ss','0.5','-i',output,'-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','-')
+    white=[(i//3%320,i//3//320) for i in range(0,len(pixels),3) if min(pixels[i:i+3])>180]
+    assert white
+    assert 60<sum(x for x,y in white)/len(white)<100
+    assert 25<sum(y for x,y in white)/len(white)<60
+
+
+def test_sticker_transform_defaults_and_validation():
+    from schemas.video_edit import StickerClip
+    raw={'id':'sticker','type':'sticker','start':0,'duration':1,'source':{'kind':'asset','id':1}}
+    old=StickerClip.model_validate(raw)
+    assert old.rotation==0 and old.lock_aspect and old.scale_y is None
+    moved=StickerClip.model_validate({**raw,'scale':2,'scale_y':.5,'rotation':90,'lock_aspect':False})
+    assert moved.rotation==90 and moved.scale_y==.5
+    for patch in ({'rotation':181},{'rotation':float('nan')},{'scale_y':0},{'scale_y':4.1}):
+        with pytest.raises(ValidationError):StickerClip.model_validate({**raw,**patch})
+
+
+@pytest.mark.asyncio
+async def test_sticker_stretch_rotation_and_opacity_survive_draft_save_and_render(media):
+    from services.video_enhancement.media import export_media
+    _,chapter,_,video=await project()
+    ffmpeg('-f','lavfi','-i','color=c=yellow:s=16x8','-frames:v','1',media[2])
+    sticker=await editor_storage.import_file(chapter,UploadFile(filename='rect.png',file=io.BytesIO(media[2].read_bytes())),'sticker',AuthContext())
+    document=EditDocument(width=320,height=180,clips=[video_clip(video.id),
+        {'id':'i','type':'sticker','source':sticker['source'],'start':.5,'duration':1,'x':50,'y':50,'scale':1,'scale_y':.5,'lock_aspect':False,'rotation':90,'opacity':1}])
+    saved=await save_draft(chapter.id,EditSave(revision=0,document=document),AuthContext())
+    from services.schema_compat import ensure_video_editor_schema
+    for _ in range(2):
+        await Tortoise.generate_schemas(safe=True)
+        await ensure_video_editor_schema()
+        value=(await read_draft(chapter.id,AuthContext()))['document']['clips'][1]
+        assert value['rotation']==90 and value['scale_y']==.5 and not value['lock_aspect']
+    row=await submit_export(chapter.id,saved['revision'],AuthContext())
+    await editor_export_worker.execute(row.id)
+    task=await AiTask.get(id=row.task_id)
+    assert task.status==3,task.error_message
+    await row.refresh_from_db()
+    output=export_media.local_path(row.media_ref)
+    def pixel(x,y):
+        data=ffmpeg('-ss','0.8','-i',output,'-frames:v','1','-vf',f'crop=4:4:{x}:{y}','-pix_fmt','rgb24','-f','rawvideo','-')
+        return [sum(data[i::3])/len(data[i::3]) for i in range(3)]
+    assert pixel(158,55)[1]>180  # A tall, narrow sticker after stretching and rotation.
+    assert pixel(125,88)[1]<80
+    assert pixel(188,55)[0]>180 and pixel(188,55)[1]<80  # Transparent rotation corners retain the video.
