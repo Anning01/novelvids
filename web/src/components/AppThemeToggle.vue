@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, inject, ref } from 'vue'
-import { Check, Monitor, Moon, Sun } from 'lucide-vue-next'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Check, ChevronRight, Monitor, Moon, Sun } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
 import { appThemeControllerKey, type AppThemePreference, useAppThemeController } from '@/shared/appTheme'
 
@@ -14,6 +14,18 @@ withDefaults(defineProps<{
 
 const theme = inject(appThemeControllerKey) ?? useAppThemeController()
 const open = ref(false)
+const root = ref<HTMLElement>()
+function closeOutside(event: Event) {
+  if (event.target instanceof Node && !root.value?.contains(event.target)) open.value = false
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', closeOutside)
+  document.addEventListener('focusin', closeOutside)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', closeOutside)
+  document.removeEventListener('focusin', closeOutside)
+})
 const options: Array<{ value: AppThemePreference; label: string; description: string; icon: typeof Monitor }> = [
   { value: 'system', get label() { return tr('跟随系统') }, get description() { return tr('自动使用系统外观') }, icon: Monitor },
   { value: 'light', get label() { return tr('浅色') }, get description() { return tr('始终使用浅色外观') }, icon: Sun },
@@ -27,10 +39,18 @@ function select(preference: AppThemePreference) {
   theme.setPreference(preference)
   open.value = false
 }
+
+function closeFromEscape(event: KeyboardEvent) {
+  // 菜单展开时消费 Esc，避免同时关闭外层弹窗；已关闭时放行给外层弹窗。
+  if (!open.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  open.value = false
+}
 </script>
 
 <template>
-  <div class="app-theme-toggle" :class="`is-${placement}`" @keydown.esc="open = false">
+  <div ref="root" class="app-theme-toggle" :class="`is-${placement}`" @keydown.esc="closeFromEscape">
     <AppButton
       class="app-theme-toggle__trigger"
       variant="secondary"
@@ -46,6 +66,7 @@ function select(preference: AppThemePreference) {
         <span>{{ tr('外观') }}</span>
         <small>{{ activeLabel }}</small>
       </span>
+      <ChevronRight v-if="placement === 'sidebar'" class="app-theme-toggle__chevron" :size="14" aria-hidden="true" />
     </AppButton>
     <div v-if="open" class="app-theme-toggle__menu" role="menu" :aria-label="tr('选择外观主题')">
       <button
@@ -79,6 +100,7 @@ function select(preference: AppThemePreference) {
 .app-theme-toggle__menu > button > svg:last-child { justify-self: end; }
 .app-theme-toggle.is-sidebar { position: relative; right: auto; bottom: auto; z-index: 1; margin: auto 8px 12px; }
 .app-theme-toggle.is-sidebar .app-theme-toggle__trigger { width: 100%; min-height: 44px; justify-content: flex-start; gap: 10px; padding: 0 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--app-border); backdrop-filter: none; }
+.app-theme-toggle__chevron { flex: 0 0 auto; }
 .app-theme-toggle__label { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
 .app-theme-toggle__label small { overflow: hidden; color: var(--app-text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .app-theme-toggle.is-sidebar .app-theme-toggle__menu { right: auto; bottom: 52px; left: 0; }
@@ -89,7 +111,7 @@ function select(preference: AppThemePreference) {
 @media (max-width: 720px) {
   .app-theme-toggle.is-sidebar { margin-right: 8px; margin-left: 8px; }
   .app-theme-toggle.is-sidebar .app-theme-toggle__trigger { justify-content: center; padding: 0; }
-  .app-theme-toggle.is-sidebar .app-theme-toggle__label { display: none; }
+  .app-theme-toggle.is-sidebar .app-theme-toggle__label, .app-theme-toggle.is-sidebar .app-theme-toggle__chevron { display: none; }
   .app-theme-toggle.is-sidebar .app-theme-toggle__menu { position: fixed; right: 12px; bottom: 12px; left: 80px; width: auto; }
 }
 </style>

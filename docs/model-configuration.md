@@ -88,3 +88,16 @@ AI 模型配置保存在数据库中，通过 Web 界面的「**设置 / 模型�
 已保存的完整提示词默认原样使用。调整风格或 Skills 后，如需改变旧资产效果，应先优化并保存提示词，再生成，详见[技能定制](agent-skills-workflow.md)。
 
 MediaKit 属于独立的「视频画质增强」配置，不是生视频模型，详见[画质增强](video-enhancement.md)。
+
+### MiniMax H3 · AutoDL
+
+新增模型时选择 **MiniMax H3 · AutoDL**，或编辑启动时补齐的 `minimax-h3-autodl` 配置（默认停用、空密钥）：
+
+- 服务地址：`https://autodl.art/api/v1/comfyui`
+- 模型名称（工作流 ID）：`minimax_h3_zm_u24`
+- API Key：AutoDL 令牌管理中 **ComfyUI 分组**的 Token；直接填写 Token，无需添加 `Bearer`。
+- 支持 480p/768p、16:9/9:16/1:1、1–15 秒、最多 9 张参考图和 3 段音频；不支持参考视频或首尾帧模式。无参考图时沿用已验证示例的空白图输入。
+- 素材必须是 AutoDL 可访问的 HTTP(S) URL；本地图片和音频需先配置 OSS，不能直接传 Base64。
+- **需人工审核费用配置**：按秒统计，初始单价为零，请按当前峰谷时段或合同价格填写后台分辨率单价；不继承 MiniMax 官方单价和输入图片费用。查询响应的 `duration` 是推理耗时，不作为成片秒数。
+
+提交、查询协议见 [AutoDL ComfyUI API 文档](https://autodl.art/docs/comfyui_api/)，工作流参数见 [H3 多图多音频工作流](https://www.autodl.art/large-model/comfyui/minimax_h3_zm_u24)。结果 URL 有效期短，任务完成后由现有下载流程及时保存。

@@ -41,3 +41,12 @@ it('shows a discoverable label in the sidebar placement', () => {
   expect(wrapper.get('.app-theme-toggle__label').text()).toContain('外观')
   expect(wrapper.get('.app-theme-toggle').classes()).toContain('is-sidebar')
 })
+
+it('dismisses the theme menu when another sidebar control is used', async () => {
+  const wrapper = mount(AppThemeToggle, { attachTo: document.body, props: { placement: 'sidebar' } })
+  await wrapper.get('.app-theme-toggle__trigger').trigger('click')
+  expect(wrapper.find('[role="menu"]').exists()).toBe(true)
+  document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+  await wrapper.vm.$nextTick()
+  expect(wrapper.find('[role="menu"]').exists()).toBe(false)
+})

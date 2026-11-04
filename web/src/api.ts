@@ -117,7 +117,7 @@ export function uploadWithProgress(
   })
 }
 
-async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) => string, pageSize = 100): Promise<PaginationResponse<T>> {
+export async function requestAllPages<T>(urlForPage: (page: number, pageSize: number) => string, pageSize = 100): Promise<PaginationResponse<T>> {
   const first = await request<PaginationResponse<T>>(urlForPage(1, pageSize))
   const pageCount = first.data.pagination.pages
   if (pageCount <= 1) return first
@@ -288,7 +288,7 @@ export const api = {
   assets: (novelId: number, page = 1, pageSize = 100, chapterId?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, chapter_id: chapterId })}`),
   referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),
   projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24, assetType?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, asset_type: assetType, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
-  publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/asset${qs({ asset_type: assetType, is_global: true, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
+  publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/resource-library/catalog/project-assets${qs({ asset_type: assetType, page, page_size: pageSize, search })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
   assetGenerationHistory: (id: number) => request<SingleResponse<AssetGenerationRecord[]>>(`/asset/${id}/generation-history`),
   recordAssetImageEdit: (id: number, data: { image_url: string; source_image_url?: string; output_format?: string }) => request<SingleResponse<Asset>>(`/asset/${id}/generation-history/edit`, { method: 'POST', body: JSON.stringify(data) }),

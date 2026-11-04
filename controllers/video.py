@@ -421,11 +421,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
         for reference in referenced_media:
             library_verified = None
             if reference.library_resource_id is not None:
-                from services.resource_references import resource_for, validate_resource_model
-                resource = await resource_for((novel.team_id or 0) if settings.AUTH_ENABLED and novel else 0, reference.library_resource_id)
+                from services.resource_references import resource_for, validate_resource_model, reference_kind
+                resource = await resource_for((novel.team_id or 0) if settings.AUTH_ENABLED and novel else 0, reference.library_resource_id, kind=None)
                 validate_resource_model(resource, capabilities)
-                if reference.type != "video":
-                    raise HTTPException(400, detail="资源库仅支持参考视频")
+                if reference.type != reference_kind(resource):
+                    raise HTTPException(400, detail=localized_message("引用类型与资源类型不一致"))
                 reference.mention_url = reference.mention_url or reference.url
                 reference.url = resource.storage_ref
                 for field in ("duration", "width", "height", "fps", "codec", "content_type", "size_bytes"):

@@ -18,7 +18,7 @@ from pydantic_ai.usage import UsageLimits
 from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.settings import ModelSettings
 
-from prompts.creation_agent import render_creation_instructions, render_creation_request
+from prompts.creation_agent import render_creation_instructions, render_creation_request, render_turn_limited_notice
 from services.language import task_language
 from schemas.creation_agent import AgentConfiguration, ImagePromptEdit, StoryboardPromptEdit, CreationReply, AgentTarget
 from schemas.creation_objects import CreationObjectQuery, CreationChangeSet, CreationPromptPatch
@@ -48,8 +48,12 @@ class CreationAgentDeps:
 def final_reply_due(ctx: RunContext[CreationAgentDeps]) -> bool:
     if ctx.deps.changes is None:
         return False
-    calls = getattr(ctx.model, 'calls', None)
-    count = len(calls) if isinstance(calls, list) else ctx.usage.requests
+    # Only main-loop requests count; history summarization shares the model
+    # wrapper but must not bring the final reply forward by one request.
+    count = getattr(ctx.model, 'main_requests', None)
+    if not isinstance(count, int):
+        calls = getattr(ctx.model, 'calls', None)
+        count = len(calls) if isinstance(calls, list) else ctx.usage.requests
     limit = getattr(ctx.model, 'request_limit', None) or ctx.deps.limits.request_limit
     return count >= limit - 1
 
@@ -124,6 +128,22 @@ def _narrow_change_schema(schema: dict, capabilities: set[str]) -> dict:
     return schema
 
 
+DEFAULT_WRITE_CAPABILITIES = frozenset({'query', 'read', 'create', 'update', 'undo'})
+
+
+def default_write_capabilities(changes) -> set[str]:
+    """Capabilities an authorized run may use without declaring them first.
+
+    Declaring capabilities only narrowed the batch tool's schema; authorization
+    itself comes from the frozen write scope, per-object checks and the
+    read-before-write rule. Deletion stays declaration-gated because it is
+    destructive and the skill requires an explicit user request for it.
+    """
+    if changes is None or changes.request.write_scope == 'read_only':
+        return set()
+    return set(DEFAULT_WRITE_CAPABILITIES)
+
+
 async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions):
     if final_reply_due(ctx):
         ctx.deps.turn_limited = True
@@ -136,7 +156,7 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
     capabilities = (
         {'query', 'read', 'create', 'update', 'delete', 'undo'}
         if ctx.deps.tools_enabled
-        else ctx.deps.enabled_capabilities
+        else ctx.deps.enabled_capabilities | default_write_capabilities(ctx.deps.changes)
     )
     if ctx.deps.changes:
         if not capabilities:
@@ -183,7 +203,10 @@ def creation_instructions(ctx: RunContext[CreationAgentDeps]):
     from prompts.skill_pack import instructions
     execution = current_execution.get()
     if execution:
-        return instructions(execution.snapshot, execution.language, 'editing') + '\n' + str({'authorized_production': [item.model_dump(mode='json') for item in ctx.deps.changes.request.production_intents] if ctx.deps.changes else []})
+        rendered = instructions(execution.snapshot, execution.language, 'editing') + '\n' + str({'authorized_production': [item.model_dump(mode='json') for item in ctx.deps.changes.request.production_intents] if ctx.deps.changes else []})
+        if final_reply_due(ctx):
+            rendered += '\n' + render_turn_limited_notice()
+        return rendered
     return render_creation_instructions(language=task_language.get() or "zh", crud=bool(ctx.deps.changes), turn_limited=final_reply_due(ctx))
 
 
@@ -203,8 +226,10 @@ creation_agent = Agent(
 )
 
 _TECHNICAL_REPLY_REFERENCE = re.compile(
+    # Only schema field names and explicit id labels are internal. A user-visible
+    # noun followed by a number ("场景 2", "Scene 2") is ordinary wording.
     r"(?i)(?:\b(?:scene_id|asset_id|asset_type|target_id|change_id|chapter_id|variant_refs|variant_bindings|client_ref)\b"
-    r"|\b(?:scene|asset|id)\s*[:#：]?\s*\d+\b|场景\s*\d+)"
+    r"|\bid\s*[:#：]?\s*\d+\b)"
 )
 
 
@@ -526,7 +551,7 @@ async def apply_creation_changes(ctx: RunContext[CreationAgentDeps], changes: Cr
     try:
         if not ctx.deps.tools_enabled:
             required = {operation.operation for operation in changes.operations}
-            enabled = ctx.deps.enabled_capabilities
+            enabled = ctx.deps.enabled_capabilities | default_write_capabilities(ctx.deps.changes)
             allowed = all(
                 operation in enabled
                 or operation.startswith('create_') and 'create' in enabled

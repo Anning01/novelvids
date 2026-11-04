@@ -63,6 +63,14 @@ function updatePlacement() {
   }
 }
 
+function closeFromEscape(event: KeyboardEvent) {
+  // 菜单展开时消费 Esc，避免同时关闭外层弹窗；已关闭时放行给外层弹窗。
+  if (!open.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  open.value = false
+}
+
 function toggleOption(value: string) {
   emit('update:modelValue', props.modelValue.includes(value)
     ? props.modelValue.filter(item => item !== value)
@@ -87,7 +95,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="root" class="app-multi-select" :class="{ 'is-open': open, 'is-empty': !selectedOptions.length }" @keydown.esc="open = false">
+  <div ref="root" class="app-multi-select" :class="{ 'is-open': open, 'is-empty': !selectedOptions.length }" @keydown.esc="closeFromEscape">
     <AppButton
       type="button"
       variant="secondary"

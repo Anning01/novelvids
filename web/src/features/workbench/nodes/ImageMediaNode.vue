@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import { useLibraryMedia } from '@/features/resource-library/useLibraryMedia'
 
 import type { NodeProps } from '@vue-flow/core'
 import { Image, Pencil, Upload } from 'lucide-vue-next'
@@ -14,7 +15,7 @@ const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
 const uploading = ref(false)
 const annotationOpen = ref(false)
-const url = computed(() => typeof props.data.url === 'string' ? props.data.url : '')
+const { url, error: libraryError } = useLibraryMedia(() => props.data)
 const title = computed(() => String(props.data.title || props.data.originalFilename || tr('上传图片')))
 const annotations = computed(() => Array.isArray(props.data.annotations) ? props.data.annotations as ImageAnnotation[] : [])
 const dimensions = computed(() => {
@@ -53,8 +54,8 @@ function saveAnnotations(next: ImageAnnotation[]) {
     <WorkbenchNodeFrame v-bind="props" :data="{ ...data, kind: 'image_media', title, status: uploading ? tr('上传中') : 'ready' }">
       <div class="workbench-uploaded-media-node workbench-uploaded-image-node">
         <span class="workbench-uploaded-media-node__type"><Image :size="14" aria-hidden="true" />{{ tr('图片') }}</span>
-        <img v-if="url" :src="url" :alt="tr('{p0}预览', { p0: title })" @load="captureDimensions">
-        <div v-else class="workbench-media-placeholder">{{ tr('图片不可用') }}</div>
+        <img v-if="url && !libraryError" :src="url" :alt="tr('{p0}预览', { p0: title })" @load="captureDimensions">
+        <div v-else class="workbench-media-placeholder">{{ libraryError || tr('图片不可用') }}</div>
         <small v-if="dimensions">{{ dimensions }}</small>
         <label class="workbench-uploaded-media-node__replace" :class="{ 'is-disabled': uploading }">
           <Upload :size="14" aria-hidden="true" />{{ uploading ? tr('上传中…') : tr('重新上传') }}

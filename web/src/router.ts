@@ -21,7 +21,7 @@ const router = createRouter({
     { path: '/novel/:id', component: () => import('./pages/NovelPage.vue') },
     { path: '/novel/:novelId/chapter/:chapterId/step/:stepId', component: () => import('./pages/WorkflowPage.vue') },
     { path: '/resource-library', component: () => import('./pages/ResourceLibraryPage.vue') },
-    { path: '/assets', component: () => import('./pages/VideosPage.vue') },
+    { path: '/assets', component: () => import('./pages/VideosPage.vue'), beforeEnter: to => to.query.scope === 'public' ? { path: '/resource-library', query: { kind: to.query.category === 'audio' ? 'voice' : 'character' } } : true },
     { path: '/settings', component: () => import('./pages/ConfigPage.vue'), meta: { roles: ['admin'] } },
     { path: '/billing', component: () => import('./pages/BillingPage.vue'), meta: { roles: ['admin', 'creator'] } },
     { path: '/members', name: 'members', component: () => import('./pages/MembersPage.vue'), meta: { roles: ['admin'] } },

@@ -4,12 +4,11 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia } from 'pinia'
 import { exportApi } from '@/features/video-export/api'
 import ShortDramaVideoPage from './ShortDramaVideoPage.vue'
-import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { api } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
 import { downloadVideoZip } from '@/shared/downloadZip'
-import AppSelect from '@/components/AppSelect.vue'
 import AppButton from '@/components/AppButton.vue'
+import EditorWorkspace from '@/features/video-editor/EditorWorkspace.vue'
 import { TaskStatusEnum } from '@/types'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -50,6 +49,7 @@ async function mountPage() {
       plugins: [router, createPinia()],
       components: { AppButton },
       stubs: {
+        EditorWorkspace: { props: ['chapterId', 'projectId', 'filename'], template: '<div class="editor-workspace"></div>', expose: ['openExport'], methods: { openExport() {} } },
         ShortDramaWorkspaceShell: {
           template: '<div><slot name="header-end" /><slot /></div>',
         },
@@ -100,23 +100,13 @@ describe('短剧视频页完整视频下载', () => {
     vi.mocked(downloadVideoZip).mockResolvedValue(undefined)
   })
 
-  it('合并当前章节已有分镜后下载，不再下载选中的单个分镜', async () => {
-    const wrapper = await mountPage()
-    await flushPromises()
-
-    wrapper.findComponent(AppSelect).vm.$emit('update:modelValue', 'merged')
-    await flushPromises()
-    const downloadButton = wrapper.findAll('button').find(button => button.text().includes('下载本集'))
-    expect(downloadButton).toBeTruthy()
-    await downloadButton!.trigger('click')
-    await flushPromises()
-
-    expect(api.mergeChapterVideos).toHaveBeenCalledWith(337)
-    expect(downloadFile).toHaveBeenCalledWith(
-      '/media/videos/merged/chapter_337_merged.mp4',
-      '雾城-第12集-山雨欲来-完整视频.mp4',
-    )
-    expect(downloadFile).not.toHaveBeenCalledWith('/media/videos/100.mp4', expect.anything())
+  it('opens edit export separately from downloading original shots', async () => {
+    const wrapper = await mountPage(); await flushPromises()
+    expect(wrapper.findComponent(EditorWorkspace).exists()).toBe(true)
+    const exportButton = wrapper.findAll('button').find(button => button.text().includes('导出成片'))
+    expect(exportButton).toBeTruthy()
+    expect(api.mergeChapterVideos).not.toHaveBeenCalled()
+    expect(downloadVideoZip).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -139,7 +129,7 @@ describe('短剧视频页完整视频下载', () => {
     expect(wrapper.text()).not.toContain('准备当前原片')
     expect(exportApi.list).not.toHaveBeenCalled()
     expect(exportApi.models).not.toHaveBeenCalled()
-    expect(wrapper.find('.video-timeline').exists()).toBe(true)
+    expect(wrapper.findComponent(EditorWorkspace).exists()).toBe(true)
     expect(wrapper.find('button[aria-label="按序号打包下载分镜视频"]').exists()).toBe(true)
     wrapper.unmount()
   })
@@ -154,24 +144,27 @@ describe('短剧视频页完整视频下载', () => {
     const wrapper = await mountPage(); await flushPromises()
     await wrapper.get('button[aria-label="按序号打包下载分镜视频"]').trigger('click'); await flushPromises()
     expect(wrapper.text()).toContain('正在打包 1/2')
-    expect(wrapper.find('button[aria-label="下载方式"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[aria-label="按序号打包下载分镜视频"]').attributes('disabled')).toBeDefined()
     wrapper.unmount(); await flushPromises()
     expect(signal?.aborted).toBe(true)
     expect(api.mergeChapterVideos).not.toHaveBeenCalled()
   })
 
-  it('shows a first-frame thumbnail for every completed clip even without poster metadata', async () => {
-    const wrapper = await mountPage()
+  it('downloads only real media and does not collapse the saved editing timeline', async () => {
+    const wrapper = await mountPage(); await flushPromises()
+    await wrapper.get('button[aria-label="按序号打包下载分镜视频"]').trigger('click'); await flushPromises()
+    expect(downloadVideoZip).toHaveBeenCalledWith(expect.arrayContaining([
+      { url: '/media/videos/100.mp4', filename: '001-分镜1.mp4' },
+    ]), expect.any(String), expect.any(Object))
+    expect(wrapper.findComponent(EditorWorkspace).exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not display a chapter from another project when the URL carries its ID', async () => {
+    const wrapper = await mountPage(); await flushPromises()
+    await wrapper.vm.$router.push('/create/short-drama/video/7?chapter=999')
     await flushPromises()
-    const clips = wrapper.findAll('.video-timeline-clip')
-    expect(clips).toHaveLength(3)
-    const thumbnails = wrapper.find('.video-timeline').findAllComponents(VideoThumbnail)
-    expect(thumbnails).toHaveLength(2)
-    expect(thumbnails[0]!.props()).toMatchObject({ src: '/media/videos/100.mp4', poster: '' })
-    expect(thumbnails[1]!.props()).toMatchObject({ src: '/media/videos/101.mp4', poster: '' })
-    expect(clips[2]!.text()).toContain('待生成')
-    expect(clips[2]!.findComponent(VideoThumbnail).exists()).toBe(false)
-    expect(wrapper.find('.video-stage-poster').findComponent(VideoThumbnail).props('fit')).toBe('contain')
+    expect(wrapper.findComponent(EditorWorkspace).props('chapterId')).toBe(337)
     wrapper.unmount()
   })
 })

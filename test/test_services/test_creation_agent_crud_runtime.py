@@ -65,11 +65,13 @@ async def test_crud_model_discovers_then_creates_without_manual_selection():
         nonlocal calls
         calls += 1
         names = {tool.name for tool in info.function_tools}
-        assert names == (
-            {'get_creation_context', 'get_creation_prompt_rules', 'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'query_creation_objects', 'read_creation_objects'}
-            if calls == 1 else
-            {'get_creation_context', 'get_creation_prompt_rules', 'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'read_creation_objects', 'query_creation_objects', 'apply_creation_changes'}
-        )
+        # An authorized run exposes its writers from the first request; the model
+        # no longer needs a declaration request before it can write.
+        assert names == {
+            'get_creation_context', 'get_creation_prompt_rules', 'read_creation_history', 'patch_creation_prompts',
+            'create_creation_setting', 'query_creation_objects', 'read_creation_objects', 'apply_creation_changes',
+            'undo_creation_change',
+        }
         assert 'expected_version' not in json.dumps([t.parameters_json_schema for t in info.function_tools])
         if calls == 1:
             return ModelResponse(parts=[ToolCallPart('get_creation_context', {
@@ -94,6 +96,79 @@ async def test_crud_model_discovers_then_creates_without_manual_selection():
     assert result.output == '已为本章新增红伞设定。'
     assert await Asset.filter(canonical_name='红伞', novel_id=changes.novel_id).exists()
     assert await PromptChange.filter(task_id=task.id).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_authorized_write_needs_no_capability_declaration_round_trip():
+    changes, scene, _, _, task = await crud()
+    legacy = PromptEditService(novel_id=changes.novel_id, task_id=task.id, allowed_targets=set(), max_batch_size=8)
+    calls = 0
+
+    def model(messages, info):
+        nonlocal calls
+        calls += 1
+        assert 'apply_creation_changes' in {tool.name for tool in info.function_tools}
+        if calls == 1:
+            return ModelResponse(parts=[ToolCallPart('apply_creation_changes', {'operations': [
+                {'operation': 'create_setting', 'client_ref': 'umbrella', 'asset_type': 3, 'name': '黑伞',
+                 'description': '黑色长柄伞', 'prompt': '黑色布面长柄伞，木柄，完整展示'}]}, tool_call_id='create')])
+        saved = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)][-1]
+        assert saved.content['status'] == 'saved', saved.content
+        return ModelResponse(parts=[TextPart('已为本章新增黑伞设定。')])
+
+    result = await creation_agent.run('本章增加一把黑伞', model=FunctionModel(model),
+        deps=CreationAgentDeps(service=legacy, changes=changes, context={}), usage_limits=UsageLimits(request_limit=3))
+    assert calls == 2, 'an authorized write must not need a separate capability declaration request'
+    assert result.output == '已为本章新增黑伞设定。'
+    assert await Asset.filter(canonical_name='黑伞', novel_id=changes.novel_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_is_still_withheld_until_the_run_declares_it():
+    changes, scene, _, _, task = await crud()
+    legacy = PromptEditService(novel_id=changes.novel_id, task_id=task.id, allowed_targets=set(), max_batch_size=8)
+    calls = 0
+
+    def changes_schema(info):
+        return json.dumps(next(t.parameters_json_schema for t in info.function_tools
+                               if t.name == 'apply_creation_changes'))
+
+    def model(messages, info):
+        nonlocal calls
+        calls += 1
+        assert 'apply_creation_changes' in {tool.name for tool in info.function_tools}
+        if calls == 1:
+            assert 'DeleteObject' not in changes_schema(info)
+            return ModelResponse(parts=[ToolCallPart('get_creation_context', {'capabilities': ['delete']}, tool_call_id='context')])
+        assert 'DeleteObject' in changes_schema(info)
+        if calls == 2:
+            return ModelResponse(parts=[ToolCallPart('apply_creation_changes', {'operations': [
+                {'operation': 'delete', 'target': {'kind': 'scene', 'id': scene.id}}]}, tool_call_id='remove')])
+        saved = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)][-1]
+        assert saved.content['status'] == 'saved'
+        assert saved.content['changes'][0]['operation'] == 'delete'
+        return ModelResponse(parts=[TextPart('已移除该分镜。')])
+
+    result = await creation_agent.run('删除这个分镜', model=FunctionModel(model),
+        deps=CreationAgentDeps(service=legacy, changes=changes, context={}), usage_limits=UsageLimits(request_limit=4))
+    assert calls == 3
+    assert result.output == '已移除该分镜。'
+
+
+@pytest.mark.asyncio
+async def test_read_only_run_still_hides_the_write_tools():
+    changes, _, _, _, task = await crud(scope='read_only')
+    legacy = PromptEditService(novel_id=changes.novel_id, task_id=task.id, allowed_targets=set(), max_batch_size=8)
+
+    def model(messages, info):
+        names = {tool.name for tool in info.function_tools}
+        assert 'apply_creation_changes' not in names
+        assert 'undo_creation_change' not in names
+        return ModelResponse(parts=[TextPart('本章目前有两处设定。')])
+
+    result = await creation_agent.run('本章有哪些设定', model=FunctionModel(model),
+        deps=CreationAgentDeps(service=legacy, changes=changes, context={}), usage_limits=UsageLimits(request_limit=2))
+    assert result.output == '本章目前有两处设定。'
 
 
 @pytest.mark.asyncio

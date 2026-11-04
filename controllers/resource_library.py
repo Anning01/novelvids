@@ -1,4 +1,5 @@
 """目录规则与资源生命周期编排。"""
+from utils.messages import localized_message
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -9,16 +10,16 @@ from config import settings
 from utils.media_name import video_display_name
 from models.scene import Scene
 from models.video import Video
-from models.resource_library import ResourceFolder, VideoResource
+from models.resource_library import ResourceFolder, VideoResource, ResourcePlacement
 from schemas.resource_library import FolderWrite, ResourceImport
 from services.oss import normalize_media_url, resolve_media_url
-from services.resource_storage import resource_storage
+from services.resource_storage import resource_storage, library_media_storage
 from services.resource_references import resource_for, reference_dict, validate_resource_model
 
 
 def resource_dict(resource: VideoResource) -> dict:
     return {
-        "id": resource.id, "folder_id": resource.folder_id, "name": video_display_name(resource.name),
+        "id": resource.id, "folder_id": resource.folder_id, "name": video_display_name(resource.name), "kind": resource.kind,
         "filename": resource.filename, "url": resolve_media_url(resource.storage_ref),
         "storage_ref": resource.storage_ref, "poster_url": resolve_media_url(resource.poster_ref),
         "state": resource.state, "created_at": resource.created_at,
@@ -58,26 +59,34 @@ class ResourceLibraryController:
         except IntegrityError as exc:
             raise HTTPException(409, detail="同一目录下已有同名文件夹") from exc
 
-    async def reserve(self, team_id: int, user_id: int | None, filename: str, folder_id: int = 0):
-        resource_storage.check_filename(filename)
+    async def reserve(self, team_id: int, user_id: int | None, filename: str, folder_id: int = 0, *, kind='video'):
+        if not filename or len(Path(filename).name)>255:
+            raise HTTPException(422, detail=localized_message('文件名不能为空且不能超过 255 个字符'))
+        if kind == 'video':
+            resource_storage.check_filename(filename)
+        else:
+            library_media_storage.check_kind(filename, kind)
         async with in_transaction():
             if folder_id:
                 await ResourceFolder.filter(id=folder_id, team_id=team_id).select_for_update()
             await self.folder(team_id, folder_id)
             return await VideoResource.create(
-                team_id=team_id, created_by=user_id, folder_id=folder_id,
+                team_id=team_id, created_by=user_id, folder_id=folder_id, kind=kind,
                 filename=Path(filename).name, name=video_display_name(Path(filename).name),
                 storage_ref=resource_storage.new_ref(team_id, filename),
             )
 
     async def finalize(self, team_id: int, resource_id: int):
-        resource = await resource_for(team_id, resource_id, ready=False)
+        resource = await resource_for(team_id, resource_id, ready=False, kind=None)
         if resource.state in {"ready", "source"}:
             return resource
         if resource.state != "uploading":
             raise HTTPException(409, detail="上传已结束或正在删除")
         try:
-            media, poster = await resource_storage.inspect(resource.storage_ref, resource.filename)
+            if resource.kind == 'video':
+                media, poster = await resource_storage.inspect(resource.storage_ref, resource.filename)
+            else:
+                media, poster = await library_media_storage.inspect(resource.storage_ref, resource.filename, resource.kind)
             async with in_transaction():
                 if resource.folder_id:
                     await ResourceFolder.filter(id=resource.folder_id, team_id=team_id).select_for_update()
@@ -109,7 +118,7 @@ class ResourceLibraryController:
             await VideoResource.filter(id__in=ids, team_id=team_id).update(folder_id=folder_id)
 
     async def cancel_upload(self, team_id: int, resource_id: int):
-        resource = await resource_for(team_id, resource_id, ready=False)
+        resource = await resource_for(team_id, resource_id, ready=False, kind=None)
         if resource.state != "uploading":
             return
         await VideoResource.filter(id=resource_id, team_id=team_id, state="uploading").update(state="delete_failed")
@@ -152,6 +161,8 @@ class ResourceLibraryController:
         async with in_transaction():
             await ResourceFolder.filter(team_id=team_id).select_for_update()
             folder_ids, resource_ids = await self.folder_contents(team_id, folder_id)
+            if await ResourcePlacement.filter(team_id=team_id, folder_id__in=folder_ids).exists():
+                raise HTTPException(409, detail=localized_message('文件夹内包含角色或参考音色，请先移出这些资源'))
             if await VideoResource.filter(id__in=resource_ids, state="uploading").exists():
                 raise HTTPException(409, detail="文件夹内有视频正在上传，请等待上传完成或取消后再删除")
             await ResourceFolder.filter(id__in=folder_ids, team_id=team_id).update(deleting=True)

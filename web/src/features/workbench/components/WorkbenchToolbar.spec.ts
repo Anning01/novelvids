@@ -36,13 +36,13 @@ it('shows every verified add menu item in order', async () => {
     '水印',
     '视频合成器',
     '上传图片',
-    '从资源库选择视频',
+    '从资源库选择',
     '上传视频',
     '上传音频',
   ])
 
   expect(wrapper.find('[aria-label="复用项目资产"]').exists()).toBe(false)
-  await wrapper.findAll('[role="menuitem"]').find(item => item.text() === '从资源库选择视频')!.trigger('click')
+  await wrapper.findAll('[role="menuitem"]').find(item => item.text() === '从资源库选择')!.trigger('click')
   expect(wrapper.emitted('chooseLibrary')).toHaveLength(1)
   expect(wrapper.find('[role="menu"]').exists()).toBe(false)
 })

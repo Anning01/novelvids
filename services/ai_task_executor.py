@@ -97,6 +97,8 @@ class AiTaskExecutor:
         )
 
         for task in stale_tasks:
+            if task.request_params.get('operation') == 'editor_render':
+                continue  # Local render leases own recovery, cancellation and timeouts.
             if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.status in {1, 6} or task.stage in {"waiting_media", "needs_review"}):
                 continue
             handler = self._handlers.get(task_type)

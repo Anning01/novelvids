@@ -10,7 +10,8 @@ const props = withDefaults(defineProps<{
   title: string
   muted?: boolean
   playbackRate?: number
-}>(), { nextSrc: '', poster: '', muted: false, playbackRate: 1 })
+  volume?: number
+}>(), { nextSrc: '', poster: '', muted: false, playbackRate: 1, volume: 1 })
 const emit = defineEmits<{
   play: []
   pause: []
@@ -18,11 +19,13 @@ const emit = defineEmits<{
   timeupdate: [seconds: number]
   error: []
   click: []
+  buffering: [value: boolean]
 }>()
 const sources = ref(['', ''])
 const activeSlot = ref(0)
 const visibleSlot = ref(0)
 const buffering = ref(false)
+watch(buffering, value => emit('buffering', value))
 const elements: Array<HTMLVideoElement | null> = [null, null]
 let command: AbortController | null = null
 let wantsPlayback = false
@@ -54,6 +57,7 @@ function configure() {
     if (!element) return
     element.muted = index !== activeSlot.value || props.muted
     element.playbackRate = props.playbackRate
+    element.volume = Math.min(1, Math.max(0, props.volume))
   })
 }
 
@@ -82,7 +86,7 @@ watch(() => props.src, src => {
   void nextTick(() => present(activeSlot.value))
 }, { immediate: true, flush: 'sync' })
 watch(() => props.nextSrc, preloadNext)
-watch(() => [props.muted, props.playbackRate], configure)
+watch(() => [props.muted, props.playbackRate, props.volume], configure)
 
 function waitForMetadata(video: HTMLVideoElement, signal: AbortSignal) {
   if (signal.aborted) return Promise.reject(new DOMException('Playback changed', 'AbortError'))
@@ -156,7 +160,7 @@ onBeforeUnmount(() => {
     element.load()
   })
 })
-defineExpose({ start, pause })
+defineExpose({ start, pause, time: () => elements[activeSlot.value]?.currentTime || 0 })
 </script>
 
 <template>

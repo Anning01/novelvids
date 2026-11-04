@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 
 from models.config import AiModelConfig
+from services.video.autodl import AutoDLVideoGenerator
 from services.video.base import BaseVideoGenerator
 from services.video.capabilities import capabilities_for
 from services.video.minimax import MiniMaxH3Generator
@@ -82,6 +83,9 @@ video_generator_factory = VideoGeneratorFactory({
     ),
     VideoGenerationModelTypeEnum.minimax_h3: VideoGeneratorAdapterSpec(
         MiniMaxH3Generator, VideoModelTypeEnum.minimax
+    ),
+    VideoGenerationModelTypeEnum.minimax_h3_autodl: VideoGeneratorAdapterSpec(
+        AutoDLVideoGenerator, VideoModelTypeEnum.minimax
     ),
     VideoGenerationModelTypeEnum.wan_3: VideoGeneratorAdapterSpec(
         Wan3Generator, VideoModelTypeEnum.wan

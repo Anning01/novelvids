@@ -97,7 +97,11 @@ function closeFromOutside(event: PointerEvent) {
   if (!root.value?.contains(target) && !menu.value?.contains(target)) open.value = false
 }
 
-function closeFromEscape() {
+function closeFromEscape(event: KeyboardEvent) {
+  // 菜单展开时消费 Esc，避免同时关闭外层弹窗；已关闭时放行给外层弹窗。
+  if (!open.value) return
+  event.preventDefault()
+  event.stopPropagation()
   open.value = false
 }
 

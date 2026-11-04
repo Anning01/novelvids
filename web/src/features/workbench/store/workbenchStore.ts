@@ -3,6 +3,7 @@ import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { api, mediaUrl, persistedMediaRef, retryableStatusError } from '@/api'
+import { catalogApi, type CatalogResource } from '@/features/resource-library/catalog'
 import { libraryApi } from '@/features/resource-library/api'
 import type { VideoResource } from '@/features/resource-library/types'
 import { readVideoReferenceMedia } from '@/shared/scenePromptReferences'
@@ -446,7 +447,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async deleteSelection() { return this.deleteNodeKeys([...this.selectedNodeKeys]) },
     addMediaNode(kind: 'audio_reference' | 'digital_human') {
       this.checkpoint()
-      const stamp = Date.now()
+      let stamp = Date.now()
+      while (this.nodes.some(item => item.key === `${kind}-${stamp}`)) stamp++
       const key = `${kind}-${stamp}`
       const item = node(-stamp, key, kind, kind === 'audio_reference' ? tr('参考音频') : tr('数字人'), { x: 520, y: 120 + this.manualNodes.length * 340 }, {
         resource: null,
@@ -485,6 +487,35 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success(tr('{p0}上传完成', { p0: label }))
       return item
     },
+    async addCatalogResource(resource: CatalogResource, position?: Point) {
+      if (resource.catalog === 'asset') {
+        const novelId = this.novelId, chapterId = this.chapterId
+        const applied = (await catalogApi.apply(resource.key, novelId, undefined, undefined, chapterId)).data
+        if (!applied.asset_id || this.novelId !== novelId || this.chapterId !== chapterId) return
+        const asset = (await api.asset(applied.asset_id)).data
+        if (this.novelId !== novelId || this.chapterId !== chapterId) return
+        if (!this.assets.some(row => row.id === asset.id)) this.assets.push(asset)
+        this.rebuildGraph()
+        const item = this.nodeByKey(`asset-${asset.id}`)
+        if (item && position) item.position = position
+        if (item) this.selectNode(item.key)
+        this.persistLayout()
+        return item
+      }
+      if (resource.catalog === 'voice' || resource.catalog === 'human') {
+        if (!resource.payload) return
+        this.addMediaNode(resource.catalog === 'voice' ? 'audio_reference' : 'digital_human')
+        const key = this.selectedNodeKeys[0]
+        if (key) { this.setMediaResource(key, resource.payload); const added = this.nodeByKey(key); if (added) added.data.resource_catalog_key = resource.key; this.persistLayout() }
+        return
+      }
+      const kind = resource.kind === 'video' ? 'video_media' : ['bgm', 'sound'].includes(resource.kind) ? 'audio_media' : 'image_media'
+      const item = this.addUploadedMedia(kind, { filename: resource.filename || resource.name, original_filename: resource.name, content_type: '' }, position)
+      item.title = resource.name
+      item.data = { ...item.data, url: resource.url, storage_ref: resource.storage_ref, library_resource_id: resource.catalog === 'media' ? resource.id : undefined, width: resource.width, height: resource.height, durationSeconds: resource.duration }
+      this.persistLayout()
+      return item
+    },
     addLibraryVideo(resource: VideoResource, position?: Point) {
       const item = this.addUploadedMedia('video_media', { filename: resource.filename, original_filename: resource.name, content_type: resource.content_type }, position)
       item.title = resource.name
@@ -498,11 +529,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         .map(edge => ({ node: this.nodeByKey(edge.source), edge }))
         .filter(value => value.node)
       const saved = readVideoReferenceMedia(this.scenes.find(item => item.id === sceneId)?.metadata?.video_reference_media)
-        .filter(item => item.type === 'video' && item.library_resource_id)
+        .filter(item => item.library_resource_id)
       const references = disambiguateMaterialMentionNames(sources.map(value => ({ ...value, name: value.node!.title.trim() || value.node!.key })))
-        .filter(value => value.node!.kind === 'video_media' && Number(value.node!.data.library_resource_id)
-          && (!value.edge.config?.inputMode || ['auto', 'reference_video'].includes(String(value.edge.config.inputMode))))
-        .map(value => ({ type: 'video' as const, url: String(value.node!.data.storage_ref || value.node!.data.url), name: value.name, mention_name: value.name,
+        .filter(value => ['video_media', 'image_media'].includes(value.node!.kind) && Number(value.node!.data.library_resource_id)
+          && (!value.edge.config?.inputMode || ['auto', value.node!.kind === 'image_media' ? 'reference_image' : 'reference_video'].includes(String(value.edge.config.inputMode))))
+        .map(value => ({ type: (value.node!.kind === 'video_media' ? 'video' : 'image') as 'video' | 'image', url: String(value.node!.data.storage_ref || value.node!.data.url), name: value.name, mention_name: value.name,
           library_resource_id: Number(value.node!.data.library_resource_id), duration: Number(value.node!.data.durationSeconds) || undefined }))
       const unique = new Map<number, VideoReferenceMedia>()
       for (const reference of [...saved, ...references]) {
@@ -1165,7 +1196,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
             const resource = source.data.resource as { image_url?: string } | undefined
             return resource?.image_url ? [resource.image_url] : []
           }
-          return typeof source.data.url === 'string' ? [source.data.url] : []
+          const url = source.data.storage_ref || source.data.url
+          return typeof url === 'string' ? [url] : []
         })
       return [...new Set(urls.filter(Boolean))].slice(0, 10)
     },
