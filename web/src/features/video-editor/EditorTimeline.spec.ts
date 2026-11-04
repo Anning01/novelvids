@@ -52,3 +52,50 @@ it('ignores secondary mouse buttons', () => {
   window.dispatchEvent(pointer('pointermove', 150))
   expect(wrapper.emitted('seek')).toBeUndefined()
 })
+
+async function subtitleTimeline() {
+  const wrapper=render()
+  const document=editorFixture().document
+  document.clips.push({id:'sub',type:'subtitle',name:'Caption',start:2,duration:6.7,text:'字幕',font:'sans',font_size:42,color:'#ffffff',bottom:10})
+  await wrapper.setProps({document,selectedId:'sub'})
+  await wrapper.get('input[type=range]').setValue(24)
+  return wrapper
+}
+it.each(['dark','light'])('shows subtitle movement during pointer movement before committing once on release (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  const wrapper=await subtitleTimeline()
+  const clip=wrapper.get<HTMLButtonElement>('.clip-subtitle')
+  clip.element.dispatchEvent(pointer('pointerdown',100))
+  window.dispatchEvent(pointer('pointermove',124));await wrapper.vm.$nextTick()
+  expect(clip.element.style.transform).toBe('translateX(24px)')
+  expect(clip.classes()).toContain('is-dragging')
+  expect(wrapper.props('document').clips.find(clip=>clip.id==='sub')?.start).toBe(2)
+  expect(wrapper.emitted('move')).toBeUndefined()
+  window.dispatchEvent(pointer('pointerup',148));await wrapper.vm.$nextTick()
+  expect(wrapper.emitted('move')).toEqual([['sub',4]])
+  expect(clip.classes()).not.toContain('is-dragging')
+})
+it.each(['left','right'])('previews subtitle %s edge position, width and duration before committing',async side=>{
+  const wrapper=await subtitleTimeline()
+  const clip=wrapper.get<HTMLButtonElement>('.clip-subtitle')
+  wrapper.get(`.clip-subtitle .editor-clip-handle.${side}`).element.dispatchEvent(pointer('pointerdown',100))
+  window.dispatchEvent(pointer('pointermove',124));await wrapper.vm.$nextTick()
+  expect(Number.parseFloat(clip.element.style.width)).toBeCloseTo(side==='left'?135:183)
+  expect(clip.get('small').text()).toBe(side==='left'?'5.7s':'7.7s')
+  expect(wrapper.props('document').clips.find(clip=>clip.id==='sub')?.duration).toBe(6.7)
+  expect(wrapper.emitted('edge')).toBeUndefined()
+  window.dispatchEvent(pointer('pointerup',124))
+  expect(wrapper.emitted('edge')).toEqual([['sub',side,1]])
+})
+it('accounts for timeline scrolling during a drag and cancels without a document change',async()=>{
+  const wrapper=await subtitleTimeline()
+  wrapper.get<HTMLButtonElement>('.clip-subtitle').element.dispatchEvent(pointer('pointerdown',100))
+  wrapper.get('.editor-timeline-scroll').element.scrollLeft+=24
+  window.dispatchEvent(pointer('pointermove',124));await wrapper.vm.$nextTick()
+  expect(wrapper.get<HTMLButtonElement>('.clip-subtitle').element.style.transform).toBe('translateX(48px)')
+  window.dispatchEvent(pointer('pointercancel',124));await wrapper.vm.$nextTick()
+  expect(wrapper.get<HTMLButtonElement>('.clip-subtitle').element.style.transform).toBe('')
+  expect(wrapper.emitted('move')).toBeUndefined()
+  window.dispatchEvent(pointer('pointerup',124))
+  expect(wrapper.emitted('move')).toBeUndefined()
+})

@@ -1,0 +1,16 @@
+[
+  {"id":"none","name":"无样式","color":"#ffffff","stroke_color":"#000000","stroke_width":0,"shadow":0,"bold":false},
+  {"id":"white-black","name":"白字黑边","color":"#ffffff","stroke_color":"#000000","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"black-white","name":"黑字白边","color":"#151515","stroke_color":"#ffffff","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"yellow-black","name":"黄字黑边","color":"#ffe600","stroke_color":"#000000","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"white-coral","name":"白字珊瑚边","color":"#ffffff","stroke_color":"#ff8983","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"blue-black","name":"浅蓝黑边","color":"#b4def2","stroke_color":"#000000","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"pink-rose","name":"粉字玫红边","color":"#ffd8ec","stroke_color":"#ed5b9c","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"ice-blue","name":"冰蓝亮边","color":"#bdecff","stroke_color":"#459de8","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"lime-olive","name":"青柠橄榄边","color":"#bfd848","stroke_color":"#64853a","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"mist-blue","name":"雾蓝灰边","color":"#9dcbd9","stroke_color":"#51677d","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"white-red","name":"白字红边","color":"#ffffff","stroke_color":"#ff244a","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"brick-white","name":"砖红白边","color":"#b44c3b","stroke_color":"#ffffff","stroke_width":3,"shadow":0,"bold":true},
+  {"id":"cream-shadow","name":"奶油柔影","color":"#fff0b9","stroke_color":"#69614d","stroke_width":2,"shadow":2,"bold":true},
+  {"id":"pink-shadow","name":"蔷薇柔影","color":"#ffb6ba","stroke_color":"#965258","stroke_width":2,"shadow":2,"bold":true}
+]

@@ -15,7 +15,8 @@ router = APIRouter()
 @router.get('/capabilities')
 async def capabilities(ctx: AuthContext = Depends(get_auth_context)):
     from config import settings
-    return ResponseSchema(data={'formats': FORMATS, 'max_size_mb': settings.RESOURCE_LIBRARY_MAX_SIZE_MB,
+    from services.video_editor.subtitles import subtitle_styles
+    return ResponseSchema(data={'subtitle_styles': subtitle_styles(),'formats': FORMATS, 'max_size_mb': settings.RESOURCE_LIBRARY_MAX_SIZE_MB,
         'max_duration': settings.VIDEO_EDITOR_MAX_DURATION_SECONDS, 'max_overlays': settings.VIDEO_EDITOR_MAX_OVERLAYS,
         'max_audio_tracks': settings.VIDEO_EDITOR_MAX_AUDIO_TRACKS, 'fps': [24, 25, 30, 60],
         'max_source_mb': settings.VIDEO_EDITOR_MAX_SOURCE_MB,

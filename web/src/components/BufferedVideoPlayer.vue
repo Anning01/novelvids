@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { LoaderCircle } from 'lucide-vue-next'
 import { tr } from '@/i18n'
+import { MediaGain } from '@/shared/mediaGain'
 
 const props = withDefaults(defineProps<{
   src: string
@@ -11,6 +12,7 @@ const props = withDefaults(defineProps<{
   muted?: boolean
   playbackRate?: number
   volume?: number
+  audioProcessing?: boolean
 }>(), { nextSrc: '', poster: '', muted: false, playbackRate: 1, volume: 1 })
 const emit = defineEmits<{
   play: []
@@ -27,6 +29,7 @@ const visibleSlot = ref(0)
 const buffering = ref(false)
 watch(buffering, value => emit('buffering', value))
 const elements: Array<HTMLVideoElement | null> = [null, null]
+const gain = new MediaGain()
 let command: AbortController | null = null
 let wantsPlayback = false
 let disposed = false
@@ -56,8 +59,9 @@ function configure() {
   elements.forEach((element, index) => {
     if (!element) return
     element.muted = index !== activeSlot.value || props.muted
-    element.playbackRate = props.playbackRate
-    element.volume = Math.min(1, Math.max(0, props.volume))
+    element.playbackRate = Math.min(16, Math.max(.1, props.playbackRate))
+    if (props.audioProcessing) gain.set(element, props.volume)
+    else element.volume = Math.min(1, Math.max(0, props.volume))
   })
 }
 
@@ -152,6 +156,7 @@ function onWaiting(index: number) {
 }
 
 onBeforeUnmount(() => {
+  gain.dispose()
   disposed = true
   pause()
   elements.forEach(element => {
@@ -160,7 +165,7 @@ onBeforeUnmount(() => {
     element.load()
   })
 })
-defineExpose({ start, pause, time: () => elements[activeSlot.value]?.currentTime || 0 })
+defineExpose({ start, pause, seekFrame: (time: number) => { const element = elements[activeSlot.value]; if (element && element.readyState >= 1 && !element.seeking) element.currentTime = time }, time: () => elements[activeSlot.value]?.currentTime || 0 })
 </script>
 
 <template>
@@ -168,7 +173,7 @@ defineExpose({ start, pause, time: () => elements[activeSlot.value]?.currentTime
     <video v-for="index in [0, 1]" :key="index" :ref="element => setElement(index, element)"
       :src="sources[index] || undefined" :poster="index === activeSlot ? poster || undefined : undefined"
       :class="{ 'is-visible': Boolean(src) && index === visibleSlot }"
-      :muted="index !== activeSlot || muted" preload="auto" playsinline
+      :crossorigin="audioProcessing ? 'anonymous' : undefined" :muted="index !== activeSlot || muted" preload="auto" playsinline
       :aria-label="index === activeSlot ? title : undefined" :aria-hidden="index !== activeSlot || !src"
       tabindex="-1" @loadedmetadata="configure" @loadeddata="present(index)" @seeked="present(index)"
       @playing="present(index)" @waiting="onWaiting(index)" @stalled="onWaiting(index)" @error="onError(index)"
