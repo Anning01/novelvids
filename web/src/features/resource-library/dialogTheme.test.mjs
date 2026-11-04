@@ -32,4 +32,14 @@ describe('resource library theme inheritance', () => {
     // 验证时长定位在封面右下角
     expect(vueContent).toContain('.library-cover small { position:absolute; right:8px; bottom:8px;')
   })
+
+  it('styles folder, rename and move dialogs like the upload dialog', () => {
+    const cssContent = fs.readFileSync(path.resolve(__dirname, 'dialog.css'), 'utf-8')
+
+    expect(cssContent).toMatch(/\.resource-library-dialog\.resource-library-dialog--form \.el-dialog__body\s*\{[^}]*padding:\s*20px 24px 22px/s)
+    expect(cssContent).toMatch(/\.resource-library-dialog\.resource-library-dialog--form \.el-dialog__header\s*\{[^}]*padding:\s*16px 24px/s)
+    expect(cssContent).toMatch(/\.resource-library-dialog\.resource-library-dialog--form \.el-dialog__footer\s*\{[^}]*border-top:\s*1px solid var\(--app-border\)[^}]*background:\s*var\(--app-surface-muted\)/s)
+    expect(cssContent).toMatch(/\.resource-library-dialog\.resource-library-dialog--form \.catalog-form input\s*\{[^}]*border-radius:\s*9px[^}]*font-size:\s*13px/s)
+    expect(cssContent).toMatch(/\.catalog-dialog__actions\s*\{[^}]*justify-content:\s*flex-end/s)
+  })
 })
