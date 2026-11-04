@@ -222,11 +222,12 @@ class SkillExecution:
                     raise ModelRetry(str(error)) from None
             if skill == "storyboard" and hasattr(output, "shots"):
                 from pydantic_ai import ModelRetry
-                from services.storyboard.validation import validate_skill_storyboard_timing
+                from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration
 
                 try:
-                    if "storyboard_contract" in ctx.deps.contents:
-                        for shot in output.shots:
+                    for shot in output.shots:
+                        validate_storyboard_duration(shot, self.params.get("shot_duration_range"))
+                        if "storyboard_contract" in ctx.deps.contents:
                             validate_skill_storyboard_timing(shot)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None

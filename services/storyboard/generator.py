@@ -78,9 +78,12 @@ async def generate_storyboard(
     if execution:
         from schemas.agent_workflow import SkillStoryboard, StructuredSkillStoryboard
         modern = "storyboard_contract" in execution.snapshot.contents
-        result = await execution.generate('storyboard', {'chapter': long_text,
+        facts = {'chapter': long_text,
             'entities': [entity.model_dump() for entity in entities], 'strategy': storyboard_strategy,
-            'constraints': creative_constraints or []}, StructuredSkillStoryboard if modern else SkillStoryboard)
+            'constraints': creative_constraints or []}
+        if duration_range := execution.params.get("shot_duration_range"):
+            facts["shot_duration_range"] = duration_range
+        result = await execution.generate('storyboard', facts, StructuredSkillStoryboard if modern else SkillStoryboard)
         if modern:
             from services.storyboard.validation import prepare_skill_storyboard
             result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,

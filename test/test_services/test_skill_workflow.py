@@ -341,21 +341,41 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
 
 
 @pytest.mark.asyncio
-async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically():
+@pytest.mark.parametrize("video_model_type,protocol,maximum", [
+    (None, None, None),
+    ("minimax_h3_autodl", "autodl", 15),
+    ("seedance_2_5", "volcengine_ark", 30),
+])
+async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically(
+    video_model_type, protocol, maximum,
+):
+    import json
+
     from controllers.scene import scene_controller
+    from models.config import AiModelConfig
     from models.scene import Scene
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.models.function import FunctionModel
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart, UserPromptPart
     from test.test_services.test_prompt_language import _shot
     from prompts.storyboard import format_storyboard_prompt
 
     candidate = _shot()
     candidate.actions = ["0s-4s: rain falls."]
     candidate.reference_only_types = ["人物", "场景", "物品"]
+    if maximum is not None:
+        candidate.duration = f"{maximum}s"
     expected_prompt = format_storyboard_prompt(candidate, "en")
 
     novel, chapter, _ = await enabled_project()
+    if video_model_type:
+        video_model = await AiModelConfig.create(
+            name="video", model="test", task_type=4, api_key="test",
+            base_url="https://example.test", video_model_type=video_model_type,
+            api_protocol=protocol, is_active=True,
+        )
+        novel.video_model_config_id = video_model.id
+        await novel.save(update_fields=["video_model_config_id"])
     old = await Scene.create(
         chapter=chapter,
         sequence=1,
@@ -364,8 +384,23 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
         duration=4,
     )
 
+    durations = []
+
     def respond(messages, info):
+        user_part = next(part for message in messages for part in message.parts if isinstance(part, UserPromptPart))
+        facts = json.loads(user_part.content)["untrusted_task_facts"]["input"]
+        assert "shot_duration_range" in info.instructions
+        if maximum is None:
+            assert "shot_duration_range" not in facts
+        else:
+            assert facts["shot_duration_range"][1] == maximum
         shot = candidate.model_dump(exclude={"prompt"})
+        if maximum == 15 and not durations:
+            shot["duration"] = "20s"
+        elif maximum == 15:
+            retry = next(part for message in messages for part in message.parts if isinstance(part, RetryPromptPart))
+            assert "20s" in str(retry.content) and "15" in str(retry.content)
+        durations.append(shot["duration"])
         return ModelResponse(
             parts=[ToolCallPart(info.output_tools[0].name, {"shots": [shot]})]
         )
@@ -382,7 +417,10 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     assert await Scene.with_deleted().filter(id=old.id).exists()
     assert str(old.id) in task.request_params["replaced_scene_snapshots"]
     assert await Scene.filter(chapter=chapter).count() == 1
-    assert (await Scene.get(chapter=chapter)).prompt == expected_prompt
+    saved = await Scene.get(chapter=chapter)
+    assert saved.prompt == expected_prompt
+    assert saved.duration == float(candidate.duration.removesuffix("s"))
+    assert len(durations) == (2 if maximum == 15 else 1)
 
 
 @pytest.mark.asyncio

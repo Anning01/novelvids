@@ -1,6 +1,6 @@
 
 from utils.messages import localized_message
-from controllers.config import general_config_controller
+from controllers.config import ai_model_config_controller, general_config_controller
 from utils.crud import CRUDBase
 from models.scene import Scene
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from models.chapter import Chapter
 from models.ai_task import AiTask
 from services.ai_task_executor import ai_task_executor
 from services.storyboard.strategies import storyboard_strategy_factory
+from services.video.capabilities import capabilities_for
 from services.oss import normalize_media_url
 from services.prompt_revision import apply_prompt_precondition
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -205,6 +206,12 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             if replace_existing:
                 from services.creation_agent.object_state import object_version
                 request_params['replace_versions'] = {str(scene.id): await object_version(scene) for scene in await Scene.filter(chapter_id=chapter_id)}
+            if chapter.novel.video_model_config_id is not None:
+                video_model = await ai_model_config_controller.get_active(
+                    AiTaskTypeEnum.video.value, chapter.novel.video_model_config_id, team_id=team_id
+                )
+                capabilities = capabilities_for(video_model.video_model_type)
+                request_params["shot_duration_range"] = [capabilities.duration_min, capabilities.duration_max]
             from services.creation_agent.skill_execution import prepare_workflow
             request_params = await prepare_workflow(request_params)
             task = await ai_task_executor.submit(
