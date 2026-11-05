@@ -177,6 +177,44 @@ describe('分镜角色音色选择', () => {
     })
   })
 
+  it.each([2, 9])('counts narrator and selected variant voices once per reference and blocks excess audio (%s)', async narratorId => {
+    const novel = await api.novelMeta(8)
+    vi.mocked(api.novelMeta).mockResolvedValue({
+      ...novel, data: { ...novel.data, narrator_audio_reference_id: narratorId },
+    })
+    const response = bootstrap(variant.id)
+    response.data.scenes[0]!.prompt = '@{总工程师}（平静）：你好。\n旁白（平静）：他终于开口。'
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(response as never)
+    vi.mocked(api.videoGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [{
+      config_id: 7, name: 'Test video', model: 'test', model_type: 'minimax_h3_autodl', concurrency: 1,
+      capabilities: {
+        resolutions: ['720p'], default_resolution: '720p', aspect_ratios: ['16:9'],
+        aspect_ratios_by_mode: { reference: ['16:9'] }, default_aspect_ratio: '16:9',
+        output_formats: ['mp4'], default_output_format: 'mp4', generation_modes: ['reference'],
+        supports_audio: true, default_generate_audio: true, duration_min: 1, duration_max: 15,
+        max_reference_images: 9, max_reference_videos: 0, max_reference_audios: 1,
+        reference_audio_duration_min: 2, reference_audio_duration_max: 15, reference_audio_total_duration_max: 15,
+        reference_image_formats: ['jpg'], reference_video_formats: [],
+      },
+    }] } as never)
+    vi.mocked(api.audioReferences).mockImplementation(async (_page, _search, filters) => ({
+      code: 0, message: 'ok', data: {
+        items: [{ ...currentVoice, id: filters?.id as number, duration: 5 }],
+        pagination: { total: 1, page: 1, page_size: 24, pages: 1 },
+      },
+    }))
+    const wrapper = await mountPage()
+    await flushPromises()
+    const bar = wrapper.getComponent({ name: 'SceneReferenceMediaBar' })
+    expect(bar.props('audioDurations')).toHaveLength(narratorId === 2 ? 1 : 2)
+    expect(bar.text()).toContain(narratorId === 2 ? '音频 1/1' : '音频 2/1')
+    if (narratorId === 9) {
+      expect(bar.get('[role="alert"]').text()).toContain('参考音频超过 1 个')
+      expect(wrapper.get('[aria-label="生成视频"]').attributes('disabled')).toBeDefined()
+    }
+    wrapper.unmount()
+  })
+
   it('分镜侧栏使用缩略图而不是直接加载资产原图', async () => {
     vi.mocked(api.workbenchBootstrap).mockResolvedValue(bootstrap(null) as never)
     const wrapper = await mountPage()

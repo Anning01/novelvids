@@ -7,7 +7,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from prompts.storyboard import build_storyboard_messages
+from prompts.storyboard import build_storyboard_messages, visible_storyboard_assets
+from prompts.asset_introductions import asset_introduction_requirement
 from schemas.scene import SceneEntity, Storyboard
 from services.llm.json_output import (
     JsonCompletionTruncatedError,
@@ -71,10 +72,13 @@ async def generate_storyboard(
     max_tokens: int | None = None,
     storyboard_strategy: str | None = None,
     creative_constraints: list[dict] | None = None,
+    previously_seen_assets: list[str] | None = None,
+    introduction_descriptions: dict[str, str] | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
     from services.creation_agent.skill_execution import current_execution
     execution = current_execution.get()
+    seen_assets = list(dict.fromkeys(previously_seen_assets or []))
     if execution:
         from schemas.agent_workflow import SkillStoryboard, StructuredSkillStoryboard
         modern = "storyboard_contract" in execution.snapshot.contents
@@ -83,7 +87,9 @@ async def generate_storyboard(
             'constraints': creative_constraints or []}
         if duration_range := execution.params.get("shot_duration_range"):
             facts["shot_duration_range"] = duration_range
-        result = await execution.generate('storyboard', facts, StructuredSkillStoryboard if modern else SkillStoryboard)
+        requirement = asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions)
+        options = {"additional_instructions": requirement} if requirement else {}
+        result = await execution.generate('storyboard', facts, StructuredSkillStoryboard if modern else SkillStoryboard, **options)
         if modern:
             from services.storyboard.validation import prepare_skill_storyboard
             result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,
@@ -96,6 +102,8 @@ async def generate_storyboard(
         prompt_language,
         strategy=strategy,
         creative_constraints=creative_constraints or [],
+        previously_seen_assets=seen_assets,
+        introduction_descriptions=introduction_descriptions,
     )
     chunker = NarrativeChunker.for_context_limit(
         max_context_characters,
@@ -118,6 +126,8 @@ async def generate_storyboard(
             previous_shot=previous_shot,
             strategy=strategy,
             creative_constraints=creative_constraints or [],
+            previously_seen_assets=seen_assets,
+            introduction_descriptions=introduction_descriptions,
         )
         try:
             batch_storyboard, completion = await create_json_completion(
@@ -140,6 +150,9 @@ async def generate_storyboard(
 
         for shot in batch_storyboard.shots:
             shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
+            for name in visible_storyboard_assets(shot, entities):
+                if name not in seen_assets:
+                    seen_assets.append(name)
         completions.append(completion)
         batch_index += 1
 

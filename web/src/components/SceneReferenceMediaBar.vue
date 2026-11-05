@@ -2,7 +2,7 @@
 import { tr } from '@/i18n'
 
 import { computed, ref, watch } from 'vue'
-import { Film, ImageIcon, LoaderCircle, Plus, X } from 'lucide-vue-next'
+import { Film, ImageIcon, LoaderCircle, Plus, Volume2, X } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
 import { catalogApi } from '@/features/resource-library/catalog'
 import type { VideoGenerationModel, VideoReferenceMedia } from '@/types'
@@ -10,12 +10,14 @@ import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPi
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import { fallbackImage } from '@/shared/mediaFallback'
+import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 
 const props = defineProps<{
   sceneId?: number
   model: VideoGenerationModel | null
   media: VideoReferenceMedia[]
   assetImageCount: number
+  audioDurations?: Array<number | null>
   highlightedMediaIndex?: number
   disabled?: boolean
   uploading?: boolean
@@ -57,6 +59,12 @@ const accept = computed(() => {
   ].join(',')
 })
 const unavailable = computed(() => props.disabled || props.uploading || !props.model)
+const audioUsage = computed(() => referenceAudioUsage(props.audioDurations || [], props.model?.capabilities))
+const audioLimitHint = computed(() => tr('角色和旁白音色已计入，相同音色只计一次；每条 {p0}–{p1} 秒，总计最多 {p2} 秒', {
+  p0: props.model?.capabilities.reference_audio_duration_min ?? 2,
+  p1: props.model?.capabilities.reference_audio_duration_max || 0,
+  p2: props.model?.capabilities.reference_audio_total_duration_max || 0,
+}))
 
 function chooseFiles() {
   if (!unavailable.value) input.value?.click()
@@ -136,17 +144,23 @@ function closeImagePreview() {
         <button type="button" class="reference-remove" :aria-label="tr('移除 {p0}', { p0: item.name || '参考素材' })" :title="tr('移除')" @click="emit('remove', index)"><X :size="10" /></button>
       </article>
     </div>
-    <div class="reference-summary">
+    <div class="reference-summary" role="status" aria-atomic="true">
       <ImageIcon :size="13" />
       <span>{{ tr('图片') }} {{ assetImageCount + uploadedImages }}/{{ model?.capabilities.max_reference_images || 0 }}</span>
       <i>·</i>
       <Film :size="13" />
       <span>{{ tr('视频') }} {{ uploadedVideos }}/{{ model?.capabilities.max_reference_videos || 0 }}</span>
       <small v-if="uploadedVideos">{{ totalVideoDuration.toFixed(1) }}/{{ model?.capabilities.reference_video_total_duration_max || 0 }}s</small>
+      <i>·</i>
+      <Volume2 :size="13" aria-hidden="true" />
+      <span :class="{ 'is-over-limit': audioUsage.error }" :title="audioLimitHint">{{ tr('音频') }} {{ audioUsage.count }}/{{ model?.capabilities.max_reference_audios || 0 }}</span>
+      <small v-if="audioUsage.count && audioUsage.durationComplete">{{ audioUsage.totalDuration.toFixed(1) }}/{{ model?.capabilities.reference_audio_total_duration_max || 0 }}s</small>
+      <small v-else-if="audioUsage.count">{{ tr('音频时长待确认') }}</small>
       <small v-if="assetImageCount">{{ tr('资产图已计入') }}</small>
       <small v-else-if="!model">{{ tr('请先启用视频模型') }}</small>
       <small v-else>{{ tr('支持图片与 MP4/MOV') }}</small>
     </div>
+    <p v-if="audioUsage.error && !disabled" class="reference-audio-error" role="alert">{{ audioUsage.error }}</p>
     <div v-if="sceneId" class="reference-save-actions"><span v-for="item in media.filter(value => value.type === 'video' && !value.library_resource_id)" :key="item.url"><small>{{ item.name || tr('参考视频') }}</small><SaveVideoToLibrary :source="{ source: 'scene', source_id: sceneId, media_url: item.url, name: item.name || tr('参考视频') }" /></span></div>
     <ImageLightbox
       :open="Boolean(previewImage)"
@@ -181,10 +195,11 @@ function closeImagePreview() {
 .reference-item:hover .reference-remove, .reference-item:focus-within .reference-remove { opacity: 1; transform: scale(1); }
 .reference-remove:hover { background: #d94f5f; }
 .reference-remove:focus-visible { opacity: 1; outline: 2px solid #fff; outline-offset: 1px; transform: scale(1); }
-.reference-summary { display: flex; min-width: 0; align-items: center; gap: 4px; color: #848a99; white-space: nowrap; }
-.reference-summary i { color: #c1c4cd; font-style: normal; }
-.reference-summary small { margin-left: 4px; color: #a3a8b5; }
-.is-disabled .reference-summary { color: #aeb2bd; }
+.reference-summary { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 4px; color: var(--app-text-muted); }
+.reference-summary i { color: var(--app-border); font-style: normal; }
+.reference-summary small { margin-left: 4px; color: var(--app-text-muted); }
+.reference-audio-error { flex-basis: 100%; margin: 0; color: var(--creation-danger); }
+.is-over-limit { color: var(--creation-danger); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes reference-pulse { 50% { transform: scale(1.06); } }
 </style>

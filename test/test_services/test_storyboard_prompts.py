@@ -68,7 +68,8 @@ def test_storyboard_messages_render_language_entities_and_narrative():
     narrative = "夜色里，小楼的窗户忽然亮起。"
     messages = build_storyboard_messages(narrative, [_entity()], "zh")
     assert [m["role"] for m in messages] == ["system", "user"]
-    assert messages[0]["content"] == render_skill("storyboard", "zh")
+    assert messages[0]["content"].startswith(render_skill("storyboard", "zh") + "\n")
+    assert '"nickname":"郊区小楼"' in messages[0]["content"]
     facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
     assert facts["assets"][0] == {"asset_type": "场景", "canonical_name": "郊区小楼",
         "aliases": ["小楼", "旧宅"], "visual_description": "红砖外墙，窗框斑驳", "reference_syntax": "@{郊区小楼}"}
