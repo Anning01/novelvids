@@ -3,7 +3,7 @@ from utils.messages import localized_message
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth.deps import AuthContext, require_roles, require_team_access
-from controllers.billing import billing_controller
+from controllers.billing import billing_controller, billing_scope
 from schemas.billing import (
     BillingProjectDetailOut,
     BillingProjectOut,
@@ -19,21 +19,12 @@ router = APIRouter()
 _BILLING = Depends(require_roles("admin", "creator"))
 
 
-def _team_scope(ctx: AuthContext) -> tuple[int | None, int | None]:
-    """返回 (team_id, user_id) 过滤条件：超管看全部，创作者只看自己。"""
-    if ctx.is_super_admin:
-        return None, None
-    if ctx.membership and ctx.membership.role == "creator":
-        return ctx.team_id, ctx.user.id
-    return ctx.team_id, None
-
-
 @router.get("/summary", summary="账单汇总", response_model=ResponseSchema[BillingSummaryOut])
 async def get_billing_summary(
     novel_id: int | None = None,
     ctx: AuthContext = _BILLING,
 ):
-    team_id, user_id = _team_scope(ctx)
+    team_id, user_id = billing_scope(ctx)
     return ResponseSchema(
         data=await billing_controller.summary(novel_id, team_id, user_id)
     )
@@ -48,7 +39,7 @@ async def get_billing_projects(
     params: QueryParams = Depends(get_list_params),
     ctx: AuthContext = _BILLING,
 ):
-    team_id, user_id = _team_scope(ctx)
+    team_id, user_id = billing_scope(ctx)
     return ResponseSchema(
         data=await billing_controller.projects(
             params.page, params.page_size, team_id, user_id
@@ -66,7 +57,7 @@ async def get_billing_project_detail(
     ctx: AuthContext = _BILLING,
     _: AuthContext = Depends(require_team_access),
 ):
-    team_id, user_id = _team_scope(ctx)
+    team_id, user_id = billing_scope(ctx)
     return ResponseSchema(
         data=await billing_controller.project_detail(novel_id, team_id, user_id)
     )
@@ -81,7 +72,7 @@ async def get_billing_records(
     params: QueryParams = Depends(get_list_params),
     ctx: AuthContext = _BILLING,
 ):
-    team_id, user_id = _team_scope(ctx)
+    team_id, user_id = billing_scope(ctx)
     return ResponseSchema(
         data=await billing_controller.records(params, team_id, user_id)
     )
@@ -90,7 +81,7 @@ async def get_billing_records(
 @router.get('/records/{record_id}/details', summary='流水原始明细',
             response_model=ResponseSchema[PaginationResponse[ModelUsageRecordOut]])
 async def get_billing_record_details(record_id: int, params: QueryParams = Depends(get_list_params), ctx: AuthContext = _BILLING):
-    team_id, user_id = _team_scope(ctx)
+    team_id, user_id = billing_scope(ctx)
     try:
         return ResponseSchema(data=await billing_controller.records(params, team_id, user_id, record_id))
     except LookupError:

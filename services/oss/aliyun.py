@@ -9,6 +9,7 @@ import base64
 import asyncio
 import hashlib
 import hmac
+from contextlib import asynccontextmanager
 from email.utils import formatdate
 from pathlib import Path
 
@@ -155,19 +156,23 @@ class AliyunProvider(OSSProvider):
             response.raise_for_status()
             return response.content
 
+    @asynccontextmanager
+    async def open_download(self, key: str, *, byte_range: str | None = None):
+        date, authorization = self._authorization("GET", key)
+        headers = {"Date": date, "Authorization": authorization, "Accept-Encoding": "identity"}
+        if byte_range:
+            headers["Range"] = byte_range
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream("GET", self._internal_url(key), headers=headers) as response:
+                yield response
+
     async def download_to_file(self, key: str, destination: Path) -> None:
         """使用 OSS 内网 endpoint 流式下载对象。"""
-        date, authorization = self._authorization("GET", key)
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "GET",
-                self._internal_url(key),
-                headers={"Date": date, "Authorization": authorization},
-            ) as response:
-                response.raise_for_status()
-                with destination.open("wb") as target:
-                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
-                        await asyncio.to_thread(target.write, chunk)
+        async with self.open_download(key) as response:
+            response.raise_for_status()
+            with destination.open("wb") as target:
+                async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                    await asyncio.to_thread(target.write, chunk)
 
     async def put_bytes(
         self,

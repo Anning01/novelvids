@@ -12,6 +12,9 @@ class ProjectProduction(BaseModelWithTime):
     chapter_count: int = 0
     storyboard_chapter_count: int = 0
     completed_episode_count: int = 0
+    pending_composition_count: int = 0
+    finished_seconds: float = 0
+    unknown_finished_duration_count: int = 0
     completed_shot_count: int = 0
     shot_count: int = 0
     asset_count: int = 0
@@ -30,6 +33,8 @@ class ProjectOverviewItem(NovelBriefOut):
 
 class ProjectOverviewSummary(BaseModel):
     project_count: int = 0
+    finished_seconds: float = 0
+    unknown_finished_duration_count: int = 0
     chapter_count: int = 0
     asset_count: int = 0
     video_seconds: float = 0

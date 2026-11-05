@@ -6,7 +6,7 @@ import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { mediaUrl } from '@/api'
 import { tr } from '@/i18n'
 import { resizeSticker, scaleSticker, stickerRotation } from './stickerTransform'
-import { loadSubtitleFont } from './subtitleFonts'
+import { isSubtitleFontReady, loadSubtitleFont } from './subtitleFonts'
 import { subtitleAppearance, subtitleBlockWidth } from './subtitleStyle'
 import { MediaGain } from '@/shared/mediaGain'
 import { activeAt, audioVolume, orderedVideos, sourceKey, subtitleLines, totalDuration, videoPlaybackRate } from './model'
@@ -20,6 +20,7 @@ const isBuffering = ref(false)
 const selectedSubtitles = computed(() => new Set(props.selectedIds ?? [props.selectedId]))
 const overlayDrag = ref<{id:string;group:boolean;x:number;vertical:number}|null>(null)
 const fontError = ref('')
+const fontLoading = ref(false)
 const stickerPreview=ref<{id:string;patch:ClipPatch}|null>(null)
 const stickerSizes=ref<Record<string,{width:number;height:number}>>({})
 let dragCleanup: (()=>void)|null=null
@@ -139,9 +140,13 @@ watch(visibleFonts, async (fonts, _, cleanup) => {
   let current = true
   cleanup(() => { current = false })
   fontError.value = ''
-  if (!fonts) return
-  try { await Promise.all(fonts.split(',').map(loadSubtitleFont)) }
-  catch { if (current) fontError.value = tr('字幕字体加载失败，请稍后重试') }
+  const pending = fonts ? fonts.split(',').filter(id => !isSubtitleFontReady(id)) : []
+  fontLoading.value = pending.length > 0
+  if (!pending.length) return
+  const results = await Promise.allSettled(pending.map(loadSubtitleFont))
+  if (!current) return
+  fontLoading.value = false
+  if (results.some(result => result.status === 'rejected')) fontError.value = tr('字幕字体加载失败，请稍后重试')
 }, { immediate: true })
 const activeAudio = computed(() => props.document.clips.filter((clip): clip is AudioClip => clip.type === 'audio' && activeAt(clip, props.time)))
 const audioOnly = computed(() => !orderedVideos(props.document).length && activeAudio.value.length > 0)
@@ -234,6 +239,7 @@ defineExpose({ seek })
       <div v-if="audioOnly" class="video-stage-blackout editor-audio-preview"><Music2 :size="32" /><strong>{{ activeAudio[0]?.name }}</strong><span>{{ tr('音频预览') }}</span></div>
       <div v-else-if="source?.missing || (!video && !overlays.length)" class="video-stage-blackout"><Film :size="27" /><span>{{ video ? tr('这个分镜尚未生成或素材已失效') : tr('时间线空白') }}</span></div>
       <div v-if="playing && !ready" class="editor-buffer-state" role="status"><LoaderCircle :size="18" class="is-spinning" />{{ tr('正在缓冲视频') }}</div>
+      <div v-else-if="fontLoading" class="editor-buffer-state" role="status"><LoaderCircle :size="18" class="is-spinning" />{{ tr('正在加载字幕字体…') }}</div>
       <template v-for="clip in overlays" :key="clip.id">
         <button v-if="clip.type === 'subtitle'" type="button" class="editor-subtitle" :class="{ 'is-selected': selectedSubtitles.has(clip.id), 'is-dragging':overlayDrag?.id===clip.id, 'is-readonly':readOnly }" :style="{ left:`${overlayPosition(clip).x}%`, bottom: `${overlayPosition(clip).vertical}%`, ...subtitleAppearance(clip,frameHeight), width:`${subtitleBlockWidth(clip,document,frameHeight)}px` }" :aria-label="tr('选择字幕')" @keydown.left.prevent.stop="nudgeOverlay($event,clip)" @keydown.right.prevent.stop="nudgeOverlay($event,clip)" @keydown.up.prevent.stop="nudgeOverlay($event,clip)" @keydown.down.prevent.stop="nudgeOverlay($event,clip)" @pointerdown="dragOverlay($event,clip)" @dragstart.prevent @click="emit('select', clip.id)">{{ subtitleLines(clip, document) }}</button>
         <div v-else-if="clip.type === 'sticker'" class="editor-sticker" role="group" tabindex="0" :class="{ 'is-selected': selectedId === clip.id, 'is-dragging':overlayDrag?.id===clip.id||stickerPreview?.id===clip.id, 'is-readonly':readOnly }" :style="stickerStyle(clip)" :aria-label="tr('选择贴纸')" @keydown.left.prevent.stop="nudgeOverlay($event,clip)" @keydown.right.prevent.stop="nudgeOverlay($event,clip)" @keydown.up.prevent.stop="nudgeOverlay($event,clip)" @keydown.down.prevent.stop="nudgeOverlay($event,clip)" @keydown.enter.prevent.stop="emit('select',clip.id)" @keydown.space.prevent.stop="emit('select',clip.id)" @pointerdown="dragOverlay($event,clip)" @dragstart.prevent @click="emit('select', clip.id)">

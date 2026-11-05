@@ -19,6 +19,7 @@ from services.video_editor.assets import editor_storage
 from services.video_editor.drafts import chapter_scope, compact_video_track
 from services.video_editor.sources import EditSources
 from services.video_editor.render import EditRenderer
+from services.video_editor.finished_media import save_cover
 from services.video_enhancement.media import digest, export_media, file_digest, inspect_media
 from utils.messages import localized_message as msg
 
@@ -64,7 +65,7 @@ async def submit_export(chapter_id, revision, ctx):
             source_version=digest(snapshot), manifest=manifest,
             recipe={'kind': 'editor_render', 'version': 1, 'revision': revision, 'document': snapshot}, using_db=db)
         task = await AiTask.create(task_type=4, status=6, stage='editor_queued', request_params={
-            'operation': 'editor_render', 'editor_version': 1, 'export_id': row.id, 'novel_id': chapter.novel_id,
+            'operation': 'editor_render', 'editor_version': 1, 'revision': revision, 'export_id': row.id, 'novel_id': chapter.novel_id,
             'chapter_id': chapter.id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None}, using_db=db)
         row.task_id = task.id
         await row.save(using_db=db, update_fields=['task_id'])
@@ -200,6 +201,9 @@ class EditorExportWorker:
                 ref = export_media.ref(row, 'edited')
                 sha = await asyncio.to_thread(file_digest, output)
                 probe = await asyncio.to_thread(inspect_media, output)
+                if await cancelled():
+                    raise asyncio.CancelledError
+                await save_cover(row.id, output, Path(directory))
                 if await cancelled():
                     raise asyncio.CancelledError
                 await export_media.store(ref, output)

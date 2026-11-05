@@ -16,6 +16,15 @@ const router = createRouter({
     { path: '/create/short-drama/manual/:projectId', name: 'short-drama-manual', component: () => import('./pages/ShortDramaManualPage.vue'), meta: { fullscreen: true } },
     { path: '/create/short-drama/storyboard/:projectId', name: 'short-drama-storyboard', component: () => import('./pages/ShortDramaStoryboardPage.vue'), meta: { fullscreen: true } },
     { path: '/create/short-drama/video/:projectId', name: 'short-drama-video', component: () => import('./pages/ShortDramaVideoPage.vue'), meta: { fullscreen: true } },
+    { path: '/finished-library', component: () => import('./pages/FinishedEpisodesPage.vue'), beforeEnter: to => {
+      if (to.query.project && to.query.chapter) {
+        const { project, ...query } = to.query
+        return { name: 'work-detail', params: { projectId: String(project) }, query }
+      }
+      return true
+    } },
+    { path: '/finished-library/:projectId', name: 'work-detail', component: () => import('./pages/PortfolioWorkPage.vue') },
+    { path: '/works/:projectId', name: 'public-work', component: () => import('./pages/PortfolioWorkPage.vue'), meta: { public: true, fullscreen: true } },
     { path: '/projects', component: () => import('./pages/DashboardPage.vue') },
     { path: '/profile', name: 'profile', component: () => import('./pages/ProfilePage.vue') },
     { path: '/novel/:id', component: () => import('./pages/NovelPage.vue') },

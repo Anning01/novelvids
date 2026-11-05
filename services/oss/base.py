@@ -7,9 +7,12 @@
 import abc
 import asyncio
 import re
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+
+import httpx
 
 from config import settings
 
@@ -62,6 +65,10 @@ class OSSProvider(abc.ABC):
         """
         data = await self.get_bytes(key)
         await asyncio.to_thread(destination.write_bytes, data)
+
+    def open_download(self, key: str, *, byte_range: str | None = None) -> AbstractAsyncContextManager[httpx.Response]:
+        """Stream an object and expose its HTTP range metadata to the caller."""
+        raise NotImplementedError
 
     async def put_file(
         self,

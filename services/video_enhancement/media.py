@@ -67,7 +67,7 @@ class ExportMedia(ResourceStorage):
             destination = self.local_path(ref)
             destination.parent.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(dir=destination.parent, prefix='.export-') as temporary:
-                staged = Path(temporary) / 'file.mp4'
+                staged = Path(temporary) / destination.name
                 await asyncio.to_thread(shutil.copyfile, path, staged)
                 os.replace(staged, destination)
         else:

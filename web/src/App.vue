@@ -35,6 +35,7 @@ const creationItems = [
 const personalItems = computed(() => {
   const items = [
     { path: '/projects', get label() { return tr('项目') }, icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
+    { path: '/finished-library', get label() { return tr('作品库') }, icon: Clapperboard, active: () => route.path.startsWith('/finished-library') },
     { path: '/resource-library', get label() { return tr('资源库') }, icon: Film, active: () => route.path.startsWith('/resource-library') },
     { path: '/assets', get label() { return tr('项目资产') }, icon: Images, active: () => route.path.startsWith('/assets') },
   ]

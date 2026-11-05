@@ -57,6 +57,9 @@ export interface ProjectProduction {
   chapter_count: number
   storyboard_chapter_count: number
   completed_episode_count: number
+  pending_composition_count?: number
+  finished_seconds?: number
+  unknown_finished_duration_count?: number
   completed_shot_count: number
   shot_count: number
   asset_count: number
@@ -68,6 +71,8 @@ export interface ProjectProduction {
 }
 export interface ProjectOverviewItem extends Novel { production: ProjectProduction }
 export interface ProjectOverviewSummary {
+  finished_seconds?: number
+  unknown_finished_duration_count?: number
   project_count: number
   chapter_count: number
   asset_count: number
