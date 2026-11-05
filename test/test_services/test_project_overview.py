@@ -10,6 +10,7 @@ from models.novel import Novel
 from models.scene import Scene
 from models.video import Video
 from services.project_overview import project_overview
+from test.test_services.test_finished_episodes import finished
 
 
 async def chapter_for(project, number=1):
@@ -38,7 +39,7 @@ async def test_empty_overview_and_text_only_projects_have_real_zero_output():
 
 
 @pytest.mark.asyncio
-async def test_complete_episodes_require_every_current_active_shot_video():
+async def test_completed_episodes_require_successful_composition_and_preserve_completed_versions():
     project = await Novel.create(name="In production")
     chapter = await chapter_for(project)
     first = await Scene.create(chapter=chapter, sequence=1, duration=800)
@@ -52,11 +53,17 @@ async def test_complete_episodes_require_every_current_active_shot_video():
     assert metric.video_seconds == 6  # neither planned runtime nor old versions
     await video_for(second, seconds=4)
     metric = (await project_overview()).items[0].production
+    assert metric.completed_episode_count == 0
+    assert metric.pending_composition_count == 1
+    await finished(chapter, seconds=7)
+    metric = (await project_overview()).items[0].production
     assert metric.completed_episode_count == 1
+    assert metric.pending_composition_count == 0
+    assert metric.finished_seconds == 7
     assert metric.video_seconds == 10
     failed = await video_for(second, status=4, url=None)
     await Scene.filter(id=second.id).update(metadata={"workbench": {"activeVideoId": failed.id}})
-    assert (await project_overview()).items[0].production.completed_episode_count == 0
+    assert (await project_overview()).items[0].production.completed_episode_count == 1
 
 
 @pytest.mark.asyncio
@@ -101,7 +108,8 @@ async def test_missing_actual_duration_is_distinct_from_zero_and_scoped_totals()
     assert overview.summary.video_seconds == 0
     assert overview.summary.unknown_duration_count == 1
     assert overview.summary.chapter_count == 1
-    assert overview.items[0].production.completed_episode_count == 1
+    assert overview.items[0].production.completed_episode_count == 0
+    assert overview.items[0].production.pending_composition_count == 1
 
 
 @pytest.mark.asyncio
@@ -115,7 +123,12 @@ async def test_media_activity_controls_sort_and_latest_completed_episode():
     await Video.filter(id=latest.id).update(updated_at=other.updated_at + timedelta(minutes=1))
     overview = await project_overview()
     assert overview.items[0].id == project.id
+    assert overview.items[0].production.latest_episode_number is None
+    chapter = await Chapter.get(novel=project, number=2)
+    await finished(chapter, seconds=5)
+    overview = await project_overview()
     assert overview.items[0].production.latest_episode_number == 2
+    assert overview.summary.finished_seconds == 5
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from prompts.storyboard import (
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
+from services.storyboard.validation import validate_storyboard_duration
 from services.storyboard.entities import visual_entity_description
 from services.creation_agent.memory import creation_memory
 from services.creation_objects import CreationObjects, project_write
@@ -139,6 +140,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             from services.creation_agent.operations import CreationOperations
             for shot in storyboard.shots:
                 from services.storyboard.validation import validate_skill_storyboard_shot
+                validate_storyboard_duration(shot, execution.params.get("shot_duration_range"))
                 validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])
                 validate_prompt_dependencies(shot.prompt, entities or [])
                 CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))

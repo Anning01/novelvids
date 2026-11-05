@@ -260,7 +260,9 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
 
 
 @pytest.mark.asyncio
-async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result():
+@pytest.mark.parametrize("language,custom_style", [("zh", ""), ("en", "Custom ink rendering")])
+@pytest.mark.parametrize("repair_format", [True, False])
+async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result(language, custom_style, repair_format):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.models.function import FunctionModel
@@ -268,9 +270,33 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     from models.asset import Asset
 
     novel, chapter, assistant = await enabled_project()
+    novel.style_key = "realistic-general"
+    novel.custom_style_prompt = custom_style
+    await novel.save()
+    from models.config import GeneralConfig
+    await GeneralConfig.create(id=1, prompt_language=language)
+    snapshot = snapshot_skills()
+    snapshot["contents"]["image"] = "Frozen mandatory image layout rules"
+    snapshot["contents"]["styles"] = '{"realistic-general":{"image":"Frozen project rendering"}}'
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_asset_contract
+    import json
+    snapshot["contents"]["asset_contract"] = json.dumps(synthetic_asset_contract())
+    visual = fixed_asset_prompt(language)
+    attempts = 0
 
     def respond(messages, info):
-        assert "任务语言 language=" in info.instructions
+        nonlocal attempts
+        attempts += 1
+        import json
+        from pydantic_ai.messages import UserPromptPart
+        assert f"任务语言 language={language}" in info.instructions
+        assert "Frozen mandatory image layout rules" in info.instructions
+        assert snapshot["contents"]["assets"] in info.instructions
+        facts = next(json.loads(part.content)["untrusted_task_facts"]
+                     for message in messages for part in message.parts
+                     if isinstance(part, UserPromptPart))
+        assert facts["project"]["image_style"] == (custom_style or "Frozen project rendering")
+        assert facts["project"]["aspect_ratio"] == novel.aspect_ratio
         tool = info.output_tools[0]
         return ModelResponse(
             parts=[
@@ -283,7 +309,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
                                 "label": "人物",
                                 "aliases": [],
                                 "description": "Detective",
-                                "base_traits": "A complete natural visual prompt, without fixed labels.",
+                                "base_traits": "A natural prose description without the task or fixed fields." if attempts == 1 or not repair_format else visual,
                             }
                         ],
                         "scenes": [],
@@ -297,31 +323,59 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     model.client = AsyncMock()
     with patch("services.creation_agent.handler.configured_model", return_value=model):
         task = await chapter_controller.extract(chapter.id)
+        task.request_params["skill_snapshot"] = snapshot
+        await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
+    if not repair_format:
+        assert task.status == 4
+        assert attempts == 3
+        assert not await Asset.filter(novel=novel).exists()
+        return
     assert task.status == 3, task.error_message
     assert (
         await Asset.get(novel=novel, canonical_name="Alex")
-    ).base_traits == "A complete natural visual prompt, without fixed labels."
+    ).base_traits == visual
+    assert attempts == 2  # Invalid format is retried before any asset is saved.
     assert task.response_data["conversation_id"]
 
 
 @pytest.mark.asyncio
-async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically():
+@pytest.mark.parametrize("video_model_type,protocol,maximum", [
+    (None, None, None),
+    ("minimax_h3_autodl", "autodl", 15),
+    ("seedance_2_5", "volcengine_ark", 30),
+])
+async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically(
+    video_model_type, protocol, maximum,
+):
+    import json
+
     from controllers.scene import scene_controller
+    from models.config import AiModelConfig
     from models.scene import Scene
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.models.function import FunctionModel
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart, UserPromptPart
     from test.test_services.test_prompt_language import _shot
     from prompts.storyboard import format_storyboard_prompt
 
     candidate = _shot()
     candidate.actions = ["0s-4s: rain falls."]
     candidate.reference_only_types = ["人物", "场景", "物品"]
+    if maximum is not None:
+        candidate.duration = f"{maximum}s"
     expected_prompt = format_storyboard_prompt(candidate, "en")
 
     novel, chapter, _ = await enabled_project()
+    if video_model_type:
+        video_model = await AiModelConfig.create(
+            name="video", model="test", task_type=4, api_key="test",
+            base_url="https://example.test", video_model_type=video_model_type,
+            api_protocol=protocol, is_active=True,
+        )
+        novel.video_model_config_id = video_model.id
+        await novel.save(update_fields=["video_model_config_id"])
     old = await Scene.create(
         chapter=chapter,
         sequence=1,
@@ -330,8 +384,23 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
         duration=4,
     )
 
+    durations = []
+
     def respond(messages, info):
+        user_part = next(part for message in messages for part in message.parts if isinstance(part, UserPromptPart))
+        facts = json.loads(user_part.content)["untrusted_task_facts"]["input"]
+        assert "shot_duration_range" in info.instructions
+        if maximum is None:
+            assert "shot_duration_range" not in facts
+        else:
+            assert facts["shot_duration_range"][1] == maximum
         shot = candidate.model_dump(exclude={"prompt"})
+        if maximum == 15 and not durations:
+            shot["duration"] = "20s"
+        elif maximum == 15:
+            retry = next(part for message in messages for part in message.parts if isinstance(part, RetryPromptPart))
+            assert "20s" in str(retry.content) and "15" in str(retry.content)
+        durations.append(shot["duration"])
         return ModelResponse(
             parts=[ToolCallPart(info.output_tools[0].name, {"shots": [shot]})]
         )
@@ -348,7 +417,10 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     assert await Scene.with_deleted().filter(id=old.id).exists()
     assert str(old.id) in task.request_params["replaced_scene_snapshots"]
     assert await Scene.filter(chapter=chapter).count() == 1
-    assert (await Scene.get(chapter=chapter)).prompt == expected_prompt
+    saved = await Scene.get(chapter=chapter)
+    assert saved.prompt == expected_prompt
+    assert saved.duration == float(candidate.duration.removesuffix("s"))
+    assert len(durations) == (2 if maximum == 15 else 1)
 
 
 @pytest.mark.asyncio

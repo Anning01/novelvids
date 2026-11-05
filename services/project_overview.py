@@ -14,6 +14,7 @@ from schemas.project_overview import (
     ProjectOverview, ProjectOverviewItem, ProjectOverviewSummary, ProjectProduction,
 )
 from services.oss import normalize_media_url
+from services.finished_episodes import completed_edit_rows
 from services.audio_references import audio_reference_accessible
 
 
@@ -77,6 +78,7 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
     }
     project_by_id = {project["id"]: project for project in projects}
     latest_completion = {}
+    ready_chapters = set()
 
     def add_media(project_id, value):
         if isinstance(value, str) and value.strip():
@@ -136,7 +138,6 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
         metric.shot_count += len(shots)
         metric.storyboard_chapter_count += bool(shots)
         completed = 0
-        completed_at = None
         for scene in shots:
             touch(project_id, scene["updated_at"])
             metadata = _mapping(scene["metadata"])
@@ -151,7 +152,6 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
             if selected is None:
                 continue
             completed += 1
-            completed_at = max(completed_at, selected["updated_at"]) if completed_at else selected["updated_at"]
             metric.completed_shot_count += 1
             add_media(project_id, selected["url"])
             seconds = _reported_seconds(selected)
@@ -161,21 +161,47 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
                 metric.video_seconds += seconds
             touch(project_id, selected["updated_at"])
         if shots and completed == len(shots):
-            metric.completed_episode_count += 1
-            if project_id not in latest_completion or completed_at > latest_completion[project_id]:
-                latest_completion[project_id] = completed_at
-                metric.latest_episode_number = chapter["number"]
+            ready_chapters.add(chapter["id"])
+    completed_chapters = set()
+    chapter_numbers = {chapter["id"]: chapter["number"] for chapter in chapters}
+    for row in await completed_edit_rows(chapter_projects):
+        chapter_id = row['chapter_id']
+        project_id = chapter_projects[chapter_id]
+        if chapter_id in completed_chapters or row['novel_id'] != project_id:
+            continue
+        completed_chapters.add(chapter_id)
+        metric = metrics[project_id]
+        metric.completed_episode_count += 1
+        value = _mapping(row['output_probe']).get('duration')
+        try:
+            seconds = float(value)
+        except (ValueError, TypeError):
+            seconds = float('nan')
+        if math.isfinite(seconds) and seconds > 0:
+            metric.finished_seconds += seconds
+        else:
+            metric.unknown_finished_duration_count += 1
+        finished_at = row['completed_at'] or row['updated_at']
+        touch(project_id, finished_at)
+        if project_id not in latest_completion or finished_at > latest_completion[project_id]:
+            latest_completion[project_id] = finished_at
+            metric.latest_episode_number = chapter_numbers[chapter_id]
+    for chapter_id in ready_chapters - completed_chapters:
+        metrics[chapter_projects[chapter_id]].pending_composition_count += 1
     items = []
     for project in projects:
         metric = metrics[project["id"]]
         metric.asset_count = len(media[project["id"]])
         metric.video_seconds = round(metric.video_seconds, 3)
+        metric.finished_seconds = round(metric.finished_seconds, 3)
         metric.state = "ready" if metric.completed_episode_count else "in_progress" if metric.shot_count or metric.asset_count else "not_started"
         items.append(ProjectOverviewItem.model_validate({
             **project, "tags": project["tags"] or [], "production": metric,
         }))
     items.sort(key=lambda item: (item.production.latest_activity_at, item.id), reverse=True)
     return ProjectOverview(items=items, summary=ProjectOverviewSummary(
+        finished_seconds=round(sum(item.production.finished_seconds for item in items),3),
+        unknown_finished_duration_count=sum(item.production.unknown_finished_duration_count for item in items),
         project_count=len(items), chapter_count=sum(item.production.chapter_count for item in items),
         asset_count=sum(item.production.asset_count for item in items),
         video_seconds=round(sum(item.production.video_seconds for item in items), 3),

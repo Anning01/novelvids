@@ -16,6 +16,15 @@ from services.project_analysis.handler import _build_analysis_material
 from services.remake.pipeline import RemakeDecompositionPipeline
 
 
+@pytest.fixture(autouse=True)
+def public_prompt_pack(tmp_path, monkeypatch):
+    """Public contracts must be independent of ignored developer resources."""
+    import prompts.skill_pack as pack
+    for filename in pack.FILES.values():
+        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
+    monkeypatch.setattr(pack, 'ROOT', tmp_path)
+
+
 def test_old_creative_templates_are_removed_and_only_ui_locales_remain():
     root = Path(__file__).parents[2] / "prompts"
     assert not (root / "legacy").exists()
@@ -61,7 +70,7 @@ def test_asset_rules_keep_full_chapter_cast_flashbacks_and_identities(language):
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     rendered = instructions(snapshot, language, "assets")
     assert f"language={language}" in rendered
-    for rule in ("包含已登记且本章出场的资产", "不能只返回新对象或变更项", "真正演出的回忆", "已去世不等于没有出场", "不能单凭", "不把师徒、前后任或同名者的资料互换", "不把当前哭泣、跪拜、坐化"):
+    for rule in ("包含已登记且本章出场的资产", "不能只返回新对象或变更项", "真正演出的回忆", "已去世不等于没有出场", "不能单凭", "不把师徒、前后任或同名者的资料互换", "只写稳定体貌与装束", "不把当前哭泣、跪拜"):
         assert rule in rendered
 
 

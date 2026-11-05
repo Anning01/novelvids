@@ -19,13 +19,14 @@ function project(id: number, name: string, state: ProjectOverviewItem['productio
   return { id, name, author: 'Agent 创建', tags: ['科幻'], created_at: '2026-10-20 10:00:00', updated_at: '2026-10-25 10:00:00', production: {
     chapter_count: 5, storyboard_chapter_count: 2, completed_episode_count: state === 'ready' ? 1 : 0,
     completed_shot_count: state === 'ready' ? 3 : 0, shot_count: state === 'not_started' ? 0 : 3,
-    asset_count: 8, video_seconds: state === 'ready' ? 125 : 0, unknown_duration_count: 0,
+    asset_count: 8, finished_seconds: state === 'ready' ? 125 : 0, unknown_finished_duration_count: 0, video_seconds: state === 'ready' ? 125 : 0, unknown_duration_count: 0,
     latest_episode_number: state === 'ready' ? 1 : null, latest_activity_at: `2026-10-${20 + id} 10:00:00`, state,
   } }
 }
 
 function response(items: ProjectOverviewItem[]): { code: number; message: string; data: ProjectOverview } {
   return { code: 0, message: 'ok', data: { items, summary: {
+    finished_seconds: items.reduce((n,p)=>n+(p.production.finished_seconds ?? 0),0), unknown_finished_duration_count: 0,
     project_count: items.length, chapter_count: items.reduce((n, p) => n + p.production.chapter_count, 0),
     asset_count: items.reduce((n, p) => n + p.production.asset_count, 0),
     video_seconds: items.reduce((n, p) => n + p.production.video_seconds, 0), unknown_duration_count: 0,
@@ -174,9 +175,12 @@ it('does not expose create or delete controls to a viewer', async () => {
 it('exposes full long titles, English labels and unknown actual runtime', async () => {
   const value = project(1, 'A very long complete project title that must remain accessible', 'ready')
   value.production.unknown_duration_count = 1
+  value.production.unknown_finished_duration_count = 1
+  value.production.finished_seconds = 0
   value.production.video_seconds = 0
   const result = response([value])
   result.data.summary.unknown_duration_count = 1
+  result.data.summary.unknown_finished_duration_count = 1
   vi.mocked(api.projectOverview).mockResolvedValue(result)
   setLocale('en')
   const wrapper = render()

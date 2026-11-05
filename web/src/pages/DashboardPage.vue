@@ -45,7 +45,7 @@ const filtered = computed(() => {
 })
 const visible = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const hasFilters = computed(() => Boolean(search.value.trim()) || typeFilter.value !== 'all' || stateFilter.value !== 'all')
-const runtime = computed(() => projectRuntime(overview.value?.summary.video_seconds ?? 0, overview.value?.summary.unknown_duration_count ?? 0))
+const runtime = computed(() => projectRuntime(overview.value?.summary.finished_seconds ?? 0, overview.value?.summary.unknown_finished_duration_count ?? 0))
 const costHint = computed(() => auth.role === 'creator' ? tr('仅本人已入账费用') : tr('当前项目已入账费用'))
 // Sum the same visible projects as the cards, including historical calls and versions.
 const totalCost = computed(() => (overview.value?.items ?? []).reduce((sum, project) => sum + Math.round((costs.value.get(project.id) ?? 0) * 1_000_000), 0) / 1_000_000)
@@ -53,7 +53,7 @@ const stats = computed(() => [
   { key: 'projects', label: tr('项目总数'), value: projectNumber(overview.value?.summary.project_count ?? 0), unit: '', hint: tr('个创作项目'), icon: FolderOpen },
   { key: 'chapters', label: tr('累计章节'), value: projectNumber(overview.value?.summary.chapter_count ?? 0), unit: '', hint: tr('已有文字章节'), icon: BookOpen },
   { key: 'assets', label: tr('累计资产'), value: projectNumber(overview.value?.summary.asset_count ?? 0), unit: '', hint: tr('项目内文件去重'), icon: Image },
-  { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已确认的视频时长'), icon: Clock3 },
+  { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已合成作品的实际时长'), icon: Clock3 },
   ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
 ])
 const typeOptions = computed(() => [
@@ -63,7 +63,7 @@ const typeOptions = computed(() => [
 ])
 const stateOptions = computed(() => [
   { value: 'all', label: tr('全部状态') }, { value: 'not_started', label: tr('未开始') },
-  { value: 'in_progress', label: tr('制作中') }, { value: 'ready', label: tr('视频就绪') },
+  { value: 'in_progress', label: tr('制作中') }, { value: 'ready', label: tr('已有作品') },
 ])
 const sortOptions = computed(() => [
   { value: 'updated', label: tr('最近更新优先') }, { value: 'created', label: tr('最近创建优先') }, { value: 'name', label: tr('按项目名称') },

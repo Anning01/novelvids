@@ -61,6 +61,13 @@ def _config(**overrides):
     return SimpleNamespace(**values)
 
 
+def test_multiple_analysis_calls_accumulate_cached_input():
+    gateway = RemakeVideoAnalysisGateway(_config(), client=_Client([]))
+    gateway._add_usage({'prompt_tokens': 1000, 'completion_tokens': 20, 'total_tokens': 1020, 'cache_read_tokens': 800})
+    gateway._add_usage({'prompt_tokens': 500, 'completion_tokens': 10, 'total_tokens': 510, 'cache_read_tokens': 300})
+    assert gateway.usage == {'prompt_tokens': 1500, 'completion_tokens': 30, 'total_tokens': 1530, 'cache_read_tokens': 1100}
+
+
 @pytest.mark.asyncio
 async def test_gateway_sends_compatible_json_mode_schema_instruction_and_video_data_url(tmp_path: Path):
     video = tmp_path / "scene.mov"

@@ -68,17 +68,20 @@ async def summary(
     }
 
 
-async def project_costs(
-    page: int,
-    page_size: int,
+async def _project_usage_totals(
     team_id: int | None = None,
     user_id: int | None = None,
-) -> dict:
+    project_ids: list[int] | None = None,
+) -> dict[int, dict]:
+    if project_ids == []:
+        return {}
     query = ModelUsageRecord.all()
     if team_id is not None:
         query = query.filter(team_id=team_id)
     if user_id is not None:
         query = query.filter(user_id=user_id)
+    if project_ids is not None:
+        query = query.filter(novel_id__in=project_ids)
     rows = await query.values("novel_id", "cost")
     agg: dict[int, dict] = defaultdict(
         lambda: {"total_cost": Decimal("0"), "record_count": 0}
@@ -87,6 +90,21 @@ async def project_costs(
         novel_id = row["novel_id"]
         agg[novel_id]["total_cost"] += _dec(row["cost"])
         agg[novel_id]["record_count"] += 1
+    return agg
+
+
+async def recorded_project_costs(project_ids: list[int], team_id: int | None, user_id: int | None) -> dict[int, float]:
+    totals = await _project_usage_totals(team_id, user_id, project_ids)
+    return {project_id: _money(value['total_cost']) for project_id, value in totals.items()}
+
+
+async def project_costs(
+    page: int,
+    page_size: int,
+    team_id: int | None = None,
+    user_id: int | None = None,
+) -> dict:
+    agg = await _project_usage_totals(team_id, user_id)
     novel_ids = list(agg.keys())
     novels = (
         {novel.id: novel.name for novel in await Novel.filter(id__in=novel_ids)}

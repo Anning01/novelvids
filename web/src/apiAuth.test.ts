@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { api, ApiRequestError, retryableStatusError, clearAuthToken, getAuthToken, setAuthToken } from './api'
+import { api, ApiRequestError, request, retryableStatusError, clearAuthToken, getAuthToken, setAuthToken } from './api'
+import { tr } from './i18n'
 
 it('preserves response codes so status polling retries only temporary failures', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 503, message: 'Temporarily unavailable' }), { status: 200 })))
@@ -14,6 +15,20 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   localStorage.clear()
+})
+
+it.each([
+  { body: '', status: 502 },
+  { body: '<html>Bad Gateway</html>', status: 502 },
+  { body: '{"code":', status: 200 },
+])('reports a retryable service error when the response body is invalid ($status)', async ({ body, status }) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })))
+  setAuthToken('existing-session')
+  const error = await request('/portfolio').catch((reason: unknown) => reason)
+  expect(error).toBeInstanceOf(ApiRequestError)
+  expect(error).toMatchObject({ message: tr('服务暂不可用，请稍后重试'), code: 502, httpStatus: status })
+  expect(retryableStatusError(error)).toBe(true)
+  expect(getAuthToken()).toBe('existing-session')
 })
 
 it('attaches bearer token when logged in', async () => {

@@ -53,7 +53,7 @@ class AiModelConfigProperties(BaseModel):
     )
     pricing: Optional[dict] = Field(
         None,
-        description="计费费用模块：文本={input_price_per_1m,output_price_per_1m}，图片/视频={prices}",
+        description="计费费用模块：文本={input_price_per_1m,cache_input_price_per_1m?,output_price_per_1m}，缓存价留空按普通输入计费，0为免费；discount为统一收费倍率；图片/视频={prices}",
     )
     processing_options: Optional[dict] = Field(None, description="媒体处理能力与访问设置")
     scope: Optional[str] = Field(

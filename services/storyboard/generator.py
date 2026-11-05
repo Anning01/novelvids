@@ -12,6 +12,7 @@ from schemas.scene import SceneEntity, Storyboard
 from services.llm.json_output import (
     JsonCompletionTruncatedError,
     create_json_completion,
+    completion_usage,
 )
 from services.storyboard.chunking import NarrativeChunker
 from services.storyboard.strategies import storyboard_strategy_factory
@@ -25,14 +26,7 @@ def _message_characters(messages: list[dict[str, str]]) -> int:
 
 
 def _usage_values(completion: Any) -> dict[str, int]:
-    usage = getattr(completion, "usage", None)
-    if usage is None:
-        return {}
-    return {
-        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
-        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
-        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
-    }
+    return completion_usage(completion)
 
 
 def _aggregate_metadata(completions: list[Any]) -> dict[str, Any]:
@@ -84,9 +78,12 @@ async def generate_storyboard(
     if execution:
         from schemas.agent_workflow import SkillStoryboard, StructuredSkillStoryboard
         modern = "storyboard_contract" in execution.snapshot.contents
-        result = await execution.generate('storyboard', {'chapter': long_text,
+        facts = {'chapter': long_text,
             'entities': [entity.model_dump() for entity in entities], 'strategy': storyboard_strategy,
-            'constraints': creative_constraints or []}, StructuredSkillStoryboard if modern else SkillStoryboard)
+            'constraints': creative_constraints or []}
+        if duration_range := execution.params.get("shot_duration_range"):
+            facts["shot_duration_range"] = duration_range
+        result = await execution.generate('storyboard', facts, StructuredSkillStoryboard if modern else SkillStoryboard)
         if modern:
             from services.storyboard.validation import prepare_skill_storyboard
             result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,

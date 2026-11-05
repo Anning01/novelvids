@@ -82,6 +82,8 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
     last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason')), None)
     if last_finish == 'length':
         return localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。')
+    if any(marker in message.lower() for marker in ('exceeded maximum retries', 'exceeded max retries count')):
+        return localized_message('模型连续提交的内容未通过工具或输出校验，本轮已停止。请缩小修改范围后重试；已保存的修改可在记录中查看。')
     return localized_message('创作助手执行失败。请查看已保存的修改，确认模型可用后重试。')
 
 

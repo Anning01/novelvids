@@ -19,6 +19,17 @@ CONTENT_FIELDS = (
 )
 
 
+def validate_storyboard_duration(shot: SoraScenePromptConfig, duration_range: Sequence[int] | None) -> None:
+    if duration_range is None:
+        return
+    minimum, maximum = duration_range
+    if not minimum <= float(shot.duration.removesuffix("s")) <= maximum:
+        raise ValueError(localized_message(
+            "第 {p0} 个镜头时长为 {p1}，当前视频模型要求每镜 {p2}–{p3} 秒。请将过长内容拆成连续镜头，保留动作和台词。",
+            p0=shot.sequence, p1=shot.duration, p2=minimum, p3=maximum,
+        ))
+
+
 def validate_skill_storyboard_timing(shot: SoraScenePromptConfig) -> None:
     for name in CONTENT_FIELDS:
         value = getattr(shot, name)

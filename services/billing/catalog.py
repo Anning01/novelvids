@@ -9,8 +9,11 @@ from models.config import AiModelConfig
 # 文本模型：输入/输出单价（元 / 百万 token）。仅收录一口价模型；
 # 分段计费（按输入长度分档）模型暂不收录。
 LLM_PRICING: dict[str, dict] = {
-    "deepseek-v4-pro": {"input_price_per_1m": 12.00, "output_price_per_1m": 24.00},
-    "deepseek-v4-flash": {"input_price_per_1m": 1.00, "output_price_per_1m": 2.00},
+    # 官方高峰价；运行时仅使用管理员保存的配置，不按时间切换。
+    # https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ (2026-11-04)
+    "deepseek-v4-pro": {"input_price_per_1m": 9.00, "cache_input_price_per_1m": 0.30, "output_price_per_1m": 27.00},
+    "deepseek-flash": {"input_price_per_1m": 2.00, "cache_input_price_per_1m": 0.04, "output_price_per_1m": 8.00},
+    "deepseek-v4-flash": {"input_price_per_1m": 2.00, "cache_input_price_per_1m": 0.04, "output_price_per_1m": 8.00},
     "glm-5.2": {"input_price_per_1m": 8.00, "output_price_per_1m": 28.00},
 }
 

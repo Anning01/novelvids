@@ -16,10 +16,10 @@ const menuOpen = ref(false)
 const actions = ref<HTMLElement | null>(null)
 const trigger = ref<InstanceType<typeof AppButton> | null>(null)
 const deleteButton = ref<HTMLButtonElement | null>(null)
-const runtime = computed(() => projectRuntime(props.project.production.video_seconds, props.project.production.unknown_duration_count))
+const runtime = computed(() => projectRuntime(props.project.production.finished_seconds ?? 0, props.project.production.unknown_finished_duration_count ?? 0))
 const settings = computed(() => readShortDramaSettings(props.project))
 const metadata = computed(() => [projectKindLabel(props.project), settings.value.aspectRatio, settings.value.resolution?.toUpperCase()].filter(Boolean).join(' · '))
-const stateLabel = computed(() => ({ not_started: tr('未开始'), in_progress: tr('制作中'), ready: tr('视频就绪') }[props.project.production.state]))
+const stateLabel = computed(() => ({ not_started: tr('未开始'), in_progress: tr('制作中'), ready: tr('已有作品') }[props.project.production.state]))
 const tags = computed(() => props.project.tags?.filter(Boolean) ?? [])
 
 async function openMenu() {
@@ -67,13 +67,14 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
         </div>
       </div>
 
-      <div :id="`project-progress-${project.id}`" class="project-overview-card__progress" :title="tr('整集内全部有效分镜的当前视频均生成成功，才计为完成一集；章节总数不是制作目标。')">
+      <div :id="`project-progress-${project.id}`" class="project-overview-card__progress" :title="tr('每集合成成功后计为完成，同一集的多个合成版本只统计一次。')">
         <div class="project-overview-card__progress-heading">
           <span><Clapperboard :size="14" aria-hidden="true" />{{ tr('视频制作') }}</span>
           <strong>{{ tr('已完成 {p0} 集', { p0: projectNumber(project.production.completed_episode_count) }) }}</strong>
         </div>
         <div class="project-overview-card__progress-detail">
           <span v-if="project.production.latest_episode_number !== null">{{ tr('最近完成：第 {p0} 集', { p0: project.production.latest_episode_number }) }}</span>
+          <span v-else-if="project.production.pending_composition_count">{{ tr('待合成 {p0} 集', {p0:project.production.pending_composition_count}) }}</span>
           <span v-else-if="project.production.shot_count">{{ tr('{p0} / {p1} 个分镜视频就绪', { p0: project.production.completed_shot_count, p1: project.production.shot_count }) }}</span>
           <span v-else>{{ tr('尚未开始视频制作') }}</span>
           <time :datetime="project.production.latest_activity_at" :title="tr('最近更新：{p0}', { p0: project.production.latest_activity_at })">{{ projectDate(project.production.latest_activity_at) }}</time>
@@ -83,11 +84,12 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
       <dl :id="`project-stats-${project.id}`" class="project-overview-card__stats">
         <div><dt><BookOpen :size="13" aria-hidden="true" />{{ tr('章节数') }}</dt><dd>{{ projectNumber(project.production.chapter_count) }}</dd></div>
         <div :title="tr('当前绑定的图片、声音和视频，项目内按文件去重；已移除的素材不计入。')"><dt><Image :size="13" aria-hidden="true" />{{ tr('资产数') }}</dt><dd>{{ projectNumber(project.production.asset_count) }}</dd></div>
-        <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_duration_count }) : tr('当前成功视频已确认的实际时长，不重复累计历史版本。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
+        <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_finished_duration_count ?? 0 }) : tr('每集按最新成功合成版本的实际时长统计。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
         <div v-if="costState" class="project-overview-card__cost" :title="[costHint, tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')].filter(Boolean).join(' ')" :aria-busy="costState === 'loading'"><dt><Coins :size="13" aria-hidden="true" />{{ tr('已花费') }}</dt><dd :class="{ 'is-pending': costState !== 'ready' }">{{ costState === 'ready' ? money(cost ?? 0) : costState === 'loading' ? tr('正在读取…') : tr('读取失败') }}</dd></div>
       </dl>
     </RouterLink>
 
+    <footer v-if="project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }} · {{ project.production.completed_episode_count }} {{ tr('集') }}</RouterLink></footer>
     <div v-if="editable" ref="actions" class="project-overview-card__actions" :class="{ 'is-open': menuOpen }" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="event => { if (!actions?.contains(event.relatedTarget as Node)) closeMenu() }">
       <AppButton ref="trigger" variant="ghost" icon-only size="sm" :aria-label="tr('项目「{p0}」更多操作', { p0: project.name })" aria-haspopup="menu" :aria-expanded="menuOpen" :disabled="deleting" @click.stop="openMenu" @keydown.down.prevent="openMenu">
         <Ellipsis :size="18" aria-hidden="true" />
@@ -100,9 +102,10 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </template>
 
 <style scoped>
-.project-overview-card { position: relative; min-width: 0; border: 1px solid var(--app-border); border-radius: 18px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 3px 14px rgb(35 39 55 / 3%); transition: border-color 160ms ease, box-shadow 160ms ease; }
+.project-finished-link{padding:10px 20px 15px;font-size:12px;color:var(--app-accent)}
+.project-overview-card { display:flex;flex-direction:column;position: relative; min-width: 0; border: 1px solid var(--app-border); border-radius: 18px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 3px 14px rgb(35 39 55 / 3%); transition: border-color 160ms ease, box-shadow 160ms ease; }
 .project-overview-card:hover, .project-overview-card:focus-within { border-color: var(--app-border-strong); box-shadow: 0 8px 24px rgb(35 39 55 / 7%); }
-.project-overview-card__link { display: flex; height: 100%; min-width: 0; flex-direction: column; padding: 20px; border-radius: inherit; color: inherit; }
+.project-overview-card__link { display: flex; flex:1; min-width: 0; flex-direction: column; padding: 20px; border-radius: inherit; color: inherit; }
 .project-overview-card__link:focus-visible { outline: 3px solid var(--app-accent); outline-offset: 3px; }
 .project-overview-card__identity { display: grid; min-height: 126px; grid-template-columns: 84px minmax(0, 1fr); align-items: start; gap: 16px; }
 .project-overview-card__cover { display: grid; width: 84px; height: 120px; overflow: hidden; place-items: center; border-radius: 10px; color: var(--app-text-muted); background: var(--app-surface-muted); }

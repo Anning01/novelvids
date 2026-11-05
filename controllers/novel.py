@@ -47,6 +47,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "story_outline": novel.story_outline,
             "project_type": novel.project_type,
             "project_setting": novel.project_setting,
+            "storyboard_strategy": novel.storyboard_strategy,
+            "storyboard_setting": novel.storyboard_setting,
             "style_key": getattr(novel, "style_key", None),
             "workflow_kind": getattr(novel, "workflow_kind", "script"),
             "aspect_ratio": getattr(novel, "aspect_ratio", None),

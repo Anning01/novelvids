@@ -197,6 +197,7 @@ class SkillExecution:
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
         )
+        request_aspect_ratio = "16:9"
         agent = Agent(
             deps_type=SkillSnapshot,
             instructions=instructions(self.snapshot, self.language, skill),
@@ -211,22 +212,33 @@ class SkillExecution:
 
         @agent.output_validator
         def validate_output(ctx: RunContext[SkillSnapshot], output):
-            if skill == "storyboard" and hasattr(output, "shots"):
+            if skill == "assets":
                 from pydantic_ai import ModelRetry
-                from services.storyboard.validation import validate_skill_storyboard_timing
+                from services.extraction.extractor import validate_asset_prompt_contract
 
                 try:
-                    if "storyboard_contract" in ctx.deps.contents:
-                        for shot in output.shots:
+                    validate_asset_prompt_contract(output, ctx.deps, self.language, request_aspect_ratio)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
+            if skill == "storyboard" and hasattr(output, "shots"):
+                from pydantic_ai import ModelRetry
+                from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration
+
+                try:
+                    for shot in output.shots:
+                        validate_storyboard_duration(shot, self.params.get("shot_duration_range"))
+                        if "storyboard_contract" in ctx.deps.contents:
                             validate_skill_storyboard_timing(shot)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             return output
 
         async def invoke():
+            nonlocal request_aspect_ratio
             from models.novel import Novel
 
             project = await Novel.get(id=self.params["novel_id"])
+            request_aspect_ratio = project.aspect_ratio or "16:9"
             project_facts = {
                 "name": project.name,
                 "style_key": project.style_key,
@@ -234,6 +246,13 @@ class SkillExecution:
                 "aspect_ratio": project.aspect_ratio,
                 "storyboard_strategy": project.storyboard_strategy,
             }
+            if skill in ("assets", "image"):
+                styles = json.loads(self.snapshot.read("styles"))
+                selected_style = styles.get(project.style_key, {})
+                project_facts["image_style"] = (
+                    (project.custom_style_prompt or "").strip()
+                    or selected_style.get("image", "")
+                )
             request_facts = {
                 "input": facts,
                 "project": project_facts,

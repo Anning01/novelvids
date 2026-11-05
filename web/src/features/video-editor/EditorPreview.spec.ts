@@ -208,3 +208,36 @@ it('previews a group move on all visible selected captions and commits once on r
   window.dispatchEvent(pointer('pointerup',132,82));await flushPromises()
   expect(wrapper.emitted('position')).toEqual([['overlay',{x:60,bottom:20}]])
 })
+
+it.each(['light', 'dark'])('updates the paused preview when the selected font finishes loading (%s)', async theme => {
+  const font = `live-${theme}`
+  document.documentElement.dataset.appTheme = theme
+  let resolve!: (response: Response) => void
+  const fetchFont = vi.fn(() => new Promise<Response>(done => { resolve = done }))
+  vi.stubGlobal('fetch', fetchFont)
+  vi.stubGlobal('FontFace', class { async load() { return this } })
+  const fontSet = { add: vi.fn() }
+  const priorFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
+  Object.defineProperty(document, 'fonts', { configurable: true, value: fontSet })
+  const wrapper = await overlayPreview('subtitle')
+  try {
+    const current = wrapper.props('document')
+    await wrapper.setProps({
+      document: { ...current, clips: current.clips.map(clip => clip.type === 'subtitle' ? { ...clip, font } : clip) },
+    })
+    const subtitle = wrapper.get<HTMLButtonElement>('.editor-subtitle')
+    expect(wrapper.get('[role="status"]').text()).toBe('正在加载字幕字体…')
+    expect(subtitle.element.style.fontFamily).not.toContain(font)
+    resolve(new Response(new Uint8Array([0]), { headers: { 'Content-Type': 'font/ttf' } }))
+    await flushPromises()
+    expect(fontSet.add).toHaveBeenCalledOnce()
+    expect(subtitle.element.style.fontFamily).toContain(`Subtitle-${font}`)
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    expect(wrapper.emitted('update:playing')).toBeUndefined()
+  } finally {
+    wrapper.unmount()
+    if (priorFonts) Object.defineProperty(document, 'fonts', priorFonts)
+    else Reflect.deleteProperty(document, 'fonts')
+    delete document.documentElement.dataset.appTheme
+  }
+})

@@ -75,7 +75,11 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
     ? await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]), url, options?.body) : null
   if (generation) headers['X-Creation-Request-Id'] = generation.id
   const response = await fetch(BASE + url, { headers, ...options })
-  const payload = await response.json()
+  const payload = await response.json().catch((error: unknown) => {
+    if (!(error instanceof SyntaxError)) throw error
+    const code = response.ok ? 502 : response.status
+    throw new ApiRequestError(tr('服务暂不可用，请稍后重试'), code, response.status)
+  })
   if (!response.ok || payload.code !== 0) {
     // 登录失效：清除令牌并跳转登录页（登录接口本身的 401 不跳转）
     if (payload.code === 401 && !url.startsWith('/auth/login')) {

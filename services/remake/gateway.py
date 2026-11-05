@@ -257,8 +257,9 @@ class RemakeVideoAnalysisGateway:
         }
 
     def _add_usage(self, usage: dict[str, int]) -> None:
-        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            self.usage[key] += int(usage.get(key, 0) or 0)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens"):
+            if key in usage:
+                self.usage[key] = self.usage.get(key, 0) + int(usage[key] or 0)
 
 
 def _is_retryable(error: Exception) -> bool:

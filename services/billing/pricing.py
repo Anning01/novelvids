@@ -63,7 +63,8 @@ def compute_text_cost(usage: dict | None, pricing: dict | None) -> Decimal:
                 _as_int(call.get("usage", {}).get("cache_read_tokens"))
                 for call in usage["calls"] if isinstance(call, dict)
             )
-    cache_tokens = min(tokens["input_tokens"], max(0, cache_tokens)) if cache_price > 0 else 0
+    has_cache_price = pricing.get("cache_input_price_per_1m") is not None and cache_price >= 0
+    cache_tokens = min(tokens["input_tokens"], max(0, cache_tokens)) if has_cache_price else 0
     full_price_input_tokens = tokens["input_tokens"] - cache_tokens
     cost = (
         (Decimal(full_price_input_tokens) / _TOKEN_DIVISOR) * input_price

@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from models.config import AiModelConfig, GeneralConfig
 from schemas.config import AiModelConfigCreate, AiModelConfigUpdate, GeneralConfigUpdate
-from services.billing.catalog import VIDEO_PRICING
+from services.billing.catalog import LLM_PRICING, VIDEO_PRICING
 from services.image_generation.capabilities import (
     capabilities_for as image_capabilities_for,
     validate_protocol as validate_image_protocol,
@@ -25,8 +25,11 @@ def _validate_text_pricing(pricing: dict) -> None:
         raise HTTPException(status_code=400, detail=localized_message('文本模型的费用配置 type 必须为 text'))
     for key in ("input_price_per_1m", "output_price_per_1m"):
         value = pricing.get(key)
-        if value is None or not isinstance(value, (int, float)) or value < 0:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise HTTPException(status_code=400, detail=localized_message('文本费用缺少合法的 {p1}', p1=f'{key}'))
+    cache_price = pricing.get("cache_input_price_per_1m")
+    if cache_price is not None and (isinstance(cache_price, bool) or not isinstance(cache_price, (int, float)) or not math.isfinite(cache_price) or cache_price < 0):
+        raise HTTPException(status_code=400, detail=localized_message('文本费用缺少合法的 {p1}', p1='cache_input_price_per_1m'))
 
 
 def _validate_image_pricing(pricing: dict, model_type) -> None:
@@ -157,7 +160,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         if not isinstance(pricing, dict):
             raise HTTPException(status_code=400, detail=localized_message('费用配置必须是对象'))
         discount = pricing.get("discount")
-        if discount is not None and (not isinstance(discount, (int, float)) or discount <= 0):
+        if discount is not None and (isinstance(discount, bool) or not isinstance(discount, (int, float)) or not math.isfinite(discount) or discount <= 0):
             raise HTTPException(status_code=400, detail=localized_message('折扣倍数 discount 必须为正数'))
         description = pricing.get("discount_description")
         if description is not None and not isinstance(description, str):
@@ -352,6 +355,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 for model_type in VideoGenerationModelTypeEnum
             },
             "video_pricing": VIDEO_PRICING,
+            "text_pricing": {model: {"type": "text", "currency": "CNY", **prices} for model, prices in LLM_PRICING.items()},
         }
 
     async def deactivate(self, config_id: int) -> AiModelConfig:

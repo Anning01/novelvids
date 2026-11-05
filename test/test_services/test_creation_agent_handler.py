@@ -33,6 +33,39 @@ def test_hidden_tool_retry_at_turn_limit_is_actionable_without_masking_provider_
     assert '确认模型可用' in public_run_error('Connection failed', [], turn_limited=True)
 
 
+@pytest.mark.parametrize('reason', ['Exceeded maximum retries (2) for output validation', "Tool 'apply_creation_changes' exceeded max retries count of 2"])
+def test_validation_retry_failure_has_specific_safe_guidance(reason):
+    from services.creation_agent.handler import public_run_error
+    result = public_run_error(reason + ' secret-provider-payload', [{'finish_reason': 'tool_call'}] * 9)
+    assert '未通过工具或输出校验' in result
+    assert '缩小修改范围' in result
+    assert 'secret' not in result and 'apply_creation_changes' not in result
+
+
+@pytest.mark.asyncio
+async def test_repeated_invalid_tool_arguments_report_validation_failure_without_saving(monkeypatch):
+    conversation, request, _ = await session_fixture()
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+
+    async def model(messages, info):
+        yield {0: DeltaToolCall(name='get_creation_context', tool_call_id=f'bad-{len(messages)}',
+                               json_args=json.dumps({'chapter_id': request.chapter_id}))}
+
+    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args: FunctionModel(stream_function=model))
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
+    await executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == TaskStatusEnum.failed.value
+    from utils.messages import localized_message
+    expected = localized_message('模型连续提交的内容未通过工具或输出校验，本轮已停止。请缩小修改范围后重试；已保存的修改可在记录中查看。', _language='en')
+    assert task.error_message == expected
+    assert not await PromptChange.filter(task=task).exists()
+    assistant = await AgentMessage.get(task=task, role='assistant')
+    events = await agent_event_log.load(assistant)
+    assert any(event.get('type') == 'RUN_ERROR' and event.get('message') == expected for event in events)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('with_constraint', [False, True])
 async def test_handler_persists_events_history_and_usage_without_exposing_private_text(monkeypatch, with_constraint):

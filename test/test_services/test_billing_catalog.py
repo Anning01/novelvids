@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import pytest
 
 from services.billing.catalog import pricing_for
 
@@ -72,8 +73,16 @@ def test_pricing_for_llm_model():
     )
     pricing = pricing_for(config)
     assert pricing["type"] == "text"
-    assert pricing["input_price_per_1m"] == 12.00
-    assert pricing["output_price_per_1m"] == 24.00
+    assert pricing["input_price_per_1m"] == 9.00
+    assert pricing["cache_input_price_per_1m"] == 0.30
+    assert pricing["output_price_per_1m"] == 27.00
+
+
+@pytest.mark.parametrize('model', ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'])
+def test_flash_current_name_and_legacy_aliases_use_peak_prices(model):
+    pricing = pricing_for(SimpleNamespace(image_model_type=None, video_model_type=None, model=model))
+    assert pricing == {'type': 'text', 'currency': 'CNY', 'input_price_per_1m': 2,
+                       'cache_input_price_per_1m': 0.04, 'output_price_per_1m': 8}
 
 
 def test_pricing_for_unknown_model_returns_none():
