@@ -95,6 +95,7 @@ class SkillExecution:
         *,
         model_config=None,
         media=None,
+        additional_instructions: str = "",
     ):
         from services.creation_agent.handler import configured_model
 
@@ -200,7 +201,9 @@ class SkillExecution:
         request_aspect_ratio = "16:9"
         agent = Agent(
             deps_type=SkillSnapshot,
-            instructions=instructions(self.snapshot, self.language, skill),
+            instructions=instructions(self.snapshot, self.language, skill) + (
+                "\n" + additional_instructions if additional_instructions else ""
+            ),
             output_type=output_type,
             retries=2,
         )

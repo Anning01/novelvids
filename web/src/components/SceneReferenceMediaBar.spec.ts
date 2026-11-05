@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import AppButton from './AppButton.vue'
 import SceneReferenceMediaBar from './SceneReferenceMediaBar.vue'
 import type { VideoGenerationModel } from '@/types'
+import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 
 vi.mock('@/features/resource-library/api', () => ({ libraryApi: { get: vi.fn() } }))
 
@@ -31,6 +32,43 @@ const model: VideoGenerationModel = {
 }
 
 describe('SceneReferenceMediaBar', () => {
+  it.each(['light', 'dark'])('shows audio limits, pending duration, over-limit feedback and disabled state in %s', async theme => {
+    document.documentElement.dataset.theme = theme
+    const audioModel = { ...model, capabilities: { ...model.capabilities, max_reference_audios: 3, reference_audio_duration_min: 2, reference_audio_duration_max: 15, reference_audio_total_duration_max: 15 } }
+    const wrapper = mount(SceneReferenceMediaBar, { props: { model: audioModel, media: [], assetImageCount: 0, audioDurations: [5, 6] } })
+    expect(wrapper.text()).toContain('音频 2/3')
+    expect(wrapper.text()).toContain('11.0/15s')
+    expect(wrapper.get('[title*="相同音色"]').attributes('title')).toContain('每条 2–15 秒')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    await wrapper.setProps({ audioDurations: [5, null] })
+    expect(wrapper.text()).toContain('音频 2/3')
+    expect(wrapper.text()).toContain('音频时长待确认')
+    expect(wrapper.text()).not.toContain('5.0/15s')
+    await wrapper.setProps({ audioDurations: [6, 5, 5] })
+    expect(wrapper.get('[role="alert"]').text()).toContain('参考音频总时长超过 15 秒')
+    await wrapper.setProps({ audioDurations: [3, 3, 3, 3] })
+    expect(wrapper.get('[role="alert"]').text()).toContain('参考音频超过 3 个')
+    await wrapper.setProps({ disabled: true, audioDurations: [] })
+    expect(wrapper.text()).toContain('音频 0/3')
+    expect(wrapper.get('.reference-add').attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ disabled: false, model: null })
+    expect(wrapper.text()).toContain('音频 0/0')
+    expect(wrapper.text()).toContain('请先启用视频模型')
+    wrapper.unmount()
+    delete document.documentElement.dataset.theme
+  })
+
+  it.each([
+    [[2, 13], '', true],
+    [[1, 5], '单条参考音频需为 2–15 秒', true],
+    [[16], '单条参考音频需为 2–15 秒', true],
+    [[8, 8], '参考音频总时长超过 15 秒', true],
+    [[8, null], '', false],
+    [[0], '单条参考音频需为 2–15 秒', true],
+  ] as const)('validates known audio durations %s', (durations, error, durationComplete) => {
+    const caps = { ...model.capabilities, reference_audio_duration_min: 2, reference_audio_duration_max: 15, reference_audio_total_duration_max: 15 }
+    expect(referenceAudioUsage([...durations], caps)).toMatchObject({ error, durationComplete })
+  })
   it('counts project asset images together with uploaded references', () => {
     const wrapper = mount(SceneReferenceMediaBar, {
       props: {

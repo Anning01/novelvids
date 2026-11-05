@@ -14,6 +14,7 @@ from prompts.storyboard_strategies import (
 )
 from utils.prompt_language import normalize_prompt_language
 from prompts.labels import prompt_label
+from prompts.asset_introductions import asset_introduction_requirement
 
 
 class StoryboardEntity(Protocol):
@@ -283,9 +284,15 @@ def build_storyboard_messages(
     long_text, entities, prompt_language="zh", *, batch_index=0, batch_count=1,
     next_sequence=1, previous_shot=None, strategy=CINEMATIC_STORYBOARD_STRATEGY,
     creative_constraints=(),
+    previously_seen_assets=(),
+    introduction_descriptions=None,
 ):
+    system_prompt = render_skill("storyboard", prompt_language)
+    requirement = asset_introduction_requirement(entities, previously_seen_assets, prompt_language, introduction_descriptions)
+    if requirement:
+        system_prompt += "\n" + requirement
     return [
-        {"role": "system", "content": render_skill("storyboard", prompt_language)},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": task_facts({
             "assets": json.loads(_asset_payload(entities)),
             "manuscript": long_text, "strategy": strategy.key,
@@ -350,6 +357,20 @@ def referenced_entities(
 ) -> list[StoryboardEntity]:
     """返回镜头实际引用的实体。"""
     return entity_reference_names(_shot_search_text(shot), entities)
+
+
+def visible_storyboard_assets(shot: object, entities: Sequence[StoryboardEntity]) -> list[str]:
+    """Count visual presence of assets; spoken mentions do not consume a debut."""
+    values = [getattr(shot, "visual_prose", "") or "", getattr(shot, "spatial_relationships", "") or "",
+              getattr(shot, "environment", "") or "",
+              *(getattr(shot, "actions", ()) or ())]
+    for segment in getattr(shot, "segments", ()) or ():
+        if isinstance(segment, dict):
+            values.extend((segment.get("visual_prose", "") or "", *(segment.get("actions", ()) or ())))
+        else:
+            values.extend((segment.visual_prose, *segment.actions))
+    text = normalize_storyboard_reference_text("\n".join(values), entities)
+    return [entity.name for entity in entity_reference_names(text, entities)]
 
 
 ASSET_REFERENCE_LABELS = (

@@ -1,5 +1,10 @@
 {
   "common": {
+    "参考音频超过 {p0} 个（包含角色和旁白音色）": "More than {p0} reference audio clips, including character and narrator voices",
+    "单条参考音频需为 {p0}–{p1} 秒": "Each reference audio clip must be {p0}–{p1} seconds",
+    "参考音频总时长超过 {p0} 秒": "Reference audio exceeds {p0} seconds in total",
+    "角色和旁白音色已计入，相同音色只计一次；每条 {p0}–{p1} 秒，总计最多 {p2} 秒": "Includes character and narrator voices, counted once per voice. Each clip must be {p0}–{p1} seconds, up to {p2} seconds total.",
+    "音频时长待确认": "Audio duration pending",
     "短剧": "Short drama",
     "漫剧": "Comic drama",
     "动画": "Animation",

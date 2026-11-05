@@ -17,6 +17,7 @@ from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.storyboard.validation import validate_storyboard_duration
 from services.storyboard.entities import visual_entity_description
+from services.storyboard.appearances import previously_seen_assets
 from services.creation_agent.memory import creation_memory
 from services.creation_objects import CreationObjects, project_write
 from schemas.scene import SceneEntity
@@ -71,6 +72,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
         # 3. 调用 OpenAI API 生成分镜
         creative_constraints = await creation_memory.for_generation(chapter, assets)
+        seen_assets = await previously_seen_assets(chapter, entities)
         start_time = time.time()
 
         try:
@@ -88,6 +90,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 max_tokens=max_tokens,
                 storyboard_strategy=strategy.key,
                 creative_constraints=creative_constraints,
+                previously_seen_assets=seen_assets,
+                introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )
 
             end_time = time.time()

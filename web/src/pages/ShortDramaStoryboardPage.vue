@@ -70,6 +70,7 @@ import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
+import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { Asset, AssetVariant, AudioReference, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia, AutoEnhancement, VideoDefaults } from '@/types'
 
@@ -849,6 +850,11 @@ function cacheAudioReference(reference: AudioReference) {
   }
 }
 
+function sceneAudioDurations(scene: Scene, model = selectedVideoModelConfig.value): Array<number | null> {
+  if (!model?.capabilities.supports_audio || draftFor(scene).videoGenerationMode !== 'reference') return []
+  return sceneVoiceReferenceMappings(scene).map(mapping => audioReferencesById.value[mapping.referenceId]?.duration ?? null)
+}
+
 function loadAudioReference(referenceId: number) {
   if (audioReferencesById.value[referenceId]) return Promise.resolve()
   const pending = audioReferenceRequests.get(referenceId)
@@ -870,6 +876,12 @@ function hydrateSceneAudioReferences(sceneItems = scenes.value) {
   )))
   return Promise.all([...referenceIds].map(loadAudioReference))
 }
+
+watch(() => [...new Set(scenes.value.flatMap(scene => (
+  sceneVoiceReferenceMappings(scene).map(mapping => mapping.referenceId)
+)))].sort((left, right) => left - right).join(','), () => {
+  void hydrateSceneAudioReferences()
+}, { flush: 'post' })
 
 function ensureSceneVoiceReferencePrompt(scene: Scene) {
   const draft = draftFor(scene)
@@ -1154,6 +1166,8 @@ function referenceLimitError(scene: Scene, model = selectedVideoModelConfig.valu
   if (imageCount > model.capabilities.max_reference_images) return tr('参考图片超过 {p0} 张（包含资产图）', { p0: model.capabilities.max_reference_images })
   if (videos.length > model.capabilities.max_reference_videos) return tr('参考视频超过 {p0} 个', { p0: model.capabilities.max_reference_videos })
   if (duration > model.capabilities.reference_video_total_duration_max + 0.001) return tr('参考视频总时长超过 {p0} 秒', { p0: model.capabilities.reference_video_total_duration_max })
+  const audioUsage = referenceAudioUsage(sceneAudioDurations(scene, model), model.capabilities)
+  if (audioUsage.error) return audioUsage.error
   return ''
 }
 
@@ -2376,6 +2390,7 @@ onBeforeUnmount(() => {
                   :model="selectedVideoModelConfig"
                   :media="draftFor(scene).referenceMedia"
                   :asset-image-count="selectedAssetReferenceImageCount(scene)"
+                  :audio-durations="sceneAudioDurations(scene)"
                   :highlighted-media-index="highlightedMediaIndex(scene)"
                   :disabled="draftFor(scene).videoGenerationMode === 'keyframes'"
                   :uploading="uploadingReferenceSceneIds.has(scene.id)"
