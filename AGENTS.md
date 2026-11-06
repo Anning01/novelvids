@@ -90,3 +90,5 @@
 - 站点：`https://shortdramas.xiazq.com`；代码：`/root/novelvids`；Supervisor 服务：`novelvids-backend`；后端：`127.0.0.1:9000`；Caddy 提供 `web/dist`。服务器使用 PostgreSQL，部署前须备份并验证兼容。
 - 用户要求推送并部署时，在测试、备份和健康检查通过后按现有部署流程执行；先从服务器现有配置核实目录、服务名和版型，不猜测或覆盖环境文件。
 - 开源版与器灵版共用代码，通过 `AUTH_ENABLED` / `AUTH_PROVIDER` 区分；部署保留服务器当前版型，除非用户明确要求切换。
+
+- 2026-11-07 已按用户指示启用生产器灵版：`AUTH_ENABLED=true`、`AUTH_PROVIDER=qiling`，开放器灵新账号注册；器灵、协议和微信支付配置已从本地 `.env` 同步。微信密钥位于服务器 `/root/.config/novelvids/wechat-pay/`，不得提交密钥或输出配置值。更新时保留器灵版，不自动切回密码登录。
