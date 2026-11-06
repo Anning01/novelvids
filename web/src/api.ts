@@ -2,7 +2,7 @@ import { generationRequest, finishGenerationRequest } from '@/shared/generationR
 
 import { tr } from '@/i18n'
 import type { ProjectOverview } from './types'
-import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, LoginResult, MemberItem, Novel, NovelMeta, PaginationResponse, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoGenerationOptions, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
+import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, MemberItem, Novel, NovelMeta, PaginationResponse, RechargeOrder, RechargeOrderDetail, RechargeOrderItem, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoGenerationOptions, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
 // 例：VITE_API_BASE=https://api.example.com npm run build
@@ -81,8 +81,7 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
     throw new ApiRequestError(tr('服务暂不可用，请稍后重试'), code, response.status)
   })
   if (!response.ok || payload.code !== 0) {
-    // 登录失效：清除令牌并跳转登录页（登录接口本身的 401 不跳转）
-    if (payload.code === 401 && !url.startsWith('/auth/login')) {
+    if (payload.code === 401 && getAuthToken()) {
       clearAuthToken()
       redirectToLogin()
     }
@@ -247,13 +246,24 @@ export const api = {
   enums: () => request<SingleResponse<AllEnums>>('/config/enums/all'),
   visualStyles: () => request<SingleResponse<VisualStyleItem[]>>('/config/visual-styles'),
   authStatus: () => request<SingleResponse<AuthStatus>>('/auth/status'),
-  login: (username: string, password: string) => request<SingleResponse<LoginResult>>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  register: (data: { username: string; password: string; nickname?: string; invite_token: string }) => request<SingleResponse<LoginResult>>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  login: (username: string, password: string) => request<SingleResponse<import('./types').LoginResult>>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  register: (data: { username: string; password: string; nickname?: string; invite_token: string }) => request<SingleResponse<import('./types').LoginResult>>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  changePassword: (oldPassword: string, newPassword: string) => request<SingleResponse<null>>('/auth/change-password', { method: 'POST', body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) }),
+  resetTeamMemberPassword: (userId: number, data: { new_password: string }, teamId?: number) => request<SingleResponse<null>>(`/team/members/${userId}/reset-password${qs({ team_id: teamId })}`, { method: 'POST', body: JSON.stringify(data) }),
+  createUser: (data: { username: string; password: string; nickname?: string }) => request<SingleResponse<UserItem>>('/users', { method: 'POST', body: JSON.stringify(data) }),
+  qilingStart: (bind: boolean) => request<SingleResponse<import('./types').QilingAttempt>>(`/auth/qiling/${bind ? 'bind/' : ''}start`, { method: 'POST' }),
+  qilingPoll: (bind: boolean, attempt: string, signal: AbortSignal) => request<SingleResponse<import('./types').QilingPoll>>(`/auth/qiling/${bind ? 'bind/' : ''}poll`, { method: 'POST', body: JSON.stringify({ attempt }), signal }),
   me: () => request<SingleResponse<AuthMe>>('/auth/me'),
   logout: () => request<SingleResponse<null>>('/auth/logout', { method: 'POST' }),
-  changePassword: (oldPassword: string, newPassword: string) => request<SingleResponse<null>>('/auth/change-password', { method: 'POST', body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) }),
   teamBalance: (teamId?: number) => request<SingleResponse<{ team_id: number; balance: number }>>(`/team/balance${qs({ team_id: teamId })}`),
   teamTopUp: (data: { team_id: number; amount: number; note?: string }) => request<SingleResponse<{ team_id: number; balance: number }>>('/team/balance/topup', { method: 'POST', body: JSON.stringify(data) }),
+  createRechargeOrder: (data: { team_id: number; amount: number; note?: string }) => request<SingleResponse<RechargeOrder>>('/team/balance/recharge', { method: 'POST', body: JSON.stringify(data) }),
+  queryRechargeOrder: (outTradeNo: string) => request<SingleResponse<RechargeOrderDetail>>(`/team/balance/recharge/${encodeURIComponent(outTradeNo)}`),
+  syncRechargeOrder: (outTradeNo: string) => request<SingleResponse<RechargeOrderDetail>>(`/team/balance/recharge/${encodeURIComponent(outTradeNo)}`),
+  mockPayRechargeOrder: (outTradeNo: string) => request<SingleResponse<RechargeOrderDetail>>(`/team/balance/recharge/${encodeURIComponent(outTradeNo)}/mock-pay`, { method: 'POST' }),
+  rechargeOrders: (params: { page?: number; page_size?: number; status?: string; search?: string } = {}) => request<PaginationResponse<RechargeOrderItem>>(`/team/orders${qs(params)}`),
+  refundRechargeOrder: (outTradeNo: string, data?: { reason?: string }) => request<SingleResponse<RechargeOrderItem>>(`/team/orders/${encodeURIComponent(outTradeNo)}/refund`, { method: 'POST', body: JSON.stringify(data ?? {}) }),
+  experienceShowcase: () => request<SingleResponse<import('./types').ShowcaseWork[]>>('/experience/showcase'),
   teamMembers: (page = 1, pageSize = 20, teamId?: number) => request<PaginationResponse<MemberItem>>(`/team/members${qs({ page, page_size: pageSize, team_id: teamId })}`),
   createTeamInvite: (role: TeamRole = 'creator', teamId?: number) => request<SingleResponse<InviteItem>>(`/team/invites${qs({ role, team_id: teamId })}`, { method: 'POST' }),
   teamInviteInfo: (token: string) => request<SingleResponse<InviteItem>>(`/team/invites/${token}`),
@@ -261,13 +271,11 @@ export const api = {
   updateTeamMember: (userId: number, data: { role?: TeamRole; status?: number }, teamId?: number) => request<SingleResponse<MemberItem>>(`/team/members/${userId}${qs({ team_id: teamId })}`, { method: 'PATCH', body: JSON.stringify(data) }),
   setTeamMemberLimit: (userId: number, costLimit: number | null, teamId?: number) => request<SingleResponse<MemberItem>>(`/team/members/${userId}/limit${qs({ team_id: teamId })}`, { method: 'PUT', body: JSON.stringify({ cost_limit: costLimit }) }),
   removeTeamMember: (userId: number, teamId?: number) => request<SingleResponse<null>>(`/team/members/${userId}${qs({ team_id: teamId })}`, { method: 'DELETE' }),
-  resetTeamMemberPassword: (userId: number, data: { new_password: string }, teamId?: number) => request<SingleResponse<null>>(`/team/members/${userId}/reset-password${qs({ team_id: teamId })}`, { method: 'POST', body: JSON.stringify(data) }),
   teams: (page = 1, pageSize = 100) => request<PaginationResponse<TeamItem>>(`/team/teams${qs({ page, page_size: pageSize })}`),
   createTeam: (data: { name: string; owner_user_id: number; member_limit?: number | null }) => request<SingleResponse<TeamItem>>('/team/teams', { method: 'POST', body: JSON.stringify(data) }),
   updateTeam: (id: number, data: { name?: string; status?: number; member_limit?: number | null }) => request<SingleResponse<TeamItem>>(`/team/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   userStats: () => request<SingleResponse<UserStats>>('/users/stats'),
   users: (page = 1, pageSize = 100, search?: string) => request<PaginationResponse<UserItem>>(`/users${qs({ page, page_size: pageSize, search })}`),
-  createUser: (data: { username: string; password: string; nickname?: string }) => request<SingleResponse<UserItem>>('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: number, data: { status: number }) => request<SingleResponse<UserItem>>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteUser: (id: number) => request<SingleResponse<null>>(`/users/${id}`, { method: 'DELETE' }),
   novels: () => request<PaginationResponse<Novel>>('/novel?page=1&page_size=100'),

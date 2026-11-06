@@ -13,7 +13,7 @@ const props = defineProps<{ video: Video }>()
 const emit = defineEmits<{ extracted: [video: Video] }>()
 const auth = useAuthStore()
 const busy = ref(false)
-const canWrite = computed(() => !auth.enabled || auth.isSuperAdmin || ['admin', 'creator'].includes(auth.role || ''))
+const canWrite = computed(() => !auth.enabled || auth.role === 'super' || ['admin', 'creator'].includes(auth.role || ''))
 const frameUrl = computed(() => {
   const metadata = props.video.metadata
   return metadata && ['provider', 'ffmpeg'].includes(String(metadata.last_frame_source)) && typeof metadata.last_frame_url === 'string'

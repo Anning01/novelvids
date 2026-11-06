@@ -9,7 +9,7 @@ import { useAuthStore } from '@/features/auth/authStore'
 async function mountPage(pinia: Pinia, token: string) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/invite/:token', component: InvitePage }],
+    routes: [{ path: '/invite/:token', component: InvitePage }, { path: '/login', component: { template: '<div />' } }],
   })
   await router.push(`/invite/${token}`)
   await router.isReady()
@@ -48,32 +48,16 @@ describe('InvitePage', () => {
     expect(api.joinTeamInvite).toHaveBeenCalledWith('t1')
   })
 
-  it('shows register form for anonymous users', async () => {
+  it('sends a signed-out invitee through Qiling login and back to the same invitation', async () => {
     vi.spyOn(api, 'teamInviteInfo').mockResolvedValue({
       data: { token: 't2', team_id: 2, team_name: '注册团队', role: 'viewer', expires_at: '' },
     } as never)
-    vi.spyOn(api, 'register').mockResolvedValue({
-      data: { token: 'new-session', user: { id: 9, username: 'newbie', nickname: '', avatar_url: '', is_super_admin: false } },
-    } as never)
-    vi.spyOn(api, 'me').mockResolvedValue({
-      data: { user: { id: 9, username: 'newbie', nickname: '', avatar_url: '', is_super_admin: false }, memberships: [{ team_id: 2, team_name: '注册团队', role: 'viewer' }] },
-    } as never)
-
     const pinia = createPinia()
-    setActivePinia(pinia)
+    useAuthStore(pinia).$patch({ provider: 'qiling' })
     const wrapper = await mountPage(pinia, 't2')
     await flushPromises()
-
-    const inputs = wrapper.findAll('input')
-    await inputs[0].setValue('newbie')
-    await inputs[2].setValue('password-123')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    expect(api.register).toHaveBeenCalledWith(
-      expect.objectContaining({ username: 'newbie', invite_token: 't2' }),
-    )
-    expect(useAuthStore(pinia).token).toBe('new-session')
+    expect(wrapper.get('a').attributes('href')).toContain('/login?redirect=/invite/t2')
+    expect(wrapper.find('form').exists()).toBe(false)
   })
 
   it('shows error for invalid invite', async () => {

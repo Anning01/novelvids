@@ -12,9 +12,10 @@ it('matches the reference watermark controls and five preset order', async () =>
   })
 
   expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('设置成片水印')
-  expect(wrapper.get('[aria-label="组织模板"]').element).toBeInstanceOf(HTMLSelectElement)
+  expect(wrapper.get('button[aria-label="组织模板"]').element).toHaveAttribute('disabled')
   expect(wrapper.get('[aria-label="组织模板"]').text()).toContain('不使用模板')
-  expect(wrapper.get('[aria-label="水印位置"]').findAll('option').map(option => option.text())).toEqual([
+  await wrapper.get('button[aria-label="水印位置"]').trigger('click')
+  expect(wrapper.get('[role="listbox"]').findAll('[role="option"]').map(option => option.text())).toEqual([
     '左上角',
     '右上角',
     '左下角',
@@ -41,7 +42,8 @@ it('emits preset and slider changes immediately and keeps close separate', async
     global: { stubs: { Teleport: true } },
   })
 
-  await wrapper.get('[aria-label="水印位置"]').setValue('top-left')
+  await wrapper.get('button[aria-label="水印位置"]').trigger('click')
+  await wrapper.get('[role="listbox"]').get('[role="option"]').trigger('click')
   expect(wrapper.emitted('change')?.at(-1)?.[0]).toMatchObject({ x: 0.14, y: 0.14, scale: 0.2 })
 
   await wrapper.get('[aria-label="缩放"]').setValue(0.35)

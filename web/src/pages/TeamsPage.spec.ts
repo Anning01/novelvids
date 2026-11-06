@@ -91,6 +91,35 @@ describe('TeamsPage', () => {
     expect(api.createTeam).toHaveBeenCalledWith({ name: '新队', owner_user_id: 7, member_limit: 8 })
   })
 
+  it('creates team with default member limit 3 when untouched', async () => {
+    vi.spyOn(api, 'users').mockResolvedValue({
+      data: {
+        items: [
+          { id: 7, username: 'owner7', nickname: '七号', is_super_admin: false, status: 1, total_cost: '0.000000', team_count: 0 },
+        ],
+        pagination: { total: 1, page: 1, page_size: 100, pages: 1 },
+      },
+    } as never)
+    const createTeamMock = vi.spyOn(api, 'createTeam').mockResolvedValue({
+      data: { id: 6, name: '默认限员队', balance: 0, model_config_source: 'official', status: 1, member_limit: 3, owner_user_id: 7, owner_username: 'owner7', member_count: 1 },
+    } as never)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const openButton = wrapper.findAll('button').find(button => button.text() === '新建团队')
+    await openButton!.trigger('click')
+    await flushPromises()
+
+    const inputs = wrapper.findAll('.dialog-card input')
+    expect((inputs[1].element as HTMLInputElement).value).toBe('3')
+    await inputs[0].setValue('默认限员队')
+    await wrapper.get('.dialog-card').trigger('submit')
+    await flushPromises()
+
+    expect(createTeamMock).toHaveBeenCalledWith({ name: '默认限员队', owner_user_id: 7, member_limit: 3 })
+  })
+
   it('tops up a team via api', async () => {
     vi.spyOn(api, 'teams').mockResolvedValue({
       data: {

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query
 
+from auth.api import password_provider
 from auth.deps import AuthContext, require_super_admin
 from controllers.user import user_controller
 from schemas.user import UserCreateIn, UserOut, UserPatchIn, UserStatsOut
@@ -45,6 +46,7 @@ async def list_users(
     "",
     summary="手动创建用户（仅超级管理员）",
     response_model=ResponseSchema[UserOut],
+    dependencies=[Depends(password_provider)],
 )
 async def create_user(payload: UserCreateIn, _: AuthContext = _SUPER):
     return ResponseSchema(

@@ -27,6 +27,15 @@ from test.test_services.test_skill_workflow import enabled_project
 from test.test_services.test_prompt_language import _shot
 
 
+@pytest.fixture(autouse=True)
+def public_prompt_pack(tmp_path, monkeypatch):
+    """Exercise the public flow independently of ignored private timing policy."""
+    import prompts.skill_pack as pack
+    for filename in pack.FILES.values():
+        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
+    monkeypatch.setattr(pack, 'ROOT', tmp_path)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(

@@ -28,7 +28,8 @@ export function resolveAuthGuard(to: RouteLocationNormalized, auth: AuthStoreLik
   if (auth.enabled !== true) return {}
   if (to.meta.public === true) return {}
   if (!auth.isLoggedIn) return { redirect: '/login' }
-  if (to.meta.superOnly === true && auth.role !== 'super') return { redirect: '/' }
+  if (auth.role === null && to.path !== '/profile') return { redirect: '/profile' }
+  if (to.meta.superOnly === true && auth.role !== 'super' && !auth.isSuperAdmin) return { redirect: '/' }
   const required = to.meta.roles as TeamRole[] | undefined
   if (!hasRoleAccess(auth.role, required)) return { redirect: '/' }
   return {}

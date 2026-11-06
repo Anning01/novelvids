@@ -288,18 +288,19 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             image_config = await ai_model_config_controller.get_active(
                 AiTaskTypeEnum.reference_image.value, team_id=request_params.get("team_id"),
             )
+            cover_ratio = novel.aspect_ratio or "2:3"
             cover_selection = validate_selection(
-                image_config.image_model_type, clarity=None, aspect_ratio="2:3",
+                image_config.image_model_type, clarity=None, aspect_ratio=cover_ratio,
                 output_format="png", generation_count=1,
             )
             if execution:
                 from schemas.agent_workflow import CompletePrompt
                 cover = await execution.generate('image', {'purpose': 'project_cover', 'name': novel.name,
-                    'outline': analysis.story_outline, 'aspect_ratio': '2:3'}, CompletePrompt)
+                    'outline': analysis.story_outline, 'aspect_ratio': cover_ratio}, CompletePrompt)
                 cover_prompt = cover.prompt
             else:
                 cover_prompt = render_cover_prompt(name=novel.name, book_types=analysis.book_types,
-                    story_outline=analysis.story_outline, prompt_language=prompt_language)
+                    story_outline=analysis.story_outline, prompt_language=prompt_language, aspect_ratio=cover_ratio)
             async def generate_cover():
                 if execution:
                     await execution.before_request()

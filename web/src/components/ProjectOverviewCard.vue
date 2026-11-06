@@ -3,8 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { BookOpen, Clapperboard, Clock3, Coins, Ellipsis, Image, Trash2 } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
-import { mediaUrl } from '@/api'
-import { fallbackImage } from '@/shared/mediaFallback'
+import ProjectCover from '@/components/ProjectCover.vue'
 import { money } from '@/features/billing/recordDisplay'
 import { projectDate, projectKindLabel, projectNumber, projectRuntime } from '@/shared/projectOverview'
 import { projectEntryRoute, readShortDramaSettings } from '@/shared/shortDramaProject'
@@ -52,10 +51,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
   <article class="project-overview-card" :class="{ 'is-deleting': deleting }" :aria-labelledby="`project-title-${project.id}`">
     <RouterLink :to="projectEntryRoute(project)" class="project-overview-card__link" :aria-label="tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
       <div class="project-overview-card__identity">
-        <div class="project-overview-card__cover">
-          <img v-if="project.cover" :src="mediaUrl(project.cover_thumbnail || project.cover)" alt="" width="84" height="120" loading="lazy" decoding="async" @error="fallbackImage($event, mediaUrl(project.cover))">
-          <BookOpen v-else :size="29" :stroke-width="1.5" aria-hidden="true" />
-        </div>
+        <ProjectCover class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
         <div class="project-overview-card__copy">
           <span class="project-overview-card__status" :class="`is-${project.production.state}`">{{ stateLabel }}</span>
           <h2 :id="`project-title-${project.id}`" :title="project.name">{{ project.name }}</h2>
@@ -107,9 +103,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 .project-overview-card:hover, .project-overview-card:focus-within { border-color: var(--app-border-strong); box-shadow: 0 8px 24px rgb(35 39 55 / 7%); }
 .project-overview-card__link { display: flex; flex:1; min-width: 0; flex-direction: column; padding: 20px; border-radius: inherit; color: inherit; }
 .project-overview-card__link:focus-visible { outline: 3px solid var(--app-accent); outline-offset: 3px; }
-.project-overview-card__identity { display: grid; min-height: 126px; grid-template-columns: 84px minmax(0, 1fr); align-items: start; gap: 16px; }
-.project-overview-card__cover { display: grid; width: 84px; height: 120px; overflow: hidden; place-items: center; border-radius: 10px; color: var(--app-text-muted); background: var(--app-surface-muted); }
-.project-overview-card__cover img { width: 100%; height: 100%; object-fit: cover; }
+.project-overview-card__identity { display: grid; min-height: 126px; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 16px; }
 .project-overview-card__copy { min-width: 0; }
 .project-overview-card__status { display: inline-flex; max-width: calc(100% - 23px); min-height: 23px; align-items: center; padding: 2px 7px; border-radius: 6px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; font-weight: 600; line-height: 1.35; }
 .project-overview-card__status.is-in_progress { color: var(--app-accent); background: var(--app-accent-soft); }

@@ -16,15 +16,21 @@ const totalTeams = ref(0)
 
 const showCreateDialog = ref(false)
 const candidates = ref<UserItem[]>([])
-const createForm = ref({ name: '', memberLimit: '', ownerUserId: null as number | null })
+const createForm = ref({ name: '', memberLimit: '3', ownerUserId: null as number | null })
 const creating = ref(false)
 
 const statusLabel = (status: number) => (status === 1 ? tr('正常') : tr('已停用'))
 
-const ownerOptions = computed(() => candidates.value.map(user => ({
-  value: String(user.id),
-  label: tr('{p0}（{p1}{p2}）', { p0: user.nickname || user.username, p1: user.username, p2: user.is_super_admin ? tr('，超管') : '' }),
-})))
+const ownerOptions = computed(() => candidates.value.map(user => {
+  const name = user.nickname || (user.username.startsWith('qiling-') ? tr('微信用户') : user.username)
+  const isQiling = user.username.startsWith('qiling-')
+  const tag = user.is_super_admin ? tr('超管') : ''
+  const extra = isQiling ? (tag ? `（${tag}）` : '') : `（${user.username}${tag ? `，${tag}` : ''}）`
+  return {
+    value: String(user.id),
+    label: `${name}${extra}`,
+  }
+}))
 
 function selectOwner(value: string) {
   createForm.value.ownerUserId = Number(value)
@@ -59,7 +65,7 @@ function changePageSize(size: number) {
 }
 
 async function openCreateDialog() {
-  createForm.value = { name: '', memberLimit: '', ownerUserId: null }
+  createForm.value = { name: '', memberLimit: '3', ownerUserId: null }
   try {
     const response = await api.users()
     // 所有人可选任意可用用户（含超管本人），超管在选项中标明
@@ -84,7 +90,7 @@ async function createTeam() {
     await api.createTeam({
       name: createForm.value.name.trim(),
       owner_user_id: createForm.value.ownerUserId,
-      member_limit: limit || null,
+      member_limit: limit === 0 ? null : (limit ?? 3),
     })
     notice.success(tr('团队已创建'))
     showCreateDialog.value = false
@@ -209,8 +215,8 @@ onMounted(loadTeams)
           <p v-if="!candidates.length" class="dim">{{ tr('没有可选用户，请先在「用户管理」中创建用户') }}</p>
         </div>
         <label>
-          <span>{{ tr('人员上限（留空表示不限）') }}</span>
-          <input v-model="createForm.memberLimit" type="number" min="1" :placeholder="tr('如 10')" />
+          <span>{{ tr('人员上限（默认 3 人，留空或 0 表示不限）') }}</span>
+          <input v-model="createForm.memberLimit" type="number" min="1" :placeholder="tr('默认 3 人，留空或 0 表示不限')" />
         </label>
         <div class="dialog-actions">
           <button type="button" class="ghost-button" @click="showCreateDialog = false">{{ tr('取消') }}</button>

@@ -17,6 +17,7 @@ const invite = ref<InviteItem | null>(null)
 const loading = ref(true)
 const errorMessage = ref('')
 const joining = ref(false)
+
 const registerForm = ref({ username: '', nickname: '', password: '' })
 const registering = ref(false)
 
@@ -35,7 +36,8 @@ async function join() {
   joining.value = true
   errorMessage.value = ''
   try {
-    await api.joinTeamInvite(token)
+    const { data } = await api.joinTeamInvite(token)
+    if (data?.team_id) auth.setActiveTeam(data.team_id)
     await auth.refreshMe()
     notice.success(tr('已加入「{p0}」', { p0: invite.value.team_name }))
     await router.replace('/')
@@ -84,7 +86,7 @@ onMounted(load)
             {{ joining ? tr('加入中…') : tr('加入团队') }}
           </button>
         </template>
-        <form v-else class="register-form" @submit.prevent="register">
+        <form v-else-if="auth.provider === 'password'" class="register-form" @submit.prevent="register">
           <label>
             <span>{{ tr('用户名') }}</span>
             <input v-model="registerForm.username" type="text" autocomplete="username" :placeholder="tr('设置登录用户名')" required />
@@ -101,7 +103,7 @@ onMounted(load)
             {{ registering ? tr('注册中…') : tr('注册并加入') }}
           </button>
         </form>
-        <p class="invite-hint">{{ tr('没有账号？注册后将自动加入团队。已有账号？') }}<RouterLink to="/login">{{ tr('去登录') }}</RouterLink> {{ tr('后再次打开本链接。') }}</p>
+        <RouterLink v-else class="primary-button link-button" :to="{ path: '/login', query: { redirect: route.fullPath } }">{{ tr('登录后加入团队') }}</RouterLink>
       </template>
 
       <template v-else>
@@ -138,13 +140,6 @@ onMounted(load)
 .invite-logo { width: 56px; height: 56px; border-radius: 12px; margin: 0 auto; }
 .invite-card h1 { margin: 0; font-size: 20px; color: var(--app-text, #303442); }
 .invite-subtitle { margin: -6px 0 4px; font-size: 13px; color: var(--app-text-muted, #9398a8); }
-.invite-hint { margin: 4px 0 0; font-size: 12px; color: var(--app-text-muted, #9398a8); }
-.register-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
-.register-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--app-text-muted, #9398a8); }
-.register-form input {
-  height: 38px; padding: 0 12px; border: 1px solid var(--app-border, #e3e5ec); border-radius: 10px;
-  background: var(--app-surface-muted, #f2f3f7); color: var(--app-text, #303442); font-size: 14px; outline: none;
-}
 .primary-button {
   height: 40px; border: none; border-radius: 10px; background: var(--app-accent, #5b5cf6);
   color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
@@ -152,4 +147,7 @@ onMounted(load)
 .primary-button:disabled { opacity: 0.6; }
 .link-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .dim { color: var(--app-text-muted, #9398a8); font-size: 13px; }
+.register-form { display: grid; gap: 10px; text-align: left; }
+.register-form label { display: grid; gap: 5px; color: var(--app-text-secondary); }
+.register-form input { min-height: 38px; padding: 0 10px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); color: var(--app-text); }
 </style>

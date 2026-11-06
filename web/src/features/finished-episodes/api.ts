@@ -13,8 +13,14 @@ export interface FinishedVersion {
 const root = '/finished-episodes'
 export const finishedApi = {
   versions: (chapter: number) => request<SingleResponse<FinishedVersion[]>>(`${root}/chapters/${chapter}/versions`),
-  coverUrl: (id: number) => `${API_BASE}${root}/versions/${id}/cover`,
-  videoUrl: (id: number, download = false) => `${API_BASE}${root}/versions/${id}/video${download ? '?download=true' : ''}`,
+  coverUrl: (id: number, token?: string | null) => `${API_BASE}${root}/versions/${id}/cover${token ? `?token=${encodeURIComponent(token)}` : ''}`,
+  videoUrl: (id: number, download = false, token?: string | null) => {
+    const params = new URLSearchParams()
+    if (download) params.set('download', 'true')
+    if (token) params.set('token', token)
+    const qs = params.toString()
+    return `${API_BASE}${root}/versions/${id}/video${qs ? `?${qs}` : ''}`
+  },
 }
 export function versionName(version: FinishedVersion): string {
   return `v${version.revision ?? version.id}`

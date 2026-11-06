@@ -61,6 +61,11 @@ describe('resolveAuthGuard', () => {
     const decision = resolveAuthGuard(route(), auth({ enabled: true, isLoggedIn: true, role: 'viewer' }))
     expect(decision).toEqual({})
   })
+  it('sends a new user without a team to team setup in their profile', () => {
+    const newcomer = auth({ enabled: true, isLoggedIn: true })
+    expect(resolveAuthGuard(route({ path: '/' }), newcomer)).toEqual({ redirect: '/profile' })
+    expect(resolveAuthGuard(route({ path: '/profile' }), newcomer)).toEqual({})
+  })
   it('redirects to home when role is insufficient', () => {
     const decision = resolveAuthGuard(
       route({ meta: { roles: ['admin'] } }),

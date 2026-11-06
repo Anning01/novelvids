@@ -44,17 +44,15 @@ async def enhancement_snapshot(request: AutoEnhancement, team_id):
 
 
 async def execution_context(params):
-    from auth.deps import AuthContext, require_roles
-    from auth.models import User, TeamMember
+    from auth.deps import AuthContext, context_for_team, require_roles
+    from auth.models import User
     from config import settings
     if not settings.AUTH_ENABLED:
         return AuthContext()
     user = await User.get_or_none(id=params.get('user_id'), status=1)
-    membership = await TeamMember.filter(user_id=params.get('user_id'), team_id=params.get('team_id'),
-        status=1, team__status=1).first()
-    if user is None or (not user.is_super_admin and membership is None):
+    if user is None or (not user.is_super_admin and params.get('team_id') is None):
         raise HTTPException(403, localized_message('没有权限执行此操作'))
-    ctx = AuthContext(user=user, membership=membership, team_id=params.get('team_id'), is_super_admin=user.is_super_admin)
+    ctx = await context_for_team(user, params.get('team_id'))
     await require_roles('admin', 'creator')(ctx)
     return ctx
 

@@ -26,7 +26,7 @@ async def _scene(novel: Novel, *, narration=None) -> Scene:
 
 
 @pytest.mark.asyncio
-async def test_seedance_system_voice_uses_asset_uri_and_narrator_is_conditional():
+async def test_seedance_system_voice_uses_public_url_and_narrator_is_conditional():
     character_voice = await AudioReference.create(
         nickname="羽宁音色", gender="女",
         audio_url="https://cdn.example.com/yuning.wav", avatar_url="",
@@ -51,7 +51,7 @@ async def test_seedance_system_voice_uses_asset_uri_and_narrator_is_conditional(
     )
 
     assert [item.url for item in references] == [
-        "asset://asset-narrator", "asset://asset-yuning",
+        "https://cdn.example.com/narrator.wav", "https://cdn.example.com/yuning.wav",
     ]
     assert references[0].kind == "narrator"
     assert references[1].subjects == ("羽宁",)
@@ -193,7 +193,7 @@ async def test_台词角色漏掉at标注时从分镜绑定资产兜底音色():
     )
 
     assert len(references) == 1
-    assert references[0].url == "asset://asset-fallback"
+    assert references[0].url == "https://cdn.example.com/fallback.mp3"
     assert references[0].subjects == ("李七夜",)
 
 

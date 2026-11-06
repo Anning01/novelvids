@@ -1,70 +1,91 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { afterEach, expect, it, vi } from 'vitest'
 import LoginPage from './LoginPage.vue'
-import { api } from '@/api'
+import QilingLogin from '@/features/auth/QilingLogin.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 
-function mountPage() {
+async function mountPage(enabled = true, redirect = '/') {
+  const pinia = createPinia()
+  const auth = useAuthStore(pinia)
+  auth.$patch({ enabled: true, provider: 'qiling', legalReady: true, qilingEnabled: enabled })
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/login', component: LoginPage },
       { path: '/', component: { template: '<div />' } },
+      { path: '/invite/:token', component: { template: '<div />' } },
     ],
   })
-  return mount(LoginPage, {
-    global: { plugins: [createPinia(), router] },
-  })
+  await router.push({ path: '/login', query: { redirect } })
+  const wrapper = mount(LoginPage, { global: { plugins: [pinia, router], stubs: { QilingLogin: true } } })
+  return { wrapper, auth, router }
 }
 
-describe('LoginPage', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    localStorage.clear()
-    vi.restoreAllMocks()
-  })
+afterEach(() => vi.unstubAllGlobals())
 
-  it('renders the login form', () => {
-    const wrapper = mountPage()
-    expect(wrapper.get('h1').text()).toBe('登录')
-    expect(wrapper.find('input[type="text"]').element).toBeInstanceOf(HTMLInputElement)
-    expect(wrapper.find('input[type="password"]').element).toBeInstanceOf(HTMLInputElement)
-  })
+it.each(['light', 'dark'])('shows a glass sign-in card with only Qiling login in %s mode', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  try {
+    const { wrapper } = await mountPage()
+    expect(wrapper.get('.cinematic-login__glass').text()).toContain('微信扫码登录')
+    expect(wrapper.findComponent(QilingLogin).exists()).toBe(false)
+    expect(wrapper.get('a[href="/api/auth/legal/terms"]').text()).toBe('用户协议')
+    expect(wrapper.get('a[href="/api/auth/legal/privacy"]').text()).toBe('隐私政策')
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    expect(wrapper.getComponent(QilingLogin).props('autoStart')).toBe(true)
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect(wrapper.get('video').attributes('src')).toMatch(/static\/bg\.mp4$/)
+  } finally {
+    delete document.documentElement.dataset.appTheme
+  }
+})
 
-  it('shows validation error for empty fields', async () => {
-    const wrapper = mountPage()
-    await wrapper.get('form').trigger('submit')
-    expect(wrapper.get('[role="alert"]').text()).toContain('请输入用户名和密码')
-  })
+it('uses a static background when reduced motion is requested', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+  const { wrapper } = await mountPage()
+  expect(wrapper.find('video').exists()).toBe(false)
+  expect(wrapper.find('.cinematic-login__motion').exists()).toBe(false)
+})
 
-  it('logs in and redirects on success', async () => {
-    vi.spyOn(api, 'login').mockResolvedValue({
-      data: { token: 't1', user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false } },
-    } as never)
-    vi.spyOn(api, 'me').mockResolvedValue({
-      data: { user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false }, memberships: [] },
-    } as never)
+it('continues to the original invitation after sign-in', async () => {
+  const { wrapper, auth, router } = await mountPage(true, '/invite/team-token')
+  await wrapper.get('input[type="checkbox"]').setValue(true)
+  const accept = vi.spyOn(auth, 'acceptSession').mockResolvedValue()
+  const session = { token: 'session', user: { id: 1, username: 'alice', nickname: '', avatar_url: '', is_super_admin: false } }
+  wrapper.getComponent(QilingLogin).vm.$emit('authenticated', session)
+  await flushPromises()
+  expect(accept).toHaveBeenCalledWith(session)
+  expect(router.currentRoute.value.path).toBe('/invite/team-token')
+})
 
-    const wrapper = mountPage()
-    await wrapper.get('input[type="text"]').setValue('  alice  ')
-    await wrapper.get('input[type="password"]').setValue('password123')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
+it('explains when the only sign-in provider is unavailable', async () => {
+  const { wrapper } = await mountPage(false)
+  expect(wrapper.get('[role="alert"]').text()).toContain('器灵登录暂不可用')
+  expect(wrapper.findComponent(QilingLogin).exists()).toBe(false)
+})
 
-    expect(api.login).toHaveBeenCalledWith('alice', 'password123')
-    const store = useAuthStore()
-    expect(store.token).toBe('t1')
-  })
+it('shows account/password login in the open source edition and does not mount Qiling', async () => {
+  const { wrapper, auth } = await mountPage()
+  auth.$patch({ provider: 'password', qilingEnabled: false, legalReady: false })
+  await flushPromises()
+  expect(wrapper.get('h2').text()).toBe('账号登录')
+  expect(wrapper.findComponent(QilingLogin).exists()).toBe(false)
+  expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+  const login = vi.spyOn(auth, 'login').mockResolvedValue()
+  await wrapper.get('input[autocomplete="username"]').setValue(' local-admin ')
+  await wrapper.get('input[type="password"]').setValue('local-password')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(login).toHaveBeenCalledWith('local-admin', 'local-password')
+})
 
-  it('shows backend error message on failure', async () => {
-    vi.spyOn(api, 'login').mockRejectedValue(new Error('用户名或密码错误'))
-    const wrapper = mountPage()
-    await wrapper.get('input[type="text"]').setValue('alice')
-    await wrapper.get('input[type="password"]').setValue('bad')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toContain('用户名或密码错误')
-  })
+it('does not allow accepting an incomplete legal notice in the Qiling edition', async () => {
+  const { wrapper, auth } = await mountPage()
+  auth.$patch({ legalReady: false })
+  await flushPromises()
+  expect(wrapper.text()).toContain('运营者尚未完善协议配置')
+  expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+  expect(wrapper.findComponent(QilingLogin).exists()).toBe(false)
 })

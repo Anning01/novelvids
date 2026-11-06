@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
@@ -19,8 +20,19 @@ const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 const totalMembers = ref(0)
+const memberLimit = ref<number | null>(null)
+
+const isLimitReached = computed(() => {
+  if (memberLimit.value === null || memberLimit.value === undefined) return false
+  return totalMembers.value >= memberLimit.value
+})
 
 const inviteRole = ref<TeamRole>('creator')
+const roleOptions = computed(() => [
+  { value: 'creator', label: tr('创作者') },
+  { value: 'viewer', label: tr('查看者') },
+  { value: 'admin', label: tr('团队管理员') },
+])
 const inviteLink = ref('')
 const creatingInvite = ref(false)
 
@@ -30,6 +42,20 @@ const teamId = computed<number | undefined>(() => {
 })
 function isSelf(member: MemberItem) {
   return auth.user !== null && member.user_id === auth.user.id
+}
+
+function selectTeam(value: string) {
+  const id = Number(value)
+  if (id === selectedTeamId.value) return
+  selectedTeamId.value = id
+  page.value = 1
+  void loadMembers()
+}
+
+function selectMemberRole(member: MemberItem, role: string) {
+  if (member.role === role) return
+  member.role = role as TeamRole
+  void changeRole(member)
 }
 
 const money = (value: number | string | null | undefined) => {
@@ -51,6 +77,11 @@ async function loadMembers() {
     const response = await api.teamMembers(page.value, pageSize.value, teamId.value)
     members.value = response.data.items
     totalMembers.value = response.data.pagination.total
+    if (response.data.member_limit !== undefined) {
+      memberLimit.value = response.data.member_limit
+    } else {
+      memberLimit.value = auth.membership?.member_limit ?? null
+    }
     // 删除末页最后一条等场景：当前页为空时回退一页
     if (!members.value.length && page.value > 1) {
       page.value -= 1
@@ -157,6 +188,26 @@ async function resetPassword(member: MemberItem) {
   }
 }
 
+async function editTeamLimit() {
+  if (!teamId.value) return
+  const currentLimitStr = memberLimit.value === null || memberLimit.value === undefined ? '' : String(memberLimit.value)
+  const raw = window.prompt(
+    tr('设置团队成员上限（留空或 0 表示不限）：'),
+    currentLimitStr,
+  )
+  if (raw === null) return
+  const value = raw.trim() === '' ? null : Number(raw)
+  if (value !== null && (Number.isNaN(value) || value < 1)) return
+  try {
+    await api.updateTeam(teamId.value, { member_limit: value === 0 ? null : value })
+    notice.success(tr('人员上限已更新'))
+    await loadMembers()
+    if (auth.role === 'super') await loadTeams()
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : tr('设置上限失败'))
+  }
+}
+
 onMounted(async () => {
   await loadTeams()
   await loadMembers()
@@ -166,27 +217,66 @@ onMounted(async () => {
 <template>
   <main class="members-page">
     <header class="page-header">
-      <h1>{{ tr('成员管理') }}</h1>
-      <label v-if="auth.role === 'super'" class="team-picker">
+      <div class="header-title-group">
+        <h1>{{ tr('成员管理') }}</h1>
+        <span
+          v-if="memberLimit !== null && memberLimit !== undefined"
+          class="capacity-badge"
+          :class="{ 'is-limit': isLimitReached }"
+        >
+          {{ tr('上限 {p0} 人', { p0: memberLimit }) }}
+        </span>
+      </div>
+      <div v-if="auth.role === 'super'" class="team-picker">
         <span>{{ tr('团队') }}</span>
-        <select v-model="selectedTeamId" @change="page = 1; loadMembers()">
-          <option v-for="team in teams" :key="team.id" :value="team.id">{{ team.name }}</option>
-        </select>
-      </label>
+        <AppSelect
+          :model-value="String(selectedTeamId ?? '')"
+          :options="teams.map(team => ({ value: String(team.id), label: team.name }))"
+          :ariaLabel="tr('团队')"
+          :disabled="!teams.length"
+          @update:model-value="selectTeam"
+        />
+        <button v-if="teamId" type="button" class="ghost-button" @click="editTeamLimit">
+          {{ tr('修改上限') }}
+        </button>
+      </div>
     </header>
 
     <section class="panel">
-      <h2>{{ tr('邀请成员') }}</h2>
-      <p class="dim">{{ tr('成员加入团队的唯一方式是通过邀请链接（24 小时有效）。新用户经链接注册加入，老用户登录后经链接加入。') }}</p>
+      <div class="panel-header-row">
+        <h2>{{ tr('邀请成员') }}</h2>
+        <span class="limit-hint">
+          {{ tr('团队人数上限：{p0}', { p0: memberLimit !== null && memberLimit !== undefined ? `${memberLimit} 人` : tr('不限') }) }}
+        </span>
+      </div>
+      <p class="dim">{{ tr('邀请链接 24 小时有效。受邀成员使用器灵登录后确认加入。') }}</p>
+
+      <div v-if="isLimitReached" class="limit-warning-banner">
+        <span class="limit-warning-icon">⚠️</span>
+        <span class="limit-warning-text">
+          {{ tr('当前团队人数已达上限（{p0} 人），新成员将无法加入。如需扩容，请联系平台超级管理员。', { p0: memberLimit }) }}
+        </span>
+      </div>
+
       <div class="invite-row">
-        <select v-model="inviteRole">
-          <option value="creator">{{ tr('创作者') }}</option>
-          <option value="viewer">{{ tr('查看者') }}</option>
-          <option value="admin">{{ tr('团队管理员') }}</option>
-        </select>
-        <button type="button" class="primary-button" :disabled="creatingInvite" @click="createInvite">
+        <AppSelect
+          :model-value="inviteRole"
+          :options="roleOptions"
+          :ariaLabel="tr('邀请角色')"
+          @update:model-value="inviteRole = $event as TeamRole"
+        />
+        <button
+          type="button"
+          class="primary-button"
+          :disabled="creatingInvite || isLimitReached"
+          :title="isLimitReached ? tr('团队人数已达上限，如需扩容请联系平台超级管理员') : ''"
+          @click="createInvite"
+        >
           {{ creatingInvite ? tr('生成中…') : tr('生成邀请链接') }}
         </button>
+        <span v-if="auth.role !== 'super'" class="contact-admin-tip">
+          {{ tr('如需扩容人员上限，请联系平台超级管理员') }}
+        </span>
       </div>
       <div v-if="inviteLink" class="invite-link-row">
         <input :value="inviteLink" type="text" readonly />
@@ -195,7 +285,12 @@ onMounted(async () => {
     </section>
 
     <section class="panel">
-      <h2>{{ tr('成员列表（') }}{{ totalMembers }}）</h2>
+      <div class="panel-header-row">
+        <h2>{{ tr('成员列表（') }}{{ totalMembers }}）</h2>
+        <span v-if="memberLimit !== null && memberLimit !== undefined" class="capacity-ratio">
+          {{ tr('当前成员：{p0} / {p1} 人', { p0: totalMembers, p1: memberLimit }) }}
+        </span>
+      </div>
       <p v-if="loading" class="dim">{{ tr('加载中…') }}</p>
       <table v-else class="member-table">
         <thead>
@@ -206,14 +301,16 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr v-for="member in members" :key="member.user_id" :class="{ 'is-disabled': member.status !== 1 }">
-            <td>{{ member.username }}<span v-if="isSelf(member)" class="self-mark">{{ tr('本人') }}</span></td>
+            <td>{{ member.username.startsWith('qiling-') ? (member.nickname || tr('微信用户')) : member.username }}<span v-if="isSelf(member)" class="self-mark">{{ tr('本人') }}</span></td>
             <td>{{ member.nickname || '—' }}</td>
             <td>
-              <select :value="member.role" :disabled="isSelf(member)" @change="member.role = ($event.target as HTMLSelectElement).value as TeamRole; changeRole(member)">
-                <option value="admin">{{ tr('团队管理员') }}</option>
-                <option value="creator">{{ tr('创作者') }}</option>
-                <option value="viewer">{{ tr('查看者') }}</option>
-              </select>
+              <AppSelect
+                :model-value="member.role"
+                :options="roleOptions"
+                :ariaLabel="tr('角色') + ' · ' + member.username"
+                :disabled="isSelf(member)"
+                @update:model-value="selectMemberRole(member, $event)"
+              />
             </td>
             <td>
               <span class="status-badge" :class="member.status === 1 ? 'is-active' : 'is-stopped'">
@@ -229,7 +326,7 @@ onMounted(async () => {
               <template v-else>
                 <button type="button" class="ghost-button" @click="toggleStatus(member)">{{ member.status === 1 ? tr('禁用') : tr('启用') }}</button>
                 <button type="button" class="ghost-button" @click="setLimit(member)">{{ tr('限额') }}</button>
-                <button type="button" class="ghost-button" @click="resetPassword(member)">{{ tr('重置密码') }}</button>
+                <button v-if="auth.provider === 'password'" type="button" class="ghost-button" @click="resetPassword(member)">{{ tr('重置密码') }}</button>
                 <button type="button" class="danger-button" @click="removeMember(member)">{{ tr('移除') }}</button>
               </template>
             </td>
@@ -250,14 +347,36 @@ onMounted(async () => {
 <style scoped>
 .members-page { max-width: 1080px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.header-title-group { display: flex; align-items: center; gap: 10px; }
+.capacity-badge {
+  font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px;
+  background: var(--app-accent-soft, rgba(91, 92, 246, 0.1));
+  color: var(--app-accent, #5b5cf6);
+}
+.capacity-badge.is-limit {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--app-danger, #dc2626);
+}
 .page-header h1 { margin: 0; font-size: 22px; color: var(--app-text, #303442); }
 .team-picker { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--app-text-muted, #9398a8); }
 .panel { background: var(--app-surface, #fff); border: 1px solid var(--app-border, #e3e5ec); border-radius: 12px; padding: 18px; }
 .panel h2 { margin: 0 0 12px; font-size: 15px; color: var(--app-text, #303442); }
-.invite-row { display: flex; gap: 8px; }
+.panel-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.panel-header-row h2 { margin: 0; }
+.limit-hint, .capacity-ratio { font-size: 13px; color: var(--app-text-muted, #9398a8); }
+.limit-warning-banner {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px;
+  border-radius: 8px; background: var(--app-surface-muted, #f8f9fa);
+  border: 1px solid var(--app-border, #e3e5ec);
+  color: var(--creation-warning, #9a6a12); font-size: 13px;
+}
+.contact-admin-tip {
+  font-size: 12px; color: var(--app-text-muted, #9398a8); align-self: center; margin-left: 6px;
+}
+.invite-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .invite-link-row { display: flex; gap: 8px; margin-top: 10px; }
 .invite-link-row input { flex: 1; }
-.invite-row select, .invite-link-row input, .team-picker select, .member-table select {
+.invite-link-row input {
   height: 36px; padding: 0 10px; border: 1px solid var(--app-border, #e3e5ec); border-radius: 8px;
   background: var(--app-surface-muted, #f2f3f7); color: var(--app-text, #303442); font-size: 13px;
 }

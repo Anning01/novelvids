@@ -6,6 +6,15 @@ from schemas.scene import SceneEntity
 from test.test_services.test_prompt_language import _shot
 
 
+@pytest.fixture(autouse=True)
+def public_prompt_pack(tmp_path, monkeypatch):
+    """Public serialization contracts must not depend on ignored private rules."""
+    import prompts.skill_pack as pack
+    for filename in pack.FILES.values():
+        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
+    monkeypatch.setattr(pack, 'ROOT', tmp_path)
+
+
 def characters():
     return [SceneEntity(name='苏玄', aliases=[], description='十六岁少年', asset_type='人物'),
             SceneEntity(name='赵无垢', aliases=['师父'], description='六十四岁师父', asset_type='人物')]

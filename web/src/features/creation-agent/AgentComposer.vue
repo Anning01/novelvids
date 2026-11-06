@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { XSender } from 'vue-element-plus-x'
-import { ArrowUp, ChevronDown, Square } from 'lucide-vue-next'
+import { ArrowUp, Square } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import type { AgentCapabilities } from './types'
 
@@ -85,12 +86,15 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
       <template #footer>
         <div class="agent-composer__tools">
           <div class="agent-composer__choices"><slot name="tools" />
-            <label class="agent-composer__model">
-              <select :value="modelId" :aria-label="tr('助手模型')" :disabled="busy || submitting" @change="emit('update:modelId', ($event.target as HTMLSelectElement).value)">
-                <option v-if="!models.length" value="">{{ tr('尚无可用模型') }}</option>
-                <option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
-              </select><ChevronDown :size="13" aria-hidden="true" />
-            </label>
+            <AppSelect
+              class="agent-composer__model"
+              density="compact"
+              :model-value="modelId"
+              :options="models.length ? models.map(model => ({ value: String(model.id), label: model.name })) : [{ value: '', label: tr('尚无可用模型') }]"
+              :ariaLabel="tr('助手模型')"
+              :disabled="busy || submitting || !models.length"
+              @update:model-value="emit('update:modelId', $event)"
+            />
           </div>
           <AppButton v-if="busy" class="agent-composer__send" size="xs" variant="soft" icon-only :aria-label="tr('停止创作助手')" @click="emit('stop')"><Square :size="14" /></AppButton>
           <AppButton v-else class="agent-composer__send" size="xs" variant="primary" icon-only :aria-label="tr('发送创作要求')" :disabled="!canSend" @click="submit"><ArrowUp :size="18" /></AppButton>
@@ -113,10 +117,7 @@ onBeforeUnmount(() => { ready = false; observer?.disconnect() })
 .agent-composer :deep(.chat-placeholder-wrap) { color: var(--app-text-muted) !important; font-weight: 400 !important; font-size: 14px; }
 .agent-composer__tools { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 8px 6px; }
 .agent-composer__choices { display: flex; min-width: 0; align-items: center; gap: 2px; }
-.agent-composer__model { display: flex; min-width: 0; align-items: center; gap: 3px; padding: 0 7px; color: var(--app-text-secondary); border-radius: 8px; }
-.agent-composer__model:hover { background: var(--app-surface-hover); }.agent-composer__model:focus-within { outline: 2px solid var(--app-accent); }
-.agent-composer__model select { appearance: none; min-width: 0; max-width: 125px; height: 28px; padding: 0; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 12px; text-overflow: ellipsis; cursor: pointer; }
-.agent-composer__model svg { flex-shrink: 0; pointer-events: none; }
+.agent-composer__model { max-width: 160px; }
 .agent-composer__send { border-radius: 50%; box-shadow: none; }
 .agent-composer__send { min-width: 28px; min-height: 28px; width: 28px; height: 28px; transition: transform .18s cubic-bezier(.23,1,.32,1), background .15s; }
 .agent-composer__send:active:not(:disabled) { transform: scale(.92); }

@@ -7,13 +7,14 @@ import { useAuthStore } from '@/features/auth/authStore'
 import { appConfirm } from '@/shared/confirmDialog'
 import { downloadFile, fetchFileBlob } from '@/shared/downloadFile'
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 import { exportApi, type ChapterExport } from './api'
 
 const props = defineProps<{ chapterId?: number; videoId?: number }>()
 const emit = defineEmits<{ applied: [videoId: number] }>()
 const singleVideo = computed(() => Boolean(props.videoId))
 const auth = useAuthStore()
-const canWrite = computed(() => !auth.enabled || auth.isSuperAdmin || ['admin', 'creator'].includes(auth.role || ''))
+const canWrite = computed(() => !auth.enabled || auth.role === 'super' || ['admin', 'creator'].includes(auth.role || ''))
 const exports = ref<ChapterExport[]>([])
 const models = ref<Array<{ id: number; name: string }>>([])
 const modelId = ref(0)
@@ -172,10 +173,16 @@ onUnmounted(() => { alive = false; generation++; clearPreview(); clearInterval(t
     <p v-if="error" role="alert" class="export-error">{{ error }}</p>
     <p v-if="loading && !exports.length" role="status">{{ tr('正在读取导出记录') }}</p>
     <p v-else-if="!exports.length && !error" class="export-empty">{{ singleVideo ? tr('正在准备当前视频，随后可确认高清化费用。') : tr('尚无导出版本。只有本集全部镜头的视频就绪后才能准备原片。') }}</p>
-    <label v-if="canWrite && exports.some(row => row.source_sha256 && !row.parent_export_id)" class="export-model">{{ tr('画质增强服务') }}
-      <select v-model.number="modelId" :disabled="busy"><option :value="0">{{ tr('请选择增强服务') }}</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option></select>
+    <div v-if="canWrite && exports.some(row => row.source_sha256 && !row.parent_export_id)" class="export-model">{{ tr('画质增强服务') }}
+      <AppSelect
+        :model-value="String(modelId)"
+        :options="[{ value: '0', label: tr('请选择增强服务') }, ...models.map(model => ({ value: String(model.id), label: model.name }))]"
+        :ariaLabel="tr('画质增强服务')"
+        :disabled="busy || !models.length"
+        @update:model-value="modelId = Number($event)"
+      />
       <small v-if="!models.length">{{ tr('请在设置中配置并启用视频画质增强服务。') }}</small>
-    </label>
+    </div>
     <ol class="export-list"><li v-for="row in exports" :key="row.id">
       <div class="export-description"><strong>{{ row.parent_export_id ? `${String(row.recipe.resolution || '1080p').toUpperCase()} ${tr('高清版')}` : tr('原片版本') }} · #{{ row.id }}</strong>
         <small v-if="row.selection_current === false">{{ tr('当前镜头选择已更新，此版本保留原内容。') }}</small>
@@ -201,7 +208,6 @@ onUnmounted(() => { alive = false; generation++; clearPreview(); clearInterval(t
 .chapter-exports{background:var(--app-surface);color:var(--app-text);border:1px solid var(--app-border);border-radius:16px;padding:18px;margin:16px 0}
 header,.export-list li{display:flex;align-items:center;justify-content:space-between;gap:16px}header p,.export-empty,.export-description small,.export-model small{color:var(--app-text-muted);font-size:13px;margin:6px 0}
 .export-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.export-model{display:flex;gap:10px;align-items:center;margin:16px 0;flex-wrap:wrap;font-size:13px}
-select{background:var(--app-surface-muted);color:var(--app-text);border:1px solid var(--app-border);border-radius:8px;padding:9px;max-width:100%}select:hover{background:var(--app-surface-hover)}select:focus-visible{outline:2px solid var(--app-accent);outline-offset:2px}select:disabled{opacity:.55}
 .export-list{padding:0;margin:12px 0 0;list-style:none}.export-list li{padding:14px 0;border-top:1px solid var(--app-border)}.export-description{display:flex;flex-direction:column;gap:5px;min-width:0}.export-description span{display:flex;align-items:center;gap:6px;color:var(--app-text-secondary);font-size:13px}.export-error{color:var(--creation-danger);overflow-wrap:anywhere}.spin{animation:export-spin 1s linear infinite}@keyframes export-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spin{animation:none}}@media(max-width:700px){header,.export-list li{align-items:flex-start;flex-direction:column}.export-actions{width:100%}}
 .chapter-exports :deep(.app-button--secondary){background:var(--app-surface-muted);color:var(--app-text-secondary);box-shadow:inset 0 0 0 1px var(--app-border)}.chapter-exports :deep(.app-button--secondary:hover:not(:disabled)){background:var(--app-surface-hover);color:var(--app-text)}.chapter-exports :deep(.app-button--ghost:hover:not(:disabled)){background:var(--app-accent-soft);color:var(--app-accent)}
 .export-preview { display:grid;gap:8px;margin-top:14px }.export-preview video { width:100%;max-height:420px;background:var(--app-surface-muted);border-radius:10px }

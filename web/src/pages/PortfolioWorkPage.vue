@@ -13,7 +13,7 @@ import { productionCostLabel, productionTime, workApi, workDate, workLength, wor
 import { authHeaders } from '@/api'
 import { tr } from '@/i18n'
 import { appConfirm } from '@/shared/confirmDialog'
-import { downloadFile, fetchFileBlob } from '@/shared/downloadFile'
+import { downloadFile } from '@/shared/downloadFile'
 import '@/features/resource-library/dialog.css'
 import '@/features/portfolio/portfolio.css'
 
@@ -143,11 +143,11 @@ async function play() {
   playing.value = true
   playerError.value = ''
   try {
-    const url = publicView.value
+    const streamUrl = publicView.value
       ? workApi.publicMedia(project, version, 'video')
-      : await fetchFileBlob(finishedApi.videoUrl(version), authHeaders())
+      : finishedApi.videoUrl(version, false, auth.token)
     if (request !== playbackRequest) return
-    source.value = typeof url === 'string' ? url : URL.createObjectURL(url)
+    source.value = streamUrl
     await nextTick()
     if (request === playbackRequest) await player.value?.play().catch(() => {})
   } catch (reason) {

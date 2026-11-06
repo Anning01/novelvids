@@ -3,10 +3,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import { api } from '@/api'
 import { useAuthStore } from './authStore'
 
-function stubApi(overrides: Partial<Record<'authStatus' | 'me' | 'login' | 'logout', () => Promise<unknown>>> = {}) {
+function stubApi(overrides: Partial<Record<'authStatus' | 'me' | 'logout', () => Promise<unknown>>> = {}) {
   vi.spyOn(api, 'authStatus').mockResolvedValue({ data: { enabled: true } } as never)
   vi.spyOn(api, 'me').mockResolvedValue({ data: { user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false }, memberships: [{ team_id: 1, team_name: '团队A', role: 'creator' }] } } as never)
-  vi.spyOn(api, 'login').mockResolvedValue({ data: { token: 't1', user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false } } } as never)
   vi.spyOn(api, 'logout').mockResolvedValue({ data: null } as never)
   Object.entries(overrides).forEach(([key, value]) => {
     vi.spyOn(api, key as 'me').mockImplementation(value as never)
@@ -57,7 +56,7 @@ describe('useAuthStore', () => {
     stubApi()
     const store = useAuthStore()
     await store.bootstrap()
-    await store.login('alice', 'password123')
+    await store.acceptSession({ token: 't1', user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false } })
     expect(store.token).toBe('t1')
     expect(localStorage.getItem('novelvids_token')).toBe('t1')
     expect(store.memberships).toHaveLength(1)
@@ -68,7 +67,7 @@ describe('useAuthStore', () => {
     stubApi()
     const store = useAuthStore()
     await store.bootstrap()
-    await store.login('alice', 'password123')
+    await store.acceptSession({ token: 't1', user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false } })
     await store.logout()
     expect(store.token).toBeNull()
     expect(store.user).toBeNull()
@@ -76,7 +75,7 @@ describe('useAuthStore', () => {
     expect(localStorage.getItem('novelvids_token')).toBeNull()
   })
 
-  it('admin role can access settings, viewer cannot', async () => {
+  it('regular admin role cannot access settings (reserved for super admin), viewer cannot', async () => {
     stubApi({
       me: () => Promise.resolve({ data: { user: { id: 2, username: 'bob', nickname: '', avatar_url: '', is_super_admin: false }, memberships: [{ team_id: 1, team_name: '团队A', role: 'admin' }] } } as never),
     })
@@ -84,7 +83,7 @@ describe('useAuthStore', () => {
     const store = useAuthStore()
     await store.bootstrap()
     expect(store.role).toBe('admin')
-    expect(store.canAccessSettings).toBe(true)
+    expect(store.canAccessSettings).toBe(false)
     expect(store.canManageMembers).toBe(true)
 
     stubApi({

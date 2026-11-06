@@ -53,6 +53,7 @@ export function readShortDramaSettings(project: ProjectSettingsSource): ShortDra
 }
 
 export function projectEntryRoute(project: Novel): RouteLocationRaw {
+  if (project.author === '片段创作') return { name: 'clip-studio', params: { projectId: project.id } }
   if (project.workflow_kind === 'remake') {
     return { name: 'remake-progress', params: { projectId: project.id } }
   }

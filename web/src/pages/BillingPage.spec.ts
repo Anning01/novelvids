@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { api } from '@/api'
+import { useAuthStore } from '@/features/auth/authStore'
 import BillingPage from './BillingPage.vue'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -127,7 +128,9 @@ it.each(['light', 'dark'])('中文调用流水显示语音识别名称和实际�
       pagination: { total: 1, page: 1, page_size: 20, pages: 1 },
     },
   })
-  const wrapper = mount(BillingPage, { global: { plugins: [createPinia()], stubs: { AppSelect: true } } })
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({ enabled: true })
+  const wrapper = mount(BillingPage, { global: { plugins: [pinia], stubs: { AppSelect: true } } })
   try {
     await flushPromises()
     const cells = wrapper.findAll('.data-table > tbody > tr > td').map(cell => cell.text())
@@ -136,5 +139,37 @@ it.each(['light', 'dark'])('中文调用流水显示语音识别名称和实际�
     wrapper.unmount()
     if (previousTheme) document.documentElement.dataset.appTheme = previousTheme
     else delete document.documentElement.dataset.appTheme
+  }
+})
+
+it('renders the table inside a horizontal scroll container and keeps source badge from wrapping', async () => {
+  vi.mocked(api.billingSummary).mockResolvedValue({
+    code: 0, message: '', data: { total_cost: 1.2, total_records: 1, by_billing_type: [], by_task_type: [], by_model: [], daily_trend: [] },
+  })
+  vi.mocked(api.billingProjects).mockResolvedValue({
+    code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 20, pages: 0 } },
+  })
+  vi.mocked(api.billingRecords).mockResolvedValue({
+    code: 0, message: '', data: {
+      items: [{
+        id: 101, novel_id: 1, task_type: 1, billing_type: 'video', model: 'wan3',
+        usage: { seconds: 5 }, duration_seconds: 5, cost: 1.2, cost_source: 'balance',
+        currency: 'CNY', status: 3, created_at: '2026-11-06 16:09:37', updated_at: '',
+      }],
+      pagination: { total: 1, page: 1, page_size: 20, pages: 1 },
+    },
+  })
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({ enabled: true })
+  const wrapper = mount(BillingPage, { global: { plugins: [pinia], stubs: { AppSelect: true } } })
+  try {
+    await flushPromises()
+    expect(wrapper.find('.data-table-wrapper').exists()).toBe(true)
+    const badge = wrapper.find('.source-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('团队余额')
+    expect(badge.classes()).toContain('is-balance')
+  } finally {
+    wrapper.unmount()
   }
 })

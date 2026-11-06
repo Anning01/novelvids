@@ -3,12 +3,13 @@ import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { Novel } from '@/types'
 
 export function projectKind(project: Novel) {
+  if (project.author === '片段创作') return 'clip'
   if (project.workflow_kind === 'remake') return 'remake'
   return readShortDramaSettings(project).mode ?? 'script'
 }
 
 export function projectKindLabel(project: Novel) {
-  return { agent: tr('AI 创作'), manual: tr('手动创作'), remake: tr('视频重制'), script: tr('小说 / 剧本') }[projectKind(project)]
+  return { clip: tr('独立片段'), agent: tr('AI 创作'), manual: tr('手动创作'), remake: tr('视频重制'), script: tr('小说 / 剧本') }[projectKind(project)]
 }
 
 export function projectNumber(value: number): string {

@@ -74,7 +74,10 @@ describe('creation assistant panel', () => {
     const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
     await wrapper.get('[data-testid="sender"]').trigger('click')
     expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ targets: [], write_scope: 'chapter' }))
-    await wrapper.get('[aria-label="助手操作范围"]').setValue('read_only')
+    await wrapper.get('button[aria-label="助手操作范围"]').trigger('click')
+    const options = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="助手操作范围"] [role="option"]')]
+    options.find(option => option.textContent?.trim() === '只查询')!.click()
+    await flushPromises()
     await wrapper.get('[data-testid="sender"]').trigger('click')
     expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ targets: [], write_scope: 'read_only' }))
     wrapper.unmount()
@@ -365,5 +368,43 @@ it('distinguishes source preparation from paid enhancement in chat confirmation'
   expect(wrapper.text()).toContain('不会提交付费画质增强')
   expect(wrapper.text()).not.toContain('确认后会调用模型并产生费用')
   expect(wrapper.findAll('button').some(button => button.text() === '准备当前原片')).toBe(true)
+  wrapper.unmount()
+})
+
+it('retains clip model, ratio and references when an agent proposal leaves options unset', async () => {
+  const pinia = createPinia()
+  const references = [{ type: 'image' as const, url: '/media/reference.png' }]
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3,
+    videoDefaults: { model_config_id: 22, aspect_ratio: '9:16', resolution: '1080p', duration: 8, reference_media: references },
+  }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  const send = vi.spyOn(store, 'send').mockResolvedValue(true)
+  const options = JSON.parse('{"aspect_ratio":null,"resolution":null,"duration":null,"reference_media":[]}') as import('@/types').VideoGenerationOptions
+  store.messages = [{ id: 4, role: 'assistant', content: '准备生成', task_id: 'proposal', status: 3, changes: [], usage: {}, created_at: '',
+    pending_production: { confirmation_request_id: 'confirmed', message: '生成视频', labels: [{operation:'video',target_label:'镜头'}],
+      intents: [{operation:'video',target_id:9,request_id:'intent',video_options:options}], chapter_id:3,
+      targets:[{kind:'scene',id:9}], write_scope:'selected',model_config_id:1 } }]
+  await flushPromises()
+  await wrapper.findAll('button').find(item=>item.text().includes('确认生成并计费'))!.trigger('click')
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({production_intents:[expect.objectContaining({
+    media_model_config_id:22,video_options:expect.objectContaining({aspect_ratio:'9:16',resolution:'1080p',duration:8,reference_media:references}),
+  })]}))
+  wrapper.unmount()
+})
+
+it('retains history while payment recovery suspends new requests', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, {props:{projectId:7,chapterId:3,suspended:true},global:{plugins:[pinia]}})
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.messages = [{id:1,role:'user',content:'保留这段创作',task_id:'old',status:3,changes:[],usage:{},created_at:''}]
+  const send = vi.spyOn(store,'send').mockResolvedValue(true)
+  await flushPromises()
+  expect(wrapper.text()).toContain('保留这段创作')
+  expect(wrapper.get('[data-testid="sender"]').attributes('disabled')).toBeDefined()
+  expect(send).not.toHaveBeenCalled()
+  await wrapper.setProps({suspended:false})
+  expect(wrapper.get('[data-testid="sender"]').attributes('disabled')).toBeUndefined()
   wrapper.unmount()
 })

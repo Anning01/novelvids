@@ -13,7 +13,7 @@ class User(AbstractBaseModel):
         max_length=100, unique=True, description="登录用户名（唯一）"
     )
     password_hash = fields.CharField(
-        max_length=255, description="密码哈希（pbkdf2_sha256）"
+        max_length=255, default="!", description="旧数据库兼容字段"
     )
     nickname = fields.CharField(max_length=100, default="", description="昵称")
     avatar_url = fields.CharField(
@@ -149,6 +149,27 @@ class UserSession(AbstractBaseModel):
         return f"session:{self.user_id}"
 
 
+class QilingIdentity(AbstractBaseModel):
+    issuer = fields.CharField(max_length=255)
+    subject = fields.CharField(max_length=100)
+    user = fields.OneToOneField("models.User", related_name="qiling_identity", on_delete=fields.CASCADE)
+
+    class Meta:
+        table = "qiling_identities"
+        unique_together = (("issuer", "subject"),)
+
+
+class QilingLoginAttempt(AbstractBaseModel):
+    token_hash = fields.CharField(max_length=64, unique=True)
+    upstream_state = fields.CharField(max_length=200)
+    issuer = fields.CharField(max_length=255)
+    binding_user = fields.ForeignKeyField("models.User", null=True, on_delete=fields.CASCADE)
+    expires_at = fields.DatetimeField(db_index=True)
+
+    class Meta:
+        table = "qiling_login_attempts"
+
+
 class BalanceTransaction(AbstractBaseModel):
     """团队余额流水表：充值/消费/调整，不可变。balance_after 冗余用于对账。"""
 
@@ -179,3 +200,46 @@ class BalanceTransaction(AbstractBaseModel):
 
     def __str__(self):
         return f"{self.type}:{self.change_amount}->{self.balance_after}"
+
+
+class RechargeOrder(AbstractBaseModel):
+    """团队充值订单表：记录微信支付 Native 扫码充值单及支付状态。"""
+
+    out_trade_no = fields.CharField(
+        max_length=64, unique=True, db_index=True, description="商户订单号"
+    )
+    team = fields.ForeignKeyField(
+        "models.Team",
+        related_name="recharge_orders",
+        on_delete=fields.CASCADE,
+        description="所属团队",
+    )
+    user_id = fields.IntField(db_index=True, description="创建订单用户 ID")
+    amount = fields.DecimalField(
+        max_digits=18, decimal_places=2, description="充值金额（元）"
+    )
+    status = fields.CharField(
+        max_length=20, default="pending", db_index=True, description="状态：pending/paid/expired/closed/failed/refunding/refunded/refund_closed"
+    )
+    payment_method = fields.CharField(
+        max_length=32, default="wechat_native", description="支付方式"
+    )
+    code_url = fields.CharField(
+        max_length=512, null=True, description="微信 Native 支付二维码 URL"
+    )
+    transaction_id = fields.CharField(
+        max_length=128, null=True, db_index=True, description="微信支付流水号"
+    )
+    paid_at = fields.DatetimeField(null=True, description="支付成功时间")
+    expires_at = fields.DatetimeField(null=True, description="订单过期时间")
+    note = fields.CharField(max_length=255, default="", description="充值备注")
+    refund_id = fields.CharField(max_length=128, null=True, db_index=True, description="微信退款单号")
+    refunded_at = fields.DatetimeField(null=True, description="退款成功时间")
+    refund_reason = fields.CharField(max_length=255, default="", description="退款原因")
+
+    class Meta:
+        table = "recharge_orders"
+        table_description = "团队充值订单表"
+
+    def __str__(self):
+        return f"Order({self.out_trade_no}, {self.amount}, {self.status})"

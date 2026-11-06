@@ -57,9 +57,11 @@ def test_project_analysis_accepts_prose_and_rejects_empty_visual_prompt():
 
 
 @pytest.mark.asyncio
-async def test_project_analysis_uses_configured_image_protocol_for_cover():
+@pytest.mark.parametrize('aspect_ratio', [None, '16:9', '9:16', '1:1', '4:3'])
+async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_ratio):
     novel = await Novel.create(
         name="山海归途",
+        aspect_ratio=aspect_ratio,
         content="第1章 启程\n林舟离开故乡。\n第2章 归途\n林舟揭开旧日真相。",
     )
     await AiModelConfig.create(
@@ -149,8 +151,11 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover():
     generate_images.assert_awaited_once()
     request = generate_images.await_args.kwargs
     assert request["api_protocol"] == "volcengine_ark"
-    assert request["resolution"] == "1248x1872"
-    assert request["aspect_ratio"] == "2:3"
+    from services.image_generation.capabilities import validate_selection
+    expected = validate_selection('seedream_5_pro', clarity=None, aspect_ratio=aspect_ratio or '2:3', output_format='png', generation_count=1)
+    assert request["resolution"] == expected.provider_size
+    assert request["aspect_ratio"] == (aspect_ratio or "2:3")
+    assert f'"aspect_ratio": "{aspect_ratio or "2:3"}"' in request['prompt']
     assert request["output_format"] == "png"
 
 
@@ -300,3 +305,35 @@ def test_project_analysis_templates_preserve_material_and_requested_language():
         assert "language=" + language in messages[0]["content"]
         facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
         assert facts == {"name": "雨夜来信", "chapter_count": 2, "manuscript": "第一章 车站\n第二章 咖啡馆"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('aspect_ratio', ['16:9', '9:16', '1:1'])
+async def test_agent_cover_prompt_and_image_call_share_project_ratio(aspect_ratio):
+    from services.creation_agent.skill_execution import current_execution
+    from schemas.agent_workflow import CompletePrompt
+    novel = await Novel.create(name='片段封面', content='第一章 开始\n雨后的街角。', aspect_ratio=aspect_ratio)
+    await Chapter.create(novel=novel, number=1, name='开始', content='雨后的街角。')
+    image_config = await AiModelConfig.create(name='image', task_type=2, model='test-image', base_url='https://example.test',
+        api_key='test', api_protocol='volcengine_ark', image_model_type='seedream_5_lite', is_active=True)
+    async def generate(skill, facts, output):
+        if skill == 'story':
+            return BookAnalysis(book_types=[], story_outline='雨后的街角。', key_characters=[])
+        assert facts['aspect_ratio'] == aspect_ratio
+        assert output is CompletePrompt
+        return CompletePrompt(prompt=f'完整电影画面，{aspect_ratio}')
+    execution = SimpleNamespace(params={'task_id': 'test'}, generate=AsyncMock(side_effect=generate), before_request=AsyncMock())
+    async def execute_step(task_id, key, action, **kwargs):
+        return await action()
+    token = current_execution.set(execution)
+    try:
+        with patch('services.creation_agent.skill_execution.require_agent', new=AsyncMock(return_value=(image_config, None))), \
+             patch('services.creation_agent.operation_receipts.execute_step', new=execute_step), \
+             patch('services.project_analysis.handler.generate_images', new=AsyncMock(return_value=[object()])) as images, \
+             patch('services.project_analysis.handler._save_cover', new=AsyncMock(return_value='/media/test-cover.png')):
+            result = await ProjectAnalysisTaskHandler().execute({'novel_id':novel.id,'assistant_model_config_id':1})
+        assert result['cover_status'] == 'ready'
+        assert images.call_args.kwargs['aspect_ratio'] == aspect_ratio
+        assert aspect_ratio in images.call_args.kwargs['prompt']
+    finally:
+        current_execution.reset(token)

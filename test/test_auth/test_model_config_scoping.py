@@ -6,8 +6,8 @@
 import pytest
 from httpx import AsyncClient
 
+from test.test_auth import issue_test_session
 from auth.models import Team, TeamMember, User
-from auth.security import hash_password
 from config import settings
 from controllers.config import ai_model_config_controller
 from models.config import AiModelConfig
@@ -33,17 +33,12 @@ async def _create_user(username: str, *, super_admin: bool = False) -> User:
     return await User.create(
         username=username,
         nickname=username,
-        password_hash=hash_password(PASSWORD),
         is_super_admin=super_admin,
     )
 
 
 async def _login(client: AsyncClient, username: str) -> str:
-    response = await client.post(
-        "/api/auth/login", json={"username": username, "password": PASSWORD}
-    )
-    assert response.json()["code"] == 0, response.text
-    return response.json()["data"]["token"]
+    return await issue_test_session(username)
 
 
 def _auth(token: str) -> dict:
@@ -266,3 +261,21 @@ async def test_get_active_rejects_other_team_explicit_config():
             team_id=team_a.id,
         )
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reference_upload_rejects_other_teams_model_config(client):
+    from unittest.mock import AsyncMock, patch
+    team_a = await Team.create(name="reference-own")
+    team_b = await Team.create(name="reference-foreign")
+    user = await _create_user("reference-user")
+    await TeamMember.create(team=team_a, user=user, role="creator")
+    config = await AiModelConfig.create(name="private-image", task_type=AiTaskTypeEnum.reference_image.value,
+        team_id=team_b.id, scope="team", model="test", api_key="test", base_url="https://example.invalid",
+        image_model_type="gemini", is_active=True)
+    with patch("api.video.save_reference_upload", new_callable=AsyncMock) as save:
+        result = await client.post("/api/video/reference/upload",
+            headers=_auth(await issue_test_session(user.username)),
+            data={"model_config_id": config.id}, files={"file": ("image.png", b"not-an-image", "image/png")})
+        assert result.json()["code"] == 400
+        save.assert_not_awaited()

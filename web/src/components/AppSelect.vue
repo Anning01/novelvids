@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Check, ChevronDown } from 'lucide-vue-next'
+import AppButton from './AppButton.vue'
 
 export interface AppSelectOption {
   value: string
@@ -16,7 +17,7 @@ const props = withDefaults(defineProps<{
   menuLabel?: string
   menuClass?: string
   menuZIndex?: number
-  menuWidth?: number
+  menuWidth?: number | 'auto' | string
   maxMenuHeight?: number
   align?: 'start' | 'end'
   density?: 'default' | 'compact'
@@ -47,17 +48,25 @@ const normalizedOptions = computed<AppSelectOption[]>(() => props.options.map(op
   typeof option === 'string' ? { value: option, label: option } : option
 )))
 const selectedOption = computed(() => normalizedOptions.value.find(option => option.value === props.modelValue) ?? normalizedOptions.value[0])
-const menuStyle = computed(() => ({
-  ...menuTheme.value,
-  zIndex: props.menuZIndex,
-  maxHeight: `${props.maxMenuHeight}px`,
-  width: `${props.menuWidth || menuPosition.value.width}px`,
-  top: `${menuPosition.value.top}px`,
-  left: `${menuPosition.value.left}px`,
-}))
+const menuStyle = computed(() => {
+  const style: Record<string, string | number | undefined> = {
+    ...menuTheme.value,
+    zIndex: props.menuZIndex,
+    maxHeight: `${props.maxMenuHeight}px`,
+    top: `${menuPosition.value.top}px`,
+    left: `${menuPosition.value.left}px`,
+  }
+  if (props.menuWidth && props.menuWidth !== 'auto') {
+    style.width = typeof props.menuWidth === 'number' ? `${props.menuWidth}px` : props.menuWidth
+  } else {
+    style.width = 'max-content'
+    style.maxWidth = 'calc(100vw - 16px)'
+  }
+  return style
+})
 
-async function toggleMenu() {
-  if (props.disabled) return
+async function toggleMenu(fromEnd = false) {
+  if (props.disabled || !normalizedOptions.value.length) return
   open.value = !open.value
   if (!open.value) return
   if (root.value) {
@@ -69,6 +78,39 @@ async function toggleMenu() {
   updatePlacement()
   await nextTick()
   updatePlacement()
+  const selected = normalizedOptions.value.findIndex(option => option.value === props.modelValue)
+  focusOption(selected < 0 ? (fromEnd ? normalizedOptions.value.length - 1 : 0) : selected)
+}
+
+function focusOption(index: number) {
+  const option = menu.value?.querySelectorAll<HTMLElement>('[role="option"]')[index]
+  option?.focus({ preventScroll: true })
+  option?.scrollIntoView({ block: 'nearest' })
+}
+
+function focusTrigger() {
+  root.value?.querySelector('button')?.focus()
+}
+
+function navigateMenu(event: KeyboardEvent) {
+  if (event.key === 'Tab') {
+    focusTrigger()
+    open.value = false
+    return
+  }
+  const options = Array.from(menu.value?.querySelectorAll('[role="option"]') ?? [])
+  const current = options.indexOf(document.activeElement as Element)
+  let next: number
+  switch (event.key) {
+    case 'Home': next = 0; break
+    case 'End': next = options.length - 1; break
+    case 'ArrowDown': next = Math.min(current + 1, options.length - 1); break
+    case 'ArrowUp': next = Math.max(current - 1, 0); break
+    default: return
+  }
+  event.preventDefault()
+  event.stopPropagation()
+  focusOption(next)
 }
 
 function updatePlacement() {
@@ -78,7 +120,10 @@ function updatePlacement() {
   const menuHeight = menu.value?.getBoundingClientRect().height || estimatedMenuHeight
   const roomBelow = window.innerHeight - rect.bottom
   opensUp.value = roomBelow < menuHeight + 12 && rect.top > roomBelow
-  const width = props.menuWidth || rect.width
+  const measuredMenuWidth = menu.value?.getBoundingClientRect().width || 0
+  const width = (props.menuWidth && props.menuWidth !== 'auto')
+    ? (typeof props.menuWidth === 'number' ? props.menuWidth : Number.parseFloat(props.menuWidth) || rect.width)
+    : (measuredMenuWidth || rect.width)
   const left = props.align === 'end' ? rect.right - width : rect.left
   menuPosition.value = {
     top: opensUp.value ? rect.top - menuHeight - 7 : rect.bottom + 7,
@@ -89,8 +134,13 @@ function updatePlacement() {
 
 function selectOption(option: AppSelectOption) {
   emit('update:modelValue', option.value)
+  focusTrigger()
   open.value = false
 }
+
+watch(() => props.disabled || !normalizedOptions.value.length, unavailable => {
+  if (unavailable) open.value = false
+})
 
 function closeFromOutside(event: PointerEvent) {
   const target = event.target as Node
@@ -102,6 +152,7 @@ function closeFromEscape(event: KeyboardEvent) {
   if (!open.value) return
   event.preventDefault()
   event.stopPropagation()
+  focusTrigger()
   open.value = false
 }
 
@@ -131,8 +182,10 @@ onUnmounted(() => {
       :aria-label="ariaLabel"
       aria-haspopup="listbox"
       :aria-expanded="open"
-      :disabled="disabled"
-      @click="toggleMenu"
+      :disabled="disabled || !normalizedOptions.length"
+      @click="toggleMenu()"
+      @keydown.down.prevent.stop="!open && toggleMenu()"
+      @keydown.up.prevent.stop="!open && toggleMenu(true)"
     >
       <span class="app-select__leading">
         <slot name="leading" :option="selectedOption">
@@ -152,6 +205,8 @@ onUnmounted(() => {
         :style="menuStyle"
         role="listbox"
         :aria-label="ariaLabel"
+        @keydown.esc="closeFromEscape"
+        @keydown="navigateMenu"
       >
         <p v-if="menuLabel" class="app-select__menu-label">{{ menuLabel }}</p>
         <AppButton
@@ -161,6 +216,7 @@ onUnmounted(() => {
           class="app-select__option"
           :class="{ 'is-selected': option.value === modelValue, 'has-separator': option.separator }"
           role="option"
+          tabindex="-1"
           :aria-selected="option.value === modelValue"
           @click="selectOption(option)"
         >
@@ -170,7 +226,12 @@ onUnmounted(() => {
             </slot>
           </span>
           <span :title="option.label">{{ option.label }}</span>
-          <Check v-if="option.value === modelValue" class="app-select__check" :size="15" />
+          <Check
+            class="app-select__check"
+            :class="{ 'is-invisible': option.value !== modelValue }"
+            :size="15"
+            aria-hidden="true"
+          />
         </AppButton>
       </div>
     </Teleport>
@@ -308,6 +369,11 @@ onUnmounted(() => {
   background: var(--app-surface-hover);
 }
 
+.app-select__option:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
+}
+
 .app-select__option.is-selected {
   color: var(--app-accent);
   background: var(--app-accent-soft);
@@ -324,6 +390,11 @@ onUnmounted(() => {
   margin-left: auto;
   flex: 0 0 auto;
   color: var(--app-accent);
+}
+
+.app-select__check.is-invisible {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .app-select.is-compact .app-select__trigger {

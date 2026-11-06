@@ -88,6 +88,10 @@ async def _initialize_database_schema() -> None:
     # Ownership columns must exist before generating the scoped project-name index.
     await ensure_shared_team_columns()
     await ensure_novel_analysis_schema()
+    if settings.AUTH_ENABLED:
+        from services.schema_compat import _ensure_qiling_issuer_columns, ensure_recharge_refund_columns
+        await _ensure_qiling_issuer_columns(Tortoise.get_connection("default"))
+        await ensure_recharge_refund_columns()
     if settings.GENERATE_SCHEMAS:
         await Tortoise.generate_schemas(safe=True)
     await ensure_ai_model_config_schema()
@@ -96,6 +100,8 @@ async def _initialize_database_schema() -> None:
     await ensure_agent_operation_schema()
     from services.schema_compat import ensure_video_editor_schema
     await ensure_video_editor_schema()
+    from services.schema_compat import ensure_recharge_order_schema
+    await ensure_recharge_order_schema()
 
 
 @asynccontextmanager
@@ -108,11 +114,12 @@ async def lifespan(_: FastAPI):
     if settings.MODEL_CONFIG_SEED_ENABLED:
         await ensure_model_config_seed_data()
     if settings.AUTH_ENABLED:
-        from auth.bootstrap import ensure_super_admin
         from services.schema_compat import ensure_team_schema
 
         await ensure_team_schema()
-        await ensure_super_admin()
+        if settings.AUTH_PROVIDER == "password":
+            from auth.bootstrap import ensure_super_admin
+            await ensure_super_admin()
     # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）
     await ai_task_executor.fail_stale_on_boot()
     await video_task_reconciler.start()
@@ -179,10 +186,18 @@ if settings.AUTH_ENABLED:
     from auth.api import router as auth_router
     from api.team import router as team_router
     from api.user import router as user_router
+    from controllers.team import team_controller
+    from starlette.requests import Request
 
     app.include_router(auth_router, prefix="/api/auth", tags=["认证与会话"])
     app.include_router(team_router, prefix="/api/team", tags=["团队与余额"])
     app.include_router(user_router, prefix="/api/users", tags=["用户管理"])
+
+    @app.post("/api/payment/wechat/notify", tags=["微信支付通知"])
+    async def global_wechat_pay_notify(request: Request):
+        return await team_controller.handle_wechat_notify(
+            await request.body(), headers=request.headers
+        )
 
 # 注册 AI 任务处理器
 ai_task_executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())

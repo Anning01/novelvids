@@ -98,6 +98,19 @@ class Settings:
     VIDEO_EDITOR_MAX_AUDIO_TRACKS = max(1, int(os.getenv('VIDEO_EDITOR_MAX_AUDIO_TRACKS', '32')))
     VIDEO_EDITOR_MAX_SOURCE_MB = max(1, int(os.getenv('VIDEO_EDITOR_MAX_SOURCE_MB', '2048')))
 
+    # 微信支付 v3（Native 扫码支付）
+    WECHAT_PAY_APP_ID: str = os.getenv("WECHAT_PAY_APP_ID", "").strip()
+    WECHAT_PAY_MCH_ID: str = os.getenv("WECHAT_PAY_MCH_ID", "").strip()
+    WECHAT_PAY_API_V3_KEY: str = os.getenv("WECHAT_PAY_API_V3_KEY", "").strip()
+    WECHAT_PAY_SERIAL_NO: str = os.getenv("WECHAT_PAY_SERIAL_NO", "").strip()
+    WECHAT_PAY_PRIVATE_KEY: str = os.getenv("WECHAT_PAY_PRIVATE_KEY", "").strip()
+    WECHAT_PAY_PRIVATE_KEY_PATH: str = os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH", "").strip()
+    WECHAT_PAY_PUBLIC_KEY: str = os.getenv("WECHAT_PAY_PUBLIC_KEY", "").strip()
+    WECHAT_PAY_PUBLIC_KEY_PATH: str = os.getenv("WECHAT_PAY_PUBLIC_KEY_PATH", "").strip()
+    WECHAT_PAY_PUBLIC_KEY_ID: str = os.getenv("WECHAT_PAY_PUBLIC_KEY_ID", "").strip()
+    WECHAT_PAY_NOTIFY_URL: str = os.getenv("WECHAT_PAY_NOTIFY_URL", "").strip()
+    WECHAT_PAY_MOCK: bool = _env_bool("WECHAT_PAY_MOCK", False)
+
     # 媒体文件目录
     MEDIA_PATH = os.getenv("MEDIA_PATH", "./media")
     CHAPTER_EXPORT_PATH = os.getenv("CHAPTER_EXPORT_PATH", "./data/chapter-exports")
@@ -109,13 +122,28 @@ class Settings:
 
     # 登录与团队功能开关（默认关闭，与无鉴权版本行为一致）
     AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", False)
+    AUTH_PROVIDER: str = os.getenv("AUTH_PROVIDER", "password").strip().lower()
+    if AUTH_PROVIDER not in {"password", "qiling"}:
+        raise ValueError("AUTH_PROVIDER must be password or qiling")
+    QILING_API_BASE_URL: str = os.getenv(
+        "QILING_API_BASE_URL", os.getenv("NOVELVIDS_DEV_QILING_API_BASE_URL", "")
+    ).strip().rstrip("/")
+    QILING_SIGNUP_ENABLED: bool = _env_bool("QILING_SIGNUP_ENABLED", False)
+    SUPER_ADMIN_USERNAME: str = os.getenv("SUPER_ADMIN_USERNAME", "")
+    SUPER_ADMIN_PASSWORD: str = os.getenv("SUPER_ADMIN_PASSWORD", "")
+
+    LEGAL_OPERATOR_NAME: str = os.getenv("LEGAL_OPERATOR_NAME", "").strip()
+    LEGAL_CONTACT_EMAIL: str = os.getenv("LEGAL_CONTACT_EMAIL", "").strip()
+    LEGAL_CONTACT_ADDRESS: str = os.getenv("LEGAL_CONTACT_ADDRESS", "").strip()
+    LEGAL_EFFECTIVE_DATE: str = os.getenv("LEGAL_EFFECTIVE_DATE", "").strip()
+    LEGAL_STORAGE_DESCRIPTION: str = os.getenv("LEGAL_STORAGE_DESCRIPTION", "").strip()
+    LEGAL_RETENTION_DESCRIPTION: str = os.getenv("LEGAL_RETENTION_DESCRIPTION", "").strip()
+    LEGAL_ACCOUNT_DELETION_DESCRIPTION: str = os.getenv("LEGAL_ACCOUNT_DELETION_DESCRIPTION", "").strip()
+    LEGAL_AI_MARKING_DESCRIPTION: str = os.getenv("LEGAL_AI_MARKING_DESCRIPTION", "").strip()
+    LEGAL_THIRD_PARTIES_JSON: str = os.getenv("LEGAL_THIRD_PARTIES_JSON", "").strip()
 
     # 会话有效期（小时）
     SESSION_TTL_HOURS: int = int(os.getenv("SESSION_TTL_HOURS", "168"))
-
-    # 首个超级管理员引导账号（AUTH_ENABLED=true 且不存在超管时自动创建）
-    SUPER_ADMIN_USERNAME: str = os.getenv("SUPER_ADMIN_USERNAME", "")
-    SUPER_ADMIN_PASSWORD: str = os.getenv("SUPER_ADMIN_PASSWORD", "")
 
     # ---- 对象存储（默认 local：本地磁盘，行为不变） ----
     OSS_PROVIDER: str = os.getenv("OSS_PROVIDER", "local")  # local | aliyun

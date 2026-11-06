@@ -108,7 +108,8 @@ it('opens reference-style settings and saves changes through the store', async (
   })
 
   await wrapper.get('[aria-label="设置水印"]').trigger('click')
-  await wrapper.get('[aria-label="水印位置"]').setValue('center')
+  await wrapper.get('button[aria-label="水印位置"]').trigger('click')
+  await wrapper.get('[role="listbox"]').findAll('[role="option"]').at(-1)!.trigger('click')
 
   expect(store.nodeByKey('watermark-1')?.data.config).toMatchObject({ x: 0.5, y: 0.5, scale: 0.2 })
 })

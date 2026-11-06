@@ -57,7 +57,7 @@ const stats = computed(() => [
   ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
 ])
 const typeOptions = computed(() => [
-  { value: 'all', label: tr('全部类型') }, { value: 'agent', label: tr('AI 创作') },
+  { value: 'all', label: tr('全部类型') }, { value: 'clip', label: tr('独立片段') }, { value: 'agent', label: tr('AI 创作') },
   { value: 'manual', label: tr('手动创作') }, { value: 'remake', label: tr('视频重制') },
   { value: 'script', label: tr('小说 / 剧本') },
 ])

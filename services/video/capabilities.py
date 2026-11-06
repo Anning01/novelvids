@@ -148,7 +148,6 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_audio_total_duration_max=15,
         reference_audio_duration_min=2,
         max_request_size_mb=64,
-        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.seedance_2_fast: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -169,7 +168,6 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_audio_total_duration_max=15,
         reference_audio_duration_min=2,
         max_request_size_mb=64,
-        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.seedance_2_mini: VideoModelCapabilities(
         resolutions=("480p", "720p"),
@@ -190,7 +188,6 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_audio_total_duration_max=15,
         reference_audio_duration_min=2,
         max_request_size_mb=64,
-        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.seedance_2_5: VideoModelCapabilities(
         resolutions=("480p", "720p", "1080p"),
@@ -214,7 +211,6 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
         reference_audio_total_duration_max=30,
         reference_audio_duration_min=2,
         max_request_size_mb=64,
-        system_audio_asset_scheme="asset://",
     ),
     VideoGenerationModelTypeEnum.minimax_h3: VideoModelCapabilities(
         resolutions=("768P", "2K"),

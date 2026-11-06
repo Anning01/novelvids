@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 async def ensure_super_admin() -> None:
     """AUTH_ENABLED=true 时调用：创建首个超管（若已存在则跳过）。"""
+    if settings.AUTH_PROVIDER != "password":
+        return
     if not settings.SUPER_ADMIN_USERNAME or not settings.SUPER_ADMIN_PASSWORD:
         logger.warning(
             "AUTH_ENABLED=true 但未配置 SUPER_ADMIN_USERNAME / "

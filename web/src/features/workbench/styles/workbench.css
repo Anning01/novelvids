@@ -4201,8 +4201,7 @@
 .workbench-watermark-dialog p { margin: 0; }
 .workbench-watermark-dialog h2 { font-size: 18px; }
 .workbench-watermark-dialog p { margin-top: 5px; color: #999189; font-size: 11px; }
-.workbench-watermark-dialog button,
-.workbench-watermark-dialog select {
+.workbench-watermark-dialog > header > button {
   border: 1px solid #4b4641;
   border-radius: 9px;
   color: #e7e0d8;
@@ -4220,8 +4219,8 @@
   align-items: end;
   gap: 10px;
 }
-.workbench-watermark-dialog label { display: grid; gap: 7px; color: #aaa198; font-size: 11px; }
-.workbench-watermark-dialog select { min-height: 36px; padding: 0 10px; }
+.workbench-watermark-dialog label,
+.workbench-watermark-dialog__select-field { display: grid; gap: 7px; color: #aaa198; font-size: 11px; }
 .workbench-watermark-dialog__template-row a { padding-bottom: 9px; color: #c7b1ed; font-size: 11px; }
 .workbench-watermark-dialog__preview {
   position: relative;

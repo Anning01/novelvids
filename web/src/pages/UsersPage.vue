@@ -4,9 +4,11 @@ import { tr } from '@/i18n'
 import { onMounted, ref } from 'vue'
 import { api } from '@/api'
 import AppPagination from '@/components/AppPagination.vue'
+import { useAuthStore } from '@/features/auth/authStore'
 import { notice } from '@/shared/notice'
 import type { UserItem, UserStats } from '@/types'
 
+const auth = useAuthStore()
 const stats = ref<UserStats>({ user_count: 0, user_total_cost: 0, team_count: 0, team_balance_total: 0 })
 const users = ref<UserItem[]>([])
 const loading = ref(false)
@@ -103,7 +105,7 @@ onMounted(load)
   <main class="users-page">
     <header class="page-header">
       <h1>{{ tr('用户管理') }}</h1>
-      <button type="button" class="primary-button" @click="showCreateDialog = true">{{ tr('创建用户') }}</button>
+      <button v-if="auth.provider === 'password'" type="button" class="primary-button" @click="showCreateDialog = true">{{ tr('创建用户') }}</button>
     </header>
 
     <section class="stats-row">

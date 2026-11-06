@@ -1,9 +1,9 @@
-"""团队邀请服务：生成/校验/加入/经邀请注册。
+"""团队邀请服务：生成、校验和加入。
 
 规则：
 - 邀请链接 24 小时有效，可多人使用；
 - 成员加入团队的唯一方式（管理员不再直接建号）；
-- 加入与注册都校验团队人数上限与团队状态。
+- 加入时校验团队人数上限与团队状态。
 """
 
 from utils.messages import localized_message
@@ -12,9 +12,12 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
+from tortoise.expressions import F
+from tortoise.transactions import atomic
 
-from auth.models import Team, TeamInvite, TeamMember, User
 from auth.security import hash_password
+from auth.models import Team, TeamInvite, TeamMember, User
+from services.team_provisioning import create_owned_team
 
 INVITE_TTL_HOURS = 24
 
@@ -53,15 +56,16 @@ async def get_invite_info(token: str) -> dict:
     }
 
 
+@atomic()
 async def join_team_via_invite(user: User, token: str) -> dict:
     """老用户经邀请链接加入团队。"""
     invite = await _valid_invite(token)
+    await Team.filter(id=invite.team_id).select_for_update().get()
     await _enforce_member_limit(invite.team)
     if await TeamMember.filter(team=invite.team, user=user).exists():
         raise HTTPException(status_code=400, detail=localized_message('你已是该团队成员'))
     membership = await TeamMember.create(team=invite.team, user=user, role=invite.role)
-    invite.used_count += 1
-    await invite.save(update_fields=["used_count", "updated_at"])
+    await TeamInvite.filter(id=invite.id).update(used_count=F("used_count") + 1, updated_at=_now())
     return {
         "team_id": invite.team_id,
         "team_name": invite.team.name,
@@ -70,11 +74,13 @@ async def join_team_via_invite(user: User, token: str) -> dict:
     }
 
 
+@atomic()
 async def register_via_invite(
     username: str, password: str, nickname: str, token: str
 ) -> tuple[User, dict]:
     """新用户经邀请链接注册并自动加入团队。"""
     invite = await _valid_invite(token)
+    await Team.filter(id=invite.team_id).select_for_update().get()
     username = username.strip()
     if await User.filter(username=username).exists():
         raise HTTPException(status_code=400, detail=localized_message('用户名已被使用'))
@@ -87,8 +93,8 @@ async def register_via_invite(
     membership = await TeamMember.create(
         team=invite.team, user=user, role=invite.role
     )
-    invite.used_count += 1
-    await invite.save(update_fields=["used_count", "updated_at"])
+    await create_owned_team(user.id)
+    await TeamInvite.filter(id=invite.id).update(used_count=F("used_count") + 1, updated_at=_now())
     return user, {
         "team_id": invite.team_id,
         "team_name": invite.team.name,
@@ -111,5 +117,9 @@ async def _enforce_member_limit(team: Team) -> None:
     count = await TeamMember.filter(team=team).count()
     if count >= team.member_limit:
         raise HTTPException(
-            status_code=403, detail=localized_message('团队人数已达上限（{p1} 人）', p1=f'{team.member_limit}')
+            status_code=403,
+            detail=localized_message(
+                '团队人数已达上限（{p1} 人），如需扩容请联系平台超级管理员',
+                p1=f'{team.member_limit}',
+            ),
         )

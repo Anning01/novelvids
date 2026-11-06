@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, clearAuthToken, getActiveTeamId, getAuthToken, redirectToLogin, setActiveTeamId, setAuthToken } from '@/api'
-import type { AuthUser, Membership, TeamRole } from '@/types'
+import type { AuthMe, AuthUser, LoginResult, Membership, TeamRole } from '@/types'
 
 /**
  * 登录与权限状态。
@@ -18,23 +18,27 @@ export const useAuthStore = defineStore('auth', {
     memberships: [] as Membership[],
     activeTeamId: getActiveTeamId(),
     totalCost: 0,
+    qilingEnabled: false,
+    qilingBound: false,
+    ownsTeam: false,
+    provider: 'password' as 'password' | 'qiling',
+    legalReady: false,
   }),
   getters: {
     isLoggedIn: (state) => state.enabled === true && Boolean(state.user && state.token),
     isSuperAdmin: (state) => state.user?.is_super_admin === true,
-    membership: (state): Membership | null => (
-      state.memberships.find(item => item.team_id === state.activeTeamId)
-      ?? state.memberships[0]
-      ?? null
-    ),
-    role: (state): TeamRole | 'super' | null => {
-      if (!state.enabled) return null
-      if (state.user?.is_super_admin) return 'super'
-      const active = state.memberships.find(item => item.team_id === state.activeTeamId) ?? state.memberships[0]
-      return active?.role ?? null
+    activeMemberships: (state) => state.memberships.filter(item => item.status !== 0 && item.team_status !== 0),
+    membership(): Membership | null {
+      return this.activeMemberships.find(item => item.team_id === this.activeTeamId)
+        ?? (this.isSuperAdmin && this.activeTeamId === null ? null : this.activeMemberships[0] ?? null)
+    },
+    role(): TeamRole | 'super' | null {
+      if (!this.enabled) return null
+      if (this.isSuperAdmin && this.activeTeamId === null) return 'super'
+      return this.membership?.role ?? (this.isSuperAdmin ? 'super' : null)
     },
     canAccessSettings(): boolean {
-      return this.enabled === false || this.role === 'admin' || this.role === 'super'
+      return this.enabled === false || this.isSuperAdmin || this.role === 'super'
     },
     canAccessBilling(): boolean {
       return this.enabled === false || this.role === 'admin' || this.role === 'creator' || this.role === 'super'
@@ -43,7 +47,7 @@ export const useAuthStore = defineStore('auth', {
       return this.role === 'admin' || this.role === 'super'
     },
     canManageTeams(): boolean {
-      return this.role === 'super'
+      return this.isSuperAdmin || this.role === 'super'
     },
   },
   actions: {
@@ -52,6 +56,9 @@ export const useAuthStore = defineStore('auth', {
       try {
         const status = await api.authStatus()
         this.enabled = status.data.enabled
+        this.qilingEnabled = status.data.qiling_enabled === true
+        this.provider = status.data.provider ?? (this.qilingEnabled ? 'qiling' : 'password')
+        this.legalReady = status.data.legal_ready === true
       } catch {
         // 状态探测失败时保守处理：视为未启用，不阻塞应用
         this.enabled = false
@@ -68,17 +75,18 @@ export const useAuthStore = defineStore('auth', {
       }
       this.ready = true
     },
-    applyMe(me: { user: AuthUser; memberships: Membership[]; is_super_admin: boolean; total_cost?: number | string }): void {
+    applyMe(me: AuthMe): void {
       this.user = me.user
       this.memberships = me.memberships
       this.totalCost = Number(me.total_cost ?? 0)
+      this.qilingBound = me.qiling_bound === true
+      this.ownsTeam = me.owns_team === true
       this.activeTeamId = this._resolveActiveTeam()
     },
     _resolveActiveTeam(): number | null {
-      if (!this.memberships.length) return null
       const saved = getActiveTeamId()
-      if (saved !== null && this.memberships.some(item => item.team_id === saved)) return saved
-      const first = this.memberships[0].team_id
+      if (saved !== null && this.activeMemberships.some(item => item.team_id === saved)) return saved
+      const first = this.isSuperAdmin ? null : this.activeMemberships[0]?.team_id ?? null
       setActiveTeamId(first)
       return first
     },
@@ -86,21 +94,19 @@ export const useAuthStore = defineStore('auth', {
       setActiveTeamId(teamId)
       this.activeTeamId = teamId
     },
-    async login(username: string, password: string): Promise<void> {
-      const result = await api.login(username, password)
-      setAuthToken(result.data.token)
-      this.token = result.data.token
-      this.user = result.data.user
+    async acceptSession(session: LoginResult): Promise<void> {
+      setActiveTeamId(null)
+      setAuthToken(session.token)
+      this.token = session.token
+      this.user = session.user
       const me = await api.me()
       this.applyMe(me.data)
     },
+    async login(username: string, password: string): Promise<void> {
+      await this.acceptSession((await api.login(username, password)).data)
+    },
     async register(data: { username: string; password: string; nickname?: string; invite_token: string }): Promise<void> {
-      const result = await api.register(data)
-      setAuthToken(result.data.token)
-      this.token = result.data.token
-      this.user = result.data.user
-      const me = await api.me()
-      this.applyMe(me.data)
+      await this.acceptSession((await api.register(data)).data)
     },
     async refreshMe(): Promise<void> {
       if (!this.token) return
@@ -120,6 +126,8 @@ export const useAuthStore = defineStore('auth', {
       this.memberships = []
       this.activeTeamId = null
       this.totalCost = 0
+      this.qilingBound = false
+      this.ownsTeam = false
       redirectToLogin()
     },
   },

@@ -29,7 +29,7 @@ import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
-import { fallbackImage } from '@/shared/mediaFallback'
+import ProjectCover from '@/components/ProjectCover.vue'
 import {
   chapterDraftChanged,
   createChapterEditDraft,
@@ -513,23 +513,7 @@ onBeforeUnmount(() => {
         <AppButton variant="soft" size="sm" :disabled="!selectedEpisodeBrief" @click="continueToSettings">{{ tr('前往资产提取') }}<ArrowRight :size="15" /></AppButton>
       </section>
       <div class="analysis-hero">
-        <div class="project-cover-art" :aria-label="tr('项目封面')">
-          <img
-            v-if="project.cover || analysisResult?.cover"
-            :src="project.coverPreview || project.cover || analysisResult?.cover || undefined"
-            :alt="tr('{p0}封面', { p0: displayedProjectName })"
-            width="640"
-            height="960"
-            decoding="async"
-            @error="fallbackImage($event, project.cover || analysisResult?.cover)"
-          />
-          <template v-else>
-          <span class="cover-orbit orbit-one" />
-          <span class="cover-orbit orbit-two" />
-          <Sparkles :size="34" />
-          <small>AI DRAMA</small>
-          </template>
-        </div>
+        <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover" :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="tr('{p0}封面', { p0: displayedProjectName })" :max-width="240" :max-height="180" />
         <div class="analysis-hero-copy">
           <AppBadge
             class="analysis-ready"
@@ -694,14 +678,7 @@ onBeforeUnmount(() => {
 .analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
 .analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }
 .agent-content { width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 36px 22px 80px; box-sizing: border-box; }
-.analysis-hero { display: grid; grid-template-columns: 142px minmax(0, 1fr) auto; align-items: center; gap: 26px; padding: 24px; border-radius: 20px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
-.project-cover-art { position: relative; display: grid; height: 180px; overflow: hidden; place-items: center; align-content: center; gap: 9px; border-radius: 13px; color: #fff; background: linear-gradient(145deg, #6f70f4, #4c3e91 58%, #201d45); box-shadow: 0 12px 25px rgb(48 42 105 / 22%); }
-.project-cover-art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.project-cover-art svg, .project-cover-art small { position: relative; z-index: 2; }
-.project-cover-art small { font-size: 8px; font-weight: 750; letter-spacing: .22em; }
-.cover-orbit { position: absolute; border: 1px solid rgb(255 255 255 / 18%); border-radius: 50%; }
-.orbit-one { width: 170px; height: 170px; transform: translate(45px, -45px); }
-.orbit-two { width: 100px; height: 100px; transform: translate(-52px, 62px); }
+.analysis-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 26px; padding: 24px; border-radius: 20px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
 .analysis-hero-copy { display: grid; justify-items: start; }
 .analysis-ready { margin-bottom: 9px; }
 .status-spinner { animation: status-spin 1.1s linear infinite; }
@@ -789,14 +766,12 @@ onBeforeUnmount(() => {
 .continue-button > svg { position: absolute; right: 20px; }
 .continue-button:hover { background: #4d4ee9; transform: translateY(-1px); }
 @media (max-width: 960px) {
-  .analysis-hero { grid-template-columns: 118px minmax(0, 1fr); }
-  .project-cover-art { height: 150px; }
+  .analysis-hero { grid-template-columns: auto minmax(0, 1fr); }
   .analysis-hero > .analysis-hero-actions { grid-column: 2; justify-self: start; }
 }
 @media (max-width: 720px) {
   .agent-content { width: 100%; padding: 22px 14px 60px; }
-  .analysis-hero { grid-template-columns: 86px minmax(0, 1fr); gap: 15px; padding: 15px; }
-  .project-cover-art { height: 116px; }
+  .analysis-hero { grid-template-columns: auto minmax(0, 1fr); gap: 15px; padding: 15px; }
   .analysis-hero h1 { font-size: 19px; }
   .genre-tags { margin-top: 11px; }
   .profile-grid, .character-grid { grid-template-columns: 1fr; }
@@ -808,7 +783,6 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 480px) {
   .analysis-hero { grid-template-columns: 1fr; }
-  .project-cover-art { display: none; }
   .analysis-hero > .analysis-hero-actions { grid-column: 1; flex-wrap: wrap; justify-self: stretch; }
   .analysis-section > header { align-items: flex-start; flex-direction: column; }
 }

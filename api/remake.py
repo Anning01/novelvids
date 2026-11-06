@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from auth.deps import (
     AuthContext,
     ensure_novel_access,
+    ensure_project_creation_team,
     get_auth_context,
     require_roles,
 )
@@ -214,6 +215,7 @@ async def create_project(
     ctx: AuthContext = Depends(get_auth_context),
     _: AuthContext = _EDITOR,
 ):
+    ensure_project_creation_team(ctx)
     result = await remake_project_service.create(
         payload,
         team_id=ctx.team_id,

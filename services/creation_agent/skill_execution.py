@@ -199,6 +199,8 @@ class SkillExecution:
             limits=limits,
         )
         request_aspect_ratio = "16:9"
+        from services.storyboard.speech_timing import StoryboardSpeechValidator
+        speech_validator = StoryboardSpeechValidator(self.snapshot) if skill == "storyboard" else None
         agent = Agent(
             deps_type=SkillSnapshot,
             instructions=instructions(self.snapshot, self.language, skill) + (
@@ -228,6 +230,8 @@ class SkillExecution:
                 from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration
 
                 try:
+                    if speech_validator is not None:
+                        speech_validator.validate(output.shots)
                     for shot in output.shots:
                         validate_storyboard_duration(shot, self.params.get("shot_duration_range"))
                         if "storyboard_contract" in ctx.deps.contents:

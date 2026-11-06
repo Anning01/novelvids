@@ -6,8 +6,8 @@
 import pytest
 from httpx import AsyncClient
 
+from test.test_auth import issue_test_session
 from auth.models import Team, TeamMember, User
-from auth.security import hash_password
 from config import settings
 from models.novel import Novel
 from models.usage_record import ModelUsageRecord
@@ -29,18 +29,13 @@ async def _create_member(
     user = await User.create(
         username=username,
         nickname=username,
-        password_hash=hash_password("password123"),
     )
     await TeamMember.create(team=team, user=user, role=role)
     return user, f"{username}"
 
 
 async def _login(client: AsyncClient, username: str) -> str:
-    response = await client.post(
-        "/api/auth/login", json={"username": username, "password": "password123"}
-    )
-    assert response.json()["code"] == 0, response.text
-    return response.json()["data"]["token"]
+    return await issue_test_session(username)
 
 
 async def _create_novel(name: str, team: Team | None = None, created_by: int | None = None) -> Novel:
@@ -137,7 +132,6 @@ async def test_super_admin_sees_all_teams(client: AsyncClient):
     boss = await User.create(
         username="boss",
         nickname="boss",
-        password_hash=hash_password("password123"),
         is_super_admin=True,
     )
 
@@ -156,7 +150,6 @@ async def test_user_without_team_membership_gets_403(client: AsyncClient):
     await User.create(
         username="lonely",
         nickname="lonely",
-        password_hash=hash_password("password123"),
     )
     token = await _login(client, "lonely")
     response = await client.get("/api/novel", headers=_auth(token))
@@ -235,7 +228,7 @@ async def test_same_project_name_is_independent_between_teams(client: AsyncClien
 @pytest.mark.asyncio
 async def test_team_bootstrap_keeps_personal_projects_in_creator_scope(client: AsyncClient):
     team = await _create_team("Personal scope guard")
-    owner = await User.create(username="personal_owner", password_hash=hash_password("password123"))
+    owner = await User.create(username="personal_owner")
     personal = await _create_novel("重启同名项目", created_by=owner.id)
     shared = await _create_novel("重启同名项目", team=team)
     legacy = await _create_novel("历史无归属项目")
@@ -262,7 +255,7 @@ async def test_team_bootstrap_keeps_personal_projects_in_creator_scope(client: A
 
 @pytest.mark.asyncio
 async def test_personal_projects_alone_do_not_trigger_a_default_team(client: AsyncClient):
-    owner = await User.create(username="personal_only", password_hash=hash_password("password123"))
+    owner = await User.create(username="personal_only")
     personal = await _create_novel("个人项目", created_by=owner.id)
 
     await ensure_team_schema()

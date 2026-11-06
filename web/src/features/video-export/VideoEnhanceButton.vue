@@ -16,7 +16,7 @@ const dialog = ref<HTMLElement | null>(null)
 const titleId = useId()
 let previousFocus: HTMLElement | null = null
 let expectedVideoId = 0
-const canWrite = computed(() => !auth.enabled || auth.isSuperAdmin || ['admin', 'creator'].includes(auth.role || ''))
+const canWrite = computed(() => !auth.enabled || auth.role === 'super' || ['admin', 'creator'].includes(auth.role || ''))
 watch(() => props.video.id, id => {
   if (id === expectedVideoId) return
   open.value = false; activeVideo.value = null

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 
 import { Upload, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
@@ -21,8 +22,8 @@ const preset = computed(() => WATERMARK_PRESETS.find(item => {
 
 watch(() => props.modelValue, value => { draft.value = normalizeWatermarkConfig(value) }, { deep: true })
 
-function changePreset(event: Event) {
-  const value = (event.target as HTMLSelectElement).value as WatermarkPreset
+function changePreset(presetValue: string) {
+  const value = presetValue as WatermarkPreset
   if (!value) return
   draft.value = { ...draft.value, ...watermarkPresetConfig(value), resourceUrl: draft.value.resourceUrl }
   emit('change', normalizeWatermarkConfig(draft.value))
@@ -52,8 +53,10 @@ function upload(event: Event) {
         </header>
 
         <div class="workbench-watermark-dialog__template-row">
-          <label>{{ tr('组织模板') }} <select :aria-label="tr('组织模板')" disabled><option>{{ tr('不使用模板') }}</option></select>
-          </label>
+          <div class="workbench-watermark-dialog__select-field">
+            {{ tr('组织模板') }}
+            <AppSelect model-value="" :options="[tr('不使用模板')]" :ariaLabel="tr('组织模板')" disabled />
+          </div>
           <a href="/watermark-templates" target="_blank" rel="noopener">{{ tr('管理模板') }}</a>
         </div>
 
@@ -73,10 +76,16 @@ function upload(event: Event) {
         </div>
 
         <div class="workbench-watermark-dialog__fields">
-          <label>{{ tr('预设位置') }} <select :aria-label="tr('水印位置')" :value="preset" @change="changePreset">
-              <option v-for="item in WATERMARK_PRESETS" :key="item.value" :value="item.value">{{ item.label }}</option>
-            </select>
-          </label>
+          <div class="workbench-watermark-dialog__select-field">
+            {{ tr('预设位置') }}
+            <AppSelect
+              :model-value="preset"
+              :options="preset ? [...WATERMARK_PRESETS] : [{ value: '', label: tr('自定义') }, ...WATERMARK_PRESETS]"
+              :ariaLabel="tr('水印位置')"
+              :menu-z-index="10000011"
+              @update:model-value="changePreset"
+            />
+          </div>
           <label>{{ tr('横向位置') }} <span>{{ Math.round(draft.x * 100) }}%</span>
             <input type="range" :aria-label="tr('横向位置')" min="0" max="1" step="0.01" :value="draft.x" @change="changeNumber('x', $event)">
           </label>

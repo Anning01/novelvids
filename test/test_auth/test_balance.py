@@ -9,8 +9,8 @@ import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
 
+from test.test_auth import issue_test_session
 from auth.models import BalanceTransaction, Team, TeamMember, User
-from auth.security import hash_password
 from config import settings
 from models.novel import Novel
 from models.usage_record import ModelUsageRecord
@@ -30,17 +30,12 @@ async def _create_user(username: str, *, super_admin: bool = False) -> User:
     return await User.create(
         username=username,
         nickname=username,
-        password_hash=hash_password(PASSWORD),
         is_super_admin=super_admin,
     )
 
 
 async def _login(client: AsyncClient, username: str) -> str:
-    response = await client.post(
-        "/api/auth/login", json={"username": username, "password": PASSWORD}
-    )
-    assert response.json()["code"] == 0, response.text
-    return response.json()["data"]["token"]
+    return await issue_test_session(username)
 
 
 def _auth(token: str) -> dict:
@@ -160,6 +155,27 @@ async def test_super_admin_can_top_up_via_api(client: AsyncClient):
     )
     assert response.json()["code"] == 0, response.text
     assert Decimal(response.json()["data"]["balance"]) == Decimal("50.000000")
+
+
+@pytest.mark.asyncio
+async def test_super_admin_with_selected_team_can_top_up_and_view_balance(client: AsyncClient):
+    team = await Team.create(name="带作用域充值队")
+    boss = await _create_user("bal_boss_scoped", super_admin=True)
+    await TeamMember.create(team=team, user=boss, role=TeamRoleEnum.admin.value)
+    token = await _login(client, "bal_boss_scoped")
+
+    scoped_headers = {**_auth(token), "X-Team-Id": str(team.id)}
+
+    res_get = await client.get("/api/team/balance", headers=scoped_headers)
+    assert res_get.json()["code"] == 0, res_get.text
+
+    res_topup = await client.post(
+        "/api/team/balance/topup",
+        json={"team_id": team.id, "amount": "88", "note": "选定团队充值"},
+        headers=scoped_headers,
+    )
+    assert res_topup.json()["code"] == 0, res_topup.text
+    assert Decimal(res_topup.json()["data"]["balance"]) == Decimal("88.000000")
 
 
 @pytest.mark.asyncio

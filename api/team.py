@@ -7,10 +7,12 @@
 
 from utils.messages import localized_message
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
-from auth.deps import AuthContext, get_current_user, require_roles, require_super_admin
-from auth.models import User
+from auth.deps import AuthContext, get_auth_context, get_current_user, require_roles, require_super_admin
+from auth.models import Team, TeamMember, User
+from auth.api import password_provider
+from config import settings
 from controllers.team import team_controller
 from schemas.team import (
     BalanceTopUpIn,
@@ -18,8 +20,14 @@ from schemas.team import (
     InviteOut,
     MemberLimitIn,
     MemberOut,
+    MemberPaginationResponse,
     MemberPatchIn,
     MemberResetPasswordIn,
+    RechargeCreateIn,
+    RechargeOrderAdminOut,
+    RechargeOrderDetailOut,
+    RechargeOrderOut,
+    RefundOrderIn,
     TeamBalanceOut,
     TeamCreateIn,
     TeamOut,
@@ -35,11 +43,12 @@ _SUPER = Depends(require_super_admin)
 
 
 def _team_id_or_own(ctx: AuthContext, team_id: int | None) -> int:
-    """超管可指定团队；团队管理员固定本人团队。"""
+    """超管可指定团队；未指定时回退当前选中的团队；团队管理员固定本人团队。"""
     if ctx.is_super_admin:
-        if team_id is None:
+        target = team_id or ctx.team_id
+        if target is None:
             raise HTTPException(status_code=400, detail=localized_message('请指定 team_id'))
-        return team_id
+        return target
     return ctx.team_id
 
 
@@ -79,6 +88,190 @@ async def top_up_team_balance(
             payload.amount,
             operator_user_id=_operator_id(ctx),
             note=payload.note,
+        )
+    )
+
+
+@router.post(
+    "/balance/recharge",
+    summary="创建团队充值订单（微信支付 Native 扫码）",
+    response_model=ResponseSchema[RechargeOrderOut],
+)
+async def create_recharge_order(
+    payload: RechargeCreateIn,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    if not ctx.user:
+        raise HTTPException(401, localized_message("需要登录"))
+
+    if not ctx.is_super_admin:
+        membership = await TeamMember.filter(
+            team_id=payload.team_id,
+            user_id=ctx.user.id,
+            status=1,
+        ).first()
+        if membership is None:
+            raise HTTPException(403, localized_message("仅团队成员或超级管理员可为此团队充值"))
+
+    order = await team_controller.create_recharge(
+        team_id=payload.team_id,
+        user_id=ctx.user.id,
+        amount=payload.amount,
+        note=payload.note,
+    )
+    return ResponseSchema(data=order)
+
+
+@router.get(
+    "/balance/recharge/{out_trade_no}",
+    summary="查询充值订单状态",
+    response_model=ResponseSchema[RechargeOrderDetailOut],
+)
+async def get_recharge_order_status(
+    out_trade_no: str,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    user_id = ctx.user.id if ctx.user else 0
+    order, balance_after = await team_controller.query_recharge(
+        out_trade_no=out_trade_no,
+        user_id=user_id,
+        is_super_admin=ctx.is_super_admin,
+    )
+    return ResponseSchema(
+        data=RechargeOrderDetailOut(
+            id=order.id,
+            out_trade_no=order.out_trade_no,
+            team_id=order.team_id,
+            amount=order.amount,
+            status=order.status,
+            payment_method=order.payment_method,
+            code_url=order.code_url,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+            expires_at=order.expires_at,
+            transaction_id=order.transaction_id,
+            paid_at=order.paid_at,
+            balance_after=balance_after,
+        )
+    )
+
+
+@router.post(
+    "/balance/recharge/{out_trade_no}/mock-pay",
+    summary="模拟支付成功（仅在开发/测试 WECHAT_PAY_MOCK 开启时可用）",
+    response_model=ResponseSchema[RechargeOrderDetailOut],
+)
+async def mock_pay_recharge_order(
+    out_trade_no: str,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    if not settings.WECHAT_PAY_MOCK or settings.AUTH_PROVIDER == "qiling":
+        raise HTTPException(404, localized_message("充值订单不存在"))
+
+    user_id = ctx.user.id if ctx.user else 0
+    order, balance_after = await team_controller.mock_pay_recharge(
+        out_trade_no=out_trade_no,
+        user_id=user_id,
+        is_super_admin=ctx.is_super_admin,
+    )
+    return ResponseSchema(
+        data=RechargeOrderDetailOut(
+            id=order.id,
+            out_trade_no=order.out_trade_no,
+            team_id=order.team_id,
+            amount=order.amount,
+            status=order.status,
+            payment_method=order.payment_method,
+            code_url=order.code_url,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+            expires_at=order.expires_at,
+            transaction_id=order.transaction_id,
+            paid_at=order.paid_at,
+            balance_after=balance_after,
+        )
+    )
+
+
+@router.post(
+    "/balance/recharge/wechat/notify",
+    summary="微信支付异步结果通知回调",
+)
+async def wechat_pay_recharge_notify(request: Request):
+    body = await request.body()
+    return await team_controller.handle_wechat_notify(body, headers=request.headers)
+
+
+@router.get(
+    "/orders",
+    summary="查询充值订单列表（超管查看全部用户充值，普通用户查看本人充值）",
+    response_model=ResponseSchema[PaginationResponse[RechargeOrderAdminOut]],
+)
+async def list_recharge_orders(
+    background_tasks: BackgroundTasks,
+    status: str | None = Query(None, description="订单状态筛选：pending/paid/expired/closed/failed"),
+    search: str | None = Query(None, description="搜索关键词：订单号/微信流水号/团队/用户/备注"),
+    params=Depends(get_list_params),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    if not ctx.user:
+        raise HTTPException(401, localized_message("需要登录"))
+
+    # 超级管理员触发后台轻量清理任务：过期待支付订单置为 expired，超过 7 天的历史失效订单彻底删除
+    if ctx.is_super_admin:
+        background_tasks.add_task(team_controller.cleanup_recharge_orders)
+
+    data = await team_controller.list_orders(
+        user_id=ctx.user.id,
+        is_super_admin=ctx.is_super_admin,
+        status=status,
+        search=search,
+        page=params.page,
+        page_size=params.page_size,
+    )
+    return ResponseSchema(data=data)
+
+
+@router.post(
+    "/orders/{out_trade_no}/refund",
+    summary="超级管理员退款（微信原路退回并扣回团队充值金额，团队余额不足时拒绝退款）",
+    response_model=ResponseSchema[RechargeOrderAdminOut],
+)
+async def refund_recharge_order(
+    out_trade_no: str,
+    payload: RefundOrderIn = RefundOrderIn(),
+    ctx: AuthContext = _SUPER,
+):
+    operator_id = ctx.user.id if ctx.user else None
+    order = await team_controller.refund_recharge(
+        out_trade_no=out_trade_no,
+        operator_user_id=operator_id,
+        reason=payload.reason,
+    )
+    user = await User.get_or_none(id=order.user_id)
+    team = await Team.get_or_none(id=order.team_id)
+    return ResponseSchema(
+        data=RechargeOrderAdminOut(
+            id=order.id,
+            out_trade_no=order.out_trade_no,
+            team_id=order.team_id,
+            team_name=team.name if team else "",
+            user_id=order.user_id,
+            username=user.username if user else "",
+            nickname=user.nickname if user else "",
+            amount=order.amount,
+            status=order.status,
+            payment_method=order.payment_method,
+            code_url=order.code_url,
+            transaction_id=order.transaction_id,
+            paid_at=order.paid_at,
+            expires_at=order.expires_at,
+            note=order.note,
+            refund_id=order.refund_id,
+            refunded_at=order.refunded_at,
+            refund_reason=order.refund_reason,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
     )
 
@@ -150,8 +343,8 @@ async def join_invite(
 
 @router.get(
     "/members",
-    summary="团队成员列表（分页，含累计消耗与限额）",
-    response_model=ResponseSchema[PaginationResponse[MemberOut]],
+    summary="团队成员列表（分页，含累计消耗、限额与团队人数上限）",
+    response_model=ResponseSchema[MemberPaginationResponse],
 )
 async def list_members(
     ctx: AuthContext = _ADMIN,
@@ -205,21 +398,12 @@ async def set_member_limit(
     )
 
 
-@router.post(
-    "/members/{user_id}/reset-password",
-    summary="重置成员密码",
-    response_model=ResponseSchema[None],
-)
-async def reset_member_password(
-    user_id: int,
-    payload: MemberResetPasswordIn,
-    ctx: AuthContext = _ADMIN,
-    team_id: int | None = Query(default=None, ge=1),
-):
-    await team_controller.reset_member_password(
-        _team_id_or_own(ctx, team_id), user_id, payload.new_password, _operator_id(ctx)
-    )
-    return ResponseSchema(data=None, message="密码已重置")
+@router.post("/members/{user_id}/reset-password", dependencies=[Depends(password_provider)])
+async def reset_member_password(user_id: int, payload: MemberResetPasswordIn,
+                                ctx: AuthContext = _ADMIN, team_id: int | None = Query(None, ge=1)):
+    await team_controller.reset_member_password(_team_id_or_own(ctx, team_id), user_id,
+                                                payload.new_password, _operator_id(ctx))
+    return ResponseSchema(data=None)
 
 
 @router.delete(

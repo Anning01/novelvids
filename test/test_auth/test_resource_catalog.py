@@ -1,5 +1,5 @@
 import pytest
-from auth.models import Team
+from auth.models import Team, TeamMember
 from config import settings
 from models.resource_library import VideoResource
 from models.audio_reference import AudioReference
@@ -69,8 +69,7 @@ async def test_cross_team_media_and_voice_cannot_be_applied_or_saved_in_a_draft(
 
 async def _super_headers(client):
     from auth.models import User
-    from auth.security import hash_password
-    user = await User.create(username='catalog_super', password_hash=hash_password('password123'), is_super_admin=True)
+    user = await User.create(username='catalog_super', is_super_admin=True)
     return user, _auth(await _login(client, user.username))
 
 
@@ -94,6 +93,8 @@ async def test_super_admin_can_browse_all_projects_and_manage_public_seeds_witho
     projects = (await client.get('/api/resource-library/catalog/projects', headers=headers)).json()
     assert projects['data']['pagination']['total'] == 2
     scoped = {**headers, 'X-Team-Id':str(first.id)}
+    assert (await client.get('/api/resource-library/catalog/projects', headers=scoped)).json()['data']['pagination']['total'] == 1
+    await TeamMember.create(user=boss, team=first, role='creator')
     assert (await client.get('/api/resource-library/catalog/projects', headers=scoped)).json()['data']['pagination']['total'] == 1
     listing = (await client.get('/api/resource-library/catalog', headers=scoped)).json()
     assert listing['code'] == 0 and len(listing['data']['items']) == 3

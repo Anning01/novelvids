@@ -63,3 +63,74 @@ it('uses available space and updates the anchor when its container scrolls', asy
   expect(menu.classList.contains('is-up')).toBe(true)
   expect(560 - (Number.parseFloat(menu.style.top) + 206)).toBe(7)
 })
+
+it.each(['light', 'dark'])('supports keyboard selection and restores focus in %s mode', async theme => {
+  const host = document.createElement('div')
+  host.dataset.appTheme = theme
+  document.body.append(host)
+  const wrapper = mount(AppSelect, {
+    attachTo: host,
+    props: { modelValue: 'one', options: ['one', 'two'], ariaLabel: '键盘下拉' },
+  })
+  try {
+    const trigger = wrapper.get('button')
+    trigger.element.focus()
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    const menu = document.querySelector('[role="listbox"][aria-label="键盘下拉"]')!
+    const [first, second] = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+    expect(document.activeElement).toBe(first)
+    first!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement).toBe(second)
+    second!.click()
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toEqual([['two']])
+    expect(document.activeElement).toBe(trigger.element)
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    await wrapper.setProps({ disabled: true })
+    expect(trigger.element.disabled).toBe(true)
+  } finally {
+    wrapper.unmount()
+    host.remove()
+  }
+})
+
+it('fits menu width to content and reserves checkmark slot for all options', async () => {
+  const wrapper = mount(AppSelect, {
+    attachTo: document.body,
+    props: { modelValue: 'wan3', options: ['wan3', 'doubao-seedance-2-0-mini'], ariaLabel: '模型选择' },
+    global: { components: { AppButton } },
+  })
+  try {
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    const menu = document.body.querySelector<HTMLElement>('[role="listbox"][aria-label="模型选择"]')!
+    expect(menu.style.width).toBe('max-content')
+    const options = menu.querySelectorAll('[role="option"]')
+    expect(options).toHaveLength(2)
+
+    const firstCheck = options[0]?.querySelector('.app-select__check')
+    const secondCheck = options[1]?.querySelector('.app-select__check')
+    expect(firstCheck).not.toBeNull()
+    expect(firstCheck?.classList.contains('is-invisible')).toBe(false)
+    expect(secondCheck).not.toBeNull()
+    expect(secondCheck?.classList.contains('is-invisible')).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('respects explicit menuWidth when provided', async () => {
+  const wrapper = mount(AppSelect, {
+    attachTo: document.body,
+    props: { modelValue: 'wan3', options: ['wan3'], ariaLabel: '固定宽度', menuWidth: 240 },
+    global: { components: { AppButton } },
+  })
+  try {
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    const menu = document.body.querySelector<HTMLElement>('[role="listbox"][aria-label="固定宽度"]')!
+    expect(menu.style.width).toBe('240px')
+  } finally {
+    wrapper.unmount()
+  }
+})

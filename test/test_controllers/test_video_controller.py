@@ -450,7 +450,7 @@ async def test_生成视频_提交角色与旁白音频并添加显式映射():
 
     kwargs = mock_gen.submit.call_args.kwargs
     assert kwargs["reference_audios"] == [
-        "asset://voice-narrator", "asset://voice-zhangsan",
+        "https://example.com/narrator.mp3", "https://example.com/zhangsan.mp3",
     ]
     assert kwargs["prompt"].startswith("@张三（低声）：天亮了。")
     import json

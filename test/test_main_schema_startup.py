@@ -47,3 +47,35 @@ async def test_legacy_columns_are_added_before_safe_schema_generation(monkeypatc
     ]
     assert events[1][1] == {"include_indexes": False}
     assert events[2][1] == {"include_indexes": False}
+
+
+@pytest.mark.parametrize("auth_enabled", ["false", "true"])
+def test_fresh_database_boots_twice_without_losing_data_or_enabling_auth(tmp_path, auth_enabled):
+    import os
+    import subprocess
+    import sys
+    script = """
+import asyncio
+from tortoise import Tortoise
+from main import _initialize_database_schema
+from config import settings
+from models.novel import Novel
+async def run():
+    await _initialize_database_schema()
+    project = await Novel.create(name='startup-sentinel')
+    project_id = project.id
+    await Tortoise.close_connections()
+    await _initialize_database_schema()
+    assert await Novel.filter(id=project_id, name='startup-sentinel').exists()
+    connection = Tortoise.get_connection('default')
+    tables = {row['name'] for row in await connection.execute_query_dict("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert ('users' in tables) == settings.AUTH_ENABLED
+    assert ('recharge_orders' in tables) == settings.AUTH_ENABLED
+    await Tortoise.close_connections()
+asyncio.run(run())
+"""
+    result = subprocess.run([sys.executable, "-c", script], env={**os.environ,
+        "AUTH_ENABLED": auth_enabled, "AUTH_PROVIDER": "password",
+        "DATABASE_URL": f"sqlite://{tmp_path / 'startup.db'}", "GENERATE_SCHEMAS": "true"},
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

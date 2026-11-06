@@ -6,8 +6,8 @@
 import pytest
 from httpx import AsyncClient
 
+from test.test_auth import issue_test_session
 from auth.models import Team, TeamMember, User
-from auth.security import hash_password
 from config import settings
 from models.novel import Novel
 from models.usage_record import ModelUsageRecord
@@ -24,7 +24,6 @@ async def _create_user(username: str, *, super_admin: bool = False) -> User:
     return await User.create(
         username=username,
         nickname=username,
-        password_hash=hash_password(PASSWORD),
         is_super_admin=super_admin,
     )
 
@@ -34,11 +33,7 @@ async def _add_member(user: User, team: Team, role: str) -> None:
 
 
 async def _login(client: AsyncClient, username: str) -> str:
-    response = await client.post(
-        "/api/auth/login", json={"username": username, "password": PASSWORD}
-    )
-    assert response.json()["code"] == 0, response.text
-    return response.json()["data"]["token"]
+    return await issue_test_session(username)
 
 
 def _auth(token: str) -> dict:

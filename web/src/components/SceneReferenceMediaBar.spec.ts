@@ -32,7 +32,7 @@ const model: VideoGenerationModel = {
 }
 
 describe('SceneReferenceMediaBar', () => {
-  it.each(['light', 'dark'])('shows audio limits, pending duration, over-limit feedback and disabled state in %s', async theme => {
+  it.each(['light', 'dark'])('shows audio limits and hides incomplete durations in %s', async theme => {
     document.documentElement.dataset.theme = theme
     const audioModel = { ...model, capabilities: { ...model.capabilities, max_reference_audios: 3, reference_audio_duration_min: 2, reference_audio_duration_max: 15, reference_audio_total_duration_max: 15 } }
     const wrapper = mount(SceneReferenceMediaBar, { props: { model: audioModel, media: [], assetImageCount: 0, audioDurations: [5, 6] } })
@@ -42,7 +42,7 @@ describe('SceneReferenceMediaBar', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     await wrapper.setProps({ audioDurations: [5, null] })
     expect(wrapper.text()).toContain('音频 2/3')
-    expect(wrapper.text()).toContain('音频时长待确认')
+    expect(wrapper.text()).not.toContain('音频时长待确认')
     expect(wrapper.text()).not.toContain('5.0/15s')
     await wrapper.setProps({ audioDurations: [6, 5, 5] })
     expect(wrapper.get('[role="alert"]').text()).toContain('参考音频总时长超过 15 秒')

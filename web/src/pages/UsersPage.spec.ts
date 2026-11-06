@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { useAuthStore } from '@/features/auth/authStore'
 import UsersPage from './UsersPage.vue'
 import { api } from '@/api'
 
@@ -72,29 +73,11 @@ describe('UsersPage 用户管理', () => {
     expect(api.deleteUser).toHaveBeenCalledWith(2)
   })
 
-  it('创建用户走弹窗', async () => {
-    vi.spyOn(api, 'userStats').mockResolvedValue({
-      data: { user_count: 0, user_total_cost: 0, team_count: 0, team_balance_total: 0 },
-    } as never)
-    vi.spyOn(api, 'users').mockResolvedValue({
-      data: { items: [], pagination: { total: 0, page: 1, page_size: 100, pages: 0 } },
-    } as never)
-    vi.spyOn(api, 'createUser').mockResolvedValue({
-      data: { id: 9, username: 'newbie', nickname: '新人', is_super_admin: false, status: 1, total_cost: '0.000000', team_count: 0 },
-    } as never)
-
-    const wrapper = mountPage()
-    await flushPromises()
-
-    const openButton = wrapper.findAll('button').find(button => button.text() === '创建用户')
-    await openButton!.trigger('click')
-    const inputs = wrapper.findAll('.dialog-card input')
-    await inputs[0].setValue('newbie')
-    await inputs[1].setValue('新人')
-    await inputs[2].setValue('newbie-pass-1')
-    await wrapper.get('.dialog-card').trigger('submit')
-    await flushPromises()
-
-    expect(api.createUser).toHaveBeenCalledWith({ username: 'newbie', nickname: '新人', password: 'newbie-pass-1' })
+  it('has no password account creation entry', async () => {
+    const pinia = createPinia()
+    useAuthStore(pinia).$patch({ provider: 'qiling' })
+    const wrapper = mount(UsersPage, { global: { plugins: [pinia] } })
+    expect(wrapper.text()).not.toContain('创建用户')
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
   })
 })

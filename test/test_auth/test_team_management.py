@@ -112,7 +112,8 @@ async def test_admin_creates_invite_and_new_user_registers(client, member_world)
     session_token = registered.json()["data"]["token"]
     me = await client.get("/api/auth/me", headers=_auth(session_token))
     assert me.json()["code"] == 0
-    assert me.json()["data"]["memberships"][0]["team_name"] == "成员队"
+    memberships = me.json()["data"]["memberships"]
+    assert {(item["team_name"], item["role"]) for item in memberships} == {("成员队", "creator"), ("新人的团队", "admin")}
 
 
 @pytest.mark.asyncio
@@ -304,3 +305,58 @@ async def test_admin_cannot_set_own_limit_or_reset_own_password(client, member_w
         headers=_auth(member_world["tokens"]["admin"]),
     )
     assert reset.json()["code"] == 400
+
+
+@pytest.mark.asyncio
+async def test_default_team_member_limit_is_three_and_expand_requires_super_admin(
+    client, member_world
+):
+    from services.team_provisioning import create_owned_team
+
+    user = await _create_user("limit_user")
+    team = await create_owned_team(user.id)
+    assert team.member_limit == 3
+
+    user_token = await _login(client, "limit_user")
+
+    # 1. /api/auth/me 返回当前团队的人员上限为 3
+    me_resp = await client.get("/api/auth/me", headers=_auth(user_token))
+    assert me_resp.json()["code"] == 0
+    memberships = me_resp.json()["data"]["memberships"]
+    assert any(m["team_id"] == team.id and m["member_limit"] == 3 for m in memberships)
+
+    # 2. /api/team/members 返回当前团队的人员上限为 3
+    members_resp = await client.get(
+        "/api/team/members",
+        headers={"Authorization": f"Bearer {user_token}", "X-Team-Id": str(team.id)},
+    )
+    assert members_resp.json()["code"] == 0
+    assert members_resp.json()["data"]["member_limit"] == 3
+
+    # 3. 普通管理员无法自行扩容（仅超管可修改团队）
+    denied = await client.patch(
+        f"/api/team/teams/{team.id}",
+        json={"member_limit": 10},
+        headers=_auth(user_token),
+    )
+    assert denied.json()["code"] == 403
+
+    # 4. 超级管理员可扩容
+    boss_token = member_world["tokens"]["boss"]
+    expanded = await client.patch(
+        f"/api/team/teams/{team.id}",
+        json={"member_limit": 10},
+        headers=_auth(boss_token),
+    )
+    assert expanded.json()["code"] == 0
+    assert expanded.json()["data"]["member_limit"] == 10
+
+    # 5. 超管新建团队若未指定 member_limit，默认上限为 3 人
+    new_user = await _create_user("new_owner")
+    created = await client.post(
+        "/api/team/teams",
+        json={"name": "默认新建团队", "owner_user_id": new_user.id},
+        headers=_auth(boss_token),
+    )
+    assert created.json()["code"] == 0
+    assert created.json()["data"]["member_limit"] == 3

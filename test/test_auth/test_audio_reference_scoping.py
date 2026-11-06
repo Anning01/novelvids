@@ -4,8 +4,8 @@ import pytest
 from httpx import AsyncClient
 from unittest.mock import AsyncMock
 
+from test.test_auth import issue_test_session
 from auth.models import Team, User
-from auth.security import hash_password
 from config import settings
 from models.audio_reference import AudioReference
 from models.novel import Novel
@@ -19,12 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 
 async def _login(client: AsyncClient, username: str) -> str:
-    response = await client.post(
-        "/api/auth/login",
-        json={"username": username, "password": "password123"},
-    )
-    assert response.json()["code"] == 0, response.text
-    return response.json()["data"]["token"]
+    return await issue_test_session(username)
 
 
 def _headers(token: str, team_id: int) -> dict[str, str]:
@@ -61,7 +56,6 @@ async def test_超级管理员在项目内只看到可用音色(client: AsyncCli
     boss = await User.create(
         username="voice_boss",
         nickname="voice_boss",
-        password_hash=hash_password("password123"),
         is_super_admin=True,
     )
     team = await Team.create(name="音色团队")
@@ -82,7 +76,7 @@ async def test_超级管理员在项目内只看到可用音色(client: AsyncCli
     response = await client.get(
         "/api/media-library/audio-references",
         params={"novel_id": novel.id, "page_size": 100},
-        headers=_headers(token, team.id),
+        headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.json()["code"] == 0, response.text
@@ -98,7 +92,6 @@ async def test_项目上传策略使用项目团队而不是超级管理员空�
     boss = await User.create(
         username="policy_boss",
         nickname="policy_boss",
-        password_hash=hash_password("password123"),
         is_super_admin=True,
     )
     team = await Team.create(name="上传策略团队")
@@ -128,7 +121,7 @@ async def test_项目上传策略使用项目团队而不是超级管理员空�
             "content_type": "audio/mpeg",
             "novel_id": novel.id,
         },
-        headers=_headers(token, team.id),
+        headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.json()["code"] == 0, response.text
@@ -143,7 +136,6 @@ async def test_裁剪音色使用项目作用域并创建副本(
     boss = await User.create(
         username="trim_voice_boss",
         nickname="trim_voice_boss",
-        password_hash=hash_password("password123"),
         is_super_admin=True,
     )
     team = await Team.create(name="裁剪音色团队")
@@ -172,7 +164,7 @@ async def test_裁剪音色使用项目作用域并创建副本(
     response = await client.post(
         f"/api/media-library/audio-references/{source.id}/trim",
         json={"start": 1.5, "end": 4.5, "novel_id": novel.id},
-        headers=_headers(token, team.id),
+        headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.json()["code"] == 0, response.text

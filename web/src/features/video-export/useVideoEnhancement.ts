@@ -27,7 +27,7 @@ export function useVideoEnhancement(video: Readonly<Ref<Video>>, visible: Readon
   const source = computed(() => rows.value.find(row => !row.parent_export_id))
   const run = computed(() => rows.value.find(row => row.id === submittedId.value)
     || rows.value.find(row => row.parent_export_id && (running(row) || row.stage === 'needs_review' || row.applied_to_scene)))
-  const canWrite = computed(() => auth.enabled !== true || auth.isSuperAdmin || ['admin', 'creator'].includes(auth.role || ''))
+  const canWrite = computed(() => auth.enabled !== true || auth.role === 'super' || ['admin', 'creator'].includes(auth.role || ''))
   const scope = computed(() => `${video.value.id}:${auth.activeTeamId}:${auth.user?.id}:${auth.role}`)
   const model = computed(() => models.value.find(item => String(item.id) === modelId.value))
   const size = computed(() => source.value?.source_probe.width && source.value.source_probe.height

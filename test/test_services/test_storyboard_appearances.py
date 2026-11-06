@@ -120,7 +120,7 @@ async def test_handler_loads_prior_appearances_into_generation_request():
 @pytest.mark.asyncio
 @pytest.mark.parametrize('language', ['zh', 'en'])
 async def test_model_chosen_introduction_is_preserved_through_serialization_and_storage(language):
-    from prompts.skill_pack import SkillSnapshot, snapshot_skills
+    from test.test_services.test_storyboard_speech_timing import snapshot
     from schemas.agent_workflow import StructuredSkillStoryboard
     from services.creation_agent.skill_execution import current_execution
     from services.storyboard.handler import StoryboardTaskHandler
@@ -135,7 +135,7 @@ async def test_model_chosen_introduction_is_preserved_through_serialization_and_
     introduction = f'0s-2s: 旁白：{name}是从蓝星穿越而来的青年。' if language == 'zh' else f'0s-2s: Narrator: {name} is a time traveler.'
     shot.narration = [introduction]
     raw = StructuredSkillStoryboard.model_validate({'shots': [shot.model_dump()]})
-    execution = SimpleNamespace(snapshot=SkillSnapshot.model_validate(snapshot_skills()),
+    execution = SimpleNamespace(snapshot=snapshot(private=False),
                                 params={'assistant_model_config_id': 1}, generate=AsyncMock(return_value=raw))
     token = current_execution.set(execution)
     try:
@@ -187,11 +187,11 @@ def test_no_new_characters_leave_original_generation_prompt_unchanged(language, 
 
 @pytest.mark.asyncio
 async def test_skill_generation_without_new_people_does_not_inject_instructions():
-    from prompts.skill_pack import SkillSnapshot, snapshot_skills
+    from test.test_services.test_storyboard_speech_timing import snapshot
     from schemas.agent_workflow import StructuredSkillStoryboard
     from services.creation_agent.skill_execution import current_execution
 
-    execution = SimpleNamespace(snapshot=SkillSnapshot.model_validate(snapshot_skills()),
+    execution = SimpleNamespace(snapshot=snapshot(private=False),
                                 params={'assistant_model_config_id': 1},
                                 generate=AsyncMock(return_value=StructuredSkillStoryboard.model_validate(
                                     {'shots': [_shot().model_dump()]})))

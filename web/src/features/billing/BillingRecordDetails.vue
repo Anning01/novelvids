@@ -61,7 +61,7 @@ onBeforeUnmount(() => { epoch += 1 })
 .billing-record-details { padding: 12px 20px; color: var(--app-text-secondary); background: var(--app-surface-muted); }
 p { margin: 0 0 10px; font-size: 11px; }
 table { width: 100%; border-collapse: collapse; font-size: 11px; }
-th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--app-border); }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--app-border); white-space: nowrap; }
 th { color: var(--app-text-muted); font-weight: 500; }small { display: block; margin-top: 3px; color: var(--app-text-muted); }
 .is-num { text-align: right; font-variant-numeric: tabular-nums; } footer, footer > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 footer { margin-top: 8px; font-size: 11px; }

@@ -63,8 +63,9 @@ describe('MembersPage', () => {
     const wrapper = mountPage(setupStore())
     await flushPromises()
 
-    const roleSelect = wrapper.find('section.panel select')
-    await roleSelect.setValue('viewer')
+    await wrapper.get('button[aria-label="邀请角色"]').trigger('click')
+    const options = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="邀请角色"] [role="option"]')]
+    options.find(option => option.textContent?.trim() === '查看者')!.click()
     const buttons = wrapper.findAll('button')
     const inviteButton = buttons.find(button => button.text().includes('生成邀请链接'))
     expect(inviteButton).toBeTruthy()
@@ -100,6 +101,70 @@ describe('MembersPage', () => {
     await limitButton!.trigger('click')
     await flushPromises()
     expect(api.setTeamMemberLimit).toHaveBeenCalledWith(2, 50, 9)
+  })
+
+  it('shows member limit warning and disables invite button when limit reached', async () => {
+    vi.spyOn(api, 'teamMembers').mockResolvedValue({
+      data: {
+        items: [
+          { user_id: 1, username: 'u1', nickname: '', role: 'admin', status: 1, total_cost: 0, cost_limit: null },
+          { user_id: 2, username: 'u2', nickname: '', role: 'creator', status: 1, total_cost: 0, cost_limit: null },
+          { user_id: 3, username: 'u3', nickname: '', role: 'viewer', status: 1, total_cost: 0, cost_limit: null },
+        ],
+        pagination: { total: 3, page: 1, page_size: 20, pages: 1 },
+        member_limit: 3,
+      },
+    } as never)
+
+    const wrapper = mountPage(setupStore())
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('上限 3 人')
+    expect(wrapper.text()).toContain('当前成员：3 / 3 人')
+    expect(wrapper.text()).toContain('当前团队人数已达上限（3 人），新成员将无法加入。如需扩容，请联系平台超级管理员。')
+    expect(wrapper.text()).toContain('如需扩容人员上限，请联系平台超级管理员')
+
+    const inviteBtn = wrapper.findAll('button').find(b => b.text().includes('生成邀请链接'))
+    expect(inviteBtn).toBeDefined()
+    expect(inviteBtn!.attributes('disabled')).toBeDefined()
+  })
+
+  it('allows superadmin to edit team member limit', async () => {
+    vi.spyOn(api, 'teams').mockResolvedValue({
+      data: {
+        items: [{ id: 9, name: 'A队', balance: 0, model_config_source: 'official', status: 1, member_limit: 3, member_count: 1 }],
+        pagination: { total: 1, page: 1, page_size: 20, pages: 1 },
+      },
+    } as never)
+    vi.spyOn(api, 'teamMembers').mockResolvedValue({
+      data: {
+        items: [{ user_id: 1, username: 'u1', nickname: '', role: 'admin', status: 1, total_cost: 0, cost_limit: null }],
+        pagination: { total: 1, page: 1, page_size: 20, pages: 1 },
+        member_limit: 3,
+      },
+    } as never)
+    const updateTeamMock = vi.spyOn(api, 'updateTeam').mockResolvedValue({ data: {} } as never)
+    vi.spyOn(window, 'prompt').mockReturnValue('10')
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const superStore = useAuthStore(pinia)
+    superStore.$patch({
+      enabled: true,
+      user: { id: 99, username: 'super', nickname: '', avatar_url: '', is_super_admin: true },
+      memberships: [],
+      activeTeamId: null,
+    })
+
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+
+    const editLimitBtn = wrapper.findAll('button').find(b => b.text() === '修改上限')
+    expect(editLimitBtn).toBeDefined()
+    await editLimitBtn!.trigger('click')
+    await flushPromises()
+
+    expect(updateTeamMock).toHaveBeenCalledWith(9, { member_limit: 10 })
   })
 })
 
@@ -157,7 +222,8 @@ describe('MembersPage 本人行不可操作', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('本人')
     expect(rows[0].text()).toContain('不可操作本人')
-    expect(rows[0].findAll('button')).toHaveLength(0)
+    expect(rows[0].get('button[aria-label="角色 · admin"]').attributes('disabled')).toBeDefined()
+    expect(rows[0].findAll('button:not(:disabled)')).toHaveLength(0)
     expect(rows[1].findAll('button').length).toBeGreaterThan(0)
   })
 })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 
 import AgentUsageDetails from './AgentUsageDetails.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -8,6 +9,7 @@ import { BubbleList } from 'vue-element-plus-x'
 import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList'
 import { Bot, RefreshCw, X, BookOpenText, ChevronsUpDown } from 'lucide-vue-next'
 import { api } from '@/api'
+import type { VideoGenerationOptions } from '@/types'
 import AppButton from '@/components/AppButton.vue'
 import { notice } from '@/shared/notice'
 import { useCreationAgentStore } from './store'
@@ -23,7 +25,7 @@ import AgentActivity from './AgentActivity.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
 import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, PromptTargetStatus } from './types'
 
-const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; phase?: 'script' | 'settings' | 'storyboard' | 'video' }>()
+const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; suspended?: boolean; phase?: 'script' | 'settings' | 'storyboard' | 'video'; initialConversationId?: number; initialUserText?: string; videoDefaults?: VideoGenerationOptions & { model_config_id: number } }>()
 const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]] }>()
 const store = useCreationAgentStore()
 const router = useRouter()
@@ -44,6 +46,12 @@ const selected = computed({
 const options = ref<(AgentTargetOption & { key: string })[]>([])
 const pickerOpen = ref(false)
 const writeScope = ref<'chapter' | 'project' | 'read_only'>('chapter')
+
+function changeWriteScope(next: string) {
+  if (next === writeScope.value) return
+  writeScope.value = next as typeof writeScope.value
+  if (next !== 'read_only') workspace.select([])
+}
 const catalogLoading = ref(false)
 const catalogPage = ref(1)
 const hasMoreAssets = ref(false)
@@ -81,7 +89,8 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
-const bubbles = computed(() => store.messages.filter(message => message.role === 'user' ||
+const bubbles = computed(() => store.messages.map(message => props.initialUserText && store.conversationId === props.initialConversationId
+  && message.id === store.messages.find(item => item.role === 'user')?.id ? { ...message, content: props.initialUserText } : message).filter(message => message.role === 'user' ||
   message.content || message.query_results?.length || message.changes.length || message.status === 4 || message.status === 5,
 ).map(message => ({ ...message,
   content: message.role === 'assistant' && message.status !== 3 ? '' : message.content,
@@ -150,7 +159,13 @@ async function refreshTargetStatus() {
   }
 }
 
-watch(() => props.projectId, id => { workspace.enterProject(id); void store.open(id) }, { immediate: true })
+watch(() => [props.projectId, props.initialConversationId] as const, async ([id, conversationId]) => {
+  workspace.enterProject(id)
+  await store.open(id)
+  if (props.projectId === id && props.initialConversationId === conversationId && conversationId && store.conversationId !== conversationId) {
+    await store.selectConversation(conversationId)
+  }
+}, { immediate: true })
 watch(() => [props.projectId, props.chapterId], () => {
   workspace.enterChapter(props.chapterId)
   void loadTargets()
@@ -180,7 +195,7 @@ watch(() => [store.busy, store.changesRevision], () => { if (!store.busy) void r
 watch(pickerOpen, open => { if (open) void refreshTargetStatus() })
 
 async function send(text: string) {
-  if (!text.trim() || !ready.value || store.busy) return
+  if (!text.trim() || !ready.value || store.busy || props.suspended) return
   const key = draftKey.value
   if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null,
     targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : writeScope.value })) {
@@ -193,9 +208,18 @@ async function send(text: string) {
 }
 
 async function confirmProduction(pending: import('./types').PendingProduction) {
+  if (props.suspended) return
+  const productionIntents = pending.intents.map(intent => {
+    if (intent.operation !== 'video' || !props.videoDefaults ||
+      (intent.media_model_config_id && intent.media_model_config_id !== props.videoDefaults.model_config_id)) return intent
+    const { model_config_id, ...options } = props.videoDefaults
+    const overrides = Object.fromEntries(Object.entries(intent.video_options ?? {}).filter(([key, value]) =>
+      value != null && !(key === 'reference_media' && Array.isArray(value) && !value.length)))
+    return { ...intent, media_model_config_id: model_config_id, video_options: { ...options, ...overrides } }
+  })
   await store.send({ request_id: pending.confirmation_request_id, message: pending.message,
     chapter_id: pending.chapter_id, targets: pending.targets, write_scope: pending.write_scope,
-    model_config_id: pending.model_config_id, production_intents: pending.intents })
+    model_config_id: pending.model_config_id, production_intents: productionIntents })
 }
 
 async function operation(action: () => Promise<unknown>) {
@@ -278,7 +302,19 @@ onMounted(() => {
       @select="operation(() => store.selectConversation($event))" @create="newConversation"
       @delete="operation(() => store.deleteConversation($event))" @restore="operation(() => store.restoreConversation($event))" @load-deleted="operation(store.loadDeletedConversations)" @refresh="operation(store.refreshConversations)" />
     <div class="creation-agent-panel__context"><BookOpenText :size="13" /><span>{{ chapterLabel || tr('当前章节') }}</span>
-      <select v-model="writeScope" :aria-label="tr('助手操作范围')" :disabled="store.busy" @change="writeScope !== 'read_only' && workspace.select([])"><option value="chapter">{{ targets.length ? tr('指定对象') : tr('当前章') }}</option><option value="project">{{ tr('全项目') }}</option><option value="read_only">{{ tr('只查询') }}</option></select>
+      <AppSelect
+        class="creation-agent-panel__scope-select"
+        density="compact"
+        :model-value="writeScope"
+        :ariaLabel="tr('助手操作范围')"
+        :disabled="store.busy"
+        :options="[
+          { value: 'chapter', label: targets.length ? tr('指定对象') : tr('当前章') },
+          { value: 'project', label: tr('全项目') },
+          { value: 'read_only', label: tr('只查询') },
+        ]"
+        @update:model-value="changeWriteScope"
+      />
     </div>
     <AgentSetupState v-if="store.loading || !ready" :capabilities="store.capabilities" :loading="store.loading" :error="store.error" @retry="store.open(projectId)" />
     <div v-else-if="!store.messages.length" class="creation-agent-panel__welcome">
@@ -301,7 +337,7 @@ onMounted(() => {
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
           <p>{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
           <ul><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
-          <AppButton :disabled="!writable || store.busy" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
+          <AppButton :disabled="!writable || store.busy || suspended" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
         </div>
         <ul v-if="item.production?.length" class="creation-agent-panel__production">
           <li v-for="receipt in item.production" :key="receipt.task_id">
@@ -325,7 +361,7 @@ onMounted(() => {
       <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} {{ tr('个对象有新设定待核对') }} <span>{{ tr('查看') }}</span></button></p>
       <p v-if="statusError && (pickerOpen || targets.length)" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
       </AgentDisclosure>
-      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
+      <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy || suspended" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">
         <template #context>
           <AgentDisclosure v-if="targets.length" class="creation-agent-panel__references" :title="tr('引用 {p0}', { p0: targets.length })" :summary="workspace.selection.map(option => option.label).join('、')">
           <div class="creation-agent-panel__selected" :aria-label="tr('已选修改对象')">
@@ -347,7 +383,6 @@ onMounted(() => {
 .creation-agent-panel > header,.creation-agent-panel__toolbar,.creation-agent-panel__scope,.creation-agent-panel__context,.creation-agent-panel__selected,.creation-agent-panel > footer { flex-shrink: 0; }
 .creation-agent-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; min-height: 38px; border-bottom: 1px solid var(--app-border); }
 .creation-agent-panel header > div { display: flex; align-items: center; gap: 8px; }
-.creation-agent-panel select { min-width: 0; color: var(--app-text-secondary); background: var(--app-surface); border: 1px solid var(--app-border); border-radius: 8px; padding: 6px; font: inherit; }
 .creation-agent-panel__constraint-notice { margin: 0 2px 8px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
 .creation-agent-panel__hint { padding: 10px 16px; color: var(--app-text-secondary); }
 .creation-agent-panel__welcome { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: flex-start; justify-content: safe center; padding: 24px; gap: 14px; }
@@ -357,7 +392,7 @@ onMounted(() => {
 .creation-agent-panel__suggestion:hover { color: var(--app-accent); background: var(--app-accent-soft); border-color: var(--app-accent); }
 .creation-agent-panel__context { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 12px 5px; color: var(--app-text-muted); font-size: 11px; border-bottom: 1px solid var(--app-border); }
 .creation-agent-panel__context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.creation-agent-panel__context select { margin-left: auto; flex-shrink: 0; padding: 3px; font-size: 11px; border: 0; background: transparent; }
+.creation-agent-panel__scope-select { margin-left: auto; flex-shrink: 0; }
 .creation-agent-panel__selected { display: flex; flex-wrap: wrap; gap: 4px; max-height: 72px; overflow: auto; padding: 0 2px; }
 .creation-agent-panel__selected > span { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; overflow-wrap: anywhere; }
 .creation-agent-panel__selected-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -4,6 +4,7 @@ import { tr } from '@/i18n'
 import { computed, onMounted, ref } from 'vue'
 import { Activity, Clapperboard, Coins, Image, Type, ChevronRight } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
+import AppPagination from '@/components/AppPagination.vue'
 import { api } from '@/api'
 import BillingRecordDetails from '@/features/billing/BillingRecordDetails.vue'
 import { costSourceLabel, money, recordStatus, usageLabel } from '@/features/billing/recordDisplay'
@@ -53,7 +54,6 @@ const billingBreakdown = computed(() => {
 const projectName = (novelId: number) => (
   projects.value.find(item => item.novel_id === novelId)?.novel_name || tr('项目 {p0}', { p0: novelId })
 )
-const pages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize.value)))
 
 function formatDuration(seconds: number | null | undefined): string {
   if (seconds == null) return '—'
@@ -113,7 +113,8 @@ function changePage(next: number) {
   void loadRecords()
 }
 
-function changePageSize() {
+function changePageSize(next: number) {
+  pageSize.value = next
   page.value = 1
   void loadRecords()
 }
@@ -174,64 +175,62 @@ onMounted(load)
           <div><h2>{{ tr('调用流水') }}</h2><p>{{ tr('创作助手按会话汇总，展开可查看明细。') }}</p></div>
           <small>{{ selectedProject?.novel_name || tr('全部项目') }}</small>
         </header>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>{{ tr('时间') }}</th>
-              <th>{{ tr('项目') }}</th>
-              <th>{{ tr('维度') }}</th>
-              <th>{{ tr('任务') }}</th>
-              <th>{{ tr('模型') }}</th>
-              <th>{{ tr('用量') }}</th>
-              <th>{{ tr('时长') }}</th>
-              <th>{{ tr('状态') }}</th>
-              <th v-if="showSourceColumn">{{ tr('来源') }}</th>
-              <th class="is-num">{{ tr('成本') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="item in records" :key="item.id"><tr>
-              <td class="cell-muted">{{ item.created_at }}</td>
-              <td>{{ projectName(item.novel_id) }}</td>
-              <td>{{ billingTypeLabel(item.billing_type) }}</td>
-              <td><template v-if="item.record_kind === 'agent_conversation'">
-                <button class="conversation-record-toggle" type="button" :aria-label="tr('查看会话 {p0} 费用明细', { p0: item.conversation_id })" :aria-expanded="expandedRecordId === item.id" :aria-controls="`billing-details-${item.id}`" @click="expandedRecordId = expandedRecordId === item.id ? null : item.id">
-                  <ChevronRight :size="13" :class="{ 'is-expanded': expandedRecordId === item.id }" />{{ tr('创作助手') }} </button><small class="conversation-record-meta">{{ tr('会话') }} {{ item.conversation_id }} · {{ item.turn_count }} {{ tr('轮对话') }}</small>
-              </template><template v-else>{{ taskTypeLabel(item.task_type) }}</template></td>
-              <td>{{ item.model_name || item.model }}</td>
-              <td class="cell-muted">{{ usageLabel(item) }}</td>
-              <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
-              <td>{{ recordStatus(item) }}</td>
-              <td v-if="showSourceColumn">
-                <span class="source-badge" :class="{ 'is-key': item.cost_source === 'team_key', 'is-balance': item.cost_source === 'balance' }">{{ costSourceLabel(item.cost_source) }}</span>
-              </td>
-              <td class="is-num cell-mono">
-                <div v-if="recordDiscount(item) !== 1" class="cost-with-discount">
-                  <span class="list-price">{{ money(item.cost / recordDiscount(item), item.currency) }}</span>
-                  <span class="discount-chip">{{ discountText(recordDiscount(item)) }}</span>
-                </div>
-                {{ money(item.cost, item.currency) }}
-              </td>
-            </tr>
-            <tr v-if="expandedRecordId === item.id" :id="`billing-details-${item.id}`" class="conversation-record-detail"><td :colspan="showSourceColumn ? 10 : 9">
-              <BillingRecordDetails :record-id="item.id" :novel-id="item.novel_id" :show-source="showSourceColumn" />
-            </td></tr></template>
-            <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">{{ tr('暂无调用记录') }}</td></tr>
-          </tbody>
-        </table>
-        <footer v-if="totalRecords > 0" class="pager">
-          <span class="pager-total">{{ tr('共') }} {{ totalRecords }} {{ tr('条') }}</span>
-          <div class="pager-controls">
-            <select v-model.number="pageSize" class="pager-size" :aria-label="tr('每页条数')" @change="changePageSize">
-              <option :value="20">{{ tr('20 条/页') }}</option>
-              <option :value="50">{{ tr('50 条/页') }}</option>
-              <option :value="100">{{ tr('100 条/页') }}</option>
-            </select>
-            <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">{{ tr('上一页') }}</button>
-            <span>{{ page }} / {{ pages }}</span>
-            <button type="button" :disabled="page >= pages" @click="changePage(page + 1)">{{ tr('下一页') }}</button>
-          </div>
-        </footer>
+        <div class="data-table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>{{ tr('时间') }}</th>
+                <th>{{ tr('项目') }}</th>
+                <th>{{ tr('维度') }}</th>
+                <th>{{ tr('任务') }}</th>
+                <th>{{ tr('模型') }}</th>
+                <th>{{ tr('用量') }}</th>
+                <th>{{ tr('时长') }}</th>
+                <th>{{ tr('状态') }}</th>
+                <th v-if="showSourceColumn" class="cell-source">{{ tr('来源') }}</th>
+                <th class="is-num">{{ tr('成本') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="item in records" :key="item.id"><tr>
+                <td class="cell-muted">{{ item.created_at }}</td>
+                <td>{{ projectName(item.novel_id) }}</td>
+                <td>{{ billingTypeLabel(item.billing_type) }}</td>
+                <td><template v-if="item.record_kind === 'agent_conversation'">
+                  <button class="conversation-record-toggle" type="button" :aria-label="tr('查看会话 {p0} 费用明细', { p0: item.conversation_id })" :aria-expanded="expandedRecordId === item.id" :aria-controls="`billing-details-${item.id}`" @click="expandedRecordId = expandedRecordId === item.id ? null : item.id">
+                    <ChevronRight :size="13" :class="{ 'is-expanded': expandedRecordId === item.id }" />{{ tr('创作助手') }} </button><small class="conversation-record-meta">{{ tr('会话') }} {{ item.conversation_id }} · {{ item.turn_count }} {{ tr('轮对话') }}</small>
+                </template><template v-else>{{ taskTypeLabel(item.task_type) }}</template></td>
+                <td>{{ item.model_name || item.model }}</td>
+                <td class="cell-muted">{{ usageLabel(item) }}</td>
+                <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
+                <td>{{ recordStatus(item) }}</td>
+                <td v-if="showSourceColumn" class="cell-source">
+                  <span class="source-badge" :class="{ 'is-key': item.cost_source === 'team_key', 'is-balance': item.cost_source === 'balance' }">{{ costSourceLabel(item.cost_source) }}</span>
+                </td>
+                <td class="is-num cell-mono">
+                  <div v-if="recordDiscount(item) !== 1" class="cost-with-discount">
+                    <span class="list-price">{{ money(item.cost / recordDiscount(item), item.currency) }}</span>
+                    <span class="discount-chip">{{ discountText(recordDiscount(item)) }}</span>
+                  </div>
+                  {{ money(item.cost, item.currency) }}
+                </td>
+              </tr>
+              <tr v-if="expandedRecordId === item.id" :id="`billing-details-${item.id}`" class="conversation-record-detail"><td :colspan="showSourceColumn ? 10 : 9">
+                <BillingRecordDetails :record-id="item.id" :novel-id="item.novel_id" :show-source="showSourceColumn" />
+              </td></tr></template>
+              <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">{{ tr('暂无调用记录') }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <AppPagination
+          class="pager"
+          :page="page"
+          :page-size="pageSize"
+          :total="totalRecords"
+          :page-size-options="[20, 50, 100]"
+          @page-change="changePage"
+          @size-change="changePageSize"
+        />
       </section>
     </template>
   </main>
@@ -276,9 +275,10 @@ onMounted(load)
 .data-table .conversation-record-detail > td { padding: 0; }
 @media (prefers-reduced-motion: reduce) { .conversation-record-toggle svg { transition: none; } }
 .table-card__header small { color: var(--app-text-muted); font-size: 11px; }
+.data-table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.data-table th, .data-table td { padding: 11px 20px; text-align: left; }
-.data-table thead th { color: var(--app-text-muted); font-weight: 650; font-size: 10px; letter-spacing: .04em; border-bottom: 1px solid var(--app-border); }
+.data-table th, .data-table td { padding: 11px 18px; text-align: left; white-space: nowrap; }
+.data-table thead th { color: var(--app-text-muted); font-weight: 650; font-size: 10px; letter-spacing: .04em; border-bottom: 1px solid var(--app-border); white-space: nowrap; }
 .data-table tbody tr { transition: background-color .12s ease; }
 .data-table tbody tr:hover { background: var(--app-surface-hover, #f7f8fb); }
 .data-table tbody td { border-bottom: 1px solid var(--app-border); }
@@ -286,22 +286,27 @@ onMounted(load)
 .data-table .is-num { text-align: right; }
 .data-table .cell-muted { color: var(--app-text-muted); }
 .data-table .cell-mono { font-variant-numeric: tabular-nums; }
+.data-table .cell-source { white-space: nowrap; }
 .data-table .empty { color: var(--app-text-muted); text-align: center; padding: 28px; }
 
-.source-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  word-break: keep-all;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
 .source-badge.is-balance { color: var(--app-accent); background: var(--app-accent-soft); }
 .source-badge.is-key { color: #059669; background: rgb(16 185 129 / 12%); }
 .cost-with-discount { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-bottom: 2px; }
 .cost-with-discount .list-price { color: var(--app-text-muted); text-decoration: line-through; font-size: 11px; }
-.cost-with-discount .discount-chip { padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; color: #b45309; background: rgb(245 158 11 / 15%); }
-.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 16px; }
-.pager-total { color: var(--app-text-muted); font-size: 11px; }
-.pager-controls { display: flex; align-items: center; gap: 10px; }
-.pager span { color: var(--app-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.pager button { padding: 6px 12px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text-secondary); background: var(--app-surface); cursor: pointer; font-size: 11px; }
-.pager button:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
-.pager button:disabled { opacity: .45; cursor: not-allowed; }
-.pager-size { height: 30px; padding: 0 8px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text-secondary); background: var(--app-surface); font-size: 11px; cursor: pointer; }
+.cost-with-discount .discount-chip { display: inline-flex; align-items: center; white-space: nowrap; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; color: #b45309; background: rgb(245 158 11 / 15%); }
+.pager { padding: 12px 20px 16px; }
 
 @media (max-width: 960px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

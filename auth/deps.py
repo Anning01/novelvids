@@ -43,10 +43,13 @@ def auth_disabled() -> bool:
 
 
 def extract_bearer_token(request: Request) -> Optional[str]:
-    """从 Authorization: Bearer <token> 提取令牌；缺失返回 None。"""
+    """从 Authorization: Bearer <token> 提取令牌，也支持 ?token=xxx 查询参数供媒体流式播放（video/audio标签）使用；缺失返回 None。"""
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         return header[len("Bearer "):].strip()
+    token = request.query_params.get("token")
+    if token:
+        return token.strip()
     return None
 
 
@@ -80,23 +83,29 @@ async def get_auth_context(
     解析成员身份，未指定时回退到第一个可用团队成员。"""
     if auth_disabled() or user is None:
         return AuthContext()
-    if user.is_super_admin:
+    return await context_for_team(user, _selected_team_id(request))
+
+
+async def context_for_team(user: User, team_id: int | None) -> AuthContext:
+    """超管跨团队并保持超管权限；选定团队时附带该团队上下文与成员身份。"""
+    if user.is_super_admin and team_id is None:
         return AuthContext(user=user, is_super_admin=True)
-    selected_team_id = _selected_team_id(request)
-    query = TeamMember.filter(user=user, team__status=1, status=1)
-    if selected_team_id is not None:
+    query = TeamMember.filter(user=user, team__status=1, status=1).order_by("id")
+    if team_id is not None:
         membership = await (
-            query.filter(team_id=selected_team_id).select_related("team").first()
+            query.filter(team_id=team_id).select_related("team").first()
         )
     else:
         membership = await query.select_related("team").first()
     if membership is None:
+        if user.is_super_admin:
+            return AuthContext(user=user, team_id=team_id, is_super_admin=True)
         raise HTTPException(status_code=403, detail=localized_message('没有加入任何可用团队'))
     return AuthContext(
         user=user,
         membership=membership,
         team_id=membership.team_id,
-        is_super_admin=False,
+        is_super_admin=user.is_super_admin,
     )
 
 
@@ -121,6 +130,11 @@ def require_roles(*roles: str):
         return ctx
 
     return dependency
+
+
+def ensure_project_creation_team(ctx: AuthContext) -> None:
+    if not auth_disabled() and ctx.team_id is None:
+        raise HTTPException(403, localized_message('请先切换到要创建作品的团队'))
 
 
 async def require_super_admin(

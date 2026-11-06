@@ -83,3 +83,10 @@
 - 每次部署只保留上一版的一套回滚文件（提交 SHA、代码归档、旧前端）及一份部署前数据库备份。
 - 部署健康检查成功后必须执行 `scripts/prune_deployment_backups.py --keep <本次回滚目录名> --apply` 清理旧备份与上传临时包；失败部署先回滚，不删除可用恢复点。
 - 不清理当前代码、运行数据库、媒体、证书或其他项目；具体目录、备份格式和预览方式见 `docs/team-auth-deployment.md`。
+
+## 8. 固定生产部署目标
+
+- 生产服务器：`root@8.138.35.228`（SSH：`ssh root@8.138.35.228`）。用户已明确指定，后续会话不要重复询问部署地址。
+- 站点：`https://shortdramas.xiazq.com`；代码：`/root/novelvids`；Supervisor 服务：`novelvids-backend`；后端：`127.0.0.1:9000`；Caddy 提供 `web/dist`。服务器使用 PostgreSQL，部署前须备份并验证兼容。
+- 用户要求推送并部署时，在测试、备份和健康检查通过后按现有部署流程执行；先从服务器现有配置核实目录、服务名和版型，不猜测或覆盖环境文件。
+- 开源版与器灵版共用代码，通过 `AUTH_ENABLED` / `AUTH_PROVIDER` 区分；部署保留服务器当前版型，除非用户明确要求切换。

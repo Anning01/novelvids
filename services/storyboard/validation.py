@@ -55,6 +55,9 @@ def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
                              entities: Sequence[SceneEntity], strategy_key: str):
     from schemas.agent_workflow import SkillStoryboard, SkillShot
     from prompts.storyboard_strategies import StoryboardStrategyPrompt
+    from services.storyboard.speech_timing import StoryboardSpeechValidator
+
+    StoryboardSpeechValidator(snapshot).validate(storyboard.shots)
 
     resource = json.loads(snapshot.read("strategies"))[strategy_key]
     strategy = StoryboardStrategyPrompt(key=strategy_key, name=strategy_key, description="",
@@ -96,3 +99,5 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     if f"@{{镜头时长:{duration:g}s}}" not in prompt:
         raise ValueError(localized_message("分镜提示词缺少镜头时长标记"))
     validate_skill_storyboard_timing(shot)
+    from services.storyboard.speech_timing import StoryboardSpeechValidator
+    StoryboardSpeechValidator(snapshot).validate_shot(shot)

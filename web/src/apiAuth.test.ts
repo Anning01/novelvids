@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { api, ApiRequestError, request, retryableStatusError, clearAuthToken, getAuthToken, setAuthToken } from './api'
+import { api, ApiRequestError, request, retryableStatusError, getAuthToken, setAuthToken } from './api'
 import { tr } from './i18n'
 
 it('preserves response codes so status polling retries only temporary failures', async () => {
@@ -67,17 +67,14 @@ it('clears token and redirects to login on 401', async () => {
   expect(window.location.hash).toBe('#/login')
 })
 
-it('does not redirect when login itself returns 401', async () => {
-  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    code: 401, message: '用户名或密码错误', data: null,
-  }), { status: 200 }))
-  vi.stubGlobal('fetch', fetchMock)
-  window.location.hash = '#/projects'
-  await expect(api.login('alice', 'wrong')).rejects.toThrow('用户名或密码错误')
-  expect(window.location.hash).toBe('#/projects')
-  expect(clearAuthToken()).toBeUndefined()
+it('does not redirect a signed-out caller when Qiling sign-in returns 401', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+    JSON.stringify({ code: 401, message: '器灵登录无效' }), { status: 401 },
+  )))
+  window.location.hash = '#/invite/token'
+  await expect(api.qilingStart(false)).rejects.toThrow('器灵登录无效')
+  expect(window.location.hash).toBe('#/invite/token')
 })
-
 
 it('attaches bearer token and team header to uploads', async () => {
   // 第一次调用是直传策略探测（返回 direct:false → 走本地上传）

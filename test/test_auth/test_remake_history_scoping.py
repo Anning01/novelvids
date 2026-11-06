@@ -3,8 +3,8 @@
 import pytest
 from httpx import AsyncClient
 
+from test.test_auth import issue_test_session
 from auth.models import Team, TeamMember, User
-from auth.security import hash_password
 from config import settings
 from models.chapter import Chapter
 from models.novel import Novel
@@ -40,12 +40,7 @@ async def _available_project(name: str, team_id: int) -> Novel:
 
 
 async def _login(client: AsyncClient, username: str) -> dict[str, str]:
-    response = await client.post(
-        "/api/auth/login",
-        json={"username": username, "password": "password123"},
-    )
-    token = response.json()["data"]["token"]
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + await issue_test_session(username)}
 
 
 @pytest.mark.asyncio
@@ -55,7 +50,6 @@ async def test_history_catalog_is_team_scoped_and_super_admin_can_read_all(clien
     member = await User.create(
         username="history_member",
         nickname="history_member",
-        password_hash=hash_password("password123"),
     )
     await TeamMember.create(
         team=team_a,
@@ -65,7 +59,6 @@ async def test_history_catalog_is_team_scoped_and_super_admin_can_read_all(clien
     boss = await User.create(
         username="history_boss",
         nickname="history_boss",
-        password_hash=hash_password("password123"),
         is_super_admin=True,
     )
     project_a = await _available_project("历史A项目", team_a.id)

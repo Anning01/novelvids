@@ -64,10 +64,13 @@ class MembershipOut(BaseModel):
     team_name: str = ""
     role: str
     status: int = 1
+    team_status: int = 1
+    is_owner: bool = False
     total_cost: float = 0.0
     cost_limit: Decimal | float | str | None = None
     team_balance: Decimal | float | str | None = None
     joined_at: datetime | str | None = ""
+    member_limit: int | None = None
 
     @field_serializer("joined_at", when_used="json")
     def _ser_joined_at(self, value):
@@ -81,6 +84,8 @@ class MeOut(BaseModel):
     memberships: list[MembershipOut] = []
     is_super_admin: bool = False
     total_cost: float = 0.0
+    qiling_bound: bool = False
+    owns_team: bool = False
 
 
 class LoginOut(BaseModel):

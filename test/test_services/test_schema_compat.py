@@ -244,3 +244,35 @@ async def test_postgres_compat_indexes_are_guarded_by_table_existence(monkeypatc
     scripts = [call.args[0] for call in connection.execute_script.await_args_list]
     assert "to_regclass('novels')" in scripts[0]
     assert "to_regclass('audio_references')" in scripts[1]
+
+
+@pytest.mark.asyncio
+async def test_refund_columns_are_added_once_to_old_sqlite_orders(monkeypatch):
+    from services.schema_compat import ensure_recharge_refund_columns
+    connection = AsyncMock()
+    connection.execute_query_dict.side_effect = [
+        [{"name": "id"}, {"name": "out_trade_no"}],
+        [{"name": name} for name in ("id", "out_trade_no", "refund_id", "refunded_at", "refund_reason")],
+    ]
+    monkeypatch.setattr("services.schema_compat.settings.AUTH_ENABLED", True)
+    monkeypatch.setattr("services.schema_compat.settings.DATABASE_URL", "sqlite://old.db")
+    monkeypatch.setattr("services.schema_compat.Tortoise.get_connection", lambda _: connection)
+    await ensure_recharge_refund_columns()
+    await ensure_recharge_refund_columns()
+    assert connection.execute_script.await_count == 3
+    assert all("ADD COLUMN" in call.args[0] and "DROP" not in call.args[0]
+               for call in connection.execute_script.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_postgres_auth_columns_are_safe_before_first_table_creation(monkeypatch):
+    from services.schema_compat import ensure_recharge_refund_columns, _ensure_qiling_issuer_columns
+    connection = AsyncMock()
+    monkeypatch.setattr("services.schema_compat.settings.AUTH_ENABLED", True)
+    monkeypatch.setattr("services.schema_compat.settings.DATABASE_URL", "postgres://test")
+    monkeypatch.setattr("services.schema_compat.Tortoise.get_connection", lambda _: connection)
+    await ensure_recharge_refund_columns()
+    await _ensure_qiling_issuer_columns(connection)
+    assert connection.execute_script.await_count == 3
+    assert all("ALTER TABLE IF EXISTS" in call.args[0] and "ADD COLUMN IF NOT EXISTS" in call.args[0]
+               for call in connection.execute_script.await_args_list)

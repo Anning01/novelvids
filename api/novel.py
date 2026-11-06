@@ -1,7 +1,7 @@
 from api._production_request import production_request
 from fastapi import APIRouter, BackgroundTasks, Depends
 
-from auth.deps import AuthContext, get_auth_context, require_roles, require_team_access
+from auth.deps import AuthContext, ensure_project_creation_team, get_auth_context, require_roles, require_team_access
 from controllers.novel import novel_controller
 from schemas.project_overview import ProjectOverview
 from schemas.ai_task import AiTaskOut
@@ -29,6 +29,7 @@ async def create_novel(
     ctx: AuthContext = Depends(get_auth_context),
     _: AuthContext = _EDITOR,
 ):
+    ensure_project_creation_team(ctx)
     novels = await novel_controller.create(
         novel,
         team_id=ctx.team_id,

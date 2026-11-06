@@ -1,7 +1,7 @@
 from api._production_request import production_request
 
 from utils.messages import localized_message
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from pydantic import BaseModel, Field
 
@@ -26,7 +26,8 @@ from schemas.video import (
     VideoReferenceMedia,
 )
 from controllers.config import ai_model_config_controller
-from services.video.capabilities import capabilities_for
+from models.config import AiModelConfig
+from services.video.capabilities import VideoModelCapabilities, capabilities_for
 from services.video.reference_media import save_reference_upload
 from utils.enums import AiTaskTypeEnum
 from utils.page import QueryParams, get_list_params
@@ -61,10 +62,45 @@ class VideoReferenceOssFinalizeIn(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
 
 
-@router.post("/reference/oss-finalize", summary="OSS 直传后登记视频参考素材（不再经过服务器）")
+IMAGE_REFERENCE_CAPABILITIES = VideoModelCapabilities(
+    resolutions=("default",),
+    aspect_ratios=("default",),
+    aspect_ratios_by_mode={"reference": ("default",)},
+    output_formats=("png", "jpeg", "webp"),
+    generation_modes=("reference",),
+    duration_min=0,
+    duration_max=0,
+    supports_auto_duration=False,
+    supports_audio=False,
+    max_reference_images=10,
+    max_reference_videos=0,
+    max_reference_audios=0,
+    reference_video_duration_max=0,
+    reference_video_total_duration_max=0,
+    reference_audio_duration_max=0,
+    reference_audio_total_duration_max=0,
+    reference_audio_duration_min=0,
+    max_request_size_mb=30,
+    reference_image_formats=("png", "jpg", "jpeg", "webp"),
+    reference_video_formats=(),
+    reference_image_max_size_mb=10,
+    reference_video_max_size_mb=0,
+)
+
+
+async def _reference_capabilities(config_id: int, ctx: AuthContext) -> VideoModelCapabilities:
+    config = await AiModelConfig.get_or_none(id=config_id, is_active=True)
+    if config is None:
+        raise HTTPException(status_code=400, detail=localized_message('所选模型未启用或已被删除'))
+    task_type = AiTaskTypeEnum.video if config.video_model_type else AiTaskTypeEnum.reference_image
+    config = await ai_model_config_controller.get_active(task_type.value, config_id, team_id=ctx.team_id)
+    return capabilities_for(config.video_model_type) if config.video_model_type else IMAGE_REFERENCE_CAPABILITIES
+
+
+@router.post("/reference/oss-finalize", summary="OSS 直传后登记视频或生图参考素材（不再经过服务器）")
 async def finalize_video_reference_oss(
     payload: VideoReferenceOssFinalizeIn,
-    _: AuthContext = _EDITOR,
+    ctx: AuthContext = _EDITOR,
 ):
     from services.oss import oss
     from services.video.reference_media import media_kind_for_extension
@@ -73,11 +109,7 @@ async def finalize_video_reference_oss(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=400, detail=localized_message('未启用对象存储'))
-    config = await ai_model_config_controller.get_active(
-        AiTaskTypeEnum.video.value,
-        payload.model_config_id,
-    )
-    capabilities = capabilities_for(config.video_model_type)
+    capabilities = await _reference_capabilities(payload.model_config_id, ctx)
     kind = media_kind_for_extension(payload.filename, capabilities)
     url = oss.public_url(payload.key)
     return ResponseSchema(
@@ -90,17 +122,13 @@ async def finalize_video_reference_oss(
     )
 
 
-@router.post("/reference/upload", summary="上传视频生成参考素材", response_model=ResponseSchema[VideoReferenceMedia])
+@router.post("/reference/upload", summary="上传视频或生图参考素材", response_model=ResponseSchema[VideoReferenceMedia])
 async def upload_video_reference(
     model_config_id: int = Form(..., ge=1),
     file: UploadFile = File(...),
-    _: AuthContext = _EDITOR,
+    ctx: AuthContext = _EDITOR,
 ):
-    config = await ai_model_config_controller.get_active(
-        AiTaskTypeEnum.video.value,
-        model_config_id,
-    )
-    capabilities = capabilities_for(config.video_model_type)
+    capabilities = await _reference_capabilities(model_config_id, ctx)
     return ResponseSchema(data=await save_reference_upload(file, capabilities))
 
 

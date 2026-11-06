@@ -1,4 +1,4 @@
-"""用户管理控制器（仅超级管理员）：列表/统计/手动创建/禁用登录/删除。"""
+"""用户管理控制器（仅超级管理员）：列表、统计、禁用登录和删除。"""
 
 from utils.messages import localized_message
 
@@ -8,8 +8,8 @@ from fastapi import HTTPException
 from tortoise.expressions import Q
 from tortoise.functions import Count, Sum
 
-from auth.models import Team, TeamMember, User
 from auth.security import hash_password
+from auth.models import Team, TeamMember, User
 
 
 class UserController:

@@ -21,8 +21,10 @@ from api.video_edit import router as video_edit_router
 
 from api.portfolio import router as portfolio_router
 from api.finished_episode import router as finished_episode_router
+from api.experience import router as experience_router
 
 api_router = APIRouter()
+api_router.include_router(experience_router, prefix="/experience", tags=["模型体验与优秀作品"])
 api_router.include_router(portfolio_router, prefix="/portfolio", tags=["作品库"])
 api_router.include_router(finished_episode_router, prefix='/finished-episodes', tags=['作品库'])
 api_router.include_router(resource_catalog_router, prefix='/resource-library/catalog', tags=['团队资源库'])

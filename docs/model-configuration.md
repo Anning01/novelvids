@@ -47,7 +47,7 @@ AI 模型配置保存在数据库中，通过 Web 界面的「**设置 / 模型�
 | 模型类型 | 主要能力 | 协议 |
 |------|------|------|
 | Doubao Seedance 2.0 / Fast / Mini | 参考图/视频/音频、首尾帧、同步声音，最长 15 秒 | `volcengine_ark` |
-| Doubao Seedance 2.5 | 更多参考素材、最长 30 秒、系统音频素材 `asset://` | `volcengine_ark` |
+| Doubao Seedance 2.5 | 更多参考素材、最长 30 秒、同步声音 | `volcengine_ark` |
 | MiniMax H3 | 768P / 2K、参考图/视频/音频、首尾帧 | `minimax` |
 | Wan3 | 文生/图生/首尾帧/全能参考，支持百炼临时素材上传 | `dashscope` |
 

@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 import pytest
 
 from auth.models import Team, TeamMember, User
-from auth.security import hash_password
 from config import settings
 from models.novel import Novel
 from models.chapter import Chapter
@@ -33,7 +32,7 @@ async def test_version_specific_publication_and_revocation_enforce_team_and_role
     creator,_=await _create_member('finished_creator',team)
     viewer,_=await _create_member('finished_viewer',team,role='viewer')
     outsider,_=await _create_member('finished_outsider',other)
-    boss=await User.create(username='finished_super',password_hash=hash_password('password123'),is_super_admin=True)
+    boss=await User.create(username='finished_super',is_super_admin=True)
     headers={user.username:_auth(await _login(client,user.username)) for user in [admin,creator,viewer,outsider,boss]}
     a,c,v,o,b=[headers[user.username] for user in [admin,creator,viewer,outsider,boss]]
     project=await Novel.create(name='Private original',team_id=team.id)

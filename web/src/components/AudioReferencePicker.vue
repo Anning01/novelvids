@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Clock3, LoaderCircle, Mic2, Scissors, Search, Upload, X } from 'lucide-vue-next'
@@ -231,7 +232,15 @@ onBeforeUnmount(releaseUploadPreview)
         </div>
         <form v-if="uploadOpen" class="audio-picker__upload" @submit.prevent="uploadReference">
           <label><span>{{ tr('音色名称') }}</span><input v-model="uploadName" maxlength="100" :placeholder="tr('例如：羽宁参考音色')" /></label>
-          <label><span>{{ tr('性别') }}</span><select v-model="uploadGender"><option>{{ tr('未设置') }}</option><option>{{ tr('男') }}</option><option>{{ tr('女') }}</option><option>{{ tr('其他') }}</option></select></label>
+          <div class="audio-picker__gender">
+            <span>{{ tr('性别') }}</span>
+            <AppSelect
+              v-model="uploadGender"
+              :options="['未设置', '男', '女', '其他'].map(value => ({ value, label: tr(value) }))"
+              :ariaLabel="tr('性别')"
+              :menu-z-index="1501"
+            />
+          </div>
           <label class="audio-picker__file"><input type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" @change="chooseFile" /><span>{{ uploadFile?.name || tr('选择 MP3 / WAV，长音频可在上传前裁剪') }}</span></label>
           <section v-if="uploadPreviewUrl" class="audio-picker__clip-editor">
             <header><div><Scissors :size="14" /><strong>{{ tr('上传前裁剪') }}</strong></div><span><Clock3 :size="12" />{{ tr('原始') }} {{ formatDuration(uploadDuration) }} {{ tr('· 已选') }} {{ uploadClipDuration > 0 ? `${uploadClipDuration.toFixed(1)}s` : '--' }}</span></header>
@@ -294,7 +303,7 @@ onBeforeUnmount(releaseUploadPreview)
 .audio-picker h2, .audio-picker p { margin: 0; }
 .audio-picker h2 { font-size: 15px; }.audio-picker header p { margin-top: 3px; color: var(--app-text-muted); font-size: 10px; }
 .audio-picker__tools { display: flex; gap: 10px; padding: 14px 20px; }.audio-picker__tools > label { display: flex; min-height: 36px; flex: 1; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--app-border); border-radius: 9px; }.audio-picker__tools input { width: 100%; border: 0; outline: 0; color: inherit; background: transparent; }
-.audio-picker__upload { display: grid; grid-template-columns: 1fr 120px; gap: 10px; margin: 0 20px 12px; padding: 13px; border: 1px solid var(--app-accent-border, var(--app-border-strong)); border-radius: 11px; background: var(--app-accent-soft); }.audio-picker__upload label { display: grid; gap: 5px; color: var(--app-text-secondary); font-size: 9px; }.audio-picker__upload input, .audio-picker__upload select { min-height: 34px; padding: 0 9px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface); }.audio-picker__file { grid-column: 1 / -1; }.audio-picker__file input { position: absolute; width: 1px; opacity: 0; }.audio-picker__file span { display: flex; min-height: 36px; align-items: center; padding: 0 10px; border: 1px dashed var(--app-border-strong); border-radius: 8px; background: var(--app-surface); cursor: pointer; }
+.audio-picker__upload { display: grid; grid-template-columns: 1fr 120px; gap: 10px; margin: 0 20px 12px; padding: 13px; border: 1px solid var(--app-accent-border, var(--app-border-strong)); border-radius: 11px; background: var(--app-accent-soft); }.audio-picker__upload label, .audio-picker__gender { display: grid; gap: 5px; color: var(--app-text-secondary); font-size: 9px; }.audio-picker__upload input { min-height: 34px; padding: 0 9px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface); }.audio-picker__file { grid-column: 1 / -1; }.audio-picker__file input { position: absolute; width: 1px; opacity: 0; }.audio-picker__file span { display: flex; min-height: 36px; align-items: center; padding: 0 10px; border: 1px dashed var(--app-border-strong); border-radius: 8px; background: var(--app-surface); cursor: pointer; }
 .audio-picker__clip-editor { display: grid; grid-column: 1 / -1; gap: 9px; padding: 11px; border: 1px solid color-mix(in srgb,var(--app-accent) 18%,var(--app-border)); border-radius: 10px; background: var(--app-surface); }.audio-picker__clip-editor > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.audio-picker__clip-editor > header > div,.audio-picker__clip-editor > header > span { display: flex; align-items: center; gap: 6px; }.audio-picker__clip-editor > header > div { color: var(--app-text); font-size: 10px; }.audio-picker__clip-editor > header > span { color: var(--app-text-muted); font-size: 9px; }.audio-picker__clip-editor > audio { width: 100%; height: 32px; }.audio-picker__clip-editor > p { color: var(--app-text-muted); font-size: 9px; line-height: 1.5; }
 .audio-picker__existing-trim { display: grid; gap: 10px; margin: 0 20px 12px; padding: 13px; border: 1px solid color-mix(in srgb,var(--app-accent) 24%,var(--app-border)); border-radius: 12px; background: color-mix(in srgb,var(--app-accent) 4%,var(--app-surface)); }.audio-picker__existing-trim > header,.audio-picker__existing-trim > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.audio-picker__existing-trim > header > div { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--app-accent); }.audio-picker__existing-trim > header > div > span { display: grid; min-width: 0; gap: 2px; }.audio-picker__existing-trim strong { color: var(--app-text); font-size: 11px; }.audio-picker__existing-trim small,.audio-picker__existing-trim > footer > span { color: var(--app-text-muted); font-size: 9px; }.audio-picker__existing-trim > audio { width: 100%; height: 32px; }.audio-picker__existing-trim .audio-picker__clip-inputs input { min-height: 34px; padding: 0 26px 0 9px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface); }
 .audio-picker__error { margin: 0 20px 10px !important; color: #d34f5d; font-size: 10px; }

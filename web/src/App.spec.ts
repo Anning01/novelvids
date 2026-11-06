@@ -42,7 +42,7 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     expect(wrapper.find('.app-theme-toggle.is-sidebar').exists()).toBe(true)
   })
 
-  it('多团队成员的登录用户在 Logo 下方显示选择器并可切换', () => {
+  it('多团队成员的登录用户在 Logo 下方显示团队选择器', async () => {
     const pinia = setupStore({
       enabled: true,
       token: 't',
@@ -54,12 +54,13 @@ describe('App 侧边栏团队选择器与用户入口', () => {
       activeTeamId: 2,
     })
     const wrapper = mountApp(pinia)
-    const selector = wrapper.find('.app-team-selector select')
-    expect(selector.exists()).toBe(true)
-    expect((selector.element as HTMLSelectElement).value).toBe('2')
-    const options = selector.findAll('option')
-    expect(options).toHaveLength(2)
-    expect(options.map(option => option.text())).toEqual(['甲队', '乙队'])
+    const trigger = wrapper.get('button[aria-label="切换团队"]')
+    expect(trigger.text()).toBe('乙队')
+    expect(wrapper.find('select').exists()).toBe(false)
+    await trigger.trigger('click')
+    const options = Array.from(document.querySelectorAll('[role="listbox"][aria-label="切换团队"] [role="option"]'))
+    expect(options.map(option => option.textContent?.trim())).toEqual(['甲队', '乙队'])
+    expect(options[1]?.getAttribute('aria-selected')).toBe('true')
   })
 
   it('超管（不属于任何团队）显示平台管理员标识', () => {
@@ -71,7 +72,7 @@ describe('App 侧边栏团队选择器与用户入口', () => {
       activeTeamId: null,
     }))
     expect(wrapper.find('.app-team-selector--super').text()).toContain('平台管理员')
-    expect(wrapper.find('.app-team-selector select').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="切换团队"]').exists()).toBe(false)
   })
 
   it('登录态下用户入口指向用户中心，外观按钮保留在侧边栏', () => {

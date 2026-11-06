@@ -6,7 +6,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
-from schemas._base import BaseResponse
+from schemas._base import BaseModelWithTime, BaseResponse
+from utils.response_format import PaginationResponse
 
 
 def _serialize_decimal(value: Decimal) -> str:
@@ -27,6 +28,76 @@ class BalanceTopUpIn(BaseModel):
     team_id: int = Field(..., gt=0, description="目标团队")
     amount: Decimal = Field(..., gt=0, description="充值金额（元）")
     note: str = Field("", max_length=255, description="备注")
+
+
+class RechargeCreateIn(BaseModel):
+    team_id: int = Field(..., gt=0, description="目标团队 ID")
+    amount: Decimal = Field(..., gt=0, description="充值金额（元）")
+    note: str = Field("", max_length=255, description="充值备注")
+
+
+class RechargeOrderOut(BaseModelWithTime):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    out_trade_no: str
+    team_id: int
+    amount: Decimal
+    status: str
+    payment_method: str
+    code_url: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+    @field_serializer("amount", when_used="json")
+    def _ser_amount(self, value: Decimal) -> str:
+        return _serialize_decimal(value)
+
+
+class RechargeOrderDetailOut(RechargeOrderOut):
+    transaction_id: Optional[str] = None
+    paid_at: Optional[datetime] = None
+    balance_after: Optional[Decimal] = None
+
+    @field_serializer("balance_after", when_used="json")
+    def _ser_bal(self, value: Optional[Decimal]) -> Optional[str]:
+        return _serialize_decimal(value) if value is not None else None
+
+
+class RechargeOrderAdminOut(BaseModel):
+    """充值订单管理列表项（支持超管与普通用户）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    out_trade_no: str
+    team_id: int
+    team_name: str = ""
+    user_id: int
+    username: str = ""
+    nickname: str = ""
+    amount: Decimal
+    status: str
+    payment_method: str = "wechat_native"
+    code_url: Optional[str] = None
+    transaction_id: Optional[str] = None
+    paid_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    note: str = ""
+    refund_id: Optional[str] = None
+    refunded_at: Optional[datetime] = None
+    refund_reason: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    @field_serializer("amount", when_used="json")
+    def _ser_amount(self, value: Decimal) -> str:
+        return _serialize_decimal(value)
+
+
+class RefundOrderIn(BaseModel):
+    reason: str = Field("", max_length=255, description="退款原因或备注说明")
 
 
 class BalanceTransactionOut(BaseResponse):
@@ -91,6 +162,10 @@ class InviteOut(BaseModel):
 # ---- 团队管理（超管） ----
 
 
+class MemberPaginationResponse(PaginationResponse[MemberOut]):
+    member_limit: Optional[int] = Field(None, description="团队成员人数上限；null 不限")
+
+
 class TeamOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -114,7 +189,7 @@ class TeamOut(BaseModel):
 class TeamCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=100, description="团队名称")
     owner_user_id: int = Field(..., gt=0, description="团队所有人（自动成为团队管理员）")
-    member_limit: Optional[int] = Field(None, ge=1, description="成员人数上限；null 不限")
+    member_limit: Optional[int] = Field(3, ge=1, description="成员人数上限；默认 3 人；null 不限")
 
 
 class TeamPatchIn(BaseModel):

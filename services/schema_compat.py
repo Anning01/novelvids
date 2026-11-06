@@ -377,14 +377,31 @@ async def ensure_team_schema() -> None:
     - teams / team_members 表增量列
     - 尚无团队时创建「默认团队」，把存量小说与计费流水挂入
     """
-    if not settings.DATABASE_URL.startswith("sqlite"):
-        return
-
     connection = Tortoise.get_connection("default")
-    await ensure_shared_team_columns()
+    if settings.DATABASE_URL.startswith("sqlite"):
+        await ensure_shared_team_columns()
+        await _ensure_team_member_schema(connection)
+        await _backfill_default_team(connection)
 
-    await _ensure_team_member_schema(connection)
-    await _backfill_default_team(connection)
+    from auth.models import QilingIdentity, QilingLoginAttempt
+    generator = connection.schema_generator(connection)
+    for model in (QilingIdentity, QilingLoginAttempt):
+        await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])
+    await _ensure_qiling_issuer_columns(connection)
+
+
+async def _ensure_qiling_issuer_columns(connection) -> None:
+    # An older development schema did not record the issuer. An empty value
+    # keeps old attempts and identities from being trusted under a new issuer.
+    for table in ("qiling_identities", "qiling_login_attempts"):
+        if settings.DATABASE_URL.startswith("sqlite"):
+            columns = await connection.execute_query_dict(f"PRAGMA table_info({table})")
+            if columns and "issuer" not in {column["name"] for column in columns}:
+                await connection.execute_script(f"ALTER TABLE {table} ADD COLUMN issuer VARCHAR(255) NOT NULL DEFAULT '';")
+        elif settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
+            await connection.execute_script(
+                f"ALTER TABLE IF EXISTS {table} ADD COLUMN IF NOT EXISTS issuer VARCHAR(255) NOT NULL DEFAULT '';"
+            )
 
 
 async def _ensure_team_member_schema(connection) -> None:
@@ -410,6 +427,11 @@ async def _ensure_team_member_schema(connection) -> None:
         ")) WHERE owner_user_id IS NULL AND EXISTS ("
         "  SELECT 1 FROM team_members WHERE team_members.team_id = teams.id"
         ");"
+    )
+
+    # 历史个人团队（有 owner_user_id 且未设上限）回填默认人员上限 3 人
+    await connection.execute_script(
+        "UPDATE teams SET member_limit = 3 WHERE member_limit IS NULL AND owner_user_id IS NOT NULL;"
     )
 
     member_columns = await connection.execute_query_dict(
@@ -484,3 +506,39 @@ async def _backfill_default_team(connection) -> None:
         "(SELECT team_id FROM novels WHERE novels.id = model_usage_records.novel_id) "
         "WHERE team_id IS NULL AND novel_id IN (SELECT id FROM novels);"
     )
+
+
+async def ensure_recharge_order_schema() -> None:
+    """确保充值订单表存在，并补充退款字段。"""
+    if not settings.AUTH_ENABLED:
+        return
+    from auth.models import RechargeOrder
+    connection = Tortoise.get_connection("default")
+    generator = connection.schema_generator(connection)
+    definition = generator._get_table_sql(RechargeOrder, safe=True)
+    await connection.execute_script(definition["table_creation_string"])
+
+    await ensure_recharge_refund_columns()
+
+
+async def ensure_recharge_refund_columns() -> None:
+    if not settings.AUTH_ENABLED:
+        return
+    connection = Tortoise.get_connection("default")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        columns = await connection.execute_query_dict("PRAGMA table_info(recharge_orders)")
+        if not columns:
+            return
+        col_names = {row["name"] for row in columns}
+        if "refund_id" not in col_names:
+            await connection.execute_script("ALTER TABLE recharge_orders ADD COLUMN refund_id VARCHAR(128);")
+        if "refunded_at" not in col_names:
+            await connection.execute_script("ALTER TABLE recharge_orders ADD COLUMN refunded_at TIMESTAMP;")
+        if "refund_reason" not in col_names:
+            await connection.execute_script("ALTER TABLE recharge_orders ADD COLUMN refund_reason VARCHAR(255) DEFAULT '';")
+    elif settings.DATABASE_URL.startswith(("postgres://", "postgresql://")):
+        await connection.execute_script(
+            "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refund_id VARCHAR(128);"
+            "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMP WITH TIME ZONE;"
+            "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refund_reason VARCHAR(255) DEFAULT '';"
+        )

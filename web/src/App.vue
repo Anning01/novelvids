@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import AppSelect from '@/components/AppSelect.vue'
 
 import { ElConfigProvider } from 'element-plus'
 import { elementLocale } from '@/i18n'
-import { BarChart3, Building2, Clapperboard, Film, FolderKanban, Images, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
+import { BarChart3, Building2, Clapperboard, Film, FolderKanban, Images, Receipt, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { notice } from '@/shared/notice'
@@ -34,7 +35,7 @@ const creationItems = [
 // AUTH_ENABLED=false 时全部可见（vanilla 体验）
 const personalItems = computed(() => {
   const items = [
-    { path: '/projects', get label() { return tr('项目') }, icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
+    { path: '/projects', get label() { return tr('我的创作') }, icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
     { path: '/finished-library', get label() { return tr('作品库') }, icon: Clapperboard, active: () => route.path.startsWith('/finished-library') },
     { path: '/resource-library', get label() { return tr('资源库') }, icon: Film, active: () => route.path.startsWith('/resource-library') },
     { path: '/assets', get label() { return tr('项目资产') }, icon: Images, active: () => route.path.startsWith('/assets') },
@@ -51,10 +52,17 @@ const adminItems = computed(() => {
     items.push({ path: '/teams', get label() { return tr('团队管理') }, icon: Building2, active: () => route.path.startsWith('/teams') })
     items.push({ path: '/users', get label() { return tr('用户管理') }, icon: UserRound, active: () => route.path.startsWith('/users') })
   }
+  if (auth.enabled === true && auth.isLoggedIn) {
+    items.push({ path: '/orders', get label() { return tr('订单管理') }, icon: Receipt, active: () => route.path.startsWith('/orders') })
+  }
   return items
 })
 const userLabel = computed(() => auth.user?.nickname || auth.user?.username || '')
 const avatarText = computed(() => userLabel.value.slice(0, 1).toUpperCase())
+const teamOptions = computed(() => [
+  ...(auth.isSuperAdmin ? [{ value: '', label: tr('平台管理') }] : []),
+  ...auth.activeMemberships.map(item => ({ value: String(item.team_id), label: item.team_name })),
+])
 const money = (value: number | string | null | undefined) => {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) ? parsed.toFixed(2) : '0.00'
@@ -68,11 +76,11 @@ const walletLabel = computed(() => {
   if (membership.cost_limit !== null && membership.cost_limit !== undefined) return tr('限额 ¥{p0}', { p0: money(membership.cost_limit) })
   return tr('余额 ¥{p0}', { p0: money(membership.team_balance) })
 })
-function handleTeamSwitch(event: Event) {
-  const value = Number((event.target as HTMLSelectElement).value)
-  if (!value || value === auth.activeTeamId) return
+function handleTeamSwitch(teamId: string) {
+  const value = teamId ? Number(teamId) : null
+  if (value === auth.activeTeamId || (value === null && !auth.isSuperAdmin)) return
   auth.setActiveTeam(value)
-  // 切换团队后重载当前页面，全部数据按新团队作用域重新拉取
+  window.location.hash = value === null ? '#/teams' : '#/'
   window.location.reload()
 }
 </script>
@@ -87,16 +95,15 @@ function handleTeamSwitch(event: Event) {
           <small>NOVEL STUDIO</small>
         </span>
       </RouterLink>
-      <label
-        v-if="auth.enabled === true && auth.isLoggedIn && auth.memberships.length"
+      <AppSelect
+        v-if="auth.enabled === true && auth.isLoggedIn && auth.activeMemberships.length"
         class="app-team-selector"
-      >
-        <select :value="auth.activeTeamId ?? ''" :aria-label="tr('切换团队')" @change="handleTeamSwitch">
-          <option v-for="item in auth.memberships" :key="item.team_id" :value="item.team_id">
-            {{ item.team_name }}
-          </option>
-        </select>
-      </label>
+        density="compact"
+        :model-value="String(auth.activeTeamId ?? '')"
+        :options="teamOptions"
+        :ariaLabel="tr('切换团队')"
+        @update:model-value="handleTeamSwitch"
+      />
       <div
         v-else-if="auth.enabled === true && auth.isLoggedIn && auth.isSuperAdmin"
         class="app-team-selector app-team-selector--super"
@@ -159,19 +166,6 @@ function handleTeamSwitch(event: Event) {
   display: block;
   margin: 0 10px 10px;
 }
-.app-team-selector select {
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--app-border, #e3e5ec);
-  border-radius: 9px;
-  background: var(--app-surface-muted, #f2f3f7);
-  color: var(--app-text, #303442);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.app-team-selector select:hover { border-color: var(--app-border-strong, #d3d6e0); background: var(--app-surface-hover, #f0f1f6); }
 .app-team-selector--super {
   padding: 0 10px;
   font-size: 12px;

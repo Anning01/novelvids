@@ -92,8 +92,6 @@ async def _provider_audio_url(
     *,
     team_id: int | None,
 ) -> str:
-    if reference.source == "system" and capabilities.system_audio_asset_scheme:
-        return f"{capabilities.system_audio_asset_scheme}{reference.asset_id}"
     url = resolve_media_url(reference.audio_url) or reference.audio_url
     if url.startswith("/media/"):
         if not capabilities.supports_audio_data_uri:

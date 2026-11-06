@@ -257,7 +257,15 @@ export interface AllEnums {
   image_model_type: ConfigEnumItem[]
   [key: string]: ConfigEnumItem[]
 }
-export interface PaginationResponse<T> { code: number; message: string; data: { items: T[]; pagination: { total: number; page: number; page_size: number; pages: number } } }
+export interface PaginationResponse<T> {
+  code: number
+  message: string
+  data: {
+    items: T[]
+    pagination: { total: number; page: number; page_size: number; pages: number }
+    member_limit?: number | null
+  }
+}
 export interface SingleResponse<T> { code: number; message: string; data: T }
 
 export interface RemakeCapabilities {
@@ -369,10 +377,13 @@ export interface Membership {
   team_name: string
   role: TeamRole
   status?: number
+  team_status?: number
+  is_owner?: boolean
   total_cost?: number | string
   cost_limit?: number | string | null
   team_balance?: number | string | null
   joined_at?: string
+  member_limit?: number | null
 }
 
 export interface AuthMe {
@@ -380,10 +391,20 @@ export interface AuthMe {
   memberships: Membership[]
   is_super_admin: boolean
   total_cost?: number | string
+  qiling_bound?: boolean
+  owns_team?: boolean
 }
 
-export interface AuthStatus { enabled: boolean }
+export interface AuthStatus {
+  enabled: boolean
+  provider?: 'password' | 'qiling'
+  qiling_enabled?: boolean
+  legal_ready?: boolean
+  legal_missing?: string[]
+}
 export interface LoginResult { token: string; user: AuthUser }
+export interface QilingAttempt { attempt: string; authorization_url: string; expires_in: number }
+export type QilingPoll = { status: 'completed'; session: LoginResult } | { status: 'pending' | 'expired' | 'failed' | 'bound' }
 
 export interface TeamItem {
   id: number
@@ -507,4 +528,62 @@ export interface BillingProjectDetail {
   total_cost: number
   record_count: number
   by_task_type: Array<{ task_type: number; cost: number }>
+}
+
+export interface RechargeOrder {
+  id: number
+  out_trade_no: string
+  team_id: number
+  amount: number | string
+  status: 'pending' | 'paid' | 'expired' | 'closed' | 'failed'
+  payment_method: string
+  code_url?: string | null
+  created_at: string
+  expires_at?: string | null
+}
+
+export interface RechargeOrderDetail extends RechargeOrder {
+  transaction_id?: string | null
+  paid_at?: string | null
+  balance_after?: number | string | null
+}
+
+export interface RechargeOrderItem {
+  id: number
+  out_trade_no: string
+  team_id: number
+  team_name: string
+  user_id: number
+  username: string
+  nickname: string
+  amount: number | string
+  status: 'pending' | 'paid' | 'expired' | 'closed' | 'failed' | 'refunded'
+  payment_method: string
+  code_url?: string | null
+  transaction_id?: string | null
+  paid_at?: string | null
+  expires_at?: string | null
+  note?: string
+  refund_id?: string | null
+  refunded_at?: string | null
+  refund_reason?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface ShowcaseWork {
+  cover_width?: number | null
+  cover_height?: number | null
+  id: string
+  title: string
+  cover: string
+  video_url: string
+  episodes_count: number
+  duration: string
+  category: string
+  tags: string[]
+  heat: string
+  description: string
+  author: string
+  novel_id?: number | null
 }

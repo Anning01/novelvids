@@ -59,6 +59,7 @@ def test_empty_private_markdown_cannot_silently_remove_instructions(public_pack)
 
 def test_private_resources_are_ignored_by_git():
     paths = ['prompts/skills/assets.anning.md', 'prompts/skills/SKILL.anning.md',
-             'prompts/skills/styles.anning.json', 'prompts/skills/asset_contract.anning.json']
+             'prompts/skills/styles.anning.json', 'prompts/skills/asset_contract.anning.json',
+             'prompts/skills/storyboard.anning.md', 'prompts/skills/storyboard_contract.anning.json']
     result = subprocess.run(['git', 'check-ignore', '--stdin'], input='\n'.join(paths), text=True, capture_output=True, check=True)
     assert result.stdout.splitlines() == paths

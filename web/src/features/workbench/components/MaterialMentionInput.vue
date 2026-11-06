@@ -774,6 +774,14 @@ function closeAfterBlur() {
     }
   }, 0);
 }
+function insertMaterial(material: MaterialMentionOption) {
+  const offset = currentCaretOffset() ?? serializeEditor().length;
+  editor.value?.focus();
+  trigger.value = { start: offset, end: offset, query: '' };
+  chooseMaterial(material);
+}
+
+defineExpose({ focus: () => editor.value?.focus(), insertMaterial });
 </script>
 
 <template>
