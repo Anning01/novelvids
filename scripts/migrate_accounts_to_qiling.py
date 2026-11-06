@@ -33,14 +33,11 @@ async def resolve_user_id(identifier: str) -> int:
     user = await User.filter(username=identifier).first()
     if user:
         return user.id
-    user = await User.filter(nickname=identifier).first()
-    if user:
-        return user.id
-    # Try partial nickname match if exact match fails
-    user = await User.filter(nickname__icontains=identifier).first()
-    if user:
-        return user.id
-    raise ValueError(f"Cannot resolve user by identifier: '{identifier}'")
+    matches = await User.filter(nickname=identifier).limit(2)
+    if len(matches) == 1:
+        return matches[0].id
+    raise ValueError("Account identifier is missing or ambiguous; use its exact numeric ID")
+
 
 
 async def main() -> None:
