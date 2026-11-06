@@ -183,3 +183,35 @@ async def test_clip_retry_identity_moves_without_recreating_the_project():
     assert project.created_by==target.id
     assert project.creation_idempotency_key=="clip:"+str(uuid5(NAMESPACE_URL,f"None:{target.id}:{request_id}"))
     assert await Novel.all().count()==1
+
+
+async def test_multiple_receipts_for_the_same_task_keep_aliases_intact():
+    from models.ai_task import AiTask
+    from models.agent_submission import AgentSubmission
+    from services.creation_agent.submissions import submission_key
+    source,target=await accounts()
+    params={"user_id":source.id,"team_id":1,"submission_id":"canonical","submission_hash":"hash"}
+    task=await AiTask.create(task_type=4,status=3,request_params=params)
+    canonical=await AgentSubmission.create(key=submission_key(params),request_hash="hash",task_type=4,task=task)
+    alias_key=submission_key({**params,"submission_id":"reused-task"})
+    alias=await AgentSubmission.create(key=alias_key,request_hash="alias-hash",task_type=4,task=task)
+    await migrate_accounts_to_target([source.id],target.id)
+    await canonical.refresh_from_db();await alias.refresh_from_db()
+    assert canonical.key==submission_key({**params,"user_id":target.id})
+    assert alias.key==alias_key and alias.task_id==task.id and alias.request_hash=="alias-hash"
+    assert await AgentSubmission.all().count()==2
+
+
+async def test_older_task_without_a_receipt_does_not_conflict_with_its_retry():
+    from models.ai_task import AiTask
+    from models.agent_submission import AgentSubmission
+    from services.creation_agent.submissions import submission_key
+    source,target=await accounts()
+    params={"user_id":source.id,"team_id":1,"submission_id":"retry","submission_hash":"hash"}
+    current=await AiTask.create(task_type=4,status=3,request_params=params)
+    old=await AiTask.create(task_type=4,status=4,request_params=params)
+    receipt=await AgentSubmission.create(key=submission_key(params),request_hash="hash",task_type=4,task=current)
+    await migrate_accounts_to_target([source.id],target.id)
+    await old.refresh_from_db();await current.refresh_from_db();await receipt.refresh_from_db()
+    assert old.request_params['user_id']==current.request_params['user_id']==target.id
+    assert receipt.task_id==current.id and receipt.key==submission_key(current.request_params)

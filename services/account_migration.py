@@ -95,9 +95,12 @@ async def _transfer_task_owners(source_ids: list[int], target_id: int) -> None:
         updated = {**params, "user_id": target_id}
         key = submission_key(updated)
         if key:
-            for receipt in await AgentSubmission.filter(task_id=task.id).select_for_update():
-                if await AgentSubmission.filter(key=key).exclude(id=receipt.id).exists():
-                    raise ValueError("Conflicting task retry receipts require review before migration")
+            receipt = await AgentSubmission.filter(task_id=task.id, key=submission_key(params)).select_for_update().first()
+            existing = await AgentSubmission.filter(key=key).first()
+            if receipt is not None and existing is not None and existing.task_id != task.id:
+                raise ValueError("Conflicting task retry receipts require review before migration")
+            if receipt is not None and existing is None:
+                # A reused task may have additional receipt aliases; retain them unchanged.
                 receipt.key = key
                 await receipt.save(update_fields=["key", "updated_at"])
         task.request_params = updated
