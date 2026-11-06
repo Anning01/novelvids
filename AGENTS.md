@@ -92,3 +92,5 @@
 - 开源版与器灵版共用代码，通过 `AUTH_ENABLED` / `AUTH_PROVIDER` 区分；部署保留服务器当前版型，除非用户明确要求切换。
 
 - 2026-11-07 已按用户指示启用生产器灵版：`AUTH_ENABLED=true`、`AUTH_PROVIDER=qiling`，开放器灵新账号注册；器灵、协议和微信支付配置已从本地 `.env` 同步。微信密钥位于服务器 `/root/.config/novelvids/wechat-pay/`，不得提交密钥或输出配置值。更新时保留器灵版，不自动切回密码登录。
+
+- 旧公共演示环境位于 `8.134.175.148`（SSH 别名 `anning`），已于 2026-11-07 下架猫影 Docker 容器并停用 `novelvids-demo-reset.timer`。`demo.xiazq.com` 由 Nginx 跳转至商业站；`/srv/novelvids-demo` 数据保留，不要重新启用旧容器或重置任务。

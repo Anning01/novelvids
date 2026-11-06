@@ -5,7 +5,7 @@
 <h1 align="center">NovelVids · 猫影短剧</h1>
 
 <p align="center">
-  <strong>An open-source AI workspace for illustrated stories and short dramas.</strong>
+  <strong>An AI creation platform for illustrated stories and short dramas · hosted service and open-source self-hosting.</strong>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
-  <a href="#quick-start"><img src="https://img.shields.io/badge/deploy-self--hosted-555" alt="Self-hosted"></a>
+  <a href="https://shortdramas.xiazq.com"><img src="https://img.shields.io/badge/online-hosted%20service-6864e8" alt="Hosted commercial service"></a>
   <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="Chinese / English"></a>
 </p>
 
@@ -24,8 +24,16 @@
 </p>
 
 <p align="center">
-  <a href="#see-the-result">Watch a sample</a> · <a href="https://demo.xiazq.com">Try the demo</a> · <a href="#quick-start">Run locally</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a>
+  <a href="#see-the-result">Watch a sample</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a>
 </p>
+
+## Create online
+
+**[Open the NovelVids commercial service →](https://shortdramas.xiazq.com)**
+
+Sign in with Qiling through WeChat. Start with an image or video idea, add reference material, or develop a story into a short drama. The hosted service provides model selection, team collaboration, usage records and top-ups. Generation fees follow the displayed estimates and actual usage.
+
+The former read-only demo has been retired and redirects to the commercial service. For open-source self-hosting and development, see Quick start below and the [development guide](docs/development.en.md).
 
 ## See the result
 
@@ -41,12 +49,11 @@
 
 [Watch the illustrated drama on YouTube](https://youtu.be/NAuIKfsSero) · Visual style: 3D xianxia; storyboard strategy: narrated storytelling. Generated automatically from story to finished video, without manually editing prompts or AI-generated prompts. Results depend on the material, models and creative revisions.
 
-**Explore before installing:** [open the live demo](https://demo.xiazq.com), username `demo`, password `NovelVids-Demo-2026`. Browse existing projects, assets, storyboards and videos. The demo is read-only and does not offer free generation; it resets daily at 00:00 Asia/Shanghai. Do not enter private data.
-
 ## Keep the creative process in one project
 
 | Start with | What you can do |
 | --- | --- |
+| A visual idea | Choose an image or video model on the home page, reference images, video or audio, review the estimate and create a clip |
 | A story or manuscript | Import TXT, Markdown, DOCX or PDF, review chapter boundaries and story analysis, then work chapter by chapter |
 | Characters, locations and props | Manage reference images, aliases and variants; reuse the same assets and voice bindings |
 | A storyboard | Edit shot descriptions, complete prompts, reference media and generation parameters; inspect each result |
@@ -62,21 +69,36 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 - **Editable steps.** Keep prompts and generation versions. Revise one shot before deciding whether to generate it again.
 - **Shared capabilities for buttons and chat.** The assistant orchestrates creation; image and video models generate the media. Tasks and usage remain recorded.
 - **Customizable creative rules.** One Chinese skill pack guides story analysis, assets, images and storyboards, with Chinese or English output selected by system language.
-- **Your deployment, your providers.** Run on your computer or server and configure models for your budget and visual style.
+- **Choose how to use it.** Create with the hosted service, or manage your own models, storage and deployment with the open-source edition.
 
-### Real interface
+### Current interface
 
-**Infinite canvas: organize characters, locations, props and shots together.**
+**Home: select a model, reference material and start with an image or video clip.**
 
-[![NovelVids infinite canvas connecting assets and video shots](docs/images/screenshots/workbench.png)](docs/images/screenshots/workbench.png)
+[![Current black home page with image/video creation and the works showcase](docs/images/screenshots/home.jpg)](docs/images/screenshots/home.jpg)
 
-| Character and location assets | Assistant and storyboard editing |
+| Storyboards and creation assistant | Infinite canvas workflow |
 | --- | --- |
-| [![Asset management](docs/images/screenshots/asset.png)](docs/images/screenshots/asset.png) | [![A recorded storyboard revision by the assistant](docs/images/screenshots/creation-agent.png)](docs/images/screenshots/creation-agent.png) |
+| [![Storyboard workspace and creation assistant](docs/images/screenshots/creation-agent.jpg)](docs/images/screenshots/creation-agent.jpg) | [![Assets, references and video nodes on the canvas](docs/images/screenshots/workbench.jpg)](docs/images/screenshots/workbench.jpg) |
 
-Click an image for full size. [More screenshots](docs/screenshots.md). These captures show Chinese; the interface also supports English.
+| Project assets | Works library |
+| --- | --- |
+| [![Character and scene assets](docs/images/screenshots/asset.jpg)](docs/images/screenshots/asset.jpg) | [![Current works library and finished episode archive](docs/images/screenshots/portfolio.jpg)](docs/images/screenshots/portfolio.jpg) |
+
+Screenshots use public example projects in the current Chinese interface. English is also supported. [View the complete gallery](docs/screenshots.md).
 
 ## Quick start
+
+1. Open the **[NovelVids commercial service](https://shortdramas.xiazq.com)**, read the agreements and sign in with Qiling through WeChat.
+2. Choose an image or video model, enter a visual idea, add references and review the estimate. For a series, import a story through Short dramas and continue into assets and storyboards.
+3. Review generated versions, revise shots, organize resources and manage finished episodes in the works library. Projects and costs belong to the currently selected team.
+
+### Open-source self-hosting
+
+The open-source edition lets you manage models, data and deployment. It runs anonymously by default; password login and team setup are covered in the [team deployment guide](docs/team-auth-deployment.md).
+
+<details>
+<summary>Expand Docker self-hosting and first-run configuration</summary>
 
 You need Docker with Docker Compose and access to model services. **Self-hosting is not offline inference:** AI features call the APIs you configure, and providers may charge for them.
 
@@ -106,6 +128,8 @@ Repeat this preparation after rebuilding the backend image. See [model setup and
 - **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
 - **No login by default:** intended for personal local use. Before public exposure, configure authentication and HTTPS using the [team deployment guide](docs/team-auth-deployment.md) (Chinese).
 - **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See the [development guide](docs/development.en.md).
+
+</details>
 
 ## Creative workflow
 

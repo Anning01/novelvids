@@ -5,7 +5,7 @@
 <h1 align="center">猫影短剧 · NovelVids</h1>
 
 <p align="center">
-  <strong>开源 AI 漫剧与短剧创作工作台。</strong>
+  <strong>AI 漫剧与短剧创作平台 · 在线创作与开源自部署。</strong>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
-  <a href="#快速开始"><img src="https://img.shields.io/badge/deploy-self--hosted-555" alt="Self-hosted"></a>
+  <a href="https://shortdramas.xiazq.com"><img src="https://img.shields.io/badge/online-猫影商业站-6864e8" alt="猫影商业站"></a>
   <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="中文 / English"></a>
 </p>
 
@@ -24,8 +24,16 @@
 </p>
 
 <p align="center">
-  <a href="#先看效果">看成品</a> · <a href="https://demo.xiazq.com">在线体验</a> · <a href="#快速开始">本地部署</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+  <a href="#先看效果">看成品</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
+
+## 在线创作
+
+**[进入猫影商业站 →](https://shortdramas.xiazq.com)**
+
+使用器灵账号微信扫码登录，从一句想法开始生成图片或视频，也可以把故事推进成系列短剧。在线版提供模型选择、参考素材、团队协作、用量记录与充值入口；生成费用以页面展示的报价和实际用量为准。
+
+旧的只读演示站已下线，原入口会跳转到商业站。开源版的自部署与二次开发说明见下方「快速开始」和[开发指南](docs/development.md)。
 
 ## 先看效果
 
@@ -41,12 +49,11 @@
 
 [在 B 站观看漫剧制作示例](https://www.bilibili.com/video/BV1U74P6hEzD/) · 视觉风格：3D仙侠；分镜策略：旁白叙事。从故事到成片自动生成，全程没有人工修改提示词或 AI 生成的 Prompt。实际效果取决于素材、模型和创作调整。
 
-**先逛一遍再决定安装：**[打开在线演示](https://demo.xiazq.com)，账号 `demo`，密码 `NovelVids-Demo-2026`。演示站只读，可看已有项目、资产、分镜和视频，不提供免费生成；每天北京时间 00:00 重置。请勿填写私人数据。
-
 ## 在一个项目里完成创作
 
 | 从哪里开始 | 你可以做什么 |
 | --- | --- |
+| 一句画面描述 | 从首页选择图片或视频模型，引用图片、视频或音频，查看报价并生成独立片段 |
 | 一段故事或小说 | 导入 TXT、Markdown、DOCX、PDF，检查分章与故事分析，逐章推进 |
 | 角色、场景与道具 | 管理参考图、别名、变装与衍生形态，复用同一资产和声音绑定 |
 | 一组分镜 | 编辑镜头描述、完整提示词、参考素材和生成参数，检查每次结果 |
@@ -62,21 +69,36 @@
 - **每一步可以修改。** 保留提示词与生成版本；可以只调整一个镜头，再决定是否生成。
 - **按钮与对话用同一套能力。** 创作助手负责编排，图片和视频模型负责生成，任务与用量有记录。
 - **规则可以自己改。** 故事、资产、生图和分镜规则集中在一套中文 Skills；按系统语言输出中文或英文。
-- **服务由你配置。** 在自己的电脑或服务器部署，选择适合预算与创作风格的模型。
+- **按需要选择使用方式。** 商业站提供在线创作；开源自部署版由你配置模型服务和数据存储。
 
-### 真实界面
+### 新版界面
 
-**无限画布：把角色、场景、道具和镜头关系放在一起。**
+**首页：选择模型、引用素材，从图片或视频片段开始。**
 
-[![NovelVids 无限画布，连接资产与视频镜头](docs/images/screenshots/workbench.png)](docs/images/screenshots/workbench.png)
+[![新版黑色首页，支持图片与视频创作、参考素材和作品展示](docs/images/screenshots/home.jpg)](docs/images/screenshots/home.jpg)
 
-| 角色与场景资产 | 创作助手与分镜编辑 |
+| 分镜与创作助手 | 无限画布工作流 |
 | --- | --- |
-| [![资产管理界面](docs/images/screenshots/asset.png)](docs/images/screenshots/asset.png) | [![助手调整分镜的真实操作记录](docs/images/screenshots/creation-agent.png)](docs/images/screenshots/creation-agent.png) |
+| [![分镜工作区与创作助手](docs/images/screenshots/creation-agent.jpg)](docs/images/screenshots/creation-agent.jpg) | [![资产、参考素材和视频节点组成的无限画布](docs/images/screenshots/workbench.jpg)](docs/images/screenshots/workbench.jpg) |
 
-点击查看原图。[更多界面](docs/screenshots.md)。截图为中文界面，系统也支持英文。
+| 项目资产 | 作品库 |
+| --- | --- |
+| [![角色与场景资产管理](docs/images/screenshots/asset.jpg)](docs/images/screenshots/asset.jpg) | [![新版作品库与成片归档](docs/images/screenshots/portfolio.jpg)](docs/images/screenshots/portfolio.jpg) |
+
+截图使用公开示例项目，展示当前版本的中文界面；系统也支持英文。[查看完整界面预览](docs/screenshots.md)。
 
 ## 快速开始
+
+1. 打开 **[猫影商业站](https://shortdramas.xiazq.com)**，阅读协议并通过器灵微信扫码登录。
+2. 在首页选择图片或视频模型，填写画面描述、添加参考素材并核对预计费用；也可以从「短剧制作」导入故事，进入资产与分镜工作区。
+3. 查看生成结果与历史版本，继续编辑镜头、整理资源，或在作品库管理成片。团队和费用归属以当前选中的团队为准。
+
+### 开源自部署
+
+开源版适合自行管理模型、数据和部署的用户，默认可匿名使用；启用账号密码登录与团队协作见[团队部署指南](docs/team-auth-deployment.md)。
+
+<details>
+<summary>展开 Docker 自部署与首次配置步骤</summary>
 
 需要 Docker 与 Docker Compose，以及可用的模型服务。**自部署不等于离线推理**：当前 AI 能力通过你配置的 API 调用，供应商可能收费。
 
@@ -106,6 +128,8 @@ docker compose exec backend ffprobe -version
 - **数据在本地：**`./data` 保存数据库和私有导出，`./media` 保存图片、视频、音频；更新前备份这两个目录。
 - **默认无登录：**适合个人本地使用。公网部署请先按[登录与团队部署指南](docs/team-auth-deployment.md)启用鉴权和 HTTPS。
 - **本地开发：**Python 3.12+、Node.js 22.12+、uv 与 FFmpeg，见[开发指南](docs/development.md)。
+
+</details>
 
 ## 创作流程
 
