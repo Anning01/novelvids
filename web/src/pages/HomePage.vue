@@ -274,9 +274,10 @@ async function create() {
 </template>
 
 <style scoped>
-.clip-home { --home-accent: #6864e8; position: relative; isolation: isolate; min-height: 100%; padding: 26px clamp(20px,3vw,48px) 48px; color: var(--app-text); background: var(--app-canvas); }
+.clip-home { --home-accent: var(--app-accent); position: relative; isolation: isolate; min-height: 100%; padding: 26px clamp(20px,3vw,48px) 48px; color: var(--app-text); background: var(--app-canvas); }
 .clip-home :deep(.app-select) { --app-accent: var(--home-accent); }
-:global(:root[data-app-theme='dark'] .clip-home) { --home-accent: #a8a6ff; --app-canvas: #0d111a; --app-surface: #161d2b; --app-surface-muted: #101725; --app-surface-hover: #202a3d; --app-border: #283144; --app-border-strong: #3c4860; --app-text: #edf0f8; --app-text-secondary: #b2bdd1; --app-text-muted: #8f9bb3; --app-accent: #a8a6ff; --app-accent-soft: #252747; }
+:global(:root[data-app-theme='dark'] .clip-home .home-atmosphere) { background: none; }
+:global(:root[data-app-theme='dark'] .clip-home .shortcut-icon) { color: var(--app-text-secondary); background: var(--app-surface-muted); }
 .home-content { max-width: 1140px; margin: 0 auto; }
 .home-atmosphere { position: absolute; inset: 0 0 auto; height: 260px; z-index: -1; pointer-events: none; background: radial-gradient(ellipse at 50% 0%,color-mix(in srgb,var(--home-accent) 9%,transparent),transparent 70%); }
 .home-heading { text-align: center; margin: 0 auto 20px; }

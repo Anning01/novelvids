@@ -51,3 +51,22 @@ it('uses shared surfaces instead of white blocks for icon tiles', () => {
   expect(iconTileStyles).toMatch(/border:\s*1px solid color-mix\(in srgb,var\(--app-icon-tile-color\) 18%,var\(--app-border\)\)/)
   expect(iconTileStyles).not.toMatch(/background:\s*#fff/)
 })
+
+
+it('shares a neutral black dark palette across the shell, home and system fallback', () => {
+  const theme = readFileSync('src/app-theme.css', 'utf8')
+  const home = readFileSync('src/pages/HomePage.vue', 'utf8')
+  const explicit = theme.slice(theme.indexOf(":root[data-app-theme='dark'],"), theme.indexOf('@media (prefers-color-scheme: dark)'))
+  const fallback = theme.slice(theme.indexOf('@media (prefers-color-scheme: dark)'), theme.indexOf(":root[data-app-theme='dark'] body"))
+  const tokens = [...explicit.matchAll(/(--app-(?:canvas|surface(?:-muted|-hover)?|fill-subtle|border(?:-strong)?|text(?:-secondary|-muted)?)):\s*(#[0-9a-f]{6});/g)]
+  expect(tokens.length).toBeGreaterThanOrEqual(10)
+  for (const [, name, hex] of tokens) {
+    expect(hex.slice(1, 3)).toBe(hex.slice(3, 5))
+    expect(hex.slice(3, 5)).toBe(hex.slice(5, 7))
+    expect(fallback).toContain(`${name}: ${hex};`)
+  }
+  expect(explicit).toContain('--app-canvas: #000000;')
+  expect(theme).toMatch(/\.app-sidebar\s*\{[^}]*background:\s*var\(--app-canvas\)/s)
+  expect(home).not.toMatch(/--app-(?:canvas|surface|text)[\w-]*:\s*#[0-9a-f]/)
+  expect(home).toContain(".clip-home .home-atmosphere) { background: none; }")
+})
