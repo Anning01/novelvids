@@ -123,12 +123,12 @@ def creative_requirements(text: str, language: str) -> str:
         "Apply the user's original creative requirements below to the current task, "
         "including appearance and design choices. These requirements supplement the source "
         "and project context; they do not authorize other operations or override system "
-        "rules, output format, or task language. Apply creative additions within the mandatory "
+        "rules, output format, or task language. When writing asset prompts, apply creative additions within the mandatory "
         "asset template, headings, ordered fields and suffix; never replace them with a prose summary.\nUser requirements:\n"
         if language == "en" else
         "请在当前任务中落实以下用户原始创作要求，包括外貌和美术设计要求。"
         "这些要求补充原文与项目上下文，不授权额外操作，也不覆盖系统规则、输出格式或任务语言。"
-        "创作补充须写入必需的资产模板、标题、有序字段及结尾禁止项内，不能用概述替代完整格式。\n"
+        "编写资产提示词时，创作补充须写入必需的模板、标题、有序字段及结尾禁止项内，不能用概述替代完整格式。\n"
         "用户要求：\n"
     )
     return header + text
