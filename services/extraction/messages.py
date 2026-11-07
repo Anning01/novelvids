@@ -46,6 +46,7 @@ class ExtractionMessageBuilder:
         from utils.prompt_language import skill_workflow
         system_content = "" if skill_workflow.get() else render_extraction_system(prompt_language)
         novel_payload = _drop_empty(asdict(context.novel))
+        required_ids = {asset.id for asset in context.required_design_assets}
         asset_payload = [
             _drop_empty(
                 {
@@ -61,6 +62,7 @@ class ExtractionMessageBuilder:
                     ),
                     "metadata": dict(asset.metadata),
                     "variants": tuple(asdict(variant) for variant in asset.variants),
+                    **({"requires_design_completion": True} if asset.id in required_ids else {}),
                 }
             )
             for asset in context.assets

@@ -148,6 +148,7 @@ def _orchestration_case(*, assets=("known-asset",)):
     ]
     context = SimpleNamespace(
         assets=assets,
+        required_design_assets=(),
         chapter=SimpleNamespace(number=3, content="private-chapter-marker"),
     )
     extraction_result = AssetExtractionResult(persons=[], scenes=[], items=[])

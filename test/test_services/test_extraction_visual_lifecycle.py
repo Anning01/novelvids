@@ -223,3 +223,74 @@ async def test_planned_extraction_records_base_promotion_and_variant_for_replay_
     assert asset.base_traits == '分析占位'
     assert asset.metadata == {'analysis_source': 'project_analysis', 'voice_reference_id': 73}
     assert await AssetVariant.filter(asset=asset).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_chapter_linked_placeholders_require_design_even_when_only_mentioned():
+    novel = await Novel.create(name='本章关联占位补全')
+    chapter = await Chapter.create(novel=novel, number=1, name='第一章', content='主角提到峰主的威胁。')
+    placeholder = await Asset.create(novel=novel, asset_type=1, canonical_name='峰主',
+        source_chapters=[1, 60], base_traits='分析占位', metadata={'analysis_source': 'project_analysis'})
+    await Asset.create(novel=novel, asset_type=1, canonical_name='后续人物',
+        source_chapters=[60], base_traits='后续占位', metadata={'analysis_source': 'project_analysis'})
+    await Asset.create(novel=novel, asset_type=1, canonical_name='已有正式人物',
+        source_chapters=[1], base_traits='正式设计')
+    context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
+    assert [asset.id for asset in context.required_design_assets] == [placeholder.id]
+    messages = ExtractionMessageBuilder().build(context, 'zh')
+    registry = json.loads(messages[2]['content'])
+    assert [asset['id'] for asset in registry if asset.get('requires_design_completion')] == [placeholder.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('repair_omission', [True, False])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(repair_omission, language):
+    from unittest.mock import AsyncMock, patch
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.messages import ModelResponse, ToolCallPart, RetryPromptPart
+    from controllers.chapter import chapter_controller
+    from services.ai_task_executor import ai_task_executor
+    from test.test_services.test_skill_workflow import enabled_project
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+
+    novel, chapter, _ = await enabled_project()
+    from models.config import GeneralConfig
+    await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': language})
+    placeholder = await Asset.create(novel=novel, asset_type=1, canonical_name='被提及峰主',
+        source_chapters=[chapter.number], base_traits='分析生成的简略外貌',
+        metadata={'analysis_source': 'project_analysis', 'voice_reference_id': 73})
+    snapshot = synthetic_snapshot()
+    prompt = fixed_asset_prompt(language, snapshot=snapshot)
+    attempts = 0
+    def respond(messages, info):
+        nonlocal attempts
+        attempts += 1
+        assert f'language={language}' in info.instructions
+        assert 'requires_design_completion=true' in info.instructions
+        if attempts > 1:
+            assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
+        persons = [] if attempts == 1 or not repair_omission else [
+            {'name': placeholder.canonical_name, 'base_traits': prompt}]
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+            {'persons': persons, 'scenes': [], 'items': []})])
+    model = FunctionModel(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        task = await chapter_controller.extract(chapter.id)
+        task.request_params['skill_snapshot'] = snapshot.model_dump()
+        await task.save()
+        await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    await placeholder.refresh_from_db()
+    if repair_omission:
+        assert task.status == 3, task.error_message
+        assert attempts == 2
+        assert placeholder.base_traits == prompt
+        assert 'analysis_source' not in placeholder.metadata
+    else:
+        assert task.status == 4
+        assert attempts == 3
+        assert placeholder.base_traits == '分析生成的简略外貌'
+        assert placeholder.metadata['analysis_source'] == 'project_analysis'
+    assert placeholder.metadata['voice_reference_id'] == 73

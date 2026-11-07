@@ -98,6 +98,19 @@ class AssetExtractionResult(BaseModel):
     items: list[Item] = Field(description="道具资产列表")
 
 
+def validate_required_design_assets(result: AssetExtractionResult, required_assets: tuple[tuple[int, str], ...]) -> None:
+    from utils.enums import AssetTypeEnum
+    from utils.messages import localized_message
+
+    returned = {(kind.value, item.name.strip())
+        for kind, items in ((AssetTypeEnum.person, result.persons),
+                            (AssetTypeEnum.scene, result.scenes), (AssetTypeEnum.item, result.items))
+        for item in items if item.base_traits.strip()}
+    missing = [name for kind, name in required_assets if (kind, name.strip()) not in returned]
+    if missing:
+        raise ValueError(localized_message('本章关联的剧本占位资产尚未补全正式设定，请按原标准名返回完整提示词：{p0}', p0='、'.join(missing)))
+
+
 def validate_asset_prompt_contract(result: AssetExtractionResult, snapshot: SkillSnapshot, language: str, aspect_ratio: str) -> None:
     """Validate new extraction output without rewriting saved or historical prompts."""
     assets = [(person, "group" if person.label == "群像" else "person") for person in result.persons]
@@ -166,12 +179,17 @@ class AssetExtractor:
         model: str,
         supports_json_output: bool = False,
         prompt_language: str = "zh",
+        required_assets: tuple[tuple[int, str], ...] = (),
     ) -> None:
         self.client = client
         self.model = model
         self.supports_json_output = supports_json_output
         self.last_usage: dict = {}
         self.prompt_language = prompt_language
+        self.required_assets = required_assets
+
+    async def _validate_coverage(self, result: AssetExtractionResult) -> None:
+        validate_required_design_assets(result, self.required_assets)
 
     async def extract(
         self,
@@ -180,7 +198,8 @@ class AssetExtractor:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         if execution:
-            return await execution.generate('assets', messages, self.response_model)
+            options = {'output_validator': self._validate_coverage} if self.required_assets else {}
+            return await execution.generate('assets', messages, self.response_model, **options)
         try:
             parsed, completion = await create_json_completion(
                 self.client,
@@ -191,7 +210,9 @@ class AssetExtractor:
                 prompt_language=self.prompt_language,
             )
             self.last_usage = completion_usage(completion)
-            return AssetExtractionResult.model_validate(parsed)
+            result = AssetExtractionResult.model_validate(parsed)
+            await self._validate_coverage(result)
+            return result
         except asyncio.CancelledError:
             raise
         except Exception as error:

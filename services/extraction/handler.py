@@ -7,7 +7,7 @@ from openai import AsyncOpenAI
 from services.ai_task_executor import BaseTaskHandler
 from services.extraction.budget import ContextBudgetPolicy
 from services.extraction.context import ExtractionContextLoader
-from services.extraction.extractor import AssetExtractionGatewayError, AssetExtractor
+from services.extraction.extractor import AssetExtractionGatewayError, AssetExtractor, validate_required_design_assets
 from services.extraction.messages import ExtractionMessageBuilder
 from services.extraction.persistence import AssetUpsertService
 from utils.prompt_language import normalize_prompt_language
@@ -113,6 +113,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
             report.message_characters,
             report.total_characters,
         )
+        required_assets = tuple((asset.asset_type, asset.canonical_name) for asset in context.required_design_assets)
         extractor = self.extractor_factory(
             AsyncOpenAI(
                 api_key=request_params["api_key"],
@@ -124,6 +125,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 "supports_json_output",
                 False,
             ),
+            **({'required_assets': required_assets} if required_assets else {}),
         )
         logger.info(
             "Extraction model call: novel_id=%s chapter_id=%s "
@@ -134,6 +136,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
         )
         try:
             result = await extractor.extract(messages)
+            validate_required_design_assets(result, required_assets)
         except asyncio.CancelledError:
             logger.warning(
                 "Extraction model call: novel_id=%s chapter_id=%s "

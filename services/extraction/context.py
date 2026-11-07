@@ -100,6 +100,12 @@ class ExtractionContext:
     assets: tuple[KnownAssetSnapshot, ...]
     chapter: ChapterExtractionInput
 
+    @property
+    def required_design_assets(self) -> tuple[KnownAssetSnapshot, ...]:
+        return tuple(asset for asset in self.assets
+            if asset.metadata.get('analysis_source') == 'project_analysis'
+            and self.chapter.number in asset.source_chapters)
+
 
 class ExtractionContextLoader:
     """Load a chapter and its project-wide, extraction-safe context."""
