@@ -48,15 +48,13 @@ class EditSources:
                                    scene__deleted_at__isnull=True, status=3).select_related('scene').first()
         if not video or not video.url:
             raise HTTPException(404, msg('剪辑素材不存在或不属于当前项目'))
-        from services.video.duration import generated_video_duration
-        duration = await generated_video_duration(video)
         data = video.metadata or {}
         return {'key': key, 'source': source.model_dump(), 'kind': 'video',
                 'name': msg('分镜 {p0}', p0=video.scene.sequence),
                 'scene_id': video.scene_id,
                 'ref': normalize_media_url(video.url) or video.url, 'url': resolve_media_url(video.url),
                 'poster': resolve_media_url(data.get('poster_thumbnail_url') or data.get('poster_url') or data.get('first_frame_url')),
-                'duration': duration,
+                'duration': float(data.get('duration_seconds') or data.get('duration') or video.scene.duration or 4),
                 'width': data.get('width', 0), 'height': data.get('height', 0), 'fps': data.get('fps', 24)}
 
     async def catalog(self):
