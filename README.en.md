@@ -33,7 +33,7 @@
 
 Sign in with Qiling through WeChat. Start with an image or video idea, add reference material, or develop a story into a short drama. The hosted service provides model selection, team collaboration, usage records and top-ups. Generation fees follow the displayed estimates and actual usage.
 
-The former read-only demo has been retired and redirects to the commercial service. For open-source self-hosting and development, see Quick start below and the [development guide](docs/development.en.md).
+For open-source self-hosting and development, see Quick start below and the [development guide](docs/development.en.md).
 
 ## See the result
 
