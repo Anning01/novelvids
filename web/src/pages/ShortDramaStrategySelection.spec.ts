@@ -59,6 +59,7 @@ it('selects a backend strategy on project creation and persists it', async () =>
   })
   await flushPromises()
 
+  expect(wrapper.get('button[aria-label="画面比例"]').text()).toContain('16:9')
   const strategyTrigger = wrapper.get('button[aria-label="分镜策略"]')
   expect(strategyTrigger.text()).toContain('电影感叙事')
   await strategyTrigger.trigger('click')
@@ -79,7 +80,7 @@ it('selects a backend strategy on project creation and persists it', async () =>
     storyboard_strategy: 'narration',
     storyboard_setting: '旁白规则',
     description: '人工模式',
-    aspect_ratio: '9:16',
+    aspect_ratio: '16:9',
     resolution: '720p',
     style_key: 'realistic-general',
     custom_style_prompt: null,
