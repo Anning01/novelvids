@@ -99,8 +99,11 @@ async def test_partial_or_invalid_read_never_becomes_completed_plan():
         if skill == 'source_reading':
             return SourceReading(summary='猜测', candidates=[{'chapter_id': facts['chapter_id'], 'start': 0, 'end': facts['end'] + 1}])
         return await model(skill, facts, output_type, **kwargs)
-    with patch.object(execution, 'generate', side_effect=broken), pytest.raises(ValueError, match='之外'):
+    # The cached invalid span now gets one reference-repair attempt. A repair
+    # that still supplies numeric guesses instead of paragraph IDs is rejected.
+    with patch.object(execution, 'generate', side_effect=broken) as generate, pytest.raises(ValueError, match='first_paragraph'):
         await CreationPlanner(execution, source).prepare(request)
+    assert len([call for call in generate.call_args_list if call.args[0] == 'source_reading']) == 2
     assert not await AgentOperation.filter(task=task, key='creation:plan').exists()
 
 

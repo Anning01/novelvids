@@ -104,10 +104,19 @@ class CreationPlanner:
         read_ids = list(dict.fromkeys([*brief.read_chapter_ids, *brief.write_chapter_ids]))
         loader = CreationSourceLoader(self.execution)
         evidence = await loader.read(read_ids, [r.model_dump() for r in brief.requirements])
+        async def validate_draft(draft):
+            candidate = CreationPlan(**draft.model_dump(), novel_id=self.novel_id,
+                source_message_id=self.source.id, original_request=request.model_dump(mode='json'),
+                brief=brief, chapters=evidence)
+            await self.validate_steps(candidate, request)
+            await loader.excerpts([source for step in candidate.steps for source in step.sources], evidence, strict_refs=True)
+            draft.steps = candidate.steps
+        from prompts.creation_plan import plan_reference_instructions
         draft = await self.execution.generate('creation_planning', {
             'user_message': request.message, 'brief': brief.model_dump(), 'selection': request.model_dump(mode='json'),
             'chapters': [item.model_dump() for item in evidence], 'assets': assets, 'variants': variants, 'scenes': scenes,
-        }, CreationPlanDraft)
+        }, CreationPlanDraft, output_validator=validate_draft,
+            additional_instructions=plan_reference_instructions(self.execution.language))
         plan = CreationPlan(**draft.model_dump(), novel_id=self.novel_id, source_message_id=self.source.id,
             original_request=request.model_dump(mode='json'), brief=brief, chapters=evidence)
         await self.validate_steps(plan, request)

@@ -36,8 +36,11 @@ class CreationBrief(PlanModel):
 
 class SourceSelection(PlanModel):
     chapter_id: int = Field(gt=0)
-    start: int = Field(ge=0)
-    end: int = Field(gt=0)
+    start: int = Field(0, ge=0, description='服务器填写的原文起点；选用段落或 reference_id 时无需计算')
+    end: int = Field(1, gt=0, description='服务器填写的原文终点；选用段落或 reference_id 时无需计算')
+    first_paragraph: int | None = Field(None, ge=1)
+    last_paragraph: int | None = Field(None, ge=1)
+    reference_id: str | None = Field(None, max_length=160)
     quote: str | None = Field(None, max_length=8000, description='逐字复制的原文片段；服务器据此定位，不依赖模型计算字符位置')
 
 

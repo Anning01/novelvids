@@ -131,6 +131,7 @@ class SkillExecution:
         model_config=None,
         media=None,
         additional_instructions: str = "",
+        output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
     ):
         from services.creation_agent.handler import configured_model
 
@@ -280,13 +281,24 @@ class SkillExecution:
             retries=2,
         )
 
-        @agent.tool
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
             """读取本次运行固定版本的技能；只接受技能清单中的名称。"""
             return ctx.deps.read(name)
 
+        # These phases already receive their full rules and evidence. Additional
+        # skill lookups only repeat context and consume the user's call budget.
+        if skill not in {'planning_request', 'source_reading', 'creative_check'}:
+            agent.tool(read_skill)
+
         @agent.output_validator
-        def validate_output(ctx: RunContext[SkillSnapshot], output):
+        async def validate_output(ctx: RunContext[SkillSnapshot], output):
+            if skill == 'source_reading' and isinstance(facts, dict) and facts.get('reference_protocol') == 2:
+                from services.creation_agent.source_references import resolve_reading
+                from pydantic_ai import ModelRetry
+                try:
+                    output = resolve_reading(output, facts, require_paragraphs=True)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
             if skill == "assets":
                 from pydantic_ai import ModelRetry
                 from services.extraction.extractor import validate_asset_prompt_contract
@@ -320,6 +332,12 @@ class SkillExecution:
                             validate_skill_storyboard_timing(shot)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
+            if output_validator:
+                from pydantic_ai import ModelRetry
+                try:
+                    await output_validator(output)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
             return output
 
         async def invoke():
@@ -343,7 +361,8 @@ class SkillExecution:
                     or selected_style.get("image", "")
                 )
             request_facts = {
-                "input": facts,
+                "input": ({key: value for key, value in facts.items() if key != 'content'}
+                    if skill == 'source_reading' and isinstance(facts, dict) and facts.get('reference_protocol') == 2 else facts),
                 "project": project_facts,
                 "parameters": {
                     key: self.params[key]
@@ -403,7 +422,9 @@ class SkillExecution:
         try:
             payload = await execute_step(
                 self.params["task_id"], key, invoke, external=True,
-                external_started=lambda: bool(recorded.calls),
+                # A complete response rejected by output validation is a known
+                # failure. Only interrupted/failed requests remain uncertain.
+                external_started=lambda: bool(recorded.calls) and any(call['status'] != 'completed' for call in recorded.calls),
             )
             child.status = TaskStatusEnum.completed.value
             child.response_data = payload

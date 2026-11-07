@@ -5,7 +5,7 @@
 mode 默认 fill_missing，保留已有成果。仅新要求明确需要修改既有内容时用 revise 并在 label 和 summary 明示。分镜 revise 表示整章重做，不能隐瞒。image/video 的 revise 必须包含提示词调整意图。
 用户明确要求图片或视频重新生成、但不修改提示词时，使用 regenerate；此模式沿用已有提示词重新调用媒体模型，不自动改写已确认设计。普通批量生成仍默认 fill_missing。
 每步 requirement_ids 仅列适用要求。sources 从阅读候选中选准确的原文范围；跨章编排必须携带选段。instructions 写明确创作方案，包括顺序、切换、衔接及验收要求，不只是重复用户原话。例如倒叙需要明确选中的事件、保留的悬念及切回点，但不要因示例而擅自采用倒叙。
-选取阅读候选时原样复制其 chapter_id、start、end 和 quote，不重新计算位置或改写引文。
+选取阅读候选时只复制其 chapter_id 和 reference_id；start/end 及原文由服务器解析，不抄写 quote，不计算字符位置。引用编号只能来自给出的已读候选。
 asset_ids 只使用实际需要出镜的目录资产。缺失文字资产应先提取来源章资产，再由后续步骤读取结果，不更改资产原始章节归属。不得跨越 brief.write_chapter_ids；参考章节不是可写范围。
 仅作为分镜前置依赖的缺失文字资产允许从已阅读的来源章提取，并在 label 和 summary 明示。除此之外不修改参考章节。brief.operations 中要求生成的每个写入章节都必须有对应步骤，不能只做第一章便宣称全书完成。
 variant_ids 用于明确选择出镜资产的已有形态，每个基础资产最多一个；仅使用目录 ID。image 的 variant_id 是本次生图目标，不能混淆两者。

@@ -6,6 +6,8 @@ import json
 from models.chapter import Chapter
 from schemas.creation_agent import AgentConfiguration
 from schemas.creation_plan import ChapterEvidence, SourceExcerpt, SourceReading
+from services.creation_agent.source_references import resolve_reading, resolve_plan_references, source_paragraphs
+from prompts.creation_plan import reading_reference_instructions
 from utils.messages import localized_message
 
 
@@ -65,21 +67,24 @@ class CreationSourceLoader:
             coverage = []
             for offset in range(0, len(chapter.content), limits.context_page_characters):
                 end = min(len(chapter.content), offset + limits.context_page_characters)
-                page = await self.execution.generate('source_reading', {
+                facts = {
                     'segment': f'{chapter.id}:{version}:{offset}', 'chapter_id': chapter.id,
                     'chapter_number': chapter.number, 'start': offset, 'end': end,
                     'content': chapter.content[offset:end], 'requirements': requirements,
-                }, SourceReading)
-                for candidate in page.candidates:
-                    if candidate.quote:
-                        text = chapter.content[offset:end]
-                        position = text.find(candidate.quote)
-                        if position < 0 or text.find(candidate.quote, position + 1) >= 0:
-                            raise ValueError(localized_message('原文引文不存在或不唯一，请使用更完整的原文片段'))
-                        candidate.start = offset + position
-                        candidate.end = candidate.start + len(candidate.quote)
-                    if candidate.chapter_id != chapter.id or not offset <= candidate.start < candidate.end <= end:
-                        raise ValueError(localized_message('阅读结果引用了当前片段之外的原文'))
+                    'paragraphs': source_paragraphs(chapter.content[offset:end], offset), 'reference_protocol': 2,
+                }
+                options = {'additional_instructions': reading_reference_instructions(self.execution.language)}
+                page = await self.execution.generate('source_reading', facts, SourceReading, **options)
+                # Completed historical receipts are immutable and free to replay.
+                # Resolve their old quotations locally before requesting any repair.
+                try:
+                    page = resolve_reading(page, facts)
+                except ValueError as error:
+                    repaired = await self.execution.generate('source_reading', {
+                        **facts, 'segment': facts['segment'] + ':references:repair:1',
+                        'reference_error': str(error),
+                    }, SourceReading, **options)
+                    page = resolve_reading(repaired, facts, require_paragraphs=True)
                 pages.append(page)
                 coverage.append((offset, end))
             await chapter.refresh_from_db()
@@ -91,7 +96,8 @@ class CreationSourceLoader:
                 '已读第 {p0}/{p1} 章', p0=index + 1, p1=len(ids)), detail=chapter.name)
         return chapters
 
-    async def excerpts(self, selections, chapters):
+    async def excerpts(self, selections, chapters, *, strict_refs=False):
+        resolve_plan_references(selections, chapters, strict=strict_refs)
         versions = {item.chapter_id: item.version for item in chapters}
         excerpts = []
         seen = set()

@@ -210,7 +210,11 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                 buffer.append({'type': 'RUN_STARTED', 'runId': task_id, 'threadId': str(conversation.id)})
                 await flush()
                 from services.creation_agent.plans import CreationPlanner
-                plan = await CreationPlanner(execution, user_message).prepare(request)
+                from pydantic_ai.exceptions import UnexpectedModelBehavior
+                try:
+                    plan = await CreationPlanner(execution, user_message).prepare(request)
+                except UnexpectedModelBehavior:
+                    raise ValueError(localized_message('助手未能完成内部内容校验，已保留已完成步骤，可继续本次任务。')) from None
                 if plan is not None:
                     content = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
                     buffer.extend([
