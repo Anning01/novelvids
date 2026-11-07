@@ -22,6 +22,7 @@ import AgentTargetPicker from './AgentTargetPicker.vue'
 import AgentSetupState from './AgentSetupState.vue'
 import AgentDisclosure from './AgentDisclosure.vue'
 import AgentActivity from './AgentActivity.vue'
+import AgentRunActivity from './AgentRunActivity.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
 import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, PromptTargetStatus } from './types'
 
@@ -91,10 +92,10 @@ function removeTarget(option: AgentTargetOption) {
 }
 const bubbles = computed(() => store.messages.map(message => props.initialUserText && store.conversationId === props.initialConversationId
   && message.id === store.messages.find(item => item.role === 'user')?.id ? { ...message, content: props.initialUserText } : message).filter(message => message.role === 'user' ||
-  message.content || message.query_results?.length || message.changes.length || message.status === 4 || message.status === 5,
+  message.content || message.query_results?.length || message.changes.length || message.activity?.length || message.production?.length || message.started_at || [1, 2, 4, 5, 6].includes(message.status),
 ).map(message => ({ ...message,
-  content: message.role === 'assistant' && message.status !== 3 ? '' : message.content,
-  paragraphs: (message.role === 'assistant' && message.status !== 3 ? '' : message.content).split(/\n\s*\n/).filter(Boolean),
+  activityStatus: message.production?.some(receipt => [1, 2, 6].includes(receipt.status)) ? 2 : message.status,
+  paragraphs: message.content.split(/\n\s*\n/).filter(Boolean),
   preview: message.content.replace(/\s+/g, ' ').slice(0, 90) || (message.changes.length ? tr('{p0} 条修改记录', { p0: message.changes.length }) : message.status === 4 ? tr('本轮未完成') : tr('查询与处理记录')),
   placement: message.role === 'user' ? 'end' as const : 'start' as const,
   variant: message.role === 'user' ? 'filled' as const : 'borderless' as const,
@@ -109,7 +110,8 @@ function toggleAllMessages() {
   const open = allCollapsed.value
   messageExpansion.value = Object.fromEntries(bubbles.value.map(message => [message.id, open]))
 }
-const statusLabel = computed(() => store.error ? tr('本轮未完成 · 查看原因') : store.statusText || tr('创作上下文'))
+const currentProductionActive = computed(() => bubbles.value.some(message => message.task_id === store.currentRun?.task_id && message.status === 3 && message.activityStatus === 2))
+const statusLabel = computed(() => store.error ? tr('本轮未完成 · 查看原因') : currentProductionActive.value ? tr('处理中') : store.statusText || tr('创作上下文'))
 watch(() => store.error, error => { if (error) statusOpen.value = true })
 watch(() => store.conversationId, () => { messageExpansion.value = {}; statusOpen.value = false })
 
@@ -328,6 +330,7 @@ onMounted(() => {
     <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
         <AgentDisclosure class="creation-agent-panel__message-group" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
+        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at)" :status="item.activityStatus" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" />
         <div v-if="item.content" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
@@ -352,8 +355,8 @@ onMounted(() => {
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? tr('{p0} 条新消息', { p0: unreadCount }) : tr('回到最新') }}</AppButton></template>
     </BubbleList>
     <footer v-if="ready && !store.loading">
-      <AgentDisclosure v-if="store.statusText || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
-        <template #title><AgentActivity :text="statusLabel" :active="store.busy" /></template>
+      <AgentDisclosure v-if="(!store.busy && !currentProductionActive && store.statusText) || store.error || pendingCount || statusError || (store.busy && !store.streamConnected)" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
+        <template #title><AgentActivity :text="statusLabel" :active="false" /></template>
         <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待核对', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('待核对') }} {{ pendingCount }}</button></template>
       <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">{{ tr('编辑后重试') }}</AppButton><AppButton size="xs" @click="router.push('/settings')">{{ tr('查看设置') }}</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">{{ tr('重新连接') }}</AppButton></p>

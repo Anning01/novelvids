@@ -53,7 +53,24 @@ export interface AgentConversation {
   title?: string
 }
 
-export interface ProductionReceipt { task_id: string; operation: string; status: number; stage?: string | null; error?: string | null }
+export interface ProductionReceipt { task_id: string; operation: string; status: number; stage?: string | null; error?: string | null; started_at?: string | null; finished_at?: string | null }
+
+export interface AgentActivityStep {
+  id: string
+  kind: 'thinking' | 'tool' | 'status'
+  tool_name?: string | null
+  label: string
+  status: 'running' | 'completed' | 'failed'
+  detail?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface AgentProgress {
+  activity?: AgentActivityStep[]
+  started_at?: string | null
+  finished_at?: string | null
+}
 
 export interface PendingProduction {
   confirmation_request_id: string
@@ -66,7 +83,7 @@ export interface PendingProduction {
   model_config_id: number | null
 }
 
-export interface AgentMessage {
+export interface AgentMessage extends AgentProgress {
   pending_production?: PendingProduction | null
   production?: ProductionReceipt[]
   id: number
@@ -80,7 +97,7 @@ export interface AgentMessage {
   query_results?: AgentQueryResult[]
 }
 
-export interface AgentRun {
+export interface AgentRun extends AgentProgress {
   pending_production?: PendingProduction | null
   production?: ProductionReceipt[]
   task_id: string

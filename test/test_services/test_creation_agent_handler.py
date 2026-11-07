@@ -308,7 +308,11 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
     assert assistant.usage['missing_usage'] is False
     assert assistant.content == '已调暖灯光。'
     assert 'synthetic-reasoning' not in assistant.content
-    assert not any(event['type'].startswith('THINKING') for event in await agent_event_log.load(assistant))
+    thinking_events = [event for event in await agent_event_log.load(assistant) if event['type'].startswith('THINKING')]
+    assert bool(thinking_events) is reasoning
+    if reasoning:
+        assert 'synthetic-reasoning' in str(thinking_events)
+        assert all(isinstance(event['timestamp'], int) for event in thinking_events)
     if reasoning:
         assert all(call['usage']['details']['reasoning_tokens'] == 7 for call in assistant.usage['calls'])
 

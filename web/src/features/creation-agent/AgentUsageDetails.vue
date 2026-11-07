@@ -23,13 +23,10 @@ const scopeName = (scope: { kind?: string }) => ({ get project() { return tr('�
   <AgentDisclosure v-if="number('requests')" class="agent-usage" :title="tr('本轮用量')" :summary="number('compactions') ? tr('已整理上下文') : tr('{p0} 次调用', { p0: number('requests') })">
     <dl>
       <dt>{{ tr('模型调用') }}</dt><dd>{{ number('requests') }} {{ tr('次') }}<span v-if="number('summary_requests')">{{ tr('（含') }} {{ number('summary_requests') }} {{ tr('次摘要）') }}</span></dd>
-      <dt>{{ tr('输入 / 输出') }}</dt><dd :title="exactPair(number('input_tokens'), number('output_tokens'))">{{ formatTokenCount(number('input_tokens')) }} / {{ formatTokenCount(number('output_tokens')) }} token</dd>
-      <dt>{{ tr('输入缓存命中') }}</dt><dd>{{ reported ? cacheRate : tr('供应商未完整报告') }}</dd>
+      <template v-if="typeof usage.input_tokens === 'number' && typeof usage.output_tokens === 'number'"><dt>{{ tr('输入 / 输出') }}</dt><dd :title="exactPair(number('input_tokens'), number('output_tokens'))">{{ formatTokenCount(number('input_tokens')) }} / {{ formatTokenCount(number('output_tokens')) }} token</dd></template>
+      <template v-if="reported"><dt>{{ tr('输入缓存命中') }}</dt><dd>{{ cacheRate }}</dd></template>
       <template v-if="reported"><dt>{{ tr('缓存 / 非缓存输入') }}</dt><dd :title="exactPair(cachedTokens, uncachedTokens)">{{ formatTokenCount(cachedTokens) }} / {{ formatTokenCount(uncachedTokens) }} token</dd></template>
     </dl>
-    <small>{{ tr('1K = 1,000 token；1M = 1,000,000 token') }}</small>
-    <p v-if="usage.cache_price_configured === false">{{ tr('尚未配置缓存输入单价，费用按当前模型价格计算。') }}</p>
-    <p v-if="usage.missing_usage">{{ tr('部分请求未返回完整用量。') }}</p>
   </AgentDisclosure>
   <AgentDisclosure v-if="rules.length" class="agent-usage" :title="tr('已记住 {p0} 条设定', { p0: rules.length })">
     <ul><li v-for="(rule, index) in rules" :key="index">{{ scopeName(rule.scope || {}) }}：{{ rule.content }}</li></ul>

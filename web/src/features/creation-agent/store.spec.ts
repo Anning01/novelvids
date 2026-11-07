@@ -286,3 +286,24 @@ it('refreshes recent task conversations without switching the selected history o
   expect(agentApi.submit).not.toHaveBeenCalled()
   expect(agentApi.create).not.toHaveBeenCalled()
 })
+
+it('keeps streamed reasoning and tool steps visible, then restores the persisted timeline', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  store.messages = [{ id: 2, role: 'assistant', task_id: 'run-1', content: '', status: 2, changes: [], usage: {}, created_at: '' }]
+  const activity = [{ id: 'thinking:1', kind: 'thinking' as const, label: '思考', status: 'completed' as const, detail: '核对章节' }]
+  vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { ...run, activity, started_at: '2026-11-07T01:00:00Z', finished_at: '2026-11-07T01:00:03Z' } })
+  vi.mocked(runSubscription).mockResolvedValue({
+    runAgent: vi.fn(async (_input, observer) => {
+      observer.onEvent({ event: { type: 'RUN_STARTED' } })
+      observer.onEvent({ event: { type: 'REASONING_MESSAGE_START' } })
+      observer.onEvent({ event: { type: 'REASONING_MESSAGE_CONTENT', delta: '核对章节' } })
+      expect(store.messages[0]?.activity?.[0]?.detail).toBe('核对章节')
+      observer.onEvent({ event: { type: 'TOOL_CALL_START', toolCallId: 'tool', toolCallName: 'query_creation_objects' } })
+      expect(store.messages[0]?.activity?.[1]?.tool_name).toBe('query_creation_objects')
+    }), abortRun: vi.fn(),
+  } as unknown as Awaited<ReturnType<typeof runSubscription>>)
+  await store.follow('run-1')
+  expect(store.messages[0]?.activity).toEqual(activity)
+  expect(store.messages[0]?.finished_at).toBe('2026-11-07T01:00:03Z')
+})

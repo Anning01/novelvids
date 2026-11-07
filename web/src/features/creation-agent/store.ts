@@ -1,4 +1,5 @@
 import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
+import { applyActivityEvent, mergeActivity, type ActivityEvent } from './activity'
 import { creationAgentToolProgressLabel } from './toolPresentation'
 
 import { tr } from '@/i18n'
@@ -7,7 +8,7 @@ import { computed, markRaw, ref } from 'vue'
 import { getActiveTeamId, getAuthToken } from '@/api'
 import { agentApi, runSubscription } from './api'
 import type { HttpAgent } from '@ag-ui/client'
-import type { AgentCapabilities, AgentChange, AgentConversation, AgentMessage, AgentRun, AgentRunInput } from './types'
+import type { AgentActivityStep, AgentCapabilities, AgentChange, AgentConversation, AgentMessage, AgentRun, AgentRunInput } from './types'
 
 const activeStatuses = new Set([1, 2, 6])
 export const isAgentRunning = (status: number) => activeStatuses.has(status)
@@ -57,7 +58,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   function applySnapshot(run: AgentRun) {
     currentRun.value = run
     const message = messages.value.find(item => item.task_id === run.task_id && item.role === 'assistant')
-    if (message) Object.assign(message, { content: run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
+    if (message) Object.assign(message, {
+      activity: streamConnected.value && isAgentRunning(run.status)
+        ? mergeActivity(run.activity || [], message.activity || [])
+        : run.activity, started_at: run.started_at, finished_at: run.finished_at, content: isAgentRunning(run.status) && !run.content ? message.content : run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
     reportChanges(run.changes)
     if (!isAgentRunning(run.status)) {
       statusText.value = run.status === 3 ? (run.usage.turn_limited ? tr('本轮处理已结束，可以继续对话') : run.changes.length ? tr('修改已保存') : tr('回复已完成'))
@@ -94,8 +98,15 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (revision !== epoch || attempt !== subscriptionAttempt) { handle.abortRun(); return }
     subscription = handle
     streamConnected.value = true
+    const liveActivity: AgentActivityStep[] = []
     try {
       await handle.runAgent({ runId: taskId }, {
+        onEvent({ event }) {
+          if (revision !== epoch || subscription !== handle) return
+          applyActivityEvent(liveActivity, event as ActivityEvent)
+          const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
+          if (message) message.activity = mergeActivity(message.activity || [], liveActivity)
+        },
         onTextMessageContentEvent({ textMessageBuffer }) {
           if (revision !== epoch || subscription !== handle) return
           const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
@@ -297,12 +308,16 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   async function refreshProduction() {
     const revision = epoch
     const runs = [...new Set(messages.value.filter(message => message.role === 'assistant'
-      && message.production?.some(receipt => isAgentRunning(receipt.status))).map(message => message.task_id))]
+      && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))]
     await Promise.allSettled(runs.map(async taskId => {
       const response = await agentApi.snapshot(taskId)
       if (revision !== epoch) return
+      if (currentRun.value?.task_id === taskId) { applySnapshot(response.data); return }
       const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
-      if (message) Object.assign(message, { production: response.data.production || [], usage: response.data.usage })
+      if (message) Object.assign(message, { production: response.data.production || [], usage: response.data.usage,
+        activity: streamConnected.value && isAgentRunning(response.data.status)
+          ? mergeActivity(response.data.activity || [], message.activity || [])
+          : response.data.activity, started_at: response.data.started_at, finished_at: response.data.finished_at })
     }))
   }
 

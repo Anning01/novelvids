@@ -53,7 +53,7 @@ describe('creation assistant panel', () => {
     wrapper.unmount()
   })
 
-  it('shows one compact activity indicator without an empty assistant bubble', async () => {
+  it('keeps the active assistant visible with its current execution state', async () => {
     const pinia = createPinia()
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
     await flushPromises()
@@ -62,8 +62,33 @@ describe('creation assistant panel', () => {
     store.currentRun = { task_id: 'active', conversation_id: 1, status: 2, content: '', error_message: '', changes: [], usage: {}, event_count: 1 }
     store.statusText = '正在整理上下文'
     await flushPromises()
-    expect(wrapper.findAll('.creation-agent-panel__message-group')).toHaveLength(0)
+    expect(wrapper.findAll('.creation-agent-panel__message-group')).toHaveLength(1)
+    expect(wrapper.get('[aria-label="执行过程"]').text()).toContain('正在整理上下文')
     expect(wrapper.findAll('.agent-activity.is-active')).toHaveLength(1)
+    store.messages[0]!.content = '我会先核对主角在本章的外貌设定。'
+    await flushPromises()
+    expect(wrapper.get('.creation-agent-panel__message').text()).toContain('我会先核对主角')
+    wrapper.unmount()
+  })
+
+  it('keeps child generation progress visible after the assistant has submitted it', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.messages = [{ id: 2, role: 'assistant', content: '已提交提取任务', task_id: 'submitted', status: 3,
+      changes: [], usage: {}, created_at: '2026-11-07T04:00:00Z', started_at: '2026-11-07T04:00:00Z', finished_at: null,
+      production: [{ task_id: 'child', operation: 'assets', status: 2 }],
+      activity: [{ id: 'child:extract', kind: 'status', label: '正在提取本章资产', status: 'running' }],
+    }]
+    store.currentRun = { task_id: 'submitted', conversation_id: 1, status: 3, content: '已提交提取任务', error_message: null, changes: [], usage: {}, event_count: 1 }
+    store.statusText = '回复已完成'
+    await flushPromises()
+    expect(wrapper.get('[aria-label="执行过程"]').text()).toContain('正在提取本章资产')
+    expect(wrapper.text()).not.toContain('回复已完成')
+    expect(wrapper.findAll('.agent-activity.is-active')).toHaveLength(1)
+    expect(store.currentRun.status).toBe(3)
+    expect(store.busy).toBe(false)
     wrapper.unmount()
   })
 

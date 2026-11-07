@@ -11,10 +11,11 @@ defineProps<{ text: string; active: boolean }>()
 </template>
 
 <style scoped>
-/* Beautiful UI ThinkingState shimmer; driven by actual run state, never a demo timer. */
+/* Keep the status readable in both themes; animate only the activity icon. */
 .agent-activity { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--app-text-secondary); font-size: 11px; }
 .agent-activity__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.is-active .agent-activity__text { color: transparent; background-image: linear-gradient(90deg, var(--app-text-muted) 35%, var(--app-text) 50%, var(--app-text-muted) 65%); background-size: 200% 100%; background-clip: text; animation: agent-shimmer 1.4s linear infinite; }
-@keyframes agent-shimmer { from { background-position: 150% center; } to { background-position: -50% center; } }
-@media (prefers-reduced-motion: reduce) { .is-active .agent-activity__text { animation: none; background: none; color: var(--app-text-secondary); } }
+.is-active { color: var(--app-text); }
+.is-active svg { animation: agent-pulse 1.4s ease-in-out infinite; }
+@keyframes agent-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .is-active svg { animation: none; } }
 </style>

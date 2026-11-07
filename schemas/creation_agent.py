@@ -165,7 +165,21 @@ class CreationQueryResultOut(BaseModel):
     has_more: bool
 
 
+class AgentActivityOut(BaseModel):
+    id: str
+    kind: Literal['thinking', 'tool', 'status']
+    label: str
+    status: Literal['running', 'completed', 'failed']
+    detail: str | None = None
+    tool_name: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class AgentRunOut(BaseModel):
+    activity: list[AgentActivityOut] = Field(default_factory=list)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     pending_production: dict | None = None
     production: list[dict] = Field(default_factory=list)
     task_id: UUID
@@ -180,6 +194,9 @@ class AgentRunOut(BaseModel):
 
 
 class AgentMessageOut(BaseModel):
+    activity: list[AgentActivityOut] = Field(default_factory=list)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     pending_production: dict | None = None
     production: list[dict] = Field(default_factory=list)
     id: int

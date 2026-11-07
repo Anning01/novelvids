@@ -10,7 +10,7 @@
     "器灵账号待绑定": "Qiling account not linked",
     "注册于 {p0}": "Joined {p0}",
     "当前工作范围": "Current workspace",
-    "正在加载个人中心…": "Loading your profile\u2026",
+    "正在加载个人中心…": "Loading your profile…",
     "个人中心加载失败，请重试。": "Could not load your profile. Try again.",
     "当前团队": "Current team",
     "个人团队": "Personal team",
@@ -3450,5 +3450,19 @@
     "素材预览": "Media preview",
     "片段数量超过服务端限制": "Clip count exceeds the server limit",
     "画布尺寸": "Canvas size"
+  },
+  "agentProgress": {
+    "执行过程": "Execution progress",
+    "用时 {p0}": "Elapsed {p0}",
+    "已结束": "Finished",
+    "思考": "Thinking",
+    "思考过程": "Thinking",
+    "执行步骤": "Execution step",
+    "理解生成要求": "Understanding the request",
+    "分析故事": "Analyzing the story",
+    "准备图片提示词": "Preparing image prompts",
+    "分析参考视频": "Analyzing reference video",
+    "准备视频提示词": "Preparing video prompts",
+    "处理创作要求": "Processing creative requirements"
   }
 }

@@ -211,6 +211,27 @@ class SkillExecution:
                 if not available.supports_tool_calls:
                     raise ValueError(localized_message("视频理解模型需要支持工具调用"))
 
+        from services.creation_agent.event_log import agent_event_log
+        from services.task_signals import task_signals
+        from datetime import datetime, timezone
+
+        async def report_activity(call):
+            label = {
+                "authorization": "理解生成要求", "story": "分析故事", "assets": "提取本章资产",
+                "image": "准备图片提示词", "storyboard": "生成分镜", "remake": "分析参考视频",
+                "video": "准备视频提示词",
+            }.get(skill, "处理创作要求")
+            item = {
+                "id": f"model:{child.id}:{call['index']}", "kind": "status", "label": label,
+                "status": "running" if call["status"] == "in_progress" else call["status"],
+                "started_at": call["started_at"], "finished_at": call.get("finished_at"),
+            }
+            event = {"type": "CUSTOM", "name": "agent_activity", "value": item,
+                     "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}
+            seq = await agent_event_log.start(child_message)
+            await agent_event_log.append(child_message.id, [event], seq)
+            await task_signals.publish(str(self.message.task_id))
+
         recorded = RecordedAgentModel(
             model,
             message=child_message,
@@ -219,6 +240,7 @@ class SkillExecution:
             request_limit=limits.request_limit,
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
+            on_activity=report_activity,
         )
         request_aspect_ratio = "16:9"
         from services.storyboard.speech_timing import StoryboardSpeechValidator

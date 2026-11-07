@@ -4,6 +4,7 @@ from utils.messages import localized_message
 
 import dataclasses
 import time
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 from services.creation_agent.context_budget import ContextBudget, wire_size
@@ -20,9 +21,10 @@ def main_request_count(calls) -> int:
 
 class RecordedAgentModel(WrapperModel):
     def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
-                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None):
+                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None):
         super().__init__(model)
         self.message = message
+        self.on_activity = on_activity
         self.before_request = before_request
         self.max_characters = max_characters
         self.calls = list((message.usage or {}).get("calls", []))
@@ -49,13 +51,15 @@ class RecordedAgentModel(WrapperModel):
         if self.max_characters is not None and report['total_characters'] > self.max_characters:
             raise ValueError(localized_message('上下文超过配置上限，请分段读取当前对象'))
         call = {"index": len(self.calls) + 1, "status": "in_progress", "usage_reported": False,
-                "phase": self.phase, "context": self.budget.report(messages, parameters)}
+                "started_at": datetime.now(timezone.utc).isoformat(), "phase": self.phase, "context": self.budget.report(messages, parameters)}
         self.calls.append(call)
         await self._checkpoint()
+        if self.on_activity:
+            await self.on_activity(call)
         return call, time.monotonic()
 
     async def _finish(self, call, started, usage, completed, finish_reason=None):
-        call.update(status="completed" if completed else "failed", duration_seconds=round(time.monotonic() - started, 3))
+        call.update(status="completed" if completed else "failed", finished_at=datetime.now(timezone.utc).isoformat(), duration_seconds=round(time.monotonic() - started, 3))
         if finish_reason is not None:
             call['finish_reason'] = finish_reason
         if usage is not None:
@@ -64,6 +68,8 @@ class RecordedAgentModel(WrapperModel):
             call["cache_usage_reported"] = bool(usage.details.get('cache_usage_reported', False) or usage.cache_read_tokens or usage.cache_write_tokens)
             self.budget.observe(call['context'], usage)
         await self._checkpoint()
+        if self.on_activity:
+            await self.on_activity(call)
 
     async def _checkpoint(self):
         usage = {

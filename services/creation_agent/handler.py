@@ -209,10 +209,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             ):
                 item = event.model_dump(mode="json", by_alias=True, exclude_none=True)
                 kind = item["type"]
-                if kind.startswith('THINKING'):
-                    # Provider reasoning stays in native model history; the UI
-                    # needs progress and results, not thousands of reasoning chunks.
-                    continue
+                item["timestamp"] = int(time.time() * 1000)
                 if kind.startswith('TEXT_MESSAGE') and item.get('messageId') != final_message_id:
                     # Some models put planning/retries in ordinary content.
                     # Stream tool progress, then publish only the validated reply.
@@ -228,13 +225,13 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                     content = ""
                 elif kind == "TEXT_MESSAGE_CONTENT":
                     content += item.get("delta", "")
-                if buffer and kind in {"TEXT_MESSAGE_CONTENT", "TOOL_CALL_ARGS"} and buffer[-1]["type"] == kind and (
+                if buffer and kind in {"TEXT_MESSAGE_CONTENT", "THINKING_TEXT_MESSAGE_CONTENT", "REASONING_MESSAGE_CONTENT", "TOOL_CALL_ARGS"} and buffer[-1]["type"] == kind and (
                     buffer[-1].get("messageId") == item.get("messageId") and buffer[-1].get("toolCallId") == item.get("toolCallId")
                 ):
                     buffer[-1]["delta"] += item.get("delta", "")
                 else:
                     buffer.append(item)
-                if time.monotonic() - last_flush >= 0.2 or kind not in {"TEXT_MESSAGE_CONTENT", "TOOL_CALL_ARGS"}:
+                if time.monotonic() - last_flush >= 0.2 or kind not in {"TEXT_MESSAGE_CONTENT", "THINKING_TEXT_MESSAGE_CONTENT", "REASONING_MESSAGE_CONTENT", "TOOL_CALL_ARGS"}:
                     await flush()
             if error:
                 raise ValueError(error)

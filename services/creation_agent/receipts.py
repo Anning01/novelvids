@@ -18,6 +18,8 @@ def receipt_of(task) -> dict:
         }.get(task.task_type, "video"),
         "status": task.status,
         "stage": task.stage,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
         "error": task.error_message,
     }
 
