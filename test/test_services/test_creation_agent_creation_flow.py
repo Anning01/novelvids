@@ -89,7 +89,7 @@ async def test_archived_name_conflict_returns_actionable_result_without_query_lo
 
 
 @pytest.mark.asyncio
-async def test_last_request_is_reserved_for_a_reply_and_can_be_followed_by_another_turn():
+async def test_old_call_limit_does_not_withdraw_tools_and_next_turn_still_works():
     changes, _, _, _, task = await crud()
     legacy = PromptEditService(novel_id=changes.novel_id, task_id=task.id, allowed_targets=set(), max_batch_size=8)
     calls = 0
@@ -98,12 +98,12 @@ async def test_last_request_is_reserved_for_a_reply_and_can_be_followed_by_anoth
         calls += 1
         if calls == 1:
             return ModelResponse(parts=[ToolCallPart('get_creation_context', {}, tool_call_id='context')])
-        assert not info.function_tools
-        assert '本轮' in (info.instructions or '')
+        assert 'create_creation_setting' in {tool.name for tool in info.function_tools}
         return ModelResponse(parts=[TextPart('已读取上下文，可以继续描述要创建的人物。')])
     deps = CreationAgentDeps(service=legacy, changes=changes, context={}, limits=AgentConfiguration(request_limit=2))
     result = await creation_agent.run('先检查', model=FunctionModel(respond), deps=deps, usage_limits=UsageLimits(request_limit=2))
     assert calls == 2 and '继续' in result.output
+    assert deps.turn_limited is False
     def next_turn(messages, info):
         assert 'create_creation_setting' in {t.name for t in info.function_tools}
         return ModelResponse(parts=[TextPart('收到新的要求。')])

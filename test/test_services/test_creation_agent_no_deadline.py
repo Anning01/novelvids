@@ -67,3 +67,73 @@ async def test_non_agent_jobs_retain_their_existing_timeout(monkeypatch):
 @pytest.mark.parametrize('legacy_timeout', [180, 600, 900, None])
 def test_old_agent_configuration_no_longer_imposes_a_deadline(legacy_timeout):
     assert AgentConfiguration(timeout_seconds=legacy_timeout).timeout_seconds is None
+
+
+def test_old_run_caps_are_retired_without_disabling_context_compaction():
+    limits = AgentConfiguration(request_limit=20, tool_calls_limit=50, total_tokens_limit=2_000_000,
+        working_input_tokens=840000, compaction_trigger_ratio=0.7)
+    assert limits.request_limit is None and limits.tool_calls_limit is None and limits.total_tokens_limit is None
+    assert limits.working_input_tokens == 840000 and limits.compaction_trigger_ratio == 0.7
+
+
+@pytest.mark.asyncio
+async def test_explicit_stop_interrupts_an_unbounded_model_wait(monkeypatch):
+    started, cancelled = asyncio.Event(), asyncio.Event()
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, SlowHandler())
+    task = await AiTask.create(task_type=7, status=1, request_params={})
+    async def execute(*args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+    monkeypatch.setattr(executor, '_execute_handler', execute)
+    monkeypatch.setattr('services.ai_task_executor.AGENT_CANCEL_POLL_SECONDS', 0.01)
+    running = asyncio.create_task(executor.run(task))
+    await asyncio.wait_for(started.wait(), 2)
+    await AiTask.filter(id=task.id).update(status=5)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, 2)
+    assert cancelled.is_set()
+    await task.refresh_from_db()
+    assert task.status == 5
+
+
+@pytest.mark.asyncio
+async def test_agent_transport_has_no_read_deadline_but_preserves_connection_limits():
+    from types import SimpleNamespace
+    from openai import DEFAULT_TIMEOUT
+    from services.creation_agent.handler import configured_model
+    model = configured_model(SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='test', thinking=None), AgentConfiguration())
+    try:
+        assert model.client.timeout.read is None
+        assert model.client.timeout.connect == DEFAULT_TIMEOUT.connect
+        assert DEFAULT_TIMEOUT.read == 600
+    finally:
+        await model.client.close()
+
+
+@pytest.mark.asyncio
+async def test_stopping_an_external_request_keeps_uncertainty_protection(monkeypatch):
+    from models.agent_operation import AgentOperation
+    from services.creation_agent.operation_receipts import execute_step
+    started = asyncio.Event()
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, SlowHandler())
+    task = await AiTask.create(task_type=7, status=1, request_params={'workflow_version': 'agent-skills-v1'})
+    async def external():
+        started.set()
+        await asyncio.Event().wait()
+    async def execute(*args):
+        return await execute_step(task.id, 'model:slow', external, external=True)
+    monkeypatch.setattr(executor, '_execute_handler', execute)
+    monkeypatch.setattr('services.ai_task_executor.AGENT_CANCEL_POLL_SECONDS', 0.01)
+    running = asyncio.create_task(executor.run(task))
+    await asyncio.wait_for(started.wait(), 2)
+    await AiTask.filter(id=task.id).update(status=5)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, 2)
+    await task.refresh_from_db()
+    assert task.status == 4 and task.stage == 'needs_review'
+    assert (await AgentOperation.get(task=task, key='model:slow')).state == 'uncertain'

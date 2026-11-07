@@ -105,6 +105,8 @@ class CreationPlanner:
         loader = CreationSourceLoader(self.execution)
         evidence = await loader.read(read_ids, [r.model_dump() for r in brief.requirements])
         async def validate_draft(draft):
+            from services.creation_agent.plan_normalization import coalesce_storyboards
+            draft.steps, _ = coalesce_storyboards(draft.steps, {row['id']: row['number'] for row in chapters}, self.execution.language)
             candidate = CreationPlan(**draft.model_dump(), novel_id=self.novel_id,
                 source_message_id=self.source.id, original_request=request.model_dump(mode='json'),
                 brief=brief, chapters=evidence)
@@ -117,6 +119,8 @@ class CreationPlanner:
             'chapters': [item.model_dump() for item in evidence], 'assets': assets, 'variants': variants, 'scenes': scenes,
         }, CreationPlanDraft, output_validator=validate_draft,
             additional_instructions=plan_reference_instructions(self.execution.language))
+        from services.creation_agent.plan_normalization import coalesce_storyboards
+        draft.steps, _ = coalesce_storyboards(draft.steps, {row['id']: row['number'] for row in chapters}, self.execution.language)
         plan = CreationPlan(**draft.model_dump(), novel_id=self.novel_id, source_message_id=self.source.id,
             original_request=request.model_dump(mode='json'), brief=brief, chapters=evidence)
         await self.validate_steps(plan, request)

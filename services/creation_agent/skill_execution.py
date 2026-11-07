@@ -11,7 +11,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.usage import UsageLimits
 from models.creation_agent import AgentMessage
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills, task_facts, creative_requirements
-from services.creation_agent.model_boundary import RecordedAgentModel, main_request_count
+from services.creation_agent.model_boundary import RecordedAgentModel
 from utils.enums import AiTaskTypeEnum
 
 WORKFLOW_VERSION = "agent-skills-v1"
@@ -191,39 +191,6 @@ class SkillExecution:
 
         async def validate_call():
             await self.before_request()
-            messages = await AgentMessage.filter(
-                conversation_id=self.message.conversation_id
-            ).select_related("task")
-            related = [
-                m
-                for m in messages
-                if m.task_id == self.message.task_id
-                or m.task.request_params.get("parent_task_id") == self.params["task_id"]
-            ]
-            if self.params.get('creation_plan_id'):
-                # Include planning and every generation/check child, even across
-                # private production conversations. One plan has one shared budget.
-                plan_id = self.params['creation_plan_id']
-                from models.agent_operation import AgentOperation
-                root_ids = {plan_id, self.params.get('creation_run_id', plan_id)}
-                receipts = await AgentOperation.filter(task_id__in=list(root_ids), key__startswith='submit:', state='completed')
-                task_ids = root_ids | {row.result['task_id'] for row in receipts if row.result.get('task_id')}
-                conversation_ids = await AgentMessage.filter(task_id__in=list(task_ids)).values_list('conversation_id', flat=True)
-                candidates = await AgentMessage.filter(conversation_id__in=list(set(conversation_ids)), role='assistant').select_related('task')
-                related = [m for m in candidates if str(m.task_id) == plan_id
-                    or m.task.request_params.get('creation_plan_id') == plan_id
-                    or m.task.request_params.get('parent_task_id') == plan_id]
-            spent_requests = sum(main_request_count((m.usage or {}).get("calls", [])) for m in related)
-            spent_tokens = sum(
-                int((m.usage or {}).get("input_tokens", 0))
-                + int((m.usage or {}).get("output_tokens", 0))
-                for m in related
-            )
-            if (
-                spent_requests >= limits.request_limit
-                or spent_tokens >= limits.total_tokens_limit
-            ):
-                raise ValueError(localized_message("本次任务已达到总调用或用量上限"))
             from services.balance import ensure_solvent
 
             await ensure_solvent(self.params.get("team_id"), self.params.get("user_id"))
@@ -272,6 +239,9 @@ class SkillExecution:
         request_aspect_ratio = "16:9"
         from services.storyboard.speech_timing import StoryboardSpeechValidator
         speech_validator = StoryboardSpeechValidator(self.snapshot) if skill == "storyboard" else None
+        if skill in {'storyboard', 'video'}:
+            from prompts.creation_plan import resolved_storyboard_resources_instructions
+            additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
         agent = Agent(
             deps_type=SkillSnapshot,
             instructions=instructions(self.snapshot, self.language, skill) + (
@@ -287,7 +257,7 @@ class SkillExecution:
 
         # These phases already receive their full rules and evidence. Additional
         # skill lookups only repeat context and consume the user's call budget.
-        if skill not in {'planning_request', 'source_reading', 'creative_check'}:
+        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video'}:
             agent.tool(read_skill)
 
         @agent.output_validator
@@ -330,6 +300,19 @@ class SkillExecution:
                         validate_storyboard_duration(shot, self.params.get("shot_duration_range"))
                         if "storyboard_contract" in ctx.deps.contents:
                             validate_skill_storyboard_timing(shot)
+                    source_facts = facts
+                    while isinstance(source_facts, dict) and 'original_input' in source_facts:
+                        source_facts = source_facts['original_input']
+                    if isinstance(source_facts, dict) and 'entities' in source_facts and 'storyboard_contract' in ctx.deps.contents:
+                        from schemas.scene import SceneEntity
+                        from services.storyboard.validation import prepare_skill_storyboard
+                        from services.storyboard.strategies import storyboard_strategy_factory
+                        from services.creation_agent.prompt_edits import validate_prompt_dependencies
+                        entities = [SceneEntity.model_validate(item) for item in source_facts['entities']]
+                        strategy = storyboard_strategy_factory.resolve(source_facts.get('strategy'))
+                        prepared = prepare_skill_storyboard(output, ctx.deps, self.language, entities, strategy.key)
+                        for shot in prepared.shots:
+                            validate_prompt_dependencies(shot.prompt, entities)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             if output_validator:
@@ -353,13 +336,18 @@ class SkillExecution:
                 "aspect_ratio": project.aspect_ratio,
                 "storyboard_strategy": project.storyboard_strategy,
             }
-            if skill in ("assets", "image"):
+            if skill in ("assets", "image", "storyboard", "video"):
                 styles = json.loads(self.snapshot.read("styles"))
                 selected_style = styles.get(project.style_key, {})
-                project_facts["image_style"] = (
+                style_kind = 'image' if skill in {'assets', 'image'} else 'video'
+                project_facts[style_kind + '_style'] = (
                     (project.custom_style_prompt or "").strip()
-                    or selected_style.get("image", "")
+                    or selected_style.get(style_kind, "")
                 )
+            if skill in {'storyboard', 'video'}:
+                from services.storyboard.strategies import storyboard_strategy_factory
+                strategy = storyboard_strategy_factory.resolve(project.storyboard_strategy)
+                project_facts['storyboard_rules'] = json.loads(self.snapshot.read('strategies'))[strategy.key]
             request_facts = {
                 "input": ({key: value for key, value in facts.items() if key != 'content'}
                     if skill == 'source_reading' and isinstance(facts, dict) and facts.get('reference_protocol') == 2 else facts),

@@ -146,8 +146,8 @@ export interface AgentRunInput {
 export interface AgentConfiguration {
   production_concurrency?: number
   enabled: boolean
-  request_limit: number
-  tool_calls_limit: number
+  request_limit: number | null
+  tool_calls_limit: number | null
   max_targets: number
   timeout_seconds: number | null
   max_context_characters: number | null
@@ -159,5 +159,5 @@ export interface AgentConfiguration {
   context_page_characters?: number
   history_runs: number
   max_output_tokens: number
-  total_tokens_limit: number
+  total_tokens_limit: number | null
 }

@@ -53,12 +53,28 @@ class CreationPlanRunner:
 
     async def run(self):
         plan = await load_plan(self.params['creation_plan_id'], novel_id=self.params['novel_id'])
+        from services.creation_agent.plan_normalization import execution_plan
+        plan, groups = execution_plan(plan, self.execution.language)
+        if groups:
+            _, created = await AgentOperation.get_or_create(task_id=self.params['task_id'], key='plan:coalesced',
+                defaults={'state': 'completed', 'result': {'groups': groups}})
+            if created:
+                await plan_activity(self.execution, 'coalesced', localized_message('同章叙事段落已合并，统一生成完整章节'))
+                for step in plan.steps:
+                    if step.id in groups:
+                        await plan_activity(self.execution, f'step:{step.id}', step.label, status='running')
         records = {row.key.removeprefix('plan-step:'): row for row in await AgentOperation.filter(
             task_id=self.params['task_id'], key__startswith='plan-step:')}
         for step in plan.steps:
             await self.execution.before_request()
             if step.id in records and records[step.id].state == 'completed':
-                continue
+                if step.id not in groups or records[step.id].result.get('coalesced'):
+                    continue
+                if records[step.id].result.get('status') in {'completed', 'skipped'}:
+                    records[step.id] = await self.finish(step, {'status': 'failed', 'coalesced': True,
+                        'error': localized_message('旧分段任务已有保存结果，需核对完整章节后继续')})
+                    continue
+                records.pop(step.id)
             if any(records.get(key) and records[key].result.get('status') in {'failed', 'blocked'} for key in step.depends_on):
                 records[step.id] = await self.finish(step, {'status': 'blocked', 'error': localized_message('前置步骤未完成')})
                 continue
@@ -84,6 +100,12 @@ class CreationPlanRunner:
                     task = await AiTask.get(id=outcome['task_id'])
                     children.append(str(task.id))
                     if task.status == 3:
+                        if step.id in groups:
+                            from services.creation_agent.plan_sources import fingerprint
+                            verified = await AgentOperation.get_or_none(task=task, key='coalesced:validated', state='completed')
+                            if verified is None or verified.result.get('revision') != fingerprint(step.model_dump())[:20]:
+                                errors.append(localized_message('旧分段结果尚未按完整章节校验，已保留原结果'))
+                                continue
                         output = task.response_data or {}
                         if step.operation == 'image':
                             output = {**output, 'asset_ids': [target_id]}
@@ -97,9 +119,10 @@ class CreationPlanRunner:
                 if active:
                     continue
                 if errors:
-                    records[step.id] = await self.finish(step, {'status': 'failed', 'error': '；'.join(errors), 'task_ids': children, 'outputs': outputs})
+                    records[step.id] = await self.finish(step, {'status': 'failed', 'coalesced': step.id in groups,
+                        'error': '；'.join(errors), 'task_ids': children, 'outputs': outputs})
                 elif len(outputs) == len(identifiers):
-                    merged = {'status': 'completed' if children else 'skipped', 'task_ids': children, 'outputs': outputs,
+                    merged = {'status': 'completed' if children else 'skipped', 'coalesced': step.id in groups, 'task_ids': children, 'outputs': outputs,
                         'asset_ids': sorted({i for item in outputs for i in item.get('asset_ids', [])}),
                         'scene_ids': sorted({i for item in outputs for i in item.get('scene_ids', [])})}
                     records[step.id] = await self.finish(step, merged)
@@ -182,6 +205,9 @@ async def run_confirmed_plan(params, assistant):
         if not (await agent_configuration()).enabled or not await AiTask.filter(id=params['task_id'], status=2).exists():
             raise ValueError(localized_message('任务已停止，不能继续执行'))
     execution = SkillExecution(params, assistant, before_request)
+    if assistant.run_input.get('creation_run_id') != params['creation_run_id']:
+        assistant.run_input = {**assistant.run_input, 'creation_run_id': params['creation_run_id']}
+        await assistant.save(update_fields=['run_input'])
     from services.creation_agent.event_log import agent_event_log
     if await agent_event_log.last(assistant) is None:
         await agent_event_log.append(assistant.id, [{'type': 'RUN_STARTED', 'runId': params['task_id'],

@@ -5,11 +5,11 @@ import { agentApi } from './api'
 import type { AgentConfiguration } from './types'
 
 vi.mock('./api', () => ({ agentApi: { configuration: vi.fn(), updateConfiguration: vi.fn() } }))
-const configuration: AgentConfiguration = { enabled: false, request_limit: 20, tool_calls_limit: 50, max_targets: 32,
+const configuration: AgentConfiguration = { enabled: false, request_limit: null, tool_calls_limit: null, max_targets: 32,
   timeout_seconds: 600, max_context_characters: 2000000, working_input_tokens: 840000,
   compaction_trigger_ratio: 0.7, compaction_target_ratio: 0.45, summary_output_tokens: 4000,
   summary_timeout_seconds: 30, context_page_characters: 4000, history_runs: 12,
-  max_output_tokens: 64000, total_tokens_limit: 2000000 }
+  max_output_tokens: 64000, total_tokens_limit: null }
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -21,10 +21,11 @@ it('keeps assistant activation and budgets backend managed', async () => {
   const wrapper = mount(AgentSettingsPanel)
   await flushPromises()
   expect(wrapper.text()).not.toContain('运行超时')
+  for (const label of ['模型调用上限', '工具调用上限', '每轮总用量上限']) expect(wrapper.text()).not.toContain(label)
   const enabled = wrapper.get('[role="switch"]')
   await enabled.trigger('click')
   await wrapper.get('form').trigger('submit')
-  expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, request_limit: 20, max_targets: 32 }))
+  expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, request_limit: null, max_targets: 32 }))
 })
 
 it('keeps advanced controls collapsed and preserves edited ratios on save', async () => {
@@ -34,8 +35,8 @@ it('keeps advanced controls collapsed and preserves edited ratios on save', asyn
   const wrapper = mount(AgentSettingsPanel)
   await flushPromises()
   expect(wrapper.get('details').attributes('open')).toBeUndefined()
-  expect(wrapper.findAll('legend').map(item => item.text())).toEqual(['对话用量', '记忆与上下文'])
-  expect(wrapper.text()).toContain('DeepSeek 长上下文')
+  expect(wrapper.findAll('legend').map(item => item.text())).toEqual(['执行与输出', '记忆与上下文'])
+  expect(wrapper.text()).toContain('上下文自动整理')
   expect(wrapper.text()).toContain('840K 输入预算')
   const ratio = wrapper.findAll('label').find(label => label.text().includes('整理触发比例'))!
   await ratio.get('input').setValue('0.75')

@@ -8,7 +8,8 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, DEFAULT_TIMEOUT
+from httpx import Timeout
 from starlette.requests import Request
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -53,7 +54,8 @@ async def authorize_run(params: dict) -> AuthContext:
 
 def configured_model(config, limits: AgentConfiguration):
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
-                         max_retries=0)
+                         max_retries=0, timeout=Timeout(connect=DEFAULT_TIMEOUT.connect, read=None,
+                             write=DEFAULT_TIMEOUT.write, pool=DEFAULT_TIMEOUT.pool))
     extra_body = {}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}

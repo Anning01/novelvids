@@ -71,6 +71,15 @@ async def activity_for_messages(messages, events, production):
                 result[message_id].append(item)
     for items in result.values():
         items.sort(key=lambda item: item.get('started_at') or '')
+    coalesced = [row for row in messages if (row.run_input or {}).get('creation_run_id')]
+    if coalesced:
+        from models.agent_operation import AgentOperation
+        rows = await AgentOperation.filter(task_id__in=[row.task_id for row in coalesced], key='plan:coalesced', state='completed')
+        by_task = {str(row.task_id): {f'creation:step:{member}' for representative, members in row.result['groups'].items()
+                    for member in members if member != representative} for row in rows}
+        for message in coalesced:
+            hidden = by_task.get(str(message.task_id), set())
+            result[message.id] = [item for item in result[message.id] if item['id'] not in hidden]
     return result
 
 

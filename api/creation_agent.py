@@ -114,7 +114,7 @@ async def stream(task_id: UUID, request: Request, body: RunAgentInput | None = B
             code='CANCELLED' if task.status == TaskStatusEnum.cancelled.value else fallback_code)
 
     async def events():
-        cursor = after
+        cursor = max(after, int((assistant.run_input or {}).get('stream_start_seq', 0)))
         while not await request.is_disconnected():
             async with task_signals.subscription(str(task_id)) as signal:
                 task = await AiTask.get(id=task_id)

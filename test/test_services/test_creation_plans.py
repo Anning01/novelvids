@@ -201,8 +201,12 @@ async def test_failed_dependency_blocks_only_its_dependents():
     from services.creation_agent.plan_execution import CreationPlanRunner
     from schemas.creation_plan import CreationPlanStep
     _, _, plan, task, execution = await confirmed_fixture()
+    from models.scene import Scene
+    independent_chapter = plan.chapters[1].chapter_id
+    await Scene.create(chapter_id=independent_chapter, sequence=1, prompt='已有分镜', duration=6)
     plan.steps += [CreationPlanStep(id='video', operation='video', source_step='chapter1', depends_on=['chapter1'],
-        label='生成第一章视频', instructions='按分镜生成'), plan.steps[0].model_copy(update={'id': 'independent', 'mode': 'fill_missing', 'requirement_ids': [], 'instructions': '保留已有分镜'})]
+        label='生成第一章视频', instructions='按分镜生成'), plan.steps[0].model_copy(update={'id': 'independent', 'target_id': independent_chapter,
+            'mode': 'fill_missing', 'requirement_ids': [], 'instructions': '保留已有分镜'})]
     await AgentOperation.filter(task_id=execution.params['creation_plan_id'], key='creation:plan').update(result=plan.model_dump(mode='json'))
     await AgentOperation.create(task=task, key='plan-step:chapter1', state='completed', result={'status': 'failed', 'error': '检查未通过'})
     result = await CreationPlanRunner(execution).run()

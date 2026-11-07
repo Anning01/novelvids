@@ -14,6 +14,7 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 current_task_id = ContextVar("current_ai_task_id", default=None)
+AGENT_CANCEL_POLL_SECONDS = 1.0
 
 
 # 不同任务类型的超时时间（秒）
@@ -242,7 +243,7 @@ class AiTaskExecutor:
         token = task_language.set(task.request_params.get("prompt_language", legacy_language))
         try:
             if timeout is None:
-                result = await self._execute_handler(task, handler)
+                result = await self._execute_cancellable(task, handler)
             else:
                 result = await asyncio.wait_for(self._execute_handler(task, handler), timeout=timeout)
             await self._complete(task, result)
@@ -250,6 +251,11 @@ class AiTaskExecutor:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
         except WaitingForDependencies:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_dependencies')
+        except asyncio.CancelledError as error:
+            # Preserve the existing uncertain-submission protection when a stop
+            # interrupts an external request whose result has not arrived.
+            await self._fail(task, localized_message('任务已停止'), error=error)
+            raise
         except asyncio.TimeoutError as error:
             await self._fail(task, localized_message("任务超时（{p0}s）", p0=timeout), error=error)
         except Exception as e:
@@ -271,6 +277,21 @@ class AiTaskExecutor:
             return await handler.execute(task.request_params)
         finally:
             current_task_id.reset(token)
+
+    async def _execute_cancellable(self, task, handler):
+        """An unbounded agent request must still respond to a persisted stop."""
+        work = asyncio.create_task(self._execute_handler(task, handler))
+        try:
+            while True:
+                done, _ = await asyncio.wait({work}, timeout=AGENT_CANCEL_POLL_SECONDS)
+                if done:
+                    return await work
+                if await AiTask.filter(id=task.id, status=TaskStatusEnum.cancelled.value).exists():
+                    raise asyncio.CancelledError()
+        finally:
+            if not work.done():
+                work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
 
     async def submit_and_run(
         self, task_type: AiTaskTypeEnum, request_params: dict

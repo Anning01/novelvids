@@ -160,19 +160,77 @@ def test_plan_prompts_render_language_and_preserve_mandatory_protocol(language):
 
 
 @pytest.mark.asyncio
-async def test_plan_budget_exhaustion_stops_before_a_provider_request():
+async def test_historical_token_cap_does_not_stop_a_confirmed_run():
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.models.function import FunctionModel
     target, execution = await media_fixture()
     execution.params['agent_configuration']['total_tokens_limit'] = 1000
-    await AgentMessage.filter(task_id=execution.params['creation_plan_id'], role='assistant').update(usage={'input_tokens': 1000})
-    def never_called(messages, info):
-        raise AssertionError('Exhausted plan must not call the provider')
-    model = FunctionModel(never_called)
+    await AgentMessage.filter(task_id=execution.params['creation_run_id'], role='assistant').update(usage={'input_tokens': 1000})
+    model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '继续执行'})]))
     model.client = AsyncMock()
-    with patch('services.creation_agent.handler.configured_model', return_value=model), pytest.raises(ValueError, match='上限|limit'):
-        await execution.generate('image', {'asset_type': target.asset_type, 'current_prompt': target.base_traits}, CompletePrompt)
-    receipt = await AgentOperation.get(task_id=execution.params['task_id'], key='model:image:CompletePrompt:')
-    assert receipt.state == 'failed'
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        result = await execution._generate('video', {}, CompletePrompt)
+    receipt = await AgentOperation.get(task_id=execution.params['task_id'], key='model:video:CompletePrompt:')
+    assert receipt.state == 'completed' and result.prompt == '继续执行'
+
+
+@pytest.mark.asyncio
+async def test_prior_planning_usage_does_not_consume_the_confirmed_round_budget():
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+    _, execution = await media_fixture()
+    execution.params['agent_configuration']['total_tokens_limit'] = 1000
+    await AgentMessage.filter(task_id=execution.params['creation_plan_id'], role='assistant').update(usage={'input_tokens': 2000})
+    model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '完整候选'})]))
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        result = await execution._generate('video', {}, CompletePrompt)
+    assert result.prompt == '完整候选'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('strategy', ['cinematic', 'narration'])
+async def test_storyboard_resources_are_supplied_without_extra_skill_calls(strategy):
+    import json
+    from models.novel import Novel
+    from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
+    from pydantic_ai.models.function import FunctionModel
+    _, execution = await media_fixture()
+    await Novel.filter(id=execution.params['novel_id']).update(custom_style_prompt='已配置的画面风格', storyboard_strategy=strategy)
+    def respond(messages, info):
+        assert not info.function_tools
+        content = next(part.content for message in messages for part in message.parts if isinstance(part, UserPromptPart))
+        project = json.loads(content[0])['untrusted_task_facts']['project']
+        assert project['video_style'] == '已配置的画面风格'
+        assert project['storyboard_rules'] == json.loads(execution.snapshot.read('strategies'))[strategy]
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '完整候选'})])
+    model = FunctionModel(respond); model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        await execution._generate('video', {}, CompletePrompt)
+
+
+@pytest.mark.asyncio
+async def test_unknown_storyboard_reference_is_repaired_before_the_result_is_accepted():
+    from pydantic_ai.messages import ModelResponse, ToolCallPart, RetryPromptPart
+    from pydantic_ai.models.function import FunctionModel
+    from schemas.scene import SceneEntity
+    from test.test_services.test_storyboard_prompts import _shot
+    _, execution = await media_fixture()
+    calls = 0
+    def respond(messages, info):
+        nonlocal calls
+        calls += 1
+        shot = _shot(1)
+        if calls == 1:
+            shot.visual_prose = '@{不存在的设定}出现。'
+        else:
+            assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots': [shot.model_dump(exclude={'prompt'})]})])
+    model = FunctionModel(respond); model.client = AsyncMock()
+    entity = SceneEntity(name='郊区小楼', aliases=[], description='旧楼', asset_type='场景')
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        result = await execution._generate('storyboard', {'entities': [entity.model_dump()], 'strategy': 'cinematic'}, StructuredSkillStoryboard)
+    assert calls == 2 and '不存在' not in result.shots[0].visual_prose
 
 
 @pytest.mark.asyncio

@@ -127,6 +127,7 @@ class CreationStepContext(PlanModel):
     assets: list[dict] = Field(default_factory=list)
     constraints: list[dict] = Field(default_factory=list)
     upstream_results: dict[str, dict] = Field(default_factory=dict)
+    coalesced_step_ids: list[str] = Field(default_factory=list)
 
 
 class RequirementFinding(PlanModel):

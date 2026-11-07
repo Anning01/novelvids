@@ -39,8 +39,8 @@ class AgentConfiguration(BaseModel):
     # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
     # 128K output. The assistant keeps the default output below that maximum,
     # while leaving enough room for tool schemas and provider-side reasoning.
-    request_limit: int = Field(20, ge=1, le=30)
-    tool_calls_limit: int = Field(50, ge=1, le=100)
+    request_limit: int | None = Field(None, ge=1, le=30)
+    tool_calls_limit: int | None = Field(None, ge=1, le=100)
     max_targets: int = Field(32, ge=1, le=100)
     # Read old stored/client configurations without retaining an agent deadline.
     timeout_seconds: int | None = Field(None, ge=10, le=900)
@@ -55,11 +55,17 @@ class AgentConfiguration(BaseModel):
     context_page_characters: int = Field(4000, ge=500, le=64000)
     history_runs: int = Field(12, ge=1, le=100)
     max_output_tokens: int = Field(64000, ge=256, le=384000)
-    total_tokens_limit: int = Field(2_000_000, ge=1000, le=10_000_000)
+    total_tokens_limit: int | None = Field(None, ge=1000, le=10_000_000)
 
     @field_validator('timeout_seconds')
     @classmethod
     def retire_run_timeout(cls, value):
+        return None
+
+    @field_validator('request_limit', 'tool_calls_limit', 'total_tokens_limit')
+    @classmethod
+    def retire_cumulative_caps(cls, value):
+        # Accept historical snapshots without re-enabling retired run-wide caps.
         return None
 
     def context_character_limit(self, model_limit: int | None) -> int | None:

@@ -9,6 +9,7 @@ from models.scene import Scene
 from schemas.creation_plan import CreationStepContext
 from services.creation_agent.memory import creation_memory
 from services.creation_agent.plans import load_plan, validate_objects, validate_sources
+from services.creation_agent.plan_normalization import execution_plan
 from utils.messages import localized_message
 
 
@@ -16,6 +17,7 @@ async def step_context(params):
     if not params.get('creation_plan_id') or not params.get('creation_step_id'):
         return None
     plan = await load_plan(params['creation_plan_id'], novel_id=params['novel_id'])
+    plan, groups = execution_plan(plan, params.get('prompt_language', 'zh'))
     step = next((item for item in plan.steps if item.id == params['creation_step_id']), None)
     if step is None:
         raise ValueError(localized_message('创作步骤不存在'))
@@ -60,13 +62,15 @@ async def step_context(params):
     return CreationStepContext(step=step, original_message=source.content,
         requirements=[item for item in plan.brief.requirements if item.id in step.requirement_ids],
         sources=[item for item in plan.excerpts if (item.chapter_id, item.start, item.end) in selectors],
-        assets=projections, constraints=constraints, upstream_results=upstream)
+        assets=projections, constraints=constraints, upstream_results=upstream,
+        coalesced_step_ids=groups.get(step.id, []))
 
 
 async def validate_step_inputs(params, *, include_target=True):
     if not params.get('creation_plan_id'):
         return
     plan = await load_plan(params['creation_plan_id'], novel_id=params['novel_id'])
+    plan, _ = execution_plan(plan, params.get('prompt_language', 'zh'))
     await validate_sources(plan)
     step = next(item for item in plan.steps if item.id == params['creation_step_id'])
     keys = set(plan.object_scopes.get(step.id, [])) | {f'asset:{identifier}' for identifier in step.asset_ids}

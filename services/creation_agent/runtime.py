@@ -55,7 +55,7 @@ def final_reply_due(ctx: RunContext[CreationAgentDeps]) -> bool:
         calls = getattr(ctx.model, 'calls', None)
         count = len(calls) if isinstance(calls, list) else ctx.usage.requests
     limit = getattr(ctx.model, 'request_limit', None) or ctx.deps.limits.request_limit
-    return count >= limit - 1
+    return limit is not None and count >= limit - 1
 
 
 def _referenced_definitions(schema: dict) -> set[str]:

@@ -162,15 +162,17 @@ async def test_task_total_cap_ignores_summary_phase_calls_of_the_parent_run():
 
 
 @pytest.mark.asyncio
-async def test_task_total_cap_still_blocks_when_main_requests_are_exhausted():
+async def test_historical_task_total_cap_no_longer_blocks_progress():
     from unittest.mock import patch
     from schemas.agent_workflow import CompletePrompt
 
     execution = await _parent_execution_with_usage(
         [{'phase': 'main'}, {'phase': 'main'}, {'phase': 'main'}], request_limit=3)
     with patch('services.creation_agent.handler.configured_model', return_value=_structured_prompt_model('完整提示词')):
-        with pytest.raises(ValueError, match='总调用或用量上限'):
-            await execution.generate('image', {'description': '测试'}, CompletePrompt)
+        result = await execution.generate('image', {'description': '测试'}, CompletePrompt)
+    assert result.prompt == '完整提示词'
+    await execution.message.refresh_from_db()
+    assert execution.message.usage['requests'] == 3
 
 
 @pytest.mark.asyncio
