@@ -71,6 +71,9 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
+        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):
+            if key in parent.params:
+                inherited[key] = parent.params[key]
     return {
         **params,
         **(submission.get() or {}),
@@ -110,6 +113,16 @@ class SkillExecution:
         return self.params.get("prompt_language", "en")
 
     async def generate(
+        self, skill: str, facts: object, output_type: type[BaseModel], **options,
+    ):
+        from services.creation_agent.step_context import step_context
+        context = await step_context(self.params) if skill in {'assets', 'storyboard', 'image', 'video'} else None
+        if context and (context.requirements or context.constraints or self.params.get('creation_plan_id') != self.params['task_id']):
+            from services.creation_agent.creative_checks import generate_checked
+            return await generate_checked(self, skill, facts, output_type, options, context)
+        return await self._generate(skill, facts, output_type, **options)
+
+    async def _generate(
         self,
         skill: str,
         facts: object,
@@ -186,6 +199,19 @@ class SkillExecution:
                 if m.task_id == self.message.task_id
                 or m.task.request_params.get("parent_task_id") == self.params["task_id"]
             ]
+            if self.params.get('creation_plan_id'):
+                # Include planning and every generation/check child, even across
+                # private production conversations. One plan has one shared budget.
+                plan_id = self.params['creation_plan_id']
+                from models.agent_operation import AgentOperation
+                root_ids = {plan_id, self.params.get('creation_run_id', plan_id)}
+                receipts = await AgentOperation.filter(task_id__in=list(root_ids), key__startswith='submit:', state='completed')
+                task_ids = root_ids | {row.result['task_id'] for row in receipts if row.result.get('task_id')}
+                conversation_ids = await AgentMessage.filter(task_id__in=list(task_ids)).values_list('conversation_id', flat=True)
+                candidates = await AgentMessage.filter(conversation_id__in=list(set(conversation_ids)), role='assistant').select_related('task')
+                related = [m for m in candidates if str(m.task_id) == plan_id
+                    or m.task.request_params.get('creation_plan_id') == plan_id
+                    or m.task.request_params.get('parent_task_id') == plan_id]
             spent_requests = sum(main_request_count((m.usage or {}).get("calls", [])) for m in related)
             spent_tokens = sum(
                 int((m.usage or {}).get("input_tokens", 0))
@@ -330,6 +356,10 @@ class SkillExecution:
                     if key in self.params
                 },
             }
+            from services.creation_agent.step_context import step_context
+            context = await step_context(self.params) if skill in {'assets', 'storyboard', 'image', 'video'} else None
+            if context:
+                request_facts['step_context'] = context.model_dump(mode='json')
             if skill == "authorization":
                 request_facts = {"input": facts}
             user_input = (
@@ -337,7 +367,11 @@ class SkillExecution:
                 if media
                 else task_facts(request_facts)
             )
-            if skill != "authorization":
+            if context:
+                if context.requirements or context.constraints or self.params.get('creation_plan_id') != self.params['task_id']:
+                    from prompts.creation_plan import step_requirements
+                    user_input = [task_facts(request_facts), step_requirements(self.language), *(media or [])]
+            elif skill != "authorization":
                 requirement = await user_instruction(self.params)
                 if requirement:
                     user_input = [

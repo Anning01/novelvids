@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentPlanDetails from './AgentPlanDetails.vue'
 import { tr } from '@/i18n'
 import AppSelect from '@/components/AppSelect.vue'
 
@@ -218,6 +219,12 @@ async function send(text: string) {
 
 async function confirmProduction(pending: import('./types').PendingProduction) {
   if (props.suspended) return
+  if (pending.plan_confirmation) {
+    await store.send({ request_id: pending.confirmation_request_id, message: pending.message,
+      chapter_id: pending.chapter_id, targets: [], write_scope: pending.write_scope,
+      model_config_id: pending.model_config_id, plan_confirmation: pending.plan_confirmation })
+    return
+  }
   const productionIntents = pending.intents.map(intent => {
     if (intent.operation !== 'video' || !props.videoDefaults ||
       (intent.media_model_config_id && intent.media_model_config_id !== props.videoDefaults.model_config_id)) return intent
@@ -345,9 +352,10 @@ onMounted(() => {
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
-          <p>{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
-          <ul><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
-          <AppButton :disabled="!writable || store.busy || suspended" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
+          <p>{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
+          <AgentPlanDetails v-if="item.pending_production.plan_confirmation" :plan="item.pending_production" />
+          <ul v-else><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
+          <AppButton :disabled="!writable || store.busy || suspended" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
         </div>
         <ul v-if="item.production?.length && !item.singleProductionResult" class="creation-agent-panel__production">
           <li v-for="receipt in item.production" :key="receipt.task_id">

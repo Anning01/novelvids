@@ -21,6 +21,10 @@ FILES = {
             "authorization",
             "summary",
             "structured",
+            "planning_request",
+            "source_reading",
+            "creation_planning",
+            "creative_check",
         )
     },
     "styles": "styles.json",

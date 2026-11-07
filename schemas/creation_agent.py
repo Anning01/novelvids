@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator, field_valida
 from pydantic.json_schema import SkipJsonSchema
 
 from schemas.scene import ScenePromptSegment
+from schemas.creation_plan import PlanConfirmation
 
 
 LEGACY_AGENT_DEFAULTS = {
@@ -95,6 +96,7 @@ class PromptTargetStatusOut(AgentTarget):
 
 
 class AgentRunRequest(BaseModel):
+    plan_confirmation: PlanConfirmation | None = None
     production_intents: list["ProductionIntent"] = Field(default_factory=list, max_length=100)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

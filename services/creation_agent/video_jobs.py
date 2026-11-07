@@ -155,8 +155,16 @@ class VideoProductionHandler:
         from schemas.agent_workflow import CompletePrompt
 
         execution = current_execution.get()
+        from models.agent_operation import AgentOperation
+        from services.creation_agent.waiting import WaitingForMedia
+        completed = await AgentOperation.get_or_none(task_id=params['task_id'], key='media:video', state='completed')
+        if completed:
+            raise WaitingForMedia(completed.result)
         req = VideoGenerateRequest.model_validate(params["video_request"])
         scene = await Scene.get(id=req.scene_id)
+        if params.get('creation_plan_id'):
+            from services.creation_agent.media_preparation import prepare_planned_media
+            await prepare_planned_media(execution, kind='scene', target=scene)
         if not (scene.prompt or "").strip():
             generated = await execution.generate(
                 "video",
@@ -175,6 +183,9 @@ class VideoProductionHandler:
 
         async def invoke():
             await execution.before_request()
+            if params.get('creation_plan_id'):
+                from services.creation_agent.media_preparation import validate_prepared_media
+                await validate_prepared_media(execution, scene)
             video = await video_controller._submit_generation(
                 req,
                 media_base_url=params.get("media_base_url", ""),

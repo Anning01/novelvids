@@ -174,7 +174,34 @@ class ExtractionTaskHandler(BaseTaskHandler):
         from services.creation_agent.operation_receipts import execute_step
         execution = current_execution.get()
         async def persist():
-            return await self.upsert_service.save_result(novel_id=novel_id,
-                chapter_number=context.chapter.number, result=result)
+            from services.creation_agent.step_context import step_context, validate_step_inputs
+            from services.creation_objects import project_write
+            plan_context = await step_context(request_params)
+            async with project_write(novel_id):
+                await validate_step_inputs(request_params)
+                from models.asset import Asset
+                from services.creation_agent.object_state import object_state, object_version, object_label, creation_version
+                before = {asset.id: await object_state(asset) for asset in await Asset.filter(novel_id=novel_id)} if plan_context else {}
+                options = {'preserve_existing': plan_context.step.mode == 'fill_missing', 'include_ids': True} if plan_context else {}
+                summary = await self.upsert_service.save_result(novel_id=novel_id,
+                    chapter_number=context.chapter.number, result=result, **options)
+                if plan_context:
+                    from models.creation_agent import PromptChange
+                    from services.creation_agent.plan_sources import fingerprint
+                    identifiers = [item['asset_id'] for group in summary.values() for item in group]
+                    summary['asset_ids'] = sorted(set(identifiers))
+                    changes = []
+                    for asset in await Asset.filter(id__in=identifiers):
+                        previous, after = before.get(asset.id, {}), await object_state(asset)
+                        if previous == after:
+                            continue
+                        changes.append({'kind': 'asset', 'target_id': asset.id, 'target_label': await object_label(asset),
+                            'operation': 'update' if previous else 'create', 'before': previous, 'after': after,
+                            'after_version': await object_version(asset), 'constraint_ids': [],
+                            'recovery': {} if previous else {'creation_version': await creation_version(asset)}})
+                    if changes:
+                        await PromptChange.create(novel_id=novel_id, task_id=execution.params['task_id'],
+                            tool_call_id='persist:assets', request_hash=fingerprint(result.model_dump()), changes=changes)
+                return summary
         summary = await execute_step(execution.params['task_id'], 'persist:assets', persist, atomic=True) if execution else await persist()
         return {**summary, "token_usage": getattr(extractor, "last_usage", {})}

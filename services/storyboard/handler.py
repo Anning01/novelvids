@@ -55,6 +55,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
         )
         all_assets = await Asset.filter(novel_id=chapter.novel_id)
         assets = [a for a in all_assets if chapter.number in (a.source_chapters or [])]
+        from services.creation_agent.step_context import context_assets
+        additional_assets = await context_assets(request_params)
+        assets = list({asset.id: asset for asset in [*assets, *additional_assets]}.values())
 
         # 2. 构建实体上下文
         entities = [
@@ -69,6 +72,14 @@ class StoryboardTaskHandler(BaseTaskHandler):
             if AssetTypeEnum(asset.asset_type)
             in (AssetTypeEnum.person, AssetTypeEnum.scene, AssetTypeEnum.item)
         ]
+        from services.creation_agent.step_context import step_context
+        plan_context = await step_context(request_params)
+        if plan_context:
+            from models.asset_variant import AssetVariant
+            from services.storyboard.entities import entities_for_assets
+            selected = {row.asset_id: row.id for row in await AssetVariant.filter(id__in=plan_context.step.variant_ids)}
+            loaded = await Asset.filter(id__in=[asset.id for asset in assets]).prefetch_related('variants')
+            entities = entities_for_assets(loaded, chapter.number, selected)
 
         # 3. 调用 OpenAI API 生成分镜
         creative_constraints = await creation_memory.for_generation(chapter, assets)
@@ -150,6 +161,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))
             async def persist():
                 async with project_write(chapter.novel_id):
+                    from services.creation_agent.step_context import validate_step_inputs
+                    await validate_step_inputs(execution.params)
                     from models.ai_task import AiTask
                     from services.creation_agent.object_state import object_version
                     task = await AiTask.get(id=execution.params['task_id'])
@@ -178,6 +191,12 @@ class StoryboardTaskHandler(BaseTaskHandler):
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
+        selected_variants = {}
+        if execution and execution.params.get('creation_plan_id'):
+            from services.creation_agent.step_context import step_context
+            from models.asset_variant import AssetVariant
+            context = await step_context(execution.params)
+            selected_variants = {str(row.asset_id): row.id for row in await AssetVariant.filter(id__in=context.step.variant_ids)}
 
         for shot in storyboard.shots:
             original_description = shot.description
@@ -277,6 +296,10 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 metadata=scene_metadata
             ))
             await objects.bind_assets(scene, referenced_asset_ids)
+            bindings = {str(asset_id): selected_variants[str(asset_id)] for asset_id in referenced_asset_ids if str(asset_id) in selected_variants}
+            if bindings:
+                scene.metadata = {**scene.metadata, 'asset_variant_ids': bindings}
+                await scene.save(update_fields=['metadata'])
 
             scenes_created.append(scene)
 

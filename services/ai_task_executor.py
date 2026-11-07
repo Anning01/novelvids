@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
 from services.creation_agent.waiting import WaitingForMedia
+from services.creation_agent.waiting import WaitingForDependencies
 from services.task_signals import task_signals
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
@@ -106,7 +107,7 @@ class AiTaskExecutor:
         for task in stale_tasks:
             if task.request_params.get('operation') == 'editor_render':
                 continue  # Local render leases own recovery, cancellation and timeouts.
-            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.status in {1, 6} or task.stage in {"waiting_media", "needs_review"}):
+            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.status in {1, 6} or task.stage in {"waiting_media", "waiting_dependencies", "needs_review"} or task.request_params.get('operation') == 'creation_plan'):
                 continue
             handler = self._handlers.get(task_type)
             timeout = (handler.timeout_seconds(task.request_params) if handler else None) or TASK_TIMEOUT.get(task_type, 60)
@@ -219,7 +220,9 @@ class AiTaskExecutor:
 
         # 标记为执行中
         claimed = await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.queued.value]).update(
-            status=TaskStatusEnum.running.value, started_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+            status=TaskStatusEnum.running.value,
+            started_at=task.started_at if task.request_params.get('operation') == 'creation_plan' and task.started_at else datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc))
         if not claimed:
             return
         await task.refresh_from_db()
@@ -235,6 +238,8 @@ class AiTaskExecutor:
             await self._complete(task, result)
         except WaitingForMedia as waiting:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
+        except WaitingForDependencies:
+            await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_dependencies')
         except asyncio.TimeoutError as error:
             await self._fail(task, localized_message("任务超时（{p0}s）", p0=timeout), error=error)
         except Exception as e:
@@ -291,7 +296,8 @@ class AiTaskExecutor:
             updated_at=datetime.now(timezone.utc),
         )
         await task.refresh_from_db()
-        await task_signals.publish(str(task.id))
+        if task.request_params.get('operation') != 'creation_plan':
+            await task_signals.publish(str(task.id))
         if task.status == TaskStatusEnum.cancelled.value and task.request_params.get('workflow_version') == 'agent-skills-v1':
             await AiTask.filter(id=task.id).update(response_data=result)
         versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
@@ -329,7 +335,7 @@ class AiTaskExecutor:
             ],
         )
         for task in stale:
-            if task.request_params.get("workflow_version") == "agent-skills-v1" and task.task_type != AiTaskTypeEnum.creation_agent.value:
+            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.task_type != AiTaskTypeEnum.creation_agent.value or task.request_params.get('operation') == 'creation_plan'):
                 continue
             logger.warning("Boot cleanup: failing stale task #%s", task.id)
             await self._fail(

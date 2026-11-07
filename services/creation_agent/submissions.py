@@ -107,6 +107,12 @@ async def bind_submission(task, params=None):
     from services.creation_agent.skill_execution import user_instruction
 
     params = envelope(task.request_params if params is None else params)
+    from services.creation_agent.skill_execution import current_execution
+    execution = current_execution.get()
+    expected_plan = params.get('creation_plan_id') or (execution.params.get('creation_plan_id') if execution else None)
+    expected_step = params.get('creation_step_id') or (execution.params.get('creation_step_id') if execution else None)
+    if (task.request_params.get('creation_plan_id'), task.request_params.get('creation_step_id')) != (expected_plan, expected_step):
+        raise HTTPException(409, localized_message('已有任务属于不同创作方案，请等待完成后重试'))
     if task.request_params.get("instruction_message_id") != params.get("instruction_message_id"):
         if await user_instruction(task.request_params) != await user_instruction(params):
             raise HTTPException(409, localized_message("已有任务的创作要求不同，请等待完成或停止后重新提交"))

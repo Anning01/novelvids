@@ -73,9 +73,12 @@ export interface AgentProgress {
 }
 
 export interface PendingProduction {
+  plan_confirmation?: { task_id: string; revision: string }
+  summary?: string
+  read_chapters?: string[]
   confirmation_request_id: string
   message: string
-  labels: { operation: string; target_label: string }[]
+  labels: { operation: string; target_label: string; mode?: 'fill_missing' | 'regenerate' | 'revise'; instructions?: string }[]
   intents: ProductionIntent[]
   chapter_id: number | null
   targets: AgentTarget[]
@@ -130,6 +133,7 @@ export interface ProductionIntent {
 }
 
 export interface AgentRunInput {
+  plan_confirmation?: { task_id: string; revision: string }
   production_intents?: ProductionIntent[]
   request_id: string
   message: string

@@ -613,7 +613,7 @@ async def read_skill(ctx: RunContext[CreationAgentDeps], name: str) -> str:
     return execution.snapshot.read(name)
 
 
-@creation_agent.tool
+@creation_agent.tool(sequential=True)
 async def submit_production(ctx: RunContext[CreationAgentDeps], intent_index: int = 0) -> dict:
     """仅在用户明确要求生成时使用。服务端从本轮原话核对范围并提交真实任务。"""
     from services.creation_agent.intent_tools import submit_intent
@@ -621,6 +621,17 @@ async def submit_production(ctx: RunContext[CreationAgentDeps], intent_index: in
     if ctx.deps.changes is None or ctx.deps.source_message is None:
         raise ModelRetry(localized_message('此历史运行不支持生成'))
     request = ctx.deps.changes.request
+    from services.creation_agent.skill_execution import current_execution
+    execution = current_execution.get()
+    if execution and 'creation_planning' in execution.snapshot.contents and not request.production_intents:
+        from services.creation_agent.plans import CreationPlanner, plan_proposal
+        try:
+            plan = await CreationPlanner(execution, ctx.deps.source_message).prepare(request)
+        except ValueError as error:
+            raise ModelRetry(str(error)) from None
+        if plan is not None:
+            return {'status': 'confirmation_required', 'submitted': False,
+                    'plan': await plan_proposal(execution.params['task_id'])}
     if not request.production_intents:
         request = await resolve_production_intents(request, ctx.deps.changes.novel_id, ctx.deps.source_message)
         ctx.deps.changes.request = request

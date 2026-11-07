@@ -158,6 +158,8 @@ class AssetUpsertService:
         novel_id: int,
         chapter_number: int,
         result: AssetExtractionResult,
+        preserve_existing: bool = False,
+        include_ids: bool = False,
     ) -> dict[str, list[dict[str, str]]]:
         summary: dict[str, list[dict[str, str]]] = {}
         async with in_transaction() as connection:
@@ -168,6 +170,8 @@ class AssetUpsertService:
                     chapter_number=chapter_number,
                     asset_type=asset_type,
                     items=getattr(result, result_key),
+                    preserve_existing=preserve_existing,
+                    include_ids=include_ids,
                 )
         return summary
 
@@ -179,6 +183,8 @@ class AssetUpsertService:
         chapter_number: int,
         asset_type: AssetTypeEnum,
         items: list[ExtractedAsset],
+        preserve_existing: bool = False,
+        include_ids: bool = False,
     ) -> list[dict[str, str]]:
         saved: list[dict[str, str]] = []
         existing_assets = await Asset.filter(
@@ -195,6 +201,9 @@ class AssetUpsertService:
             existing = _match_identity(item, existing_assets, batch_names)
 
             if existing:
+                if preserve_existing:
+                    saved.append({'name': item.name, 'action': 'preserved', **({'asset_id': existing.id} if include_ids else {})})
+                    continue
                 existing_last_chapter = int(existing.last_updated_chapter or 0)
                 existing_metadata = (
                     dict(existing.metadata)
@@ -254,7 +263,7 @@ class AssetUpsertService:
                         "updated_at",
                     ],
                 )
-                saved.append({"name": item.name, "action": "updated"})
+                saved.append({"name": item.name, "action": "updated", **({'asset_id': existing.id} if include_ids else {})})
                 continue
 
             created = await Asset.create(
@@ -270,6 +279,6 @@ class AssetUpsertService:
                 last_updated_chapter=chapter_number,
             )
             existing_assets.append(created)
-            saved.append({"name": item.name, "action": "created"})
+            saved.append({"name": item.name, "action": "created", **({'asset_id': created.id} if include_ids else {})})
 
         return saved

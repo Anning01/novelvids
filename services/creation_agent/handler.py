@@ -95,6 +95,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         task_id = request_params["task_id"]
         user_message = await AgentMessage.get(task_id=task_id, role="user")
         assistant = await AgentMessage.get(task_id=task_id, role="assistant")
+        if request_params.get('operation') == 'creation_plan':
+            from services.creation_agent.plan_execution import run_confirmed_plan
+            return await run_confirmed_plan(request_params, assistant)
         conversation = await AgentConversation.get(id=assistant.conversation_id)
         request = AgentRunRequest.model_validate(public_run_input(user_message.run_input))
         limits = AgentConfiguration.model_validate(request_params["agent_configuration"])
@@ -184,6 +187,10 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             await assistant.save(update_fields=['usage'])
             await AgentMessage.filter(id=assistant.id).update(native_messages=json.loads(result.new_messages_json()))
             final_text = result.output.message if isinstance(result.output, CreationReply) else result.output
+            if request_params.get('has_creation_plan'):
+                # Preparing a plan is not a production receipt. Do not let a
+                # conversational closing sentence misreport it as completed work.
+                final_text = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
             yield TextMessageStartEvent(message_id=final_message_id)
             yield TextMessageContentEvent(message_id=final_message_id, delta=final_text)
             yield TextMessageEndEvent(message_id=final_message_id)

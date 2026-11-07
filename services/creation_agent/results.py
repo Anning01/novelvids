@@ -46,7 +46,10 @@ def undo_change_ids(events: list[dict]) -> set[int]:
 
 
 async def message_changes(message: AgentMessage, novel_id: int, events: list[dict]) -> list[PromptChange]:
-    rows = await PromptChange.filter(task_id=message.task_id, novel_id=novel_id).order_by('id')
+    from models.agent_operation import AgentOperation
+    children = await AgentOperation.filter(task_id=message.task_id, key__startswith='submit:', state='completed')
+    ids = [message.task_id, *[row.result['task_id'] for row in children if row.result.get('task_id')]]
+    rows = await PromptChange.filter(task_id__in=ids, novel_id=novel_id).order_by('id')
     ids = undo_change_ids(events)
     if ids:
         own_tasks = await AgentMessage.filter(conversation_id=message.conversation_id).values_list('task_id', flat=True)
@@ -64,6 +67,11 @@ async def changes_by_message(messages: list[AgentMessage], novel_id: int,
     for change in await PromptChange.filter(task_id__in=[message.task_id for message in messages],
                                             novel_id=novel_id).order_by('id'):
         grouped.setdefault(change.task_id, []).append(change)
+    from models.agent_operation import AgentOperation
+    children = await AgentOperation.filter(task_id__in=[message.task_id for message in messages], key__startswith='submit:', state='completed')
+    owners = {row.result['task_id']: row.task_id for row in children if row.result.get('task_id')}
+    for change in await PromptChange.filter(task_id__in=list(owners), novel_id=novel_id).order_by('id'):
+        grouped.setdefault(owners[str(change.task_id)], []).append(change)
     result = {message.id: list(grouped.get(message.task_id, [])) for message in messages}
     referenced: dict[int, list[int]] = {}
     for message in messages:
