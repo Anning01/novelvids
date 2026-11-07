@@ -60,6 +60,9 @@ def compact_retry_history(messages: list[ModelMessage]) -> list[ModelMessage]:
     if not failed_call_ids:
         return messages
 
+    latest_retry = next((part for message in reversed(messages) for part in reversed(message.parts)
+                         if isinstance(part, RetryPromptPart)), None)
+
     compacted = []
     for message in messages:
         parts = []
@@ -69,7 +72,8 @@ def compact_retry_history(messages: list[ModelMessage]) -> list[ModelMessage]:
                 part = replace(part, args={'retry_context': '未通过校验的完整参数已省略，请按后续错误修正'})
                 changed = True
             elif isinstance(part, RetryPromptPart):
-                content = _compact_retry_content(part.content)
+                content = (part.content if part is latest_retry and isinstance(part.content, str)
+                           else _compact_retry_content(part.content))
                 if content != part.content:
                     part = replace(part, content=content)
                     changed = True

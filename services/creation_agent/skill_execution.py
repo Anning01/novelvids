@@ -244,8 +244,17 @@ class SkillExecution:
             on_activity=report_activity,
         )
         request_aspect_ratio = "16:9"
-        from services.storyboard.speech_timing import StoryboardSpeechValidator
-        speech_validator = StoryboardSpeechValidator(self.snapshot) if skill == "storyboard" else None
+        from services.storyboard.candidates import StoryboardCandidateValidator
+        storyboard_candidates = (StoryboardCandidateValidator(output_type, self.snapshot, self.language,
+            self.params.get('shot_duration_range'), facts)
+            if skill == 'storyboard' and 'shots' in output_type.model_fields else None)
+        storyboard_checkpoint = None
+        if storyboard_candidates:
+            from models.agent_operation import AgentOperation
+            saved = await AgentOperation.get_or_none(task_id=self.params['task_id'], key=f'candidate:storyboard:{segment}', state='completed')
+            if saved:
+                storyboard_checkpoint = saved.result
+                storyboard_candidates.restore(storyboard_checkpoint)
         if skill in {'storyboard', 'video'}:
             from prompts.creation_plan import resolved_storyboard_resources_instructions
             additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
@@ -254,7 +263,7 @@ class SkillExecution:
             instructions=instructions(self.snapshot, self.language, skill) + (
                 "\n" + additional_instructions if additional_instructions else ""
             ),
-            output_type=output_type,
+            output_type=storyboard_candidates.draft_type if storyboard_candidates else output_type,
             retries=2,
         )
 
@@ -308,32 +317,16 @@ class SkillExecution:
                     validate_asset_design(output.prompt, kind, ctx.deps, self.language, request_aspect_ratio)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
-            if skill == "storyboard" and hasattr(output, "shots"):
+            if storyboard_candidates:
                 from pydantic_ai import ModelRetry
-                from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration
-
-                try:
-                    if speech_validator is not None:
-                        speech_validator.validate(output.shots)
-                    for shot in output.shots:
-                        validate_storyboard_duration(shot, self.params.get("shot_duration_range"))
-                        if "storyboard_contract" in ctx.deps.contents:
-                            validate_skill_storyboard_timing(shot)
-                    source_facts = facts
-                    while isinstance(source_facts, dict) and 'original_input' in source_facts:
-                        source_facts = source_facts['original_input']
-                    if isinstance(source_facts, dict) and 'entities' in source_facts and 'storyboard_contract' in ctx.deps.contents:
-                        from schemas.scene import SceneEntity
-                        from services.storyboard.validation import prepare_skill_storyboard
-                        from services.storyboard.strategies import storyboard_strategy_factory
-                        from services.creation_agent.prompt_edits import validate_prompt_dependencies
-                        entities = [SceneEntity.model_validate(item) for item in source_facts['entities']]
-                        strategy = storyboard_strategy_factory.resolve(source_facts.get('strategy'))
-                        prepared = prepare_skill_storyboard(output, ctx.deps, self.language, entities, strategy.key)
-                        for shot in prepared.shots:
-                            validate_prompt_dependencies(shot.prompt, entities)
-                except ValueError as error:
-                    raise ModelRetry(str(error)) from None
+                from models.agent_operation import AgentOperation
+                from prompts.storyboard_repair import structural_repair
+                merged, checkpoint = storyboard_candidates.merge(output)
+                await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:storyboard:{segment}',
+                    defaults={'state': 'completed', 'result': checkpoint})
+                if merged is None:
+                    raise ModelRetry(structural_repair(self.language, checkpoint))
+                output = merged
             if output_validator and skill != 'assets':
                 from pydantic_ai import ModelRetry
                 try:
@@ -344,6 +337,8 @@ class SkillExecution:
 
         async def invoke():
             nonlocal request_aspect_ratio
+            if storyboard_checkpoint and not storyboard_checkpoint['pending'] and not storyboard_checkpoint['protocol_errors']:
+                return storyboard_candidates.result().model_dump(mode='json')
             from models.novel import Novel
 
             project = await Novel.get(id=self.params["novel_id"])
@@ -382,6 +377,8 @@ class SkillExecution:
                     if key in self.params
                 },
             }
+            if storyboard_candidates and isinstance(facts, dict) and 'storyboard_repair' in facts:
+                request_facts['input'] = {key: value for key, value in facts.items() if key != 'storyboard_repair'}
             from services.creation_agent.step_context import step_context
             context = await step_context(self.params) if skill in {'assets', 'storyboard', 'image', 'video'} else None
             if context:
@@ -406,6 +403,13 @@ class SkillExecution:
                         *(media or []),
                     ]
             from pydantic_ai import capture_run_messages
+
+            if storyboard_checkpoint:
+                from prompts.storyboard_repair import structural_repair
+                checkpoint = {**storyboard_checkpoint,
+                    'candidates': {int(key): value for key, value in storyboard_checkpoint['candidates'].items()},
+                    'pending': {int(key): value for key, value in storyboard_checkpoint['pending'].items()}}
+                user_input = [*(user_input if isinstance(user_input, list) else [user_input]), structural_repair(self.language, checkpoint)]
 
             with capture_run_messages() as run_messages:
                 try:
@@ -448,6 +452,9 @@ class SkillExecution:
             from pydantic_ai.exceptions import UnexpectedModelBehavior
             if isinstance(error, UnexpectedModelBehavior) and asset_candidates and asset_candidates.issues:
                 raise AssetExtractionValidationError(asset_candidates.issues) from error
+            if isinstance(error, UnexpectedModelBehavior) and storyboard_candidates and storyboard_candidates.pending:
+                details = '；'.join(f'{number}: {" / ".join(issues)}' for number, issues in storyboard_candidates.pending.items())
+                raise ValueError(localized_message('部分分镜修正仍未通过，已保留合格镜头与候选：{p0}', p0=details)) from error
             raise
         finally:
             try:

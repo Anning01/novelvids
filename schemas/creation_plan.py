@@ -135,6 +135,7 @@ class RequirementFinding(PlanModel):
     passed: bool
     location: str
     detail: str
+    shot_sequences: list[int] = Field(default_factory=list, description='Existing storyboard shot numbers that require editing; [] when not localizable')
 
 
 class CreativeCheck(PlanModel):

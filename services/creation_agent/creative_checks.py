@@ -62,11 +62,17 @@ async def check_candidate(execution, skill, facts, candidate, context, attempt):
             raise ValueError(localized_message('请逐条返回这些 requirement_id，不增不漏：{p0}', p0=', '.join(sorted(expected))))
         if any(item.passed and not item.location.strip() for item in report.findings):
             raise ValueError(localized_message('检查结果缺少候选内容依据'))
+        if hasattr(candidate, 'shots'):
+            available = {shot.sequence for shot in candidate.shots}
+            if any(number not in available for item in report.findings for number in item.shot_sequences):
+                raise ValueError('shot_sequences must reference existing candidate shots')
     review_facts = {
         'segment': f'{skill}:{segment}:check:{attempt}', 'step_context': context.model_dump(mode='json'),
         'input': facts, 'candidate': candidate.model_dump(mode='json'),
     }
-    report = await execution._generate('creative_check', review_facts, CreativeCheck, output_validator=validate_report)
+    from prompts.storyboard_repair import review_locations
+    report = await execution._generate('creative_check', review_facts, CreativeCheck, output_validator=validate_report,
+        additional_instructions=review_locations(execution.language) if hasattr(candidate, 'shots') else '')
     try:
         await validate_report(report)
     except ValueError:
@@ -120,8 +126,19 @@ async def generate_checked(execution, skill, facts, output_type, options, contex
     repaired_facts = {'segment': f'{original_segment}:creative-repair:1', 'original_input': facts,
         'candidate': candidate.model_dump(mode='json'), 'creative_check': report.model_dump(mode='json')}
     repaired_options = {**options, 'additional_instructions': options.get('additional_instructions', '') + '\n' + correction_instructions(execution.language)}
-    candidate = await execution._generate(skill, repaired_facts, output_type, **repaired_options)
-    report = await check_candidate(execution, skill, facts, candidate, context, 1)
+    targets = None
+    if skill == 'storyboard' and hasattr(candidate, 'shots'):
+        from prompts.storyboard_repair import semantic_repair
+        targets = sorted({number for item in report.findings if not item.passed for number in item.shot_sequences})
+        repaired_facts.pop('candidate')
+        repaired_facts['storyboard_repair'] = {'candidate': candidate.model_dump(mode='json'), 'shot_sequences': targets}
+        repaired_facts['repair_targets'] = [shot.model_dump(mode='json') for shot in candidate.shots if shot.sequence in targets]
+        repaired_facts['read_only_neighbors'] = [shot.model_dump(mode='json') for shot in candidate.shots
+            if shot.sequence not in targets and any(abs(shot.sequence - number) == 1 for number in targets)]
+        repaired_options['additional_instructions'] = options.get('additional_instructions', '') + '\n' + semantic_repair(execution.language)
+    if targets is None or targets:
+        candidate = await execution._generate(skill, repaired_facts, output_type, **repaired_options)
+        report = await check_candidate(execution, skill, facts, candidate, context, 1)
     # Editorial findings must not discard a usable text draft. Structural,
     # reference, timing and version checks still run before chapter persistence.
     advisory = skill == 'storyboard' and context.step.operation == 'storyboard'
