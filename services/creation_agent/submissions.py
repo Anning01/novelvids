@@ -104,7 +104,14 @@ async def submit_once(task_type, params, create):
 
 
 async def bind_submission(task, params=None):
+    from services.creation_agent.skill_execution import user_instruction
+
+    params = envelope(task.request_params if params is None else params)
+    if task.request_params.get("instruction_message_id") != params.get("instruction_message_id"):
+        if await user_instruction(task.request_params) != await user_instruction(params):
+            raise HTTPException(409, localized_message("已有任务的创作要求不同，请等待完成或停止后重新提交"))
+
     async def existing(_connection):
         return task
 
-    return await submit_once(task.task_type, params or task.request_params, existing)
+    return await submit_once(task.task_type, params, existing)

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.usage import UsageLimits
 from models.creation_agent import AgentMessage
-from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills, task_facts
+from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills, task_facts, creative_requirements
 from services.creation_agent.model_boundary import RecordedAgentModel, main_request_count
 from utils.enums import AiTaskTypeEnum
 
@@ -62,6 +62,15 @@ async def prepare_workflow(params: dict) -> dict:
             )
         }
         inherited["origin_run_id"] = parent.params["task_id"]
+        source_id = parent.params.get("instruction_message_id")
+        if source_id is None:
+            source = await AgentMessage.get_or_none(
+                task_id=parent.params["task_id"], role="user",
+                task__task_type=AiTaskTypeEnum.creation_agent.value,
+            )
+            source_id = source.id if source else None
+        if source_id is not None:
+            inherited["instruction_message_id"] = source_id
     return {
         **params,
         **(submission.get() or {}),
@@ -71,6 +80,19 @@ async def prepare_workflow(params: dict) -> dict:
         "skill_snapshot": snapshot_skills(),
         **inherited,
     }
+
+
+async def user_instruction(params: dict) -> str:
+    source_id = params.get("instruction_message_id")
+    if source_id is None:
+        return ""
+    source = await AgentMessage.get_or_none(
+        id=source_id, role="user", conversation__novel_id=params["novel_id"],
+        conversation__team_id=params.get("team_id"),
+    )
+    if source is None:
+        raise ValueError(localized_message("原始创作要求已不可用，请重新提交任务"))
+    return source.content
 
 
 @dataclass
@@ -281,6 +303,14 @@ class SkillExecution:
                 if media
                 else task_facts(request_facts)
             )
+            if skill != "authorization":
+                requirement = await user_instruction(self.params)
+                if requirement:
+                    user_input = [
+                        task_facts(request_facts),
+                        creative_requirements(requirement, self.language),
+                        *(media or []),
+                    ]
             result = await agent.run(
                 user_input,
                 deps=self.snapshot,
