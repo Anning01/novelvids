@@ -133,3 +133,28 @@ def test_asset_design_rules_cover_specific_designs_instead_of_plot_summaries():
         "结构部件", "磨损", "普通校服", "逐项自检",
     ):
         assert requirement in rules
+
+
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('skill', ['assets', 'editing', 'image'])
+def test_all_asset_writers_receive_mandatory_format_above_user_preferences(language, skill):
+    snapshot = synthetic_snapshot()
+    rendered = instructions(snapshot, language, skill)
+    contract = json.loads(snapshot.read('asset_contract'))[language]
+    for kind in ('person', 'group', 'scene', 'item'):
+        assert contract[kind]['heading'] in rendered
+        assert contract[kind]['task'] in rendered
+    assert '用户补充要求只用于协议允许的设计内容' in rendered
+    assert '项目封面不适用资产协议' in rendered
+
+
+def test_creative_requirements_preserve_user_text_inside_mandatory_format():
+    from prompts.skill_pack import creative_requirements
+    text = '把主角弄帅一些，特别一些'
+    for language in ('zh', 'en'):
+        result = creative_requirements(text, language)
+        assert result.endswith(text)
+        assert '格式' in result if language == 'zh' else 'format' in result
+    from pathlib import Path
+    editing = (Path(__file__).parents[2] / 'prompts/skills/editing.md').read_text()
+    assert '不要求固定自然语言栏位' not in editing

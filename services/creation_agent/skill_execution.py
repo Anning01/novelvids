@@ -269,6 +269,18 @@ class SkillExecution:
                     validate_asset_prompt_contract(output, ctx.deps, self.language, request_aspect_ratio)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
+            if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
+                from pydantic_ai import ModelRetry
+                from prompts.creation_standards import ASSET_PROMPT_KINDS
+                from prompts.reference import GROUP_PORTRAIT
+                from services.extraction.extractor import validate_asset_design
+
+                kind = ('group' if facts['asset_type'] == 1 and facts.get('reference_layout') == GROUP_PORTRAIT
+                        else ASSET_PROMPT_KINDS[facts['asset_type']])
+                try:
+                    validate_asset_design(output.prompt, kind, ctx.deps, self.language, request_aspect_ratio)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
             if skill == "storyboard" and hasattr(output, "shots"):
                 from pydantic_ai import ModelRetry
                 from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration

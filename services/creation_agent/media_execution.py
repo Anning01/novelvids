@@ -12,12 +12,16 @@ async def prepare_image_prompt(asset, variant, params):
     target = variant or asset
     if (target.base_traits or "").strip():
         return
+    from services.creation_agent.prompt_standards import CreationPromptStandards
+
+    _, layout = await CreationPromptStandards(asset.novel_id).asset_kind(target)
     result = await execution.generate(
         "image",
         {
             "target": target.canonical_name if variant is None else target.name,
             "description": target.description,
             "asset_type": asset.asset_type,
+            "reference_layout": layout,
             "aspect_ratio": params.get("aspect_ratio"),
             "novel_id": asset.novel_id,
         },

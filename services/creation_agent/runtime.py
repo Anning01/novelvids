@@ -519,7 +519,7 @@ async def create_creation_setting(
     chapter_id: Annotated[int | None, Field(gt=0)] = None,
     reference_layout: Literal['character_turnaround', 'group_portrait'] = 'character_turnaround',
 ) -> dict:
-    """创建人物(1)、场景(2)或道具(3)；先读取 get_creation_prompt_rules，提交完整视觉描述，服务端渲染参考图任务。"""
+    """创建人物(1)、场景(2)或道具(3)；先读取 get_creation_prompt_rules，提交符合本轮资产输出协议的完整提示词，服务端校验后原样保存。"""
     service = crud_service(ctx)
     try:
         await service.authorize()

@@ -180,7 +180,13 @@ class PromptEditService:
                         )
                     else:
                         validate_image_prompt_edit(edit.prompt, target.base_traits or "")
-                        values = {"base_traits": edit.prompt}
+                        from services.creation_agent.prompt_standards import CreationPromptStandards
+
+                        standards = CreationPromptStandards(self.novel_id)
+                        asset = target if isinstance(target, Asset) else await Asset.get(id=target.asset_id)
+                        _, layout = await standards.asset_kind(target)
+                        prompt = await standards.prepare_asset(edit.prompt, asset_type=asset.asset_type, layout=layout)
+                        values = {"base_traits": prompt}
                     before = {field: getattr(target, field) for field in values}
                     version = await self._write(target, values, connection)
                     if isinstance(target, Scene):
