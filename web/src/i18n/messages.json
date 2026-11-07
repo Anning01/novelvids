@@ -3463,6 +3463,11 @@
     "准备图片提示词": "Preparing image prompts",
     "分析参考视频": "Analyzing reference video",
     "准备视频提示词": "Preparing video prompts",
-    "处理创作要求": "Processing creative requirements"
+    "处理创作要求": "Processing creative requirements",
+    "资产提取": "Asset extraction",
+    "图片生成": "Image generation",
+    "分镜生成": "Storyboard generation",
+    "视频重制": "Video remake",
+    "章节合成": "Episode composition"
   }
 }

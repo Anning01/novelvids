@@ -35,6 +35,8 @@ it('freezes the recorded duration and retains an expandable reasoning summary af
   await wrapper.setProps({ status: 3, finishedAt: '2026-11-07T04:00:12Z' })
   await vi.advanceTimersByTimeAsync(30_000)
   expect(wrapper.text()).toContain('用时 12 秒')
+  expect(wrapper.find('ol').exists()).toBe(false)
+  await wrapper.get('button[aria-label="执行过程"]').trigger('click')
   expect(wrapper.find('details').exists()).toBe(true)
   expect(wrapper.get('details').attributes('open')).toBeUndefined()
   expect(wrapper.find('.is-running').exists()).toBe(false)
@@ -58,5 +60,13 @@ it('shows a meaningful current state before steps arrive, without inventing hist
   expect(wrapper.text()).toContain('正在准备生成')
   expect(wrapper.find('ol').exists()).toBe(false)
   expect(wrapper.find('.agent-run-activity__elapsed').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it('does not repeat the operation name in the active summary', () => {
+  const wrapper = mount(AgentRunActivity, { props: { status: 2, operationLabel: '图片生成',
+    steps: [{ id: 'image', kind: 'status', label: '图片生成', status: 'running' }],
+  } })
+  expect(wrapper.get('.agent-run-activity__header').text()).toBe('图片生成')
   wrapper.unmount()
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Check, Circle, CircleAlert, Clock3, LoaderCircle } from 'lucide-vue-next'
+import { Check, ChevronRight, Circle, CircleAlert, Clock3, LoaderCircle } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import AgentActivity from './AgentActivity.vue'
 import { creationAgentToolOperationLabel, creationAgentToolProgressLabel } from './toolPresentation'
@@ -12,8 +12,11 @@ const props = defineProps<{
   startedAt?: string | null
   finishedAt?: string | null
   statusText?: string
+  operationLabel?: string
 }>()
 const active = computed(() => [1, 2, 6].includes(props.status))
+const expanded = ref(active.value)
+watch(active, running => { expanded.value = running })
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 watch(active, running => {
@@ -38,6 +41,7 @@ const activeStepLabel = computed(() => {
 })
 const stateText = computed(() => active.value ? (activeStepLabel.value || props.statusText || tr('正在处理你的创作要求'))
   : tr(({ 3: '已完成', 4: '本轮未完成', 5: '本轮已停止' } as Record<number, string>)[props.status] || '等待中'))
+const summaryText = computed(() => props.operationLabel && !active.value ? `${props.operationLabel} · ${stateText.value}` : stateText.value)
 function stepState(step: AgentActivityStep): string {
   return tr(step.status === 'completed' ? '已完成' : step.status === 'failed' ? '失败' : active.value ? '处理中' : '已结束')
 }
@@ -45,11 +49,12 @@ function stepState(step: AgentActivityStep): string {
 
 <template>
   <section class="agent-run-activity" :aria-label="tr('执行过程')">
-    <header class="agent-run-activity__header">
-      <AgentActivity :text="stateText" :active="active" />
+    <component :is="steps?.length ? 'button' : 'div'" class="agent-run-activity__header" :type="steps?.length ? 'button' : undefined" :aria-expanded="steps?.length ? expanded : undefined" :aria-label="steps?.length ? tr('执行过程') : undefined" @click="expanded = !expanded">
+      <ChevronRight v-if="steps?.length" :size="12" class="agent-run-activity__chevron" :class="{ 'is-expanded': expanded }" aria-hidden="true" />
+      <AgentActivity :text="summaryText" :active="active" />
       <span v-if="elapsed" class="agent-run-activity__elapsed"><Clock3 :size="12" aria-hidden="true" />{{ tr('用时 {p0}', { p0: elapsed }) }}</span>
-    </header>
-    <ol v-if="steps?.length" class="agent-run-activity__steps">
+    </component>
+    <ol v-if="steps?.length && expanded" class="agent-run-activity__steps">
       <li v-for="step in steps" :key="step.id" class="agent-run-activity__step" :class="{ 'is-running': step.status === 'running' && active, 'is-failed': step.status === 'failed' }">
         <Check v-if="step.status === 'completed'" class="agent-run-activity__icon" :size="13" aria-hidden="true" />
         <CircleAlert v-else-if="step.status === 'failed'" class="agent-run-activity__icon" :size="13" aria-hidden="true" />
@@ -69,9 +74,14 @@ function stepState(step: AgentActivityStep): string {
 </template>
 
 <style scoped>
-.agent-run-activity { margin: 4px 0 10px; min-width: 0; color: var(--app-text-secondary); font-size: 12px; }
-.agent-run-activity__header { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 3px 0 7px; }
-.agent-run-activity__elapsed { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.agent-run-activity { margin: 2px 0 8px; min-width: 0; color: var(--app-text-secondary); font-size: 12px; }
+.agent-run-activity__header { display: flex; align-items: center; gap: 7px; padding: 4px 0; width: fit-content; max-width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; }
+button.agent-run-activity__header { cursor: pointer; border-radius: 4px; }
+button.agent-run-activity__header:hover { color: var(--app-text); }
+button.agent-run-activity__header:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+.agent-run-activity__chevron { flex-shrink: 0; transition: transform .15s; }
+.agent-run-activity__chevron.is-expanded { transform: rotate(90deg); }
+.agent-run-activity__elapsed { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .agent-run-activity__steps { list-style: none; padding: 0; margin: 0 0 0 6px; }
 .agent-run-activity__step { position: relative; display: flex; gap: 10px; padding: 4px 0 8px 13px; border-left: 1px solid var(--app-border); }
 .agent-run-activity__step:last-child { padding-bottom: 2px; border-left-color: transparent; }
@@ -88,5 +98,5 @@ function stepState(step: AgentActivityStep): string {
 .is-failed { color: var(--creation-danger); }
 .agent-run-activity__spinner { animation: agent-step-spin 1.2s linear infinite; }
 @keyframes agent-step-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .agent-run-activity__spinner { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .agent-run-activity__chevron { transition: none; } .agent-run-activity__spinner { animation: none; } }
 </style>

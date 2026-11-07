@@ -433,3 +433,26 @@ it('retains history while payment recovery suspends new requests', async () => {
   expect(wrapper.get('[data-testid="sender"]').attributes('disabled')).toBeUndefined()
   wrapper.unmount()
 })
+
+it('presents a completed image job once without a redundant status paragraph or bullet list', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.messages = [{ id: 2, role: 'assistant', content: '已完成', task_id: 'image', status: 3,
+    changes: [], usage: {}, created_at: '2026-11-07T04:00:00Z', started_at: '2026-11-07T04:00:00Z', finished_at: '2026-11-07T04:00:51Z',
+    production: [{ task_id: 'image', operation: 'image', status: 3 }],
+  }]
+  await flushPromises()
+  expect(wrapper.text()).toContain('图片生成 · 已完成')
+  expect(wrapper.text()).toContain('用时 51 秒')
+  expect(wrapper.text().match(/已完成/g)).toHaveLength(1)
+  expect(wrapper.find('.creation-agent-panel__message').exists()).toBe(false)
+  expect(wrapper.find('.creation-agent-panel__production').exists()).toBe(false)
+  // Legacy completed jobs still have a result line without recorded timings.
+  store.messages[0]!.started_at = undefined
+  store.messages[0]!.finished_at = undefined
+  await flushPromises()
+  expect(wrapper.text()).toContain('图片生成 · 已完成')
+  wrapper.unmount()
+})

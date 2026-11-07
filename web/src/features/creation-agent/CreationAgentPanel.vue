@@ -24,7 +24,7 @@ import AgentDisclosure from './AgentDisclosure.vue'
 import AgentActivity from './AgentActivity.vue'
 import AgentRunActivity from './AgentRunActivity.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
-import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, PromptTargetStatus } from './types'
+import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, ProductionReceipt, PromptTargetStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; suspended?: boolean; phase?: 'script' | 'settings' | 'storyboard' | 'video'; initialConversationId?: number; initialUserText?: string; videoDefaults?: VideoGenerationOptions & { model_config_id: number } }>()
 const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]] }>()
@@ -90,12 +90,19 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
+const productionLabel = (operation: string) => tr(({ story: '项目分析', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
+function singleProductionResult(message: { role: string; content: string; production?: ProductionReceipt[] }): ProductionReceipt | undefined {
+  const receipt = message.production?.length === 1 ? message.production[0] : undefined
+  return message.role === 'assistant' && ['已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined
+}
 const bubbles = computed(() => store.messages.map(message => props.initialUserText && store.conversationId === props.initialConversationId
   && message.id === store.messages.find(item => item.role === 'user')?.id ? { ...message, content: props.initialUserText } : message).filter(message => message.role === 'user' ||
   message.content || message.query_results?.length || message.changes.length || message.activity?.length || message.production?.length || message.started_at || [1, 2, 4, 5, 6].includes(message.status),
 ).map(message => ({ ...message,
   activityStatus: message.production?.some(receipt => [1, 2, 6].includes(receipt.status)) ? 2 : message.status,
-  paragraphs: message.content.split(/\n\s*\n/).filter(Boolean),
+  singleProductionResult: singleProductionResult(message),
+  paragraphs: singleProductionResult(message) ? [] : message.content.split(/\n\s*\n/).filter(Boolean),
+  noStyle: message.role === 'assistant',
   preview: message.content.replace(/\s+/g, ' ').slice(0, 90) || (message.changes.length ? tr('{p0} 条修改记录', { p0: message.changes.length }) : message.status === 4 ? tr('本轮未完成') : tr('查询与处理记录')),
   placement: message.role === 'user' ? 'end' as const : 'start' as const,
   variant: message.role === 'user' ? 'filled' as const : 'borderless' as const,
@@ -329,12 +336,12 @@ onMounted(() => {
     <AppButton v-if="store.nextBefore" size="xs" @click="operation(() => store.history(store.nextBefore || undefined))">{{ tr('查看更早的消息') }}</AppButton>
     <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
-        <AgentDisclosure class="creation-agent-panel__message-group" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
-        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at)" :status="item.activityStatus" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" />
-        <div v-if="item.content" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
+        <AgentDisclosure class="creation-agent-panel__message-group" :class="{ 'is-assistant': item.role === 'assistant' }" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
+        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" />
+        <div v-if="item.paragraphs.length" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
-        <p v-if="item.role === 'assistant' && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? tr('本轮已停止') : tr('本轮未完成') }}{{ item.changes.length ? tr('，已保存的修改见下方记录') : tr('，尚未保存修改') }}</p>
+        <p v-if="item.role === 'assistant' && !item.singleProductionResult && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? tr('本轮已停止') : tr('本轮未完成') }}{{ item.changes.length ? tr('，已保存的修改见下方记录') : tr('，尚未保存修改') }}</p>
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
@@ -342,20 +349,21 @@ onMounted(() => {
           <ul><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
           <AppButton :disabled="!writable || store.busy || suspended" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
         </div>
-        <ul v-if="item.production?.length" class="creation-agent-panel__production">
+        <ul v-if="item.production?.length && !item.singleProductionResult" class="creation-agent-panel__production">
           <li v-for="receipt in item.production" :key="receipt.task_id">
-            {{ tr('生成任务') }} · {{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[receipt.operation] || receipt.operation) }} · {{ tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
+            {{ productionLabel(receipt.operation) }} · {{ tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
             <span v-if="receipt.stage === 'billing_pending'">{{ tr('用量正在结算') }}</span>
             <span v-if="receipt.error">{{ receipt.error }}</span>
           </li>
         </ul>
+        <p v-if="item.singleProductionResult?.error" class="creation-agent-panel__round-status">{{ item.singleProductionResult.error }}</p>
         <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
         </AgentDisclosure>
       </template>
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? tr('{p0} 条新消息', { p0: unreadCount }) : tr('回到最新') }}</AppButton></template>
     </BubbleList>
     <footer v-if="ready && !store.loading">
-      <AgentDisclosure v-if="(!store.busy && !currentProductionActive && store.statusText) || store.error || pendingCount || statusError || (store.busy && !store.streamConnected)" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
+      <AgentDisclosure v-if="(!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4 || store.currentRun?.status === 5)) || store.error || pendingCount || statusError || (store.busy && !store.streamConnected)" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
         <template #title><AgentActivity :text="statusLabel" :active="false" /></template>
         <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待核对', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('待核对') }} {{ pendingCount }}</button></template>
       <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
@@ -403,6 +411,11 @@ onMounted(() => {
 .creation-agent-panel__welcome p { color: var(--app-text-secondary); line-height: 1.8; margin: 0; }
 .creation-agent-panel__welcome span { font-size: 12px; color: var(--app-text-secondary); }
 .creation-agent-panel__messages { flex: 1; min-width: 0; min-height: 0; padding: 8px 12px; overflow-y: auto; overflow-x: hidden; }
+.creation-agent-panel__production { list-style: none; margin: 6px 0; padding: 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; }
+.creation-agent-panel__production li + li { margin-top: 3px; }
+.creation-agent-panel__message-group.is-assistant :deep(.agent-disclosure__toggle) { width: fit-content; flex: none; font-size: 12px; }
+.creation-agent-panel__message-group.is-assistant :deep(.agent-disclosure__title) { color: var(--app-text); font-weight: 600; }
+.creation-agent-panel__message-group.is-assistant :deep(.agent-disclosure__body) { padding: 2px 0 0; }
 .creation-agent-panel__message { overflow-wrap: anywhere; line-height: 1.65; }
 .creation-agent-panel__message p { margin: 0; white-space: pre-wrap; }.creation-agent-panel__message p + p { margin-top: 6px; }
 .creation-agent-panel > footer { padding: 4px 10px 6px; border-top: 1px solid var(--app-border); margin-top: auto; background: var(--app-surface); max-height: 48%; overflow-y: auto; }
@@ -416,7 +429,7 @@ onMounted(() => {
 .creation-agent-panel__pending-chip:focus-visible { outline: 2px solid var(--app-accent); }
 .creation-agent-panel :deep(.elx-bubble-list__list) { gap: 10px; }
 .creation-agent-panel :deep(.elx-bubble__content) { padding: 2px 8px; border-radius: 9px; min-height: 0; white-space: normal; }
-.creation-agent-panel :deep(.elx-bubble__content--borderless) { padding: 0; background: transparent; }
+.creation-agent-panel :deep(.elx-bubble--start .elx-bubble__content-wrapper .elx-bubble__content) { width: 100%; padding: 0; border: 0; border-radius: 0; min-height: 0; background: transparent; box-shadow: none; }
 .creation-agent-panel :deep(.elx-bubble__footer:empty) { display: none; }
 .creation-agent-panel :deep(.elx-bubble__content-wrapper) { gap: 0; }
 .creation-agent-panel :deep(.elx-bubble--end .agent-disclosure__summary) { color: var(--app-text); }
