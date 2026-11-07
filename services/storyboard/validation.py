@@ -81,6 +81,8 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     contract = json.loads(snapshot.read("storyboard_contract"))
     shot = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities))
     prompt = shot.prompt or ""
+    from services.storyboard.entities import shot_variant_bindings
+    shot_variant_bindings(shot, entities)
     position = 0
     for section in contract["sections"]:
         label = prompt_label(section, language)

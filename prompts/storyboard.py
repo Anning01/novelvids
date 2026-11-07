@@ -260,6 +260,7 @@ def _asset_payload(entities: Sequence[StoryboardEntity]) -> str:
             "aliases": entity.aliases,
             "visual_description": entity.description,
             "reference_syntax": f"@{{{entity.name}}}",
+            **({"chapter_numbers": entity.chapter_numbers} if getattr(entity, "chapter_numbers", []) else {}),
         }
         for entity in entities
     ]
@@ -341,14 +342,13 @@ def entity_reference_names(
 
     实体名或别名只要命中一次即视为被引用，这是分镜资产引用的唯一判定逻辑。
     """
-    return [
-        entity
-        for entity in entities
-        if any(
-            f"@{{{name}}}" in text or f"@{name}" in text
-            for name in (entity.name, *entity.aliases)
-        )
-    ]
+    names = {name for entity in entities for name in (entity.name, *entity.aliases) if name}
+    references = set(re.findall(r"@\{([^{}]+)\}", text))
+    unbraced = re.sub(r"@\{[^{}]+\}", "", text)
+    if names:
+        pattern = r"@(" + "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True)) + r")"
+        references.update(re.findall(pattern, unbraced))
+    return [entity for entity in entities if references.intersection((entity.name, *entity.aliases))]
 
 
 def referenced_entities(

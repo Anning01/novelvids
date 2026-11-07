@@ -29,7 +29,26 @@ class AssetExtractionGatewayError(RuntimeError):
         self.usage = usage or {}
 
 
-class Person(BaseModel):
+class ExtractedVariant(BaseModel):
+    name: str = Field(min_length=1, max_length=100, description="衍生形态名；与目录中相同形态必须使用相同名称")
+    description: str = Field(default="", description="形态的剧情阶段与适用情境")
+    base_traits: str = Field(min_length=1, description="遵循当前资产输出协议的完整形态生图提示词")
+    change_reason: str = Field(min_length=1, description="原文中支持重大外形变化的具体依据；复用时说明与已有形态相同")
+
+    @field_validator("name", "base_traits", "change_reason")
+    @classmethod
+    def nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Visual variant fields must not be blank")
+        return value.strip()
+
+
+class ExtractedAppearance(BaseModel):
+    variant: ExtractedVariant | None = Field(default=None,
+        description="本章有重大外形变化或沿用已有衍生时填写；普通措辞差异、动作表情、光线变化为 null，沿用基础形象")
+
+
+class Person(ExtractedAppearance):
     name: str = Field(description="标准名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
     label: Literal["人物", "动物", "群像"] = Field(
@@ -57,14 +76,14 @@ class Person(BaseModel):
         return "group_portrait" if self.label == "群像" else "character_turnaround"
 
 
-class Scene(BaseModel):
+class Scene(ExtractedAppearance):
     name: str = Field(description="场景名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
     description: str = Field(default="", description="任务指定语言的剧情语义说明")
     base_traits: str = Field(description="任务语言的完整场景生图提示词：空间规模拓扑、分层位置关系、固定陈设、材质光照、项目风格与四格透视版式")
 
 
-class Item(BaseModel):
+class Item(ExtractedAppearance):
     name: str = Field(description="道具名称")
     aliases: list[str] = Field(default_factory=list, description="别名列表")
     description: str = Field(default="", description="任务指定语言的剧情语义说明")
@@ -86,6 +105,8 @@ def validate_asset_prompt_contract(result: AssetExtractionResult, snapshot: Skil
     assets += [(item, "item") for item in result.items]
     for asset, kind in assets:
         validate_asset_design(asset.base_traits, kind, snapshot, language, aspect_ratio)
+        if asset.variant:
+            validate_asset_design(asset.variant.base_traits, kind, snapshot, language, aspect_ratio)
 
 
 def validate_asset_design(text: str, kind: str, snapshot: SkillSnapshot, language: str, aspect_ratio: str) -> None:

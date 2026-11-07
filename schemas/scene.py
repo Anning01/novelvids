@@ -22,6 +22,8 @@ class SceneEntity(BaseModel):
         description="实体类型，用于构建专业 Prompt 的资产引用章节",
     )
     asset_id: Optional[int] = Field(None, description="关联的资产ID，用于持久化分镜资产引用")
+    variant_id: int | None = Field(None, description="选定衍生形态ID；null 表示基础形象")
+    chapter_numbers: list[int] = Field(default_factory=list, description="已确认使用该形态的章节；回忆按剧情时间选择")
 
 
 # --- Asset 侧模型 ---

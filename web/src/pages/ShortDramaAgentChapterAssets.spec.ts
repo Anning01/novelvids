@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
-import { AssetTypeEnum, TaskStatusEnum } from '@/types'
+import { AssetTypeEnum, TaskStatusEnum, type Novel } from '@/types'
 import ShortDramaAgentPage from './ShortDramaAgentPage.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 
@@ -32,6 +32,8 @@ vi.mock('@/api', async (importOriginal) => {
       storyboardStrategies: vi.fn(),
       analyzeNovel: vi.fn(),
       task: vi.fn(),
+      updateNovel: vi.fn(),
+      updateChapter: vi.fn(),
     },
   }
 })
@@ -241,4 +243,48 @@ it('keeps completed story analysis usable when only the cover is awaiting review
   expect(wrapper.findAll('button').some(button => button.text() === '编辑内容')).toBe(true)
   expect(wrapper.find('.analysis-progress-card').exists()).toBe(false)
   expect(api.analyzeNovel).not.toHaveBeenCalled()
+})
+
+it('sends only changed fields via patch when saving edits', async () => {
+  vi.mocked(api.updateNovel).mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: {
+      id: 9,
+      name: '修改后的名字',
+    } as unknown as Novel,
+  })
+
+  const wrapper = mount(ShortDramaAgentPage, {
+    global: {
+      plugins: [pinia],
+      components: { AppButton },
+      stubs: { RouterLink: { template: '<a><slot /></a>' } },
+    },
+  })
+  await flushPromises()
+
+  const editButton = wrapper.findAll('button').find(button => button.text().includes('编辑内容'))
+  expect(editButton).toBeTruthy()
+  await editButton!.trigger('click')
+
+  // Click "保存修改" without changes -> does not call updateNovel
+  const saveButton = wrapper.findAll('button').find(button => button.text().includes('保存修改'))
+  expect(saveButton).toBeTruthy()
+  await saveButton!.trigger('click')
+  await flushPromises()
+  expect(api.updateNovel).not.toHaveBeenCalled()
+
+  // Enter edit mode again and modify name
+  await editButton!.trigger('click')
+  const nameInput = wrapper.get('.analysis-title-input')
+  await nameInput.setValue('修改后的名字')
+
+  const saveButtonAfterChange = wrapper.findAll('button').find(button => button.text().includes('保存修改'))
+  await saveButtonAfterChange!.trigger('click')
+  await flushPromises()
+
+  // updateNovel called with diff patch only
+  expect(api.updateNovel).toHaveBeenCalledTimes(1)
+  expect(api.updateNovel).toHaveBeenCalledWith(9, { name: '修改后的名字' })
 })

@@ -13,6 +13,7 @@ FILES = {
         for name in (
             "story",
             "assets",
+            "asset_lifecycle",
             "image",
             "storyboard",
             "remake",
@@ -104,6 +105,8 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
         specification = json.loads(snapshot.read("storyboard_contract"))
         specification["sections"] = [prompt_label(section, language) for section in specification["sections"]]
         contract = "\n输出协议（系统按以下栏目序列化结构内容，不单独生成 prompt）：\n" + json.dumps(specification, ensure_ascii=False)
+    if skill in {"assets", "storyboard"} and "asset_lifecycle" in snapshot.contents:
+        contract += "\n" + snapshot.read("asset_lifecycle")
     return (
         snapshot.read("base")
         + "\n任务语言 language="

@@ -138,9 +138,15 @@ class CreationObjects:
             raise ValueError(localized_message('形态绑定格式无效'))
         for raw_asset_id, raw_variant_id in bindings.items():
             try:
-                asset_id, variant_id = int(raw_asset_id), int(raw_variant_id)
+                asset_id = int(raw_asset_id)
+                variant_id = int(raw_variant_id) if raw_variant_id is not None else None
             except (ValueError, TypeError):
                 raise ValueError(localized_message('形态绑定标识无效')) from None
+            if variant_id is None:
+                await self.active_assets([asset_id])
+                if asset_id not in asset_ids:
+                    raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
+                continue
             if asset_id not in asset_ids or not await AssetVariant.filter(
                 id=variant_id, asset_id=asset_id, asset__novel_id=self.novel_id, asset__deleted_at__isnull=True).exists():
                 raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))

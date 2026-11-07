@@ -55,6 +55,40 @@ describe('project analysis editor', () => {
     })
   })
 
+  it('builds a minimal diff patch when initial draft is provided', () => {
+    const base = {
+      name: '我创造了世界',
+      tagsText: '都市，玄幻',
+      storyOutline: '初始大纲',
+      projectType: 'AI 精品短剧',
+      projectSetting: '项目设定',
+      storyboardStrategy: 'narration',
+      storyboardSetting: '旁白规则',
+      narratorAudioReferenceId: 10,
+    }
+
+    // No changes -> empty object
+    expect(projectPatchFromDraft({ ...base }, base)).toEqual({})
+
+    // Only narrator voice changed
+    expect(projectPatchFromDraft({
+      ...base,
+      narratorAudioReferenceId: 42,
+    }, base)).toEqual({
+      narrator_audio_reference_id: 42,
+    })
+
+    // Only title and tags changed
+    expect(projectPatchFromDraft({
+      ...base,
+      name: '新标题',
+      tagsText: '都市，科幻',
+    }, base)).toEqual({
+      name: '新标题',
+      tags: ['都市', '科幻'],
+    })
+  })
+
   it('migrates the legacy cinematic label and uses canonical strategy metadata', () => {
     const draft = createProjectAnalysisDraft({
       name: '项目',

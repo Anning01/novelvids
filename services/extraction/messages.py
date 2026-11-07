@@ -60,6 +60,7 @@ class ExtractionMessageBuilder:
                         asset.source_chapters
                     ),
                     "metadata": dict(asset.metadata),
+                    "variants": tuple(asdict(variant) for variant in asset.variants),
                 }
             )
             for asset in context.assets

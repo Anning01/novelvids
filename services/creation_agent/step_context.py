@@ -48,6 +48,7 @@ async def step_context(params):
         variants = await AssetVariant.filter(asset_id=asset.id).values('id', 'name', 'description', 'base_traits', 'chapter_numbers')
         projections.append({'id': asset.id, 'name': asset.canonical_name, 'aliases': asset.aliases,
             'description': asset.description, 'prompt': asset.base_traits, 'type': asset.asset_type,
+            'analysis_source': (asset.metadata or {}).get('analysis_source'),
             'source_chapters': asset.source_chapters, 'variants': variants})
     selectors = {(item.chapter_id, item.start, item.end) for item in step.sources}
     constraints = await creation_memory.for_generation(chapter, assets) if chapter else []

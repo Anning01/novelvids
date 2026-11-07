@@ -124,6 +124,7 @@ class CreationPlanRunner:
                 elif len(outputs) == len(identifiers):
                     merged = {'status': 'completed' if children else 'skipped', 'coalesced': step.id in groups, 'task_ids': children, 'outputs': outputs,
                         'asset_ids': sorted({i for item in outputs for i in item.get('asset_ids', [])}),
+                        'variant_ids': sorted({i for item in outputs for i in item.get('variant_ids', [])}),
                         'scene_ids': sorted({i for item in outputs for i in item.get('scene_ids', [])})}
                     records[step.id] = await self.finish(step, merged)
             except Exception as error:
@@ -187,6 +188,9 @@ class CreationPlanRunner:
             if step.variant_id:
                 target = await AssetVariant.get(id=step.variant_id)
                 versions[f'variant:{target.id}'] = await object_version(target)
+            for identifier in result.get('variant_ids', []):
+                target = await AssetVariant.get(id=identifier)
+                versions[f'variant:{identifier}'] = await object_version(target)
             result['object_versions'] = versions
         row, _ = await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'plan-step:{step.id}',
             defaults={'state': 'completed', 'result': result})

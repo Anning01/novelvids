@@ -208,7 +208,17 @@ async def _sync_character_assets(
                 **values,
             )
         else:
-            asset.update_from_dict(values)
+            from services.extraction.context import normalize_source_chapters
+
+            metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+            if metadata.get('analysis_source') == 'project_analysis' or not (asset.base_traits or '').strip():
+                values['metadata'] = {**metadata, **values['metadata']}
+                asset.update_from_dict(values)
+            else:
+                asset.aliases = list(dict.fromkeys([*(asset.aliases or []), *character.aliases]))
+                asset.source_chapters = list(normalize_source_chapters([
+                    *normalize_source_chapters(asset.source_chapters), *chapter_numbers]))
+                asset.metadata = {**metadata, 'role': character.role}
             await asset.save()
 
 

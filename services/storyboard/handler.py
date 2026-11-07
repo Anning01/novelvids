@@ -16,12 +16,11 @@ from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.storyboard.validation import validate_storyboard_duration
-from services.storyboard.entities import visual_entity_description
+from services.storyboard.entities import generation_entities_for_assets, shot_variant_bindings
 from services.storyboard.appearances import previously_seen_assets
 from services.creation_agent.memory import creation_memory
 from services.creation_objects import CreationObjects, project_write
 from schemas.scene import SceneEntity
-from utils.enums import AssetTypeEnum
 from utils.prompt_language import normalize_prompt_language
 
 
@@ -60,26 +59,14 @@ class StoryboardTaskHandler(BaseTaskHandler):
         assets = list({asset.id: asset for asset in [*assets, *additional_assets]}.values())
 
         # 2. 构建实体上下文
-        entities = [
-            SceneEntity(
-                name=asset.canonical_name,
-                aliases=asset.aliases or [],
-                description=visual_entity_description(asset.description, asset.base_traits),
-                asset_type=AssetTypeEnum(asset.asset_type).nickname,
-                asset_id=asset.id,
-            )
-            for asset in assets
-            if AssetTypeEnum(asset.asset_type)
-            in (AssetTypeEnum.person, AssetTypeEnum.scene, AssetTypeEnum.item)
-        ]
         from services.creation_agent.step_context import step_context
         plan_context = await step_context(request_params)
+        selected = {}
         if plan_context:
             from models.asset_variant import AssetVariant
-            from services.storyboard.entities import entities_for_assets
             selected = {row.asset_id: row.id for row in await AssetVariant.filter(id__in=plan_context.step.variant_ids)}
-            loaded = await Asset.filter(id__in=[asset.id for asset in assets]).prefetch_related('variants')
-            entities = entities_for_assets(loaded, chapter.number, selected)
+        loaded = await Asset.filter(id__in=[asset.id for asset in assets]).prefetch_related('variants')
+        entities = generation_entities_for_assets(loaded, chapter.number, selected)
 
         # 3. 调用 OpenAI API 生成分镜
         creative_constraints = await creation_memory.for_generation(chapter, assets)
@@ -191,12 +178,10 @@ class StoryboardTaskHandler(BaseTaskHandler):
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
-        selected_variants = {}
-        if execution and execution.params.get('creation_plan_id'):
-            from services.creation_agent.step_context import step_context
-            from models.asset_variant import AssetVariant
-            context = await step_context(execution.params)
-            selected_variants = {str(row.asset_id): row.id for row in await AssetVariant.filter(id__in=context.step.variant_ids)}
+        for shot in storyboard.shots:
+            normalized = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities or []))
+            bindings = shot_variant_bindings(normalized, entities or [])
+            await objects.validate_variant_bindings([int(key) for key in bindings], bindings)
 
         for shot in storyboard.shots:
             original_description = shot.description
@@ -296,7 +281,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 metadata=scene_metadata
             ))
             await objects.bind_assets(scene, referenced_asset_ids)
-            bindings = {str(asset_id): selected_variants[str(asset_id)] for asset_id in referenced_asset_ids if str(asset_id) in selected_variants}
+            bindings = shot_variant_bindings(shot, entities or [])
             if bindings:
                 scene.metadata = {**scene.metadata, 'asset_variant_ids': bindings}
                 await scene.save(update_fields=['metadata'])

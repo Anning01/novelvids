@@ -172,17 +172,20 @@ async def test_extract_creates_task_and_assets(client: AsyncClient, configured_c
     # 验证任务完成
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.completed.value
-    assert set(task.response_data) == {"persons", "scenes", "items", "token_usage", "conversation_id", "agent_run_id"}
+    assert set(task.response_data) == {"persons", "scenes", "items", "token_usage", "conversation_id", "agent_run_id", "asset_ids", "variant_ids"}
+    assert task.response_data['variant_ids'] == []
+    saved_assets = {asset.canonical_name: asset.id for asset in await Asset.filter(novel_id=novel.id)}
+    assert task.response_data['asset_ids'] == sorted(saved_assets.values())
     assert task.response_data["agent_run_id"] == str(task.id)
     assert [entry["name"] for entry in task.response_data["persons"]] == [
         "张三",
         "李四",
     ]
     assert task.response_data["scenes"] == [
-        {"name": "皇宫大殿", "action": "created"}
+        {"name": "皇宫大殿", "action": "created", "asset_id": saved_assets['皇宫大殿']}
     ]
     assert task.response_data["items"] == [
-        {"name": "尚方宝剑", "action": "created"}
+        {"name": "尚方宝剑", "action": "created", "asset_id": saved_assets['尚方宝剑']}
     ]
 
     # 验证资产写入

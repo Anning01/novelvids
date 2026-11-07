@@ -200,6 +200,7 @@ def _orchestration_case(*, assets=("known-asset",)):
 @pytest.mark.asyncio
 async def test_handler_orchestrates_injected_collaborators_once(caplog):
     case = _orchestration_case()
+    await Novel.create(id=case.request_params['novel_id'], name='编排测试项目')
     llm_client = SimpleNamespace()
 
     with (
@@ -366,6 +367,7 @@ async def test_handler_context_failure_stops_following_collaborators():
 @pytest.mark.asyncio
 async def test_handler_empty_asset_registry_still_calls_model_once():
     case = _orchestration_case(assets=())
+    await Novel.create(id=case.request_params['novel_id'], name='空目录测试项目')
 
     summary = await case.handler.execute(case.request_params)
 
@@ -850,6 +852,7 @@ async def test_不同小说的资产互相隔离():
 @pytest.mark.asyncio
 async def test_handler_surfaces_token_usage_from_extractor():
     case = _orchestration_case()
+    await Novel.create(id=case.request_params['novel_id'], name='用量测试项目')
     case.extractor.last_usage = {"prompt_tokens": 120, "completion_tokens": 40}
 
     with patch("services.extraction.handler.AsyncOpenAI", return_value=SimpleNamespace()):
