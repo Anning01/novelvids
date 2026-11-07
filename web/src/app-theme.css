@@ -27,19 +27,19 @@
 .agent-conversation-popover.is-workflow,
 .short-drama-workspace-shell.is-immersive .short-drama-header-end {
   color-scheme: dark;
-  --app-canvas: #000000;
-  --app-surface: #0a0a0a;
-  --app-surface-raised: rgb(10 10 10 / 96%);
-  --app-surface-muted: #111111;
-  --app-surface-hover: #181818;
-  --app-fill-subtle: #111111;
-  --app-border: #262626;
-  --app-border-strong: #404040;
+  --app-canvas: #161616;
+  --app-surface: #202020;
+  --app-surface-raised: rgb(32 32 32 / 96%);
+  --app-surface-muted: #1c1c1c;
+  --app-surface-hover: #292929;
+  --app-fill-subtle: #252525;
+  --app-border: #333333;
+  --app-border-strong: #484848;
   --app-text: #f5f5f5;
   --app-text-secondary: #c2c2c2;
   --app-text-muted: #999999;
   --app-accent: #b8a7ff;
-  --app-accent-soft: #141414;
+  --app-accent-soft: #292929;
   --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
   --creation-bg-image: url('/background-dark.png');
   --creation-success: #82d5ad;
@@ -50,19 +50,19 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-app-theme]) {
     color-scheme: dark;
-    --app-canvas: #000000;
-    --app-surface: #0a0a0a;
-    --app-surface-raised: rgb(10 10 10 / 96%);
-    --app-surface-muted: #111111;
-    --app-surface-hover: #181818;
-    --app-fill-subtle: #111111;
-    --app-border: #262626;
-    --app-border-strong: #404040;
+    --app-canvas: #161616;
+    --app-surface: #202020;
+    --app-surface-raised: rgb(32 32 32 / 96%);
+    --app-surface-muted: #1c1c1c;
+    --app-surface-hover: #292929;
+    --app-fill-subtle: #252525;
+    --app-border: #333333;
+    --app-border-strong: #484848;
     --app-text: #f5f5f5;
     --app-text-secondary: #c2c2c2;
     --app-text-muted: #999999;
     --app-accent: #b8a7ff;
-    --app-accent-soft: #141414;
+    --app-accent-soft: #292929;
     --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
     --creation-bg-image: url('/background-dark.png');
     --creation-success: #82d5ad;

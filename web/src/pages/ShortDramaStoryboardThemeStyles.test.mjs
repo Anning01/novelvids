@@ -8,7 +8,7 @@ const referenceSource = readFileSync('src/components/SceneReferenceMediaBar.vue'
 describe('分镜页面深色主题与图片回退', () => {
   it('keeps hovered chapter details and video placeholders on theme surfaces', () => {
     expect(pageSource).toMatch(/\.chapter-summary:hover\s*\{[^}]*var\(--app-surface\)[^}]*var\(--app-border\)/s)
-    expect(themeSource).toContain('--app-fill-subtle: #111111')
+    expect(themeSource).toContain('--app-fill-subtle: #252525')
     expect(referenceSource).toContain('background: var(--app-fill-subtle)')
     expect(referenceSource).not.toContain('@media (prefers-color-scheme: dark)')
   })

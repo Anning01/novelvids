@@ -53,7 +53,7 @@ it('uses shared surfaces instead of white blocks for icon tiles', () => {
 })
 
 
-it('shares a neutral black dark palette across the shell, home and system fallback', () => {
+it('shares a layered neutral dark palette across the shell, home and system fallback', () => {
   const theme = readFileSync('src/app-theme.css', 'utf8')
   const home = readFileSync('src/pages/HomePage.vue', 'utf8')
   const explicit = theme.slice(theme.indexOf(":root[data-app-theme='dark'],"), theme.indexOf('@media (prefers-color-scheme: dark)'))
@@ -65,7 +65,10 @@ it('shares a neutral black dark palette across the shell, home and system fallba
     expect(hex.slice(3, 5)).toBe(hex.slice(5, 7))
     expect(fallback).toContain(`${name}: ${hex};`)
   }
-  expect(explicit).toContain('--app-canvas: #000000;')
+  expect(explicit).toContain('--app-canvas: #161616;')
+  const palette = new Map(tokens.map(([, name, hex]) => [name, parseInt(hex.slice(1, 3), 16)]))
+  expect(palette.get('--app-surface')).toBeGreaterThan(palette.get('--app-canvas'))
+  expect(palette.get('--app-surface-hover')).toBeGreaterThan(palette.get('--app-surface'))
   expect(theme).toMatch(/\.app-sidebar\s*\{[^}]*background:\s*var\(--app-canvas\)/s)
   expect(home).not.toMatch(/--app-(?:canvas|surface|text)[\w-]*:\s*#[0-9a-f]/)
   expect(home).toContain(".clip-home .home-atmosphere) { background: none; }")
