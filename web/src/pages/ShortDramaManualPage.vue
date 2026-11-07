@@ -631,20 +631,6 @@ function trackAssetGeneration(generation: AssetActiveGeneration) {
   void monitorAssetGeneration(generation.asset_id, generation.task_id)
 }
 
-async function generateAssetAndWait(asset: Asset) {
-  setAssetGenerating(asset.id, true)
-  setAssetFailed(asset.id, false)
-  let taskId: string
-  try {
-    taskId = (await api.generateAsset(asset.id)).data.id
-  } catch {
-    setAssetFailed(asset.id, true)
-    setAssetGenerating(asset.id, false)
-    return false
-  }
-  return monitorAssetGeneration(asset.id, taskId)
-}
-
 async function resumeActiveGenerations() {
   if (!pageAlive || discoveringGenerations || !Number.isFinite(projectId.value) || projectId.value <= 0) return
   discoveringGenerations = true
@@ -674,37 +660,23 @@ async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId:
     setAssetFailed(asset.id, false)
   }
   try {
-    const preparedAssets = await Promise.all(targets.map(async asset => {
-      const metadata = {
-        ...(asset.metadata || {}),
-        model_config_id: options.modelConfigId,
-        clarity: options.clarity,
-        resolution: options.clarity,
-        aspect_ratio: options.ratio,
-        output_format: options.outputFormat,
-        generation_count: 1,
-      }
-      const updated = (await api.updateAsset(asset.id, { metadata })).data
-      assets.value = assets.value.map(item => item.id === updated.id ? updated : item)
-      return updated
-    }))
-    const concurrency = Math.max(1, Math.min(4, options.concurrency || 1, preparedAssets.length))
-    let cursor = 0
-    let succeeded = 0
-    let failed = 0
-    const worker = async () => {
-      while (pageAlive) {
-        const asset = preparedAssets[cursor++]
-        if (!asset) return
-        const completed = await generateAssetAndWait(asset)
-        completed ? succeeded++ : failed++
-      }
-    }
-    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    const response = await api.generateAssetBatch({
+      novel_id: projectId.value,
+      asset_ids: targets.map(asset => asset.id),
+      model_config_id: options.modelConfigId,
+      clarity: options.clarity,
+      aspect_ratio: options.ratio,
+      output_format: options.outputFormat,
+    })
     if (!pageAlive) return
+    for (const id of response.data.skipped_asset_ids) setAssetGenerating(id, false)
+    for (const task of response.data.tasks) {
+      const assetId = Number(task.request_params?.asset_id)
+      if (Number.isFinite(assetId)) void monitorAssetGeneration(assetId, task.id)
+    }
     await refreshAssets()
-    if (failed) notice.info(tr('批量生成完成：成功 {p0} 个，失败 {p1} 个', { p0: succeeded, p1: failed }))
-    else notice.success(tr('{p0} 个资产设定图已生成', { p0: succeeded }))
+    notice.info(tr('任务已提交，正在等待模型执行。'))
+    void resumeActiveGenerations()
   } catch (error) {
     for (const asset of targets) setAssetGenerating(asset.id, false)
     notice.error((error as Error).message)

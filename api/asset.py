@@ -28,6 +28,8 @@ from schemas.asset import (
     AssetReferencePromptOut,
     AssetReferencePromptPreview,
     AssetReferenceCreate,
+    AssetReferenceBatchCreate,
+    AssetReferenceBatchOut,
     AssetUpdate,
     AssetWithVariantsOut,
 )
@@ -342,6 +344,19 @@ async def reuse_asset_in_chapter(
     return ResponseSchema(
         data=await asset_controller.reuse_in_chapter(asset_id, chapter_id)
     )
+
+
+@router.post('/reference-batch', summary='整批提交资产参考图队列', response_model=ResponseSchema[AssetReferenceBatchOut])
+async def asset_reference_batch(
+    payload: AssetReferenceBatchCreate,
+    ctx: AuthContext = Depends(get_auth_context),
+    _: AuthContext = _EDITOR,
+):
+    await ensure_novel_access(payload.novel_id, ctx)
+    result = await asset_controller.reference_batch(payload, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    # Versioned pending tasks are picked up by the existing server worker,
+    # independently of this HTTP request or the browser's lifetime.
+    return ResponseSchema(data=result)
 
 
 @router.get("/reference/{asset_id}", summary="生成资产参考图", response_model=ResponseSchema[AiTaskOut])

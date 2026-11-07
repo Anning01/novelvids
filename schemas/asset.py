@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Optional, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, Field, ConfigDict, PositiveInt, field_validator, model_validator
+from schemas.ai_task import AiTaskOut
 from schemas._base import BaseResponse
 from schemas.asset_variant import AssetVariantOut
 from services.cover_derivatives import image_derivative_reference
@@ -136,6 +137,20 @@ class AssetReferenceCreate(BaseModel):
             if value not in normalized:
                 normalized.append(value)
         return normalized
+
+
+class AssetReferenceBatchCreate(BaseModel):
+    novel_id: PositiveInt
+    asset_ids: list[PositiveInt] = Field(min_length=1)
+    model_config_id: PositiveInt
+    clarity: str = Field(min_length=1)
+    aspect_ratio: str = Field(min_length=1)
+    output_format: str = Field(min_length=1)
+
+
+class AssetReferenceBatchOut(BaseModel):
+    tasks: list[AiTaskOut]
+    skipped_asset_ids: list[int]
 
 
 class AssetGenerationRecordOut(BaseModel):
