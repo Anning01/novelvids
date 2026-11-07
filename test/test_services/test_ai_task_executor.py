@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from models.ai_task import AiTask
+from models.novel import Novel
 from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
 from services.ai_task_executor import (
@@ -66,6 +67,7 @@ class CountingHandler(BaseTaskHandler):
 @pytest.mark.asyncio
 async def test_submit_创建pending任务():
     """submit 应在数据库中创建 pending 状态的任务。"""
+    await Novel.create(id=1, name="executor-owned-project")
     executor = AiTaskExecutor()
     task = await executor.submit(
         AiTaskTypeEnum.extraction,
@@ -388,6 +390,7 @@ class FailWithUsageHandler(BaseTaskHandler):
 
 @pytest.mark.asyncio
 async def test_run_完成落文本流水():
+    await Novel.create(id=5, name="executor-owned-project")
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.extraction.value,
         name="llm", base_url="https://api.example.com", api_key="k", model="m",
@@ -411,6 +414,7 @@ async def test_run_完成落文本流水():
 
 @pytest.mark.asyncio
 async def test_run_文本失败透出usage仍计费():
+    await Novel.create(id=6, name="executor-owned-project")
     executor = AiTaskExecutor()
     executor.register(AiTaskTypeEnum.extraction, FailWithUsageHandler())
     task = await executor.submit(AiTaskTypeEnum.extraction, {"novel_id": 6})
@@ -429,6 +433,7 @@ class ImageBillingHandler(BaseTaskHandler):
 
 @pytest.mark.asyncio
 async def test_run_参考图落图片流水含输入图费():
+    await Novel.create(id=8, name="executor-owned-project")
     config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.reference_image.value,
         name="image", base_url="https://ark.example.com/api/v3", api_key="k", model="m",

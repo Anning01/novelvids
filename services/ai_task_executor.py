@@ -2,6 +2,7 @@ from utils.messages import localized_message
 import abc
 import asyncio
 import logging
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 from models.ai_task import AiTask
@@ -11,6 +12,7 @@ from services.task_signals import task_signals
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
+current_task_id = ContextVar("current_ai_task_id", default=None)
 
 
 # 不同任务类型的超时时间（秒）
@@ -68,6 +70,11 @@ class AiTaskExecutor:
         self._production_condition = asyncio.Condition()
         self._production_active = 0
 
+    def is_executing(self, task_id) -> bool:
+        """An executor lease includes response persistence and usage settlement."""
+        lock = self._task_locks.get(str(task_id))
+        return lock is not None and lock.locked()
+
     def register(self, task_type: AiTaskTypeEnum, handler: BaseTaskHandler):
         """注册任务处理器。"""
         self._handlers[task_type] = handler
@@ -124,10 +131,14 @@ class AiTaskExecutor:
         保持原子性，见 scene_controller.generate 的章节行锁）。
         """
         from services.balance import ensure_solvent
+        await ensure_solvent(request_params.get("team_id"), request_params.get("user_id"))
+        if db_connection is None and request_params.get("novel_id") is not None:
+            from services.creation_objects import project_write
+            async with project_write(int(request_params["novel_id"])) as connection:
+                return await self._admit_task(task_type, request_params, connection)
+        return await self._admit_task(task_type, request_params, db_connection)
 
-        await ensure_solvent(
-            request_params.get("team_id"), request_params.get("user_id")
-        )
+    async def _admit_task(self, task_type, request_params, db_connection):
         from services.language import generation_language
 
         request_params = dict(request_params)
@@ -236,11 +247,15 @@ class AiTaskExecutor:
             task_language.reset(token)
 
     async def _execute_handler(self, task, handler):
-        from services.creation_agent.skill_execution import WORKFLOW_VERSION
-        if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
-            from services.creation_agent.production import run_production
-            return await run_production(task, handler)
-        return await handler.execute(task.request_params)
+        token = current_task_id.set(task.id)
+        try:
+            from services.creation_agent.skill_execution import WORKFLOW_VERSION
+            if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
+                from services.creation_agent.production import run_production
+                return await run_production(task, handler)
+            return await handler.execute(task.request_params)
+        finally:
+            current_task_id.reset(token)
 
     async def submit_and_run(
         self, task_type: AiTaskTypeEnum, request_params: dict
@@ -336,6 +351,10 @@ class AiTaskExecutor:
         if task.request_params.get('workflow_version') == 'agent-skills-v1' and await AgentOperation.filter(task_id=task.id, state='uncertain', external=True).exists():
             task.stage = 'needs_review'
             task.error_message = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))
+            # Cancellation cannot erase an uncertain external submission or make review impossible.
+            await AiTask.filter(id=task.id, status=TaskStatusEnum.cancelled.value).update(
+                status=TaskStatusEnum.failed.value, stage=task.stage, error_message=task.error_message,
+                finished_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
         task.finished_at = datetime.now(timezone.utc)
         update_fields = ["status", "error_message", "finished_at", "updated_at", "stage"]
         if task.stage is not None and task.stage != "needs_review":

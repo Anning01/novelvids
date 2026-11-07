@@ -211,7 +211,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
 
     async def remove(self, novel_id: int) -> None:
         instance = await self.get(novel_id)
-        await super().remove(instance)
+        from services.project_deletion import remove_project
+        await remove_project(instance)
 
     async def split(self, novel_id: int):
         """使用nlp拆分章节"""

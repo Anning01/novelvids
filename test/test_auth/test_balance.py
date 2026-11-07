@@ -98,15 +98,16 @@ async def test_ensure_solvent_blocks_insolvent_team():
 @pytest.mark.asyncio
 async def test_submit_blocked_when_team_insolvent():
     team = await Team.create(name="拦截队")
+    novel = await Novel.create(name="有效费用归属项目", team_id=team.id)
     with pytest.raises(HTTPException) as exc:
         await ai_task_executor.submit(
-            AiTaskTypeEnum.extraction, {"novel_id": 1, "team_id": team.id}
+            AiTaskTypeEnum.extraction, {"novel_id": novel.id, "team_id": team.id}
         )
     assert exc.value.status_code == 402
 
     await balance.top_up(team.id, Decimal("5"))
     task = await ai_task_executor.submit(
-        AiTaskTypeEnum.extraction, {"novel_id": 1, "team_id": team.id}
+        AiTaskTypeEnum.extraction, {"novel_id": novel.id, "team_id": team.id}
     )
     assert task is not None
 

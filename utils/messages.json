@@ -1,4 +1,5 @@
 {
+  "已停止未提交的后续步骤，模型请求或费用仍在收尾或待核对，请完成后再删除。已发生费用不会退款。": "Future steps have been stopped. Wait for in-flight requests and unsettled or uncertain charges before deleting. Incurred fees are not refunded.",
   "器灵登录尚未配置": "Qiling sign-in has not been configured",
   "器灵暂不可用，请重试": "Qiling is temporarily unavailable. Try again.",
   "当前账号已绑定器灵": "This account is already linked to Qiling",

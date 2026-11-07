@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, X } from 'lucide-vue-next'
-import { api } from '@/api'
+import { api, ApiRequestError } from '@/api'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import AppPagination from '@/components/AppPagination.vue'
@@ -118,7 +118,7 @@ async function remove(project: ProjectOverviewItem) {
   if (deletingIds.value.has(project.id) || !editable.value) return
   if (!await appConfirm({
     title: tr('删除项目「{p0}」？', { p0: project.name }),
-    get message() { return tr('项目、章节及相关创作数据将被删除，且无法恢复。') },
+    get message() { return tr('删除会停止排队任务及未提交的后续步骤。已提交的模型调用按实际用量结算，已发生费用不会退款，账单会保留；请求或费用仍在收尾、结果待核对时，需处理完成后再删除。项目、章节及相关创作数据删除后无法恢复。') },
     get confirmLabel() { return tr('删除项目') },
     tone: 'danger',
   })) return
@@ -129,6 +129,7 @@ async function remove(project: ProjectOverviewItem) {
     await load()
   } catch (error) {
     notice.error((error as Error).message)
+    if (error instanceof ApiRequestError && error.code === 409) await load()
   } finally {
     deletingIds.value = new Set([...deletingIds.value].filter(id => id !== project.id))
   }

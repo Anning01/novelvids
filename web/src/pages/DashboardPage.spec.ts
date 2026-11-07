@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { api } from '@/api'
+import { api, ApiRequestError } from '@/api'
 import { setLocale } from '@/i18n'
 import { useAuthStore } from '@/features/auth/authStore'
 import { appConfirm } from '@/shared/confirmDialog'
@@ -114,6 +114,10 @@ it('isolates delete from navigation, requires confirmation and refreshes totals 
   await card.get('[role="menuitem"]').trigger('click')
   await flushPromises()
   expect(appConfirm).toHaveBeenCalledOnce()
+  const confirmation = vi.mocked(appConfirm).mock.calls[0]![0]
+  expect(confirmation.message).toContain('未提交的后续步骤')
+  expect(confirmation.message).toContain('已发生费用不会退款')
+  expect(confirmation.message).toContain('账单会保留')
   expect(api.deleteNovel).toHaveBeenCalledWith(2)
   expect(wrapper.get('.projects-summary__item.is-projects p').text()).toBe('1')
   wrapper.unmount()
@@ -328,4 +332,19 @@ it('refreshes production stats on focus and removes its listener on unmount', as
   window.dispatchEvent(new Event('focus'))
   await flushPromises()
   expect(api.projectOverview).toHaveBeenCalledTimes(count)
+})
+
+
+it('keeps the project visible and refreshes its status while cancellation is settling', async () => {
+  vi.mocked(appConfirm).mockResolvedValue(true)
+  vi.mocked(api.deleteNovel).mockRejectedValue(new ApiRequestError('已停止后续步骤，请收尾后再删除。已发生费用不会退款。', 409, 200))
+  const wrapper = render()
+  await flushPromises()
+  const card = wrapper.findAll('.project-overview-card')[0]!
+  await card.get('[aria-haspopup="menu"]').trigger('click')
+  await card.get('[role="menuitem"]').trigger('click')
+  await flushPromises()
+  expect(api.projectOverview).toHaveBeenCalledTimes(2)
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(2)
+  wrapper.unmount()
 })

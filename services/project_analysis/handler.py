@@ -218,6 +218,17 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
     async def execute(self, request_params: dict) -> dict:
         novel_id = int(request_params["novel_id"])
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
+        async def stopped():
+            from services.ai_task_executor import current_task_id
+            task_id = request_params.get('task_id') or current_task_id.get()
+            if not task_id:
+                return False
+            from models.ai_task import AiTask
+            from utils.enums import TaskStatusEnum
+            return not await AiTask.filter(id=task_id, status=TaskStatusEnum.running.value).exists()
+
+        if await stopped():
+            raise ValueError(localized_message('任务已取消或结束'))
         novel = await Novel.get(id=novel_id)
         if not (novel.content or "").strip():
             raise ValueError(localized_message('项目没有可分析的书稿内容'))
@@ -243,6 +254,8 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             )
 
             material = _build_analysis_material(novel, chapters, prompt_language)
+            if await stopped():
+                raise ValueError(localized_message('任务已取消或结束'))
             llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
             analysis, completion = await create_json_completion(
                 llm_client,
@@ -254,6 +267,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             )
             token_usage = completion_usage(completion)
 
+        result = {
+            **analysis.model_dump(), 'analysis_completed': False,
+            'cover_status': 'ready' if novel.cover else 'not_requested', 'chapter_count': len(chapters), 'cover': novel.cover,
+            'token_usage': token_usage, 'llm_config_id': llm_config.id, 'llm_model': llm_config.model,
+        }
+        if await stopped():
+            result['cover_status'] = 'cancelled'
+            return result
 
         async def persist_analysis():
             from services.creation_objects import project_write
@@ -272,16 +293,10 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             await execute_step(execution.params["task_id"], "persist:story", persist_analysis, atomic=True)
         else:
             await persist_analysis()
-        result = {
-            **analysis.model_dump(),
-            "analysis_completed": True,
-            "cover_status": "ready" if novel.cover else "not_requested",
-            "chapter_count": len(chapters),
-            "cover": novel.cover,
-            "token_usage": token_usage,
-            "llm_config_id": llm_config.id,
-            "llm_model": llm_config.model,
-        }
+        result['analysis_completed'] = True
+        if await stopped():
+            result['cover_status'] = 'cancelled'
+            return result
         if not request_params.get("include_cover", True):
             return result
         try:
@@ -302,6 +317,9 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 cover_prompt = render_cover_prompt(name=novel.name, book_types=analysis.book_types,
                     story_outline=analysis.story_outline, prompt_language=prompt_language, aspect_ratio=cover_ratio)
             async def generate_cover():
+                if await stopped():
+                    result['cover_status'] = 'cancelled'
+                    return {'cover_status': 'cancelled'}
                 if execution:
                     await execution.before_request()
                 images = await generate_images(
