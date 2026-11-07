@@ -106,6 +106,13 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 storyboard_strategy=strategy.key,
             )
 
+            from services.creation_agent.skill_execution import current_execution
+            from models.agent_operation import AgentOperation
+            execution = current_execution.get()
+            review = await AgentOperation.get_or_none(task_id=execution.params['task_id'],
+                key='creative-review:storyboard', state='completed') if execution else None
+            notes = review.result.get('notes', []) if review else []
+
             # 5. 返回结果
             return {
                 "chapter_id": chapter_id,
@@ -114,6 +121,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "total_shots": len(storyboard.shots),
                 "request_duration": round(request_duration, 2),
                 "token_usage": api_metadata.get("usage", {}),
+                **({'needs_revision': True, 'review_notes': notes} if notes else {}),
             }
 
         except Exception as e:

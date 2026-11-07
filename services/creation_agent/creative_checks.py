@@ -16,6 +16,17 @@ class ExistingCreationContent(BaseModel):
     objects: list[dict]
 
 
+def review_notes(report):
+    notes = report.issues or [item.detail for item in report.findings if not item.passed]
+    return list(dict.fromkeys(note for note in notes if note.strip())) or [localized_message('部分创作细节仍需完善，请查看已保存的分镜。')]
+
+
+async def record_storyboard_review(execution, report):
+    await AgentOperation.update_or_create(task_id=execution.params['task_id'], key='creative-review:storyboard',
+        defaults={'state': 'completed', 'result': {'needs_revision': not report.passed,
+            'notes': review_notes(report) if not report.passed else [], 'check': report.model_dump(mode='json')}})
+
+
 async def check_preserved_result(execution, step, target_id, result):
     from services.creation_agent.step_context import step_context
     from models.asset import Asset
@@ -35,6 +46,9 @@ async def check_preserved_result(execution, step, target_id, result):
     report = await check_candidate(execution, step.operation, {'segment': f'preserved:{target_id}'},
         ExistingCreationContent(objects=objects), context, 0)
     if not report.passed:
+        if step.operation == 'storyboard':
+            result.update(needs_revision=True, review_notes=review_notes(report))
+            return
         raise CreativeCandidateRejected(localized_message('已有成果未落实新要求，已保留原内容；请在新方案中明确调整：{p0}',
             p0='；'.join(report.issues + [item.detail for item in report.findings if not item.passed])))
 
@@ -63,8 +77,10 @@ async def check_candidate(execution, skill, facts, candidate, context, attempt):
         await validate_report(report)
     await AgentOperation.update_or_create(task_id=execution.params['task_id'], key=f'creative-check:{skill}:{segment}:{attempt}',
         defaults={'state': 'completed', 'result': {'candidate': candidate.model_dump(mode='json'), 'check': report.model_dump(mode='json')}})
-    await plan_activity(execution, f'check:{skill}:{segment}:{attempt}', localized_message('正在核对创作要求'),
-        status='completed' if report.passed else 'failed', detail='；'.join(report.issues))
+    advisory = skill == 'storyboard' and context.step.operation == 'storyboard'
+    await plan_activity(execution, f'check:{skill}:{segment}:{attempt}',
+        localized_message('检查发现待完善项') if advisory and not report.passed else localized_message('正在核对创作要求'),
+        status='completed' if report.passed or advisory else 'failed', detail='；'.join(report.issues))
     return report
 
 
@@ -94,6 +110,8 @@ async def generate_checked(execution, skill, facts, output_type, options, contex
         candidate = await execution._generate(skill, facts, output_type, **options)
     report = await check_candidate(execution, skill, facts, candidate, context, 0)
     if report.passed:
+        if skill == 'storyboard' and context.step.operation == 'storyboard':
+            await record_storyboard_review(execution, report)
         if context.coalesced_step_ids:
             await AgentOperation.update_or_create(task_id=execution.params['task_id'], key='coalesced:validated',
                 defaults={'state': 'completed', 'result': {'revision': revision}})
@@ -104,10 +122,15 @@ async def generate_checked(execution, skill, facts, output_type, options, contex
     repaired_options = {**options, 'additional_instructions': options.get('additional_instructions', '') + '\n' + correction_instructions(execution.language)}
     candidate = await execution._generate(skill, repaired_facts, output_type, **repaired_options)
     report = await check_candidate(execution, skill, facts, candidate, context, 1)
-    if not report.passed:
+    # Editorial findings must not discard a usable text draft. Structural,
+    # reference, timing and version checks still run before chapter persistence.
+    advisory = skill == 'storyboard' and context.step.operation == 'storyboard'
+    if advisory:
+        await record_storyboard_review(execution, report)
+    if not report.passed and not advisory:
         raise CreativeCandidateRejected(localized_message('候选内容未通过创作要求检查，已保留候选，未覆盖原成果：{p0}',
             p0='；'.join(report.issues + [item.detail for item in report.findings if not item.passed])))
     if context.coalesced_step_ids:
         await AgentOperation.update_or_create(task_id=execution.params['task_id'], key='coalesced:validated',
-            defaults={'state': 'completed', 'result': {'revision': revision}})
+            defaults={'state': 'completed', 'result': {'revision': revision, 'needs_revision': not report.passed}})
     return candidate

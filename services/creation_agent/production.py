@@ -254,6 +254,9 @@ async def finish_production_message(task):
         text = 'Existing results preserved' if english else '已保留已有成果'
     if task.status == 3 and (task.response_data or {}).get('not_applied_reason'):
         text = task.response_data['not_applied_reason']
+    if task.status == 3 and (task.response_data or {}).get('review_notes'):
+        text = ('Storyboard saved; some creative details need revision.' if english else '分镜已保存，部分创作细节待完善。')
+        text += '\n' + '\n'.join(task.response_data['review_notes'])
     await AgentMessage.filter(id=message.id).update(
         content=text,
         events=[

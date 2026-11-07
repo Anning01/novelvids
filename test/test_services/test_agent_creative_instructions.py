@@ -133,3 +133,31 @@ async def test_instruction_reference_cannot_cross_project_or_disappear_silently(
     with pytest.raises(ValueError, match='原始创作要求'):
         await user_instruction({**params, 'instruction_message_id': source.id + 99999})
     assert await user_instruction({'novel_id': other.id}) == ''
+
+
+@pytest.mark.asyncio
+async def test_instruction_owner_can_use_global_scope_for_team_project():
+    from models.creation_agent import AgentConversation
+    from services.creation_agent.skill_execution import user_instruction
+
+    request, root = await chat_execution()
+    source = await AgentMessage.get(task_id=root.params['task_id'], role='user')
+    await AgentConversation.filter(id=source.conversation_id).update(team_id=1, created_by=5)
+    params = {**root.params, 'instruction_message_id': source.id, 'user_id': 5, 'team_id': None}
+    assert await user_instruction(params) == request.message
+    assert await user_instruction({**params, 'team_id': 1}) == request.message
+    for overrides in ({'user_id': 6}, {'user_id': None}, {'team_id': 2}):
+        with pytest.raises(ValueError, match='原始创作要求'):
+            await user_instruction({**params, **overrides})
+
+
+@pytest.mark.asyncio
+async def test_missing_instruction_fails_before_context_loading_or_generation():
+    _, execution = await chat_execution()
+    execution.params['instruction_message_id'] = 99999
+    with patch('services.creation_agent.step_context.step_context', new_callable=AsyncMock) as context, \
+            patch.object(execution, '_generate', new_callable=AsyncMock) as generate:
+        with pytest.raises(ValueError, match='原始创作要求'):
+            await execution.generate('storyboard', {}, CreativeOutput)
+    context.assert_not_awaited()
+    generate.assert_not_awaited()

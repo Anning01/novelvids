@@ -89,10 +89,15 @@ async def user_instruction(params: dict) -> str:
     source_id = params.get("instruction_message_id")
     if source_id is None:
         return ""
-    source = await AgentMessage.get_or_none(
+    query = AgentMessage.filter(
         id=source_id, role="user", conversation__novel_id=params["novel_id"],
-        conversation__team_id=params.get("team_id"),
+        conversation__created_by=params.get("user_id"),
     )
+    # Global administrator runs have no selected team; their project can have one.
+    # Project access is authorized by before_request, private text by its owner.
+    if params.get("team_id") is not None:
+        query = query.filter(conversation__team_id=params["team_id"])
+    source = await query.first()
     if source is None:
         raise ValueError(localized_message("原始创作要求已不可用，请重新提交任务"))
     return source.content
@@ -115,6 +120,8 @@ class SkillExecution:
     async def generate(
         self, skill: str, facts: object, output_type: type[BaseModel], **options,
     ):
+        if skill != 'authorization':
+            await user_instruction(self.params)
         from services.creation_agent.step_context import step_context
         context = await step_context(self.params) if skill in {'assets', 'storyboard', 'image', 'video'} else None
         if context and (context.requirements or context.constraints or self.params.get('creation_plan_id') != self.params['task_id']):

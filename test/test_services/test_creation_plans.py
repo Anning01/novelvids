@@ -370,10 +370,37 @@ async def test_existing_storyboard_is_not_reported_as_fulfilling_a_missing_requi
     with patch.object(SkillExecution, '_generate', AsyncMock(return_value=report)), \
          patch('services.creation_agent.plan_execution.submit_intent', AsyncMock()) as submitter:
         result = await CreationPlanRunner(execution).run()
-    assert result['partial'] is True
-    assert result['steps'][0]['status'] == 'failed'
-    assert '已有成果未落实' in result['steps'][0]['error']
+    assert result['partial'] is False and result['needs_revision'] is True
+    assert result['steps'][0]['status'] == 'skipped'
+    assert '缺少倒叙开场' in result['review_notes']
+    await execution.message.refresh_from_db()
+    assert '待完善' in execution.message.content
     submitter.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_storyboard_editorial_findings_return_a_draft_after_one_repair():
+    from schemas.agent_workflow import CompletePrompt
+    from schemas.creation_plan import CreativeCheck, CreationStepContext
+    from services.creation_agent.creative_checks import generate_checked
+    _, _, plan, task, execution = await confirmed_fixture()
+    context = CreationStepContext(step=plan.steps[0], original_message='生成第一章', requirements=plan.brief.requirements,
+        sources=plan.excerpts, coalesced_step_ids=['opening', 'ending'])
+    calls = []
+    async def generate(skill, facts, output_type, **kwargs):
+        calls.append(skill)
+        if skill == 'creative_check':
+            return CreativeCheck(plan_followed=False, issues=['第7镜头有一句台词待补充'], findings=[{
+                'requirement_id': 'opening', 'passed': False, 'location': 'shot 7', 'detail': '台词遗漏'}])
+        return CompletePrompt(prompt='可编辑的章节分镜草稿')
+    with patch.object(execution, '_generate', side_effect=generate):
+        candidate = await generate_checked(execution, 'storyboard', {}, CompletePrompt, {}, context)
+    assert candidate.prompt == '可编辑的章节分镜草稿'
+    assert calls == ['storyboard', 'creative_check', 'storyboard', 'creative_check']
+    review = await AgentOperation.get(task=task, key='creative-review:storyboard')
+    assert review.result['needs_revision'] is True
+    assert review.result['notes'] == ['第7镜头有一句台词待补充']
+    assert (await AgentOperation.get(task=task, key='coalesced:validated')).result['needs_revision'] is True
 
 
 @pytest.mark.asyncio

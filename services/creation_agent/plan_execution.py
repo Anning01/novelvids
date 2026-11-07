@@ -136,10 +136,15 @@ class CreationPlanRunner:
             raise WaitingForDependencies()
         results = [{'label': step.label, **records[step.id].result} for step in plan.steps]
         failed = [item for item in results if item['status'] in {'failed', 'blocked'}]
+        notes = list(dict.fromkeys(note for item in results for output in item.get('outputs', []) for note in output.get('review_notes', [])))
         content = localized_message('创作任务已完成') if not failed else localized_message('部分步骤未完成，已保留成功结果')
+        if notes and not failed:
+            content = localized_message('分镜处理已完成，部分创作细节待完善。')
         content += '\n' + '\n'.join(f"{item['label']}：{item.get('error') or localized_message('已保留已有成果' if item['status'] == 'skipped' else '已完成')}" for item in results)
+        if notes:
+            content += '\n' + '\n'.join(notes)
         await AgentMessage.filter(id=self.execution.message.id).update(content=content)
-        return {'steps': results, 'partial': bool(failed)}
+        return {'steps': results, 'partial': bool(failed), **({'needs_revision': True, 'review_notes': notes} if notes else {})}
 
     async def target(self, execution, step, target_id):
         await self.execution.before_request()
