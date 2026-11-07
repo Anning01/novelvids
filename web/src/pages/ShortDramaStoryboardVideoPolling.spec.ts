@@ -303,3 +303,14 @@ it.each([401, 403, 404])('does not endlessly retry an unavailable or inaccessibl
   expect(api.queryVideo).toHaveBeenCalledTimes(1)
   expect(api.generateVideo).not.toHaveBeenCalled()
 })
+
+it('retains the server submission time when polling returns only video status', async () => {
+  vi.setSystemTime(new Date('2026-11-07T12:12:31Z'))
+  const persisted = { ...pending, created_at: '2026-11-07T12:00:00Z' }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [scene], assets: [], videos: { 109: [persisted] } } } as never)
+  vi.mocked(api.queryVideo).mockResolvedValue({ data: { id: 37, scene_id: 109, status: 2, metadata: {} } } as never)
+  const { wrapper } = await render()
+  expect(wrapper.get('.video-generation-progress time').text()).toBe('12 分 31 秒')
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(wrapper.get('.video-generation-progress time').text()).toBe('12 分 33 秒')
+})

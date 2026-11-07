@@ -45,6 +45,7 @@ import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import type { AgentChange, AgentTarget } from '@/features/creation-agent/types'
 import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistory.vue'
 import VideoGenerationErrorState from '@/components/VideoGenerationErrorState.vue'
+import VideoGenerationProgress from '@/components/VideoGenerationProgress.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
@@ -450,6 +451,8 @@ function setSceneBusy(target: typeof generatingVideoSceneIds, sceneId: number, v
 function updateVideoSnapshot(current: VideoResult) {
   const records = videos.value[current.scene_id] || []
   const previous = records.find(item => item.id === current.id)
+  // Status polling omits creation timestamps; retain the server's original clock.
+  current = { ...previous, ...current, created_at: current.created_at || previous?.created_at || '' }
   current = preserveAutoEnhancement(previous, current)
   // A late processing response must not replace a completion obtained on focus.
   if (previous && terminalTaskStatuses.has(previous.status) && !terminalTaskStatuses.has(current.status)) return previous
@@ -2450,8 +2453,7 @@ onBeforeUnmount(() => {
                     :poster="videoCoverUrl(selectedVideoFor(scene)!)"
                     :title="tr('分镜 {p0} 视频预览', { p0: scene.sequence })"
                   />
-                  <div v-else-if="videoSyncErrors[scene.id]?.stopped" class="preview-empty"><RefreshCw :size="30" /><strong>{{ tr('视频状态暂未同步') }}</strong><span>{{ tr('可刷新视频状态，不必重新生成') }}</span></div>
-                  <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>{{ tr('视频生成中') }}</strong><span>{{ tr('完成后将在这里自动播放') }}</span></div>
+                  <VideoGenerationProgress v-else-if="videoSyncErrors[scene.id]?.stopped || generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" :video="selectedVideoFor(scene)" :sync-delayed="videoSyncErrors[scene.id]?.stopped" />
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>{{ tr('等待生成视频') }}</strong><span>{{ tr('完善提示词后点击“生成视频”') }}</span></div>
                 </div>
                 <p v-if="videoSyncErrors[scene.id]" class="video-sync-note" role="status">{{ videoSyncErrors[scene.id].message }}</p>
