@@ -155,7 +155,7 @@ export interface AgentConfiguration {
   compaction_trigger_ratio?: number
   compaction_target_ratio?: number
   summary_output_tokens?: number
-  summary_timeout_seconds?: number
+  summary_timeout_seconds?: number | null
   context_page_characters?: number
   history_runs: number
   max_output_tokens: number

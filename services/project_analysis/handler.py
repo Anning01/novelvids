@@ -338,6 +338,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                     api_protocol=image_config.api_protocol, resolution=cover_selection.provider_size,
                     aspect_ratio=cover_selection.aspect_ratio, output_format=cover_selection.output_format,
                     quality=cover_selection.provider_quality, count=1,
+                    **({'timeout': None} if execution else {}),
                 )
                 # Preserve actual provider usage even if saving a returned image subsequently fails.
                 result.update(image_usage={"image_count": len(images), "clarity": cover_selection.clarity},

@@ -21,6 +21,7 @@ it('keeps assistant activation and budgets backend managed', async () => {
   const wrapper = mount(AgentSettingsPanel)
   await flushPromises()
   expect(wrapper.text()).not.toContain('运行超时')
+  expect(wrapper.text()).not.toContain('摘要等待时间')
   for (const label of ['模型调用上限', '工具调用上限', '每轮总用量上限']) expect(wrapper.text()).not.toContain(label)
   const enabled = wrapper.get('[role="switch"]')
   await enabled.trigger('click')

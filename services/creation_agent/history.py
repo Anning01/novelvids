@@ -1,7 +1,6 @@
 """Incremental conversation compression; durable creative constraints remain separate."""
 
 from dataclasses import replace
-import asyncio
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -123,10 +122,10 @@ async def prepare_history(conversation: AgentConversation, assistant: AgentMessa
         try:
             if hasattr(model, 'phase'):
                 model.phase = 'summary'
-            result = await asyncio.wait_for(summary_agent.run(
+            result = await summary_agent.run(
                 render_creation_summary(conversation.summary[:history_budget], data), model=model,
                 model_settings={'max_tokens': min(limits.summary_output_tokens, limits.max_output_tokens)},
-                usage_limits=UsageLimits(request_limit=1)), timeout=limits.summary_timeout_seconds)
+                usage_limits=UsageLimits(request_limit=1))
             if not isinstance(result.output, str) or not result.output.strip():
                 raise ValueError('empty summary')
             summary = result.output[:history_budget]

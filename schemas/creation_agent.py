@@ -49,7 +49,7 @@ class AgentConfiguration(BaseModel):
     compaction_trigger_ratio: float = Field(0.70, gt=0.1, lt=1)
     compaction_target_ratio: float = Field(0.45, gt=0, lt=1)
     summary_output_tokens: int = Field(4000, ge=128, le=8000)
-    summary_timeout_seconds: int = Field(30, ge=1, le=60)
+    summary_timeout_seconds: int | None = Field(None, ge=1, le=60)
     # Keep tool reads deliberately small even when the model has a large
     # context window; the agent can page forward when the next section matters.
     context_page_characters: int = Field(4000, ge=500, le=64000)
@@ -57,7 +57,7 @@ class AgentConfiguration(BaseModel):
     max_output_tokens: int = Field(64000, ge=256, le=384000)
     total_tokens_limit: int | None = Field(None, ge=1000, le=10_000_000)
 
-    @field_validator('timeout_seconds')
+    @field_validator('timeout_seconds', 'summary_timeout_seconds')
     @classmethod
     def retire_run_timeout(cls, value):
         return None

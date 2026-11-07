@@ -38,7 +38,6 @@ const groups: { title: string; description: string; fields: BudgetField[] }[] = 
     { key: 'history_runs', get label() { return tr('近期对话轮数') }, get unit() { return tr('轮') } },
     { key: 'context_page_characters', get label() { return tr('每页读取长度') }, get unit() { return tr('字符') } },
     { key: 'summary_output_tokens', get label() { return tr('摘要输出上限') }, unit: 'token' },
-    { key: 'summary_timeout_seconds', get label() { return tr('摘要等待时间') }, get unit() { return tr('秒') } },
   ] },
 ]
 onMounted(async () => {

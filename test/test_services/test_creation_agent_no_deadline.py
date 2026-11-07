@@ -101,15 +101,12 @@ async def test_explicit_stop_interrupts_an_unbounded_model_wait(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_agent_transport_has_no_read_deadline_but_preserves_connection_limits():
+async def test_agent_transport_has_no_request_deadline():
     from types import SimpleNamespace
-    from openai import DEFAULT_TIMEOUT
     from services.creation_agent.handler import configured_model
     model = configured_model(SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='test', thinking=None), AgentConfiguration())
     try:
-        assert model.client.timeout.read is None
-        assert model.client.timeout.connect == DEFAULT_TIMEOUT.connect
-        assert DEFAULT_TIMEOUT.read == 600
+        assert model.client.timeout is None
     finally:
         await model.client.close()
 
@@ -137,3 +134,26 @@ async def test_stopping_an_external_request_keeps_uncertainty_protection(monkeyp
     await task.refresh_from_db()
     assert task.status == 4 and task.stage == 'needs_review'
     assert (await AgentOperation.get(task=task, key='model:slow')).state == 'uncertain'
+
+
+@pytest.mark.parametrize('seconds', [None, 1, 30, 60])
+def test_legacy_summary_deadline_is_retired(seconds):
+    assert AgentConfiguration(summary_timeout_seconds=seconds).summary_timeout_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_agent_reference_generation_disables_synchronous_image_deadline():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+    from services.creation_agent.skill_execution import current_execution
+    from services.reference.generator import generate_for_sora_consistency
+
+    execution = SimpleNamespace(before_request=AsyncMock())
+    token = current_execution.set(execution)
+    try:
+        with patch('services.reference.generator.generate_images', AsyncMock(return_value=[])) as generate:
+            await generate_for_sora_consistency({'base_traits': 'test'}, base_url='https://example.invalid', api_key='test')
+        assert generate.call_args.kwargs['timeout'] is None
+        execution.before_request.assert_awaited_once()
+    finally:
+        current_execution.reset(token)

@@ -84,3 +84,23 @@ async def test_large_history_is_summarized_before_the_turn_count_limit():
     assert len(calls) == 1
     assert history and '历史完整提示词' not in str(history)
     assert '目标12' in conversation.summary
+
+
+@pytest.mark.asyncio
+async def test_slow_summary_finishes_instead_of_being_cut_off_by_legacy_deadline():
+    import asyncio
+    import json
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    conversation, _, _ = await session_fixture()
+    previous = await AiTask.create(task_type=7, status=3)
+    await AgentMessage.create(conversation=conversation, task=previous, role='assistant', request_id=uuid4(),
+        request_hash='long', content='saved', native_messages=json.loads(ModelMessagesTypeAdapter.dump_json([
+            ModelResponse(parts=[TextPart('Earlier content ' * 1500)])])))
+    task = await AiTask.create(task_type=7)
+    current = await AgentMessage.create(conversation=conversation, task=task, role='assistant', request_id=uuid4(), request_hash='now')
+    async def summarize(messages, info):
+        await asyncio.sleep(.02)
+        return ModelResponse(parts=[TextPart('Completed summary after old deadline')])
+    limits = AgentConfiguration(history_runs=6, max_context_characters=2000).model_copy(update={'summary_timeout_seconds': .001})
+    await prepare_history(conversation, current, limits, FunctionModel(summarize))
+    assert conversation.summary == 'Completed summary after old deadline'
