@@ -207,8 +207,10 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             if routed_start:
                 # Broad production requests must not depend on the chat model
                 # choosing submit_production instead of emitting a huge CRUD call.
-                buffer.append({'type': 'RUN_STARTED', 'runId': task_id, 'threadId': str(conversation.id)})
-                await flush()
+                last_event = await agent_event_log.last(assistant)
+                if last_event is None or last_event['type'] in {'RUN_ERROR', 'RUN_FINISHED'}:
+                    buffer.append({'type': 'RUN_STARTED', 'runId': task_id, 'threadId': str(conversation.id)})
+                    await flush()
                 from services.creation_agent.plans import CreationPlanner
                 from pydantic_ai.exceptions import UnexpectedModelBehavior
                 try:

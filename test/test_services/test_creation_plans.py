@@ -503,12 +503,18 @@ async def test_prepared_plan_cannot_be_reported_as_completed_generation(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_broad_production_request_enters_planner_before_chat_can_write(monkeypatch):
+@pytest.mark.parametrize('resuming', [False, True])
+async def test_broad_production_request_enters_planner_before_chat_can_write(monkeypatch, resuming):
     from models.scene import Scene
     from services.ai_task_executor import AiTaskExecutor
     from services.creation_agent.handler import CreationAgentTaskHandler
     from utils.enums import AiTaskTypeEnum
     _, request, chapters, task, _, _ = await plan_fixture()
+    from services.creation_agent.event_log import agent_event_log
+    assistant = await AgentMessage.get(task=task, role='assistant')
+    if resuming:
+        await agent_event_log.append(assistant.id, [{'type': 'RUN_STARTED', 'runId': str(task.id),
+            'threadId': str(assistant.conversation_id)}], 0)
     respond = plan_model(request, chapters)
     async def generate(self, skill, facts, output_type, **kwargs):
         return await respond(skill, facts, output_type, **kwargs)
@@ -526,6 +532,7 @@ async def test_broad_production_request_enters_planner_before_chat_can_write(mon
     assert await plan_proposal(task.id)
     assert await Scene.filter(chapter_id=request.chapter_id).count() == 1
     chat.assert_not_called()
+    assert sum(event['type'] == 'RUN_STARTED' for event in await agent_event_log.load(assistant)) == 1
 
 
 @pytest.mark.asyncio
