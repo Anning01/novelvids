@@ -103,6 +103,20 @@ describe('creation assistant store', () => {
     expect(store.error).toBe('')
   })
 
+  it('uses a successful running snapshot instead of treating a disconnected stream as task failure', async () => {
+    const store = useCreationAgentStore()
+    await store.open(7)
+    vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { ...run, status: 2, content: '' } })
+    vi.mocked(runSubscription).mockResolvedValue({ runAgent: vi.fn().mockRejectedValue(new Error('network error')), abortRun: vi.fn() } as unknown as Awaited<ReturnType<typeof runSubscription>>)
+    await store.follow('run-1')
+    expect(store.busy).toBe(true)
+    expect(store.error).toBe('')
+    expect(store.streamConnected).toBe(false)
+    expect(store.statusText).toContain('仍在后台执行')
+    expect(agentApi.submit).not.toHaveBeenCalled()
+    expect(agentApi.stop).not.toHaveBeenCalled()
+  })
+
   it('freezes scope and reuses request id after an uncertain submission', async () => {
     const store = useCreationAgentStore()
     await store.open(7)

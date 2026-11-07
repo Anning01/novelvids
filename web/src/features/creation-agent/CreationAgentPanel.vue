@@ -119,7 +119,7 @@ function toggleAllMessages() {
   messageExpansion.value = Object.fromEntries(bubbles.value.map(message => [message.id, open]))
 }
 const currentProductionActive = computed(() => bubbles.value.some(message => message.task_id === store.currentRun?.task_id && message.status === 3 && message.activityStatus === 2))
-const statusLabel = computed(() => store.error ? tr('本轮未完成 · 查看原因') : currentProductionActive.value ? tr('处理中') : store.statusText || tr('创作上下文'))
+const statusLabel = computed(() => store.error ? store.busy ? tr('连接中断 · 后台状态待核对') : tr('本轮未完成 · 查看原因') : currentProductionActive.value ? tr('处理中') : store.statusText || tr('创作上下文'))
 watch(() => store.error, error => { if (error) statusOpen.value = true })
 watch(() => store.conversationId, () => { messageExpansion.value = {}; statusOpen.value = false })
 

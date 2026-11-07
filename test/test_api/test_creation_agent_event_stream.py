@@ -75,6 +75,24 @@ async def test_a_followed_active_run_reads_the_database_only_when_notified():
 
 
 @pytest.mark.asyncio
+async def test_idle_connection_has_heartbeats_without_fake_events(monkeypatch):
+    monkeypatch.setattr('api.creation_agent._STREAM_IDLE_FALLBACK_SECONDS', 0.02)
+    conversation, request, _ = await session_fixture()
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    assistant = await AgentMessage.get(task=task, role='assistant')
+    await agent_event_log.append(assistant.id, [_run_event(conversation, task, 'RUN_STARTED')], 0)
+    _, consumer, chunks = await _follow(task)
+    try:
+        await asyncio.sleep(0.08)
+        assert any(chunk == ': keep-alive\n\n' for chunk in chunks)
+        assert len(await agent_event_log.load(assistant)) == 1
+        await task.refresh_from_db()
+        assert task.status == TaskStatusEnum.pending.value
+    finally:
+        await _shutdown(consumer)
+
+
+@pytest.mark.asyncio
 async def test_following_stream_closes_from_published_events_when_the_run_finishes(monkeypatch):
     conversation, request, _ = await session_fixture()
     task = await agent_sessions.submit(conversation, request, AuthContext())

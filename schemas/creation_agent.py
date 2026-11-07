@@ -42,7 +42,8 @@ class AgentConfiguration(BaseModel):
     request_limit: int = Field(20, ge=1, le=30)
     tool_calls_limit: int = Field(50, ge=1, le=100)
     max_targets: int = Field(32, ge=1, le=100)
-    timeout_seconds: int = Field(600, ge=10, le=900)
+    # Read old stored/client configurations without retaining an agent deadline.
+    timeout_seconds: int | None = Field(None, ge=10, le=900)
     max_context_characters: int | None = Field(None, ge=2000)
     working_input_tokens: int = Field(840_000, ge=1000, le=900_000)
     compaction_trigger_ratio: float = Field(0.70, gt=0.1, lt=1)
@@ -55,6 +56,11 @@ class AgentConfiguration(BaseModel):
     history_runs: int = Field(12, ge=1, le=100)
     max_output_tokens: int = Field(64000, ge=256, le=384000)
     total_tokens_limit: int = Field(2_000_000, ge=1000, le=10_000_000)
+
+    @field_validator('timeout_seconds')
+    @classmethod
+    def retire_run_timeout(cls, value):
+        return None
 
     def context_character_limit(self, model_limit: int | None) -> int | None:
         return min((limit for limit in (self.max_context_characters, model_limit) if limit is not None), default=None)

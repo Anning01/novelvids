@@ -141,7 +141,10 @@ async def stream(task_id: UUID, request: Request, body: RunAgentInput | None = B
                     if last is None or last['type'] not in {'RUN_FINISHED', 'RUN_ERROR'}:
                         yield encoder.encode(closing_error(task, 'INTERRUPTED'))
                     return
-                await task_signals.wait(signal, _STREAM_IDLE_FALLBACK_SECONDS)
+                if not await task_signals.wait(signal, _STREAM_IDLE_FALLBACK_SECONDS):
+                    # Transport heartbeat only: it neither fabricates progress
+                    # nor advances the persisted event cursor.
+                    yield ': keep-alive\n\n'
 
     return StreamingResponse(events(), media_type='text/event-stream',
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

@@ -30,7 +30,6 @@ const groups: { title: string; description: string; fields: BudgetField[] }[] = 
     { key: 'max_targets', get label() { return tr('最多修改对象') }, get unit() { return tr('个 / 轮') } },
     { key: 'request_limit', get label() { return tr('模型调用上限') }, get unit() { return tr('次 / 轮') } },
     { key: 'tool_calls_limit', get label() { return tr('工具调用上限') }, get unit() { return tr('次 / 轮') } },
-    { key: 'timeout_seconds', get label() { return tr('运行超时') }, get unit() { return tr('秒') } },
     { key: 'max_output_tokens', get label() { return tr('单次输出上限') }, unit: 'token' },
     { key: 'total_tokens_limit', get label() { return tr('每轮总用量上限') }, unit: 'token' },
   ] },

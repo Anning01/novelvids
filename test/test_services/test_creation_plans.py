@@ -497,3 +497,54 @@ async def test_prepared_plan_cannot_be_reported_as_completed_generation(monkeypa
     reply = await AgentMessage.get(task=task, role='assistant')
     assert '确认执行' in reply.content and '全部分镜已生成' not in reply.content
     assert await plan_proposal(task.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_broad_production_request_enters_planner_before_chat_can_write(monkeypatch):
+    from models.scene import Scene
+    from services.ai_task_executor import AiTaskExecutor
+    from services.creation_agent.handler import CreationAgentTaskHandler
+    from utils.enums import AiTaskTypeEnum
+    _, request, chapters, task, _, _ = await plan_fixture()
+    respond = plan_model(request, chapters)
+    async def generate(self, skill, facts, output_type, **kwargs):
+        return await respond(skill, facts, output_type, **kwargs)
+    monkeypatch.setattr(SkillExecution, 'generate', generate)
+    chat = AsyncMock(side_effect=AssertionError('Production must not enter the CRUD tool loop'))
+    monkeypatch.setattr('services.creation_agent.handler.stream_creation_agent', chat)
+    await AiTask.filter(id=task.id).update(status=6)
+    await task.refresh_from_db()
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
+    await executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert task.response_data['plan_prepared'] is True
+    assert await plan_proposal(task.id)
+    assert await Scene.filter(chapter_id=request.chapter_id).count() == 1
+    chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_nonproduction_broad_request_falls_back_with_one_run_start(monkeypatch):
+    from pydantic_ai.models.function import FunctionModel
+    from services.ai_task_executor import AiTaskExecutor
+    from services.creation_agent.handler import CreationAgentTaskHandler
+    from services.creation_agent.event_log import agent_event_log
+    from utils.enums import AiTaskTypeEnum
+    _, _, _, task, _, _ = await plan_fixture()
+    async def answer(messages, info):
+        yield '本次无需修改。'
+    monkeypatch.setattr(CreationPlanner, 'prepare', AsyncMock(return_value=None))
+    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args: FunctionModel(stream_function=answer))
+    await AiTask.filter(id=task.id).update(status=6)
+    await task.refresh_from_db()
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
+    await executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    message = await AgentMessage.get(task=task, role='assistant')
+    events = await agent_event_log.load(message)
+    assert sum(event['type'] == 'RUN_STARTED' for event in events) == 1
+    assert events[-1]['type'] == 'RUN_FINISHED'

@@ -10,7 +10,7 @@ def test_creation_agent_defaults_use_deepseek_long_context_envelope():
     assert configuration.request_limit == 20
     assert configuration.tool_calls_limit == 50
     assert configuration.max_targets == 32
-    assert configuration.timeout_seconds == 600
+    assert configuration.timeout_seconds is None
     assert configuration.working_input_tokens == 840_000
     assert configuration.max_context_characters is None
     assert configuration.context_page_characters == 4_000

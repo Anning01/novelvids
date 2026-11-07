@@ -53,7 +53,7 @@ async def authorize_run(params: dict) -> AuthContext:
 
 def configured_model(config, limits: AgentConfiguration):
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
-                         max_retries=0, timeout=limits.timeout_seconds)
+                         max_retries=0)
     extra_body = {}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}
@@ -88,9 +88,6 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
 
 
 class CreationAgentTaskHandler(BaseTaskHandler):
-    def timeout_seconds(self, request_params: dict) -> int:
-        return AgentConfiguration.model_validate(request_params.get("agent_configuration", {})).timeout_seconds
-
     async def execute(self, request_params: dict) -> dict:
         task_id = request_params["task_id"]
         user_message = await AgentMessage.get(task_id=task_id, role="user")
@@ -204,6 +201,26 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         if request_params.get('skill_snapshot'):
             execution_token = current_execution.set(SkillExecution(request_params, assistant, before_request))
         try:
+            execution = current_execution.get()
+            routed_start = bool(progressive and not request.targets and request.write_scope in {'chapter', 'project'}
+                and not request.production_intents and execution and 'creation_planning' in execution.snapshot.contents)
+            if routed_start:
+                # Broad production requests must not depend on the chat model
+                # choosing submit_production instead of emitting a huge CRUD call.
+                buffer.append({'type': 'RUN_STARTED', 'runId': task_id, 'threadId': str(conversation.id)})
+                await flush()
+                from services.creation_agent.plans import CreationPlanner
+                plan = await CreationPlanner(execution, user_message).prepare(request)
+                if plan is not None:
+                    content = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
+                    buffer.extend([
+                        {'type': 'TEXT_MESSAGE_START', 'messageId': final_message_id, 'role': 'assistant'},
+                        {'type': 'TEXT_MESSAGE_CONTENT', 'messageId': final_message_id, 'delta': content},
+                        {'type': 'TEXT_MESSAGE_END', 'messageId': final_message_id},
+                        {'type': 'RUN_FINISHED', 'runId': task_id, 'threadId': str(conversation.id)},
+                    ])
+                    await flush()
+                    return {'conversation_id': conversation.id, 'change_ids': [], 'plan_prepared': True}
             history = await prepare_history(conversation, assistant, limits, recorded_model)
             context['conversation_summary'] = conversation.summary
             async for event in stream_creation_agent(
@@ -216,6 +233,8 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             ):
                 item = event.model_dump(mode="json", by_alias=True, exclude_none=True)
                 kind = item["type"]
+                if routed_start and kind == 'RUN_STARTED':
+                    continue
                 item["timestamp"] = int(time.time() * 1000)
                 if kind.startswith('TEXT_MESSAGE') and item.get('messageId') != final_message_id:
                     # Some models put planning/retries in ordinary content.

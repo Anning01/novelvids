@@ -20,6 +20,7 @@ beforeEach(() => {
 it('keeps assistant activation and budgets backend managed', async () => {
   const wrapper = mount(AgentSettingsPanel)
   await flushPromises()
+  expect(wrapper.text()).not.toContain('运行超时')
   const enabled = wrapper.get('[role="switch"]')
   await enabled.trigger('click')
   await wrapper.get('form').trigger('submit')

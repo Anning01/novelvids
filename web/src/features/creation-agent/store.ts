@@ -63,7 +63,12 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         ? mergeActivity(run.activity || [], message.activity || [])
         : run.activity, started_at: run.started_at, finished_at: run.finished_at, content: isAgentRunning(run.status) && !run.content ? message.content : run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
     reportChanges(run.changes)
-    if (!isAgentRunning(run.status)) {
+    if (isAgentRunning(run.status)) {
+      // A successful snapshot proves the job is alive even if its event stream
+      // disconnected. Do not keep a transport error displayed as a task failure.
+      error.value = run.error_message || ''
+      if (!streamConnected.value) statusText.value = tr('任务仍在后台执行，可重新连接查看实时进度')
+    } else {
       statusText.value = run.status === 3 ? (run.usage.turn_limited ? tr('本轮处理已结束，可以继续对话') : run.changes.length ? tr('修改已保存') : tr('回复已完成'))
         : run.status === 5 ? tr('已停止，已保存的修改仍保留') : tr('运行未完成，已保存的修改仍可查看')
       error.value = run.error_message || ''
@@ -126,7 +131,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         },
       })
     } catch (caught) {
-      if (revision === epoch && subscription === handle) error.value = caught instanceof Error ? caught.message : tr('连接中断，可重新连接查看结果')
+      if (revision === epoch && subscription === handle) error.value = tr('实时连接中断，正在核对后台状态')
     } finally {
       if (revision === epoch && subscription === handle) {
         streamConnected.value = false
