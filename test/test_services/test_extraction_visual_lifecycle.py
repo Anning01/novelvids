@@ -264,14 +264,16 @@ async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(
     prompt = fixed_asset_prompt(language, snapshot=snapshot)
     attempts = 0
     def respond(messages, info):
+        if 'characters' in info.output_tools[0].parameters_json_schema['properties']:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'characters': []})])
         nonlocal attempts
         attempts += 1
         assert f'language={language}' in info.instructions
         assert 'requires_design_completion=true' in info.instructions
         if attempts > 1:
             assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
-        persons = [] if attempts == 1 or not repair_omission else [
-            {'name': placeholder.canonical_name, 'base_traits': prompt}]
+        persons = ([{'name': '正常人物', 'base_traits': prompt}] if attempts == 1 else
+            [{'name': placeholder.canonical_name, 'base_traits': prompt}] if repair_omission else [])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
             {'persons': persons, 'scenes': [], 'items': []})])
     model = FunctionModel(respond)
@@ -291,6 +293,68 @@ async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(
     else:
         assert task.status == 4
         assert attempts == 3
+        assert '被提及峰主' in task.error_message
+        assert 'asset_extraction_gateway_error' not in task.error_message
+        from models.agent_operation import AgentOperation
+        from models.creation_agent import AgentMessage
+        checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
+        assert checkpoint.result['issues']
+        assert [item['name'] for item in checkpoint.result['accepted']['persons']] == ['正常人物']
+        assert not await Asset.filter(novel=novel, canonical_name='正常人物').exists()
+        model_messages = await AgentMessage.filter(role='assistant').exclude(task_id=task.id)
+        assert any(message.native_messages for message in model_messages)
         assert placeholder.base_traits == '分析生成的简略外貌'
         assert placeholder.metadata['analysis_source'] == 'project_analysis'
     assert placeholder.metadata['voice_reference_id'] == 73
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['zh', 'en'])
+async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
+    from unittest.mock import AsyncMock, patch
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.messages import ModelResponse, ToolCallPart, RetryPromptPart
+    from controllers.chapter import chapter_controller
+    from services.ai_task_executor import ai_task_executor
+    from models.config import GeneralConfig
+    from models.agent_operation import AgentOperation
+    from test.test_services.test_skill_workflow import enabled_project
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+
+    novel, chapter, _ = await enabled_project()
+    await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': language})
+    await Asset.create(novel=novel, asset_type=1, canonical_name='缺失占位', source_chapters=[1],
+        base_traits='占位概述', metadata={'analysis_source': 'project_analysis'})
+    snapshot = synthetic_snapshot()
+    prompt = fixed_asset_prompt(language, snapshot=snapshot)
+    calls = 0
+
+    def respond(messages, info):
+        if 'characters' in info.output_tools[0].parameters_json_schema['properties']:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'characters': []})])
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            persons = [{'name': '合格人物', 'base_traits': prompt}, {'name': '格式错误人物', 'base_traits': '缺少模板'}]
+        else:
+            retry = next(part.content for msg in reversed(messages) for part in msg.parts if isinstance(part, RetryPromptPart))
+            assert '合格人物' in retry and '格式错误人物' in retry and '缺失占位' in retry
+            assert ('只返回' if language == 'zh' else 'Return only') in retry
+            persons = [{'name': name, 'base_traits': prompt} for name in ('格式错误人物', '缺失占位')]
+            persons.append({'name': '合格人物', 'base_traits': '不允许覆盖已通过的设计'})
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'persons': persons, 'scenes': [], 'items': []})])
+
+    model = FunctionModel(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        task = await chapter_controller.extract(chapter.id)
+        task.request_params['skill_snapshot'] = snapshot.model_dump()
+        await task.save()
+        await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert calls == 2
+    assert set(await Asset.filter(novel=novel).values_list('canonical_name', flat=True)) == {'合格人物', '格式错误人物', '缺失占位'}
+    checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
+    assert checkpoint.result['issues'] == []
+    assert len(checkpoint.result['accepted']['persons']) == 3

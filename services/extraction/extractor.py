@@ -108,7 +108,7 @@ def validate_required_design_assets(result: AssetExtractionResult, required_asse
         for item in items if item.base_traits.strip()}
     missing = [name for kind, name in required_assets if (kind, name.strip()) not in returned]
     if missing:
-        raise ValueError(localized_message('本章关联的剧本占位资产尚未补全正式设定，请按原标准名返回完整提示词：{p0}', p0='、'.join(missing)))
+        raise ValueError(localized_message('本章应提取的资产尚未补全正式设定，请按原标准名返回完整提示词：{p0}', p0='、'.join(missing)))
 
 
 def validate_asset_prompt_contract(result: AssetExtractionResult, snapshot: SkillSnapshot, language: str, aspect_ratio: str) -> None:
@@ -198,6 +198,11 @@ class AssetExtractor:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         if execution:
+            from services.extraction.cast import read_chapter_cast
+            from prompts.extraction import render_cast_scope
+            cast = await read_chapter_cast(execution, messages)
+            self.required_assets = tuple(dict.fromkeys((*self.required_assets, *((1, name) for name in cast.required_names()))))
+            messages = [*messages, {'role': 'user', 'content': render_cast_scope(self.prompt_language, cast.model_dump(mode='json'), self.required_assets)}]
             options = {'output_validator': self._validate_coverage} if self.required_assets else {}
             return await execution.generate('assets', messages, self.response_model, **options)
         try:

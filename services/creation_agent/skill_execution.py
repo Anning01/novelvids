@@ -264,8 +264,11 @@ class SkillExecution:
 
         # These phases already receive their full rules and evidence. Additional
         # skill lookups only repeat context and consume the user's call budget.
-        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video'}:
+        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video', 'structured'}:
             agent.tool(read_skill)
+
+        from services.extraction.validation import AssetCandidateValidator, AssetExtractionValidationError
+        asset_candidates = AssetCandidateValidator() if skill == 'assets' else None
 
         @agent.output_validator
         async def validate_output(ctx: RunContext[SkillSnapshot], output):
@@ -278,12 +281,21 @@ class SkillExecution:
                     raise ModelRetry(str(error)) from None
             if skill == "assets":
                 from pydantic_ai import ModelRetry
-                from services.extraction.extractor import validate_asset_prompt_contract
+                from models.agent_operation import AgentOperation
+                from prompts.extraction import render_asset_repair
 
-                try:
-                    validate_asset_prompt_contract(output, ctx.deps, self.language, request_aspect_ratio)
-                except ValueError as error:
-                    raise ModelRetry(str(error)) from None
+                attempted = output.model_dump(mode='json')
+                output = asset_candidates.merge(output, ctx.deps, self.language, request_aspect_ratio)
+                if output_validator:
+                    try:
+                        await output_validator(output)
+                    except ValueError as error:
+                        asset_candidates.issues.append(str(error))
+                await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:assets:{segment}',
+                    defaults={'state': 'completed', 'result': {'attempted': attempted,
+                        'accepted': output.model_dump(mode='json'), 'issues': asset_candidates.issues}})
+                if asset_candidates.issues:
+                    raise ModelRetry(render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues))
             if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
                 from pydantic_ai import ModelRetry
                 from prompts.creation_standards import ASSET_PROMPT_KINDS
@@ -322,7 +334,7 @@ class SkillExecution:
                             validate_prompt_dependencies(shot.prompt, entities)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
-            if output_validator:
+            if output_validator and skill != 'assets':
                 from pydantic_ai import ModelRetry
                 try:
                     await output_validator(output)
@@ -393,25 +405,30 @@ class SkillExecution:
                         creative_requirements(requirement, self.language),
                         *(media or []),
                     ]
-            result = await agent.run(
-                user_input,
-                deps=self.snapshot,
-                model=recorded,
-                usage_limits=UsageLimits(
-                    request_limit=limits.request_limit,
-                    tool_calls_limit=limits.tool_calls_limit,
-                    total_tokens_limit=limits.total_tokens_limit,
-                ),
-                model_settings={
-                    "max_tokens": min(
-                        limits.max_output_tokens,
-                        chosen.max_tokens or limits.max_output_tokens,
+            from pydantic_ai import capture_run_messages
+
+            with capture_run_messages() as run_messages:
+                try:
+                    result = await agent.run(
+                        user_input,
+                        deps=self.snapshot,
+                        model=recorded,
+                        usage_limits=UsageLimits(
+                            request_limit=limits.request_limit,
+                            tool_calls_limit=limits.tool_calls_limit,
+                            total_tokens_limit=limits.total_tokens_limit,
+                        ),
+                        model_settings={
+                            "max_tokens": min(
+                                limits.max_output_tokens,
+                                chosen.max_tokens or limits.max_output_tokens,
+                            )
+                        },
                     )
-                },
-            )
-            await AgentMessage.filter(id=child_message.id).update(
-                native_messages=_audit_messages(result.new_messages())
-            )
+                finally:
+                    await AgentMessage.filter(id=child_message.id).update(
+                        native_messages=_audit_messages(run_messages)
+                    )
             return result.output.model_dump(mode="json")
 
         try:
@@ -425,9 +442,12 @@ class SkillExecution:
             child.response_data = payload
             await child.save(update_fields=["status", "response_data"])
             return output_type.model_validate(payload)
-        except BaseException:
+        except BaseException as error:
             child.status = TaskStatusEnum.failed.value
             await child.save(update_fields=["status"])
+            from pydantic_ai.exceptions import UnexpectedModelBehavior
+            if isinstance(error, UnexpectedModelBehavior) and asset_candidates and asset_candidates.issues:
+                raise AssetExtractionValidationError(asset_candidates.issues) from error
             raise
         finally:
             try:

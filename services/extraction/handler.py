@@ -148,9 +148,10 @@ class ExtractionTaskHandler(BaseTaskHandler):
             )
             raise
         except Exception as error:
+            from services.extraction.validation import AssetExtractionValidationError
             error_code = (
                 error.error_code
-                if isinstance(error, AssetExtractionGatewayError)
+                if isinstance(error, (AssetExtractionGatewayError, AssetExtractionValidationError))
                 else "unexpected_error"
             )
             logger.warning(
@@ -162,7 +163,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 type(error).__name__,
                 error_code,
             )
-            if isinstance(error, AssetExtractionGatewayError):
+            if isinstance(error, (AssetExtractionGatewayError, AssetExtractionValidationError)):
                 raise error from None
             raise AssetExtractionGatewayError() from None
         logger.info(

@@ -285,6 +285,8 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     attempts = 0
 
     def respond(messages, info):
+        if 'characters' in info.output_tools[0].parameters_json_schema['properties']:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'characters': []})])
         nonlocal attempts
         attempts += 1
         import json
@@ -462,11 +464,13 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
     await assistant.save()
 
     def respond(messages, info):
+        payload = ({'characters': []} if 'characters' in info.output_tools[0].parameters_json_schema['properties']
+                   else {"persons": [], "scenes": [], "items": []})
         return ModelResponse(
             parts=[
                 ToolCallPart(
                     info.output_tools[0].name,
-                    {"persons": [], "scenes": [], "items": []},
+                    payload,
                 )
             ],
             usage=RequestUsage(input_tokens=100, output_tokens=20),
@@ -482,16 +486,18 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
     children = [
         row
         for row in await AiTask.all()
-        if row.request_params.get("parent_task_id") == str(task.id)
+        if row.request_params.get("parent_task_id") == str(task.id) and row.response_data is not None
     ]
-    assert len(children) == 1
-    await record_ai_task_usage(children[0], result=children[0].response_data)
+    # The short cast read and visual generation are each charged once; activity
+    # records and the parent task are not additional model requests.
+    assert len(children) == 2
+    for child in children:
+        await record_ai_task_usage(child, result=child.response_data)
     await record_ai_task_usage(task, result=task.response_data)
     records = await ModelUsageRecord.filter(novel_id=novel.id)
-    assert len(records) == 1
-    assert records[0].ai_task_id == children[0].id
-    assert records[0].usage["input_tokens"] == 100
-    assert records[0].usage["output_tokens"] == 20
+    assert len(records) == 2
+    assert {record.ai_task_id for record in records} == {child.id for child in children}
+    assert all(record.usage["input_tokens"] == 100 and record.usage["output_tokens"] == 20 for record in records)
     assert "api_key" not in str(task.request_params)
     assert "api_key" not in str(children[0].request_params)
 
