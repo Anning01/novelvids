@@ -10,6 +10,7 @@ from typing import Any
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from services.image_inputs import resolve_image_source
+from utils.messages import localized_message
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ async def resolve_assets(
     """解析分镜使用的资产及形态，返回视频模型 subjects。
 
     只有同时满足“已绑定到分镜”和“在 prompt 中显式引用”的资产才会提交；
-    用户在分镜中显式选择的形态优先于 prompt 的 ``#形态`` 与章节默认形态。
+    带 ``#形态`` 的引用按各自形态解析；同一资产可以同时引用基础与多个形态。
     """
     # 查找该小说下的所有资产（一次查询）
     assets = await Asset.filter(novel_id=novel_id).prefetch_related("variants")
@@ -62,7 +63,7 @@ async def resolve_assets(
 
     allowed_asset_ids = set(selected_asset_ids) if selected_asset_ids is not None else None
     requested_assets: list[tuple[Asset, str]] = []
-    seen_ids: set[int] = set()
+    seen_versions: set[tuple[int, str]] = set()
 
     for matched, variant_name in mentions:
         if matched and allowed_asset_ids is not None and matched.id not in allowed_asset_ids:
@@ -71,14 +72,21 @@ async def resolve_assets(
                 matched.id,
             )
             continue
-        if matched and matched.id not in seen_ids:
-            seen_ids.add(matched.id)
+        if matched and (matched.id, variant_name) not in seen_versions:
+            seen_versions.add((matched.id, variant_name))
             requested_assets.append((matched, variant_name))
 
     subjects: list[dict[str, Any]] = []
     explicit_variant_ids = selected_variant_ids or {}
     for matched, mentioned_variant_name in requested_assets:
-        if matched.id in explicit_variant_ids:
+        multiple_versions = sum(asset.id == matched.id for asset, _ in requested_assets) > 1
+        if mentioned_variant_name:
+            variant = _find_variant(mentioned_variant_name, list(matched.variants))
+            if variant is None:
+                raise ValueError(localized_message('引用的资产形态不存在或已移除，请重新选择'))
+        elif multiple_versions:
+            variant = None
+        elif matched.id in explicit_variant_ids:
             selected_variant_id = explicit_variant_ids[matched.id]
             variant = select_asset_variant(matched, chapter_number, explicit_variant_ids, mentioned_variant_name)
             if selected_variant_id is not None and variant is None:

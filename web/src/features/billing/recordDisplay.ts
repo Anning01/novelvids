@@ -55,3 +55,8 @@ export function recordStatus(item: BillingRecord): string {
   }
   return statusLabel(item.status)
 }
+
+export function recordStatusHint(item: BillingRecord): string | undefined {
+  return item.record_kind === 'agent_conversation' && item.statuses?.includes(4)
+    ? tr('该会话有部分步骤未完成，不代表所有调用失败。展开记录可查看各次状态和实际用量。') : undefined
+}

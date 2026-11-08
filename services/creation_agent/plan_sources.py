@@ -80,6 +80,7 @@ class CreationSourceLoader:
                 try:
                     page = resolve_reading(page, facts)
                 except ValueError as error:
+                    await self.execution.claim_repair('source_reading', 'source_reference')
                     repaired = await self.execution.generate('source_reading', {
                         **facts, 'segment': facts['segment'] + ':references:repair:1',
                         'reference_error': str(error),

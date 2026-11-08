@@ -687,7 +687,7 @@ async function runSelected() {
         continue
       }
       const node = store.nodeByKey(key)
-      if (node?.kind === 'asset') await store.generateAsset(node.id)
+      if (node?.kind === 'asset') await store.generateAsset(node.id, typeof node.data.variant_id === 'number' ? node.data.variant_id : undefined)
       if (node?.kind === 'shot') {
         const scene = node.data.scene as import('@/types').Scene
         const config = normalizeShotConfig(scene, projectDefaults.value)

@@ -767,5 +767,12 @@
   "资源已删除或不可用，请重新选择": "Resource deleted or unavailable. Please choose again.",
   "参考图片数量超过当前模型限制": "The number of reference images exceeds the model limit",
   "名称不能为空": "The name cannot be empty",
-  "此素材正在存入资源库或等待清理，请稍后刷新": "This resource is being published or awaiting cleanup. Please refresh later."
+  "此素材正在存入资源库或等待清理，请稍后刷新": "This resource is being published or awaiting cleanup. Please refresh later.",
+  "头像图片不能为空且不能超过 5MB": "Choose an avatar image no larger than 5 MB.",
+  "头像仅支持 JPG、PNG 或 WebP 图片": "Avatar images must be JPG, PNG or WebP.",
+  "头像图片宽高需在 1–6000 像素之间": "Avatar dimensions must be between 1 and 6000 pixels.",
+  "本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。": "The incremental repair allowance for this task is used up. Candidates and call records are saved; review the failed step.",
+  "这是故事分析的人物参考，请先完成资产提取再生成图片。": "This is a story analysis reference. Extract the chapter assets before generating images.",
+  "引用的资产形态不存在或已移除，请重新选择": "The referenced asset variant no longer exists. Please choose it again.",
+  "方案中的形态不存在或选择重复": "The plan references a missing or duplicate variant."
 }

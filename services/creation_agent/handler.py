@@ -84,6 +84,8 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
     last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason')), None)
     if last_finish == 'length':
         return localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。')
+    if '增量修复已用完' in message or 'incremental repair' in message:
+        return localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。')
     if any(marker in message.lower() for marker in ('exceeded maximum retries', 'exceeded max retries count')):
         return localized_message('模型连续提交的内容未通过工具或输出校验，本轮已停止。请缩小修改范围后重试；已保存的修改可在记录中查看。')
     return localized_message('创作助手执行失败。请查看已保存的修改，确认模型可用后重试。')
@@ -150,10 +152,16 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                                   max_batch_size=limits.max_targets, authorization_check=before_request,
                                   max_context_characters=limits.max_context_characters)
         changes.chapter_character_budget = limits.context_page_characters
+        if progressive:
+            context.update(await changes.prepare_context())
+        from services.creation_agent.run_recovery import checkpoint_inputs
+        await checkpoint_inputs(request_params)
         model = configured_model(chosen, limits)
+        from services.creation_agent.reliability import recovery_root
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
             max_characters=limits.context_character_limit(chosen.max_context_characters),
-            request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits)
+            request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits,
+            repair_root=await recovery_root(request_params))
         buffer = []
         content = ""
         last_flush = time.monotonic()
@@ -196,6 +204,8 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         deps = CreationAgentDeps(service=service, context=context, source_message=user_message,
                                  context_loader=refresh_context, changes=changes if progressive else None, limits=limits)
+        deps.creation_rules_seen = {item['chapter_id']: item['constraints_for_new_objects']
+                                    for item in context.get('creation_contexts', [])}
         from services.creation_agent.skill_execution import SkillExecution, current_execution
         from utils.prompt_language import skill_workflow
         mode_token = skill_workflow.set(bool(request_params.get("skill_snapshot")))

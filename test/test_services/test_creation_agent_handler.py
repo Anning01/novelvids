@@ -58,10 +58,11 @@ async def test_repeated_invalid_tool_arguments_report_validation_failure_without
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.failed.value
     from utils.messages import localized_message
-    expected = localized_message('模型连续提交的内容未通过工具或输出校验，本轮已停止。请缩小修改范围后重试；已保存的修改可在记录中查看。', _language='en')
+    expected = localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。', _language='en')
     assert task.error_message == expected
     assert not await PromptChange.filter(task=task).exists()
     assistant = await AgentMessage.get(task=task, role='assistant')
+    assert assistant.usage['requests'] == 2
     events = await agent_event_log.load(assistant)
     assert any(event.get('type') == 'RUN_ERROR' and event.get('message') == expected for event in events)
 
@@ -173,6 +174,7 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
     assert 'reached its output limit' in task.error_message
     assert 'synthetic-reasoning' not in task.error_message
     assert assistant.usage['calls'][-1]['finish_reason'] == 'length'
+    assert assistant.usage['requests'] == 1  # Retrying at the same output limit only spends more.
     assert assistant.usage['missing_usage'] is False
     assert await PromptChange.filter(task=task).count() == 0
 

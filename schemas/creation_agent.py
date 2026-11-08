@@ -108,6 +108,7 @@ class PromptTargetStatusOut(AgentTarget):
 
 
 class AgentRunRequest(BaseModel):
+    resume_from_task_id: UUID | None = None
     plan_confirmation: PlanConfirmation | None = None
     production_intents: list["ProductionIntent"] = Field(default_factory=list, max_length=100)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -191,6 +192,7 @@ class AgentActivityOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    recovery: dict | None = None
     activity: list[AgentActivityOut] = Field(default_factory=list)
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -208,6 +210,7 @@ class AgentRunOut(BaseModel):
 
 
 class AgentMessageOut(BaseModel):
+    recovery: dict | None = None
     activity: list[AgentActivityOut] = Field(default_factory=list)
     started_at: datetime | None = None
     finished_at: datetime | None = None

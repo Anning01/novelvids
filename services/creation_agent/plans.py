@@ -90,10 +90,10 @@ class CreationPlanner:
             if not brief.project_scope_quote:
                 raise ValueError(localized_message('全项目生成必须提供明确范围原话'))
             brief.write_chapter_ids = [row['id'] for row in chapters]
-        if not set(brief.read_chapter_ids + brief.write_chapter_ids) <= chapter_ids:
+        if not set(brief.read_chapter_ids + brief.write_chapter_ids + brief.asset_chapter_ids) <= chapter_ids:
             raise ValueError(localized_message('创作要求中的章节不存在'))
         if not brief.project_scope_quote and request.write_scope != 'project':
-            if set(brief.write_chapter_ids) - {request.chapter_id}:
+            if set(brief.write_chapter_ids + brief.asset_chapter_ids) - {request.chapter_id}:
                 raise ValueError(localized_message('方案超出本轮章节范围'))
         if len({r.id for r in brief.requirements}) != len(brief.requirements) or not brief.requirements:
             raise ValueError(localized_message('创作要求缺失或重复'))
@@ -101,7 +101,7 @@ class CreationPlanner:
             if requirement.source_quote not in request.message or not set(requirement.chapter_ids) <= chapter_ids:
                 raise ValueError(localized_message('创作要求必须有本轮原话和实际章节依据'))
         # Target chapters are also read, so source-version checks cover generated content.
-        read_ids = list(dict.fromkeys([*brief.read_chapter_ids, *brief.write_chapter_ids]))
+        read_ids = list(dict.fromkeys([*brief.read_chapter_ids, *brief.write_chapter_ids, *brief.asset_chapter_ids]))
         loader = CreationSourceLoader(self.execution)
         evidence = await loader.read(read_ids, [r.model_dump() for r in brief.requirements])
         async def validate_draft(draft):
@@ -176,7 +176,10 @@ class CreationPlanner:
             raise ValueError(localized_message('方案遗漏了用户的创作要求'))
         for operation in set(plan.brief.operations) & {'assets', 'storyboard'}:
             covered = {step.target_id for step in plan.steps if step.operation == operation}
-            if not set(plan.brief.write_chapter_ids) <= covered:
+            expected = set(plan.brief.write_chapter_ids)
+            if operation == 'assets':
+                expected.update(plan.brief.asset_chapter_ids)
+            if not expected <= covered:
                 raise ValueError(localized_message('方案遗漏了要求生成的章节'))
         for step in plan.steps:
             if step.mode == 'regenerate' and step.operation not in {'image', 'video'}:
@@ -187,7 +190,8 @@ class CreationPlanner:
                 raise ValueError(localized_message('步骤引用了不存在的创作要求'))
             prerequisite = step.operation == 'assets' and step.target_id in plan.brief.read_chapter_ids and any(
                 step.id in following.depends_on and following.operation == 'storyboard' for following in plan.steps)
-            if step.operation in {'assets', 'storyboard'} and step.target_id not in plan.brief.write_chapter_ids and not prerequisite:
+            asset_source = step.operation == 'assets' and step.target_id in plan.brief.asset_chapter_ids
+            if step.operation in {'assets', 'storyboard'} and step.target_id not in plan.brief.write_chapter_ids and not prerequisite and not asset_source:
                 raise ValueError(localized_message('参考章节不等于可修改章节'))
             if step.source_step:
                 expected = 'assets' if step.operation == 'image' else 'storyboard'
@@ -205,8 +209,8 @@ class CreationPlanner:
             if await Asset.filter(id__in=step.asset_ids, novel_id=self.novel_id, asset_type__in=[1, 2, 3]).count() != len(set(step.asset_ids)):
                 raise ValueError(localized_message('方案引用了不存在的资产'))
             selected_variants = await AssetVariant.filter(id__in=step.variant_ids, asset__novel_id=self.novel_id)
-            if len(selected_variants) != len(step.variant_ids) or len({row.asset_id for row in selected_variants}) != len(selected_variants):
-                raise ValueError(localized_message('方案中的形态不存在或同一资产选择了多个形态'))
+            if len(selected_variants) != len(step.variant_ids):
+                raise ValueError(localized_message('方案中的形态不存在或选择重复'))
             step.asset_ids = list(dict.fromkeys([*step.asset_ids, *[row.asset_id for row in selected_variants]]))
 
 

@@ -152,7 +152,7 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
     current = {'query_creation_objects', 'read_creation_objects', 'apply_creation_changes', 'undo_creation_change'}
     # Historical selected-prompt runners remain replayable. Each live run sees
     # exactly one set of writers, never two competing business contracts.
-    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'get_creation_prompt_rules'}
+    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'get_creation_prompt_rules', 'revise_creation_object'}
     capabilities = (
         {'query', 'read', 'create', 'update', 'delete', 'undo'}
         if ctx.deps.tools_enabled
@@ -171,9 +171,9 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
                 omitted.add('undo_creation_change')
     from services.creation_agent.skill_execution import current_execution
     if current_execution.get() is None:
-        omitted.update({'read_skill', 'submit_production', 'get_production_context'})
+        omitted.update({'read_skill', 'submit_production', 'get_production_context', 'revise_creation_object'})
     if not ctx.deps.changes or getattr(getattr(ctx.deps.changes, 'request', None), 'write_scope', 'read_only') == 'read_only':
-        omitted.add('submit_production')
+        omitted.update({'submit_production', 'revise_creation_object'})
     prepared = [definition for definition in definitions if definition.name not in omitted]
     if ctx.deps.changes:
         for index, definition in enumerate(prepared):
@@ -282,6 +282,8 @@ async def get_creation_context(ctx: RunContext[CreationAgentDeps], chapter_offse
         if include_creation_rules and service.request.chapter_id:
             ctx.deps.creation_rules_seen[service.request.chapter_id] = deepcopy(prospective['constraints_for_new_objects'])
         context = dict(ctx.deps.context)
+        context.pop('selected_objects', None)
+        context.pop('creation_contexts', None)
         if include_project:
             from models.novel import Novel
             project = await Novel.get(id=service.novel_id)
@@ -484,6 +486,21 @@ async def read_creation_history(ctx: RunContext[CreationAgentDeps], query: Annot
 
 
 @creation_agent.tool(sequential=True)
+async def revise_creation_object(ctx: RunContext[CreationAgentDeps], target: AgentTarget,
+                                 instructions: Annotated[str, Field(min_length=1, max_length=4000)]) -> dict:
+    """整篇重写单个设定或分镜。只传对象与要求，服务端结构化生成并保存；局部编辑用 patch_creation_prompts。"""
+    from services.creation_agent.skill_execution import current_execution
+    from services.creation_agent.object_drafts import revise_object
+    execution = current_execution.get()
+    if execution is None:
+        raise ModelRetry(localized_message('此历史任务没有技能快照'))
+    try:
+        return change_receipt(await revise_object(crud_service(ctx), execution, target, instructions, ctx.tool_call_id or ''))
+    except ValueError as error:
+        raise ModelRetry(str(error)) from None
+
+
+@creation_agent.tool(sequential=True)
 async def patch_creation_prompts(ctx: RunContext[CreationAgentDeps], patches: list[CreationPromptPatch]) -> dict:
     """精确替换已读取设定或分镜的提示词片段；保留其余内容并返回可撤销回执。"""
     service = crud_service(ctx)
@@ -592,15 +609,25 @@ async def stream_creation_agent(
                      'selected_targets': [target.model_dump() for target in request.targets]}
     run_input = RunAgentInput(
         thread_id=conversation_id, run_id=run_id,
-        messages=[UserMessage(id=f"{run_id}:user", content=render_creation_request(message, selection))],
+        messages=[UserMessage(id=f"{run_id}:user", content=render_creation_request(message, selection,
+            deps.context if deps.changes and 'creation_contexts' in deps.context else None))],
         tools=[], context=[], state={}, forwarded_props={},
     )
     adapter = AGUIAdapter(agent=creation_agent, run_input=run_input)
-    async for event in adapter.run_stream(
-        model=model, deps=deps, usage_limits=usage_limits, message_history=message_history,
-        model_settings=model_settings, on_complete=on_complete,
-    ):
-        yield event
+    from pydantic_ai import capture_run_messages
+    from services.creation_agent.skill_execution import _audit_messages
+    with capture_run_messages() as messages:
+        try:
+            async for event in adapter.run_stream(
+                model=model, deps=deps, usage_limits=usage_limits, message_history=message_history,
+                model_settings=model_settings, on_complete=on_complete,
+            ):
+                yield event
+        finally:
+            if messages and deps.source_message:
+                from models.creation_agent import AgentMessage
+                await AgentMessage.filter(task_id=run_id, role='assistant').update(
+                    native_messages=_audit_messages(messages[len(message_history):]))
 
 
 @creation_agent.tool

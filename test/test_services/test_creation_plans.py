@@ -58,6 +58,25 @@ def plan_model(request, chapters):
 
 
 @pytest.mark.asyncio
+async def test_storyboard_plan_accepts_multiple_owned_forms_of_the_same_asset():
+    from models.asset import Asset
+    from models.asset_variant import AssetVariant
+    _, request, chapters, _, source, execution = await plan_fixture()
+    asset = await Asset.create(novel_id=chapters[0].novel_id, asset_type=1, canonical_name='同一角色')
+    variants = [await AssetVariant.create(asset=asset, name=name, images=[]) for name in ('少年', '成年')]
+    original = plan_model(request, chapters)
+    async def generate(skill, facts, output_type, **kwargs):
+        result = await original(skill, facts, output_type, **kwargs)
+        if skill == 'creation_planning':
+            result.steps[0].variant_ids = [variant.id for variant in variants]
+        return result
+    with patch.object(execution, 'generate', side_effect=generate):
+        plan = await CreationPlanner(execution, source).prepare(request)
+    assert plan.steps[0].variant_ids == [variant.id for variant in variants]
+    assert plan.steps[0].asset_ids == [asset.id]
+
+
+@pytest.mark.asyncio
 async def test_ten_chapter_plan_keeps_complete_reading_and_exact_selected_source():
     conversation, request, chapters, task, source, execution = await plan_fixture()
     generate = AsyncMock(side_effect=plan_model(request, chapters))

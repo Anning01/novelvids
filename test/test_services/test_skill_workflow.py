@@ -371,7 +371,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     await task.refresh_from_db()
     if not repair_format:
         assert task.status == 4
-        assert attempts == 3
+        assert attempts == 2  # One shared repair, rather than two SDK retries.
         assert not await Asset.filter(novel=novel).exists()
         return
     assert task.status == 3, task.error_message

@@ -72,7 +72,7 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
-        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):
+        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
             if key in parent.params:
                 inherited[key] = parent.params[key]
     return {
@@ -118,6 +118,17 @@ class SkillExecution:
     def language(self):
         return self.params.get("prompt_language", "en")
 
+    async def repair_root(self):
+        from services.creation_agent.reliability import recovery_root
+        return await recovery_root(self.params)
+
+    async def claim_repair(self, stage, code):
+        from services.creation_agent.reliability import claim_repair, failure_checkpoint
+        root = await self.repair_root()
+        issues = [{'tool': stage, 'code': code}]
+        await failure_checkpoint(root, self.message.id, issues, stage=stage)
+        await claim_repair(root, issues)
+
     async def generate(
         self, skill: str, facts: object, output_type: type[BaseModel], **options,
     ):
@@ -160,6 +171,19 @@ class SkillExecution:
 
         segment = str(facts.get("segment", "")) if isinstance(facts, dict) else ""
         key = f"model:{skill}:{output_type.__name__}:{segment}"
+        from models.agent_operation import AgentOperation
+        from services.creation_agent.plan_sources import fingerprint
+        stable_facts = dict(facts) if isinstance(facts, dict) else facts
+        if isinstance(stable_facts, dict) and isinstance(stable_facts.get('selection'), dict):
+            stable_facts['selection'] = {k: v for k, v in stable_facts['selection'].items()
+                                       if k not in {'request_id', 'resume_from_task_id'}}
+        input_key = 'model-input:' + fingerprint(key)
+        revision = fingerprint([skill, stable_facts, self.snapshot.revision, self.language, chosen.id,
+                                output_type.model_json_schema(), additional_instructions])
+        saved_input, _ = await AgentOperation.get_or_create(task_id=self.params['task_id'], key=input_key,
+            defaults={'state': 'completed', 'result': {'revision': revision}})
+        if saved_input.result['revision'] != revision:
+            raise ValueError(localized_message('候选的输入或协议已变化，请重新规划'))
         child_id = uuid5(UUID(self.params["task_id"]), key)
         child, _ = await AiTask.get_or_create(
             id=child_id,
@@ -199,6 +223,8 @@ class SkillExecution:
 
         async def validate_call():
             await self.before_request()
+            from services.creation_agent.run_recovery import checkpoint_inputs
+            await checkpoint_inputs(self.params)
             from services.balance import ensure_solvent
 
             await ensure_solvent(self.params.get("team_id"), self.params.get("user_id"))
@@ -243,11 +269,12 @@ class SkillExecution:
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
             on_activity=report_activity,
+            repair_root=await self.repair_root(), stage=skill,
         )
         request_aspect_ratio = "16:9"
         from services.storyboard.candidates import StoryboardCandidateValidator
         storyboard_candidates = (StoryboardCandidateValidator(output_type, self.snapshot, self.language,
-            self.params.get('shot_duration_range'), facts)
+            facts.get('shot_duration_range', self.params.get('shot_duration_range')) if isinstance(facts, dict) else self.params.get('shot_duration_range'), facts)
             if skill == 'storyboard' and 'shots' in output_type.model_fields else None)
         storyboard_checkpoint = None
         if storyboard_candidates:
@@ -259,9 +286,12 @@ class SkillExecution:
         if skill in {'storyboard', 'video'}:
             from prompts.creation_plan import resolved_storyboard_resources_instructions
             additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
-        agent_output = storyboard_candidates.draft_type if storyboard_candidates else output_type
-        if skill == 'remake' and chosen.supports_json_output:
-            agent_output = PromptedOutput(output_type)
+        from services.extraction.validation import AssetCandidateValidator, AssetExtractionValidationError
+        asset_candidates = AssetCandidateValidator(output_type) if skill == 'assets' else None
+        agent_output = (storyboard_candidates.draft_type if storyboard_candidates else
+                        asset_candidates.draft_type if asset_candidates else output_type)
+        if chosen.supports_json_output:
+            agent_output = PromptedOutput(agent_output)
         agent = Agent(
             deps_type=SkillSnapshot,
             instructions=instructions(self.snapshot, self.language, skill,
@@ -281,8 +311,13 @@ class SkillExecution:
         if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video', 'structured', 'remake'}:
             agent.tool(read_skill)
 
-        from services.extraction.validation import AssetCandidateValidator, AssetExtractionValidationError
-        asset_candidates = AssetCandidateValidator() if skill == 'assets' else None
+        asset_checkpoint = None
+        if asset_candidates:
+            from models.agent_operation import AgentOperation
+            saved = await AgentOperation.get_or_none(task_id=self.params['task_id'], key=f'candidate:assets:{segment}', state='completed')
+            if saved:
+                asset_checkpoint = saved.result
+                asset_candidates.restore(asset_checkpoint, output_type)
 
         @agent.output_validator
         async def validate_output(ctx: RunContext[SkillSnapshot], output):
@@ -316,7 +351,7 @@ class SkillExecution:
                 from models.agent_operation import AgentOperation
                 from prompts.extraction import render_asset_repair
 
-                attempted = output.model_dump(mode='json')
+                attempted = output.model_dump(mode='json', warnings=False)
                 output = asset_candidates.merge(output, ctx.deps, self.language, request_aspect_ratio)
                 if output_validator:
                     try:
@@ -325,7 +360,8 @@ class SkillExecution:
                         asset_candidates.issues.append(str(error))
                 await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:assets:{segment}',
                     defaults={'state': 'completed', 'result': {'attempted': attempted,
-                        'accepted': output.model_dump(mode='json'), 'issues': asset_candidates.issues}})
+                        'accepted': output.model_dump(mode='json'), 'issues': asset_candidates.issues,
+                        'pending': [[list(key), issue] for key, issue in asset_candidates.pending.items()]}})
                 if asset_candidates.issues:
                     raise ModelRetry(render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues))
             if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
@@ -364,6 +400,8 @@ class SkillExecution:
             nonlocal request_aspect_ratio, request_rejected
             if storyboard_checkpoint and not storyboard_checkpoint['pending'] and not storyboard_checkpoint['protocol_errors']:
                 return storyboard_candidates.result().model_dump(mode='json')
+            if asset_checkpoint and not asset_checkpoint['issues']:
+                return asset_checkpoint['accepted']
             from models.novel import Novel
 
             project = await Novel.get(id=self.params["novel_id"])
@@ -435,6 +473,13 @@ class SkillExecution:
                     'candidates': {int(key): value for key, value in storyboard_checkpoint['candidates'].items()},
                     'pending': {int(key): value for key, value in storyboard_checkpoint['pending'].items()}}
                 user_input = [*(user_input if isinstance(user_input, list) else [user_input]), structural_repair(self.language, checkpoint)]
+            if asset_checkpoint and asset_checkpoint['issues']:
+                from prompts.extraction import render_asset_repair
+                user_input = [*(user_input if isinstance(user_input, list) else [user_input]),
+                    render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues)]
+            receipt = await AgentOperation.get(task_id=self.params['task_id'], key=key)
+            if storyboard_checkpoint or asset_checkpoint or receipt.result.get('recovered_failure'):
+                await self.claim_repair(skill, 'saved_candidate')
 
             with capture_run_messages() as run_messages:
                 try:
@@ -478,9 +523,10 @@ class SkillExecution:
             child.status = TaskStatusEnum.failed.value
             await child.save(update_fields=["status"])
             from pydantic_ai.exceptions import UnexpectedModelBehavior
-            if isinstance(error, UnexpectedModelBehavior) and asset_candidates and asset_candidates.issues:
+            from services.creation_agent.reliability import RepairExhausted
+            if isinstance(error, (UnexpectedModelBehavior, RepairExhausted)) and asset_candidates and asset_candidates.issues:
                 raise AssetExtractionValidationError(asset_candidates.issues) from error
-            if isinstance(error, UnexpectedModelBehavior) and storyboard_candidates and storyboard_candidates.pending:
+            if isinstance(error, (UnexpectedModelBehavior, RepairExhausted)) and storyboard_candidates and storyboard_candidates.pending:
                 details = '；'.join(f'{number}: {" / ".join(issues)}' for number, issues in storyboard_candidates.pending.items())
                 raise ValueError(localized_message('部分分镜修正仍未通过，已保留合格镜头与候选：{p0}', p0=details)) from error
             raise

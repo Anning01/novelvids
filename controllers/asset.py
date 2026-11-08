@@ -770,6 +770,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
     ) -> AiTask:
         """提交参考图生成任务。"""
         asset = await self.get(asset_id)
+        if (asset.metadata or {}).get('analysis_source') == 'project_analysis':
+            raise HTTPException(409, localized_message('这是故事分析的人物参考，请先完成资产提取再生成图片。'))
         variant = None
         if variant_id is not None:
             variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset.id)

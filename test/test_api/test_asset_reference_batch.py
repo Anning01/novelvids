@@ -88,3 +88,17 @@ async def test_failed_admission_rolls_back_the_whole_queue_and_settings(client, 
     for asset in assets:
         await asset.refresh_from_db()
         assert not asset.metadata
+
+
+@pytest.mark.asyncio
+async def test_analysis_reference_in_batch_prevents_partial_paid_queue(client, configured_creation_agent):
+    assets, payload = await batch_fixture()
+    assets[-1].metadata = {'analysis_source': 'project_analysis'}
+    await assets[-1].save()
+    response = await client.post('/api/asset/reference-batch', json=payload,
+        headers={'X-Creation-Request-Id': str(uuid4())})
+    assert response.json()['code'] == 409, response.text
+    assert await AiTask.filter(task_type=2).count() == 0
+    assert await AgentSubmission.all().count() == 0
+    await assets[0].refresh_from_db()
+    assert not assets[0].metadata

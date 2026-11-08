@@ -4,6 +4,7 @@ import { AssetTypeEnum } from '@/types'
 import {
   assetImageCandidates,
   assetSelectedImageCandidates,
+  assetVariantView,
   normalizeAssetConfig,
   patchAssetWorkbenchConfig,
 } from './assetConfig'
@@ -21,6 +22,29 @@ function makeAsset(patch: Partial<Asset> = {}): Asset {
 }
 
 describe('asset workbench configuration', () => {
+  it('keeps an empty variant separate from base images and dimensions', () => {
+    const asset = makeAsset({ main_image: '/base.png', angle_image_1: '/base-side.png',
+      metadata: { workbenchImage: { width: 2048, height: 1152 }, image_gallery: ['/base.png'] },
+      variants: [{ id: 7, asset_id: 1, name: '变装', images: [], base_traits: '变装设计', created_at: '', updated_at: '' }] })
+    const view = assetVariantView(asset, 7)
+    expect(view.main_image).toBeUndefined()
+    expect(assetImageCandidates(view)).toEqual([])
+    expect(view.metadata?.workbenchImage).toEqual({})
+    expect(view.base_traits).toBe('变装设计')
+    expect(assetVariantView(asset)).toBe(asset)
+    expect(assetImageCandidates(assetVariantView(asset, 999))).toEqual([])
+    expect(asset.main_image).toBe('/base.png')
+  })
+
+  it('shows only the selected variant image gallery', () => {
+    const asset = makeAsset({ main_image: '/base.png', variants: [{ id: 7, asset_id: 1, name: '变装',
+      images: ['/variant.png', '/variant-side.png'], image_thumbnails: ['/variant-thumb.webp'],
+      description: '衍生说明', base_traits: '衍生设计', created_at: '', updated_at: '' }] })
+    const view = assetVariantView(asset, 7)
+    expect(assetImageCandidates(view).map(image => image.url)).toEqual(['/variant.png', '/variant-side.png'])
+    expect(view.main_image_thumbnail).toBe('/variant-thumb.webp')
+    expect(view.description).toBe('衍生说明')
+  })
   it('normalizes missing settings to the reference defaults', () => {
     expect(normalizeAssetConfig(makeAsset({ metadata: undefined }))).toEqual({
       modelConfigId: null,

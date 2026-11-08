@@ -20,6 +20,23 @@ describe('UsersPage 用户管理', () => {
     vi.restoreAllMocks()
   })
 
+  it.each(['light', 'dark'])('缩写长用户名并保留完整悬停内容（%s）', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const username = 'qiling-e759aa74b30d486f842f0d9e9a0334c7'
+    vi.spyOn(api,'userStats').mockResolvedValue({data:{user_count:1,user_total_cost:0,team_count:1,team_balance_total:0}} as never)
+    vi.spyOn(api,'users').mockResolvedValue({data:{items:[{id:10,username,nickname:'小新（旧账号已停用）',is_super_admin:false,status:0,created_at:'2026-11-08 17:14:00',total_cost:0,team_count:1}],pagination:{total:1,page:1,page_size:20,pages:1}}} as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    const cells = wrapper.get('tbody tr').findAll('td')
+    expect(cells[0]!.text()).toBe('qiling-e759aa…0334c7')
+    expect(cells[0]!.attributes('title')).toBe(username)
+    expect(cells[1]!.get('.nickname-text').attributes('title')).toBe('小新（旧账号已停用）')
+    expect(cells[4]!.text()).toBe('2026-11-08 17:14:00')
+    expect(wrapper.get('[aria-label="用户列表"]').attributes('tabindex')).toBe('0')
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
+
   it('顶部展示四项统计', async () => {
     vi.spyOn(api, 'userStats').mockResolvedValue({
       data: { user_count: 12, user_total_cost: 345.67, team_count: 3, team_balance_total: 1200.5 },

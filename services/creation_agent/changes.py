@@ -52,6 +52,16 @@ class CreationChanges:
         if self.authorization_check:
             await self.authorization_check()
 
+    async def prepare_context(self) -> dict:
+        """Resolve the frozen selection and its rules before asking the model."""
+        await self.authorize()
+        targets = await self.read(self.request.targets, use_cache=True) if self.request.targets else []
+        chapter_ids = {self.request.chapter_id} if self.request.chapter_id else set()
+        chapter_ids.update(item['chapter_id'] for item in targets if item.get('chapter_id'))
+        contexts = [await self.read_creation_context(chapter_id) for chapter_id in sorted(chapter_ids)]
+        return {'selected_objects': targets, 'creation_contexts': contexts,
+                'write_scope': self.request.write_scope}
+
     async def recent_changes(self, source: AgentMessage | None, page: int) -> dict:
         """Durable receipts survive model-history compression; never echo prompts."""
         await self.authorize()
@@ -177,6 +187,8 @@ class CreationChanges:
         chapter = await self.objects.chapter(chapter_id)
         assets = await Asset.filter(novel_id=self.novel_id, asset_type__in=[1, 2, 3])
         current = await creation_memory.for_generation(chapter, assets)
+        if chapter_id not in self.creation_rules and not current:
+            self.creation_rules[chapter_id] = []
         if self.creation_rules.get(chapter_id) != current:
             raise ValueError(localized_message('新增或调整关系前请读取当前章节创作上下文和适用约束'))
 

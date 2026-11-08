@@ -21,15 +21,19 @@ def visual_entity_description(description: str | None, prompt: str | None) -> st
     return '\n'.join(dict.fromkeys(value for value in ((description or '').strip(), traits) if value))
 
 
-def entities_for_assets(assets, chapter_number: int, selected: dict[int, int]):
+def entities_for_assets(assets, chapter_number: int, selected: dict[int, int], prompt: str | None = None):
     """Use the same variant selection for fresh generation and existing scenes."""
     from schemas.scene import SceneEntity
-    from services.video.asset_resolver import select_asset_variant
+    from services.video.asset_resolver import select_asset_variant, _extract_asset_mentions
     from utils.enums import AssetTypeEnum
     from utils.messages import localized_message
 
     entities = []
+    explicit_versions = {asset.id for asset, name in _extract_asset_mentions(prompt or '', list(assets)) if name}
     for asset in assets:
+        if asset.id in explicit_versions:
+            entities.extend(generation_entities_for_assets([asset], chapter_number, {}))
+            continue
         variant = select_asset_variant(asset, chapter_number, selected)
         if selected.get(asset.id) is not None and variant is None:
             raise ValueError(localized_message('已选择的资产形态不存在，请先修复素材绑定'))
@@ -69,14 +73,18 @@ def generation_entities_for_assets(assets, chapter_number: int, selected: dict[i
 
 def shot_variant_bindings(shot, entities) -> dict[str, int | None]:
     from prompts.storyboard import referenced_entities
-    from utils.messages import localized_message
 
     bindings = {}
+    multiple = set()
     for entity in referenced_entities(shot, entities):
         if entity.asset_id is None:
             continue
         key = str(entity.asset_id)
+        if key in multiple:
+            continue
         if key in bindings and bindings[key] != entity.variant_id:
-            raise ValueError(localized_message('同一镜头引用了同一资产的多个形态，请按形态拆分镜头'))
-        bindings[key] = entity.variant_id
+            bindings.pop(key)
+            multiple.add(key)
+        else:
+            bindings[key] = entity.variant_id
     return bindings

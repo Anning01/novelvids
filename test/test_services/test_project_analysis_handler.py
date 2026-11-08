@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from pydantic import ValidationError
 
 from models.asset import Asset
 from models.chapter import Chapter
@@ -14,7 +13,7 @@ from services.project_analysis.handler import (
     ProjectAnalysisTaskHandler,
     _save_cover,
 )
-from utils.enums import AiTaskTypeEnum, AssetTypeEnum
+from utils.enums import AiTaskTypeEnum
 
 
 class FakeLlmClient:
@@ -49,11 +48,10 @@ STRUCTURED_PERSON_TRAITS = """**时代基底**: modern
 **年龄**: young adult"""
 
 
-def test_project_analysis_accepts_prose_and_rejects_empty_visual_prompt():
+def test_project_analysis_keeps_legacy_visual_text_but_does_not_require_it():
     value = "young Chinese man, black hair, travel cloak"
     assert KeyCharacter(name="林舟", aliases=[], role="主角", description="寻找真相", base_traits=value, chapter_numbers=[1, 2]).base_traits == value
-    with pytest.raises(ValidationError, match="must not be empty"):
-        KeyCharacter(name="林舟", role="主角", description="寻找真相", base_traits="  ")
+    assert KeyCharacter(name="林舟", role="主角", description="寻找真相").base_traits == ''
 
 
 @pytest.mark.asyncio
@@ -124,18 +122,9 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
     assert result["chapter_count"] == 2
     assert result["cover"] == "/media/covers/test.png"
 
-    character = await Asset.get(
-        novel_id=novel.id,
-        asset_type=AssetTypeEnum.person.value,
-        canonical_name="林舟",
-    )
-    assert character.is_global is False
-    assert character.source_chapters == [1, 2]
-    assert character.last_updated_chapter == 0
-    assert character.base_traits == STRUCTURED_PERSON_TRAITS
-    assert STRUCTURED_PERSON_TRAITS in character.base_traits
-    assert character.metadata["role"] == "主角"
-    assert character.metadata["reference_layout"] == "character_turnaround"
+    assert not await Asset.filter(novel_id=novel.id).exists()
+    assert result['key_characters'][0]['name'] == '林舟'
+    assert result['key_characters'][0]['description'] == '执着寻找真相的青年。'
 
     messages = llm_client.create.await_args.kwargs["messages"]
     system_prompt = messages[0]["content"]
@@ -285,7 +274,8 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
     assert result['cover_status'] == 'failed'
     assert result['token_usage']['prompt_tokens'] == 200
     assert result['llm_config_id'] == llm.id
-    assert await Asset.filter(novel_id=novel.id, canonical_name='林舟').exists()
+    assert not await Asset.filter(novel_id=novel.id).exists()
+    assert result['key_characters'][0]['name'] == '林舟'
     if failure == 'save':
         assert result['image_usage']['image_count'] == 1
     else:

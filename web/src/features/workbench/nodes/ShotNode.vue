@@ -16,7 +16,7 @@ import MediaGenerationModelSelector from '../components/MediaGenerationModelSele
 import WorkbenchNodeFrame from '../components/WorkbenchNodeFrame.vue'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import WorkbenchVideoMedia from '../components/WorkbenchVideoMedia.vue'
-import { assetSelectedImageCandidates } from '../config/assetConfig'
+import { assetSelectedImageCandidates, assetForWorkbenchNode } from '../config/assetConfig'
 import {
   normalizeShotConfig,
   patchShotWorkbenchConfig,
@@ -103,7 +103,7 @@ function mediaKindForNode(node: WorkbenchNode): MaterialMentionOption['mediaKind
   if (node.kind === 'audio_media' || node.kind === 'audio_reference') return 'audio'
   if (node.kind === 'image_media' || node.kind === 'digital_human') return 'image'
   if (node.kind === 'asset') {
-    const linkedAsset = node.data.asset as Asset | undefined
+    const linkedAsset = assetForWorkbenchNode(node)
     return linkedAsset && assetSelectedImageCandidates(linkedAsset).length > 0 ? 'image' : 'text'
   }
   return 'text'
@@ -111,7 +111,7 @@ function mediaKindForNode(node: WorkbenchNode): MaterialMentionOption['mediaKind
 
 function previewUrlForNode(node: WorkbenchNode) {
   if (node.kind === 'asset') {
-    const asset = node.data.asset as Asset | undefined
+    const asset = assetForWorkbenchNode(node)
     const image = asset ? assetSelectedImageCandidates(asset).at(0) : undefined
     return image?.previewUrl || image?.thumbnailUrl || image?.url || ''
   }
@@ -124,7 +124,7 @@ function previewUrlForNode(node: WorkbenchNode) {
 
 function promptForNode(node: WorkbenchNode) {
   if (node.kind === 'asset') {
-    const asset = node.data.asset as { description?: string; base_traits?: string } | undefined
+    const asset = assetForWorkbenchNode(node)
     return asset?.description || asset?.base_traits || ''
   }
   return typeof node.data.prompt === 'string' ? node.data.prompt : ''
@@ -168,7 +168,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
         : source.kind === 'digital_human' ? 'person' as const : undefined,
     }
     if (source.kind !== 'asset' || referenceMode(edge, source) !== 'reference_image') return [base]
-    const candidates = assetSelectedImageCandidates(source.data.asset as Asset)
+    const candidates = assetSelectedImageCandidates(assetForWorkbenchNode(source)!)
     if (candidates.length <= 1) return [base]
     return candidates.map(candidate => ({
       ...base,

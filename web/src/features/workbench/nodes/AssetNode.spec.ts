@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { expect, it, vi } from 'vitest'
 import { unref } from 'vue'
-import type { DigitalHuman } from '@/types'
+import type { Asset, AssetVariant, DigitalHuman } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import { createWorkbenchPromptActionRegistry, workbenchPromptActionRegistryKey } from '../prompt/promptActionRegistry'
@@ -23,7 +23,7 @@ const selectedHuman: DigitalHuman = {
 
 const frameStub = {
   props: ['data'],
-  template: '<article :data-body-draggable="data.body_draggable === true ? \'true\' : \'false\'"><slot name="icon" /><slot name="title" /><slot name="toolbar-actions" /><slot /></article>',
+  template: '<article :data-body-draggable="data.body_draggable === true ? \'true\' : \'false\'"><slot name="icon" /><slot name="title" /><slot name="meta" /><slot name="toolbar-actions" /><slot /></article>',
 }
 const pickerStub = {
   props: ['open'],
@@ -37,6 +37,47 @@ const promptPanelStub = {
   emits: ['update:modelValue', 'focusout'],
   template: '<textarea data-asset-prompt :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @focusout="$emit(\'focusout\', $event)" />',
 }
+
+it.each(['light', 'dark'])('loads originals on the canvas and repairs thumbnail dimensions (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = useWorkbenchStore()
+  const updateMetadata = vi.spyOn(store, 'updateAssetImageMetadata').mockResolvedValue(null)
+  const asset = {
+    id: 90, novel_id: 9, asset_type: AssetTypeEnum.PERSON, canonical_name: '原图角色',
+    main_image: '/media/original.png', main_image_thumbnail: '/media/original-thumbnail.webp',
+    main_image_preview: '/media/original-preview.webp',
+    angle_image_1: '/media/side.png', angle_image_1_thumbnail: '/media/side-thumbnail.webp',
+    metadata: { workbenchImage: { width: 320, height: 180 } }, created_at: '', updated_at: '',
+  }
+  const wrapper = mount(AssetNode, {
+    props: { id: 'asset-90', type: 'asset', selected: false, connectable: true,
+      data: { asset, generate_capability: false } } as never,
+    global: { plugins: [pinia], stubs: {
+      WorkbenchNodeFrame: frameStub, MediaLibraryPicker: true, WorkbenchPromptEditorPanel: true,
+      WorkbenchSelect: true, WorkbenchSuggestedInput: true, ImageAnnotationDialog: true,
+    } },
+  })
+  const image = wrapper.get<HTMLImageElement>('.workbench-uploaded-image-preview')
+  expect(image.attributes('src')).toBe('/media/original.png')
+  expect(image.attributes('loading')).toBe('lazy')
+  expect(wrapper.get('.workbench-asset-image-stack-layer img').attributes('src')).toBe('/media/side-thumbnail.webp')
+  Object.defineProperties(image.element, { naturalWidth: { value: 2048 }, naturalHeight: { value: 1152 } })
+  await image.trigger('load')
+  expect(updateMetadata).toHaveBeenCalledWith(90, { width: 2048, height: 1152 }, undefined)
+  expect(wrapper.get('.workbench-node-frame__media-size').text()).toBe('2048 × 1152')
+  await wrapper.get('[aria-label="展开原图角色的 2 张图片"]').trigger('click')
+  expect(wrapper.findAll('.workbench-asset-gallery__item img').map(item => item.attributes('src')))
+    .toEqual(['/media/side.png', '/media/original.png'])
+  await wrapper.get('[aria-label="收起原图角色的 2 张图片"]').trigger('click')
+  await wrapper.setProps({ data: { asset: { ...asset, main_image: '/media/replacement.png',
+    metadata: { workbenchImage: {} } }, generate_capability: false } })
+  expect(wrapper.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/media/replacement.png')
+  expect(wrapper.find('.workbench-node-frame__media-size').exists()).toBe(false)
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
 
 it('shows the asset-type icon picker on a new empty asset', async () => {
   const pinia = createPinia()
@@ -304,6 +345,64 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   await wrapper.get('[aria-label="设三图角色参考图 1为主图"]').trigger('click')
   expect(setMainImage).toHaveBeenCalledWith(2, '/media/side.png')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(false)
+})
+
+it.each(['light', 'dark'])('keeps base and independent variant cards visible without mixing their edits (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = useWorkbenchStore()
+  const saveBase = vi.spyOn(store, 'saveAsset').mockResolvedValue(undefined)
+  const empty: AssetVariant = { id: 7, asset_id: 1, name: '测试', description: '衍生说明',
+    base_traits: '衍生设定', images: [], created_at: '', updated_at: '' }
+  const generated: AssetVariant = { ...empty, id: 8, name: '换装', images: ['/variant.png'], base_traits: '换装设定' }
+  const asset: Asset = { id: 1, novel_id: 9, canonical_name: '杜仲元', asset_type: AssetTypeEnum.PERSON,
+    main_image: '/base.png', base_traits: '基础设定', metadata: { workbenchImage: { width: 320, height: 180 },
+      workbench: { digitalHumanPreviewUrl: '/base-face.png' } }, variants: [generated], created_at: '', updated_at: '' }
+  const data = { asset, generate_capability: false, prompt_editor_open: true, prompt_editor: {
+    editorKey: 'asset_prompt', nodeKind: 'asset', fieldKey: 'prompt', label: '图片 Prompt', placeholder: '', hint: '',
+    allowedAssetTypes: null, excludedAssetTypes: null, referenceLimits: { image: 10, video: 0, audio: 0 }, allowPromptInjection: false,
+  } }
+  const wrapper = mount(AssetNode, { props: { id: 'variant-asset', type: 'asset', selected: true,
+    connectable: true, data } as never,
+    global: { plugins: [pinia], stubs: { WorkbenchNodeFrame: frameStub, WorkbenchPromptEditorPanel: promptPanelStub,
+      MediaLibraryPicker: true, WorkbenchSuggestedInput: true, ProjectAssetPicker: true, ImageAnnotationDialog: true } } })
+  const create = vi.spyOn(store, 'createAssetVariant').mockImplementation(async () => {
+    await wrapper.setProps({ data: { ...data, asset: { ...asset, variants: [generated, empty] } } })
+    return empty
+  })
+  const saveVariant = vi.spyOn(store, 'saveAssetVariant').mockResolvedValue(generated)
+  await wrapper.get('[aria-label="管理衍生形态"]').trigger('click')
+  await wrapper.get('[aria-label="新增视觉形态"]').trigger('click')
+  await wrapper.get('[aria-label="新形态名称"]').setValue('测试')
+  await wrapper.get('.workbench-asset-variant-popover__create').trigger('submit')
+  await flushPromises()
+  expect(create).toHaveBeenCalledTimes(1)
+  expect(wrapper.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/base.png')
+  expect(store.selectedNodeKeys).toEqual(['asset-1-variant-7'])
+  const variantData = { ...data, asset: { ...asset, variants: [generated, empty] }, variant_id: 7 }
+  const emptyCard = mount(AssetNode, { props: { id: 'asset-1-variant-7', type: 'asset', selected: true,
+    connectable: true, data: variantData } as never,
+    global: { plugins: [pinia], stubs: { WorkbenchNodeFrame: frameStub, WorkbenchPromptEditorPanel: promptPanelStub,
+      MediaLibraryPicker: true, WorkbenchSuggestedInput: true, ProjectAssetPicker: true, ImageAnnotationDialog: true } } })
+  expect(emptyCard.find('.workbench-uploaded-image-preview').exists()).toBe(false)
+  expect(emptyCard.find('.workbench-asset-default-image img').exists()).toBe(false)
+  expect(emptyCard.find('.workbench-node-frame__media-size').exists()).toBe(false)
+  expect(emptyCard.get('[role="img"]').attributes('aria-label')).toBe('杜仲元 · 测试默认图片')
+  const editor = emptyCard.get<HTMLTextAreaElement>('[data-asset-prompt]')
+  expect(editor.element.value).toBe('衍生设定')
+  await editor.setValue('调整后的衍生设定')
+  await editor.trigger('focusout')
+  await flushPromises()
+  expect(saveVariant).toHaveBeenCalledWith(1, 7, expect.objectContaining({ base_traits: '调整后的衍生设定' }))
+  expect(saveBase).not.toHaveBeenCalled()
+  await emptyCard.setProps({ data: { ...variantData, asset: { ...asset, variants: [generated, { ...empty, images: ['/new-variant.png'] }] } } })
+  expect(emptyCard.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/new-variant.png')
+  expect(wrapper.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/base.png')
+  expect(wrapper.get<HTMLTextAreaElement>('[data-asset-prompt]').element.value).toBe('基础设定')
+  emptyCard.unmount()
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
 })
 
 it('uses the latest full default visual for an asset without an image', () => {

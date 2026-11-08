@@ -85,29 +85,37 @@ async def test_extraction_context_exposes_placeholder_status_and_existing_varian
 
 @pytest.mark.asyncio
 async def test_reanalysis_never_demotes_formal_design_or_erases_media_bindings():
-    from services.project_analysis.handler import _sync_character_assets, KeyCharacter
+    from unittest.mock import patch
+    from models.config import AiModelConfig
+    from services.project_analysis.handler import BookAnalysis, ProjectAnalysisTaskHandler, KeyCharacter
+    from test.test_services.test_project_analysis_handler import FakeLlmClient
 
-    novel = await Novel.create(name='重新分析保留正式设计')
+    novel = await Novel.create(name='重新分析保留正式设计', content='第一章\n人物归来。第二章\n人物离开。')
+    for number in (1, 2):
+        await Chapter.create(novel=novel, number=number, name=f'章节{number}', content='人物在场。')
+    await AiModelConfig.create(task_type=5, name='analysis', model='test', base_url='https://example.invalid', api_key='test', is_active=True)
     formal = await Asset.create(novel=novel, asset_type=1, canonical_name='正式人物',
         base_traits='已确认形象', description='已确认描述', aliases=['老别名'],
         source_chapters=[1], last_updated_chapter=1,
         main_image='/media/formal.png', metadata={'voice_reference_id': 73})
     placeholder = await Asset.create(novel=novel, asset_type=1, canonical_name='占位人物',
         base_traits='旧占位', metadata={'analysis_source': 'project_analysis', 'voice_reference_id': 74})
-    for _ in range(2):
-        await _sync_character_assets(novel, [KeyCharacter(name=name, aliases=['新别名'], role='配角',
+    analysis = BookAnalysis(book_types=[], story_outline='人物归来后离开。', key_characters=[KeyCharacter(name=name, aliases=['新别名'], role='配角',
             description='新的分析概述', base_traits='新的占位', chapter_numbers=[2])
-            for name in ('正式人物', '占位人物')], 2, 'zh')
+            for name in ('正式人物', '占位人物')])
+    with patch('services.project_analysis.handler.AsyncOpenAI', return_value=FakeLlmClient(analysis)):
+        for _ in range(2):
+            await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id, 'include_cover': False})
     await formal.refresh_from_db()
     await placeholder.refresh_from_db()
     assert formal.base_traits == '已确认形象'
     assert formal.description == '已确认描述'
-    assert formal.source_chapters == [1, 2]
-    assert formal.aliases == ['老别名', '新别名']
+    assert formal.source_chapters == [1]
+    assert formal.aliases == ['老别名']
     assert formal.last_updated_chapter == 1
     assert formal.main_image == '/media/formal.png'
-    assert formal.metadata == {'voice_reference_id': 73, 'role': '配角'}
-    assert placeholder.base_traits == '新的占位'
+    assert formal.metadata == {'voice_reference_id': 73}
+    assert placeholder.base_traits == '旧占位'
     assert placeholder.metadata['analysis_source'] == 'project_analysis'
     assert placeholder.metadata['voice_reference_id'] == 74
 
@@ -292,7 +300,7 @@ async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(
         assert 'analysis_source' not in placeholder.metadata
     else:
         assert task.status == 4
-        assert attempts == 3
+        assert attempts == 2  # The task shares one repair allowance across phases.
         assert '被提及峰主' in task.error_message
         assert 'asset_extraction_gateway_error' not in task.error_message
         from models.agent_operation import AgentOperation

@@ -15,6 +15,7 @@ const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 const totalUsers = ref(0)
+const shortUsername = (value: string) => value.length > 24 ? `${value.slice(0, 13)}…${value.slice(-6)}` : value
 
 const showCreateDialog = ref(false)
 const createForm = ref({ username: '', nickname: '', password: '' })
@@ -129,7 +130,8 @@ onMounted(load)
 
     <section class="panel">
       <p v-if="loading" class="dim">{{ tr('加载中…') }}</p>
-      <table v-else class="user-table">
+      <div v-else class="user-table-scroll" role="region" :aria-label="tr('用户列表')" tabindex="0">
+      <table class="user-table">
         <thead>
           <tr>
             <th>{{ tr('用户名') }}</th><th>{{ tr('昵称') }}</th><th>{{ tr('类型') }}</th><th>{{ tr('登录状态') }}</th>
@@ -138,8 +140,8 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-for="user in users" :key="user.id" :class="{ 'is-disabled': user.status !== 1 }">
-            <td>{{ user.username }}</td>
-            <td>{{ user.nickname || '—' }}</td>
+            <td :title="user.username" :aria-label="user.username">{{ shortUsername(user.username) }}</td>
+            <td><span class="nickname-text" :title="user.nickname">{{ user.nickname || '—' }}</span></td>
             <td>
               <span v-if="user.is_super_admin" class="kind-badge is-super">{{ tr('超管') }}</span>
               <span v-else class="kind-badge">{{ tr('普通') }}</span>
@@ -164,6 +166,7 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
+      </div>
       <AppPagination
         :page="page"
         :page-size="pageSize"
@@ -209,8 +212,11 @@ onMounted(load)
 .stat-value.is-cost { color: var(--app-accent, #5b5cf6); }
 .stat-value.is-balance { color: #059669; }
 .panel { padding: 18px; border: 1px solid var(--app-border, #e3e5ec); border-radius: 12px; background: var(--app-surface, #fff); }
+.user-table-scroll { max-width: 100%; overflow-x: auto; }
+.user-table-scroll:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; border-radius: 4px; }
 .user-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.user-table th, .user-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--app-border, #e3e5ec); }
+.user-table th, .user-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--app-border, #e3e5ec); white-space: nowrap; }
+.nickname-text { display: block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .user-table .actions { text-align: right; white-space: nowrap; }
 .user-table .cost { font-variant-numeric: tabular-nums; }
 .is-disabled { opacity: 0.55; }

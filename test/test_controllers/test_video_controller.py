@@ -623,6 +623,32 @@ async def test_生成视频_采用分镜选择的资产衍生状态():
 
 
 @pytest.mark.asyncio
+async def test_同一分镜同时传入基础和两个衍生形态的图片():
+    from services.video.seedance import SeedanceGenerator
+    novel = await Novel.create(name='多形态同框')
+    chapter = await Chapter.create(novel=novel, number=1, name='同框', content='正文')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='苏玄', main_image='https://example.com/base.png')
+    young = await AssetVariant.create(asset=asset, name='少年', images=['https://example.com/young.png'])
+    adult = await AssetVariant.create(asset=asset, name='成年', images=['https://example.com/adult.png'])
+    prompt = '@{苏玄}、@{苏玄#少年}与@{苏玄#成年}同框。'
+    scene = await Scene.create(chapter=chapter, sequence=1, prompt=prompt, duration=6,
+        metadata={'asset_variant_ids': {str(asset.id): adult.id}})
+    await scene.assets.add(asset)
+    config = await AiModelConfig.create(task_type=4, name='test-video', model='mock', base_url='https://example.invalid',
+        api_key='test', api_protocol='volcengine_ark', video_model_type='seedance_2', is_active=True)
+    with patch('controllers.video.get_generator') as factory:
+        provider = AsyncMock()
+        provider.submit.return_value = 'local-multi-variant'
+        factory.return_value = provider
+        await video_controller._submit_generation(VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id))
+    subjects = provider.submit.call_args.kwargs['subjects']
+    assert [subject['images'] for subject in subjects] == [[asset.main_image], list(young.images), list(adult.images)]
+    rendered, images = SeedanceGenerator._process_prompt(prompt, subjects, 9)
+    assert images == [asset.main_image, young.images[0], adult.images[0]]
+    assert rendered == '[图1]、[图2]与[图3]同框。'
+
+
+@pytest.mark.asyncio
 async def test_首尾帧生成_必须同时提供两张图片():
     """首尾帧模式缺少任意一帧时，不提交外部生成任务。"""
     scene, config = await _create_scene_with_config()

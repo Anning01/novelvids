@@ -35,6 +35,20 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     localStorage.clear()
   })
 
+  it('侧边栏同步展示新头像，图片失败时回退到昵称首字', async () => {
+    const pinia = setupStore({enabled:true,ready:true,token:'t',
+      user:{id:1,username:'user',nickname:'小新',avatar_url:'/media/avatar.png',is_super_admin:false},
+      memberships:[{team_id:1,team_name:'团队',role:'creator'}],activeTeamId:1})
+    const wrapper = mountApp(pinia)
+    expect(wrapper.get('.app-user-avatar img').attributes('src')).toBe('/media/avatar.png')
+    await wrapper.get('.app-user-avatar img').trigger('error')
+    expect(wrapper.get('.app-user-avatar').text()).toBe('小')
+    useAuthStore(pinia).user!.avatar_url='/media/new.png'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.app-user-avatar img').attributes('src')).toBe('/media/new.png')
+    wrapper.unmount()
+  })
+
   it('vanilla（未开启登录）时不显示团队选择器，保留外观按钮', () => {
     const wrapper = mountApp(setupStore({ enabled: false, ready: true }))
     expect(wrapper.find('.app-team-selector').exists()).toBe(false)

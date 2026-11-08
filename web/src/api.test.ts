@@ -5,6 +5,27 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it('uploads the avatar as multipart file data while preserving authentication headers', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 0, message: 'ok', data: { id: 1, avatar_url: '/media/avatar.png' } }), { status: 200 }))
+  vi.stubGlobal('fetch', fetchMock)
+  localStorage.setItem('novelvids_token', 'avatar-test-token')
+  localStorage.setItem('novelvids_active_team', '7')
+  try {
+    const file = new File(['avatar-image'], 'avatar.png', { type: 'image/png' })
+    await api.uploadAvatar(file)
+    const [url, options] = fetchMock.mock.calls[0]!
+    expect(url).toBe('/api/auth/avatar')
+    expect(options.method).toBe('POST')
+    expect(options.headers).toEqual({ Authorization: 'Bearer avatar-test-token', 'X-Team-Id': '7' })
+    expect(options.body).toBeInstanceOf(FormData)
+    expect((options.body.get('file') as File).name).toBe('avatar.png')
+    expect(options.body.get('file').size).toBe(file.size)
+  } finally {
+    localStorage.removeItem('novelvids_token')
+    localStorage.removeItem('novelvids_active_team')
+  }
+})
+
 it('loads the workbench capability contract from its dedicated endpoint', async () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
     code: 0,

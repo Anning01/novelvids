@@ -20,6 +20,7 @@ from services.creation_agent.event_log import agent_event_log
 from services.creation_agent.receipts import production_receipts_for, usage_summaries
 from services.creation_agent.results import changes_by_message, message_changes, query_results
 from services.creation_agent.activity import activity_for_messages, run_timing
+from services.creation_agent.reliability import recovery_summary, recovery_summaries
 
 
 def change_projection(change: PromptChange) -> dict:
@@ -84,7 +85,7 @@ class CreationAgentController:
         assistant.task = task
         production = await production_receipts_for([task])
         activity = await activity_for_messages([assistant], {assistant.id: events}, production)
-        return AgentRunOut(activity=activity[assistant.id], **run_timing(task, production[str(task.id)]), pending_production=(await pending_productions([task]))[str(task.id)],
+        return AgentRunOut(recovery=await recovery_summary(task), activity=activity[assistant.id], **run_timing(task, production[str(task.id)]), pending_production=(await pending_productions([task]))[str(task.id)],
             production=production[str(task.id)], task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
             changes=[change_projection(change) for change in changes], usage=(await usage_summaries([assistant]))[assistant.id],
@@ -104,7 +105,9 @@ class CreationAgentController:
         pending = await pending_productions([row.task for row in assistants])
         production = await production_receipts_for([row.task for row in assistants])
         activity = await activity_for_messages(assistants, events, production)
+        recovery = await recovery_summaries([row.task for row in assistants])
         return {"items": [{"id": row.id, "role": row.role, "content": row.content,
+                           "recovery": recovery.get(str(row.task_id)) if row.role == 'assistant' else None,
                            "task_id": str(row.task_id), "status": row.task.status,
                            "created_at": row.created_at,
                            **run_timing(row.task, production.get(str(row.task_id), [])),

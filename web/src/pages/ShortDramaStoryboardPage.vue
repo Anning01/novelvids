@@ -214,7 +214,8 @@ const assistantTargets = computed<AgentTarget[]>(() => {
     for (const key of workbenchStore.selectedNodeKeys) {
       const node = workbenchStore.nodeByKey(key)
       if (node?.kind === 'shot') targets.push({ kind: 'scene', id: node.id })
-      else if (node?.kind === 'asset') targets.push({ kind: 'asset', id: node.id })
+      else if (node?.kind === 'asset') targets.push(typeof node.data.variant_id === 'number'
+        ? { kind: 'variant', id: node.data.variant_id } : { kind: 'asset', id: node.id })
     }
     return targets
   }

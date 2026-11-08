@@ -206,7 +206,7 @@ async def test_execute_passes_all_visual_forms_to_model_without_a_creation_plan(
 
 
 @pytest.mark.asyncio
-async def test_conflicting_forms_fail_before_any_scene_is_saved():
+async def test_same_identity_forms_can_be_saved_in_one_scene():
     from models.asset_variant import AssetVariant
     from models.scene import Scene
     from services.storyboard.entities import generation_entities_for_assets
@@ -216,7 +216,10 @@ async def test_conflicting_forms_fail_before_any_scene_is_saved():
     asset = await Asset.create(novel=novel, asset_type=1, canonical_name='张三', base_traits='少年')
     await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
     entities = generation_entities_for_assets(await Asset.filter(id=asset.id).prefetch_related('variants'), 2, {})
-    with pytest.raises(ValueError, match='多个形态'):
-        await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=[
-            _shot(1), _shot(2, '@{张三} 和 @{张三#成年} 同时出现。')]), {}, 0, entities=entities)
-    assert await Scene.filter(chapter=chapter).count() == 0
+    result = await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=[
+        _shot(1), _shot(2, '@{张三} 和 @{张三#成年} 同时出现。')]), {}, 0, entities=entities)
+    assert len(result) == 2
+    scene = await Scene.filter(chapter=chapter, sequence=2).prefetch_related('assets').get()
+    assert [item.id for item in scene.assets] == [asset.id]
+    assert (scene.metadata or {}).get('asset_variant_ids', {}) == {}
+    assert '@{张三#成年}' in scene.prompt
