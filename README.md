@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="#加入交流群">加入交流群</a> · <a href="#先看效果">看成品</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+  <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
 </p>
 
 ## 加入交流群
@@ -48,7 +48,13 @@
 
 开源版的自部署与二次开发说明见下方「快速开始」和[开发指南](docs/development.md)。
 
-## 先看效果
+## 使用教程
+
+**[观看 B 站使用教程 →](https://www.bilibili.com/video/BV12JW76dEkj/)**
+
+想了解猫影短剧怎么用，可以先看视频教程；生成的成片效果见下方「作品示例」。
+
+## 作品示例
 
 **商业复刻示例**
 
@@ -182,6 +188,14 @@ flowchart LR
 后续重点围绕**资产一致性、可复现工作流、部署恢复、模型与 Skills 扩展、成片质量检查**讨论和推进；当前能力与待讨论方向分开记录在[路线图](ROADMAP.md)，不作为交付承诺。
 
 如果 NovelVids 帮到了你，欢迎 Star、反馈使用体验，或分享有权公开的作品与制作过程。
+
+## 赞赏支持
+
+如果这个项目对你有帮助，欢迎通过微信或支付宝赞赏，支持我继续开发和维护猫影短剧。感谢你的支持！
+
+| 微信支付 | 支付宝 |
+| :---: | :---: |
+| <a href="docs/images/donate-wechat.jpg"><img src="docs/images/donate-wechat.jpg" width="260" alt="微信支付收款二维码"></a> | <a href="docs/images/donate-alipay.jpg"><img src="docs/images/donate-alipay.jpg" width="260" alt="支付宝收款二维码"></a> |
 
 ## 许可证
 
