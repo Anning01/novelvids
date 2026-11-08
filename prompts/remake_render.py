@@ -53,9 +53,10 @@ def _deduplicate_assets(
     return result
 
 
-def compact_catalog(assets: dict[str, Any]) -> list[dict[str, str]]:
+def compact_catalog(assets: dict[str, Any], *, snapshot=None, language='zh') -> list[dict[str, str]]:
     """仅传递视觉识别内容，不向场景模型重复资产图版式要求。"""
     result: list[dict[str, str]] = []
+    contracts = json.loads(snapshot.contents.get('asset_contract', '{}')).get(language, {}) if snapshot else {}
     for group_name, asset_type in (
         ("characters", "character"),
         ("scenes", "scene"),
@@ -64,13 +65,22 @@ def compact_catalog(assets: dict[str, Any]) -> list[dict[str, str]]:
         for item in assets.get(group_name, []):
             if not isinstance(item, dict):
                 continue
+            kind = 'group' if asset_type == 'character' and item.get('label') == '群像' else {
+                'character':'person','scene':'scene','object':'item'}[asset_type]
+            specification = contracts.get(kind)
+            description = _asset_visual_content(item.get('description'))
+            if specification:
+                heading = specification['heading']
+                text = str(item.get('description') or '')
+                description = text.split(heading,1)[1].strip() if heading in text else text.strip()
+                description = description.removesuffix(specification.get('suffix','')).strip()
             result.append(
                 {
                     "id": str(item.get("id", "")),
                     "type": asset_type,
                     "name": str(item.get("name", "")),
                     "label": str(item.get("label", "")),
-                    "description": _asset_visual_content(item.get("description")),
+                    "description": description,
                 }
             )
     return result
@@ -80,10 +90,12 @@ def _asset_visual_content(value: Any) -> str:
     text = str(value or "").strip()
     for marker in (
         "角色描述：",
+        "群像描述：",
         "场景描述：",
         "场景描述:",
         "【道具描述】",
         "Character description:",
+        "Group description:",
         "Scene description:",
         "Object description:",
     ):

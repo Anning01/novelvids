@@ -1,6 +1,7 @@
 """Shared visual contracts; retrieval is type-specific, rendering has no side effects."""
 
 import re
+import json
 
 from prompts.labels import prompt_label
 from prompts.reference import (
@@ -11,6 +12,23 @@ from prompts.storyboard_strategies import StoryboardStrategyPrompt
 
 
 ASSET_PROMPT_KINDS = {1: "person", 2: "scene", 3: "item"}
+
+
+def render_asset_design(description, visual_fields, kind, snapshot, language, aspect_ratio):
+    specification = json.loads(snapshot.contents.get('asset_contract', '{}')).get(language, {}).get(kind)
+    if not specification:
+        return description.strip()
+    task = specification['task'].format(aspect_ratio=aspect_ratio)
+    fields = specification['fields']
+    if fields:
+        if set(visual_fields) != set(fields):
+            raise ValueError(f'{kind}: visual_fields 必须且只能包含这些字段：' + '、'.join(fields))
+        details = '\n'.join(f'**{field}**：' + ' '.join(visual_fields[field].split()) for field in fields)
+    else:
+        if description.strip().startswith(task or specification['heading']):
+            return description.strip()
+        details = description.strip()
+    return '\n\n'.join(part for part in (task, specification['heading'], details, specification.get('suffix', '')) if part)
 STORYBOARD_REQUIRED_SECTIONS = (
     "禁止项",
     "风格定调",

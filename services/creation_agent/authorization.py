@@ -282,6 +282,12 @@ async def pending_productions(tasks) -> dict[str, dict | None]:
         if message is None or (message.conversation_id, str(confirmation_ids[str(task.id)])) in confirmed:
             continue
         pending[str(task.id)] = await _production_proposal_detail(message, task)
+    from models.agent_operation import AgentOperation
+    from services.creation_agent.plans import PLAN_KEY, plan_proposal
+    plan_tasks = [task.id for task in tasks if task.request_params.get('has_creation_plan')]
+    plans = await AgentOperation.filter(task_id__in=plan_tasks, key=PLAN_KEY, state='completed') if plan_tasks else []
+    for row in plans:
+        pending[str(row.task_id)] = await plan_proposal(row.task_id)
     return pending
 
 

@@ -128,7 +128,7 @@ async def generate_images(
     output_format: str = "png",
     quality: str | None = None,
     extra_body: dict[str, Any] | None = None,
-    timeout: float = 300,
+    timeout: float | None = 300,
 ) -> list[GeneratedImage]:
     """Generate images through a backend-configured provider protocol."""
     prepared = image_protocol_adapter(api_protocol).prepare(

@@ -260,6 +260,7 @@ def _asset_payload(entities: Sequence[StoryboardEntity]) -> str:
             "aliases": entity.aliases,
             "visual_description": entity.description,
             "reference_syntax": f"@{{{entity.name}}}",
+            **({"chapter_numbers": entity.chapter_numbers} if getattr(entity, "chapter_numbers", []) else {}),
         }
         for entity in entities
     ]
@@ -310,7 +311,7 @@ def _duration_token(value: object) -> str:
         seconds = float(raw)
     except (TypeError, ValueError):
         seconds = 6
-    normalized = str(int(seconds)) if seconds.is_integer() else str(round(seconds, 1))
+    normalized = f"{seconds:g}"
     return f"@{{镜头时长:{normalized}s}}"
 
 
@@ -341,14 +342,13 @@ def entity_reference_names(
 
     实体名或别名只要命中一次即视为被引用，这是分镜资产引用的唯一判定逻辑。
     """
-    return [
-        entity
-        for entity in entities
-        if any(
-            f"@{{{name}}}" in text or f"@{name}" in text
-            for name in (entity.name, *entity.aliases)
-        )
-    ]
+    names = {name for entity in entities for name in (entity.name, *entity.aliases) if name}
+    references = set(re.findall(r"@\{([^{}]+)\}", text))
+    unbraced = re.sub(r"@\{[^{}]+\}", "", text)
+    if names:
+        pattern = r"@(" + "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True)) + r")"
+        references.update(re.findall(pattern, unbraced))
+    return [entity for entity in entities if references.intersection((entity.name, *entity.aliases))]
 
 
 def referenced_entities(
@@ -356,7 +356,9 @@ def referenced_entities(
     entities: Sequence[StoryboardEntity],
 ) -> list[StoryboardEntity]:
     """返回镜头实际引用的实体。"""
-    return entity_reference_names(_shot_search_text(shot), entities)
+    names = {entity.name for entity in entity_reference_names(_shot_search_text(shot), entities)}
+    names.update(reference.asset_name for reference in getattr(shot, 'asset_refs', ()))
+    return [entity for entity in entities if entity.name in names]
 
 
 def visible_storyboard_assets(shot: object, entities: Sequence[StoryboardEntity]) -> list[str]:
@@ -423,10 +425,10 @@ def without_inline_reference_descriptions(
 def _format_asset_references(
     shot: StoryboardShot, entities: Sequence[StoryboardEntity], language: str = "zh"
 ) -> str:
-    normalized_search_text = _normalize_asset_reference_text(
-        _shot_search_text(shot), _asset_reference_candidates(entities)
-    )
-    referenced = entity_reference_names(normalized_search_text, entities)
+    text = _normalize_asset_reference_text(_shot_search_text(shot), _asset_reference_candidates(entities))
+    names = {entity.name for entity in entity_reference_names(text, entities)}
+    names.update(entity.name for entity in referenced_entities(shot, entities))
+    referenced = [entity for entity in entities if entity.name in names]
     if not referenced:
         return prompt_label("本镜头未引用已登记资产。", language)
     sections: list[str] = []

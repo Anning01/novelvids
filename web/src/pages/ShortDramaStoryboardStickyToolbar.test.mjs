@@ -36,8 +36,11 @@ it('keeps creation actions local to each scene and exposes configured batch gene
   expect(source).toContain('<ShortDramaBatchVideoDialog')
   expect(source).toContain('@generate="batchGenerateVideos"')
   expect(source).toContain('批量生视频')
+  expect(source).toContain('if (request.returnLastFrame)')
+  expect(source).toContain('api.generateVideoBatch(requests)')
+  expect(source).toContain('await monitorVideoBatch(task.id)')
   expect(source).toMatch(
-    /runVideoGenerationQueue\(\s*targets,\s*model\.concurrency,\s*request\.returnLastFrame,/
+    /runVideoGenerationQueue\(\s*targets,\s*model\.concurrency,\s*false,/
   )
   expect(source).toContain('class="chapter-model-select"')
 })

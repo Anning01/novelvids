@@ -8,6 +8,7 @@ from typing import Any
 
 from scenedetect import ContentDetector, SceneManager, open_video, split_video_ffmpeg
 from scenedetect.scene_detector import FlashFilter
+from scenedetect.video_splitter import DEFAULT_FFMPEG_ARGS
 
 MAX_SCENE_SECONDS = 15.0
 MIN_SCENE_SECONDS = 4.0
@@ -43,6 +44,7 @@ class SceneDetector:
             scenes,
             output_dir=output_dir,
             output_file_template="scene-$SCENE_NUMBER.mp4",
+            arg_override=f"{DEFAULT_FFMPEG_ARGS} -threads 1 -filter_threads 1",
         )
         paths = sorted(output_dir.glob("scene-*.mp4"))
         if len(paths) != len(scenes):

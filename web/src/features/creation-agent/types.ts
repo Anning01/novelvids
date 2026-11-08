@@ -73,9 +73,12 @@ export interface AgentProgress {
 }
 
 export interface PendingProduction {
+  plan_confirmation?: { task_id: string; revision: string }
+  summary?: string
+  read_chapters?: string[]
   confirmation_request_id: string
   message: string
-  labels: { operation: string; target_label: string }[]
+  labels: { operation: string; target_label: string; mode?: 'fill_missing' | 'regenerate' | 'revise'; instructions?: string }[]
   intents: ProductionIntent[]
   chapter_id: number | null
   targets: AgentTarget[]
@@ -130,6 +133,7 @@ export interface ProductionIntent {
 }
 
 export interface AgentRunInput {
+  plan_confirmation?: { task_id: string; revision: string }
   production_intents?: ProductionIntent[]
   request_id: string
   message: string
@@ -142,18 +146,18 @@ export interface AgentRunInput {
 export interface AgentConfiguration {
   production_concurrency?: number
   enabled: boolean
-  request_limit: number
-  tool_calls_limit: number
+  request_limit: number | null
+  tool_calls_limit: number | null
   max_targets: number
-  timeout_seconds: number
+  timeout_seconds: number | null
   max_context_characters: number | null
   working_input_tokens?: number
   compaction_trigger_ratio?: number
   compaction_target_ratio?: number
   summary_output_tokens?: number
-  summary_timeout_seconds?: number
+  summary_timeout_seconds?: number | null
   context_page_characters?: number
   history_runs: number
   max_output_tokens: number
-  total_tokens_limit: number
+  total_tokens_limit: number | null
 }

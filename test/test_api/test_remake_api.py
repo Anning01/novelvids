@@ -18,6 +18,54 @@ from services.remake.uploads import RemakeUploadService
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum, VideoModelTypeEnum
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_super_admin,selected_team,actor_id,allowed", [
+    (True, None, 3, True),
+    (True, 2, 3, True),
+    (True, 4, 3, False),
+    (True, None, 4, False),
+    (False, None, 3, False),
+])
+async def test_retry_uses_source_team_for_global_admin_without_changing_ownership(
+    monkeypatch, is_super_admin, selected_team, actor_id, allowed,
+):
+    from types import SimpleNamespace
+    from fastapi import BackgroundTasks, HTTPException
+    from auth.deps import AuthContext
+    from config import settings
+    from exceptions.remake import RemakeError
+    import api.remake as remake_api
+
+    monkeypatch.setattr(settings, "AUTH_ENABLED", True)
+    project = await Novel.create(name="重试团队上下文", workflow_kind="remake", team_id=2, created_by=3)
+    chapter = await Chapter.create(novel=project, number=1, name="第1集", content="")
+    previous = await AiTask.create(task_type=6, status=TaskStatusEnum.failed.value, request_params={})
+    source = await RemakeSource.create(
+        novel=project, chapter=chapter, episode_number=1, source_kind="upload",
+        storage_provider="local", object_key="remake/source.mp4", original_filename="source.mp4",
+        size_bytes=5, duration_seconds=5, width=720, height=1280, container_format="mp4",
+        checksum="a" * 64, media_status="failed", analysis_task=previous, team_id=2, created_by=3,
+    )
+    balance = AsyncMock()
+    monkeypatch.setattr(remake_api, "remake_project_service", RemakeProjectService(balance_checker=balance))
+    tasks = BackgroundTasks()
+    ctx = AuthContext(user=SimpleNamespace(id=actor_id), team_id=selected_team, is_super_admin=is_super_admin)
+    if not allowed:
+        with pytest.raises((RemakeError, HTTPException)):
+            await remake_api.retry_source(project.id, source.id, tasks, ctx, ctx)
+        await source.refresh_from_db()
+        assert source.analysis_task_id == previous.id
+        assert not tasks.tasks
+        return
+
+    result = await remake_api.retry_source(project.id, source.id, tasks, ctx, ctx)
+    task = await AiTask.get(id=result.data["task_id"])
+    assert task.request_params["team_id"] == 2
+    assert task.request_params["user_id"] == actor_id
+    balance.assert_awaited_once_with(2, actor_id)
+    assert len(tasks.tasks) == 1
+
+
 class FakeValidator:
     def validate_extension(self, filename: str) -> None:
         if Path(filename).suffix.lower() not in {".mp4", ".mov"}:
@@ -347,7 +395,8 @@ async def test_local_upload_create_project_and_read_sources(
 
 
 @pytest.mark.asyncio
-async def test_completed_project_progress_is_available_as_snapshot_and_sse(client):
+@pytest.mark.parametrize('has_task', [True, False])
+async def test_completed_project_progress_is_available_as_snapshot_and_sse(client, has_task):
     novel = await Novel.create(
         name="SSE 重制项目",
         author="重制工坊",
@@ -364,7 +413,7 @@ async def test_completed_project_progress_is_available_as_snapshot_and_sse(clien
         status=TaskStatusEnum.completed.value,
         stage="completed",
         progress=100,
-    )
+    ) if has_task else None
     await RemakeSource.create(
         novel=novel,
         chapter=chapter,

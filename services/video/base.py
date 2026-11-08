@@ -12,6 +12,10 @@ from utils.enums import TaskStatusEnum
 class VideoProviderError(RuntimeError):
     """视频供应商边界错误；调用方可安全持久化其脱敏后的消息。"""
 
+    def __init__(self, message: str, *, submission_uncertain: bool = False):
+        super().__init__(message)
+        self.submission_uncertain = submission_uncertain
+
 
 class BaseVideoGenerator(ABC):
     """视频供应商适配器的统一生成与查询契约。"""

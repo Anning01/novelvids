@@ -118,6 +118,8 @@ it('isolates delete from navigation, requires confirmation and refreshes totals 
   expect(confirmation.message).toContain('未提交的后续步骤')
   expect(confirmation.message).toContain('已发生费用不会退款')
   expect(confirmation.message).toContain('账单会保留')
+  expect(confirmation.message).toContain('模型调用记录也会单独保留')
+  expect(confirmation.message).toContain('不影响删除')
   expect(api.deleteNovel).toHaveBeenCalledWith(2)
   expect(wrapper.get('.projects-summary__item.is-projects p').text()).toBe('1')
   wrapper.unmount()
@@ -335,9 +337,9 @@ it('refreshes production stats on focus and removes its listener on unmount', as
 })
 
 
-it('keeps the project visible and refreshes its status while cancellation is settling', async () => {
+it('keeps the project visible and refreshes its status when deletion fails', async () => {
   vi.mocked(appConfirm).mockResolvedValue(true)
-  vi.mocked(api.deleteNovel).mockRejectedValue(new ApiRequestError('已停止后续步骤，请收尾后再删除。已发生费用不会退款。', 409, 200))
+  vi.mocked(api.deleteNovel).mockRejectedValue(new ApiRequestError('项目正在更新，请稍后重试', 409, 200))
   const wrapper = render()
   await flushPromises()
   const card = wrapper.findAll('.project-overview-card')[0]!

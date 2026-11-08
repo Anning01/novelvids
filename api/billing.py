@@ -2,7 +2,7 @@
 from utils.messages import localized_message
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth.deps import AuthContext, require_roles, require_team_access
+from auth.deps import AuthContext, require_roles, require_project_audit_access
 from controllers.billing import billing_controller, billing_scope
 from schemas.billing import (
     BillingProjectDetailOut,
@@ -55,7 +55,7 @@ async def get_billing_projects(
 async def get_billing_project_detail(
     novel_id: int,
     ctx: AuthContext = _BILLING,
-    _: AuthContext = Depends(require_team_access),
+    _: AuthContext = Depends(require_project_audit_access),
 ):
     team_id, user_id = billing_scope(ctx)
     return ResponseSchema(

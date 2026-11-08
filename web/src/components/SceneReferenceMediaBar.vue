@@ -17,6 +17,7 @@ const props = defineProps<{
   model: VideoGenerationModel | null
   media: VideoReferenceMedia[]
   assetImageCount: number
+  assetsUseDescriptions?: boolean
   audioDurations?: Array<number | null>
   highlightedMediaIndex?: number
   disabled?: boolean
@@ -155,7 +156,8 @@ function closeImagePreview() {
       <Volume2 :size="13" aria-hidden="true" />
       <span :class="{ 'is-over-limit': audioUsage.error }" :title="audioLimitHint">{{ tr('音频') }} {{ audioUsage.count }}/{{ model?.capabilities.max_reference_audios || 0 }}</span>
       <small v-if="audioUsage.count && audioUsage.durationComplete">{{ audioUsage.totalDuration.toFixed(1) }}/{{ model?.capabilities.reference_audio_total_duration_max || 0 }}s</small>
-      <small v-if="assetImageCount">{{ tr('资产图已计入') }}</small>
+      <small v-if="assetsUseDescriptions">{{ tr('超出上限的资产改用文字描述') }}</small>
+      <small v-else-if="assetImageCount">{{ tr('资产图已计入') }}</small>
       <small v-else-if="!model">{{ tr('请先启用视频模型') }}</small>
       <small v-else>{{ tr('支持图片与 MP4/MOV') }}</small>
     </div>

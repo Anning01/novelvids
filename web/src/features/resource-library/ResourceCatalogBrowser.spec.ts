@@ -5,6 +5,7 @@ import { catalogApi, type CatalogResource } from './catalog'
 import { libraryApi } from './api'
 import { appConfirm } from '@/shared/confirmDialog'
 import AppSelect from '@/components/AppSelect.vue'
+import AppButton from '@/components/AppButton.vue'
 import { useAuthStore } from '@/features/auth/authStore'
 import ResourceCatalogBrowser from './ResourceCatalogBrowser.vue'
 vi.mock('@/shared/confirmDialog',()=>({appConfirm:vi.fn().mockResolvedValue(true)}))
@@ -106,5 +107,16 @@ it.each(['light','dark'])('lays out folder settings like the upload dialog with 
  expect(dialog.findAll('.catalog-dialog__actions button').map(button=>button.text())).toEqual(['保存'])
  await form.trigger('submit');await flushPromises()
  expect(libraryApi.writeFolder).toHaveBeenCalledWith('',0,undefined)
+ wrapper.unmount()
+})
+
+it.each(['light','dark'])('uses a compact picker without a duplicate page heading (%s)', async theme => {
+ document.documentElement.dataset.appTheme=theme
+ const wrapper=mount(ResourceCatalogBrowser,{props:{pick:true,allowedKinds:['video','image']},global:{plugins:[createPinia()],components:{AppButton}}})
+ await flushPromises()
+ expect(wrapper.find('.catalog-heading').exists()).toBe(false)
+ expect(wrapper.findAll('.catalog-tabs button').map(button=>button.text())).toEqual(['视频','图片'])
+ const confirm=wrapper.findAll('button').find(button=>button.text().includes('使用所选资源'))!
+ expect(confirm.attributes('disabled')).toBeDefined()
  wrapper.unmount()
 })

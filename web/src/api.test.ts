@@ -223,3 +223,22 @@ it('reuses the generation request ID after a lost response and clears it after s
   expect(ids[1]).toBe(ids[0])
   expect(ids[2]).not.toBe(ids[0])
 })
+
+it('reuses the whole batch submission identity after a lost response', async () => {
+  localStorage.clear()
+  const payload = { novel_id: 9, asset_ids: [1, 2, 3, 4, 5], model_config_id: 7,
+    clarity: '1.5K', aspect_ratio: '16:9', output_format: 'png' }
+  const fetchMock = vi.fn()
+    .mockRejectedValueOnce(new TypeError('Connection lost'))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { tasks: [], skipped_asset_ids: [] } })))
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(api.generateAssetBatch(payload)).rejects.toThrow('Connection lost')
+  await api.generateAssetBatch(payload)
+  const first = fetchMock.mock.calls[0]?.[1] as RequestInit
+  const second = fetchMock.mock.calls[1]?.[1] as RequestInit
+  const requestId = new Headers(first.headers).get('X-Creation-Request-Id')
+  expect(requestId).toBeTruthy()
+  expect(new Headers(second.headers).get('X-Creation-Request-Id')).toBe(requestId)
+  expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/asset/reference-batch', '/api/asset/reference-batch'])
+  expect(JSON.parse(String(first.body)).asset_ids).toEqual([1, 2, 3, 4, 5])
+})

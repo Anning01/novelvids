@@ -148,6 +148,7 @@ async function retrySource(source: RemakeProgressSource) {
   const next = new Set(retryingSourceIds.value)
   next.add(source.source_id)
   retryingSourceIds.value = next
+  errorMessage.value = ''
   try {
     await api.retryRemakeSource(projectId.value, source.source_id)
     applySnapshot((await api.remakeProjectProgress(projectId.value)).data)
@@ -230,6 +231,7 @@ onBeforeUnmount(() => {
 
         <article class="episodes-card">
           <header><div><small>EPISODES</small><h2>{{ tr('剧集进度') }}</h2></div></header>
+          <p v-if="errorMessage" class="retry-error" role="alert">{{ errorMessage }}</p>
           <div class="episode-list">
             <section v-for="source in snapshot.sources" :key="source.source_id" class="episode-item" :class="{ 'is-failed': source.task?.status === TaskStatusEnum.FAILED || source.task?.status === TaskStatusEnum.CANCELLED }">
               <span class="episode-icon"><Film :size="17" /></span>
@@ -266,6 +268,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.retry-error { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--creation-danger); background: var(--app-surface); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .remake-progress-page { height: 100vh; min-height: 100vh; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; color: #292d3b; background: radial-gradient(circle at 50% -10%, #eef0ff 0, transparent 36%), #f8f9fc; }
 .progress-header { display: grid; min-height: 70px; grid-template-columns: 40px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 0 30px; border-bottom: 1px solid #e8eaf1; background: rgb(255 255 255 / 88%); backdrop-filter: blur(16px); }
 .progress-header > div { display: grid; gap: 2px; }.progress-header small, .pipeline-card header small, .episodes-card header small { color: #6a6cf0; font-size: 8px; font-weight: 750; letter-spacing: .15em; }.progress-header strong { font-size: 13px; }

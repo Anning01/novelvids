@@ -124,6 +124,7 @@ const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
 const projectDraft = ref<ProjectAnalysisDraft | null>(null)
+const initialProjectDraft = ref<ProjectAnalysisDraft | null>(null)
 const storyboardStrategies = ref<StoryboardStrategy[]>([])
 const narratorVoice = ref<AudioReference | null>(null)
 const narratorVoiceBeforeEditing = ref<AudioReference | null>(null)
@@ -367,6 +368,7 @@ function beginEditing() {
     analysisResult.value,
     storyboardStrategies.value,
   )
+  initialProjectDraft.value = { ...projectDraft.value }
   chapterDrafts.value = {}
   if (selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
   editing.value = true
@@ -394,13 +396,14 @@ function cancelEditing(restoreVoice = true) {
   if (restoreVoice) narratorVoice.value = narratorVoiceBeforeEditing.value
   editing.value = false
   projectDraft.value = null
+  initialProjectDraft.value = null
   chapterDrafts.value = {}
 }
 
 async function saveEdits() {
   if (!novel.value || !projectDraft.value || savingEdits.value) return
-  const projectPatch = projectPatchFromDraft(projectDraft.value)
-  if (!projectPatch.name) {
+  const projectPatch = projectPatchFromDraft(projectDraft.value, initialProjectDraft.value)
+  if ('name' in projectPatch && !projectPatch.name) {
     notice.error(tr('小说昵称不能为空'))
     return
   }
@@ -414,21 +417,37 @@ async function saveEdits() {
     return
   }
 
+  const hasProjectChanges = Object.keys(projectPatch).length > 0
+  const hasChapterChanges = changedChapterDrafts.length > 0
+
+  if (!hasProjectChanges && !hasChapterChanges) {
+    cancelEditing(false)
+    notice.info(tr('未检测到任何修改'))
+    return
+  }
+
   savingEdits.value = true
   try {
     const [projectResponse, chapterResponses] = await Promise.all([
-      api.updateNovel(projectId.value, projectPatch),
-      Promise.all(changedChapterDrafts.map(draft => api.updateChapter(draft.id, {
-        name: draft.name.trim(),
-        content: draft.content,
-      }))),
+      hasProjectChanges ? api.updateNovel(projectId.value, projectPatch) : Promise.resolve(null),
+      hasChapterChanges
+        ? Promise.all(changedChapterDrafts.map(draft => api.updateChapter(draft.id, {
+            name: draft.name.trim(),
+            content: draft.content,
+          })))
+        : Promise.resolve([]),
     ])
-    novel.value = projectResponse.data
-    project.value = {
-      ...project.value,
-      name: projectResponse.data.name,
-      cover: projectResponse.data.cover,
-      coverPreview: projectResponse.data.cover_preview || undefined,
+    if (projectResponse?.data) {
+      novel.value = {
+        ...novel.value,
+        ...projectResponse.data,
+      }
+      project.value = {
+        ...project.value,
+        name: projectResponse.data.name ?? project.value.name,
+        cover: projectResponse.data.cover ?? project.value.cover,
+        coverPreview: projectResponse.data.cover_preview || project.value.coverPreview,
+      }
     }
     for (const response of chapterResponses) {
       const updated = response.data

@@ -49,7 +49,7 @@ async def update_novel(
     return ResponseSchema(data=novels)
 
 
-@router.patch("/{novel_id}", summary="局部更新小说/剧本", response_model=ResponseSchema[NovelOut])
+@router.patch("/{novel_id}", summary="局部更新小说/剧本", response_model=ResponseSchema[NovelMetaOut])
 async def patch_novel(
     novel_id: int,
     novel: NovelPatch,

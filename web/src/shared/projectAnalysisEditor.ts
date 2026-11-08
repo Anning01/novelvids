@@ -83,19 +83,69 @@ export function resolveStoryboardStrategy(
     ?? strategies.find(strategy => strategy.key === DEFAULT_STORYBOARD_STRATEGY)
 }
 
-export function projectPatchFromDraft(draft: ProjectAnalysisDraft): Partial<Novel> {
-  return {
-    name: draft.name.trim(),
-    tags: normalizeTags(draft.tagsText),
-    story_outline: draft.storyOutline.trim(),
-    project_type: draft.projectType.trim(),
-    project_setting: draft.projectSetting.trim(),
-    storyboard_strategy: draft.storyboardStrategy.trim(),
-    storyboard_setting: draft.storyboardSetting.trim(),
-    ...('narratorAudioReferenceId' in draft
-      ? { narrator_audio_reference_id: draft.narratorAudioReferenceId ?? null }
-      : {}),
+export function projectPatchFromDraft(
+  draft: ProjectAnalysisDraft,
+  initial?: ProjectAnalysisDraft | null,
+): Partial<Novel> {
+  if (!initial) {
+    return {
+      name: draft.name.trim(),
+      tags: normalizeTags(draft.tagsText),
+      story_outline: draft.storyOutline.trim(),
+      project_type: draft.projectType.trim(),
+      project_setting: draft.projectSetting.trim(),
+      storyboard_strategy: draft.storyboardStrategy.trim(),
+      storyboard_setting: draft.storyboardSetting.trim(),
+      ...('narratorAudioReferenceId' in draft
+        ? { narrator_audio_reference_id: draft.narratorAudioReferenceId ?? null }
+        : {}),
+    }
   }
+
+  const patch: Partial<Novel> = {}
+  const nextName = draft.name.trim()
+  if (nextName !== initial.name.trim()) {
+    patch.name = nextName
+  }
+
+  const nextTags = normalizeTags(draft.tagsText)
+  const initialTags = normalizeTags(initial.tagsText)
+  if (nextTags.length !== initialTags.length || nextTags.some((tag, idx) => tag !== initialTags[idx])) {
+    patch.tags = nextTags
+  }
+
+  const nextOutline = draft.storyOutline.trim()
+  if (nextOutline !== initial.storyOutline.trim()) {
+    patch.story_outline = nextOutline
+  }
+
+  const nextProjectType = draft.projectType.trim()
+  if (nextProjectType !== initial.projectType.trim()) {
+    patch.project_type = nextProjectType
+  }
+
+  const nextProjectSetting = draft.projectSetting.trim()
+  if (nextProjectSetting !== initial.projectSetting.trim()) {
+    patch.project_setting = nextProjectSetting
+  }
+
+  const nextStoryboardStrategy = draft.storyboardStrategy.trim()
+  if (nextStoryboardStrategy !== initial.storyboardStrategy.trim()) {
+    patch.storyboard_strategy = nextStoryboardStrategy
+  }
+
+  const nextStoryboardSetting = draft.storyboardSetting.trim()
+  if (nextStoryboardSetting !== initial.storyboardSetting.trim()) {
+    patch.storyboard_setting = nextStoryboardSetting
+  }
+
+  const nextNarrator = draft.narratorAudioReferenceId ?? null
+  const initialNarrator = initial.narratorAudioReferenceId ?? null
+  if (nextNarrator !== initialNarrator) {
+    patch.narrator_audio_reference_id = nextNarrator
+  }
+
+  return patch
 }
 
 export function createChapterEditDraft(chapter: Chapter): ChapterEditDraft {

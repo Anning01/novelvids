@@ -5,7 +5,6 @@ from __future__ import annotations
 from utils.messages import localized_message
 
 import asyncio
-import json
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
@@ -13,16 +12,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from prompts.remake import ASSET_SCHEMA, PROMPT_SCHEMA, render_remake_prompt, render_remake_catalog
+from prompts.remake import ASSET_SCHEMA, render_remake_prompt
+from prompts.skill_pack import SkillSnapshot, snapshot_skills
+from schemas.agent_workflow import RemakeShot
 from services.language import task_language
 from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisGateway
 from services.remake.media_prepare import prepare_video_for_model_input
 from services.remake.prompt_render import (
     compact_catalog,
     normalize_global_assets,
-    render_professional_prompt,
 )
 from services.remake.scene_detection import SceneDetector, scene_detector
+from services.remake.storyboards import prepare_remake_prompt
+from services.remake.asset_validation import render_remake_assets
+from services.storyboard.strategies import storyboard_strategy_factory
 
 
 class RemakePipelineError(RuntimeError):
@@ -63,6 +66,8 @@ class RemakeDecompositionPipeline:
         model_config: Any,
         work_dir: Path,
         progress: ProgressCallback | None = None,
+        storyboard_strategy: str | None = None,
+        aspect_ratio: str = '16:9',
     ) -> RemakePipelineResult:
         pipeline_started_at = self.clock()
         if not source_path.is_file():
@@ -79,6 +84,9 @@ class RemakeDecompositionPipeline:
         gateway = self.gateway_factory(model_config)
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
+        snapshot = execution.snapshot if execution else SkillSnapshot.model_validate(snapshot_skills())
+        language = execution.language if execution else task_language.get() or 'zh'
+        strategy = storyboard_strategy_factory.resolve(storyboard_strategy).key
         await _report(progress, 20, "extracting_assets")
         raw_assets = await gateway.analyze_one(
             index=1,
@@ -88,16 +96,14 @@ class RemakeDecompositionPipeline:
             response_schema=ASSET_SCHEMA,
             include_segment_metadata=False,
         )
-        if execution:
-            assets = {group: [{**item, 'id': f"{kind}-{index:03d}"} for index,item in enumerate(raw_assets.get(group, []), 1)]
-                for group,kind in [('characters','character'),('scenes','scene'),('objects','object')]}
-        else:
-            assets = normalize_global_assets(raw_assets, task_language.get() or "zh")
+        if not execution:
+            raw_assets = render_remake_assets(raw_assets, snapshot, language, aspect_ratio)
+        assets = normalize_global_assets(raw_assets, language)
 
         await _report(progress, 42, "detecting_scenes")
         scene_paths = await asyncio.to_thread(
             self.scene_detector.split,
-            source_path,
+            model_source_path,
             work_dir / "scenes",
         )
         if not scene_paths:
@@ -106,11 +112,7 @@ class RemakeDecompositionPipeline:
             *(asyncio.to_thread(self.probe_duration, path) for path in scene_paths)
         )
 
-        catalog_context = (
-            json.dumps(assets, ensure_ascii=False)
-            if execution
-            else render_remake_catalog(compact_catalog(assets), task_language.get() or "zh")
-        )
+        catalog = compact_catalog(assets, snapshot=snapshot, language=language)
         await _report(progress, 55, "generating_storyboards")
 
         async def report_scene_progress(completed: int, total: int) -> None:
@@ -125,26 +127,13 @@ class RemakeDecompositionPipeline:
             scene_paths,
             prompt="" if execution else render_remake_prompt("shots", task_language.get() or "zh"),
             schema_name="professional_video_prompt_material",
-            response_schema=PROMPT_SCHEMA,
-            context_builder=lambda _index: catalog_context,
+            response_schema=RemakeShot.model_json_schema(),
+            context_builder=lambda index: {'assets': catalog, 'duration_seconds': durations[index - 1],
+                                          'storyboard_strategy': strategy},
             on_completed=report_scene_progress,
         )
-        if execution:
-            known_ids = {item['id'] for values in assets.values() for item in values}
-            for item in raw_prompts:
-                if any(ref.get('asset_id') not in known_ids for ref in item['asset_refs']):
-                    raise ValueError(localized_message('重制分镜引用了未登记资产'))
-            prompts = [{**item, 'duration_seconds': durations[index]} for index,item in enumerate(raw_prompts)]
-        else:
-            prompts = [
-                render_professional_prompt(
-                    raw,
-                    assets,
-                    duration_seconds=durations[index],
-                    language=task_language.get() or "zh",
-                )
-                for index, raw in enumerate(raw_prompts)
-            ]
+        prompts = [prepare_remake_prompt(raw, catalog, snapshot, language,
+            strategy_key=strategy, duration_seconds=durations[index]) for index, raw in enumerate(raw_prompts)]
 
         await _report(progress, 88, "persisting")
         analysis_requests = [dict(item) for item in gateway.timings]

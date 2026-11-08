@@ -31,6 +31,29 @@ beforeEach(() => {
   vi.mocked(api.scenes).mockResolvedValue({ code: 0, message: '', data: { items: [{ id: 9, chapter_id: 3, sequence: 1, description: '夜晚车站', created_at: '', updated_at: '' }], pagination: { page: 1, pages: 1, total: 1, page_size: 100 } } })
 })
 
+it('confirms a server-owned creation plan without sending client-authored operations', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  const pending = { confirmation_request_id: 'confirm-plan', message: '确认执行创作方案',
+    plan_confirmation: { task_id: 'plan', revision: 'a'.repeat(64) }, summary: '先读十章，高潮前置。',
+    read_chapters: ['1 · 第一章', '8 · 城门'], labels: [{ operation: 'storyboard', target_label: '第一章', mode: 'revise' as const }],
+    intents: [], chapter_id: 3, targets: [], write_scope: 'chapter' as const, model_config_id: 1 }
+  store.messages = [{ id: 2, role: 'assistant', content: '方案已准备', task_id: 'plan', status: 3,
+    changes: [], usage: {}, created_at: '', pending_production: pending }]
+  const send = vi.spyOn(store, 'send').mockResolvedValue(true)
+  await flushPromises()
+  expect(wrapper.get('[aria-label="创作方案"]').text()).toContain('高潮前置')
+  const button = wrapper.findAll('button').find(item => item.text() === '确认生成并计费')!
+  await button.trigger('click')
+  expect(send).toHaveBeenCalledWith({ request_id: 'confirm-plan', message: pending.message, chapter_id: 3,
+    targets: [], write_scope: 'chapter', model_config_id: 1, plan_confirmation: pending.plan_confirmation })
+  await wrapper.setProps({ suspended: true })
+  expect(button.attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})
+
 describe('creation assistant panel', () => {
   it('folds all messages without hiding the composer or triggering another request', async () => {
     const pinia = createPinia()

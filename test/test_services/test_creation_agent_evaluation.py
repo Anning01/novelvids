@@ -88,6 +88,9 @@ def test_definition_checker_accepts_reference_markup_but_rejects_missing_traits(
 
 @pytest.mark.asyncio
 async def test_evaluation_runs_actual_tasks_and_leaves_quality_unreviewed(monkeypatch, tmp_path):
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+    evaluation_snapshot = synthetic_snapshot()
+    monkeypatch.setattr('services.creation_agent.skill_execution.snapshot_skills', evaluation_snapshot.model_dump)
     config = await AiModelConfig.create(task_type=AiTaskTypeEnum.creation_agent.value, name='evaluation-test',
         model='function-model', base_url='https://example.invalid/v1', api_key='synthetic-key',
         supports_tool_calls=True, is_active=True, pricing={'type': 'text', 'input_price_per_1m': 1, 'output_price_per_1m': 1})
@@ -101,9 +104,14 @@ async def test_evaluation_runs_actual_tasks_and_leaves_quality_unreviewed(monkey
         elif calls == 2:
             context = next(part.content for message in messages for part in message.parts if isinstance(part, ToolReturnPart))
             target = context['targets'][0]
+            # This fixture exercises receipts and metering, so return a valid
+            # current asset document rather than obsolete free-form prose.
+            prompt = fixed_asset_prompt(language='en' if 'language=en' in info.instructions else 'zh',
+                snapshot=evaluation_snapshot)
             yield {0: DeltaToolCall(name='update_image_prompt', tool_call_id='write', json_args=json.dumps({'edits': [{
                 'target_kind': target['kind'], 'target_id': target['id'],
-                'prompt': target['prompt'] + '窗边柔和自然光。',
+                'prompt': prompt.replace('Oval face, straight brows, dark eyes, rounded nose, thin lips',
+                    target['prompt'] + '窗边柔和自然光。'),
             }]}, ensure_ascii=False))}
         else:
             yield '已保存人物的窗边柔光设定。'

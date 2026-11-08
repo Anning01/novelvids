@@ -45,12 +45,12 @@ class AgentSessions:
             raise HTTPException(404, localized_message('项目不存在'))
         return await AgentConversation.create(novel=novel, created_by=ctx.user.id if ctx.user else None, team_id=novel.team_id)
 
-    async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False) -> AgentConversation:
+    async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False, include_deleted_project: bool = False) -> AgentConversation:
         query = AgentConversation.filter(id=conversation_id, created_by=ctx.user.id if ctx.user else None)
         conversation = await (query if include_deleted else query.filter(deleted_at__isnull=True)).first()
         if conversation is None:
             raise HTTPException(404, localized_message('会话不存在'))
-        await ensure_novel_access(conversation.novel_id, ctx)
+        await ensure_novel_access(conversation.novel_id, ctx, include_deleted=include_deleted_project)
         return conversation
 
     async def set_deleted(self, conversation_id: int, ctx: AuthContext, *, deleted: bool) -> AgentConversation:
@@ -71,7 +71,7 @@ class AgentSessions:
         message = await AgentMessage.get_or_none(task_id=task_id, role="assistant")
         if message is None:
             raise HTTPException(404, localized_message('运行不存在'))
-        return await self.get(message.conversation_id, ctx), message
+        return await self.get(message.conversation_id, ctx, include_deleted_project=True), message
 
     async def validate_scope(self, novel_id: int, request: AgentRunRequest | PromptStatusRequest) -> None:
         if request.chapter_id and not await Chapter.filter(id=request.chapter_id, novel_id=novel_id).exists():
@@ -100,6 +100,8 @@ class AgentSessions:
         if chosen is None:
             raise HTTPException(422, localized_message('请配置已启用且支持工具调用的创作助手模型'))
         payload = request.model_dump(mode="json")
+        if request.plan_confirmation is None:
+            payload.pop('plan_confirmation', None)
         if 'write_scope' not in request.model_fields_set:
             # Older clients retain their original selected-prompt contract.
             payload.pop('write_scope', None)
@@ -117,14 +119,35 @@ class AgentSessions:
                 return await AiTask.get(id=previous.task_id).using_db(connection)
             if current.active_task_id and await AiTask.filter(id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
                 raise HTTPException(409, localized_message('当前会话仍在执行，请等待完成或停止后继续'))
+            plan = None
+            if request.plan_confirmation:
+                from services.creation_agent.plans import confirmed_plan
+                from models.agent_operation import AgentOperation
+                if not await AgentMessage.filter(task_id=request.plan_confirmation.task_id,
+                        conversation_id=current.id, role='user').using_db(connection).exists():
+                    raise HTTPException(404, localized_message('当前会话不存在该创作方案'))
+                confirmed = await AgentOperation.get_or_none(task_id=request.plan_confirmation.task_id,
+                    key='creation:confirmed', state='completed').using_db(connection)
+                if confirmed:
+                    if confirmed.result['revision'] != request.plan_confirmation.revision:
+                        raise HTTPException(409, localized_message('方案版本已变化'))
+                    return await AiTask.get(id=confirmed.result['task_id']).using_db(connection)
+                plan = await confirmed_plan(current, request.plan_confirmation)
             from services.creation_agent.skill_execution import prepare_workflow
             workflow = await prepare_workflow({
                 "novel_id": conversation.novel_id, "conversation_id": conversation.id,
                 "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None,
                 "model_config_id": chosen.id, "assistant_model_config_id": chosen.id, "agent_configuration": configuration.model_dump(),
             })
+            if plan:
+                workflow.update(operation='creation_plan', creation_plan_id=str(request.plan_confirmation.task_id),
+                    instruction_message_id=plan.source_message_id)
             task = await ai_task_executor.submit(AiTaskTypeEnum.creation_agent, workflow, db_connection=connection)
             task.request_params = {**task.request_params, "task_id": str(task.id)}
+            if plan:
+                task.request_params['creation_run_id'] = str(task.id)
+                await AgentOperation.create(task_id=request.plan_confirmation.task_id, key='creation:confirmed',
+                    state='completed', result={'task_id': str(task.id), 'revision': request.plan_confirmation.revision}, using_db=connection)
             await task.save(using_db=connection, update_fields=["request_params"])
             await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,
                 request_hash=digest, role="user", content=request.message, run_input=payload, using_db=connection)

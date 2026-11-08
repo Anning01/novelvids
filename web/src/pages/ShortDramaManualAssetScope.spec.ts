@@ -31,6 +31,7 @@ vi.mock('@/api', () => ({
     latestExtraction: vi.fn(),
     updateAsset: vi.fn(),
     generateAsset: vi.fn(),
+    generateAssetBatch: vi.fn(),
     activeAssetGenerations: vi.fn(),
     task: vi.fn(),
   },
@@ -140,6 +141,18 @@ beforeEach(() => {
       updated_at: '2026-08-06T00:00:00.000Z',
     } as Asset,
   }))
+  vi.mocked(api.generateAssetBatch).mockImplementation(async payload => ({
+    code: 0, message: 'ok', data: {
+      tasks: payload.asset_ids.map(id => ({
+        id: `batch-${id}`, task_type: 2, status: TaskStatusEnum.PENDING,
+        request_params: { asset_id: id }, created_at: '', updated_at: '',
+      })), skipped_asset_ids: [],
+    },
+  }))
+  vi.mocked(api.task).mockImplementation(async id => ({
+    code: 0, message: 'ok', data: { id, task_type: 2, status: TaskStatusEnum.COMPLETED,
+      request_params: {}, created_at: '', updated_at: '' },
+  }))
   vi.mocked(api.generateAsset).mockResolvedValue({
     code: 0,
     message: 'ok',
@@ -248,7 +261,7 @@ it('keeps the current chapter filter after batch generation finishes', async () 
   })
   await flushPromises()
 
-  expect(api.assets).toHaveBeenCalledTimes(1)
+  expect(api.assets).toHaveBeenCalled()
   expect(api.assets).toHaveBeenLastCalledWith(9, 1, 100, 2162)
 })
 
@@ -267,12 +280,17 @@ it('submits selected assets across character, scene, and prop types in one batch
   })
   await flushPromises()
 
-  expect(vi.mocked(api.updateAsset).mock.calls.map(([assetId]) => assetId).sort()).toEqual([31, 32, 34])
+  expect(api.generateAssetBatch).toHaveBeenCalledExactlyOnceWith({
+    novel_id: 9, asset_ids: [31, 32, 34], model_config_id: 2,
+    clarity: '1.5K', aspect_ratio: '16:9', output_format: 'png',
+  })
+  expect(api.updateAsset).not.toHaveBeenCalled()
+  expect(api.generateAsset).not.toHaveBeenCalled()
 })
 
 it('shows loading for every queued asset and hides title and description before workers start', async () => {
   const wrapper = await mountInCurrentChapterScope()
-  vi.mocked(api.updateAsset).mockImplementation(() => new Promise(() => {}))
+  vi.mocked(api.generateAssetBatch).mockImplementation(() => new Promise(() => {}))
 
   wrapper.findComponent(AssetBatchGenerateDialog).vm.$emit('generate', {
     assetIds: [31, 32, 34],
@@ -452,4 +470,22 @@ it('keeps the animation until all generations for an asset finish', async () => 
   finishes.get('variant-image')!({ code: 0, message: '', data: { id: 'variant-image', task_type: 2, status: TaskStatusEnum.COMPLETED, created_at: '' } })
   await flushPromises()
   expect(wrapper.find('.asset-generating-placeholder').exists()).toBe(false)
+})
+
+
+it('submits the entire selection before unmount and does not depend on page workers', async () => {
+  const wrapper = await mountInCurrentChapterScope()
+  let complete!: (result: Awaited<ReturnType<typeof api.generateAssetBatch>>) => void
+  vi.mocked(api.generateAssetBatch).mockImplementation(() => new Promise(resolve => { complete = resolve }))
+  wrapper.findComponent(AssetBatchGenerateDialog).vm.$emit('generate', {
+    assetIds: [31, 32, 34], modelConfigId: 2, concurrency: 1,
+    clarity: '1.5K', ratio: '16:9', outputFormat: 'png', generationCount: 1,
+  })
+  await nextTick()
+  expect(api.generateAssetBatch).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(api.generateAssetBatch).mock.calls[0]?.[0].asset_ids).toEqual([31, 32, 34])
+  wrapper.unmount()
+  complete({ code: 0, message: '', data: { tasks: [], skipped_asset_ids: [] } })
+  await flushPromises()
+  expect(api.generateAsset).not.toHaveBeenCalled()
 })

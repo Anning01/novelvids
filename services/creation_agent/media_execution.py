@@ -10,6 +10,10 @@ async def prepare_image_prompt(asset, variant, params):
     if not execution:
         return
     target = variant or asset
+    if execution.params.get('creation_plan_id'):
+        from services.creation_agent.media_preparation import prepare_planned_media
+        await prepare_planned_media(execution, kind='variant' if variant else 'asset', target=target)
+        return
     if (target.base_traits or "").strip():
         return
     from services.creation_agent.prompt_standards import CreationPromptStandards
@@ -41,9 +45,22 @@ async def run_image_handler(handler, params):
     execution = current_execution.get()
     if execution is None:
         return await handler.execute(params)
+    from models.agent_operation import AgentOperation
+    completed = await AgentOperation.get_or_none(task_id=params['task_id'], key='media:image', state='completed')
+    if completed:
+        return completed.result
+    if params.get('creation_plan_id'):
+        from models.asset import Asset
+        from models.asset_variant import AssetVariant
+        asset = await Asset.get(id=params['asset_id'])
+        variant = await AssetVariant.get(id=params['variant_id']) if params.get('variant_id') else None
+        await prepare_image_prompt(asset, variant, params)
 
     async def invoke():
         await execution.before_request()
+        if params.get('creation_plan_id'):
+            from services.creation_agent.media_preparation import validate_prepared_media
+            await validate_prepared_media(execution, variant or asset)
         return await handler.execute(params)
 
     # The image provider is synchronous: recovery never blindly repeats a request

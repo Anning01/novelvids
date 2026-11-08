@@ -1,7 +1,6 @@
 """Incremental conversation compression; durable creative constraints remain separate."""
 
 from dataclasses import replace
-import asyncio
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -60,6 +59,9 @@ def compact_retry_history(messages: list[ModelMessage]) -> list[ModelMessage]:
     if not failed_call_ids:
         return messages
 
+    latest_retry = next((part for message in reversed(messages) for part in reversed(message.parts)
+                         if isinstance(part, RetryPromptPart)), None)
+
     compacted = []
     for message in messages:
         parts = []
@@ -69,7 +71,8 @@ def compact_retry_history(messages: list[ModelMessage]) -> list[ModelMessage]:
                 part = replace(part, args={'retry_context': '未通过校验的完整参数已省略，请按后续错误修正'})
                 changed = True
             elif isinstance(part, RetryPromptPart):
-                content = _compact_retry_content(part.content)
+                content = (part.content if part is latest_retry and isinstance(part.content, str)
+                           else _compact_retry_content(part.content))
                 if content != part.content:
                     part = replace(part, content=content)
                     changed = True
@@ -119,10 +122,10 @@ async def prepare_history(conversation: AgentConversation, assistant: AgentMessa
         try:
             if hasattr(model, 'phase'):
                 model.phase = 'summary'
-            result = await asyncio.wait_for(summary_agent.run(
+            result = await summary_agent.run(
                 render_creation_summary(conversation.summary[:history_budget], data), model=model,
                 model_settings={'max_tokens': min(limits.summary_output_tokens, limits.max_output_tokens)},
-                usage_limits=UsageLimits(request_limit=1)), timeout=limits.summary_timeout_seconds)
+                usage_limits=UsageLimits(request_limit=1))
             if not isinstance(result.output, str) or not result.output.strip():
                 raise ValueError('empty summary')
             summary = result.output[:history_budget]

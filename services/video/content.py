@@ -23,6 +23,24 @@ class PreparedVideoContent:
     reference_audio_count: int
 
 
+def limit_subject_images(
+    subjects: list[dict[str, Any]] | None,
+    max_reference_images: int,
+    reference_images: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Reserve uploaded references, then keep asset images in mention order."""
+    selected = set(reference_images or [])
+    result = []
+    for subject in subjects or []:
+        images = []
+        for image in subject.get("images", []):
+            if image in selected or len(selected) < max_reference_images:
+                selected.add(image)
+                images.append(image)
+        result.append({**subject, "images": images})
+    return result
+
+
 def process_subject_prompt(
     prompt: str,
     subjects: list[dict[str, Any]] | None,
@@ -72,7 +90,8 @@ def prepare_video_content(
     """按统一内部参数生成 Seedance/MiniMax 共用的 content 结构。"""
     processed_prompt, asset_images = process_subject_prompt(
         prompt,
-        subjects if generation_mode == "reference" else None,
+        limit_subject_images(subjects, max_reference_images, reference_images)
+        if generation_mode == "reference" else None,
         max_reference_images,
     )
     items: list[dict[str, Any]] = [{"type": "text", "text": processed_prompt}]

@@ -8,11 +8,13 @@ from datetime import datetime, timezone
 from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
 from services.creation_agent.waiting import WaitingForMedia
+from services.creation_agent.waiting import WaitingForDependencies
 from services.task_signals import task_signals
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 current_task_id = ContextVar("current_ai_task_id", default=None)
+AGENT_CANCEL_POLL_SECONDS = 1.0
 
 
 # 不同任务类型的超时时间（秒）
@@ -79,6 +81,14 @@ class AiTaskExecutor:
         """注册任务处理器。"""
         self._handlers[task_type] = handler
 
+    @staticmethod
+    def run_timeout(task, handler):
+        # Agent runs and their production children finish through their actual
+        # outcome/cancellation, never because the wall clock crossed a deadline.
+        if task.task_type == AiTaskTypeEnum.creation_agent.value or task.request_params.get('workflow_version') == 'agent-skills-v1':
+            return None
+        return (handler.timeout_seconds(task.request_params) if handler else None) or TASK_TIMEOUT.get(AiTaskTypeEnum(task.task_type), 600)
+
     def get_semaphore(self, task_type: AiTaskTypeEnum, concurrency: int) -> asyncio.Semaphore:
         """获取/更新任务类型的并发信号量。"""
         existing = self._semaphores.get(task_type)
@@ -106,10 +116,12 @@ class AiTaskExecutor:
         for task in stale_tasks:
             if task.request_params.get('operation') == 'editor_render':
                 continue  # Local render leases own recovery, cancellation and timeouts.
-            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.status in {1, 6} or task.stage in {"waiting_media", "needs_review"}):
+            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.status in {1, 6} or task.stage in {"waiting_media", "waiting_dependencies", "needs_review"} or task.request_params.get('operation') == 'creation_plan'):
                 continue
             handler = self._handlers.get(task_type)
-            timeout = (handler.timeout_seconds(task.request_params) if handler else None) or TASK_TIMEOUT.get(task_type, 60)
+            timeout = self.run_timeout(task, handler)
+            if timeout is None:
+                continue
             # running 任务以 started_at 为基准，pending 任务以 created_at 为基准
             baseline = task.started_at if task.started_at else task.created_at
             if baseline and (now - baseline).total_seconds() > timeout:
@@ -193,7 +205,10 @@ class AiTaskExecutor:
         if task_type == AiTaskTypeEnum.video and task.request_params.get('workflow_version') == 'agent-skills-v1':
             from services.creation_agent.video_jobs import VideoProductionHandler
             handler = VideoProductionHandler()
-            if task.request_params.get('operation') == 'compose':
+            if task.request_params.get('operation') == 'video_batch':
+                from services.video.batches import VideoBatchHandler
+                handler = VideoBatchHandler()
+            elif task.request_params.get('operation') == 'compose':
                 from services.creation_agent.composition import CompositionHandler
                 handler = CompositionHandler()
             elif task.request_params.get('operation') == 'prepare_export':
@@ -215,11 +230,13 @@ class AiTaskExecutor:
             logger.info("Task #%s skipped (status=%s)", task.id, task.status)
             return
 
-        timeout = handler.timeout_seconds(task.request_params) or TASK_TIMEOUT.get(task_type, 600)
+        timeout = self.run_timeout(task, handler)
 
         # 标记为执行中
         claimed = await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.queued.value]).update(
-            status=TaskStatusEnum.running.value, started_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+            status=TaskStatusEnum.running.value,
+            started_at=task.started_at if task.request_params.get('operation') == 'creation_plan' and task.started_at else datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc))
         if not claimed:
             return
         await task.refresh_from_db()
@@ -228,13 +245,20 @@ class AiTaskExecutor:
         legacy_language = "zh" if task_type in {AiTaskTypeEnum.creation_agent, AiTaskTypeEnum.remake_decomposition} else "en"
         token = task_language.set(task.request_params.get("prompt_language", legacy_language))
         try:
-            result = await asyncio.wait_for(
-                self._execute_handler(task, handler),
-                timeout=timeout,
-            )
+            if timeout is None:
+                result = await self._execute_cancellable(task, handler)
+            else:
+                result = await asyncio.wait_for(self._execute_handler(task, handler), timeout=timeout)
             await self._complete(task, result)
         except WaitingForMedia as waiting:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
+        except WaitingForDependencies:
+            await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_dependencies')
+        except asyncio.CancelledError as error:
+            # Preserve the existing uncertain-submission protection when a stop
+            # interrupts an external request whose result has not arrived.
+            await self._fail(task, localized_message('任务已停止'), error=error)
+            raise
         except asyncio.TimeoutError as error:
             await self._fail(task, localized_message("任务超时（{p0}s）", p0=timeout), error=error)
         except Exception as e:
@@ -256,6 +280,21 @@ class AiTaskExecutor:
             return await handler.execute(task.request_params)
         finally:
             current_task_id.reset(token)
+
+    async def _execute_cancellable(self, task, handler):
+        """An unbounded agent request must still respond to a persisted stop."""
+        work = asyncio.create_task(self._execute_handler(task, handler))
+        try:
+            while True:
+                done, _ = await asyncio.wait({work}, timeout=AGENT_CANCEL_POLL_SECONDS)
+                if done:
+                    return await work
+                if await AiTask.filter(id=task.id, status=TaskStatusEnum.cancelled.value).exists():
+                    raise asyncio.CancelledError()
+        finally:
+            if not work.done():
+                work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
 
     async def submit_and_run(
         self, task_type: AiTaskTypeEnum, request_params: dict
@@ -291,7 +330,8 @@ class AiTaskExecutor:
             updated_at=datetime.now(timezone.utc),
         )
         await task.refresh_from_db()
-        await task_signals.publish(str(task.id))
+        if task.request_params.get('operation') != 'creation_plan':
+            await task_signals.publish(str(task.id))
         if task.status == TaskStatusEnum.cancelled.value and task.request_params.get('workflow_version') == 'agent-skills-v1':
             await AiTask.filter(id=task.id).update(response_data=result)
         versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
@@ -329,7 +369,7 @@ class AiTaskExecutor:
             ],
         )
         for task in stale:
-            if task.request_params.get("workflow_version") == "agent-skills-v1" and task.task_type != AiTaskTypeEnum.creation_agent.value:
+            if task.request_params.get("workflow_version") == "agent-skills-v1" and (task.task_type != AiTaskTypeEnum.creation_agent.value or task.request_params.get('operation') == 'creation_plan'):
                 continue
             logger.warning("Boot cleanup: failing stale task #%s", task.id)
             await self._fail(

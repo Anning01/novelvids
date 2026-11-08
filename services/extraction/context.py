@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from models.chapter import Chapter
 from models.novel import Novel
 from services.chapter_titles import normalize_chapter_title
@@ -63,6 +64,15 @@ class NovelExtractionMetadata:
 
 
 @dataclass(frozen=True)
+class KnownVariantSnapshot:
+    id: int
+    name: str
+    description: str | None
+    base_traits: str | None
+    chapter_numbers: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class KnownAssetSnapshot:
     id: int
     asset_type: int
@@ -73,6 +83,7 @@ class KnownAssetSnapshot:
     base_traits: str | None
     source_chapters: tuple[int, ...]
     metadata: Mapping[str, str]
+    variants: tuple[KnownVariantSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,6 +100,12 @@ class ExtractionContext:
     assets: tuple[KnownAssetSnapshot, ...]
     chapter: ChapterExtractionInput
 
+    @property
+    def required_design_assets(self) -> tuple[KnownAssetSnapshot, ...]:
+        return tuple(asset for asset in self.assets
+            if asset.metadata.get('analysis_source') == 'project_analysis'
+            and self.chapter.number in asset.source_chapters)
+
 
 class ExtractionContextLoader:
     """Load a chapter and its project-wide, extraction-safe context."""
@@ -102,7 +119,7 @@ class ExtractionContextLoader:
         assets = await Asset.filter(
             novel_id=novel_id,
             asset_type__in=EXTRACTABLE_ASSET_TYPE_VALUES,
-        ).order_by("asset_type", "id")
+        ).order_by("asset_type", "id").prefetch_related("variants")
 
         return ExtractionContext(
             novel=NovelExtractionMetadata(
@@ -114,7 +131,7 @@ class ExtractionContextLoader:
                 project_type=novel.project_type,
                 project_setting=novel.project_setting,
             ),
-            assets=tuple(self._asset_snapshot(asset) for asset in assets),
+            assets=tuple(self._asset_snapshot(asset, asset.variants) for asset in assets),
             chapter=ChapterExtractionInput(
                 id=chapter.id,
                 number=chapter.number,
@@ -124,7 +141,7 @@ class ExtractionContextLoader:
         )
 
     @staticmethod
-    def _asset_snapshot(asset: Asset) -> KnownAssetSnapshot:
+    def _asset_snapshot(asset: Asset, variants: Iterable[AssetVariant] = ()) -> KnownAssetSnapshot:
         metadata = asset.metadata if isinstance(asset.metadata, Mapping) else {}
         return KnownAssetSnapshot(
             id=asset.id,
@@ -139,7 +156,12 @@ class ExtractionContextLoader:
                 {
                     key: str(value)
                     for key, value in metadata.items()
-                    if key in {"role", "reference_layout"} and value is not None
+                    if key in {"role", "reference_layout", "analysis_source"} and value is not None
                 }
             ),
+            variants=tuple(KnownVariantSnapshot(
+                id=variant.id, name=variant.name, description=variant.description,
+                base_traits=variant.base_traits,
+                chapter_numbers=normalize_source_chapters(variant.chapter_numbers),
+            ) for variant in variants),
         )

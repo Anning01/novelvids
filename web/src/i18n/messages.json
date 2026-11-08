@@ -1,6 +1,15 @@
 {
   "common": {
-    "删除会停止排队任务及未提交的后续步骤。已提交的模型调用按实际用量结算，已发生费用不会退款，账单会保留；请求或费用仍在收尾、结果待核对时，需处理完成后再删除。项目、章节及相关创作数据删除后无法恢复。": "Deleting stops queued work and future steps. Submitted model calls are billed for actual usage; incurred fees are not refunded and billing records are retained. Wait for in-flight requests and unsettled or uncertain charges before deleting. Project data cannot be restored after deletion.",
+    "片段读取超时，请重试": "Loading the clip timed out. Please retry.",
+    "启动请求响应超时，请重试以确认任务状态": "The start request timed out. Retry to check the task status.",
+    "选择素材作为参考，已选资源会添加到当前分镜。": "Choose reference media to add to the current shot.",
+    "已用时": "Elapsed",
+    "正在同步计时信息": "Syncing elapsed time",
+    "正在提交生成请求": "Submitting generation request",
+    "排队等待生成": "Queued for generation",
+    "从提交起计时，完成后将在这里自动播放": "Time since submission. The video will play here when ready.",
+    "正在保存任务，请稍候": "Saving your task. Please wait.",
+    "删除会停止排队任务及未提交的后续步骤，并将作品从列表和工作台移除。账单会保留，模型调用记录也会单独保留；已提交调用继续结算或核对，不影响删除。已发生费用不会退款。": "Deleting stops queued work and future steps and removes the project from the list and workspace. Billing and model call records are retained separately. Submitted calls can still be settled or reviewed without blocking deletion. Incurred fees are not refunded.",
     "退款处理中": "Refund processing",
     "退款已关闭": "Refund closed",
     "退款处理中，请同步订单确认结果": "Refund processing. Sync the order to confirm the result.",

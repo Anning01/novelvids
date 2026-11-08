@@ -55,5 +55,6 @@ async def generate_for_sora_consistency(
             output_format=output_format,
             quality=quality,
             extra_body=extra_body,
+            **({'timeout': None} if execution else {}),
         ))
     return result

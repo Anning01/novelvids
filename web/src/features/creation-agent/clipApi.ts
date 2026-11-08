@@ -36,10 +36,13 @@ export interface ClipQuote {
   reason: string
   note: string
 }
+const CLIP_SESSION_TIMEOUT_MS = 15_000
+const CLIP_START_TIMEOUT_MS = 30_000
+
 export const clipApi = {
   quote: (input: Omit<ClipInput, 'request_id'>, signal?: AbortSignal) => request<SingleResponse<ClipQuote>>('/experience/quote', {method:'POST', body:JSON.stringify(input), signal}),
   create: (input: ClipInput) => request<SingleResponse<ClipSession>>('/experience/generate', { method: 'POST', body: JSON.stringify(input) }),
   recent: () => request<SingleResponse<ClipSummary[]>>('/experience/sessions'),
-  session: (id: number) => request<SingleResponse<ClipSession>>(`/experience/sessions/${id}`),
-  start: (id: number) => request<SingleResponse<AgentRun>>(`/experience/sessions/${id}/start`, { method: 'POST' }),
+  session: (id: number) => request<SingleResponse<ClipSession>>(`/experience/sessions/${id}`, { signal: AbortSignal.timeout(CLIP_SESSION_TIMEOUT_MS) }),
+  start: (id: number) => request<SingleResponse<AgentRun>>(`/experience/sessions/${id}/start`, { method: 'POST', signal: AbortSignal.timeout(CLIP_START_TIMEOUT_MS) }),
 }

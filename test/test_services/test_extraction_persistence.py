@@ -594,7 +594,8 @@ async def test_canonical_name_wins_over_another_assets_polluted_alias():
     await first.refresh_from_db()
     await master.refresh_from_db()
     assert first.base_traits == "少年形象"
-    assert master.base_traits == "更新师父形象"
+    assert master.base_traits == "原师父形象"
+    assert master.source_chapters == [1]
     assert await Asset.filter(novel=novel, asset_type=1).count() == 2
 
 
@@ -622,7 +623,9 @@ async def test_name_alias_match_reuses_identity_without_using_alias_to_alias_ove
         result=_result(persons=[_person(name="宫先生", aliases=["宫平"], base_traits="新形象")]))
     await existing.refresh_from_db()
     assert existing.canonical_name == "宫平"
-    assert existing.base_traits == "新形象"
+    assert existing.base_traits == "旧形象"
+    assert existing.aliases == ["小宫", "宫先生", "宫平"]
+    assert existing.source_chapters == [2]
     assert await Asset.filter(novel=novel).count() == 1
 
 

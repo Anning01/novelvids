@@ -342,3 +342,41 @@
 .resource-library-dialog .app-button--danger:hover:not(:disabled) {
   background: color-mix(in srgb,var(--app-danger) 18%,var(--app-surface));
 }
+
+/* The embedded picker has its own gutters and scroll regions, not page layout. */
+.resource-library-dialog.resource-library-dialog--picker {
+  height: min(760px, calc(100dvh - 64px));
+  display: flex;
+  flex-direction: column;
+}
+.resource-library-dialog--picker .el-dialog__header { flex-shrink: 0; padding: 20px 24px; }
+.resource-library-dialog--picker .el-dialog__body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 20px 24px 24px; overflow: hidden; }
+.resource-library-dialog--picker .el-dialog__headerbtn:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.resource-picker-hint { margin: 0 0 16px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.6; }
+.resource-library-dialog--picker .resource-catalog.is-picker { flex: 1; height: auto; min-height: 0; padding: 0; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-tabs { gap: 24px; margin-bottom: 16px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-tabs button { height: 40px; font-size: 13px; padding-inline: 4px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-body { flex: 1; height: auto; min-height: 0; border-radius: 12px; grid-template-columns: 184px minmax(0, 1fr); }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-folders { padding: 16px 10px; gap: 5px; background: var(--app-surface-muted); scrollbar-width: thin; scrollbar-color: var(--app-border) transparent; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-folder > button { min-height: 40px; font-size: 12px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-content { padding: 18px 20px 0; overflow: hidden; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-filter { gap: 10px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-results { flex-shrink: 0; padding: 14px 0; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-filter > .catalog-icon { width: 36px; height: 36px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-grid,
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-list,
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-state,
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-skeleton { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--app-border) transparent; padding: 2px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-grid { grid-auto-rows: max-content; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-pagination { flex-shrink: 0; margin-top: 14px; padding: 14px 0; border-top: 1px solid var(--app-border); gap: 12px; font-size: 12px; }
+.resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-pagination .app-button--primary { margin-left: auto; }
+@media (max-width: 620px) {
+  .resource-library-dialog.resource-library-dialog--picker { max-width: calc(100vw - 20px); height: calc(100dvh - 32px); }
+  .resource-library-dialog--picker .el-dialog__header { padding: 16px; }
+  .resource-library-dialog--picker .el-dialog__body { padding: 14px 16px 16px; }
+  .resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-body { grid-template-columns: minmax(0, 1fr); }
+  .resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-content { padding: 14px 12px 0; }
+  .resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-pagination { gap: 8px; }
+  .resource-library-dialog.resource-library-dialog--picker .resource-catalog.is-picker .catalog-pagination .app-button--primary { width: 100%; margin-left: 0; }
+}

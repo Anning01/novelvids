@@ -32,6 +32,18 @@ const model: VideoGenerationModel = {
 }
 
 describe('SceneReferenceMediaBar', () => {
+  it.each(['light', 'dark'])('explains overflow assets without an over-limit image count in %s', theme => {
+    document.documentElement.dataset.theme = theme
+    const wrapper = mount(SceneReferenceMediaBar, { props: {
+      model: { ...model, capabilities: { ...model.capabilities, max_reference_images: 9 } },
+      assetImageCount: 9, assetsUseDescriptions: true, media: [],
+    } })
+    expect(wrapper.get('[role="status"]').text()).toContain('图片 9/9')
+    expect(wrapper.text()).toContain('超出上限的资产改用文字描述')
+    wrapper.unmount()
+    delete document.documentElement.dataset.theme
+  })
+
   it.each(['light', 'dark'])('shows audio limits and hides incomplete durations in %s', async theme => {
     document.documentElement.dataset.theme = theme
     const audioModel = { ...model, capabilities: { ...model.capabilities, max_reference_audios: 3, reference_audio_duration_min: 2, reference_audio_duration_max: 15, reference_audio_total_duration_max: 15 } }

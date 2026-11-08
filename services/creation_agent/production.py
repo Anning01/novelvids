@@ -175,6 +175,19 @@ async def run_production(task, handler):
     mode_token = skill_workflow.set(True)
     token = current_execution.set(execution)
     try:
+        if task.task_type in {1, 2, 3, 4} and params.get('operation') in {None, 'assets', 'storyboard', 'image', 'video'} and not params.get('creation_plan_id') and 'creation_planning' in execution.snapshot.contents:
+            from services.creation_agent.direct_plan import prepare_direct_plan
+            await prepare_direct_plan(task, execution)
+            params.update({key: execution.params[key] for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id')})
+        if params.get('creation_plan_id') == str(task.id):
+            from services.creation_agent.plans import load_plan
+            from services.creation_agent.plan_execution import existing_result
+            plan = await load_plan(task.id)
+            kept = await existing_result(plan.steps[0], plan.steps[0].target_id)
+            if kept is not None:
+                from services.creation_agent.creative_checks import check_preserved_result
+                await check_preserved_result(execution, plan.steps[0], plan.steps[0].target_id, kept)
+                return {**kept, 'preserved_existing': True, 'conversation_id': message.conversation_id}
         if task.task_type == AiTaskTypeEnum.reference_image.value:
             from services.creation_agent.media_execution import run_image_handler
 
@@ -196,6 +209,19 @@ async def run_production(task, handler):
 
 
 async def finish_production_message(task):
+    if task.request_params.get('operation') == 'creation_plan':
+        await AgentConversation.filter(active_task_id=task.id).update(active_task_id=None)
+        from services.creation_agent.event_log import agent_event_log
+        from services.task_signals import task_signals
+        message = await AgentMessage.get_or_none(task=task, role='assistant')
+        if message:
+            last = await agent_event_log.last(message)
+            if last is None or last['type'] not in {'RUN_FINISHED', 'RUN_ERROR'}:
+                event = ({'type': 'RUN_FINISHED', 'runId': str(task.id), 'threadId': str(message.conversation_id)}
+                    if task.status == 3 else {'type': 'RUN_ERROR', 'message': task.error_message or localized_message('后续步骤已停止')})
+                await agent_event_log.append(message.id, [event], await agent_event_log.start(message))
+        await task_signals.publish(str(task.id))
+        return
     if (
         task.request_params.get("workflow_version") != "agent-skills-v1"
         or task.task_type == 7
@@ -224,6 +250,13 @@ async def finish_production_message(task):
         5: ("后续步骤已停止", "Further steps stopped"),
     }
     text = labels.get(task.status, ("处理中", "Processing"))[int(english)]
+    if task.status == 3 and (task.response_data or {}).get('preserved_existing'):
+        text = 'Existing results preserved' if english else '已保留已有成果'
+    if task.status == 3 and (task.response_data or {}).get('not_applied_reason'):
+        text = task.response_data['not_applied_reason']
+    if task.status == 3 and (task.response_data or {}).get('review_notes'):
+        text = ('Storyboard saved; some creative details need revision.' if english else '分镜已保存，部分创作细节待完善。')
+        text += '\n' + '\n'.join(task.response_data['review_notes'])
     await AgentMessage.filter(id=message.id).update(
         content=text,
         events=[

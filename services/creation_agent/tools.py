@@ -20,9 +20,8 @@ from schemas.creation_agent import ImagePromptEdit, StoryboardPromptEdit
 from schemas.scene import SceneEntity
 from services.creation_agent.prompt_edits import prepare_storyboard_edit, validate_image_prompt_edit, current_storyboard_structure
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.storyboard.entities import visual_entity_description
 from services.creation_objects import project_write
-from utils.enums import TaskStatusEnum, AssetTypeEnum
+from utils.enums import TaskStatusEnum
 
 
 class PromptEditConflict(ValueError):
@@ -75,27 +74,12 @@ class PromptEditService:
 
     @staticmethod
     async def _entities(scene: Scene) -> list[SceneEntity]:
-        from services.video.asset_resolver import normalize_selected_variant_ids, select_asset_variant
+        from services.video.asset_resolver import normalize_selected_variant_ids
+        from services.storyboard.entities import entities_for_assets
 
         await scene.fetch_related("chapter__novel", "assets__variants")
         selected = normalize_selected_variant_ids((scene.metadata or {}).get("asset_variant_ids"))
-        entities = []
-        for asset in scene.assets:
-            variant = select_asset_variant(asset, scene.chapter.number, selected)
-            explicit_id = selected.get(asset.id)
-            if explicit_id is not None and variant is None:
-                raise ValueError(localized_message('已选择的资产形态不存在，请先修复素材绑定'))
-            source = variant or asset
-            name = asset.canonical_name
-            aliases = list(asset.aliases or [])
-            if variant:
-                aliases.append(f"{name}#{variant.name}")
-            entities.append(SceneEntity(
-                asset_id=asset.id, name=name, aliases=aliases,
-                description=visual_entity_description(source.description, source.base_traits),
-                asset_type=AssetTypeEnum(asset.asset_type).nickname,
-            ))
-        return entities
+        return entities_for_assets(scene.assets, scene.chapter.number, selected)
 
     async def _replay(self, tool_call_id: str, request_hash: str):
         change = await PromptChange.get_or_none(task_id=self.task_id, tool_call_id=tool_call_id, novel_id=self.novel_id)

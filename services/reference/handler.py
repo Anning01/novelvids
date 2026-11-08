@@ -330,6 +330,7 @@ class AssetReferenceHandler(BaseTaskHandler):
             )
 
             result_urls = []
+            not_applied_reason = None
             if image_list:
                 for index, image in enumerate(image_list):
                     try:
@@ -352,28 +353,25 @@ class AssetReferenceHandler(BaseTaskHandler):
                             type(error).__name__,
                         )
 
-                if variant:
-                    variant.images = result_urls
-                    await variant.save(update_fields=["images", "updated_at"])
-                elif result_urls:
-                    asset.main_image = result_urls[0]
-                    asset.angle_image_1 = result_urls[1] if len(result_urls) > 1 else None
-                    asset.angle_image_2 = result_urls[2] if len(result_urls) > 2 else None
-                    asset.image_source = ImageSourceEnum.ai.value
-                    asset.metadata = {
-                        **(asset.metadata or {}),
-                        "image_gallery": result_urls,
-                    }
-                    await asset.save(
-                        update_fields=[
-                            "main_image",
-                            "angle_image_1",
-                            "angle_image_2",
-                            "image_source",
-                            "metadata",
-                            "updated_at",
-                        ]
-                    )
+                from services.creation_objects import project_write
+                async with project_write(asset.novel_id):
+                    if execution and execution.params.get('creation_plan_id'):
+                        from services.creation_agent.media_preparation import validate_prepared_media
+                        try:
+                            await validate_prepared_media(execution, variant or asset)
+                        except ValueError:
+                            not_applied_reason = localized_message('生成期间内容已有新修改，图片已保留，未替换当前素材')
+                    if not not_applied_reason:
+                        if variant:
+                            variant.images = result_urls
+                            await variant.save(update_fields=["images", "updated_at"])
+                        elif result_urls:
+                            asset.main_image = result_urls[0]
+                            asset.angle_image_1 = result_urls[1] if len(result_urls) > 1 else None
+                            asset.angle_image_2 = result_urls[2] if len(result_urls) > 2 else None
+                            asset.image_source = ImageSourceEnum.ai.value
+                            asset.metadata = {**(asset.metadata or {}), "image_gallery": result_urls}
+                            await asset.save(update_fields=["main_image", "angle_image_1", "angle_image_2", "image_source", "metadata", "updated_at"])
 
             if not result_urls:
                 failure = RuntimeError(localized_message('参考图生成完成，但没有可持久化的图片'))
@@ -381,6 +379,8 @@ class AssetReferenceHandler(BaseTaskHandler):
                 raise failure
 
             result = {"images": result_urls, "variant_id": variant.id if variant else None}
+            if not_applied_reason:
+                result['not_applied_reason'] = not_applied_reason
             if execution:
                 result["image_count"] = len(image_list)
             if reference_images:

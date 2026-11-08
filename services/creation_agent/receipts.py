@@ -61,10 +61,22 @@ async def usage_summaries(messages) -> dict[int, dict]:
     rows = await AgentMessage.filter(
         conversation_id__in={message.conversation_id for message in messages}, role="assistant"
     ).select_related("task")
+    plan_runs = {str(message.task_id) for message in messages
+                 if (message.run_input or {}).get('creation_run_id') == str(message.task_id)}
+    if plan_runs:
+        operations = await AgentOperation.filter(task_id__in=list(plan_runs), key__startswith='submit:', state='completed')
+        ids = [row.result['task_id'] for row in operations if row.result.get('task_id')]
+        conversations = await AgentMessage.filter(task_id__in=ids).values_list('conversation_id', flat=True)
+        extra = await AgentMessage.filter(conversation_id__in=list(set(conversations)), role='assistant').select_related('task')
+        known = {row.id for row in rows}
+        rows.extend(row for row in extra if row.id not in known)
     for child in rows:
         parent = (child.task.request_params or {}).get("parent_task_id")
         if parent:
             children.setdefault(parent, []).append(child)
+        run = (child.task.request_params or {}).get('creation_run_id')
+        if run in plan_runs and str(child.task_id) != run and parent != run:
+            children.setdefault(run, []).append(child)
     for message in messages:
         summary = summaries[message.id]
         for child in children.get(str(message.task_id), ()):

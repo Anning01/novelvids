@@ -63,6 +63,7 @@ class RemakeAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=255)
     description: str = Field(min_length=1, max_length=100_000)
+    visual_fields: dict[str, str] = Field(description="资产协议中各设计字段的值；无固定字段的场景、道具返回空字典")
     label: Literal["人物", "动物", "群像"] = "人物"
 
 
@@ -79,9 +80,8 @@ class RemakeReference(BaseModel):
     asset_type: Literal["character", "scene", "object"]
 
 
-class RemakeShot(BaseModel):
+class RemakeShot(StructuredSkillShot):
     model_config = ConfigDict(extra="forbid")
-    prompt: str = Field(min_length=1, max_length=100_000)
     asset_refs: list[RemakeReference] = Field(max_length=30)
     confidence: float = Field(ge=0, le=1)
 

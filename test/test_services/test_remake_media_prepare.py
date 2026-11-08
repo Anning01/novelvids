@@ -5,7 +5,10 @@ import pytest
 from services.remake.media_prepare import prepare_video_for_model_input
 
 
-def test_model_input_reuses_source_when_already_under_limit(tmp_path):
+def test_model_input_reuses_source_when_already_under_limit(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr('services.remake.media_prepare.subprocess.run', lambda *args,**kwargs: SimpleNamespace(
+        stdout='{"format":{"duration":"4"},"streams":[{"width":640,"height":480}]}'))
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
 

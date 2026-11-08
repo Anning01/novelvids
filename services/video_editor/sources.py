@@ -54,7 +54,7 @@ class EditSources:
                 'scene_id': video.scene_id,
                 'ref': normalize_media_url(video.url) or video.url, 'url': resolve_media_url(video.url),
                 'poster': resolve_media_url(data.get('poster_thumbnail_url') or data.get('poster_url') or data.get('first_frame_url')),
-                'duration': float(data.get('duration') or video.scene.duration or 4),
+                'duration': float(data.get('duration_seconds') or data.get('duration') or video.scene.duration or 4),
                 'width': data.get('width', 0), 'height': data.get('height', 0), 'fps': data.get('fps', 24)}
 
     async def catalog(self):

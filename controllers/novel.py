@@ -162,7 +162,13 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         return await super().update(instance, data)
 
     async def patch(self, novel_id: int, obj_in: NovelPatch) -> Novel:
-        instance = await self.get(novel_id)
+        if "content" in obj_in.model_fields_set:
+            instance = await self.get(novel_id)
+        else:
+            fields_without_content = [f for f in Novel._meta.db_fields if f != "content"]
+            instance = await self.model.filter(id=novel_id).only(*fields_without_content).first()
+            if not instance:
+                raise HTTPException(status_code=404, detail="Item not found")
         await self._validate_video_model_preference(instance, obj_in)
         await self._validate_narrator_audio_reference(instance, obj_in)
         data = validate_project_config(

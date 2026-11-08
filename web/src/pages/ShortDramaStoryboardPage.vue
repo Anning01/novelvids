@@ -45,6 +45,7 @@ import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import type { AgentChange, AgentTarget } from '@/features/creation-agent/types'
 import SceneVideoGenerationHistory from '@/components/SceneVideoGenerationHistory.vue'
 import VideoGenerationErrorState from '@/components/VideoGenerationErrorState.vue'
+import VideoGenerationProgress from '@/components/VideoGenerationProgress.vue'
 import CreativeCanvas from '@/features/workbench/pages/CreativeCanvas.vue'
 import WorkbenchCanvasIdentity from '@/features/workbench/components/WorkbenchCanvasIdentity.vue'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
@@ -67,7 +68,7 @@ import { exportApi, type EnhancementModel } from '@/features/video-export/api'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
-import { injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
+import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
@@ -105,6 +106,7 @@ interface SceneVideoGenerationSettings {
   aspectRatio: string
   returnLastFrame: boolean
   autoEnhancement?: AutoEnhancement | null
+  continuityTargetSceneId?: number
 }
 
 interface AssetVoicePickerTarget {
@@ -191,6 +193,7 @@ const savingCanvasIdentity = ref(false)
 const chapterDetailOpen = ref(false)
 const savingChapterDetails = ref(false)
 const batchGeneratingVideos = ref(false)
+let batchMonitor: AbortController | null = null
 const batchVideoDialogOpen = ref(false)
 let alive = true
 let chapterLoadVersion = 0
@@ -450,6 +453,8 @@ function setSceneBusy(target: typeof generatingVideoSceneIds, sceneId: number, v
 function updateVideoSnapshot(current: VideoResult) {
   const records = videos.value[current.scene_id] || []
   const previous = records.find(item => item.id === current.id)
+  // Status polling omits creation timestamps; retain the server's original clock.
+  current = { ...previous, ...current, created_at: current.created_at || previous?.created_at || '' }
   current = preserveAutoEnhancement(previous, current)
   // A late processing response must not replace a completion obtained on focus.
   if (previous && terminalTaskStatuses.has(previous.status) && !terminalTaskStatuses.has(current.status)) return previous
@@ -1041,7 +1046,7 @@ function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
   return [...new Set(sources)]
 }
 
-function videoInputImageReferences(scene: Scene) {
+function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelConfig.value?.capabilities.max_reference_images ?? Infinity) {
   const draft = draftFor(scene)
   const selectedAssets = assets.value.filter(asset => draft.selectedAssetIds.includes(asset.id))
   return buildVideoInputImageReferences(
@@ -1053,6 +1058,7 @@ function videoInputImageReferences(scene: Scene) {
       imageUrls: selectedAssetReferenceImages(scene, asset),
     })),
     draft.referenceMedia,
+    maxImages,
   )
 }
 
@@ -1160,7 +1166,7 @@ function referenceLimitError(scene: Scene, model = selectedVideoModelConfig.valu
   if (!model || draftFor(scene).videoGenerationMode !== 'reference') return ''
   const draft = draftFor(scene)
   const referencedMedia = referencedVideoMedia(draft.prompt, draft.referenceMedia)
-  const imageCount = selectedAssetReferenceImageCount(scene) + referencedMedia.filter(item => item.type === 'image').length
+  const imageCount = videoInputImageReferences(scene, model.capabilities.max_reference_images).length
   const videos = referencedMedia.filter(item => item.type === 'video')
   const duration = videos.reduce((total, item) => total + (item.duration || 0), 0)
   if (imageCount > model.capabilities.max_reference_images) return tr('参考图片超过 {p0} 张（包含资产图）', { p0: model.capabilities.max_reference_images })
@@ -1196,7 +1202,7 @@ function inspectVideoFile(file: File): Promise<{ duration: number; width: number
 
 async function validateReferenceFiles(scene: Scene, files: File[], model: VideoGenerationModel) {
   const capabilities = model.capabilities
-  const existingImages = selectedAssetReferenceImageCount(scene) + draftFor(scene).referenceMedia.filter(item => item.type === 'image').length
+  const existingImages = draftFor(scene).referenceMedia.filter(item => item.type === 'image').length
   const existingVideos = draftFor(scene).referenceMedia.filter(item => item.type === 'video')
   const imageFiles = files.filter(file => capabilities.reference_image_formats.includes(fileExtension(file)))
   const videoFiles = files.filter(file => capabilities.reference_video_formats.includes(fileExtension(file)))
@@ -1259,7 +1265,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
-  if (combined.filter(item => item.type === 'image').length + selectedAssetReferenceImageCount(scene) > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
+  if (combined.filter(item => item.type === 'image').length > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
   if (videos.length > model.capabilities.max_reference_videos || videos.reduce((total, item) => total + (item.duration || 0), 0) > model.capabilities.reference_video_total_duration_max + 0.001) {
     notice.error(tr('参考视频数量或总时长超过当前模型限制'))
     return
@@ -1522,6 +1528,8 @@ async function regenerateStoryboard() {
 }
 
 async function loadChapter(chapterId: number) {
+  batchMonitor?.abort()
+  batchGeneratingVideos.value = false
   const loadVersion = ++chapterLoadVersion
   stopVideoPolling()
   submittingVideoSceneIds.clear()
@@ -1541,6 +1549,9 @@ async function loadChapter(chapterId: number) {
     if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
     showChapterScenes(result)
     loading.value = false
+    void api.latestVideoBatch(chapterId).then(response => {
+      if (alive && loadVersion === chapterLoadVersion && response.data) void monitorVideoBatch(response.data.id)
+    }).catch(() => { /* Video polling remains available if batch status is temporarily unavailable. */ })
     if (!result.scenes.length && !isAgent.value) {
       // Agent 模式不再自动生成分镜：进入分镜页后由用户点击「生成全部分镜」触发，
       // 避免一进页面就自动消耗生成额度。人工模式仍自动创建首个空分镜。
@@ -1946,19 +1957,22 @@ async function generateVideo(
     const autoSetting = settings?.autoEnhancement === undefined ? draft.autoEnhancement : settings.autoEnhancement
     const autoStage = (result.metadata?.auto_enhancement as { stage?: string } | undefined)?.stage
     const enhancementCompleted = !autoSetting || autoStage === 'completed' || autoStage === 'skipped'
+    const continuityCompleted = !(settings?.returnLastFrame ?? draft.returnLastFrame)
+      || hasLastFrameContinuity(result, settings?.continuityTargetSceneId)
     if (completed) {
-      setSceneVideoError(scene.id)
+      setSceneVideoError(scene.id, continuityCompleted ? '' : tr('视频已生成，但尾帧衔接未完成，后续分镜已停止'))
       syncInjectedLastFrame(result)
     } else {
       setSceneVideoError(scene.id, sceneVideoError(scenes.value.find(item => item.id === scene.id) || scene))
     }
     if (showNotice) {
-      if (completed && !enhancementCompleted) notice.info(tr('视频已生成，但自动高清化未完成，原视频已保留'))
+      if (completed && !continuityCompleted) notice.error(tr('视频已生成，但尾帧衔接未完成，后续分镜已停止'))
+      else if (completed && !enhancementCompleted) notice.info(tr('视频已生成，但自动高清化未完成，原视频已保留'))
       else completed
         ? notice.success(tr('分镜视频生成完成'))
         : notice.error(tr('视频生成失败，详情已显示在预览区'))
     }
-    return completed && enhancementCompleted
+    return completed && enhancementCompleted && continuityCompleted
   } catch (error) {
     if (!alive || version !== chapterLoadVersion) return false
     const message = error instanceof Error ? error.message : tr('视频生成失败')
@@ -2106,12 +2120,45 @@ async function applyVideoDefaults(settings: VideoDefaults, remember: boolean) {
   finally { savingVideoDefaults.value = false }
 }
 
+async function monitorVideoBatch(taskId: string) {
+  batchMonitor?.abort()
+  const controller = new AbortController()
+  batchMonitor = controller
+  batchGeneratingVideos.value = true
+  const chapterId = activeChapterId.value
+  try {
+    const result = await pollUntilTerminal(async signal => {
+      const task = (await api.task(taskId, signal)).data
+      const bootstrap = (await api.workbenchBootstrap(projectId.value, chapterId, signal)).data
+      if (controller.signal.aborted || !alive || chapterId !== activeChapterId.value) throw new DOMException('View changed', 'AbortError')
+      for (const scene of scenes.value) {
+        const records = bootstrap.videos[scene.id] || []
+        videos.value[scene.id] = records
+        const completed = records.find(video => video.status === TaskStatusEnum.COMPLETED)
+        if (completed) syncInjectedLastFrame(completed)
+      }
+      resumeVideoPolling()
+      return task
+    }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminalTaskStatuses,
+      requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
+    if (result.status === TaskStatusEnum.COMPLETED) notice.success(tr('批量生成完成'))
+    else notice.error(result.error_message || tr('连续生成已停止，后续分镜未提交'))
+  } catch (error) {
+    if (!isAbortError(error)) notice.error((error as Error).message)
+  } finally {
+    if (batchMonitor === controller) {
+      batchMonitor = null
+      batchGeneratingVideos.value = false
+    }
+  }
+}
+
 async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
   const model = videoModels.value.find(item => item.config_id === request.modelConfigId) || null
   if (!model || batchGeneratingVideos.value) return
   const selectedIdSet = new Set(request.sceneIds)
   const targets = scenes.value
-    .filter(scene => selectedIdSet.has(scene.id) && !batchVideoDisabledReason(scene, model, request))
+    .filter(scene => selectedIdSet.has(scene.id))
     .sort((left, right) => left.sequence - right.sequence)
   if (!targets.length) {
     notice.info(tr('所选分镜当前无法生成视频'))
@@ -2135,16 +2182,43 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     autoEnhancement: request.autoEnhancement || null,
   }
   try {
+    if (request.returnLastFrame) {
+      for (const scene of targets) {
+        const blocked = batchVideoDisabledReason(scene, model, request)
+        if (blocked) throw new Error(blocked)
+        ensureSceneVoiceReferencePrompt(scene)
+        if (!await saveScene(scene, false, model)) return
+      }
+      const requests = targets.map(scene => {
+        const draft = draftFor(scene)
+        return { scene_id: scene.id, model_config_id: model.config_id,
+          generation_mode: draft.videoGenerationMode, first_frame_url: draft.firstFrameUrl || undefined,
+          last_frame_url: draft.lastFrameUrl || undefined, duration: sceneDuration(scene, model),
+          resolution: request.resolution, aspect_ratio: request.aspectRatio,
+          output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
+          return_last_frame: true, auto_enhancement: request.autoEnhancement || null,
+          reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(draft.prompt, draft.referenceMedia) : [] }
+      })
+      const task = (await api.generateVideoBatch(requests)).data
+      await monitorVideoBatch(task.id)
+      return
+    }
     const completedCount = await runVideoGenerationQueue(
       targets,
       model.concurrency,
-      request.returnLastFrame,
-      scene => generateVideo(scene, false, generationSettings),
+      false,
+      async scene => {
+        const blocked = batchVideoDisabledReason(scene, model, request)
+        if (blocked) setSceneVideoError(scene.id, blocked)
+        return !blocked && await generateVideo(scene, false, generationSettings)
+      },
     )
     const failedCount = targets.length - completedCount
     failedCount
       ? notice.error(request.autoEnhancement ? tr('批量处理结束：完成 {p0} 条，另有 {p1} 条视频或高清化未完成，原视频保留', { p0: completedCount, p1: failedCount }) : tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
       : notice.success(tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
+  } catch (error) {
+    notice.error((error as Error).message)
   } finally {
     batchGeneratingVideos.value = false
   }
@@ -2201,6 +2275,7 @@ onMounted(() => {
   window.addEventListener('keydown', closeAssetActionsFromEscape)
 })
 onBeforeUnmount(() => {
+  batchMonitor?.abort()
   void flushPendingSceneSaves()
   alive = false
   stopVideoPolling()
@@ -2390,6 +2465,7 @@ onBeforeUnmount(() => {
                   :model="selectedVideoModelConfig"
                   :media="draftFor(scene).referenceMedia"
                   :asset-image-count="selectedAssetReferenceImageCount(scene)"
+                  :assets-use-descriptions="videoInputImageReferences(scene, Infinity).length > videoInputImageReferences(scene).length"
                   :audio-durations="sceneAudioDurations(scene)"
                   :highlighted-media-index="highlightedMediaIndex(scene)"
                   :disabled="draftFor(scene).videoGenerationMode === 'keyframes'"
@@ -2450,8 +2526,7 @@ onBeforeUnmount(() => {
                     :poster="videoCoverUrl(selectedVideoFor(scene)!)"
                     :title="tr('分镜 {p0} 视频预览', { p0: scene.sequence })"
                   />
-                  <div v-else-if="videoSyncErrors[scene.id]?.stopped" class="preview-empty"><RefreshCw :size="30" /><strong>{{ tr('视频状态暂未同步') }}</strong><span>{{ tr('可刷新视频状态，不必重新生成') }}</span></div>
-                  <div v-else-if="generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" class="preview-empty is-running"><LoaderCircle :size="30" /><strong>{{ tr('视频生成中') }}</strong><span>{{ tr('完成后将在这里自动播放') }}</span></div>
+                  <VideoGenerationProgress v-else-if="videoSyncErrors[scene.id]?.stopped || generatingVideoSceneIds.has(scene.id) || (selectedVideoFor(scene) && !terminalTaskStatuses.has(selectedVideoFor(scene)!.status))" :video="selectedVideoFor(scene)" :sync-delayed="videoSyncErrors[scene.id]?.stopped" />
                   <div v-else class="preview-empty"><MonitorPlay :size="32" /><strong>{{ tr('等待生成视频') }}</strong><span>{{ tr('完善提示词后点击“生成视频”') }}</span></div>
                 </div>
                 <p v-if="videoSyncErrors[scene.id]" class="video-sync-note" role="status">{{ videoSyncErrors[scene.id].message }}</p>

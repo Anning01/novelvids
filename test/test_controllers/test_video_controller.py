@@ -103,6 +103,50 @@ async def test_previous_tail_frame_has_an_exact_reference_number_in_the_outbound
 # =====================================================================
 
 @pytest.mark.asyncio
+async def test_overflow_asset_images_use_descriptions_and_keep_uploaded_image_numbers(monkeypatch):
+    import json
+    import httpx
+    from services.video.seedance import SeedanceGenerator
+
+    upload = 'https://cdn.example.com/continuity.png'
+    prompt = '、'.join(f'@{{角色{i}}}' for i in range(10)) + reference_mention_syntax('image', upload)
+    scene, config = await _create_scene_with_config(prompt=prompt)
+    subjects = [dict(name=f'角色{i}', images=[f'https://cdn.example.com/{i}.png'],
+        description=f'角色{i}的外貌描述') for i in range(10)]
+    monkeypatch.setattr('controllers.video.resolve_assets', AsyncMock(return_value=subjects))
+    outbound = []
+    real_client = httpx.AsyncClient
+
+    def respond(request):
+        if request.method == 'GET':
+            return httpx.Response(200, json={'status': 'running'})
+        outbound.append(json.loads(request.content))
+        return httpx.Response(200, json={'id': 'overflow-accepted'})
+
+    def client_factory(*args, **kwargs):
+        assert kwargs['timeout'] == 600
+        kwargs['transport'] = httpx.MockTransport(respond)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr('services.video.seedance.httpx.AsyncClient', client_factory)
+    video = await video_controller._submit_generation(VideoGenerateRequest(scene_id=scene.id,
+        model_config_id=config.id, generate_audio=False,
+        reference_media=[VideoReferenceMedia(type='image', url=upload)]))
+    content = outbound[0]['content']
+    assert [item['image_url']['url'] for item in content[1:]] == [
+        *(f'https://cdn.example.com/{i}.png' for i in range(8)), upload]
+    assert '[图8]' in content[0]['text']
+    assert '[图9]' in content[0]['text']
+    assert '角色8的外貌描述' in content[0]['text']
+    assert '角色9的外貌描述' in content[0]['text']
+    assert '@{角色8}' not in content[0]['text']
+    assert video.metadata['input_image_count'] == 9
+    assert subjects[9]['images']  # Transport copies do not change the stored asset selection.
+    await scene.refresh_from_db()
+    assert scene.prompt == prompt
+    await SeedanceGenerator(config).query('overflow-accepted')
+
+@pytest.mark.asyncio
 async def test_生成视频_提交成功():
     """正常提交视频生成，返回 Video 记录。"""
     scene, config = await _create_scene_with_config()
@@ -212,6 +256,26 @@ async def test_生成视频_供应商提交失败时持久化异常记录():
     persisted = await Video.get(id=video.id)
     assert persisted.status == TaskStatusEnum.failed.value
     assert persisted.metadata["error"] == video.metadata["error"]
+
+
+@pytest.mark.asyncio
+async def test_uncertain_video_submission_is_preserved_and_cannot_be_repeated(monkeypatch):
+    from services.creation_agent.video_jobs import submit_video
+    from test.test_services.test_skill_workflow import enabled_project
+
+    await enabled_project()
+    scene, config = await _create_scene_with_config()
+    request = VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id)
+    generator = AsyncMock()
+    generator.submit.side_effect = VideoProviderError('response lost', submission_uncertain=True)
+    monkeypatch.setattr('controllers.video.get_generator', lambda config: generator)
+    video = await video_controller._submit_generation(request)
+    assert video.status == TaskStatusEnum.failed.value
+    assert video.metadata['submission_uncertain'] is True
+    assert '待核对' in video.metadata['error']
+    with pytest.raises(HTTPException, match='已有视频提交结果待核对'):
+        await submit_video(request)
+    generator.submit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

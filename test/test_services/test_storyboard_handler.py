@@ -150,3 +150,73 @@ async def test_save_scenes_persists_narration_strategy_and_voice_track():
     assert scene.metadata["storyboard_strategy_name"] == "旁白叙事"
     assert "【旁白 / 内心 OS】" in scene.prompt
     assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in scene.prompt
+
+
+@pytest.mark.asyncio
+async def test_shots_persist_ai_selected_variant_and_explicit_base_for_flashback():
+    from models.asset_variant import AssetVariant
+    from services.storyboard.entities import generation_entities_for_assets
+    from services.video.asset_resolver import select_asset_variant, normalize_selected_variant_ids
+
+    novel = await Novel.create(name='分镜形态绑定')
+    chapter = await Chapter.create(novel=novel, number=2, name='第二章', content='成长与回忆')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='张三', base_traits='少年')
+    variant = await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
+    loaded = await Asset.filter(id=asset.id).prefetch_related('variants')
+    entities = generation_entities_for_assets(loaded, 2, {})
+    scenes = await StoryboardTaskHandler()._save_scenes(chapter.id,
+        Storyboard(shots=[_shot(1, '@{张三#成年} 推门。'), _shot(2, '@{张三} 在少年时读书。')]),
+        {}, 0, entities=entities)
+    assert scenes[0].metadata['asset_variant_ids'] == {str(asset.id): variant.id}
+    assert scenes[1].metadata['asset_variant_ids'] == {str(asset.id): None}
+    assert '@{张三#成年}' in scenes[0].prompt
+    for scene, expected in zip(scenes, (variant.id, None)):
+        await scene.fetch_related('assets')
+        assert [row.id for row in scene.assets] == [asset.id]
+        selected = select_asset_variant(loaded[0], 2, normalize_selected_variant_ids(scene.metadata['asset_variant_ids']))
+        assert (selected.id if selected else None) == expected
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_all_visual_forms_to_model_without_a_creation_plan(monkeypatch):
+    from unittest.mock import AsyncMock
+    from models.asset_variant import AssetVariant
+    from prompts.storyboard import build_storyboard_messages
+
+    novel = await Novel.create(name='分镜模型形态上下文')
+    chapter = await Chapter.create(novel=novel, number=2, name='第二章', content='张三长大后拜入新宗门。')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='张三',
+        base_traits='少年布衣', source_chapters=[1, 2])
+    variant = await AssetVariant.create(asset=asset, name='成年宗门服', base_traits='成年青袍', chapter_numbers=[2])
+    async def generate(**kwargs):
+        entities = kwargs['entities']
+        assert [entity.name for entity in entities] == ['张三', '张三#成年宗门服']
+        messages = build_storyboard_messages(chapter.content, entities, 'zh')
+        rendered = '\n'.join(message['content'] for message in messages)
+        assert '成年青袍' in rendered and 'chapter_numbers' in rendered
+        assert '回忆、闪回应选当时的形象' in rendered
+        return Storyboard(shots=[_shot(1, '@{张三#成年宗门服} 拜入新宗门。')]), {}
+    monkeypatch.setattr('services.storyboard.handler.generate_storyboard', generate)
+    monkeypatch.setattr('services.storyboard.handler.AsyncOpenAI', lambda **kwargs: AsyncMock())
+    summary = await StoryboardTaskHandler().execute({'chapter_id': chapter.id,
+        'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'})
+    from models.scene import Scene
+    scene = await Scene.get(id=summary['scene_ids'][0])
+    assert scene.metadata['asset_variant_ids'] == {str(asset.id): variant.id}
+
+
+@pytest.mark.asyncio
+async def test_conflicting_forms_fail_before_any_scene_is_saved():
+    from models.asset_variant import AssetVariant
+    from models.scene import Scene
+    from services.storyboard.entities import generation_entities_for_assets
+
+    novel = await Novel.create(name='形态冲突不部分保存')
+    chapter = await Chapter.create(novel=novel, number=2, name='第二章', content='正文')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='张三', base_traits='少年')
+    await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
+    entities = generation_entities_for_assets(await Asset.filter(id=asset.id).prefetch_related('variants'), 2, {})
+    with pytest.raises(ValueError, match='多个形态'):
+        await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=[
+            _shot(1), _shot(2, '@{张三} 和 @{张三#成年} 同时出现。')]), {}, 0, entities=entities)
+    assert await Scene.filter(chapter=chapter).count() == 0

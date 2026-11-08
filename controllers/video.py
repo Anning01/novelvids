@@ -25,7 +25,7 @@ from models.chapter import Chapter
 from models.video import Video
 from schemas.video import VideoGenerateRequest
 from services.billing.recorder import billing_recorder
-from services.oss import resolve_media_url
+from services.oss import normalize_media_url, resolve_media_url
 from services.video import get_generator, get_record_model_type
 from services.video.base import VideoProviderError
 from services.video.asset_resolver import (
@@ -35,6 +35,7 @@ from services.video.asset_resolver import (
 )
 from services.video.capabilities import validate_selection
 from services.video.capabilities import capabilities_for
+from services.video.content import limit_subject_images
 from services.video.reference_media import (
     reference_mention_syntax,
     render_reference_mentions,
@@ -86,7 +87,7 @@ async def _ensure_video_posters(
         return {}
 
 
-async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str, str]]:
+async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str, str | float]]:
     """将远程视频下载到本地 MEDIA_PATH/videos/ 目录，返回可访问的 /media/ 路径。"""
     video_dir = os.path.join(settings.MEDIA_PATH, "videos")
     os.makedirs(video_dir, exist_ok=True)
@@ -111,7 +112,7 @@ async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str
             await oss.put_bytes(key, file.read(), "video/mp4")
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
         media_url = key
-    posters: dict[str, str] = {}
+    posters: dict[str, str | float] = {}
     try:
         posters = await video_poster_service.extract_file_and_store(
             Path(local_path),
@@ -121,6 +122,12 @@ async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str
     except Exception as error:
         logger.exception("Video poster extraction failed: video_id=%s", video_id)
         posters["poster_extraction_error"] = type(error).__name__
+    try:
+        from services.video.duration import measure_video_duration
+        posters.update(duration_seconds=await asyncio.to_thread(measure_video_duration, Path(local_path)),
+                       duration_source_ref=normalize_media_url(media_url) or media_url)
+    except Exception as error:
+        logger.warning('Video duration probe unavailable: video_id=%s error_type=%s', video_id, type(error).__name__)
     if oss.enabled:
         os.remove(local_path)
     logger.info("Video downloaded: video_id=%s -> %s", video_id, media_url)
@@ -460,6 +467,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             else:
                 reference_videos.append(resolve_media_url(reference.url) or reference.url)
 
+        subjects = limit_subject_images(subjects, capabilities.max_reference_images, reference_images)
         ordered_images = list(dict.fromkeys([image for subject in subjects for image in subject.get('images', [])] + reference_images))
         if len(ordered_images) > capabilities.max_reference_images:
             raise HTTPException(
@@ -591,6 +599,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             # 并使分镜状态在刷新页面后仍保持为红色。
             video.status = TaskStatusEnum.failed.value
             video.metadata = {**video_metadata, 'error': str(error)}
+            if error.submission_uncertain:
+                video.metadata.update(submission_uncertain=True,
+                    error=localized_message('视频提交结果待核对，系统不会重复提交') + '：' + str(error))
             await video.save(update_fields=['status', 'metadata', 'updated_at'])
             await self._set_scene_current_video(scene, video.id)
             logger.warning(

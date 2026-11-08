@@ -20,7 +20,7 @@ async def object_state(target) -> dict:
                 'variant_bindings': deepcopy((target.metadata or {}).get('asset_variant_ids', {}))}
     if isinstance(target, Asset):
         return {name: deepcopy(getattr(target, name)) for name in (
-            'canonical_name', 'aliases', 'description', 'base_traits', 'source_chapters', 'is_global', 'last_updated_chapter')}
+            'canonical_name', 'aliases', 'description', 'base_traits', 'source_chapters', 'is_global', 'last_updated_chapter', 'metadata')}
     return {name: deepcopy(getattr(target, name)) for name in ('name', 'description', 'base_traits', 'chapter_numbers')}
 
 

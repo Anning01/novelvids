@@ -25,14 +25,10 @@ interface BudgetField {
   optional?: boolean
 }
 const groups: { title: string; description: string; fields: BudgetField[] }[] = [
-  { get title() { return tr('对话用量') }, get description() { return tr('默认按 DeepSeek 长上下文对话设置，仍受所选模型自身上限约束。') }, fields: [
+  { get title() { return tr('执行与输出') }, get description() { return tr('助手持续执行到任务完成或主动停止，上下文自动整理；单次输出遵循所选模型的能力。') }, fields: [
     { key: 'production_concurrency', get label() { return tr('同时执行的创作任务') }, get unit() { return tr('个') } },
-    { key: 'max_targets', get label() { return tr('最多修改对象') }, get unit() { return tr('个 / 轮') } },
-    { key: 'request_limit', get label() { return tr('模型调用上限') }, get unit() { return tr('次 / 轮') } },
-    { key: 'tool_calls_limit', get label() { return tr('工具调用上限') }, get unit() { return tr('次 / 轮') } },
-    { key: 'timeout_seconds', get label() { return tr('运行超时') }, get unit() { return tr('秒') } },
+    { key: 'max_targets', get label() { return tr('单批操作对象') }, get unit() { return tr('个 / 批') } },
     { key: 'max_output_tokens', get label() { return tr('单次输出上限') }, unit: 'token' },
-    { key: 'total_tokens_limit', get label() { return tr('每轮总用量上限') }, unit: 'token' },
   ] },
   { get title() { return tr('记忆与上下文') }, get description() { return tr('按 840K 输入预算管理工作区，达到 70% 时自动整理历史。') }, fields: [
     { key: 'working_input_tokens', get label() { return tr('工作上下文预算') }, get unit() { return tr('预估 token') } },
@@ -42,7 +38,6 @@ const groups: { title: string; description: string; fields: BudgetField[] }[] = 
     { key: 'history_runs', get label() { return tr('近期对话轮数') }, get unit() { return tr('轮') } },
     { key: 'context_page_characters', get label() { return tr('每页读取长度') }, get unit() { return tr('字符') } },
     { key: 'summary_output_tokens', get label() { return tr('摘要输出上限') }, unit: 'token' },
-    { key: 'summary_timeout_seconds', get label() { return tr('摘要等待时间') }, get unit() { return tr('秒') } },
   ] },
 ]
 onMounted(async () => {
@@ -78,7 +73,7 @@ async function save() {
         <span>{{ tr('跨对话记忆') }}</span><span>{{ tr('自动整理上下文') }}</span><span>{{ tr('修改可撤销') }}</span>
       </div>
       <details class="agent-settings-panel__advanced">
-        <summary><SlidersHorizontal :size="16" aria-hidden="true" /><span>{{ tr('高级设置') }}<small>{{ tr('调用预算与运行限制') }}</small></span><ChevronDown :size="16" class="agent-settings-panel__chevron" aria-hidden="true" /></summary>
+        <summary><SlidersHorizontal :size="16" aria-hidden="true" /><span>{{ tr('高级设置') }}<small>{{ tr('输出与上下文设置') }}</small></span><ChevronDown :size="16" class="agent-settings-panel__chevron" aria-hidden="true" /></summary>
         <div class="agent-settings-panel__groups">
           <fieldset v-for="group in groups" :key="group.title" :disabled="saving">
             <legend>{{ group.title }}</legend><p>{{ group.description }}</p>

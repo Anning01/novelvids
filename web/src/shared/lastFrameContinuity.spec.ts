@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from './lastFrameContinuity'
+import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from './lastFrameContinuity'
+
+it('requires a stored tail frame and confirmed injection into the selected next scene', () => {
+  const metadata = { last_frame_url: '/media/tail.png', last_frame_source: 'provider',
+    last_frame_injected_scene_id: 2, last_frame_reference: { type: 'image', url: '/media/tail.png' },
+    last_frame_prompt_instruction: '首帧衔接' }
+  expect(hasLastFrameContinuity({ metadata }, 2)).toBe(true)
+  expect(hasLastFrameContinuity({ metadata }, 3)).toBe(false)
+  expect(hasLastFrameContinuity({ metadata })).toBe(true)
+  expect(hasLastFrameContinuity({ metadata: {} }, 2)).toBe(false)
+  expect(hasLastFrameContinuity({ metadata: { ...metadata, last_frame_reference: undefined } }, 2)).toBe(false)
+  expect(hasLastFrameContinuity({ metadata: { ...metadata, last_frame_extraction_error: 'failed' } }, 2)).toBe(false)
+  expect(hasLastFrameContinuity({ metadata: { ...metadata, last_frame_propagation_error: 'failed' } }, 2)).toBe(false)
+})
 
 describe('injectLastFrameContinuityInstruction', () => {
   const first = '【首帧衔接】\n@{参考图片:%2Fmedia%2Flast-1.png} 作为本镜头首帧。'

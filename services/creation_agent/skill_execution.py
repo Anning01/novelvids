@@ -7,11 +7,12 @@ import json
 from fastapi import HTTPException
 from utils.messages import localized_message
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, PromptedOutput
 from pydantic_ai.usage import UsageLimits
+from pydantic_ai.exceptions import ModelHTTPError
 from models.creation_agent import AgentMessage
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills, task_facts, creative_requirements
-from services.creation_agent.model_boundary import RecordedAgentModel, main_request_count
+from services.creation_agent.model_boundary import RecordedAgentModel
 from utils.enums import AiTaskTypeEnum
 
 WORKFLOW_VERSION = "agent-skills-v1"
@@ -71,6 +72,9 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
+        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):
+            if key in parent.params:
+                inherited[key] = parent.params[key]
     return {
         **params,
         **(submission.get() or {}),
@@ -86,10 +90,15 @@ async def user_instruction(params: dict) -> str:
     source_id = params.get("instruction_message_id")
     if source_id is None:
         return ""
-    source = await AgentMessage.get_or_none(
+    query = AgentMessage.filter(
         id=source_id, role="user", conversation__novel_id=params["novel_id"],
-        conversation__team_id=params.get("team_id"),
+        conversation__created_by=params.get("user_id"),
     )
+    # Global administrator runs have no selected team; their project can have one.
+    # Project access is authorized by before_request, private text by its owner.
+    if params.get("team_id") is not None:
+        query = query.filter(conversation__team_id=params["team_id"])
+    source = await query.first()
     if source is None:
         raise ValueError(localized_message("原始创作要求已不可用，请重新提交任务"))
     return source.content
@@ -110,6 +119,18 @@ class SkillExecution:
         return self.params.get("prompt_language", "en")
 
     async def generate(
+        self, skill: str, facts: object, output_type: type[BaseModel], **options,
+    ):
+        if skill != 'authorization':
+            await user_instruction(self.params)
+        from services.creation_agent.step_context import step_context
+        context = await step_context(self.params) if skill in {'assets', 'storyboard', 'image', 'video'} else None
+        if context and (context.requirements or context.constraints or self.params.get('creation_plan_id') != self.params['task_id']):
+            from services.creation_agent.creative_checks import generate_checked
+            return await generate_checked(self, skill, facts, output_type, options, context)
+        return await self._generate(skill, facts, output_type, **options)
+
+    async def _generate(
         self,
         skill: str,
         facts: object,
@@ -118,6 +139,7 @@ class SkillExecution:
         model_config=None,
         media=None,
         additional_instructions: str = "",
+        output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
     ):
         from services.creation_agent.handler import configured_model
 
@@ -177,26 +199,6 @@ class SkillExecution:
 
         async def validate_call():
             await self.before_request()
-            messages = await AgentMessage.filter(
-                conversation_id=self.message.conversation_id
-            ).select_related("task")
-            related = [
-                m
-                for m in messages
-                if m.task_id == self.message.task_id
-                or m.task.request_params.get("parent_task_id") == self.params["task_id"]
-            ]
-            spent_requests = sum(main_request_count((m.usage or {}).get("calls", [])) for m in related)
-            spent_tokens = sum(
-                int((m.usage or {}).get("input_tokens", 0))
-                + int((m.usage or {}).get("output_tokens", 0))
-                for m in related
-            )
-            if (
-                spent_requests >= limits.request_limit
-                or spent_tokens >= limits.total_tokens_limit
-            ):
-                raise ValueError(localized_message("本次任务已达到总调用或用量上限"))
             from services.balance import ensure_solvent
 
             await ensure_solvent(self.params.get("team_id"), self.params.get("user_id"))
@@ -208,7 +210,7 @@ class SkillExecution:
                     model_config.id,
                     team_id=self.params.get("team_id"),
                 )
-                if not available.supports_tool_calls:
+                if not (available.supports_tool_calls or skill == 'remake' and available.supports_json_output):
                     raise ValueError(localized_message("视频理解模型需要支持工具调用"))
 
         from services.creation_agent.event_log import agent_event_log
@@ -243,32 +245,89 @@ class SkillExecution:
             on_activity=report_activity,
         )
         request_aspect_ratio = "16:9"
-        from services.storyboard.speech_timing import StoryboardSpeechValidator
-        speech_validator = StoryboardSpeechValidator(self.snapshot) if skill == "storyboard" else None
+        from services.storyboard.candidates import StoryboardCandidateValidator
+        storyboard_candidates = (StoryboardCandidateValidator(output_type, self.snapshot, self.language,
+            self.params.get('shot_duration_range'), facts)
+            if skill == 'storyboard' and 'shots' in output_type.model_fields else None)
+        storyboard_checkpoint = None
+        if storyboard_candidates:
+            from models.agent_operation import AgentOperation
+            saved = await AgentOperation.get_or_none(task_id=self.params['task_id'], key=f'candidate:storyboard:{segment}', state='completed')
+            if saved:
+                storyboard_checkpoint = saved.result
+                storyboard_candidates.restore(storyboard_checkpoint)
+        if skill in {'storyboard', 'video'}:
+            from prompts.creation_plan import resolved_storyboard_resources_instructions
+            additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
+        agent_output = storyboard_candidates.draft_type if storyboard_candidates else output_type
+        if skill == 'remake' and chosen.supports_json_output:
+            agent_output = PromptedOutput(output_type)
         agent = Agent(
             deps_type=SkillSnapshot,
-            instructions=instructions(self.snapshot, self.language, skill) + (
+            instructions=instructions(self.snapshot, self.language, skill,
+                output_kind=facts.get('output_kind') if isinstance(facts, dict) else None) + (
                 "\n" + additional_instructions if additional_instructions else ""
             ),
-            output_type=output_type,
+            output_type=agent_output,
             retries=2,
         )
 
-        @agent.tool
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
             """读取本次运行固定版本的技能；只接受技能清单中的名称。"""
             return ctx.deps.read(name)
 
-        @agent.output_validator
-        def validate_output(ctx: RunContext[SkillSnapshot], output):
-            if skill == "assets":
-                from pydantic_ai import ModelRetry
-                from services.extraction.extractor import validate_asset_prompt_contract
+        # These phases already receive their full rules and evidence. Additional
+        # skill lookups only repeat context and consume the user's call budget.
+        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video', 'structured', 'remake'}:
+            agent.tool(read_skill)
 
+        from services.extraction.validation import AssetCandidateValidator, AssetExtractionValidationError
+        asset_candidates = AssetCandidateValidator() if skill == 'assets' else None
+
+        @agent.output_validator
+        async def validate_output(ctx: RunContext[SkillSnapshot], output):
+            if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'professional_video_prompt_material':
+                from services.remake.storyboards import prepare_remake_prompt
+                from pydantic_ai import ModelRetry
+                context = facts['assets']
                 try:
-                    validate_asset_prompt_contract(output, ctx.deps, self.language, request_aspect_ratio)
+                    prepare_remake_prompt(output.model_dump(), context['assets'], ctx.deps, self.language,
+                        strategy_key=context['storyboard_strategy'], duration_seconds=context['duration_seconds'])
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
+            if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'global_key_assets':
+                from services.remake.asset_validation import render_remake_assets, validate_remake_assets
+                from pydantic_ai import ModelRetry
+                try:
+                    rendered = render_remake_assets(output.model_dump(), ctx.deps, self.language, request_aspect_ratio)
+                    validate_remake_assets(rendered, ctx.deps, self.language, request_aspect_ratio)
+                    output = type(output).model_validate(rendered)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
+            if skill == 'source_reading' and isinstance(facts, dict) and facts.get('reference_protocol') == 2:
+                from services.creation_agent.source_references import resolve_reading
+                from pydantic_ai import ModelRetry
+                try:
+                    output = resolve_reading(output, facts, require_paragraphs=True)
+                except ValueError as error:
+                    raise ModelRetry(str(error)) from None
+            if skill == "assets":
+                from pydantic_ai import ModelRetry
+                from models.agent_operation import AgentOperation
+                from prompts.extraction import render_asset_repair
+
+                attempted = output.model_dump(mode='json')
+                output = asset_candidates.merge(output, ctx.deps, self.language, request_aspect_ratio)
+                if output_validator:
+                    try:
+                        await output_validator(output)
+                    except ValueError as error:
+                        asset_candidates.issues.append(str(error))
+                await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:assets:{segment}',
+                    defaults={'state': 'completed', 'result': {'attempted': attempted,
+                        'accepted': output.model_dump(mode='json'), 'issues': asset_candidates.issues}})
+                if asset_candidates.issues:
+                    raise ModelRetry(render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues))
             if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
                 from pydantic_ai import ModelRetry
                 from prompts.creation_standards import ASSET_PROMPT_KINDS
@@ -281,23 +340,30 @@ class SkillExecution:
                     validate_asset_design(output.prompt, kind, ctx.deps, self.language, request_aspect_ratio)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
-            if skill == "storyboard" and hasattr(output, "shots"):
+            if storyboard_candidates:
                 from pydantic_ai import ModelRetry
-                from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration
-
+                from models.agent_operation import AgentOperation
+                from prompts.storyboard_repair import structural_repair
+                merged, checkpoint = storyboard_candidates.merge(output)
+                await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:storyboard:{segment}',
+                    defaults={'state': 'completed', 'result': checkpoint})
+                if merged is None:
+                    raise ModelRetry(structural_repair(self.language, checkpoint))
+                output = merged
+            if output_validator and skill != 'assets':
+                from pydantic_ai import ModelRetry
                 try:
-                    if speech_validator is not None:
-                        speech_validator.validate(output.shots)
-                    for shot in output.shots:
-                        validate_storyboard_duration(shot, self.params.get("shot_duration_range"))
-                        if "storyboard_contract" in ctx.deps.contents:
-                            validate_skill_storyboard_timing(shot)
+                    await output_validator(output)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             return output
 
+        request_rejected = False
+
         async def invoke():
-            nonlocal request_aspect_ratio
+            nonlocal request_aspect_ratio, request_rejected
+            if storyboard_checkpoint and not storyboard_checkpoint['pending'] and not storyboard_checkpoint['protocol_errors']:
+                return storyboard_candidates.result().model_dump(mode='json')
             from models.novel import Novel
 
             project = await Novel.get(id=self.params["novel_id"])
@@ -309,15 +375,21 @@ class SkillExecution:
                 "aspect_ratio": project.aspect_ratio,
                 "storyboard_strategy": project.storyboard_strategy,
             }
-            if skill in ("assets", "image"):
+            if skill in ("assets", "image", "storyboard", "video", "remake"):
                 styles = json.loads(self.snapshot.read("styles"))
                 selected_style = styles.get(project.style_key, {})
-                project_facts["image_style"] = (
+                style_kind = 'image' if skill in {'assets', 'image', 'remake'} else 'video'
+                project_facts[style_kind + '_style'] = (
                     (project.custom_style_prompt or "").strip()
-                    or selected_style.get("image", "")
+                    or selected_style.get(style_kind, "")
                 )
+            if skill in {'storyboard', 'video'}:
+                from services.storyboard.strategies import storyboard_strategy_factory
+                strategy = storyboard_strategy_factory.resolve(project.storyboard_strategy)
+                project_facts['storyboard_rules'] = json.loads(self.snapshot.read('strategies'))[strategy.key]
             request_facts = {
-                "input": facts,
+                "input": ({key: value for key, value in facts.items() if key != 'content'}
+                    if skill == 'source_reading' and isinstance(facts, dict) and facts.get('reference_protocol') == 2 else facts),
                 "project": project_facts,
                 "parameters": {
                     key: self.params[key]
@@ -330,6 +402,12 @@ class SkillExecution:
                     if key in self.params
                 },
             }
+            if storyboard_candidates and isinstance(facts, dict) and 'storyboard_repair' in facts:
+                request_facts['input'] = {key: value for key, value in facts.items() if key != 'storyboard_repair'}
+            from services.creation_agent.step_context import step_context
+            context = await step_context(self.params) if skill in {'assets', 'storyboard', 'image', 'video'} else None
+            if context:
+                request_facts['step_context'] = context.model_dump(mode='json')
             if skill == "authorization":
                 request_facts = {"input": facts}
             user_input = (
@@ -337,7 +415,11 @@ class SkillExecution:
                 if media
                 else task_facts(request_facts)
             )
-            if skill != "authorization":
+            if context:
+                if context.requirements or context.constraints or self.params.get('creation_plan_id') != self.params['task_id']:
+                    from prompts.creation_plan import step_requirements
+                    user_input = [task_facts(request_facts), step_requirements(self.language), *(media or [])]
+            elif skill != "authorization":
                 requirement = await user_instruction(self.params)
                 if requirement:
                     user_input = [
@@ -345,39 +427,62 @@ class SkillExecution:
                         creative_requirements(requirement, self.language),
                         *(media or []),
                     ]
-            result = await agent.run(
-                user_input,
-                deps=self.snapshot,
-                model=recorded,
-                usage_limits=UsageLimits(
-                    request_limit=limits.request_limit,
-                    tool_calls_limit=limits.tool_calls_limit,
-                    total_tokens_limit=limits.total_tokens_limit,
-                ),
-                model_settings={
-                    "max_tokens": min(
-                        limits.max_output_tokens,
-                        chosen.max_tokens or limits.max_output_tokens,
+            from pydantic_ai import capture_run_messages
+
+            if storyboard_checkpoint:
+                from prompts.storyboard_repair import structural_repair
+                checkpoint = {**storyboard_checkpoint,
+                    'candidates': {int(key): value for key, value in storyboard_checkpoint['candidates'].items()},
+                    'pending': {int(key): value for key, value in storyboard_checkpoint['pending'].items()}}
+                user_input = [*(user_input if isinstance(user_input, list) else [user_input]), structural_repair(self.language, checkpoint)]
+
+            with capture_run_messages() as run_messages:
+                try:
+                    result = await agent.run(
+                        user_input,
+                        deps=self.snapshot,
+                        model=recorded,
+                        usage_limits=UsageLimits(
+                            request_limit=limits.request_limit,
+                            tool_calls_limit=limits.tool_calls_limit,
+                            total_tokens_limit=limits.total_tokens_limit,
+                        ),
+                        model_settings={
+                            "max_tokens": min(
+                                limits.max_output_tokens,
+                                chosen.max_tokens or limits.max_output_tokens,
+                            )
+                        },
                     )
-                },
-            )
-            await AgentMessage.filter(id=child_message.id).update(
-                native_messages=_audit_messages(result.new_messages())
-            )
+                except ModelHTTPError as error:
+                    request_rejected = 400 <= error.status_code < 500 and error.status_code not in {408, 409}
+                    raise
+                finally:
+                    await AgentMessage.filter(id=child_message.id).update(
+                        native_messages=_audit_messages(run_messages)
+                    )
             return result.output.model_dump(mode="json")
 
         try:
             payload = await execute_step(
                 self.params["task_id"], key, invoke, external=True,
-                external_started=lambda: bool(recorded.calls),
+                # A complete response rejected by output validation is a known
+                # failure. Only interrupted/failed requests remain uncertain.
+                external_started=lambda: not request_rejected and bool(recorded.calls) and any(call['status'] != 'completed' for call in recorded.calls),
             )
             child.status = TaskStatusEnum.completed.value
             child.response_data = payload
             await child.save(update_fields=["status", "response_data"])
             return output_type.model_validate(payload)
-        except BaseException:
+        except BaseException as error:
             child.status = TaskStatusEnum.failed.value
             await child.save(update_fields=["status"])
+            from pydantic_ai.exceptions import UnexpectedModelBehavior
+            if isinstance(error, UnexpectedModelBehavior) and asset_candidates and asset_candidates.issues:
+                raise AssetExtractionValidationError(asset_candidates.issues) from error
+            if isinstance(error, UnexpectedModelBehavior) and storyboard_candidates and storyboard_candidates.pending:
+                details = '；'.join(f'{number}: {" / ".join(issues)}' for number, issues in storyboard_candidates.pending.items())
+                raise ValueError(localized_message('部分分镜修正仍未通过，已保留合格镜头与候选：{p0}', p0=details)) from error
             raise
         finally:
             try:
@@ -420,4 +525,4 @@ def _audit_messages(messages):
                 parts.append(part)
             message = replace(message, parts=parts)
         projected.append(message)
-    return json.loads(ModelMessagesTypeAdapter.dump_json(projected))
+    return json.loads(ModelMessagesTypeAdapter.dump_json(projected, fallback=str))

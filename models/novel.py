@@ -3,6 +3,8 @@ from tortoise import fields
 
 from models._base import AbstractBaseModel
 from models._project_name_index import ProjectNameIndex
+from models._lifecycle import ActiveObjects
+from tortoise.queryset import QuerySet
 
 if TYPE_CHECKING:
     from models.chapter import Chapter
@@ -15,6 +17,7 @@ class Novel(AbstractBaseModel):
     name = fields.CharField(
         max_length=255, description="小说/剧本名称"
     )
+    deleted_at = fields.DatetimeField(null=True, description="作品删除时间；保留调用与结算关联")
     author = fields.CharField(max_length=255, description="作者", blank=True, null=True)
     cover = fields.CharField(max_length=255, description="封面", blank=True, null=True)
     description = fields.TextField(description="描述", blank=True, null=True)
@@ -103,9 +106,28 @@ class Novel(AbstractBaseModel):
     assets: fields.ReverseRelation["Asset"]
 
     class Meta:
+        manager = ActiveObjects()
         table = "novels"
         table_description = "小说/剧本表"
         indexes = (ProjectNameIndex(),)
+
+    @classmethod
+    def with_deleted(cls) -> QuerySet:
+        """Internal audit/settlement access; callers must still check ownership."""
+        return QuerySet(cls)
+
+    async def save(self, using_db=None, update_fields=None, force_create=False, force_update=False):
+        if not self._saved_in_db or force_create:
+            return await super().save(using_db, update_fields, force_create, force_update)
+        from services.creation_objects import project_write
+
+        async with project_write(self.id) as connection:
+            names = list(update_fields) if update_fields is not None else [
+                name for name in self._meta.db_fields if name not in {'id', 'created_at', 'deleted_at'}
+            ]
+            if 'deleted_at' in names:
+                raise ValueError('删除状态只能通过作品删除服务修改')
+            await super().save(using_db=connection, update_fields=names, force_update=force_update)
 
     def __str__(self):
         return self.name

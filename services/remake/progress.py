@@ -37,6 +37,8 @@ class RemakeProgressService:
         for source in sources:
             task = source.analysis_task
             status = task.status if task else None
+            if task is None and source.media_status == "completed":
+                status = TaskStatusEnum.completed.value
             progress = max(0, min(100, int(task.progress or 0))) if task else 0
             if status in self._QUEUED:
                 summary["queued"] += 1

@@ -231,9 +231,40 @@ async def test_gateway_failure_is_stable_and_does_not_leak_provider_or_secret(tm
             response_schema={"type": "object"},
         )
 
-    assert str(raised.value) == "第 7 个视频片段分析失败（错误代码：REMAKE_VIDEO_ANALYSIS_FAILED）"
+    assert "第 7 个视频片段分析失败" in str(raised.value)
+    assert "provider payload" in str(raised.value)
     assert "secret-key" not in str(raised.value)
+    assert "REMAKE_VIDEO_ANALYSIS_FAILED" not in str(raised.value)
     assert len(client.endpoint.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_gateway_forwards_actual_provider_error_message(tmp_path: Path):
+    class _ProviderError(RuntimeError):
+        status_code = None
+        body = {
+            "error": {
+                "message": "视频分辨率过高，不支持 4K 视频",
+                "code": "InvalidVideoFormat",
+            }
+        }
+
+    video = tmp_path / "scene.mp4"
+    video.write_bytes(b"video")
+    client = _Client([_ProviderError()])
+    gateway = RemakeVideoAnalysisGateway(_config(), client=client, retry_delays=())
+
+    with pytest.raises(RemakeVideoAnalysisError) as raised:
+        await gateway.analyze_one(
+            index=1,
+            path=video,
+            prompt="prompt",
+            schema_name="schema",
+            response_schema={"type": "object"},
+        )
+
+    assert "第 1 个视频片段分析失败：视频分辨率过高，不支持 4K 视频" in str(raised.value)
+    assert "REMAKE_VIDEO_ANALYSIS_FAILED" not in str(raised.value)
 
 
 @pytest.mark.asyncio

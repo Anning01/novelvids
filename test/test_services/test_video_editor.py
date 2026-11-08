@@ -46,7 +46,8 @@ async def project():
     novel = await Novel.create(name='Editor project', aspect_ratio='16:9')
     chapter = await Chapter.create(novel=novel, number=1, name='First', content='Story')
     scene = await Scene.create(chapter=chapter, sequence=1, prompt='Do not rewrite', duration=2)
-    video = await Video.create(scene=scene, model_type=1, status=3, url='/media/red.mp4', metadata={'duration':2})
+    video = await Video.create(scene=scene, model_type=1, status=3, url='/media/red.mp4',
+        metadata={'duration':2, 'duration_seconds':2, 'duration_source_ref':'/media/red.mp4'})
     return novel, chapter, scene, video
 
 
@@ -437,3 +438,92 @@ def test_explicit_video_source_range_rejects_invalid_endpoints():
         EditDocument(clips=[video_clip(1, trim_in=.5, trim_out=.25)])
     with pytest.raises(ValidationError):
         EditDocument(clips=[video_clip(1, duration=1, trim_out=5)])
+
+
+@pytest.mark.asyncio
+async def test_measured_duration_keeps_tail_audio_in_initial_timeline_and_export(media):
+    import array
+    from services.video.reference_media import _probe
+    novel, chapter, scene, video = await project()
+    scene.duration = 1
+    await scene.save(update_fields=['duration'])
+    video.metadata = {'duration': 1, 'model_name': 'Keep requested duration for accounting'}
+    await video.save(update_fields=['metadata'])
+    from services.video.duration import generated_video_duration
+    await generated_video_duration(video)  # Completion/background preparation, not the page read.
+    value = await read_draft(chapter.id, AuthContext())
+    assert value['media'][0]['duration'] == pytest.approx(2, abs=.05)
+    assert value['document']['clips'][0]['duration'] == 2
+    await video.refresh_from_db()
+    assert video.metadata['duration'] == 1
+    assert video.metadata['duration_seconds'] == pytest.approx(2, abs=.05)
+    assert video.metadata['model_name'] == 'Keep requested duration for accounting'
+    document = EditDocument.model_validate({**value['document'], 'width': 320, 'height': 180})
+    saved = await save_draft(chapter.id, EditSave(revision=0, document=document), AuthContext())
+    export = await submit_export(chapter.id, saved['revision'], AuthContext())
+    await editor_export_worker.execute(export.id)
+    await export.refresh_from_db()
+    from services.video_enhancement.media import export_media
+    async with export_media.materialize(export.media_ref) as rendered:
+        assert float(_probe(rendered)['format']['duration']) == pytest.approx(2, abs=.1)
+        samples = array.array('h', ffmpeg('-ss', '1.4', '-i', rendered, '-t', '0.4', '-vn', '-ac', '1', '-f', 's16le', '-'))
+        assert samples and max(abs(sample) for sample in samples) > 500
+
+
+@pytest.mark.asyncio
+async def test_duration_probe_is_cached_but_never_overwrites_an_authored_trim(media, monkeypatch):
+    from services.video import duration as duration_service
+    _, chapter, _, video = await project()
+    video.metadata = {'duration': 1}
+    await video.save(update_fields=['metadata'])
+    calls = []
+    original = duration_service.measure_video_duration
+    def measure(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(duration_service, 'measure_video_duration', measure)
+    document = EditDocument(clips=[video_clip(video.id, duration=.5, trim_in=.5, trim_out=1)])
+    await ChapterEditDraft.create(chapter=chapter, revision=1, document=document.model_dump(mode='json'))
+    from services.video.duration import generated_video_duration
+    for _ in range(2):
+        await generated_video_duration(video)
+        value = await read_draft(chapter.id, AuthContext())
+        assert value['media'][0]['duration'] == pytest.approx(2, abs=.05)
+        assert value['document']['clips'][0]['duration'] == .5
+        assert value['document']['clips'][0]['trim_out'] == 1
+    assert len(calls) == 1
+    assert (await ChapterEditDraft.get(chapter=chapter)).revision == 1
+
+
+@pytest.mark.asyncio
+async def test_changed_video_source_invalidates_measured_duration_cache(media):
+    _, chapter, _, video = await project()
+    ffmpeg('-i', media[0], '-t', '1', '-c', 'copy', media[0].with_name('short.mp4'))
+    video.url = '/media/short.mp4'
+    await video.save(update_fields=['url'])
+    from services.video.duration import generated_video_duration
+    await generated_video_duration(video)
+    value = await read_draft(chapter.id, AuthContext())
+    assert value['media'][0]['duration'] == pytest.approx(1, abs=.1)
+    await video.refresh_from_db()
+    assert video.metadata['duration_source_ref'] == '/media/short.mp4'
+
+
+@pytest.mark.asyncio
+async def test_opening_editor_never_downloads_or_probes_uncached_legacy_videos(monkeypatch):
+    _, chapter, scene, video = await project()
+    video.metadata = {'duration': 6}
+    await video.save(update_fields=['metadata'])
+    probe = AsyncMock(side_effect=AssertionError('Page reads must not probe media'))
+    monkeypatch.setattr('services.video.duration.generated_video_duration', probe)
+    monkeypatch.setattr(editor_storage, 'materialize', probe)
+    value = await read_draft(chapter.id, AuthContext())
+    assert value['media'][0]['duration'] == 6
+    assert value['document']['clips'][0]['duration'] == 6
+    probe.assert_not_called()
+    # Preserve already measured durations without touching original media.
+    video.metadata = {'duration': 6, 'duration_seconds': 158 / 24, 'duration_source_ref': video.url}
+    await video.save(update_fields=['metadata'])
+    value = await read_draft(chapter.id, AuthContext())
+    assert value['document']['clips'][0]['duration'] == 158 / 24
+    probe.assert_not_called()

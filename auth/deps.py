@@ -162,13 +162,25 @@ async def require_team_access(
     return ctx
 
 
-async def ensure_novel_access(novel_id: int, ctx: AuthContext) -> None:
+async def ensure_novel_access(novel_id: int, ctx: AuthContext, *, include_deleted: bool = False) -> None:
     """团队访问校验（函数形式，供路由在解析 body 后手动调用）。"""
     if auth_disabled() or ctx.user is None or ctx.is_super_admin:
+        if not include_deleted and await Novel.with_deleted().filter(id=novel_id, deleted_at__not_isnull=True).exists():
+            raise HTTPException(status_code=404, detail=localized_message('项目不存在'))
         return
-    novel = await Novel.get_or_none(id=novel_id)
+    projects = Novel.with_deleted() if include_deleted else Novel.all()
+    novel = await projects.filter(id=novel_id).first()
     if novel is None or novel.team_id != ctx.team_id:
         raise HTTPException(status_code=404, detail=localized_message('项目不存在'))
+
+
+async def require_project_audit_access(
+    novel_id: int,
+    ctx: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
+    """Deleted projects retain their original team boundary for billing/audit reads."""
+    await ensure_novel_access(novel_id, ctx, include_deleted=True)
+    return ctx
 
 
 async def require_chapter_access(
@@ -247,5 +259,5 @@ async def require_task_access(
         chapter = await Chapter.get_or_none(id=params["chapter_id"])
         novel_id = chapter.novel_id if chapter else None
     if novel_id is not None:
-        await ensure_novel_access(novel_id, ctx)
+        await ensure_novel_access(novel_id, ctx, include_deleted=True)
     return ctx

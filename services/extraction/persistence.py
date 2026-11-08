@@ -6,6 +6,7 @@ from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
 
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from services.extraction.context import normalize_source_chapters
 from services.extraction.extractor import (
     AssetExtractionResult,
@@ -158,8 +159,10 @@ class AssetUpsertService:
         novel_id: int,
         chapter_number: int,
         result: AssetExtractionResult,
-    ) -> dict[str, list[dict[str, str]]]:
-        summary: dict[str, list[dict[str, str]]] = {}
+        preserve_existing: bool = False,
+        include_ids: bool = False,
+    ) -> dict[str, list[dict[str, str | int]]]:
+        summary: dict[str, list[dict[str, str | int]]] = {}
         async with in_transaction() as connection:
             for asset_type, result_key in RESULT_ASSET_MAP:
                 summary[result_key] = await self._save_assets(
@@ -168,6 +171,8 @@ class AssetUpsertService:
                     chapter_number=chapter_number,
                     asset_type=asset_type,
                     items=getattr(result, result_key),
+                    preserve_existing=preserve_existing,
+                    include_ids=include_ids,
                 )
         return summary
 
@@ -179,8 +184,10 @@ class AssetUpsertService:
         chapter_number: int,
         asset_type: AssetTypeEnum,
         items: list[ExtractedAsset],
-    ) -> list[dict[str, str]]:
-        saved: list[dict[str, str]] = []
+        preserve_existing: bool = False,
+        include_ids: bool = False,
+    ) -> list[dict[str, str | int]]:
+        saved: list[dict[str, str | int]] = []
         existing_assets = await Asset.filter(
             novel_id=novel_id,
             asset_type=asset_type.value,
@@ -205,9 +212,9 @@ class AssetUpsertService:
                     existing_metadata.get("analysis_source") == "project_analysis"
                     and bool(item.base_traits.strip())
                 )
-                incoming_is_current = (
+                needs_base_design = (
                     replaces_project_analysis
-                    or chapter_number >= existing_last_chapter
+                    or not (existing.base_traits or '').strip()
                 )
                 merged_aliases = _ordered_strings(
                     existing.aliases,
@@ -222,19 +229,15 @@ class AssetUpsertService:
                 )
 
                 existing.aliases = merged_aliases
-                if incoming_is_current and item.description.strip():
+                if needs_base_design and item.description.strip():
                     existing.description = item.description
-                if incoming_is_current and item.base_traits.strip():
+                if needs_base_design and item.base_traits.strip():
                     existing.base_traits = item.base_traits
                 if replaces_project_analysis:
                     existing_metadata.pop("analysis_source", None)
                 metadata_updates: dict[str, str] = {}
-                if asset_type == AssetTypeEnum.person:
-                    metadata_updates = {
-                        "reference_layout": item_metadata["reference_layout"]
-                    }
-                    if incoming_is_current:
-                        metadata_updates = item_metadata
+                if asset_type == AssetTypeEnum.person and needs_base_design:
+                    metadata_updates = item_metadata
                 existing.metadata = {**existing_metadata, **metadata_updates}
                 existing.source_chapters = list(source_chapters)
                 existing.last_updated_chapter = (
@@ -254,7 +257,11 @@ class AssetUpsertService:
                         "updated_at",
                     ],
                 )
-                saved.append({"name": item.name, "action": "updated"})
+                variant = await self._save_variant(existing, item, chapter_number, connection)
+                saved.append({"name": item.name,
+                    "action": "updated" if needs_base_design or variant or not preserve_existing else "preserved",
+                    **({'asset_id': existing.id} if include_ids else {}),
+                    **({'variant_id': variant.id} if variant else {})})
                 continue
 
             created = await Asset.create(
@@ -270,6 +277,30 @@ class AssetUpsertService:
                 last_updated_chapter=chapter_number,
             )
             existing_assets.append(created)
-            saved.append({"name": item.name, "action": "created"})
+            variant = await self._save_variant(created, item, chapter_number, connection)
+            saved.append({"name": item.name, "action": "created", **({'asset_id': created.id} if include_ids else {}),
+                **({'variant_id': variant.id} if variant else {})})
 
         return saved
+
+    @staticmethod
+    async def _save_variant(asset: Asset, item: ExtractedAsset, chapter_number: int,
+                            connection: BaseDBAsyncClient) -> AssetVariant | None:
+        if item.variant is None:
+            return None
+        from services.creation_objects import CreationObjects
+
+        incoming = item.variant
+        variant = await AssetVariant.filter(asset_id=asset.id, name=incoming.name).using_db(connection).first()
+        objects = CreationObjects(asset.novel_id)
+        if variant:
+            chapters = list(normalize_source_chapters([*(variant.chapter_numbers or []), chapter_number]))
+            await objects.ensure_variant_chapters(asset.id, chapters, exclude_id=variant.id)
+            variant.chapter_numbers = chapters
+            await variant.save(using_db=connection, update_fields=['chapter_numbers', 'updated_at'])
+            return variant
+        return await objects.create_variant(asset.id, {
+            'name': incoming.name, 'description': incoming.description,
+            'base_traits': incoming.base_traits, 'chapter_numbers': [chapter_number],
+            'metadata': {'change_reason': incoming.change_reason},
+        })

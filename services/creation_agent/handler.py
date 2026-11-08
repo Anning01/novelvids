@@ -53,8 +53,10 @@ async def authorize_run(params: dict) -> AuthContext:
 
 def configured_model(config, limits: AgentConfiguration):
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
-                         max_retries=0, timeout=limits.timeout_seconds)
+                         max_retries=0, timeout=None)
     extra_body = {}
+    if getattr(config, 'supports_json_output', False):
+        extra_body['response_format'] = {'type': 'json_object'}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}
     from pydantic_ai.profiles.openai import OpenAIModelProfile
@@ -88,13 +90,13 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
 
 
 class CreationAgentTaskHandler(BaseTaskHandler):
-    def timeout_seconds(self, request_params: dict) -> int:
-        return AgentConfiguration.model_validate(request_params.get("agent_configuration", {})).timeout_seconds
-
     async def execute(self, request_params: dict) -> dict:
         task_id = request_params["task_id"]
         user_message = await AgentMessage.get(task_id=task_id, role="user")
         assistant = await AgentMessage.get(task_id=task_id, role="assistant")
+        if request_params.get('operation') == 'creation_plan':
+            from services.creation_agent.plan_execution import run_confirmed_plan
+            return await run_confirmed_plan(request_params, assistant)
         conversation = await AgentConversation.get(id=assistant.conversation_id)
         request = AgentRunRequest.model_validate(public_run_input(user_message.run_input))
         limits = AgentConfiguration.model_validate(request_params["agent_configuration"])
@@ -184,6 +186,10 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             await assistant.save(update_fields=['usage'])
             await AgentMessage.filter(id=assistant.id).update(native_messages=json.loads(result.new_messages_json()))
             final_text = result.output.message if isinstance(result.output, CreationReply) else result.output
+            if request_params.get('has_creation_plan'):
+                # Preparing a plan is not a production receipt. Do not let a
+                # conversational closing sentence misreport it as completed work.
+                final_text = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
             yield TextMessageStartEvent(message_id=final_message_id)
             yield TextMessageContentEvent(message_id=final_message_id, delta=final_text)
             yield TextMessageEndEvent(message_id=final_message_id)
@@ -197,6 +203,32 @@ class CreationAgentTaskHandler(BaseTaskHandler):
         if request_params.get('skill_snapshot'):
             execution_token = current_execution.set(SkillExecution(request_params, assistant, before_request))
         try:
+            execution = current_execution.get()
+            routed_start = bool(progressive and not request.targets and request.write_scope in {'chapter', 'project'}
+                and not request.production_intents and execution and 'creation_planning' in execution.snapshot.contents)
+            if routed_start:
+                # Broad production requests must not depend on the chat model
+                # choosing submit_production instead of emitting a huge CRUD call.
+                last_event = await agent_event_log.last(assistant)
+                if last_event is None or last_event['type'] in {'RUN_ERROR', 'RUN_FINISHED'}:
+                    buffer.append({'type': 'RUN_STARTED', 'runId': task_id, 'threadId': str(conversation.id)})
+                    await flush()
+                from services.creation_agent.plans import CreationPlanner
+                from pydantic_ai.exceptions import UnexpectedModelBehavior
+                try:
+                    plan = await CreationPlanner(execution, user_message).prepare(request)
+                except UnexpectedModelBehavior:
+                    raise ValueError(localized_message('助手未能完成内部内容校验，已保留已完成步骤，可继续本次任务。')) from None
+                if plan is not None:
+                    content = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
+                    buffer.extend([
+                        {'type': 'TEXT_MESSAGE_START', 'messageId': final_message_id, 'role': 'assistant'},
+                        {'type': 'TEXT_MESSAGE_CONTENT', 'messageId': final_message_id, 'delta': content},
+                        {'type': 'TEXT_MESSAGE_END', 'messageId': final_message_id},
+                        {'type': 'RUN_FINISHED', 'runId': task_id, 'threadId': str(conversation.id)},
+                    ])
+                    await flush()
+                    return {'conversation_id': conversation.id, 'change_ids': [], 'plan_prepared': True}
             history = await prepare_history(conversation, assistant, limits, recorded_model)
             context['conversation_summary'] = conversation.summary
             async for event in stream_creation_agent(
@@ -209,6 +241,8 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             ):
                 item = event.model_dump(mode="json", by_alias=True, exclude_none=True)
                 kind = item["type"]
+                if routed_start and kind == 'RUN_STARTED':
+                    continue
                 item["timestamp"] = int(time.time() * 1000)
                 if kind.startswith('TEXT_MESSAGE') and item.get('messageId') != final_message_id:
                     # Some models put planning/retries in ordinary content.

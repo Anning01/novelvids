@@ -208,7 +208,17 @@ async def _sync_character_assets(
                 **values,
             )
         else:
-            asset.update_from_dict(values)
+            from services.extraction.context import normalize_source_chapters
+
+            metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
+            if metadata.get('analysis_source') == 'project_analysis' or not (asset.base_traits or '').strip():
+                values['metadata'] = {**metadata, **values['metadata']}
+                asset.update_from_dict(values)
+            else:
+                asset.aliases = list(dict.fromkeys([*(asset.aliases or []), *character.aliases]))
+                asset.source_chapters = list(normalize_source_chapters([
+                    *normalize_source_chapters(asset.source_chapters), *chapter_numbers]))
+                asset.metadata = {**metadata, 'role': character.role}
             await asset.save()
 
 
@@ -328,6 +338,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                     api_protocol=image_config.api_protocol, resolution=cover_selection.provider_size,
                     aspect_ratio=cover_selection.aspect_ratio, output_format=cover_selection.output_format,
                     quality=cover_selection.provider_quality, count=1,
+                    **({'timeout': None} if execution else {}),
                 )
                 # Preserve actual provider usage even if saving a returned image subsequently fails.
                 result.update(image_usage={"image_count": len(images), "clarity": cover_selection.clarity},

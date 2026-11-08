@@ -138,6 +138,11 @@ class ProductionRecovery:
                     for key, value in self.running.items()
                     if not value.done()
                 }
+                for waiting in await AiTask.filter(status=2, stage='waiting_dependencies'):
+                    operations = await AgentOperation.filter(task=waiting, key__startswith='submit:', state='completed')
+                    ids = [row.result['task_id'] for row in operations if row.result.get('task_id')]
+                    if not await AiTask.filter(id__in=ids, status__in=[1, 2, 6]).exists():
+                        await AiTask.filter(id=waiting.id, status=2, stage='waiting_dependencies').update(status=6, stage='resuming')
                 from services.creation_agent.sessions import agent_configuration
 
                 capacity = (await agent_configuration()).production_concurrency

@@ -37,6 +37,8 @@ async def test_postgres_capability_migration_is_additive_and_idempotent(monkeypa
     assert 'ADD COLUMN IF NOT EXISTS supports_tool_calls' in statement
     assert 'DEFAULT FALSE' in statement
     assert 'DROP' not in statement
+    assert any('ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ' in call.args[0]
+               for call in connection.execute_script.await_args_list)
     assert all('ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ' in call.args[0]
                for call in connection.execute_script.await_args_list[1:])
 
@@ -79,3 +81,24 @@ async def test_legacy_conversation_migration_is_repeatable_and_preserves_deleted
     await ensure_creation_agent_schema()
     await Tortoise.generate_schemas(safe=True)
     assert (await AgentConversation.get(id=conversation.id)).deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_legacy_project_deletion_column_preserves_data_and_repeated_startup(monkeypatch):
+    from tortoise import Tortoise
+    from models.novel import Novel
+    from controllers.novel import novel_controller
+
+    project = await Novel.create(name='旧项目删除兼容', content='保留旧正文')
+    connection = Tortoise.get_connection('default')
+    monkeypatch.setattr('services.schema_compat.settings.DATABASE_URL', 'sqlite://:memory:')
+    await connection.execute_script('ALTER TABLE novels DROP COLUMN deleted_at;')
+    await ensure_creation_agent_schema()
+    await ensure_creation_agent_schema()
+    restored = await Novel.get(id=project.id)
+    assert restored.content == '保留旧正文' and restored.deleted_at is None
+    await novel_controller.remove(project.id)
+    await ensure_creation_agent_schema()
+    await Tortoise.generate_schemas(safe=True)
+    assert not await Novel.filter(id=project.id).exists()
+    assert (await Novel.with_deleted().get(id=project.id)).deleted_at is not None

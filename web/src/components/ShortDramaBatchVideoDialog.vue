@@ -230,7 +230,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               @click="returnLastFrame = !returnLastFrame"
             >
               <Link2 :size="16" />
-              <span><strong>{{ tr('尾帧连续生成') }}</strong><small>{{ returnLastFrame ? tr('按分镜顺序逐个执行，完成后自动衔接下一镜头') : tr('开启后无需值守，上一镜头尾帧会注入下一镜头') }}</small></span>
+              <span><strong>{{ tr('尾帧连续生成') }}</strong><small>{{ returnLastFrame ? tr('按分镜顺序逐个执行，失败或尾帧未就绪时停止') : tr('开启后无需值守，上一镜头尾帧会注入下一镜头') }}</small></span>
               <i><Check v-if="returnLastFrame" :size="13" /></i>
             </button>
             <AutoEnhancementPicker class="batch-video-auto-enhancement" v-model="autoEnhancement" :models="enhancementModels || []" :duration="scenes.filter(scene => selectedIds.includes(scene.id)).reduce((sum, scene) => sum + scene.duration, 0)" :source-resolution="selectedResolution" />

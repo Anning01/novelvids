@@ -24,7 +24,20 @@
 </p>
 
 <p align="center">
-  <a href="#先看效果">看成品</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+  <a href="#加入交流群">加入交流群</a> · <a href="#先看效果">看成品</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+</p>
+
+## 加入交流群
+
+欢迎加入 **猫影短剧 · NovelVids 微信交流群**，交流 AI 漫剧、短剧制作、模型使用与开源部署。
+
+<p align="center">
+  <a href="docs/images/wechat-group-qr.jpg"><img src="docs/images/wechat-group-qr.jpg" width="320" alt="猫影短剧 NovelVids 微信交流群二维码，2026 年 11 月 15 日前有效"></a>
+</p>
+
+<p align="center">
+  微信扫码入群 · <strong>当前二维码于 2026 年 11 月 8 日更新，11 月 15 日前有效。</strong><br>
+  二维码有效期为 7 天；如已失效，请查看仓库首页的最新版本。
 </p>
 
 ## 在线创作

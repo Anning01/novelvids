@@ -3,7 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from prompts.remake import ASSET_SCHEMA, PROMPT_SCHEMA, render_remake_prompt
+from prompts.remake import ASSET_SCHEMA, render_remake_prompt
+from schemas.agent_workflow import RemakeShot
+from test.remake_fixtures import remake_shot, design_fields, synthetic_snapshot
 from services.remake.pipeline import RemakeDecompositionPipeline, RemakePipelineError
 
 
@@ -30,7 +32,7 @@ class _Gateway:
     async def analyze_one(self, **kwargs):
         self.one_calls.append(kwargs)
         return {
-            "characters": [{"name": "将军", "label": "人物", "description": "黑甲"}],
+            "characters": [{"name": "将军", "label": "人物", "description": "黑甲", "visual_fields": design_fields()}],
             "scenes": [],
             "objects": [],
         }
@@ -41,25 +43,14 @@ class _Gateway:
         if on_completed is not None:
             for completed in range(1, len(paths) + 1):
                 await on_completed(completed, len(paths))
-        return [
-            {
-                "shot_index": index,
-                "file": path.name,
-                "asset_refs": [
-                    {"asset_id": "character-001", "asset_name": "将军", "asset_type": "character"}
-                ],
-                "style": {"visual_style": "写实", "cinematography": "24fps", "color_tone": "暖色"},
-                "global_conditions": {"time_weather": "夜", "environment_light": "烛光", "spatial_relationships": "将军居中"},
-                "audio": {"has_bgm": False, "bgm_description": ""},
-                "shots": [
-                    {"order": 1, "start_seconds": 0, "end_seconds": 4.2, "title": "近景", "camera": "固定", "description": "将军抬眼", "environment_sound": "风声", "dialogues": []}
-                ],
-                "transition": "硬切",
-                "effects": {"forbidden": "禁止变形", "allowed": "自然景深"},
-                "confidence": 0.9,
-            }
-            for index, path in enumerate(paths, start=1)
-        ]
+        return [remake_shot(index, 4.2) for index, path in enumerate(paths, start=1)]
+
+
+@pytest.fixture(autouse=True)
+def configured_asset_contract(monkeypatch):
+    snapshot = synthetic_snapshot()
+    monkeypatch.setattr('services.remake.pipeline.snapshot_skills', lambda: snapshot.model_dump())
+
 
 
 @pytest.mark.asyncio
@@ -102,10 +93,11 @@ async def test_pipeline_calls_global_assets_once_then_one_prompt_per_scene_in_or
     assert len(gateway.many_calls) == 1
     assert gateway.many_calls[0][0] == scenes
     assert gateway.many_calls[0][1]["prompt"] == render_remake_prompt("shots", "zh")
-    assert gateway.many_calls[0][1]["response_schema"] == PROMPT_SCHEMA
+    assert gateway.many_calls[0][1]["response_schema"] == RemakeShot.model_json_schema()
     catalog = gateway.many_calls[0][1]["context_builder"](1)
-    assert "character-001" in catalog
-    assert "三视图" not in catalog
+    assert catalog["assets"][0]["id"] == "character-001"
+    assert catalog["duration_seconds"] == 4.2
+    assert "三视图" not in str(catalog)
     assert [item["file"] for item in result.prompt_document["prompts"]] == [
         "scene-001.mp4",
         "scene-002.mp4",

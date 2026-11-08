@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator, field_valida
 from pydantic.json_schema import SkipJsonSchema
 
 from schemas.scene import ScenePromptSegment
+from schemas.creation_plan import PlanConfirmation
 
 
 LEGACY_AGENT_DEFAULTS = {
@@ -38,22 +39,34 @@ class AgentConfiguration(BaseModel):
     # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
     # 128K output. The assistant keeps the default output below that maximum,
     # while leaving enough room for tool schemas and provider-side reasoning.
-    request_limit: int = Field(20, ge=1, le=30)
-    tool_calls_limit: int = Field(50, ge=1, le=100)
+    request_limit: int | None = Field(None, ge=1, le=30)
+    tool_calls_limit: int | None = Field(None, ge=1, le=100)
     max_targets: int = Field(32, ge=1, le=100)
-    timeout_seconds: int = Field(600, ge=10, le=900)
+    # Read old stored/client configurations without retaining an agent deadline.
+    timeout_seconds: int | None = Field(None, ge=10, le=900)
     max_context_characters: int | None = Field(None, ge=2000)
     working_input_tokens: int = Field(840_000, ge=1000, le=900_000)
     compaction_trigger_ratio: float = Field(0.70, gt=0.1, lt=1)
     compaction_target_ratio: float = Field(0.45, gt=0, lt=1)
     summary_output_tokens: int = Field(4000, ge=128, le=8000)
-    summary_timeout_seconds: int = Field(30, ge=1, le=60)
+    summary_timeout_seconds: int | None = Field(None, ge=1, le=60)
     # Keep tool reads deliberately small even when the model has a large
     # context window; the agent can page forward when the next section matters.
     context_page_characters: int = Field(4000, ge=500, le=64000)
     history_runs: int = Field(12, ge=1, le=100)
     max_output_tokens: int = Field(64000, ge=256, le=384000)
-    total_tokens_limit: int = Field(2_000_000, ge=1000, le=10_000_000)
+    total_tokens_limit: int | None = Field(None, ge=1000, le=10_000_000)
+
+    @field_validator('timeout_seconds', 'summary_timeout_seconds')
+    @classmethod
+    def retire_run_timeout(cls, value):
+        return None
+
+    @field_validator('request_limit', 'tool_calls_limit', 'total_tokens_limit')
+    @classmethod
+    def retire_cumulative_caps(cls, value):
+        # Accept historical snapshots without re-enabling retired run-wide caps.
+        return None
 
     def context_character_limit(self, model_limit: int | None) -> int | None:
         return min((limit for limit in (self.max_context_characters, model_limit) if limit is not None), default=None)
@@ -95,6 +108,7 @@ class PromptTargetStatusOut(AgentTarget):
 
 
 class AgentRunRequest(BaseModel):
+    plan_confirmation: PlanConfirmation | None = None
     production_intents: list["ProductionIntent"] = Field(default_factory=list, max_length=100)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

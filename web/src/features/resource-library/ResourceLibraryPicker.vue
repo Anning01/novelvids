@@ -33,7 +33,8 @@ async function choose(rows: CatalogResource[]) {
 }
 </script>
 <template>
-  <ElDialog class="resource-library-dialog" :model-value="open" :title="tr(kind === 'image' ? '从资源库选择图片' : '从资源库选择视频')" width="min(1120px, 96vw)" append-to-body destroy-on-close @close="emit('close')">
+  <ElDialog class="resource-library-dialog resource-library-dialog--picker" :model-value="open" :title="tr(kind === 'image' ? '从资源库选择图片' : '从资源库选择视频')" width="min(1120px, 96vw)" align-center append-to-body destroy-on-close @close="emit('close')">
+    <p class="resource-picker-hint">{{ tr('选择素材作为参考，已选资源会添加到当前分镜。') }}</p>
     <p v-if="error" role="alert" class="picker-error">{{ error }}</p>
     <p v-if="busy" role="status">{{ tr('正在校验模型限制…') }}</p>
     <ResourceCatalogBrowser v-if="open" pick :kind="allowImages ? undefined : kind || 'video'" :allowed-kinds="allowImages ? ['video','image'] : undefined" :max-selection="selectionLimit" @change-kind="value => { if (value === 'image' || value === 'video') selectedKind = value }" @choose="choose" />

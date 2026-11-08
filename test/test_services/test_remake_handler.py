@@ -90,7 +90,7 @@ async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_bil
     novel, chapter, source, task = await _records(tmp_path)
     source_path = tmp_path / "source.mp4"
     source_path.write_bytes(b"video")
-    config = SimpleNamespace(id=12, name="理解模型", model="vision-model")
+    config = SimpleNamespace(id=12, name="理解模型", model="vision-model", supports_tool_calls=False)
     result = RemakePipelineResult(
         assets={"characters": [], "scenes": [], "objects": []},
         prompt_document={"prompts": []},
@@ -238,3 +238,48 @@ async def test_handler_preserves_safe_video_analysis_failure_category(tmp_path: 
 
     assert raised.value.error_code == "REMAKE_ANALYSIS_REQUEST_INVALID"
     assert "当前模型能力不兼容" in str(raised.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supports_tools,supports_json", [(False,False),(True,False),(False,True)])
+async def test_handler_checks_agent_model_capabilities_before_processing_media(tmp_path, supports_tools, supports_json):
+    from services.creation_agent.skill_execution import current_execution
+
+    novel, chapter, source, task = await _records(tmp_path)
+    materializer = _Materializer(tmp_path / "source.mp4")
+    pipeline = _Pipeline(error=RemakeVideoAnalysisError(
+        "无法连接视频分析服务", error_code="REMAKE_ANALYSIS_CONNECTION_FAILED",
+    ))
+
+    async def resolve(*_args, **_kwargs):
+        return SimpleNamespace(id=12, model="vision-model", supports_tool_calls=supports_tools, supports_json_output=supports_json)
+
+    handler = RemakeDecompositionTaskHandler(
+        model_resolver=resolve,
+        materializer=materializer,
+        pipeline=pipeline,
+        persistence=_Persistence(),
+    )
+    token = current_execution.set(SimpleNamespace(params={"task_id": str(task.id)}))
+    try:
+        with pytest.raises(RemakeDecompositionError) as raised:
+            await handler.execute({
+                "ai_task_id": str(task.id),
+                "novel_id": novel.id,
+                "chapter_id": chapter.id,
+                "remake_source_id": source.id,
+                "team_id": None,
+            })
+    finally:
+        current_execution.reset(token)
+
+    if supports_tools or supports_json:
+        assert raised.value.error_code == "REMAKE_ANALYSIS_CONNECTION_FAILED"
+        assert len(materializer.calls) == len(pipeline.calls) == 1
+    else:
+        assert raised.value.error_code == "REMAKE_ANALYSIS_MODEL_TOOLS_REQUIRED"
+        assert "多轮工具调用" in str(raised.value)
+        assert not materializer.calls
+        assert not pipeline.calls
+    await source.refresh_from_db()
+    assert source.media_status == "failed"

@@ -14,7 +14,7 @@ import { exportApi } from '@/features/video-export/api'
 vi.mock('@/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/api')>()
   return { ...original, api: { ...original.api, novelMeta: vi.fn(), chapters: vi.fn(),
-    videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(),
+    videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(), generateVideoBatch: vi.fn(), latestVideoBatch: vi.fn(), task: vi.fn(),
     extractVideoLastFrame: vi.fn(), videoGenerationHistory: vi.fn(), scene: vi.fn(), updateScene: vi.fn(), applyVideoDefaults: vi.fn() } }
 })
 
@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.mocked(api.chapters).mockResolvedValue({ data: { items: [chapter], pagination: { page: 1, pages: 1 } } } as never)
   vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [] } as never)
   vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [structuredClone(scene)], assets: [], videos: { 109: [pending] } } } as never)
+  vi.mocked(api.latestVideoBatch).mockResolvedValue({ data: null } as never)
   vi.mocked(api.updateScene).mockReset()
   vi.mocked(api.scene).mockReset()
   vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [] })
@@ -65,6 +66,35 @@ async function render() {
   wrappers.push(wrapper); await flushPromises()
   return { wrapper, router }
 }
+
+it('hands every selected scene to one persistent batch without submitting videos from the browser', async () => {
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
+  const shots = Array.from({ length: 5 }, (_, i) => ({ ...scene, id: 109 + i, sequence: i + 1, metadata: {} }))
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: shots, assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...shots.find(shot => shot.id === id), ...update } }) as never)
+  vi.mocked(api.generateVideoBatch).mockResolvedValue({ data: { id: 'batch-1', status: 6 } } as never)
+  vi.mocked(api.task).mockResolvedValue({ data: { id: 'batch-1', status: 3 } } as never)
+  const { wrapper } = await render()
+  wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
+    sceneIds: shots.map(shot => shot.id), modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
+  })
+  await flushPromises()
+  expect(api.generateVideoBatch).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].map(item => item.scene_id)).toEqual([109, 110, 111, 112, 113])
+  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].every(item => item.return_last_frame)).toBe(true)
+  expect(api.generateVideo).not.toHaveBeenCalled()
+})
+
+it.each(['light', 'dark'])('restores an existing batch after opening the page in %s without resubmitting', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.latestVideoBatch).mockResolvedValue({ data: { id: 'existing-batch', status: 2 } } as never)
+  vi.mocked(api.task).mockResolvedValue({ data: { id: 'existing-batch', status: 2 } } as never)
+  const { wrapper } = await render()
+  expect(api.task).toHaveBeenCalledWith('existing-batch', expect.any(AbortSignal))
+  expect(wrapper.text()).toContain('批量生成中')
+  expect(api.generateVideo).not.toHaveBeenCalled()
+  expect(api.generateVideoBatch).not.toHaveBeenCalled()
+})
 
 it('inherits project defaults for fresh chapters while respecting explicitly saved shot overrides', async () => {
   const defaults = { model_config_id: 11, resolution: '480p', aspect_ratio: '16:9', return_last_frame: true,
@@ -302,4 +332,15 @@ it.each([401, 403, 404])('does not endlessly retry an unavailable or inaccessibl
   await vi.advanceTimersByTimeAsync(60000)
   expect(api.queryVideo).toHaveBeenCalledTimes(1)
   expect(api.generateVideo).not.toHaveBeenCalled()
+})
+
+it('retains the server submission time when polling returns only video status', async () => {
+  vi.setSystemTime(new Date('2026-11-07T12:12:31Z'))
+  const persisted = { ...pending, created_at: '2026-11-07T12:00:00Z' }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [scene], assets: [], videos: { 109: [persisted] } } } as never)
+  vi.mocked(api.queryVideo).mockResolvedValue({ data: { id: 37, scene_id: 109, status: 2, metadata: {} } } as never)
+  const { wrapper } = await render()
+  expect(wrapper.get('.video-generation-progress time').text()).toBe('12 分 31 秒')
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(wrapper.get('.video-generation-progress time').text()).toBe('12 分 33 秒')
 })

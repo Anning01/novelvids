@@ -722,6 +722,43 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         ])
         return asset
 
+    async def reference_batch(self, payload, *, team_id=None, user_id=None):
+        from uuid import uuid4, uuid5
+        from schemas.asset import AssetPatch
+        from services.creation_agent.submissions import submission, previous_submission
+
+        envelope = submission.get() or {}
+        batch_id = UUID(envelope['submission_id']) if envelope else uuid4()
+        tasks, skipped = [], []
+        identifiers = list(dict.fromkeys(payload.asset_ids))
+        # Commit the complete queue together; disconnects never discard an
+        # unsubmitted tail, and admission errors leave no partial paid batch.
+        async with creation_write(payload.novel_id) as connection:
+            assets = {asset.id: asset for asset in await Asset.filter(novel_id=payload.novel_id, id__in=identifiers)}
+            if len(assets) != len(identifiers):
+                raise HTTPException(404, localized_message('当前项目内不存在该目标'))
+            active = {item['asset_id'] for item in await self.active_generations(payload.novel_id)}
+            for identifier in identifiers:
+                token = submission.set({**envelope, 'submission_id': str(uuid5(batch_id, f'asset:{identifier}')),
+                    'submission_hash': envelope.get('submission_hash', str(batch_id))})
+                try:
+                    previous = await previous_submission(2, {'team_id': team_id, 'user_id': user_id}, connection)
+                    if previous:
+                        tasks.append(previous)
+                        continue
+                    asset = assets[identifier]
+                    if asset.main_image or identifier in active:
+                        skipped.append(identifier)
+                        continue
+                    await self.patch(identifier, AssetPatch(metadata={**(asset.metadata or {}),
+                        'model_config_id': payload.model_config_id, 'clarity': payload.clarity,
+                        'resolution': payload.clarity, 'aspect_ratio': payload.aspect_ratio,
+                        'output_format': payload.output_format, 'generation_count': 1}))
+                    tasks.append(await self.reference(identifier, team_id=team_id, user_id=user_id))
+                finally:
+                    submission.reset(token)
+        return {'tasks': tasks, 'skipped_asset_ids': skipped}
+
     async def reference(
         self,
         asset_id: int,
