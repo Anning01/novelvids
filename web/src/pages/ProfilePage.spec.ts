@@ -29,6 +29,55 @@ describe('ProfilePage 用户中心', () => {
     vi.restoreAllMocks()
   })
 
+  it.each(['light', 'dark'])('保存昵称并同步用户资料，失败后可以重试（%s）', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    const user = { id:1, username:'qiling-profile',nickname:'微信用户',avatar_url:'',is_super_admin:false }
+    auth.$patch({enabled:true,token:'t',provider:'qiling',user})
+    vi.spyOn(api,'me').mockResolvedValue({data:{user,memberships:[]}} as never)
+    const update = vi.spyOn(api,'updateProfile').mockRejectedValueOnce(new Error('保存失败')).mockResolvedValue({data:{...user,nickname:'新的昵称'}} as never)
+    const wrapper = mountPage(pinia)
+    expect(wrapper.get('[aria-label="修改昵称"]').attributes('disabled')).toBeDefined()
+    await flushPromises()
+    await wrapper.get('[aria-label="修改昵称"]').trigger('click')
+    await wrapper.get('input[aria-label="昵称"]').setValue('  新的昵称  ')
+    await wrapper.get('form.profile-nickname-form').trigger('submit')
+    await flushPromises()
+    expect(auth.user?.nickname).toBe('微信用户')
+    expect(wrapper.find('form.profile-nickname-form').exists()).toBe(true)
+    await wrapper.get('form.profile-nickname-form').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenLastCalledWith('新的昵称')
+    expect(auth.user?.nickname).toBe('新的昵称')
+    expect(wrapper.get('h1').text()).toBe('新的昵称')
+    expect(wrapper.find('form.profile-nickname-form').exists()).toBe(false)
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
+
+  it('头像上传后同步显示，失败时保留原头像', async () => {
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    const user = {id:1,username:'qiling-avatar',nickname:'小新',avatar_url:'/media/old.png',is_super_admin:false}
+    auth.$patch({enabled:true,token:'t',provider:'qiling',user})
+    vi.spyOn(api,'me').mockResolvedValue({data:{user,memberships:[]}} as never)
+    const upload = vi.spyOn(api,'uploadAvatar').mockRejectedValueOnce(new Error('上传失败')).mockResolvedValue({data:{...user,avatar_url:'https://media.example/new.png'}} as never)
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+    const input = wrapper.get('input[aria-label="选择头像图片"]')
+    const file = new File(['image'],'avatar.png',{type:'image/png'})
+    Object.defineProperty(input.element,'files',{configurable:true,value:[file]})
+    await input.trigger('change')
+    await flushPromises()
+    expect(auth.user?.avatar_url).toBe('/media/old.png')
+    await input.trigger('change')
+    await flushPromises()
+    expect(upload).toHaveBeenLastCalledWith(file)
+    expect(wrapper.get('.profile-avatar img').attributes('src')).toBe('https://media.example/new.png')
+    wrapper.unmount()
+  })
+
   it('展示昵称、历史花费、注册时间与团队信息', async () => {
     vi.spyOn(api, 'me').mockResolvedValue({
       data: {

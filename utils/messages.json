@@ -767,5 +767,8 @@
   "资源已删除或不可用，请重新选择": "Resource deleted or unavailable. Please choose again.",
   "参考图片数量超过当前模型限制": "The number of reference images exceeds the model limit",
   "名称不能为空": "The name cannot be empty",
-  "此素材正在存入资源库或等待清理，请稍后刷新": "This resource is being published or awaiting cleanup. Please refresh later."
+  "此素材正在存入资源库或等待清理，请稍后刷新": "This resource is being published or awaiting cleanup. Please refresh later.",
+  "头像图片不能为空且不能超过 5MB": "Choose an avatar image no larger than 5 MB.",
+  "头像仅支持 JPG、PNG 或 WebP 图片": "Avatar images must be JPG, PNG or WebP.",
+  "头像图片宽高需在 1–6000 像素之间": "Avatar dimensions must be between 1 and 6000 pixels."
 }

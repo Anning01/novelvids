@@ -6,7 +6,8 @@ import { ElConfigProvider } from 'element-plus'
 import { elementLocale } from '@/i18n'
 import { BarChart3, Building2, Clapperboard, Film, FolderKanban, Images, Receipt, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { mediaUrl } from '@/api'
 import { notice } from '@/shared/notice'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import AppNotice from '@/components/AppNotice.vue'
@@ -58,7 +59,10 @@ const adminItems = computed(() => {
   return items
 })
 const userLabel = computed(() => auth.user?.nickname || auth.user?.username || '')
-const avatarText = computed(() => userLabel.value.slice(0, 1).toUpperCase())
+const avatarText = computed(() => Array.from(userLabel.value)[0]?.toUpperCase() || '?')
+const userAvatarUrl = computed(() => mediaUrl(auth.user?.avatar_url))
+const userAvatarFailed = ref(false)
+watch(userAvatarUrl, () => { userAvatarFailed.value = false })
 const teamOptions = computed(() => [
   ...(auth.isSuperAdmin ? [{ value: '', label: tr('平台管理') }] : []),
   ...auth.activeMemberships.map(item => ({ value: String(item.team_id), label: item.team_name })),
@@ -145,7 +149,7 @@ function handleTeamSwitch(teamId: string) {
         :class="{ 'is-active': route.path === '/profile' }"
         :title="tr('用户中心：{p0}', { p0: userLabel })"
       >
-        <span class="app-user-avatar">{{ avatarText }}</span>
+        <span class="app-user-avatar"><img v-if="userAvatarUrl && !userAvatarFailed" :src="userAvatarUrl" alt="" @error="userAvatarFailed = true" /><span v-else>{{ avatarText }}</span></span>
         <span class="app-user-copy">
           <span class="app-user-name">{{ userLabel }}</span>
           <small v-if="walletLabel" class="app-user-wallet">{{ walletLabel }}</small>
@@ -162,6 +166,7 @@ function handleTeamSwitch(teamId: string) {
 </template>
 
 <style scoped>
+.app-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .app-team-selector {
   display: block;
   margin: 0 10px 10px;

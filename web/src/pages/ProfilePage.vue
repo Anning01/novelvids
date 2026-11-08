@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   ArrowRight,
   Building2,
@@ -9,6 +9,8 @@ import {
   FileText,
   FolderOpen,
   LoaderCircle,
+  Camera,
+  Pencil,
   LogOut,
   QrCode,
   Settings,
@@ -33,6 +35,51 @@ const signingOut = ref(false)
 const loading = ref(true)
 const loadError = ref(false)
 const avatarFailed = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
+const uploadingAvatar = ref(false)
+const editingNickname = ref(false)
+const nicknameDraft = ref('')
+const nicknameInput = ref<HTMLInputElement | null>(null)
+const savingNickname = ref(false)
+
+async function editNickname() {
+  nicknameDraft.value = auth.user?.nickname || ''
+  editingNickname.value = true
+  await nextTick()
+  nicknameInput.value?.focus()
+  nicknameInput.value?.select()
+}
+
+async function saveNickname() {
+  const nickname = nicknameDraft.value.trim()
+  if (!nickname || savingNickname.value) return
+  savingNickname.value = true
+  try {
+    auth.user = (await api.updateProfile(nickname)).data
+    editingNickname.value = false
+    notice.success(tr('昵称已更新'))
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : tr('昵称保存失败'))
+  } finally {
+    savingNickname.value = false
+  }
+}
+
+async function changeAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || uploadingAvatar.value) return
+  uploadingAvatar.value = true
+  try {
+    auth.user = (await api.uploadAvatar(file)).data
+    notice.success(tr('头像已更新'))
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : tr('头像上传失败'))
+  } finally {
+    uploadingAvatar.value = false
+  }
+}
 
 // 充值弹窗状态
 const showTopUpModal = ref(false)
@@ -273,16 +320,28 @@ onMounted(load)
   <main class="profile-page">
     <!-- 身份栏：头像、昵称、账号状态和注册日期左对齐，去掉右侧重复的「当前工作范围」。器灵账号继续隐藏系统生成的用户名 -->
     <header class="profile-header">
-      <div class="profile-avatar" aria-hidden="true">
-        <img v-if="avatarUrl && !avatarFailed" :src="avatarUrl" alt="" @error="avatarFailed = true" />
-        <span v-else>{{ avatarText }}</span>
+      <div class="profile-avatar-editor">
+        <div class="profile-avatar" aria-hidden="true">
+          <img v-if="avatarUrl && !avatarFailed" :src="avatarUrl" alt="" @error="avatarFailed = true" />
+          <span v-else>{{ avatarText }}</span>
+        </div>
+        <button v-if="auth.user" type="button" class="profile-avatar-change" :disabled="loading || loadError || uploadingAvatar" :aria-label="tr('更换头像')" :title="tr('更换头像：JPG、PNG、WebP，最大 5MB')" @click="avatarInput?.click()">
+          <LoaderCircle v-if="uploadingAvatar" :size="13" class="is-spinning" /><Camera v-else :size="13" />
+        </button>
+        <input ref="avatarInput" class="profile-avatar-input" type="file" accept="image/jpeg,image/png,image/webp" :aria-label="tr('选择头像图片')" :disabled="uploadingAvatar" @change="changeAvatar" />
       </div>
       <div class="profile-identity">
         <p class="profile-caption">{{ tr('个人中心') }}</p>
         <div class="profile-name-line">
           <h1>{{ displayName }}</h1>
           <span v-if="auth.isSuperAdmin" class="profile-badge">{{ tr('超级管理员') }}</span>
+          <AppButton v-if="auth.user && !editingNickname" type="button" variant="ghost" size="sm" icon-only :aria-label="tr('修改昵称')" :disabled="loading || loadError" @click="editNickname"><Pencil :size="14" /></AppButton>
         </div>
+        <form v-if="editingNickname" class="profile-nickname-form" @submit.prevent="saveNickname">
+          <input ref="nicknameInput" v-model="nicknameDraft" :aria-label="tr('昵称')" autocomplete="nickname" maxlength="100" required :disabled="savingNickname" />
+          <AppButton type="submit" size="sm" :disabled="!nicknameDraft.trim() || savingNickname" :loading="savingNickname">{{ tr('保存') }}</AppButton>
+          <AppButton type="button" variant="ghost" size="sm" :disabled="savingNickname" @click="editingNickname = false">{{ tr('取消') }}</AppButton>
+        </form>
         <div class="profile-meta">
           <span v-if="showUsername && auth.user?.username">@{{ auth.user.username }}</span>
           <span v-if="auth.provider === 'qiling'">{{ auth.qilingBound ? tr('器灵账号已绑定') : tr('器灵账号待绑定') }}</span>
@@ -328,7 +387,7 @@ onMounted(load)
                   {{ tr('成员管理') }}
                 </RouterLink>
                 <!-- 配置仅超级管理员可见 -->
-                <RouterLink v-if="auth.isSuperAdmin" class="profile-link" to="/settings">
+                <RouterLink v-if="auth.canAccessSettings" class="profile-link" to="/settings">
                   <Settings :size="15" aria-hidden="true" />
                   {{ tr('模型配置') }}
                 </RouterLink>
@@ -724,6 +783,19 @@ onMounted(load)
   font-size: 22px;
   font-weight: 700;
 }
+
+.profile-avatar-editor { position: relative; flex: 0 0 54px; }
+.profile-avatar-change { position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 2px solid var(--app-surface); border-radius: 50%; color: var(--app-surface); background: var(--app-accent); cursor: pointer; }
+.profile-avatar-change:hover:not(:disabled) { filter: brightness(1.1); }
+.profile-avatar-change:focus-visible, .profile-nickname-form input:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+.profile-avatar-change:disabled { opacity: .55; cursor: not-allowed; }
+.profile-avatar-change .is-spinning { animation: avatar-spin 1s linear infinite; }
+@keyframes avatar-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .profile-avatar-change .is-spinning { animation: none; } }
+.profile-avatar-input { display: none; }
+.profile-nickname-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.profile-nickname-form input { width: min(220px, 100%); min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); color: var(--app-text); font: inherit; }
+.profile-nickname-form input:disabled { opacity: .6; }
 
 .profile-avatar img {
   width: 100%;

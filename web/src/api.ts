@@ -254,6 +254,12 @@ export const api = {
   qilingStart: (bind: boolean) => request<SingleResponse<import('./types').QilingAttempt>>(`/auth/qiling/${bind ? 'bind/' : ''}start`, { method: 'POST' }),
   qilingPoll: (bind: boolean, attempt: string, signal: AbortSignal) => request<SingleResponse<import('./types').QilingPoll>>(`/auth/qiling/${bind ? 'bind/' : ''}poll`, { method: 'POST', body: JSON.stringify({ attempt }), signal }),
   me: () => request<SingleResponse<AuthMe>>('/auth/me'),
+  updateProfile: (nickname: string) => request<SingleResponse<AuthMe['user']>>('/auth/profile', { method: 'PATCH', body: JSON.stringify({ nickname }) }),
+  uploadAvatar: (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<SingleResponse<AuthMe['user']>>('/auth/avatar', { method: 'POST', body })
+  },
   logout: () => request<SingleResponse<null>>('/auth/logout', { method: 'POST' }),
   teamBalance: (teamId?: number) => request<SingleResponse<{ team_id: number; balance: number }>>(`/team/balance${qs({ team_id: teamId })}`),
   teamTopUp: (data: { team_id: number; amount: number; note?: string }) => request<SingleResponse<{ team_id: number; balance: number }>>('/team/balance/topup', { method: 'POST', body: JSON.stringify(data) }),

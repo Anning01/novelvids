@@ -4,13 +4,13 @@
 其余路由仅在 AUTH_ENABLED=true 时由 main.py 注册。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from auth import qiling
 from auth.deps import extract_bearer_token, get_current_user
-from auth.schemas import ChangePasswordIn, LoginIn, LoginOut, MeOut, RegisterIn
+from auth.schemas import ChangePasswordIn, LoginIn, LoginOut, MeOut, ProfileUpdateIn, RegisterIn, UserOut
 from auth.service import auth_service
 from config import settings
 from services.security.login_throttle import login_throttle
@@ -96,6 +96,18 @@ async def qiling_bind_poll(data: QilingPollIn, request: Request, user=Depends(ge
 @router.get("/me", summary="当前用户信息", response_model=ResponseSchema[MeOut])
 async def me(user=Depends(get_current_user)):
     return ResponseSchema(data=await auth_service.me(user))
+
+
+@router.patch('/profile', summary='修改本人的昵称', response_model=ResponseSchema[UserOut])
+async def update_profile(data: ProfileUpdateIn, user=Depends(get_current_user)):
+    from services.user_profile import update_nickname
+    return ResponseSchema(data=await update_nickname(user, data.nickname))
+
+
+@router.post('/avatar', summary='上传本人的头像', response_model=ResponseSchema[UserOut])
+async def upload_avatar(file: UploadFile = File(...), user=Depends(get_current_user)):
+    from services.user_profile import update_avatar
+    return ResponseSchema(data=await update_avatar(user, file))
 
 
 @router.post("/logout", summary="退出登录", response_model=ResponseSchema[None])

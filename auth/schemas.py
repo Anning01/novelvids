@@ -42,6 +42,11 @@ class RegisterIn(BaseModel):
     invite_token: str = Field(min_length=1, max_length=64, description="邀请令牌")
 
 
+class ProfileUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    nickname: str = Field(min_length=1, max_length=100)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,6 +56,11 @@ class UserOut(BaseModel):
     avatar_url: str = ""
     is_super_admin: bool = False
     created_at: datetime | str | None = ""
+
+    @field_serializer("avatar_url")
+    def _ser_avatar_url(self, value):
+        from services.oss import resolve_media_url
+        return resolve_media_url(value) or ""
 
     @field_serializer("created_at", when_used="json")
     def _ser_created_at(self, value):
