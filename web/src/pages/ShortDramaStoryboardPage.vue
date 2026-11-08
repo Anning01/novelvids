@@ -193,6 +193,7 @@ const savingCanvasIdentity = ref(false)
 const chapterDetailOpen = ref(false)
 const savingChapterDetails = ref(false)
 const batchGeneratingVideos = ref(false)
+let batchMonitor: AbortController | null = null
 const batchVideoDialogOpen = ref(false)
 let alive = true
 let chapterLoadVersion = 0
@@ -1527,6 +1528,8 @@ async function regenerateStoryboard() {
 }
 
 async function loadChapter(chapterId: number) {
+  batchMonitor?.abort()
+  batchGeneratingVideos.value = false
   const loadVersion = ++chapterLoadVersion
   stopVideoPolling()
   submittingVideoSceneIds.clear()
@@ -1546,6 +1549,9 @@ async function loadChapter(chapterId: number) {
     if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
     showChapterScenes(result)
     loading.value = false
+    void api.latestVideoBatch(chapterId).then(response => {
+      if (alive && loadVersion === chapterLoadVersion && response.data) void monitorVideoBatch(response.data.id)
+    }).catch(() => { /* Video polling remains available if batch status is temporarily unavailable. */ })
     if (!result.scenes.length && !isAgent.value) {
       // Agent 模式不再自动生成分镜：进入分镜页后由用户点击「生成全部分镜」触发，
       // 避免一进页面就自动消耗生成额度。人工模式仍自动创建首个空分镜。
@@ -2114,6 +2120,39 @@ async function applyVideoDefaults(settings: VideoDefaults, remember: boolean) {
   finally { savingVideoDefaults.value = false }
 }
 
+async function monitorVideoBatch(taskId: string) {
+  batchMonitor?.abort()
+  const controller = new AbortController()
+  batchMonitor = controller
+  batchGeneratingVideos.value = true
+  const chapterId = activeChapterId.value
+  try {
+    const result = await pollUntilTerminal(async signal => {
+      const task = (await api.task(taskId, signal)).data
+      const bootstrap = (await api.workbenchBootstrap(projectId.value, chapterId, signal)).data
+      if (controller.signal.aborted || !alive || chapterId !== activeChapterId.value) throw new DOMException('View changed', 'AbortError')
+      for (const scene of scenes.value) {
+        const records = bootstrap.videos[scene.id] || []
+        videos.value[scene.id] = records
+        const completed = records.find(video => video.status === TaskStatusEnum.COMPLETED)
+        if (completed) syncInjectedLastFrame(completed)
+      }
+      resumeVideoPolling()
+      return task
+    }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminalTaskStatuses,
+      requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
+    if (result.status === TaskStatusEnum.COMPLETED) notice.success(tr('批量生成完成'))
+    else notice.error(result.error_message || tr('连续生成已停止，后续分镜未提交'))
+  } catch (error) {
+    if (!isAbortError(error)) notice.error((error as Error).message)
+  } finally {
+    if (batchMonitor === controller) {
+      batchMonitor = null
+      batchGeneratingVideos.value = false
+    }
+  }
+}
+
 async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
   const model = videoModels.value.find(item => item.config_id === request.modelConfigId) || null
   if (!model || batchGeneratingVideos.value) return
@@ -2143,34 +2182,43 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     autoEnhancement: request.autoEnhancement || null,
   }
   try {
-    let attemptedCount = 0
-    let stoppedScene: Scene | undefined
+    if (request.returnLastFrame) {
+      for (const scene of targets) {
+        const blocked = batchVideoDisabledReason(scene, model, request)
+        if (blocked) throw new Error(blocked)
+        ensureSceneVoiceReferencePrompt(scene)
+        if (!await saveScene(scene, false, model)) return
+      }
+      const requests = targets.map(scene => {
+        const draft = draftFor(scene)
+        return { scene_id: scene.id, model_config_id: model.config_id,
+          generation_mode: draft.videoGenerationMode, first_frame_url: draft.firstFrameUrl || undefined,
+          last_frame_url: draft.lastFrameUrl || undefined, duration: sceneDuration(scene, model),
+          resolution: request.resolution, aspect_ratio: request.aspectRatio,
+          output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
+          return_last_frame: true, auto_enhancement: request.autoEnhancement || null,
+          reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(draft.prompt, draft.referenceMedia) : [] }
+      })
+      const task = (await api.generateVideoBatch(requests)).data
+      await monitorVideoBatch(task.id)
+      return
+    }
     const completedCount = await runVideoGenerationQueue(
       targets,
       model.concurrency,
-      request.returnLastFrame,
+      false,
       async scene => {
-        attemptedCount += 1
         const blocked = batchVideoDisabledReason(scene, model, request)
         if (blocked) setSceneVideoError(scene.id, blocked)
-        const completed = !blocked && await generateVideo(scene, false, {
-          ...generationSettings,
-          continuityTargetSceneId: request.returnLastFrame ? targets[targets.indexOf(scene) + 1]?.id : undefined,
-        })
-        if (!completed) stoppedScene = scene
-        return completed
+        return !blocked && await generateVideo(scene, false, generationSettings)
       },
     )
-    if (request.returnLastFrame && stoppedScene) {
-      notice.error(tr('连续生成已停止：分镜 {p0} 未完成，后续 {p1} 条未提交', {
-        p0: stoppedScene.sequence, p1: targets.length - attemptedCount,
-      }))
-      return
-    }
     const failedCount = targets.length - completedCount
     failedCount
       ? notice.error(request.autoEnhancement ? tr('批量处理结束：完成 {p0} 条，另有 {p1} 条视频或高清化未完成，原视频保留', { p0: completedCount, p1: failedCount }) : tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
       : notice.success(tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
+  } catch (error) {
+    notice.error((error as Error).message)
   } finally {
     batchGeneratingVideos.value = false
   }
@@ -2227,6 +2275,7 @@ onMounted(() => {
   window.addEventListener('keydown', closeAssetActionsFromEscape)
 })
 onBeforeUnmount(() => {
+  batchMonitor?.abort()
   void flushPendingSceneSaves()
   alive = false
   stopVideoPolling()

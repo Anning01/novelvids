@@ -205,7 +205,10 @@ class AiTaskExecutor:
         if task_type == AiTaskTypeEnum.video and task.request_params.get('workflow_version') == 'agent-skills-v1':
             from services.creation_agent.video_jobs import VideoProductionHandler
             handler = VideoProductionHandler()
-            if task.request_params.get('operation') == 'compose':
+            if task.request_params.get('operation') == 'video_batch':
+                from services.video.batches import VideoBatchHandler
+                handler = VideoBatchHandler()
+            elif task.request_params.get('operation') == 'compose':
                 from services.creation_agent.composition import CompositionHandler
                 handler = CompositionHandler()
             elif task.request_params.get('operation') == 'prepare_export':

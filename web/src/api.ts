@@ -335,6 +335,8 @@ export const api = {
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
   extractVideoLastFrame: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/last-frame`, { method: 'POST' }),
   generateVideo: (sceneId: number, modelConfigId: number, options: VideoGenerationOptions = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
+  generateVideoBatch: (requests: Array<VideoGenerationOptions & { scene_id: number; model_config_id: number }>) => request<SingleResponse<AiTask>>('/video/batch', { method: 'POST', body: JSON.stringify({ requests }) }),
+  latestVideoBatch: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/video/batch/latest/${chapterId}`),
   async uploadVideoReference(file: File, modelConfigId: number) {
     const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
     if (policyResponse.data.direct) {
@@ -402,7 +404,7 @@ export const api = {
   },
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
-  workbenchBootstrap: (novelId: number, chapterId: number) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`),
+  workbenchBootstrap: (novelId: number, chapterId: number, signal?: AbortSignal) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`, signal ? { signal } : undefined),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
   imageGenerationModels: () => request<SingleResponse<ImageGenerationModel[]>>('/config/image-generation/models'),
   videoGenerationModels: () => request<SingleResponse<VideoGenerationModel[]>>('/config/video-generation/models'),
@@ -414,7 +416,7 @@ export const api = {
   activateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/activate`, { method: 'POST' }),
   deactivateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/deactivate`, { method: 'POST' }),
   deleteConfig: (id: number) => request<SingleResponse<null>>(`/config/${id}`, { method: 'DELETE' }),
-  task: (id: string) => request<SingleResponse<AiTask>>(`/task/${id}`),
+  task: (id: string, signal?: AbortSignal) => request<SingleResponse<AiTask>>(`/task/${id}`, signal ? { signal } : undefined),
   billingSummary: (novelId?: number) => request<SingleResponse<BillingSummary>>(`/billing/summary${qs({ novel_id: novelId })}`),
   billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),

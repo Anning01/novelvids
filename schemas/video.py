@@ -88,6 +88,11 @@ class VideoGenerateRequest(VideoGenerationOptions):
 
 # --- 输出 Schema ---
 
+class VideoBatchGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requests: list[VideoGenerateRequest] = Field(min_length=1, max_length=500)
+
+
 class VideoBriefOut(BaseResponse):
     """列表输出：简要信息"""
     model_config = ConfigDict(from_attributes=True)

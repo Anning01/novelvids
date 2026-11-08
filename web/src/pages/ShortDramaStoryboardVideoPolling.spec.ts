@@ -14,7 +14,7 @@ import { exportApi } from '@/features/video-export/api'
 vi.mock('@/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/api')>()
   return { ...original, api: { ...original.api, novelMeta: vi.fn(), chapters: vi.fn(),
-    videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(),
+    videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(), generateVideoBatch: vi.fn(), latestVideoBatch: vi.fn(), task: vi.fn(),
     extractVideoLastFrame: vi.fn(), videoGenerationHistory: vi.fn(), scene: vi.fn(), updateScene: vi.fn(), applyVideoDefaults: vi.fn() } }
 })
 
@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.mocked(api.chapters).mockResolvedValue({ data: { items: [chapter], pagination: { page: 1, pages: 1 } } } as never)
   vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [] } as never)
   vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [structuredClone(scene)], assets: [], videos: { 109: [pending] } } } as never)
+  vi.mocked(api.latestVideoBatch).mockResolvedValue({ data: null } as never)
   vi.mocked(api.updateScene).mockReset()
   vi.mocked(api.scene).mockReset()
   vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [] })
@@ -66,48 +67,33 @@ async function render() {
   return { wrapper, router }
 }
 
-it.each([
-  ['供应商失败', { ...completed, status: 4, metadata: { error: '供应商拒绝' } }],
-  ['提交结果未知', { ...completed, status: 4, metadata: { error: '结果待核对', submission_uncertain: true } }],
-  ['视频成功但没有尾帧', completed],
-] as const)('stops sequential last-frame generation after %s', async (_label, result) => {
+it('hands every selected scene to one persistent batch without submitting videos from the browser', async () => {
   vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
-  const first = { ...scene, metadata: {} }
-  const second = { ...scene, id: 110, sequence: 2, metadata: {} }
-  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [first, second], assets: [], videos: {} } } as never)
-  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...(id === first.id ? first : second), ...update } }) as never)
-  vi.mocked(api.generateVideo).mockResolvedValue({ data: result } as never)
+  const shots = Array.from({ length: 5 }, (_, i) => ({ ...scene, id: 109 + i, sequence: i + 1, metadata: {} }))
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: shots, assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...shots.find(shot => shot.id === id), ...update } }) as never)
+  vi.mocked(api.generateVideoBatch).mockResolvedValue({ data: { id: 'batch-1', status: 6 } } as never)
+  vi.mocked(api.task).mockResolvedValue({ data: { id: 'batch-1', status: 3 } } as never)
   const { wrapper } = await render()
   wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
-    sceneIds: [109, 110], modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
+    sceneIds: shots.map(shot => shot.id), modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
   })
   await flushPromises()
-  expect(api.generateVideo).toHaveBeenCalledTimes(1)
-  expect(api.generateVideo).toHaveBeenCalledWith(109, 11, expect.objectContaining({ return_last_frame: true }))
+  expect(api.generateVideoBatch).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].map(item => item.scene_id)).toEqual([109, 110, 111, 112, 113])
+  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].every(item => item.return_last_frame)).toBe(true)
+  expect(api.generateVideo).not.toHaveBeenCalled()
 })
 
-it('submits the next continuity scene only after its tail-frame reference is ready', async () => {
-  vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
-  const first = { ...scene, metadata: {} }
-  const second = { ...scene, id: 110, sequence: 2, metadata: {} }
-  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [first, second], assets: [], videos: {} } } as never)
-  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...(id === first.id ? first : second), ...update } }) as never)
-  const reference = { type: 'image', url: '/media/tail.png', name: '上一镜尾帧' }
-  vi.mocked(api.generateVideo).mockResolvedValueOnce({ data: { ...completed, metadata: {
-    last_frame_url: reference.url, last_frame_source: 'provider', last_frame_injected_scene_id: 110,
-    last_frame_reference: reference, last_frame_prompt_instruction: '【首帧衔接】\n首帧参考：@{参考图片:%2Fmedia%2Ftail.png}',
-  } } } as never).mockResolvedValueOnce({ data: { ...completed, scene_id: 110, metadata: {
-    last_frame_url: '/media/tail-2.png', last_frame_source: 'ffmpeg',
-  } } } as never)
+it.each(['light', 'dark'])('restores an existing batch after opening the page in %s without resubmitting', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.latestVideoBatch).mockResolvedValue({ data: { id: 'existing-batch', status: 2 } } as never)
+  vi.mocked(api.task).mockResolvedValue({ data: { id: 'existing-batch', status: 2 } } as never)
   const { wrapper } = await render()
-  wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
-    sceneIds: [109, 110], modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
-  })
-  await flushPromises()
-  expect(api.generateVideo).toHaveBeenCalledTimes(2)
-  expect(api.generateVideo).toHaveBeenNthCalledWith(2, 110, 11, expect.objectContaining({
-    return_last_frame: true, reference_media: [expect.objectContaining({ type: 'image', url: reference.url })],
-  }))
+  expect(api.task).toHaveBeenCalledWith('existing-batch', expect.any(AbortSignal))
+  expect(wrapper.text()).toContain('批量生成中')
+  expect(api.generateVideo).not.toHaveBeenCalled()
+  expect(api.generateVideoBatch).not.toHaveBeenCalled()
 })
 
 it('inherits project defaults for fresh chapters while respecting explicitly saved shot overrides', async () => {

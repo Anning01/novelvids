@@ -24,6 +24,7 @@ from schemas.video import (
     VideoMergeRequest,
     VideoMergeOut,
     VideoReferenceMedia,
+    VideoBatchGenerateRequest,
 )
 from controllers.config import ai_model_config_controller
 from models.config import AiModelConfig
@@ -36,6 +37,26 @@ from utils.response_format import PaginationResponse, ResponseSchema
 router = APIRouter(dependencies=[Depends(production_request)])
 
 _EDITOR = Depends(require_roles("admin", "creator"))
+
+
+@router.post('/batch', summary='后台逐一生成并衔接尾帧')
+async def generate_video_batch(req: VideoBatchGenerateRequest, request: Request, ctx: AuthContext = _EDITOR):
+    from services.video.batches import submit_batch
+    from schemas.ai_task import AiTaskOut
+    for item in req.requests:
+        await require_scene_access(item.scene_id, ctx)
+    task = await submit_batch(req, media_base_url=str(request.base_url).rstrip('/'),
+        team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    return ResponseSchema(data=AiTaskOut.model_validate(task))
+
+
+@router.get('/batch/latest/{chapter_id}', summary='恢复当前章节连续生成进度')
+async def get_video_batch(chapter_id: int, ctx: AuthContext = Depends(get_auth_context)):
+    from services.video.batches import latest_batch
+    from schemas.ai_task import AiTaskOut
+    await require_chapter_access(chapter_id, ctx)
+    task = await latest_batch(chapter_id)
+    return ResponseSchema(data=AiTaskOut.model_validate(task) if task else None)
 
 
 @router.post("/generate/", summary="提交视频生成", response_model=ResponseSchema[VideoOut])
