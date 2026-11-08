@@ -38,7 +38,7 @@ export const useAuthStore = defineStore('auth', {
       return this.membership?.role ?? (this.isSuperAdmin ? 'super' : null)
     },
     canAccessSettings(): boolean {
-      return this.enabled === false || this.isSuperAdmin || this.role === 'super'
+      return this.enabled === false || this.canManageTeams
     },
     canAccessBilling(): boolean {
       return this.enabled === false || this.role === 'admin' || this.role === 'creator' || this.role === 'super'
@@ -47,7 +47,7 @@ export const useAuthStore = defineStore('auth', {
       return this.role === 'admin' || this.role === 'super'
     },
     canManageTeams(): boolean {
-      return this.isSuperAdmin || this.role === 'super'
+      return this.role === 'super' || (this.isSuperAdmin && this.role === 'admin')
     },
   },
   actions: {

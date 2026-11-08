@@ -75,6 +75,27 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     expect(wrapper.find('button[aria-label="切换团队"]').exists()).toBe(false)
   })
 
+  it.each(['light', 'dark'])('超管在普通成员团队中隐藏无权进入的管理入口（%s）', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const pinia = setupStore({
+      enabled: true, ready: true, token: 't',
+      user: { id: 9, username: 'boss', nickname: '', avatar_url: '', is_super_admin: true },
+      memberships: [{ team_id: 1, team_name: '成员团队', role: 'creator' }], activeTeamId: 1,
+    })
+    const wrapper = mountApp(pinia)
+    for (const path of ['/settings', '/teams', '/users', '/members']) {
+      expect(wrapper.find(`a[href$="${path}"]`).exists()).toBe(false)
+    }
+    const auth = useAuthStore(pinia)
+    auth.setActiveTeam(null)
+    await wrapper.vm.$nextTick()
+    for (const path of ['/settings', '/teams', '/users']) {
+      expect(wrapper.find(`a[href$="${path}"]`).exists()).toBe(true)
+    }
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
+
   it('登录态下用户入口指向用户中心，外观按钮保留在侧边栏', () => {
     const wrapper = mountApp(setupStore({
       enabled: true,

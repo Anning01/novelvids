@@ -110,4 +110,13 @@ describe('useAuthStore', () => {
     expect(store.canAccessBilling).toBe(true)
     expect(store.canManageTeams).toBe(true)
   })
+
+  it.each(['creator', 'viewer', 'admin'] as const)('super admin team navigation follows the route guard for %s', role => {
+    const store = useAuthStore()
+    store.$patch({ enabled: true, ready: true, token: 't',
+      user: { id: 9, username: 'boss', nickname: '', avatar_url: '', is_super_admin: true },
+      memberships: [{ team_id: 1, team_name: 'Team', role }], activeTeamId: 1 })
+    expect(store.canAccessSettings).toBe(role === 'admin')
+    expect(store.canManageTeams).toBe(role === 'admin')
+  })
 })
