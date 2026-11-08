@@ -36,6 +36,16 @@ class ProductionRecovery:
                         response_data={"video_id": video.id},
                     )
                     continue
+            if task.task_type == 7 and task.request_params.get('operation') != 'creation_plan':
+                from models.creation_agent import AgentMessage
+                message = await AgentMessage.get_or_none(task=task, role='assistant')
+                if message and any(call.get('phase', 'main') == 'main' for call in (message.usage or {}).get('calls', [])):
+                    # Chat tool calls have no replay-safe continuation cursor.
+                    # Keep their transcript rather than reauthoring paid writes.
+                    await AiTask.filter(id=task.id).update(status=4, stage='needs_review',
+                        error_message=localized_message('提交结果待核对，系统不会重复提交',
+                            _language=task.request_params.get('prompt_language', 'en')))
+                    continue
             if await AgentOperation.filter(
                 task_id=task.id, state__in=["running", "uncertain"], external=True
             ).exists():

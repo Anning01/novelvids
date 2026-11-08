@@ -89,6 +89,20 @@ class AgentSessions:
     async def submit(self, conversation: AgentConversation, request: AgentRunRequest, ctx: AuthContext) -> AiTask:
         conversation = await self.get(conversation.id, ctx)
         await require_roles("admin", "creator")(ctx)
+        recovery = None
+        if request.resume_from_task_id:
+            from models.agent_operation import AgentOperation
+            if not await AgentMessage.filter(task_id=request.resume_from_task_id, conversation_id=conversation.id, role='user').exists():
+                raise HTTPException(404, '当前会话不存在该任务')
+            resumed = await AgentOperation.get_or_none(task_id=request.resume_from_task_id, key='recovery:resumed', state='completed')
+            if resumed:
+                return await AiTask.get(id=resumed.result['task_id'])
+            from services.creation_agent.run_recovery import resume_source
+            recovery = await resume_source(conversation, request.resume_from_task_id)
+            if recovery[0].request_params.get('user_id') != (ctx.user.id if ctx.user else None) or recovery[0].request_params.get('team_id') != ctx.team_id:
+                raise HTTPException(403, '只能在原团队中恢复自己的任务')
+            request = recovery[2].model_copy(update={'request_id': request.request_id,
+                'resume_from_task_id': request.resume_from_task_id})
         configuration = await agent_configuration()
         if not configuration.enabled:
             raise HTTPException(403, localized_message('创作助手尚未启用'))
@@ -96,10 +110,15 @@ class AgentSessions:
             raise HTTPException(422, localized_message('选中目标超过本次运行上限'))
         await self.validate_scope(conversation.novel_id, request)
         models = await agent_models(ctx)
-        chosen = next((model for model in models if request.model_config_id is None or model.id == request.model_config_id), None)
+        chosen_id = recovery[0].request_params['model_config_id'] if recovery else request.model_config_id
+        chosen = next((model for model in models if chosen_id is None or model.id == chosen_id), None)
         if chosen is None:
             raise HTTPException(422, localized_message('请配置已启用且支持工具调用的创作助手模型'))
+        if recovery and chosen.id != recovery[0].request_params['model_config_id']:
+            raise HTTPException(409, '恢复任务必须使用原模型')
         payload = request.model_dump(mode="json")
+        if request.resume_from_task_id is None:
+            payload.pop('resume_from_task_id', None)
         if request.plan_confirmation is None:
             payload.pop('plan_confirmation', None)
         if 'write_scope' not in request.model_fields_set:
@@ -117,8 +136,16 @@ class AgentSessions:
                 if previous.request_hash != digest:
                     raise HTTPException(409, localized_message('同一请求标识不能对应不同内容'))
                 return await AiTask.get(id=previous.task_id).using_db(connection)
+            if recovery:
+                from models.agent_operation import AgentOperation
+                resumed = await AgentOperation.get_or_none(task_id=request.resume_from_task_id, key='recovery:resumed', state='completed')
+                if resumed:
+                    return await AiTask.get(id=resumed.result['task_id'])
             if current.active_task_id and await AiTask.filter(id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
                 raise HTTPException(409, localized_message('当前会话仍在执行，请等待完成或停止后继续'))
+            if recovery:
+                from services.creation_agent.run_recovery import resume_source
+                recovery = await resume_source(current, request.resume_from_task_id)
             plan = None
             if request.plan_confirmation:
                 from services.creation_agent.plans import confirmed_plan
@@ -139,6 +166,13 @@ class AgentSessions:
                 "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None,
                 "model_config_id": chosen.id, "assistant_model_config_id": chosen.id, "agent_configuration": configuration.model_dump(),
             })
+            if recovery:
+                original, source, _, _, root = recovery
+                workflow = {**original.request_params, 'instruction_message_id': source.id,
+                    'recovery_root_task_id': root, 'resumed_from_task_id': str(original.id)}
+                workflow.pop('task_id', None)
+                workflow.pop('submission_id', None)
+                workflow.pop('submission_hash', None)
             if plan:
                 workflow.update(operation='creation_plan', creation_plan_id=str(request.plan_confirmation.task_id),
                     instruction_message_id=plan.source_message_id)
@@ -149,6 +183,11 @@ class AgentSessions:
                 await AgentOperation.create(task_id=request.plan_confirmation.task_id, key='creation:confirmed',
                     state='completed', result={'task_id': str(task.id), 'revision': request.plan_confirmation.revision}, using_db=connection)
             await task.save(using_db=connection, update_fields=["request_params"])
+            if recovery:
+                from services.creation_agent.run_recovery import copy_planning_receipts
+                await copy_planning_receipts(recovery[3], task)
+                await AgentOperation.create(task_id=request.resume_from_task_id, key='recovery:resumed',
+                    state='completed', result={'task_id': str(task.id)})
             await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,
                 request_hash=digest, role="user", content=request.message, run_input=payload, using_db=connection)
             await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,

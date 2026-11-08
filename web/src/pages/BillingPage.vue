@@ -7,7 +7,7 @@ import AppSelect from '@/components/AppSelect.vue'
 import AppPagination from '@/components/AppPagination.vue'
 import { api } from '@/api'
 import BillingRecordDetails from '@/features/billing/BillingRecordDetails.vue'
-import { costSourceLabel, money, recordStatus, usageLabel } from '@/features/billing/recordDisplay'
+import { costSourceLabel, money, recordStatus, recordStatusHint, usageLabel } from '@/features/billing/recordDisplay'
 import { useAuthStore } from '@/features/auth/authStore'
 import { notice } from '@/shared/notice'
 import type { BillingProject, BillingRecord, BillingSummary } from '@/types'
@@ -203,7 +203,7 @@ onMounted(load)
                 <td>{{ item.model_name || item.model }}</td>
                 <td class="cell-muted">{{ usageLabel(item) }}</td>
                 <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
-                <td>{{ recordStatus(item) }}</td>
+                <td :title="recordStatusHint(item)">{{ recordStatus(item) }}</td>
                 <td v-if="showSourceColumn" class="cell-source">
                   <span class="source-badge" :class="{ 'is-key': item.cost_source === 'team_key', 'is-balance': item.cost_source === 'balance' }">{{ costSourceLabel(item.cost_source) }}</span>
                 </td>

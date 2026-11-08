@@ -5,7 +5,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import type { BillingRecord } from '@/types'
-import { costSourceLabel, money, recordStatus, usageLabel } from './recordDisplay'
+import { costSourceLabel, money, recordStatus, recordStatusHint, usageLabel } from './recordDisplay'
 
 const props = defineProps<{ recordId: number; novelId: number; showSource: boolean }>()
 const records = ref<BillingRecord[]>([])
@@ -42,10 +42,11 @@ onBeforeUnmount(() => { epoch += 1 })
     <p v-if="loading" role="status">{{ tr('正在读取明细…') }}</p>
     <p v-else-if="error" role="alert">{{ error }} <AppButton size="xs" @click="load(page)">{{ tr('重试') }}</AppButton></p>
     <template v-else>
+      <p v-if="records.some(record => record.status === 4)">{{ tr('该会话有部分步骤未完成，不代表所有调用失败。展开记录可查看各次状态和实际用量。') }}</p>
       <table><thead><tr><th>{{ tr('时间') }}</th><th>{{ tr('模型 / 用量') }}</th><th>{{ tr('状态') }}</th><th v-if="showSource">{{ tr('来源') }}</th><th class="is-num">{{ tr('成本') }}</th></tr></thead>
         <tbody><tr v-for="record in records" :key="record.id">
           <td>{{ record.created_at }}</td><td>{{ record.model_name || record.model }}<small>{{ usageLabel(record) }}</small></td>
-          <td>{{ recordStatus(record) }}</td><td v-if="showSource">{{ costSourceLabel(record.cost_source) }}</td>
+          <td :title="recordStatusHint(record)">{{ recordStatus(record) }}</td><td v-if="showSource">{{ costSourceLabel(record.cost_source) }}</td>
           <td class="is-num">{{ money(record.cost, record.currency) }}</td>
         </tr></tbody>
       </table>

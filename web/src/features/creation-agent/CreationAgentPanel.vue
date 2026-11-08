@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentRecoveryDetails from './AgentRecoveryDetails.vue'
 import AgentPlanDetails from './AgentPlanDetails.vue'
 import { tr } from '@/i18n'
 import AppSelect from '@/components/AppSelect.vue'
@@ -349,6 +350,8 @@ onMounted(() => {
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
         <p v-if="item.role === 'assistant' && !item.singleProductionResult && (item.status === 4 || item.status === 5)" class="creation-agent-panel__round-status">{{ item.status === 5 ? tr('本轮已停止') : tr('本轮未完成') }}{{ item.changes.length ? tr('，已保存的修改见下方记录') : tr('，尚未保存修改') }}</p>
+        <AgentRecoveryDetails v-if="item.recovery" :recovery="item.recovery" :failed="item.status === 4" :disabled="!writable || store.busy || operationBusy || suspended"
+          @resume="operation(() => store.send({ resume_from_task_id: item.task_id, message: tr('继续失败步骤'), chapter_id: null, model_config_id: null, targets: [] }))" />
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">

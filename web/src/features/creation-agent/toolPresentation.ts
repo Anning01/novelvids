@@ -11,6 +11,7 @@ const TOOL_LABELS: Record<string, { operation: string; progress: string }> = {
   query_creation_objects: { operation: '查找对象', progress: '正在查找对象' },
   create_creation_setting: { operation: '创建新设定', progress: '正在创建新设定' },
   patch_creation_prompts: { operation: '保存提示词调整', progress: '正在保存提示词调整' },
+  revise_creation_object: { operation: '生成并保存完整设计', progress: '正在生成完整设计' },
   read_creation_objects: { operation: '查看设定和引用', progress: '正在查看设定和引用' },
   read_creation_prompt_page: { operation: '读取提示词原文', progress: '正在读取提示词原文' },
   apply_creation_changes: { operation: '保存创作调整', progress: '正在保存创作调整' },

@@ -809,7 +809,13 @@
     "头像上传失败": "Could not upload avatar",
     "更换头像": "Change avatar",
     "选择头像图片": "Choose an avatar image",
-    "更换头像：JPG、PNG、WebP，最大 5MB": "Change avatar: JPG, PNG or WebP, up to 5 MB"
+    "更换头像：JPG、PNG、WebP，最大 5MB": "Change avatar: JPG, PNG or WebP, up to 5 MB",
+    "未完成步骤": "Unfinished step",
+    "已保留 {p0} 项合格候选，待修正 {p1} 项": "Saved {p0} valid candidates; {p1} need correction",
+    "模型调用记录已保存，可核对本轮用量。": "Model call records are saved. You can review usage for this turn.",
+    "复用已完成步骤并继续": "Reuse completed steps and continue",
+    "继续失败步骤": "Continue the failed step",
+    "该会话有部分步骤未完成，不代表所有调用失败。展开记录可查看各次状态和实际用量。": "Some steps in this conversation did not finish. This does not mean all calls failed. Expand the record to review each status and actual usage."
   },
   "components": {
     "请选择": "Select",

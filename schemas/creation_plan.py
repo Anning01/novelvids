@@ -27,6 +27,7 @@ class CreationBrief(PlanModel):
     operations: list[Literal['assets', 'storyboard', 'image', 'video']] = Field(default_factory=list)
     read_chapter_ids: list[int] = Field(default_factory=list)
     write_chapter_ids: list[int] = Field(default_factory=list)
+    asset_chapter_ids: list[int] = Field(default_factory=list, description='仅提取文字资产的来源章；不授权修改正文或分镜')
     write_selection: Literal['current', 'chapters', 'project'] = 'current'
     read_chapter_numbers: list[int] = Field(default_factory=list)
     project_scope_quote: str | None = None

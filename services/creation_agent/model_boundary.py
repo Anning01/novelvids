@@ -21,10 +21,12 @@ def main_request_count(calls) -> int:
 
 class RecordedAgentModel(WrapperModel):
     def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
-                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None):
+                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation'):
         super().__init__(model)
         self.message = message
         self.on_activity = on_activity
+        self.repair_root = repair_root
+        self.stage = stage
         self.before_request = before_request
         self.max_characters = max_characters
         self.calls = list((message.usage or {}).get("calls", []))
@@ -42,6 +44,18 @@ class RecordedAgentModel(WrapperModel):
 
     async def _begin(self, messages, parameters):
         await self.before_request()
+        if self.phase != 'summary':
+            await self._save_messages(messages)
+            if self.repair_root:
+                from services.creation_agent.reliability import retry_issues, failure_checkpoint, claim_repair
+                issues = retry_issues(messages)
+                if issues:
+                    if self.calls and self.calls[-1].get('finish_reason') == 'length':
+                        await failure_checkpoint(self.repair_root, self.message.id,
+                            [{'code': 'output_length'}], stage=self.stage)
+                        raise ValueError(localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'))
+                    await failure_checkpoint(self.repair_root, self.message.id, issues, stage=self.stage)
+                    await claim_repair(self.repair_root, issues)
         if self.request_limit is not None and self.main_requests >= self.request_limit:
             raise ValueError(localized_message('本轮模型调用次数已达到配置上限'))
         used = sum(call.get('usage', {}).get('input_tokens', 0) + call.get('usage', {}).get('output_tokens', 0) for call in self.calls)
@@ -73,6 +87,7 @@ class RecordedAgentModel(WrapperModel):
 
     async def _checkpoint(self):
         usage = {
+            **(self.message.usage or {}),
             "calls": self.calls,
             "requests": len(self.calls),
             "missing_usage": any(not call["usage_reported"] for call in self.calls),
@@ -92,6 +107,20 @@ class RecordedAgentModel(WrapperModel):
         usage['cache_price_configured'] = pricing.get('cache_input_price_per_1m') is not None
         self.message.usage = usage
         await AgentMessage.filter(id=self.message.id).update(usage=usage)
+
+    async def _save_messages(self, messages):
+        from services.creation_agent.skill_execution import _audit_messages
+        await AgentMessage.filter(id=self.message.id).update(native_messages=_audit_messages(messages))
+
+    async def _save_response(self, call, response):
+        from models.agent_operation import AgentOperation
+        from services.creation_agent.skill_execution import _audit_messages
+        if getattr(self.message, 'task_id', None):
+            # Retry-history compaction must never erase the original response.
+            await AgentOperation.update_or_create(task_id=self.message.task_id,
+                key=f'model-response:{self.message.id}:{call["index"]}',
+                defaults={'state': 'completed', 'result': {'messages': _audit_messages([response]),
+                    'stage': self.stage, 'call_index': call['index']}})
 
     def _is_context_overflow(self, exc):
         from pydantic_ai.exceptions import ModelHTTPError
@@ -115,8 +144,12 @@ class RecordedAgentModel(WrapperModel):
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
+                if response is not None and self.phase != 'summary':
+                    await self._save_response(call, response)
                 await self._finish(call, started, response.usage if response else None, response is not None,
                                    response.finish_reason if response else None)
+                if response is not None and self.phase != 'summary':
+                    await self._save_messages([*messages, response])
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
@@ -139,5 +172,9 @@ class RecordedAgentModel(WrapperModel):
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
+                if response is not None and self.phase != 'summary':
+                    await self._save_response(call, response.get())
                 await self._finish(call, started, response.usage() if response else None, completed,
                                    response.finish_reason if response else None)
+                if response is not None and self.phase != 'summary':
+                    await self._save_messages([*messages, response.get()])

@@ -12,12 +12,12 @@ from uuid import uuid4
 
 import httpx
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from config import settings
 from controllers.config import ai_model_config_controller
 from controllers.novel import novel_controller
-from models.asset import Asset
 from models.chapter import Chapter
 from models.novel import Novel
 from prompts.project_analysis import render_analysis_messages, render_cover_prompt
@@ -32,7 +32,7 @@ from services.cover_derivatives import (
 from services.image_generation import generate_images
 from services.image_generation.capabilities import validate_selection
 from services.llm.json_output import create_json_completion, completion_usage
-from utils.enums import AiTaskTypeEnum, AssetTypeEnum, ImageSourceEnum
+from utils.enums import AiTaskTypeEnum
 from utils.prompt_language import normalize_prompt_language
 
 logger = logging.getLogger(__name__)
@@ -45,15 +45,9 @@ class KeyCharacter(BaseModel):
     aliases: list[str] = Field(default_factory=list, description="人物别名")
     role: str = Field(description="人物在故事中的身份和作用")
     description: str = Field(description="人物性格、背景、动机与人物弧光的任务指定语言的概述")
-    base_traits: str = Field(description="按任务指定语言撰写的详细人物外观描述")
+    # Retain old analysis payloads without asking the model for visual assets.
+    base_traits: SkipJsonSchema[str] = ''
     chapter_numbers: list[int] = Field(default_factory=list, description="人物出现的章节序号")
-
-    @field_validator("base_traits")
-    @classmethod
-    def validate_base_traits(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Visual prompt must not be empty")
-        return value
 
 
 class BookAnalysis(BaseModel):
@@ -167,63 +161,8 @@ def _cover_content_type(extension: str) -> str:
     }.get(extension.lower(), "application/octet-stream")
 
 
-async def _sync_character_assets(
-    novel: Novel,
-    characters: list[KeyCharacter],
-    chapter_count: int,
-    prompt_language: str,
-) -> None:
-    for character in characters:
-        name = character.name.strip()
-        if not name:
-            continue
-        chapter_numbers = sorted(
-            {number for number in character.chapter_numbers if 1 <= number <= chapter_count}
-        )
-        asset = await Asset.get_or_none(
-            novel_id=novel.id,
-            asset_type=AssetTypeEnum.person.value,
-            canonical_name=name,
-        )
-        values = {
-            "aliases": character.aliases,
-            "description": character.description,
-            "base_traits": character.base_traits,
-            "is_global": False,
-            "source_chapters": chapter_numbers,
-            # 项目分析只建立全书人物档案，不代表某一章的增量提取版本。
-            "last_updated_chapter": 0,
-            "metadata": {
-                "role": character.role,
-                "analysis_source": "project_analysis",
-                "reference_layout": "character_turnaround",
-            },
-        }
-        if asset is None:
-            await Asset.create(
-                novel_id=novel.id,
-                asset_type=AssetTypeEnum.person.value,
-                canonical_name=name,
-                image_source=ImageSourceEnum.ai.value,
-                **values,
-            )
-        else:
-            from services.extraction.context import normalize_source_chapters
-
-            metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
-            if metadata.get('analysis_source') == 'project_analysis' or not (asset.base_traits or '').strip():
-                values['metadata'] = {**metadata, **values['metadata']}
-                asset.update_from_dict(values)
-            else:
-                asset.aliases = list(dict.fromkeys([*(asset.aliases or []), *character.aliases]))
-                asset.source_chapters = list(normalize_source_chapters([
-                    *normalize_source_chapters(asset.source_chapters), *chapter_numbers]))
-                asset.metadata = {**metadata, 'role': character.role}
-            await asset.save()
-
-
 class ProjectAnalysisTaskHandler(BaseTaskHandler):
-    """完成 Agent 项目的分章、书稿理解、人物入库与 1K 封面生成。"""
+    """完成分章与书稿理解；人物仅保留为分析参考，封面按请求生成。"""
 
     async def execute(self, request_params: dict) -> dict:
         novel_id = int(request_params["novel_id"])
@@ -289,9 +228,6 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         async def persist_analysis():
             from services.creation_objects import project_write
             async with project_write(novel_id):
-                await _sync_character_assets(
-                    novel, analysis.key_characters, len(chapters), prompt_language,
-                )
                 novel.total_chapters = len(chapters)
                 novel.tags = analysis.book_types
                 novel.story_outline = analysis.story_outline

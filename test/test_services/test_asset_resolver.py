@@ -13,6 +13,28 @@ from utils.enums import AssetTypeEnum
 
 
 @pytest.mark.asyncio
+async def test_one_shot_can_reference_base_and_multiple_variants_without_collapsing_identity():
+    novel = await Novel.create(name='同镜多形态')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='苏玄', main_image='https://example.test/base.png')
+    young = await AssetVariant.create(asset=asset, name='少年', images=['https://example.test/young.png'], chapter_numbers=[1])
+    adult = await AssetVariant.create(asset=asset, name='成年', images=['https://example.test/adult.png'], chapter_numbers=[1])
+    subjects = await resolve_assets('@{苏玄}与@{苏玄#少年}、@{苏玄#成年}同框，@{苏玄#少年}抬头。', novel.id,
+        chapter_number=1, selected_asset_ids=[asset.id], selected_variant_ids={asset.id: adult.id})
+    assert [subject['name'] for subject in subjects] == ['苏玄', '苏玄#少年', '苏玄#成年']
+    assert [subject['images'] for subject in subjects] == [[asset.main_image], list(young.images), list(adult.images)]
+
+
+@pytest.mark.asyncio
+async def test_multiple_referenced_variants_keep_empty_variant_empty():
+    novel = await Novel.create(name='空形态不串图')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='苏玄', main_image='https://example.test/base.png')
+    await AssetVariant.create(asset=asset, name='待生成', images=[])
+    subjects = await resolve_assets('@{苏玄}与@{苏玄#待生成}', novel.id, selected_asset_ids=[asset.id])
+    assert len(subjects) == 2
+    assert subjects[1]['images'] == []
+
+
+@pytest.mark.asyncio
 async def test_解析单个资产引用():
     """@张三 解析为一个 subject。"""
     novel = await Novel.create(name="Resolver Novel", author="Author")

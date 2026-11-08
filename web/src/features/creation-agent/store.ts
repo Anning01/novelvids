@@ -59,6 +59,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     currentRun.value = run
     const message = messages.value.find(item => item.task_id === run.task_id && item.role === 'assistant')
     if (message) Object.assign(message, {
+      recovery: run.recovery,
       activity: streamConnected.value && isAgentRunning(run.status)
         ? mergeActivity(run.activity || [], message.activity || [])
         : run.activity, started_at: run.started_at, finished_at: run.finished_at, content: isAgentRunning(run.status) && !run.content ? message.content : run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })

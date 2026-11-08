@@ -1,7 +1,7 @@
 
 import { tr } from '@/i18n'
 import type { Asset } from '@/types'
-import type { ImageAnnotation } from '../types/workbenchTypes'
+import type { ImageAnnotation, WorkbenchNode } from '../types/workbenchTypes'
 import { AssetTypeEnum } from '@/types'
 
 export interface AssetWorkbenchConfig {
@@ -81,7 +81,7 @@ export function isReusableAssetPlaceholder(asset: Asset) {
     && /^资产\s+\d+$/.test(asset.canonical_name)
 }
 
-export function assetImageMediaMetadata(asset: Asset): AssetImageMediaMetadata {
+export function assetImageMediaMetadata(asset: Pick<Asset, 'metadata'>): AssetImageMediaMetadata {
   const image = recordValue(recordValue(asset.metadata).workbenchImage)
   return {
     source: image.source === 'upload' || image.source === 'generation' ? image.source : undefined,
@@ -93,6 +93,40 @@ export function assetImageMediaMetadata(asset: Asset): AssetImageMediaMetadata {
     height: typeof image.height === 'number' && Number.isFinite(image.height) ? image.height : undefined,
     annotations: Array.isArray(image.annotations) ? image.annotations as ImageAnnotation[] : [],
   }
+}
+
+export function assetVariantView(asset: Asset, variantId?: number): Asset {
+  if (variantId === undefined) return asset
+  const variant = asset.variants?.find(item => item.id === variantId)
+  const metadata = recordValue(variant?.metadata)
+  return {
+    ...asset,
+    description: variant?.description || '',
+    base_traits: variant?.base_traits || '',
+    main_image: variant?.images[0],
+    main_image_thumbnail: variant?.image_thumbnails?.[0],
+    main_image_preview: variant?.image_previews?.[0],
+    angle_image_1: undefined, angle_image_1_thumbnail: undefined, angle_image_1_preview: undefined,
+    angle_image_2: undefined, angle_image_2_thumbnail: undefined, angle_image_2_preview: undefined,
+    variants: [],
+    metadata: {
+      ...recordValue(asset.metadata), ...metadata,
+      workbenchImage: recordValue(metadata.workbenchImage),
+      selected_image_urls: metadata.selected_image_urls,
+      image_gallery: variant?.images || [],
+      image_gallery_thumbnails: variant?.image_thumbnails || [],
+      image_gallery_previews: variant?.image_previews || [],
+    },
+  }
+}
+
+export function assetNodeKey(assetId: number, variantId?: number) {
+  return variantId === undefined ? `asset-${assetId}` : `asset-${assetId}-variant-${variantId}`
+}
+
+export function assetForWorkbenchNode(node: Pick<WorkbenchNode, 'data'>): Asset | undefined {
+  const asset = node.data.asset as Asset | undefined
+  return asset && assetVariantView(asset, typeof node.data.variant_id === 'number' ? node.data.variant_id : undefined)
 }
 
 export function patchAssetImageMediaMetadata(

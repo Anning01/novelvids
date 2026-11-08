@@ -10,12 +10,12 @@ import { readVideoReferenceMedia } from '@/shared/scenePromptReferences'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import type { VideoReferenceMedia } from '@/types'
 import { notice } from '@/shared/notice'
-import type { AiTask, Asset, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel, WorkbenchBootstrap, WorkbenchProjectConfig, WorkbenchRemakeSource, WorkbenchRemakeTask } from '@/types'
+import type { AiTask, Asset, AssetVariant, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel, WorkbenchBootstrap, WorkbenchProjectConfig, WorkbenchRemakeSource, WorkbenchRemakeTask } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
 import { sceneAssetIds } from '../graph/sceneAssets'
 import { activeVideoForScene, isTerminalVideo, sceneHasRunningVideo, sceneWithActiveVideo } from '../graph/videoVersions'
-import { assetImageMediaMetadata, assetSelectedImageCandidates, assetTypeLabel, DEFAULT_ASSET_ASPECT_RATIO, isReusableAssetPlaceholder, patchAssetImageMediaMetadata, REUSABLE_ASSET_PLACEHOLDER_KEY } from '../config/assetConfig'
+import { assetImageMediaMetadata, assetSelectedImageCandidates, assetForWorkbenchNode, assetNodeKey, assetTypeLabel, DEFAULT_ASSET_ASPECT_RATIO, isReusableAssetPlaceholder, patchAssetImageMediaMetadata, REUSABLE_ASSET_PLACEHOLDER_KEY } from '../config/assetConfig'
 import { normalizeWatermarkConfig, type WatermarkConfig } from '../config/watermarkConfig'
 import { moveOrder, normalizeComposerConfig, orderedComposerInputs, type ComposerConfig, type ComposerMoveDirection } from '../config/composerConfig'
 import { nodeCapabilities } from '../config/nodeCapabilities'
@@ -39,6 +39,18 @@ const mediaTitle = (filename: string) => filename.replace(/\.[^.]+$/, '') || fil
 const uploadedUrl = (uploaded: { filename: string; url?: string }): string => (
   uploaded.url || mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`)
 )
+
+function placeNewVariantNodes(nodes: WorkbenchNode[], existingKeys: Set<string>) {
+  const added = nodes.filter(item => item.kind === 'asset' && typeof item.data.variant_id === 'number' && !existingKeys.has(item.key))
+  if (!added.length) return
+  const addedKeys = new Set(added.map(item => item.key))
+  let bottom = Math.max(0, ...nodes.filter(item => item.kind === 'asset' && !addedKeys.has(item.key))
+    .map(item => item.position.y + (item.size?.height || 320)))
+  for (const item of added) {
+    item.position = { x: nodes.find(parent => parent.key === assetNodeKey(item.id))?.position.x ?? 480, y: bottom + 64 }
+    bottom = item.position.y + (item.size?.height || 320)
+  }
+}
 
 function node(id: number, key: string, kind: WorkbenchNode['kind'], title: string, position: Point, data: Record<string, unknown>): WorkbenchNode {
   const timestamp = now()
@@ -183,6 +195,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           const value = saved.nodes[item.key]
           if (value) { item.position = value.position; if (value.size !== undefined) item.size = value.size; item.zIndex = value.zIndex; item.data.ui = value.ui }
         })
+        placeNewVariantNodes(this.nodes, new Set(Object.keys(saved.nodes)))
         if (!current && legacy) localStorage.setItem(this.layoutKey(), serializeWorkbenchState(saved))
       } catch { /* ignore invalid local layout */ }
     },
@@ -253,14 +266,35 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         }
       }
       const validAssetIds = new Set(this.assets.map(asset => asset.id))
-      this.assets.forEach((asset, index) => nodes.push(node(asset.id, `asset-${asset.id}`, 'asset', asset.canonical_name, { x: 480, y: index * 320 }, { asset, imageModelOptions: this.imageModelOptions, asset_type: assetTypeLabel(asset.asset_type), project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, layout_family: 'asset', ui: {}, index })))
+      let assetIndex = 0
+      this.assets.forEach((asset, baseIndex) => {
+        const versions = [undefined, ...(asset.variants || [])]
+        versions.forEach(variant => {
+          const index = assetIndex++
+          const item = node(asset.id, assetNodeKey(asset.id, variant?.id), 'asset',
+            variant ? `${asset.canonical_name}#${variant.name}` : asset.canonical_name,
+            { x: 480, y: baseIndex * 320 }, { asset, variant_id: variant?.id, imageModelOptions: this.imageModelOptions,
+              asset_type: assetTypeLabel(asset.asset_type), project_defaults: projectDefaults,
+              project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt },
+              layout_family: 'asset', ui: {}, index })
+          if (variant) item.backendKind = 'asset_variant'
+          nodes.push(item)
+        })
+      })
       this.scenes.forEach((scene, index) => {
         const sceneKey = `shot-${scene.id}`
         const sceneVideos = this.videos[scene.id] || []
         const sceneNode = node(scene.id, sceneKey, 'shot', tr('镜头 {p0}', { p0: String(scene.sequence).padStart(2, '0') }), { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
         sceneNode.status = sceneHasRunningVideo(sceneVideos) ? 'running' : 'ready'
         nodes.push(sceneNode)
-        sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, `asset-${assetId}`, sceneKey, 'asset_reference')))
+        sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => {
+          const asset = this.assets.find(item => item.id === assetId)!
+          const bindings = scene.metadata?.asset_variant_ids as Record<string, number | null> | undefined
+          const selected = bindings && Object.hasOwn(bindings, String(assetId))
+            ? asset.variants?.find(variant => variant.id === Number(bindings[String(assetId)]))
+            : asset.variants?.filter(variant => variant.chapter_numbers?.includes(this.chapter!.number)).sort((a, b) => b.id - a.id)[0]
+          edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, assetNodeKey(assetId, selected?.id), sceneKey, 'asset_reference'))
+        })
         const activeVideo = activeVideoForScene(scene, sceneVideos)
         if (activeVideo) {
           const resultKey = `video-${activeVideo.id}`
@@ -270,6 +304,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       })
       const old = new Map(this.nodes.map(item => [item.key, item]))
       this.nodes = nodes.map(item => old.has(item.key) ? { ...item, position: old.get(item.key)!.position, size: old.get(item.key)!.size, zIndex: old.get(item.key)!.zIndex, data: { ...item.data, ui: old.get(item.key)!.data.ui } } : item)
+      placeNewVariantNodes(this.nodes, new Set(old.keys()))
       this.manualNodes = [...old.values()].filter(item => isManualNodeKind(item.kind))
       this.nodes.push(...this.manualNodes)
       this.edges = [...edges, ...this.mediaEdges.filter(item => this.nodes.some(nodeItem => nodeItem.key === item.source) && this.nodes.some(nodeItem => nodeItem.key === item.target))]
@@ -414,21 +449,28 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const selected = [...new Set(keys)]
         .map(key => this.nodeByKey(key))
         .filter((item): item is WorkbenchNode => Boolean(item))
-      const assets = selected.filter(item => item.kind === 'asset')
+      const assets = selected.filter(item => item.kind === 'asset' && item.data.variant_id === undefined)
+      const variants = selected.filter(item => item.kind === 'asset' && typeof item.data.variant_id === 'number'
+        && !assets.some(parent => parent.id === item.id))
       const shots = selected.filter(item => item.kind === 'shot')
       const hiddenResults = selected.filter(item => item.kind === 'video_result')
       const manualKeys = new Set(selected.filter(item => isManualNodeKind(item.kind)).map(item => item.key))
       await Promise.all([
         ...assets.map(item => api.deleteAsset(item.id)),
+        ...variants.map(item => api.deleteAssetVariant(item.id, Number(item.data.variant_id))),
         ...shots.map(item => api.deleteScene(item.id)),
       ])
       if (manualKeys.size || hiddenResults.length) this.checkpoint()
       hiddenResults.forEach((item) => {
         item.data.ui = { ...((item.data.ui as Record<string, unknown>) || {}), hidden: true }
       })
-      const removedKeys = new Set([...manualKeys, ...assets.map(item => item.key), ...shots.map(item => item.key)])
+      const removedKeys = new Set([...manualKeys, ...variants.map(item => item.key),
+        ...this.nodes.filter(item => item.kind === 'asset' && assets.some(parent => parent.id === item.id)).map(item => item.key),
+        ...shots.map(item => item.key)])
       const affectedKeys = new Set([...removedKeys, ...hiddenResults.map(item => item.key)])
-      this.assets = this.assets.filter(item => !assets.some(nodeItem => nodeItem.id === item.id))
+      this.assets = this.assets.filter(item => !assets.some(nodeItem => nodeItem.id === item.id)).map(item => ({
+        ...item, variants: item.variants?.filter(variant => !variants.some(removed => removed.id === item.id && removed.data.variant_id === variant.id)),
+      }))
       this.scenes = this.scenes.filter(item => !shots.some(nodeItem => nodeItem.id === item.id))
       this.manualNodes = this.manualNodes.filter(item => !manualKeys.has(item.key))
       this.manualNodes.filter(item => item.kind === 'section').forEach((section) => {
@@ -798,10 +840,29 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (isShotReference && sourceNode.kind === 'asset') {
         const scene = targetNode.data.scene as Scene
         const assetIds = sceneAssetIds(scene)
-        if (assetIds.includes(sourceNode.id)) return false
-        this.checkpoint()
-        void this.saveScene(scene.id, { asset_ids: [...assetIds, sourceNode.id] })
-        return true
+        if (this.edges.some(item => item.source === source && item.target === target)) return false
+        if (!assetIds.includes(sourceNode.id)) {
+          this.checkpoint()
+          const variantId = sourceNode.data.variant_id
+          const hasVariants = (sourceNode.data.asset as Asset | undefined)?.variants?.length
+          const patch: Partial<Scene> = { asset_ids: [...assetIds, sourceNode.id] }
+          if (typeof variantId === 'number' || hasVariants) patch.metadata = { ...scene.metadata,
+            asset_variant_ids: { ...(scene.metadata?.asset_variant_ids as Record<string, number | null> || {}), [sourceNode.id]: variantId ?? null } }
+          void this.saveScene(scene.id, patch)
+          return true
+        }
+        if (sourceNode.data.variant_id === undefined) {
+          const primary = this.edges.find(item => item.target === target && item.type === 'asset_reference'
+            && !this.mediaEdges.some(manual => manual.key === item.key) && this.nodeByKey(item.source)?.id === sourceNode.id)
+          if (primary && primary.source !== source) {
+            this.checkpoint()
+            void this.saveScene(scene.id, { metadata: { ...scene.metadata,
+              asset_variant_ids: { ...(scene.metadata?.asset_variant_ids as Record<string, number | null> || {}), [sourceNode.id]: null } } })
+              .then(() => this.connectMediaNode(primary.source, target))
+              .catch(error => notice.error(error instanceof Error ? error.message : tr('连接失败')))
+            return true
+          }
+        }
       }
       if (this.mediaEdges.some(item => item.source === source && item.target === target)) return false
       this.checkpoint()
@@ -883,9 +944,23 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const targetNode = this.nodeByKey(target.target)
       const scene = targetNode?.kind === 'shot' ? targetNode.data.scene as Scene | undefined : undefined
       if (!sourceNode || sourceNode.kind !== 'asset' || !scene) return false
-      await this.saveScene(scene.id, {
-        asset_ids: sceneAssetIds(scene).filter(id => id !== sourceNode.id),
-      })
+      const bindings = { ...(scene.metadata?.asset_variant_ids as Record<string, number | null> || {}) }
+      const alternative = this.edges.find(item => item.key !== edgeKey && item.type === 'asset_reference' && item.target === target.target
+        && this.nodeByKey(item.source)?.kind === 'asset' && this.nodeByKey(item.source)?.id === sourceNode.id)
+      if (alternative) {
+        bindings[String(sourceNode.id)] = (this.nodeByKey(alternative.source)?.data.variant_id as number | undefined) ?? null
+        await this.saveScene(scene.id, { metadata: { ...scene.metadata, asset_variant_ids: bindings } })
+        this.mediaEdges = this.mediaEdges.filter(item => item.key !== alternative.key)
+        this.rebuildGraph()
+        this.persistLayout()
+      } else {
+        const patch: Partial<Scene> = { asset_ids: sceneAssetIds(scene).filter(id => id !== sourceNode.id) }
+        if (Object.hasOwn(bindings, String(sourceNode.id))) {
+          delete bindings[String(sourceNode.id)]
+          patch.metadata = { ...scene.metadata, asset_variant_ids: bindings }
+        }
+        await this.saveScene(scene.id, patch)
+      }
       return true
     },
     async saveScene(sceneId: number, patch: Partial<Scene>) {
@@ -1110,15 +1185,16 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success(url ? tr('已设为主图') : tr('已清除主图'))
       return updated
     },
-    async replaceAssetImage(assetId: number, file: File) {
+    async replaceAssetImage(assetId: number, file: File, variantId?: number) {
       const asset = this.assets.find(item => item.id === assetId)
       if (!asset) return null
-      const currentImageMetadata = assetImageMediaMetadata(asset)
+      const variant = asset.variants?.find(item => item.id === variantId)
+      const target = variantId === undefined ? asset : variant
+      if (!target) return null
+      const currentImageMetadata = assetImageMediaMetadata(target)
       const uploaded = await api.upload(file)
       const originalFilename = uploaded.original_filename || file.name
-      const updated = (await api.updateAsset(assetId, {
-        main_image: persistedMediaRef(uploaded),
-        metadata: patchAssetImageMediaMetadata(asset.metadata, {
+      const metadata = patchAssetImageMediaMetadata(target.metadata, {
           source: 'upload',
           assetTypeExplicit: currentImageMetadata.source === 'upload'
             ? currentImageMetadata.assetTypeExplicit
@@ -1129,19 +1205,34 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           width: undefined,
           height: undefined,
           annotations: [],
-        }),
+        })
+      if (variant) {
+        const url = persistedMediaRef(uploaded)
+        const updated = await this.saveAssetVariant(assetId, variant.id, {
+          images: [url, ...variant.images.filter(image => image !== url)], metadata,
+        })
+        notice.success(tr('资产图片已更新'))
+        return updated
+      }
+      const updated = (await api.updateAsset(assetId, {
+        main_image: persistedMediaRef(uploaded), metadata,
       })).data
       this.assets = this.assets.map(item => item.id === updated.id ? updated : item)
       this.rebuildGraph()
       notice.success(tr('资产图片已更新'))
       return updated
     },
-    async updateAssetImageMetadata(assetId: number, patch: { width?: number; height?: number }) {
+    async updateAssetImageMetadata(assetId: number, patch: { width?: number; height?: number }, variantId?: number) {
       const asset = this.assets.find(item => item.id === assetId)
       if (!asset) return null
       const next = Object.fromEntries(Object.entries(patch)
         .filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0))
       if (!Object.keys(next).length) return asset
+      if (variantId !== undefined) {
+        const variant = asset.variants?.find(item => item.id === variantId)
+        if (!variant) return null
+        return await this.saveAssetVariant(assetId, variantId, { metadata: patchAssetImageMediaMetadata(variant.metadata, next) })
+      }
       const updated = (await api.updateAsset(assetId, {
         metadata: patchAssetImageMediaMetadata(asset.metadata, next),
       })).data
@@ -1149,9 +1240,18 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.rebuildGraph()
       return updated
     },
-    async saveAssetImageAnnotations(assetId: number, annotations: ImageAnnotation[]) {
+    async saveAssetImageAnnotations(assetId: number, annotations: ImageAnnotation[], variantId?: number) {
       const asset = this.assets.find(item => item.id === assetId)
       if (!asset) return null
+      if (variantId !== undefined) {
+        const variant = asset.variants?.find(item => item.id === variantId)
+        if (!variant) return null
+        const updated = await this.saveAssetVariant(assetId, variantId, {
+          metadata: patchAssetImageMediaMetadata(variant.metadata, { annotations: cloneValue(annotations) }),
+        })
+        notice.success(tr('图片标注已保存'))
+        return updated
+      }
       const updated = (await api.updateAsset(assetId, {
         metadata: patchAssetImageMediaMetadata(asset.metadata, {
           annotations: cloneValue(annotations),
@@ -1162,12 +1262,27 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       notice.success(tr('图片标注已保存'))
       return updated
     },
+    async saveAssetVariant(assetId: number, variantId: number, patch: Partial<AssetVariant>) {
+      const current = this.assets.find(asset => asset.id === assetId)?.variants?.find(variant => variant.id === variantId)
+      const updated = (await api.updateAssetVariant(assetId, variantId, patch,
+        patch.base_traits !== undefined ? current?.base_traits : undefined)).data
+      this.assets = this.assets.map(asset => asset.id === assetId
+        ? { ...asset, variants: (asset.variants || []).map(variant => variant.id === variantId ? updated : variant) }
+        : asset)
+      this.rebuildGraph()
+      return updated
+    },
     async createAssetVariant(assetId: number, data: { name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; metadata?: Record<string, unknown> }) {
+      const parent = this.nodeByKey(assetNodeKey(assetId))
+      const position = { x: parent?.position.x ?? 480,
+        y: Math.max(0, ...this.nodes.filter(item => item.kind === 'asset').map(item => item.position.y + (item.size?.height || 320))) + 64 }
       const created = (await api.createAssetVariant(assetId, data)).data
       this.assets = this.assets.map(asset => asset.id === assetId
         ? { ...asset, variants: [...(asset.variants || []), created] }
         : asset)
       this.rebuildGraph()
+      const added = this.nodeByKey(assetNodeKey(assetId, created.id))
+      if (added) { added.position = position; this.selectNode(added.key); this.persistLayout() }
       notice.success(tr('已新增形态「{p0}」', { p0: created.name }))
       return created
     },
@@ -1179,8 +1294,8 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       this.rebuildGraph()
       notice.success(tr('资产形态已删除'))
     },
-    assetGenerationReferenceImages(assetId: number) {
-      const target = this.nodes.find(item => item.kind === 'asset' && item.id === assetId)
+    assetGenerationReferenceImages(assetId: number, variantId?: number) {
+      const target = this.nodeByKey(assetNodeKey(assetId, variantId))
       if (!target) return []
       const urls = this.edges
         .filter(item => item.type === 'asset_reference' && item.target === target.key)
@@ -1189,7 +1304,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           const source = this.nodeByKey(item.source)
           if (!source) return []
           if (source.kind === 'asset') {
-            const sourceAsset = source.data.asset as Asset | undefined
+            const sourceAsset = assetForWorkbenchNode(source)
             return sourceAsset ? assetSelectedImageCandidates(sourceAsset).map(image => image.url) : []
           }
           if (source.kind === 'digital_human') {
@@ -1205,7 +1320,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const controller = this.beginPendingWork()
       if (!this.busyAssetIds.includes(assetId)) this.busyAssetIds.push(assetId)
       try {
-        const referenceImages = this.assetGenerationReferenceImages(assetId)
+        const referenceImages = this.assetGenerationReferenceImages(assetId, variantId)
         let task = (await api.generateAsset(assetId, variantId, referenceImages)).data
         if (!terminal.has(task.status)) {
           task = await pollUntilTerminal(

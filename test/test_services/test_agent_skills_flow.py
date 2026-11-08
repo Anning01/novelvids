@@ -92,6 +92,9 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
                 "story_outline": words,
                 "key_characters": [],
             }
+        elif skill == 'structured' and output_type.__name__ == 'ChapterCast':
+            # The existing cast-reading phase is mocked separately from visual design.
+            payload = {'characters': []}
         elif skill == "assets":
             payload = {
                 "persons": [

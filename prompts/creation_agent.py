@@ -10,11 +10,13 @@ from prompts.storyboard import StoryboardEntity
 from prompts.labels import prompt_label
 
 
-def render_creation_request(message: str, current_selection: dict | None = None) -> str:
-    """Keep the user instruction isolated; current facts are read once through the tool."""
+def render_creation_request(message: str, current_selection: dict | None = None, preflight: dict | None = None) -> str:
+    """Keep server facts separate from the user's instruction and the stable system prefix."""
     payload = {"user_request": message}
     if current_selection is not None:
         payload["current_selection"] = current_selection
+    if preflight is not None:
+        payload['preflight_context'] = preflight
     return json.dumps(payload, ensure_ascii=False)
 
 

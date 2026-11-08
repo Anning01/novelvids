@@ -274,11 +274,11 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     strategy=strategy,
                 )
             # 镜头实际引用的资产 ID，持久化到 scene.assets（与画布工作流共用同一份引用数据）
-            referenced_asset_ids = [
+            referenced_asset_ids = list(dict.fromkeys(
                 entity.asset_id
                 for entity in referenced_entities(shot, entities or [])
                 if entity.asset_id is not None
-            ]
+            ))
 
             # 创建 Scene 记录
             scene = await objects.create_scene(chapter.id, after_id=None, values=dict(

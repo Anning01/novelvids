@@ -5,7 +5,7 @@ import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionOption } from '../components/materialMentionTypes'
 import type { ImageAnnotation, WorkbenchNode } from '../types/workbenchTypes'
 import { CheckCircle2, Download, ImageUp, Layers3, Library, LoaderCircle, Maximize2, Minimize2, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
-import { computed, inject, markRaw, ref, watch } from 'vue'
+import { computed, inject, markRaw, nextTick, ref, watch } from 'vue'
 import type { Asset, DigitalHuman, ImageGenerationModel } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { downloadFile } from '@/shared/downloadFile'
@@ -29,6 +29,9 @@ import {
   assetImageMediaMetadata,
   assetImageCandidates,
   assetSelectedImageCandidates,
+  assetVariantView,
+  assetForWorkbenchNode,
+  assetNodeKey,
   isReusableAssetPlaceholder,
   normalizeAssetConfig,
   patchAssetImageMediaMetadata,
@@ -69,13 +72,16 @@ const digitalHumanPickerOpen = ref(false)
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const variantToolbarOpen = ref(false)
 const reusableAssetPickerOpen = ref(false)
-const selectedVariantValue = ref('base')
+const selectedVariantId = computed(() => typeof props.data.variant_id === 'number' ? props.data.variant_id : undefined)
+const selectedVariantValue = computed(() => selectedVariantId.value === undefined ? 'base' : String(selectedVariantId.value))
+const selectedVariant = computed(() => asset.value.variants?.find(item => item.id === selectedVariantId.value))
+const activeAsset = computed(() => assetVariantView(asset.value, selectedVariantId.value))
 const addingVariant = ref(false)
 const variantName = ref('')
 const creatingVariant = ref(false)
 const reusablePlaceholder = computed(() => isReusableAssetPlaceholder(asset.value))
 
-watch(asset, value => {
+watch(activeAsset, value => {
   assetType.value = value.asset_type
   const media = assetImageMediaMetadata(value)
   assetTypeExplicit.value = media.source !== 'upload' || media.assetTypeExplicit === true
@@ -86,15 +92,11 @@ watch(asset, value => {
   if (!imageModelOptions.value.some(option => option.value === config.value.modelConfigId)) {
     config.value.modelConfigId = imageModelOptions.value[0]?.value ?? null
   }
-  if (
-    selectedVariantValue.value !== 'base'
-    && !value.variants?.some(variant => String(variant.id) === selectedVariantValue.value)
-  ) selectedVariantValue.value = 'base'
 }, { immediate: true })
-watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (asset.value.base_traits || '') }))
+watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (activeAsset.value.base_traits || '') }))
 
 watch(projectDefaults, value => {
-  config.value = normalizeAssetConfig(asset.value, value)
+  config.value = normalizeAssetConfig(activeAsset.value, value)
 }, { deep: true })
 
 watch(imageModelOptions, options => {
@@ -106,10 +108,20 @@ watch(imageModelOptions, options => {
 const busy = computed(() => store.busyAssetIds.includes(asset.value.id))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
 const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
-const imageMetadata = computed(() => assetImageMediaMetadata(asset.value))
+const imageMetadata = computed(() => assetImageMediaMetadata(activeAsset.value))
+watch(() => [selectedVariantValue.value, activeAsset.value.main_image], () => {
+  loadedImageWidth.value = 0
+  loadedImageHeight.value = 0
+  loadedGalleryImageSizes.value = {}
+  imageGalleryExpanded.value = false
+  annotationOpen.value = false
+})
 const assetName = computed(() => nickname.value.trim() || asset.value.canonical_name)
-const persistedAssetImages = computed(() => assetImageCandidates(asset.value))
+const nodeTitle = computed(() => selectedVariant.value ? `${assetName.value}#${selectedVariant.value.name}` : assetName.value)
+const titleValue = computed({ get: () => nodeTitle.value, set: (value: string) => { if (selectedVariantId.value === undefined) nickname.value = value } })
+const persistedAssetImages = computed(() => assetImageCandidates({ ...activeAsset.value, variants: [] }))
 const selectedDigitalHumanImage = computed(() => {
+  if (selectedVariantId.value !== undefined) return null
   const url = config.value.digitalHumanPreviewUrl
   if (!url) return null
   const persisted = persistedAssetImages.value.find(image => image.url === url)
@@ -132,7 +144,7 @@ const assetImages = computed(() => {
   return values.map((image, displayIndex) => ({
     ...image,
     displayIndex,
-    isMain: image.url === asset.value.main_image,
+    isMain: image.url === activeAsset.value.main_image,
   }))
 })
 const primaryImage = computed(() => (
@@ -140,7 +152,7 @@ const primaryImage = computed(() => (
   || assetImages.value[0]
   || null
 ))
-const hasImagePreview = computed(() => Boolean(asset.value.main_image))
+const hasImagePreview = computed(() => Boolean(activeAsset.value.main_image))
 const hasMultipleImages = computed(() => assetImages.value.length > 1)
 const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
 const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
@@ -156,8 +168,8 @@ const defaultVisualImageStyle = computed(() => ({
 }))
 const annotations = computed(() => imageMetadata.value.annotations || [])
 const imagePixelSize = computed(() => {
-  const width = imageMetadata.value.width || loadedImageWidth.value
-  const height = imageMetadata.value.height || loadedImageHeight.value
+  const width = loadedImageWidth.value || imageMetadata.value.width || 0
+  const height = loadedImageHeight.value || imageMetadata.value.height || 0
   return width > 0 && height > 0 ? `${Math.round(width)} × ${Math.round(height)}` : ''
 })
 function assetImageAspectRatio(image: { key: string; url: string } | null | undefined) {
@@ -165,8 +177,8 @@ function assetImageAspectRatio(image: { key: string; url: string } | null | unde
   const loaded = loadedGalleryImageSizes.value[image.key]
   if (loaded?.width && loaded.height) return `${loaded.width}:${loaded.height}`
   if (image.key === primaryImage.value?.key) {
-    const width = imageMetadata.value.width || loadedImageWidth.value
-    const height = imageMetadata.value.height || loadedImageHeight.value
+    const width = loadedImageWidth.value || imageMetadata.value.width || 0
+    const height = loadedImageHeight.value || imageMetadata.value.height || 0
     if (width > 0 && height > 0) return `${width}:${height}`
   }
   return config.value.aspectRatio
@@ -193,8 +205,8 @@ const imageDownloadFilename = computed(() => {
     ? 'webp'
     : imageMetadata.value.mimeType?.includes('jpeg')
       ? 'jpg'
-      : asset.value.main_image?.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || 'png'
-  const safeName = (nickname.value.trim() || asset.value.canonical_name || `asset-${asset.value.id}`)
+      : activeAsset.value.main_image?.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || 'png'
+  const safeName = [nickname.value.trim() || asset.value.canonical_name || `asset-${asset.value.id}`, selectedVariant.value?.name].filter(Boolean).join(' · ')
     .replace(/[\\/:*?"<>|]+/g, '-')
   return `${safeName}.${extension}`
 })
@@ -206,13 +218,12 @@ const variantOptions = computed(() => [
     label: tr('{p0} · {p1} 图', { p0: variant.name, p1: variant.images.length }),
   })),
 ])
-const selectedVariantId = computed(() => selectedVariantValue.value === 'base' ? undefined : Number(selectedVariantValue.value))
 const referenceEdges = computed(() => store.edges
   .filter(edge => edge.type === 'asset_reference' && edge.target === props.id)
   .sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id))
 function assetReferencePreview(node: WorkbenchNode) {
   if (node.kind === 'asset') {
-    const referenceAsset = node.data.asset as Asset | undefined
+    const referenceAsset = assetForWorkbenchNode(node)
     const image = referenceAsset
       ? assetSelectedImageCandidates(referenceAsset).at(0)
       : undefined
@@ -239,7 +250,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
         : source.kind === 'digital_human' ? 'person' as const : undefined,
     }
     if (source.kind !== 'asset') return [base]
-    const selectedImages = assetSelectedImageCandidates(source.data.asset as Asset)
+    const selectedImages = assetSelectedImageCandidates(assetForWorkbenchNode(source)!)
     if (selectedImages.length <= 1) return [base]
     return selectedImages.map(image => ({
       ...base,
@@ -329,6 +340,13 @@ async function save() {
   try {
     const nextConfig = normalizedDraftConfig()
     config.value = nextConfig
+    if (selectedVariantId.value !== undefined) {
+      await store.saveAssetVariant(asset.value.id, selectedVariantId.value, {
+        description: description.value, base_traits: prompt.value,
+        metadata: patchAssetWorkbenchConfig(selectedVariant.value?.metadata, nextConfig),
+      })
+      return
+    }
     await store.saveAsset(asset.value.id, {
       asset_type: assetType.value,
       canonical_name: nickname.value.trim() || asset.value.canonical_name,
@@ -346,8 +364,9 @@ async function save() {
 
 async function generate() {
   if (!canGenerate.value) return
+  const variantId = selectedVariantId.value
   await save()
-  await store.generateAsset(asset.value.id, selectedVariantId.value)
+  await store.generateAsset(asset.value.id, variantId)
 }
 
 async function createVariant() {
@@ -359,10 +378,10 @@ async function createVariant() {
       name: nextName,
       description: description.value,
       base_traits: prompt.value,
-      chapter_numbers: store.chapter?.number ? [store.chapter.number] : [],
+      chapter_numbers: [],
       metadata: { workbench: { ...config.value } },
     })
-    selectedVariantValue.value = String(created.id)
+    await focusVariant(String(created.id))
     variantName.value = ''
     addingVariant.value = false
   } finally {
@@ -374,7 +393,14 @@ async function deleteSelectedVariant() {
   const variantId = selectedVariantId.value
   if (!variantId) return
   await store.deleteAssetVariant(asset.value.id, variantId)
-  selectedVariantValue.value = 'base'
+}
+
+async function focusVariant(value: string) {
+  const key = assetNodeKey(asset.value.id, value === 'base' ? undefined : Number(value))
+  store.selectNode(key)
+  await nextTick()
+  if (promptEditor) await promptEditor.focusReference(key)
+  else store.selectNode(key)
 }
 
 registerWorkbenchPromptAction(props.id, {
@@ -460,10 +486,13 @@ function addMaterialReference(material: MaterialMentionOption, nextPrompt: strin
 
 async function setMainImage(url: string) {
   imageGalleryExpanded.value = false
-  if (changingMainImage.value || url === asset.value.main_image) return
+  if (changingMainImage.value || url === activeAsset.value.main_image) return
   changingMainImage.value = true
   try {
-    await store.setAssetMainImage(asset.value.id, url)
+    if (selectedVariantId.value !== undefined) {
+      const images = selectedVariant.value?.images || []
+      await store.saveAssetVariant(asset.value.id, selectedVariantId.value, { images: [url, ...images.filter(image => image !== url)] })
+    } else await store.setAssetMainImage(asset.value.id, url)
   } finally {
     changingMainImage.value = false
   }
@@ -507,7 +536,7 @@ async function replaceImage(event: Event) {
   if (!file || uploadingImage.value) return
   uploadingImage.value = true
   try {
-    await store.replaceAssetImage(asset.value.id, file)
+    await store.replaceAssetImage(asset.value.id, file, selectedVariantId.value)
   } catch (error) {
     notice.error(error instanceof Error ? error.message : tr('资产图片上传失败'))
   } finally {
@@ -523,19 +552,19 @@ function captureImageDimensions(event: Event) {
   void store.updateAssetImageMetadata(asset.value.id, {
     width: image.naturalWidth,
     height: image.naturalHeight,
-  })
+  }, selectedVariantId.value)
 }
 
 async function saveAnnotations(next: ImageAnnotation[]) {
-  await store.saveAssetImageAnnotations(asset.value.id, next)
+  await store.saveAssetImageAnnotations(asset.value.id, next, selectedVariantId.value)
   annotationOpen.value = false
 }
 
 async function downloadImage() {
-  if (!asset.value.main_image || downloadingImage.value) return
+  if (!activeAsset.value.main_image || downloadingImage.value) return
   downloadingImage.value = true
   try {
-    await downloadFile(asset.value.main_image, imageDownloadFilename.value)
+    await downloadFile(activeAsset.value.main_image, imageDownloadFilename.value)
   } catch (error) {
     notice.error(error instanceof Error ? error.message : tr('资产图片下载失败'))
   } finally {
@@ -559,7 +588,7 @@ async function downloadGalleryImage(image: { key: string; url: string }) {
 
 async function chooseDigitalHuman(item: DigitalHuman) {
   const previousPreviewUrl = config.value.digitalHumanPreviewUrl
-  const wasPrimary = Boolean(previousPreviewUrl && asset.value.main_image === previousPreviewUrl)
+  const wasPrimary = Boolean(previousPreviewUrl && activeAsset.value.main_image === previousPreviewUrl)
   config.value.digitalHumanAssetId = item.asset_id
   config.value.digitalHumanPreviewUrl = item.image_url
   digitalHumanPickerOpen.value = false
@@ -569,14 +598,18 @@ async function chooseDigitalHuman(item: DigitalHuman) {
 
 async function clearDigitalHuman() {
   const previousPreviewUrl = config.value.digitalHumanPreviewUrl
-  const wasPrimary = Boolean(previousPreviewUrl && asset.value.main_image === previousPreviewUrl)
+  const wasPrimary = Boolean(previousPreviewUrl && activeAsset.value.main_image === previousPreviewUrl)
   const generated = persistedAssetImages.value.find(image => image.url !== previousPreviewUrl)
   config.value.digitalHumanAssetId = ''
   config.value.digitalHumanPreviewUrl = ''
   await save()
   if (wasPrimary) {
     if (generated) await setMainImage(generated.url)
-    else await store.setAssetMainImage(asset.value.id, null)
+    else if (selectedVariantId.value !== undefined) {
+      await store.saveAssetVariant(asset.value.id, selectedVariantId.value, {
+        images: (selectedVariant.value?.images || []).filter(image => image !== previousPreviewUrl),
+      })
+    } else await store.setAssetMainImage(asset.value.id, null)
   }
 }
 
@@ -602,7 +635,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
       :data="{
         ...data,
         kind: 'asset',
-        title: nickname || asset.canonical_name,
+        title: nodeTitle,
         status: busy ? 'running' : 'ready',
         body_flush: hasImagePreview || showDefaultVisualImage,
         body_draggable: true,
@@ -620,13 +653,15 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           :placeholder="tr('选择资产类型')"
           :title="tr('选择资产类型')"
           :fallback-icon="assetTypeIconFor(assetTypeValue)"
+          :disabled="selectedVariantId !== undefined"
           icon-only
         />
       </template>
       <template #title>
         <input
           class="workbench-node-frame__title-input nodrag"
-          v-model="nickname"
+          v-model="titleValue"
+          :disabled="selectedVariantId !== undefined"
           :aria-label="tr('资产昵称')"
           maxlength="80"
           @focusout="save"
@@ -650,8 +685,8 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
         <button
           type="button"
           :disabled="uploadingImage"
-          :aria-label="asset.main_image ? tr('替换资产图片') : tr('上传资产图片')"
-          :title="asset.main_image ? tr('替换图片') : tr('上传图片')"
+          :aria-label="activeAsset.main_image ? tr('替换资产图片') : tr('上传资产图片')"
+          :title="activeAsset.main_image ? tr('替换图片') : tr('上传图片')"
           @click="imageFileInput?.click()"
         >
           <LoaderCircle v-if="uploadingImage" class="workbench-node-context__loading-icon" :size="16" aria-hidden="true" />
@@ -667,11 +702,11 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
         >
           <Layers3 :size="16" aria-hidden="true" />
         </button>
-        <button v-if="asset.main_image" type="button" :aria-label="tr('标注资产图片')" :title="tr('标注图片')" @click="annotationOpen = true">
+        <button v-if="activeAsset.main_image" type="button" :aria-label="tr('标注资产图片')" :title="tr('标注图片')" @click="annotationOpen = true">
           <Pencil :size="16" aria-hidden="true" />
         </button>
         <button
-          v-if="asset.main_image"
+          v-if="activeAsset.main_image"
           type="button"
           :disabled="downloadingImage"
           :aria-label="tr('下载图片，保存为 {p0}', { p0: imageDownloadFilename })"
@@ -687,7 +722,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             <button type="button" :aria-label="tr('关闭衍生形态管理')" @click="variantToolbarOpen = false"><X :size="14" aria-hidden="true" /></button>
           </header>
           <div class="workbench-asset-variant-popover__row">
-            <WorkbenchSelect v-model="selectedVariantValue" :options="variantOptions" :label="tr('视觉形态')" />
+            <WorkbenchSelect :model-value="selectedVariantValue" :options="variantOptions" :label="tr('视觉形态')" @update:model-value="focusVariant" />
             <button type="button" :aria-label="tr('新增视觉形态')" :title="tr('新增形态')" @click="addingVariant = !addingVariant"><Plus :size="14" aria-hidden="true" /></button>
             <button v-if="selectedVariantId" type="button" class="is-danger" :aria-label="tr('删除当前视觉形态')" :title="tr('删除当前形态')" @click="deleteSelectedVariant"><Trash2 :size="14" aria-hidden="true" /></button>
           </div>
@@ -714,7 +749,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           ><img :src="image.thumbnailUrl || image.url" alt="" draggable="false"></span>
           <img
             class="workbench-uploaded-image-preview"
-            :src="asset.main_image_thumbnail || asset.main_image"
+            :src="activeAsset.main_image"
             :alt="tr('{p0}预览', { p0: assetName })"
             draggable="false"
             loading="lazy"
@@ -765,7 +800,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
               @keydown.enter.prevent="setMainImage(image.url)"
               @keydown.space.prevent="setMainImage(image.url)"
             >
-              <img :src="image.thumbnailUrl || image.url" :alt="`${assetName}${imageRoleLabel(image)}`" draggable="false" loading="lazy" decoding="async" @load="captureGalleryImageSize(image, $event)">
+              <img :src="image.url" :alt="`${assetName}${imageRoleLabel(image)}`" draggable="false" loading="lazy" decoding="async" @load="captureGalleryImageSize(image, $event)">
               <span class="workbench-asset-gallery__label">
                 <CheckCircle2 v-if="imageIsPrimary(image)" :size="13" aria-hidden="true" />
                 {{ imageRoleLabel(image) }}
@@ -788,9 +823,9 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
         <AssetDefaultImage
           v-if="showDefaultVisualImage"
           :icon="assetTypeIconFor(assetTypeValue)"
-          :preview-url="config.digitalHumanPreviewUrl"
-          :preview-label="config.digitalHumanPreviewUrl ? tr('数字人参考') : undefined"
-          :title="assetName"
+          :preview-url="selectedVariantId === undefined ? config.digitalHumanPreviewUrl : undefined"
+          :preview-label="selectedVariantId === undefined && config.digitalHumanPreviewUrl ? tr('数字人参考') : undefined"
+          :title="selectedVariant ? `${assetName} · ${selectedVariant.name}` : assetName"
           :type-label="assetTypeLabel"
           :style="defaultVisualImageStyle"
         />
@@ -831,7 +866,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
     />
     <ImageAnnotationDialog
       :open="annotationOpen"
-      :image-url="asset.main_image || ''"
+      :image-url="activeAsset.main_image || ''"
       :model-value="annotations"
       @close="annotationOpen = false"
       @save="saveAnnotations"

@@ -79,7 +79,7 @@ class PromptEditService:
 
         await scene.fetch_related("chapter__novel", "assets__variants")
         selected = normalize_selected_variant_ids((scene.metadata or {}).get("asset_variant_ids"))
-        return entities_for_assets(scene.assets, scene.chapter.number, selected)
+        return entities_for_assets(scene.assets, scene.chapter.number, selected, scene.prompt)
 
     async def _replay(self, tool_call_id: str, request_hash: str):
         change = await PromptChange.get_or_none(task_id=self.task_id, tool_call_id=tool_call_id, novel_id=self.novel_id)

@@ -361,15 +361,14 @@ class VideoController(CRUDBase[Video, dict, dict]):
         prompt_language = await generation_language()
         prompt = normalize_last_frame_continuity_prompt(scene.prompt or "", prompt_language)
         metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
-        subjects = await resolve_assets(
-            prompt,
-            novel_id,
-            chapter_number=scene.chapter.number,
-            selected_asset_ids=[asset.id for asset in scene.assets],
-            selected_variant_ids=normalize_selected_variant_ids(
-                metadata.get("asset_variant_ids")
-            ),
-        )
+        try:
+            subjects = await resolve_assets(
+                prompt, novel_id, chapter_number=scene.chapter.number,
+                selected_asset_ids=[asset.id for asset in scene.assets],
+                selected_variant_ids=normalize_selected_variant_ids(metadata.get("asset_variant_ids")),
+            )
+        except ValueError as error:
+            raise HTTPException(409, detail=str(error)) from None
         logger.info(
             "Video resolve_assets: scene_id=%s, novel_id=%s, prompt_len=%d, subject_count=%d",
             scene.id, novel_id, len(prompt), len(subjects),

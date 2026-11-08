@@ -78,6 +78,7 @@ async def check_candidate(execution, skill, facts, candidate, context, attempt):
     except ValueError:
         # Old completed reports predate schema feedback; repair once under a
         # different key without altering their original receipt or charging it again.
+        await execution.claim_repair('creative_check', 'review_schema')
         report = await execution._generate('creative_check', {**review_facts,
             'segment': review_facts['segment'] + ':schema-repair:1'}, CreativeCheck, output_validator=validate_report)
         await validate_report(report)
@@ -137,6 +138,7 @@ async def generate_checked(execution, skill, facts, output_type, options, contex
             if shot.sequence not in targets and any(abs(shot.sequence - number) == 1 for number in targets)]
         repaired_options['additional_instructions'] = options.get('additional_instructions', '') + '\n' + semantic_repair(execution.language)
     if targets is None or targets:
+        await execution.claim_repair(skill, 'creative_requirements')
         candidate = await execution._generate(skill, repaired_facts, output_type, **repaired_options)
         report = await check_candidate(execution, skill, facts, candidate, context, 1)
     # Editorial findings must not discard a usable text draft. Structural,

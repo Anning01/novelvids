@@ -67,9 +67,20 @@ export interface AgentActivityStep {
 }
 
 export interface AgentProgress {
+  recovery?: AgentRecovery | null
   activity?: AgentActivityStep[]
   started_at?: string | null
   finished_at?: string | null
+}
+
+export interface AgentRecovery {
+  failure_step: string | null
+  error_code: string | null
+  reusable_count: number
+  pending_count: number
+  responses_saved: number
+  can_resume: boolean
+  draft_id?: number | null
 }
 
 export interface PendingProduction {
@@ -133,6 +144,7 @@ export interface ProductionIntent {
 }
 
 export interface AgentRunInput {
+  resume_from_task_id?: string
   plan_confirmation?: { task_id: string; revision: string }
   production_intents?: ProductionIntent[]
   request_id: string
