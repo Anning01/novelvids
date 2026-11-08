@@ -55,7 +55,8 @@ async function saveNickname() {
   if (!nickname || savingNickname.value) return
   savingNickname.value = true
   try {
-    auth.user = (await api.updateProfile(nickname)).data
+    const updated = (await api.updateProfile(nickname)).data
+    if (auth.user?.id === updated.id) auth.user.nickname = updated.nickname
     editingNickname.value = false
     notice.success(tr('昵称已更新'))
   } catch (error) {
@@ -72,7 +73,8 @@ async function changeAvatar(event: Event) {
   if (!file || uploadingAvatar.value) return
   uploadingAvatar.value = true
   try {
-    auth.user = (await api.uploadAvatar(file)).data
+    const updated = (await api.uploadAvatar(file)).data
+    if (auth.user?.id === updated.id) auth.user.avatar_url = updated.avatar_url
     notice.success(tr('头像已更新'))
   } catch (error) {
     notice.error(error instanceof Error ? error.message : tr('头像上传失败'))

@@ -78,6 +78,28 @@ describe('ProfilePage 用户中心', () => {
     wrapper.unmount()
   })
 
+  it('上传头像的旧资料响应不会覆盖刚保存的新昵称', async () => {
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    const user = {id:1,username:'qiling-profile',nickname:'微信用户',avatar_url:'',is_super_admin:false}
+    auth.$patch({enabled:true,token:'t',user})
+    vi.spyOn(api,'me').mockResolvedValue({data:{user,memberships:[]}} as never)
+    vi.spyOn(api,'updateProfile').mockResolvedValue({data:{...user,nickname:'新昵称'}} as never)
+    vi.spyOn(api,'uploadAvatar').mockResolvedValue({data:{...user,avatar_url:'/media/new.png'}} as never)
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+    await wrapper.get('[aria-label="修改昵称"]').trigger('click')
+    await wrapper.get('input[aria-label="昵称"]').setValue('新昵称')
+    await wrapper.get('form.profile-nickname-form').trigger('submit')
+    await flushPromises()
+    const input = wrapper.get('input[aria-label="选择头像图片"]')
+    Object.defineProperty(input.element,'files',{configurable:true,value:[new File(['image'],'avatar.png',{type:'image/png'})]})
+    await input.trigger('change')
+    await flushPromises()
+    expect(auth.user).toMatchObject({nickname:'新昵称',avatar_url:'/media/new.png'})
+    wrapper.unmount()
+  })
+
   it('展示昵称、历史花费、注册时间与团队信息', async () => {
     vi.spyOn(api, 'me').mockResolvedValue({
       data: {
