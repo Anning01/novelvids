@@ -12,7 +12,9 @@ export async function runVideoGenerationQueue<T>(
   const worker = async () => {
     while (nextIndex < items.length) {
       const item = items[nextIndex++]
-      if (item !== undefined && await generate(item)) completedCount += 1
+      if (item === undefined) continue
+      if (await generate(item)) completedCount += 1
+      else if (sequential) return
     }
   }
   await Promise.all(Array.from({ length: workerCount }, worker))

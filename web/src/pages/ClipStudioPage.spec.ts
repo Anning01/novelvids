@@ -110,3 +110,32 @@ it('distinguishes personal spending limits from team balance', async () => {
   expect(wrapper.get('.start-notice-actions a').text()).toBe('查看我的额度')
   expect(wrapper.get('.studio-start-notice').text()).not.toContain('充值')
 })
+
+it('does not reload the session when removing only the auto-start query', async () => {
+  const {wrapper,router} = await render(true)
+  expect(router.currentRoute.value.query.start).toBeUndefined()
+  expect(clipApi.session).toHaveBeenCalledTimes(1)
+  expect(wrapper.find('.studio-layout').exists()).toBe(true)
+})
+
+it('shows the workspace while result history is still loading', async () => {
+  let resolveHistory!: (value: Awaited<ReturnType<typeof api.videoGenerationHistory>>) => void
+  vi.mocked(api.videoGenerationHistory).mockImplementationOnce(() => new Promise(resolve => { resolveHistory = resolve }))
+  const {wrapper} = await render()
+  expect(wrapper.find('.studio-layout').exists()).toBe(true)
+  expect(wrapper.find('[aria-label="创作助手"]').exists()).toBe(true)
+  expect(wrapper.text()).toContain(session.name)
+  resolveHistory(ok([]))
+  await flushPromises()
+})
+
+it('shows a retry action after the session request times out', async () => {
+  vi.mocked(clipApi.session).mockRejectedValueOnce(new DOMException('Timed out','TimeoutError'))
+  const {wrapper} = await render()
+  expect(wrapper.get('[role="alert"]').text()).toBe('片段读取超时，请重试')
+  expect(wrapper.text()).not.toContain('正在恢复创作')
+  await wrapper.findAll('button').find(button => button.text()==='重试')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.studio-layout').exists()).toBe(true)
+  expect(clipApi.start).not.toHaveBeenCalled()
+})

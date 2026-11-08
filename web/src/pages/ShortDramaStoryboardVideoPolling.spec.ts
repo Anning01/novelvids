@@ -66,6 +66,50 @@ async function render() {
   return { wrapper, router }
 }
 
+it.each([
+  ['供应商失败', { ...completed, status: 4, metadata: { error: '供应商拒绝' } }],
+  ['提交结果未知', { ...completed, status: 4, metadata: { error: '结果待核对', submission_uncertain: true } }],
+  ['视频成功但没有尾帧', completed],
+] as const)('stops sequential last-frame generation after %s', async (_label, result) => {
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
+  const first = { ...scene, metadata: {} }
+  const second = { ...scene, id: 110, sequence: 2, metadata: {} }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [first, second], assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...(id === first.id ? first : second), ...update } }) as never)
+  vi.mocked(api.generateVideo).mockResolvedValue({ data: result } as never)
+  const { wrapper } = await render()
+  wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
+    sceneIds: [109, 110], modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
+  })
+  await flushPromises()
+  expect(api.generateVideo).toHaveBeenCalledTimes(1)
+  expect(api.generateVideo).toHaveBeenCalledWith(109, 11, expect.objectContaining({ return_last_frame: true }))
+})
+
+it('submits the next continuity scene only after its tail-frame reference is ready', async () => {
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
+  const first = { ...scene, metadata: {} }
+  const second = { ...scene, id: 110, sequence: 2, metadata: {} }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [first, second], assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...(id === first.id ? first : second), ...update } }) as never)
+  const reference = { type: 'image', url: '/media/tail.png', name: '上一镜尾帧' }
+  vi.mocked(api.generateVideo).mockResolvedValueOnce({ data: { ...completed, metadata: {
+    last_frame_url: reference.url, last_frame_source: 'provider', last_frame_injected_scene_id: 110,
+    last_frame_reference: reference, last_frame_prompt_instruction: '【首帧衔接】\n首帧参考：@{参考图片:%2Fmedia%2Ftail.png}',
+  } } } as never).mockResolvedValueOnce({ data: { ...completed, scene_id: 110, metadata: {
+    last_frame_url: '/media/tail-2.png', last_frame_source: 'ffmpeg',
+  } } } as never)
+  const { wrapper } = await render()
+  wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
+    sceneIds: [109, 110], modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
+  })
+  await flushPromises()
+  expect(api.generateVideo).toHaveBeenCalledTimes(2)
+  expect(api.generateVideo).toHaveBeenNthCalledWith(2, 110, 11, expect.objectContaining({
+    return_last_frame: true, reference_media: [expect.objectContaining({ type: 'image', url: reference.url })],
+  }))
+})
+
 it('inherits project defaults for fresh chapters while respecting explicitly saved shot overrides', async () => {
   const defaults = { model_config_id: 11, resolution: '480p', aspect_ratio: '16:9', return_last_frame: true,
     auto_enhancement: { model_config_id: 8, resolution: '1080p' as const } }

@@ -45,12 +45,12 @@ class AgentSessions:
             raise HTTPException(404, localized_message('项目不存在'))
         return await AgentConversation.create(novel=novel, created_by=ctx.user.id if ctx.user else None, team_id=novel.team_id)
 
-    async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False) -> AgentConversation:
+    async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False, include_deleted_project: bool = False) -> AgentConversation:
         query = AgentConversation.filter(id=conversation_id, created_by=ctx.user.id if ctx.user else None)
         conversation = await (query if include_deleted else query.filter(deleted_at__isnull=True)).first()
         if conversation is None:
             raise HTTPException(404, localized_message('会话不存在'))
-        await ensure_novel_access(conversation.novel_id, ctx)
+        await ensure_novel_access(conversation.novel_id, ctx, include_deleted=include_deleted_project)
         return conversation
 
     async def set_deleted(self, conversation_id: int, ctx: AuthContext, *, deleted: bool) -> AgentConversation:
@@ -71,7 +71,7 @@ class AgentSessions:
         message = await AgentMessage.get_or_none(task_id=task_id, role="assistant")
         if message is None:
             raise HTTPException(404, localized_message('运行不存在'))
-        return await self.get(message.conversation_id, ctx), message
+        return await self.get(message.conversation_id, ctx, include_deleted_project=True), message
 
     async def validate_scope(self, novel_id: int, request: AgentRunRequest | PromptStatusRequest) -> None:
         if request.chapter_id and not await Chapter.filter(id=request.chapter_id, novel_id=novel_id).exists():

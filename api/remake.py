@@ -351,7 +351,7 @@ async def retry_source(
         raise RemakeError(404, "REMAKE_SOURCE_NOT_FOUND", "重制来源不存在")
     result = await remake_project_service.retry(
         source.id,
-        team_id=ctx.team_id,
+        team_id=source.team_id if ctx.is_super_admin and ctx.team_id is None else ctx.team_id,
         user_id=ctx.user.id if ctx.user else None,
     )
     task = await AiTask.get(id=result["task_id"])

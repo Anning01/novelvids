@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class RemakeVideoAnalysisError(RuntimeError):
-    """对外稳定且不包含供应商响应、Prompt 或密钥的模型错误。"""
+    """包含供应商/接口真实错误信息，且安全脱敏的模型错误。"""
 
     def __init__(
         self,
@@ -38,7 +38,11 @@ class RemakeVideoAnalysisError(RuntimeError):
     ) -> None:
         self.error_code = error_code
         self.user_message = message
-        super().__init__(localized_message("{p0}（错误代码：{p1}）", p0=localized_message(message), p1=error_code))
+        if error_code == ANALYSIS_ERROR_CODE or "（错误代码：" in message:
+            display_message = localized_message(message)
+        else:
+            display_message = localized_message("{p0}（错误代码：{p1}）", p0=localized_message(message), p1=error_code)
+        super().__init__(display_message)
         self.usage = usage or {}
 
 
@@ -77,7 +81,7 @@ class RemakeVideoAnalysisGateway:
         prompt: str,
         schema_name: str,
         response_schema: dict[str, Any],
-        context_builder: Callable[[int], str] | None = None,
+        context_builder: Callable[[int], str | dict[str, Any]] | None = None,
         on_completed: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> list[dict[str, Any]]:
         semaphore = asyncio.Semaphore(max(1, int(self.config.concurrency or 1)))
@@ -115,7 +119,7 @@ class RemakeVideoAnalysisGateway:
         prompt: str,
         schema_name: str,
         response_schema: dict[str, Any],
-        context: str = "",
+        context: str | dict[str, Any] = "",
         include_segment_metadata: bool = True,
     ) -> dict[str, Any]:
         started_at = self.clock()
@@ -130,9 +134,19 @@ class RemakeVideoAnalysisGateway:
             schema = RemakeAssets if schema_name == 'global_key_assets' else RemakeShot
             video_content = BinaryContent.from_data_uri(video_input['video_url']['url'])
             video_content.vendor_metadata = {'fps': video_input['video_url']['fps']}
-            result = await execution.generate('remake', {'segment': index, 'assets': context, 'output_kind': schema_name},
-                schema, model_config=self.config,
-                media=[video_content])
+            try:
+                result = await execution.generate(
+                    'remake',
+                    {'segment': index, 'assets': context, 'output_kind': schema_name},
+                    schema,
+                    model_config=self.config,
+                    media=[video_content],
+                )
+            except Exception as error:
+                self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='failed')
+                _log_provider_failure(error, model=str(self.config.model), schema_name=schema_name, attempt=1)
+                message, error_code = _provider_failure(error, index=index)
+                raise RemakeVideoAnalysisError(message, error_code=error_code, usage=dict(self.usage)) from None
             data = result.model_dump()
             if include_segment_metadata:
                 data.update(shot_index=index, file=path.name)
@@ -269,12 +283,48 @@ def _is_retryable(error: Exception) -> bool:
     return status_code in {408, 409, 429} or status_code >= 500
 
 
+def _extract_error_detail(error: Exception) -> str:
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        nested = body.get("error")
+        if isinstance(nested, dict) and nested.get("message"):
+            return str(nested["message"]).strip()
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+        if body.get("message"):
+            return str(body["message"]).strip()
+        if body.get("detail"):
+            return str(body["detail"]).strip()
+    msg = getattr(error, "message", None)
+    if isinstance(msg, str) and msg.strip():
+        return msg.strip()
+    from pydantic import ValidationError
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+    if isinstance(error, (ValidationError, UnexpectedModelBehavior)):
+        lines = [line.strip() for line in str(error).splitlines() if line.strip() and not line.startswith("For further information")]
+        if lines:
+            return "；".join(lines[:3])
+    text = str(error).strip()
+    if text:
+        return text
+    return type(error).__name__
+
+
+def _sanitize_error_detail(detail: str) -> str:
+    if not detail:
+        return ""
+    detail = re.sub(r"(?:ark|sk)-[a-zA-Z0-9_\-]{8,}", "***", detail)
+    detail = re.sub(r"Bearer\s+[a-zA-Z0-9_\-\.]{8,}", "Bearer ***", detail, flags=re.IGNORECASE)
+    detail = re.sub(r"secret-[^\s]+", "***", detail, flags=re.IGNORECASE)
+    return detail.strip()
+
+
 def _provider_failure(error: Exception, *, index: int) -> tuple[str, str]:
     status_code = getattr(error, "status_code", None)
     if status_code == 400:
         return localized_message('视频分析请求与当前模型能力不兼容'), "REMAKE_ANALYSIS_REQUEST_INVALID"
     if status_code in {401, 403}:
-        return localized_message('视频分析模型鉴权失败或尚未开通'), "REMAKE_ANALYSIS_AUTH_FAILED"
+        return localized_message('视频分析模型鉴权失败，请检查 API Key、访问白名单及模型权限'), "REMAKE_ANALYSIS_AUTH_FAILED"
     if status_code == 404:
         return localized_message('视频分析模型不存在或不可用'), "REMAKE_ANALYSIS_MODEL_NOT_FOUND"
     if status_code == 429:
@@ -284,6 +334,11 @@ def _provider_failure(error: Exception, *, index: int) -> tuple[str, str]:
     error_type = type(error).__name__.lower()
     if "connection" in error_type or "timeout" in error_type:
         return localized_message('无法连接视频分析服务'), "REMAKE_ANALYSIS_CONNECTION_FAILED"
+
+    raw_detail = _extract_error_detail(error)
+    detail = _sanitize_error_detail(raw_detail)
+    if detail:
+        return localized_message("第 {p0} 个视频片段分析失败：{p1}", p0=index, p1=detail), ANALYSIS_ERROR_CODE
     return localized_message("第 {p0} 个视频片段分析失败", p0=index), ANALYSIS_ERROR_CODE
 
 

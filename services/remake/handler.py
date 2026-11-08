@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from models.ai_task import AiTask
 from models.remake_source import RemakeSource
 from services.ai_task_executor import BaseTaskHandler
-from services.remake.gateway import RemakeVideoAnalysisError
+from services.remake.gateway import ANALYSIS_ERROR_CODE, RemakeVideoAnalysisError
 from services.remake.materializer import RemakeMediaMaterializer, remake_media_materializer
 from services.remake.persistence import RemakeResultPersistence, remake_result_persistence
 from services.remake.pipeline import RemakeDecompositionPipeline, remake_decomposition_pipeline
@@ -34,7 +34,13 @@ class RemakeDecompositionError(RuntimeError):
         usage: dict[str, int] | None = None,
     ) -> None:
         self.error_code = error_code
-        super().__init__(localized_message("{p0}（错误代码：{p1}）", p0=localized_message(message), p1=error_code))
+        if "（错误代码：" in message:
+            display_message = localized_message(message)
+        elif error_code in (REMAKE_DECOMPOSITION_ERROR_CODE, ANALYSIS_ERROR_CODE) and message != "重制视频拆解失败":
+            display_message = localized_message(message)
+        else:
+            display_message = localized_message("{p0}（错误代码：{p1}）", p0=localized_message(message), p1=error_code)
+        super().__init__(display_message)
         self.usage = usage or {}
 
 
@@ -82,6 +88,11 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                 config_id=request_params.get("model_config_id"),
                 team_id=request_params.get("team_id"),
             )
+            if execution and not (model_config.supports_tool_calls or model_config.supports_json_output):
+                raise RemakeDecompositionError(
+                    error_code="REMAKE_ANALYSIS_MODEL_TOOLS_REQUIRED",
+                    message=localized_message('当前视频理解模型需启用结构化 JSON 输出或多轮工具调用，请在模型配置中启用其中一项'),
+                )
             if task_id:
                 task_record = await AiTask.get_or_none(id=task_id)
                 if task_record is not None:
@@ -104,11 +115,14 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
             with TemporaryDirectory(prefix="remake-decomposition-") as temp_dir:
                 work_dir = Path(temp_dir)
                 source_path = await self.materializer.materialize(source, work_dir)
+                project = await source.novel
                 result = await self.pipeline.run(
                     source_path=source_path,
                     model_config=model_config,
                     work_dir=work_dir,
                     progress=report,
+                    storyboard_strategy=project.storyboard_strategy,
+                    aspect_ratio=project.aspect_ratio or '16:9',
                 )
                 async def persist():
                     summary = await self.persistence.persist(
@@ -131,7 +145,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
             await self._mark_failed(source)
             raise RemakeDecompositionError(
                 error_code=error.error_code,
-                message=error.user_message,
+                message=str(error),
                 usage=error.usage,
             ) from None
         except HTTPException as error:
@@ -141,11 +155,11 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                     error_code=REMAKE_MODEL_UNAVAILABLE_ERROR_CODE,
                     message=localized_message('未配置可用的重制拆解模型'),
                 ) from None
-            raise RemakeDecompositionError() from None
+            raise RemakeDecompositionError(message=error.detail or "重制视频拆解失败") from None
         except Exception as error:
             await self._mark_failed(source)
             raise RemakeDecompositionError(
-                usage=getattr(error, "usage", None) or {}
+                usage=getattr(error, "usage", None) or {},
             ) from None
 
     @staticmethod

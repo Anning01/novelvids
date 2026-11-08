@@ -84,12 +84,32 @@ def snapshot_skills() -> dict:
     return SkillSnapshot(revision=revision, contents=contents).model_dump()
 
 
-def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
+def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_kind: str | None = None) -> str:
+    remake_shots = skill == 'remake' and output_kind == 'professional_video_prompt_material'
+    remake_assets = skill == 'remake' and not remake_shots
     contract = ""
-    if skill == "assets":
+    if skill == "assets" or remake_assets:
         # Extraction writes final image prompts, so layout rules cannot be optional tool reads.
         contract = "\n" + snapshot.read("image")
-    if skill in {"assets", "editing", "image"}:
+    if remake_assets:
+        contract += "\n" + snapshot.read("assets")
+        contract += (
+            "\n重制的 global_key_assets 阶段只提取视频中的人物、场景和道具。"
+            "每个资产的 description 填写完整具体的视觉设计正文，不是剧情简介；"
+            "visual_fields 填写当前资产协议规定的字段值字典，键必须与协议 fields 完全一致，值为具体设计。"
+            "人物和群像必须逐项填写全部设计字段；场景和道具的 fields 为空时返回空字典，并在 description 写完整设计。"
+            "不要抄写固定任务模板、描述标题、字段行或结尾要求，系统按当前协议统一排版为完整生图提示词。"
+            "视频证据确定主体身份与外观；按项目 image_style 和 aspect_ratio 完成规范化资产设定。"
+        )
+    if remake_shots:
+        contract += '\n' + snapshot.read('storyboard')
+        contract += (
+            '\n本阶段只分析当前视频片段，按分镜结构字段返回画面、动作、机位、声音及连续时间轴。'
+            '输入资产目录仅用于识别与引用，不重新提取资产，不把资产图三视图或四宫格版式写进视频。'
+            '分镜 duration 必须使用输入 duration_seconds，片段内时间轴从零开始。'
+            '只返回结构字段，不自行撰写 prompt；系统使用工作台共用渲染器生成完整提示词。'
+        )
+    if skill in {"assets", "editing", "image"} or remake_assets:
         if "asset_contract" in snapshot.contents:
             specification = json.loads(snapshot.read("asset_contract")).get(language)
             if specification:
@@ -100,11 +120,11 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
                     "项目封面不适用资产协议，仍按封面任务生成。"
                     "\n资产输出协议：\n" + json.dumps(specification, ensure_ascii=False)
                 )
-    if skill == "storyboard" and "storyboard_contract" in snapshot.contents:
+    if (skill == "storyboard" or remake_shots) and "storyboard_contract" in snapshot.contents:
         from prompts.labels import prompt_label
         specification = json.loads(snapshot.read("storyboard_contract"))
         specification["sections"] = [prompt_label(section, language) for section in specification["sections"]]
-        contract = "\n输出协议（系统按以下栏目序列化结构内容，不单独生成 prompt）：\n" + json.dumps(specification, ensure_ascii=False)
+        contract += "\n输出协议（系统按以下栏目序列化结构内容，不单独生成 prompt）：\n" + json.dumps(specification, ensure_ascii=False)
     if skill in {"assets", "storyboard"} and "asset_lifecycle" in snapshot.contents:
         contract += "\n" + snapshot.read("asset_lifecycle")
     return (
@@ -117,8 +137,8 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str) -> str:
     )
 
 
-def render_skill(skill: str, language: str) -> str:
-    return instructions(SkillSnapshot.model_validate(snapshot_skills()), language, skill)
+def render_skill(skill: str, language: str, *, output_kind: str | None = None) -> str:
+    return instructions(SkillSnapshot.model_validate(snapshot_skills()), language, skill, output_kind=output_kind)
 
 
 def task_facts(value: object) -> str:

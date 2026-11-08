@@ -68,7 +68,7 @@ import { exportApi, type EnhancementModel } from '@/features/video-export/api'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
-import { injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
+import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
@@ -106,6 +106,7 @@ interface SceneVideoGenerationSettings {
   aspectRatio: string
   returnLastFrame: boolean
   autoEnhancement?: AutoEnhancement | null
+  continuityTargetSceneId?: number
 }
 
 interface AssetVoicePickerTarget {
@@ -1044,7 +1045,7 @@ function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
   return [...new Set(sources)]
 }
 
-function videoInputImageReferences(scene: Scene) {
+function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelConfig.value?.capabilities.max_reference_images ?? Infinity) {
   const draft = draftFor(scene)
   const selectedAssets = assets.value.filter(asset => draft.selectedAssetIds.includes(asset.id))
   return buildVideoInputImageReferences(
@@ -1056,6 +1057,7 @@ function videoInputImageReferences(scene: Scene) {
       imageUrls: selectedAssetReferenceImages(scene, asset),
     })),
     draft.referenceMedia,
+    maxImages,
   )
 }
 
@@ -1163,7 +1165,7 @@ function referenceLimitError(scene: Scene, model = selectedVideoModelConfig.valu
   if (!model || draftFor(scene).videoGenerationMode !== 'reference') return ''
   const draft = draftFor(scene)
   const referencedMedia = referencedVideoMedia(draft.prompt, draft.referenceMedia)
-  const imageCount = selectedAssetReferenceImageCount(scene) + referencedMedia.filter(item => item.type === 'image').length
+  const imageCount = videoInputImageReferences(scene, model.capabilities.max_reference_images).length
   const videos = referencedMedia.filter(item => item.type === 'video')
   const duration = videos.reduce((total, item) => total + (item.duration || 0), 0)
   if (imageCount > model.capabilities.max_reference_images) return tr('参考图片超过 {p0} 张（包含资产图）', { p0: model.capabilities.max_reference_images })
@@ -1199,7 +1201,7 @@ function inspectVideoFile(file: File): Promise<{ duration: number; width: number
 
 async function validateReferenceFiles(scene: Scene, files: File[], model: VideoGenerationModel) {
   const capabilities = model.capabilities
-  const existingImages = selectedAssetReferenceImageCount(scene) + draftFor(scene).referenceMedia.filter(item => item.type === 'image').length
+  const existingImages = draftFor(scene).referenceMedia.filter(item => item.type === 'image').length
   const existingVideos = draftFor(scene).referenceMedia.filter(item => item.type === 'video')
   const imageFiles = files.filter(file => capabilities.reference_image_formats.includes(fileExtension(file)))
   const videoFiles = files.filter(file => capabilities.reference_video_formats.includes(fileExtension(file)))
@@ -1262,7 +1264,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
-  if (combined.filter(item => item.type === 'image').length + selectedAssetReferenceImageCount(scene) > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
+  if (combined.filter(item => item.type === 'image').length > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
   if (videos.length > model.capabilities.max_reference_videos || videos.reduce((total, item) => total + (item.duration || 0), 0) > model.capabilities.reference_video_total_duration_max + 0.001) {
     notice.error(tr('参考视频数量或总时长超过当前模型限制'))
     return
@@ -1949,19 +1951,22 @@ async function generateVideo(
     const autoSetting = settings?.autoEnhancement === undefined ? draft.autoEnhancement : settings.autoEnhancement
     const autoStage = (result.metadata?.auto_enhancement as { stage?: string } | undefined)?.stage
     const enhancementCompleted = !autoSetting || autoStage === 'completed' || autoStage === 'skipped'
+    const continuityCompleted = !(settings?.returnLastFrame ?? draft.returnLastFrame)
+      || hasLastFrameContinuity(result, settings?.continuityTargetSceneId)
     if (completed) {
-      setSceneVideoError(scene.id)
+      setSceneVideoError(scene.id, continuityCompleted ? '' : tr('视频已生成，但尾帧衔接未完成，后续分镜已停止'))
       syncInjectedLastFrame(result)
     } else {
       setSceneVideoError(scene.id, sceneVideoError(scenes.value.find(item => item.id === scene.id) || scene))
     }
     if (showNotice) {
-      if (completed && !enhancementCompleted) notice.info(tr('视频已生成，但自动高清化未完成，原视频已保留'))
+      if (completed && !continuityCompleted) notice.error(tr('视频已生成，但尾帧衔接未完成，后续分镜已停止'))
+      else if (completed && !enhancementCompleted) notice.info(tr('视频已生成，但自动高清化未完成，原视频已保留'))
       else completed
         ? notice.success(tr('分镜视频生成完成'))
         : notice.error(tr('视频生成失败，详情已显示在预览区'))
     }
-    return completed && enhancementCompleted
+    return completed && enhancementCompleted && continuityCompleted
   } catch (error) {
     if (!alive || version !== chapterLoadVersion) return false
     const message = error instanceof Error ? error.message : tr('视频生成失败')
@@ -2114,7 +2119,7 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
   if (!model || batchGeneratingVideos.value) return
   const selectedIdSet = new Set(request.sceneIds)
   const targets = scenes.value
-    .filter(scene => selectedIdSet.has(scene.id) && !batchVideoDisabledReason(scene, model, request))
+    .filter(scene => selectedIdSet.has(scene.id))
     .sort((left, right) => left.sequence - right.sequence)
   if (!targets.length) {
     notice.info(tr('所选分镜当前无法生成视频'))
@@ -2138,12 +2143,30 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     autoEnhancement: request.autoEnhancement || null,
   }
   try {
+    let attemptedCount = 0
+    let stoppedScene: Scene | undefined
     const completedCount = await runVideoGenerationQueue(
       targets,
       model.concurrency,
       request.returnLastFrame,
-      scene => generateVideo(scene, false, generationSettings),
+      async scene => {
+        attemptedCount += 1
+        const blocked = batchVideoDisabledReason(scene, model, request)
+        if (blocked) setSceneVideoError(scene.id, blocked)
+        const completed = !blocked && await generateVideo(scene, false, {
+          ...generationSettings,
+          continuityTargetSceneId: request.returnLastFrame ? targets[targets.indexOf(scene) + 1]?.id : undefined,
+        })
+        if (!completed) stoppedScene = scene
+        return completed
+      },
     )
+    if (request.returnLastFrame && stoppedScene) {
+      notice.error(tr('连续生成已停止：分镜 {p0} 未完成，后续 {p1} 条未提交', {
+        p0: stoppedScene.sequence, p1: targets.length - attemptedCount,
+      }))
+      return
+    }
     const failedCount = targets.length - completedCount
     failedCount
       ? notice.error(request.autoEnhancement ? tr('批量处理结束：完成 {p0} 条，另有 {p1} 条视频或高清化未完成，原视频保留', { p0: completedCount, p1: failedCount }) : tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
@@ -2393,6 +2416,7 @@ onBeforeUnmount(() => {
                   :model="selectedVideoModelConfig"
                   :media="draftFor(scene).referenceMedia"
                   :asset-image-count="selectedAssetReferenceImageCount(scene)"
+                  :assets-use-descriptions="videoInputImageReferences(scene, Infinity).length > videoInputImageReferences(scene).length"
                   :audio-durations="sceneAudioDurations(scene)"
                   :highlighted-media-index="highlightedMediaIndex(scene)"
                   :disabled="draftFor(scene).videoGenerationMode === 'keyframes'"

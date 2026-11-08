@@ -53,6 +53,11 @@ ASSET_SCHEMA: dict[str, Any] = {
     "required": ["characters", "scenes", "objects"],
 }
 
+for group in ASSET_SCHEMA['properties'].values():
+    group['items']['properties']['visual_fields'] = {'type': 'object', 'additionalProperties': {'type': 'string'}}
+    group['items']['required'].append('visual_fields')
+
+
 DIALOGUE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -171,7 +176,8 @@ def render_remake_request(prompt, *, context, index, schema, include_segment_met
 
 
 def render_remake_prompt(kind: str, language: str) -> str:
-    return render_skill("remake", language)
+    output_kind = 'global_key_assets' if kind == 'assets' else 'professional_video_prompt_material'
+    return render_skill("remake", language, output_kind=output_kind)
 
 
 def render_remake_catalog(assets: list[dict], language: str) -> str:

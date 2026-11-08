@@ -639,6 +639,19 @@ async def test_seedance_reference_uploads_are_appended_with_official_roles(monke
     assert task_id == "reference-task"
 
 
+def test_shared_video_content_replaces_tenth_asset_with_description():
+    from services.video.content import prepare_video_content
+
+    prepared = prepare_video_content(
+        prompt=' '.join(f'@{{资产{i}}}' for i in range(10)),
+        subjects=[dict(name=f'资产{i}', images=[f'https://cdn.example.com/{i}.png'],
+            description=f'资产{i}外观') for i in range(10)],
+        generation_mode='reference', max_reference_images=9,
+    )
+    assert prepared.reference_image_count == 9
+    assert prepared.prompt == ' '.join([*(f'[图{i}]' for i in range(1, 10)), '资产9外观'])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("model_type", "resolution", "expects_output_format"),
@@ -765,3 +778,22 @@ async def test_seedance_http_error_surfaces_structured_provider_detail(monkeypat
     assert "InvalidParameter" in message
     assert "HTTP 400" in message
     assert "video-request-400" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('error_type,uncertain', [
+    (httpx.ReadTimeout, True), (httpx.WriteError, True),
+    (httpx.ConnectTimeout, False), (httpx.ConnectError, False),
+])
+async def test_seedance_distinguishes_lost_responses_from_requests_not_sent(monkeypatch, error_type, uncertain):
+    config = await _video_config('seedance_2')
+    async def handler(request):
+        raise error_type('transport failure', request=request)
+    real_client = httpx.AsyncClient
+    def client_factory(*args, **kwargs):
+        kwargs['transport'] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+    monkeypatch.setattr('services.video.seedance.httpx.AsyncClient', client_factory)
+    with pytest.raises(SeedanceGenerationError) as error:
+        await SeedanceGenerator(config).submit(prompt='test')
+    assert error.value.submission_uncertain is uncertain

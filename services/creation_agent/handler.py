@@ -55,6 +55,8 @@ def configured_model(config, limits: AgentConfiguration):
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
                          max_retries=0, timeout=None)
     extra_body = {}
+    if getattr(config, 'supports_json_output', False):
+        extra_body['response_format'] = {'type': 'json_object'}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}
     from pydantic_ai.profiles.openai import OpenAIModelProfile

@@ -59,6 +59,47 @@ beforeEach(() => {
 })
 
 describe('RemakeProgressPage', () => {
+  it.each(['light', 'dark'])('shows retry errors and allows another attempt in %s mode', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const failed = progressSnapshot({ aggregate_status: 'failed', terminal: true })
+    failed.sources[0].task!.status = TaskStatusEnum.FAILED
+    failed.sources[0].task!.error_message = '原任务失败'
+    vi.mocked(api.remakeProjectProgress).mockResolvedValue({ code: 0, message: 'ok', data: failed })
+    let rejectRetry!: (reason: Error) => void
+    vi.mocked(api.retryRemakeSource).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectRetry = reject
+    }))
+    const wrapper = mount(RemakeProgressPage)
+    await flushPromises()
+    const retry = () => wrapper.findAll('button').find(button => button.text().includes('重试'))!
+
+    await retry().trigger('click')
+    expect(retry().attributes('disabled')).toBeDefined()
+    expect(retry().attributes('aria-busy')).toBe('true')
+    await retry().trigger('click')
+    expect(api.retryRemakeSource).toHaveBeenCalledOnce()
+    rejectRetry(new Error('重制来源不存在'))
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('重制来源不存在')
+    expect(wrapper.text()).toContain('原任务失败')
+    expect(retry().attributes('disabled')).toBeUndefined()
+
+    vi.mocked(api.retryRemakeSource).mockResolvedValueOnce({ code: 0, message: 'ok', data: { source_id: 9, task_id: 'task-2', status: 'queued' } })
+    vi.mocked(api.remakeProjectProgress).mockResolvedValueOnce({ code: 0, message: 'ok', data: progressSnapshot() })
+    vi.mocked(api.streamRemakeProjectProgress).mockImplementation(async (_project, _callback, signal) => {
+      await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    await retry().trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('正在拆解视频')
+    expect(api.retryRemakeSource).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
+
   it('shows persisted decomposition progress and only aborts the SSE observer on leave', async () => {
     let streamSignal: AbortSignal | undefined
     vi.mocked(api.streamRemakeProjectProgress).mockImplementation(async (_projectId, _onSnapshot, signal) => {

@@ -10,6 +10,8 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
 from prompts.styles import list_styles
+from prompts.labels import prompt_label
+from test.remake_fixtures import remake_shot
 from services.creation_agent.context_budget import ContextBudget
 from services.creation_agent.skill_execution import SkillExecution, current_execution
 from services.project_analysis.handler import _build_analysis_material
@@ -149,14 +151,11 @@ async def test_skill_remake_does_not_build_unused_legacy_prompts(
         raise AssertionError("New remake prepared a legacy bilingual prompt")
 
     monkeypatch.setattr("services.remake.pipeline.render_remake_prompt", forbidden)
-    monkeypatch.setattr("services.remake.pipeline.render_remake_catalog", forbidden)
     source = tmp_path / "source.mp4"
     source.write_bytes(b"fixture")
     gateway = SimpleNamespace(
         analyze_one=AsyncMock(return_value={"characters": [], "scenes": [], "objects": []}),
-        analyze_many=AsyncMock(return_value=[{
-            "prompt": "The saved complete shot.", "asset_refs": [], "confidence": 1,
-        }]),
+        analyze_many=AsyncMock(return_value=[remake_shot(duration=4, refs=[])]),
         usage={}, timings=[],
     )
     pipeline = RemakeDecompositionPipeline(
@@ -172,10 +171,8 @@ async def test_skill_remake_does_not_build_unused_legacy_prompts(
     )
     assert gateway.analyze_one.call_args.kwargs["prompt"] == ""
     assert gateway.analyze_many.call_args.kwargs["prompt"] == ""
-    assert json.loads(gateway.analyze_many.call_args.kwargs["context_builder"](1)) == {
-        "characters": [], "scenes": [], "objects": [],
-    }
-    assert result.prompt_document["prompts"][0]["prompt"] == "The saved complete shot."
+    assert gateway.analyze_many.call_args.kwargs["context_builder"](1)['assets'] == []
+    assert prompt_label('【核心生成指令｜高优先级】', 'en') in result.prompt_document['prompts'][0]['prompt']
 
 
 @pytest.mark.parametrize('language',['zh','en'])

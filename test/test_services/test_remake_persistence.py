@@ -8,6 +8,13 @@ from models.remake_source import RemakeSource
 from models.scene import Scene
 from services.remake.persistence import RemakeResultPersistence
 from utils.enums import AssetTypeEnum, TaskStatusEnum, WorkflowStatus
+from test.remake_fixtures import fixed_asset_prompt, synthetic_snapshot, remake_shot
+
+
+@pytest.fixture(autouse=True)
+def configured_asset_contract(monkeypatch):
+    snapshot = synthetic_snapshot()
+    monkeypatch.setattr('prompts.skill_pack.snapshot_skills', lambda: snapshot.model_dump())
 
 
 async def _source() -> RemakeSource:
@@ -46,21 +53,26 @@ async def _source() -> RemakeSource:
 def _assets(description="黑甲将军"):
     return {
         "characters": [
-            {"id": "character-001", "name": "将军", "label": "人物", "description": description}
+            {"id": "character-001", "name": "将军", "label": "人物", "description": fixed_asset_prompt().replace('Modern city', description)}
         ],
-        "scenes": [{"id": "scene-001", "name": "军帐", "description": "深色军帐"}],
-        "objects": [{"id": "object-001", "name": "令牌", "description": "黑木令牌"}],
+        "scenes": [{"id": "scene-001", "name": "军帐", "description": fixed_asset_prompt(kind='scene')}],
+        "objects": [{"id": "object-001", "name": "令牌", "description": fixed_asset_prompt(kind='item')}],
     }
 
 
 def _prompt(index: int, *, refs=None, duration=4):
+    return remake_shot(index, duration, refs=refs if refs is not None else [
+        {'asset_id':'character-001','asset_name':'将军','asset_type':'character'},
+        {'asset_id':'object-001','asset_name':'令牌','asset_type':'object'},
+    ])
+
+
+def _legacy_prompt(index: int):
     return {
         "shot_index": index,
         "file": f"scene-{index:03d}.mp4",
-        "duration_seconds": duration,
-        "asset_refs": refs
-        if refs is not None
-        else [
+        "duration_seconds": 4,
+        "asset_refs": [
             {"asset_id": "character-001", "asset_name": "将军", "asset_type": "character"},
             {"asset_id": "object-001", "asset_name": "令牌", "asset_type": "object"},
         ],
@@ -90,13 +102,14 @@ async def test_persistence_maps_assets_scenes_and_references_atomically():
     ]
     assert AssetTypeEnum.product.value not in [item.asset_type for item in persisted]
     person = persisted[0]
-    assert person.base_traits == "黑甲将军"
+    assert person.base_traits == _assets()['characters'][0]['description']
     assert person.source_chapters == [1]
     assert person.metadata["remake_reference_id"] == "character-001"
     scenes = await Scene.filter(chapter_id=source.chapter_id).order_by("sequence")
-    assert [scene.prompt for scene in scenes] == ["专业镜头 1", "专业镜头 2"]
+    assert all(f'专业镜头 {i}' in scene.prompt and '【核心生成指令｜高优先级】' in scene.prompt
+               for i,scene in enumerate(scenes,1))
     assert scenes[0].metadata["remake_source_id"] == source.id
-    assert {asset.canonical_name for asset in await scenes[0].assets.all()} == {"将军", "令牌"}
+    assert {asset.canonical_name for asset in await scenes[0].assets.all()} == {"将军", "令牌", "军帐"}
     chapter = await Chapter.get(id=source.chapter_id)
     await source.refresh_from_db()
     assert chapter.status == TaskStatusEnum.completed.value
@@ -126,9 +139,30 @@ async def test_persistence_retry_updates_owned_rows_without_duplicates_or_stale_
     assert await Scene.filter(chapter_id=source.chapter_id).count() == 1
     person = await Asset.get(novel_id=source.novel_id, canonical_name="将军")
     scene = await Scene.get(chapter_id=source.chapter_id, sequence=1)
-    assert person.base_traits == "更新后的将军"
+    assert person.base_traits == _assets('更新后的将军')['characters'][0]['description']
     assert await scene.assets.all() == []
     assert scene.metadata["pipeline"]["attempt"] == 2
+
+
+@pytest.mark.asyncio
+async def test_persistence_rejects_free_text_before_any_assets_are_written():
+    source = await _source()
+    with pytest.raises(ValueError):
+        await RemakeResultPersistence().persist(source=source, assets=_assets(),
+            prompt_document={'prompts':[_legacy_prompt(1)]}, pipeline_metadata={})
+    assert not await Asset.filter(novel_id=source.novel_id).exists()
+    assert not await Scene.filter(chapter_id=source.chapter_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_remade_group_keeps_group_layout_for_later_edits_and_image_generation():
+    source = await _source()
+    assets = _assets()
+    assets['characters'][0].update(label='群像', description=fixed_asset_prompt(kind='group'))
+    await RemakeResultPersistence().persist(source=source, assets=assets,
+        prompt_document={'prompts':[_prompt(1)]}, pipeline_metadata={})
+    group = await Asset.get(novel_id=source.novel_id, canonical_name='将军')
+    assert group.metadata['reference_layout'] == 'group_portrait'
 
 
 @pytest.mark.asyncio
@@ -199,7 +233,7 @@ async def test_persistence_merges_cross_episode_assets_and_tracks_each_source():
     person = await Asset.get(novel=novel, canonical_name="将军")
     assert person.source_chapters == [1, 2]
     assert person.metadata["remake_source_ids"] == [first.id, second.id]
-    assert person.base_traits == "第一集描述"
+    assert person.base_traits == _assets('第一集描述')['characters'][0]['description']
     first_scene = await Scene.get(chapter_id=first.chapter_id, sequence=1)
     second_scene = await Scene.get(chapter_id=second.chapter_id, sequence=1)
     assert person.id in [asset.id for asset in await first_scene.assets.all()]

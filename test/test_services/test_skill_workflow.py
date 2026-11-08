@@ -11,6 +11,46 @@ from services.creation_agent.skill_execution import prepare_workflow
 from utils.enums import TaskStatusEnum
 
 
+@pytest.mark.asyncio
+async def test_remake_json_mode_repairs_model_validation_errors_without_losing_audit(monkeypatch):
+    import json
+    import httpx
+    from openai import AsyncOpenAI
+    from schemas.agent_workflow import RemakeShot
+    from services.creation_agent.production import conversation_for_task
+    from services.creation_agent.skill_execution import SkillExecution
+    from models.creation_agent import AgentMessage
+    from test.remake_fixtures import remake_shot
+    novel, _, _ = await enabled_project()
+    config = await AiModelConfig.create(name='json-remake',task_type=6,model='vision',api_key='synthetic',
+        base_url='https://example.invalid',supports_json_output=True,supports_tool_calls=False,is_active=True)
+    workflow = await prepare_workflow({'novel_id':novel.id,'prompt_language':'zh'})
+    task = await AiTask.create(task_type=6,status=2,request_params=workflow)
+    assistant = await conversation_for_task(task)
+    valid = {key:value for key,value in remake_shot().items() if key in RemakeShot.model_fields}
+    invalid = {**valid,'segments':[{'duration':3,'description':'内部片段',
+        **{key:valid[key] for key in ('shot_size_and_camera','visual_prose','actions','camera_movement')}}]}
+    seen = []
+
+    def respond(request):
+        seen.append(json.loads(request.content))
+        value = invalid if len(seen)==1 else valid
+        return httpx.Response(200,json={'id':'completion','created':1,'model':'vision','object':'chat.completion',
+            'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps(value)},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':200,'completion_tokens':20,'total_tokens':220}})
+
+    monkeypatch.setattr('services.creation_agent.handler.AsyncOpenAI',lambda **kwargs: AsyncOpenAI(
+        **kwargs,http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
+    execution = SkillExecution({**workflow,'task_id':str(task.id)},assistant,AsyncMock())
+    output = await execution.generate('remake',{'segment':1,'output_kind':'professional_video_prompt_material',
+        'assets':{'assets':[{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
+                  'duration_seconds':4.2,'storyboard_strategy':'cinematic'}},RemakeShot,model_config=config)
+    assert output.duration=='4.2s' and len(seen)==2
+    assert all(request['response_format']=={'type':'json_object'} and not request.get('tools') for request in seen)
+    child = await AgentMessage.filter(conversation_id=assistant.conversation_id).exclude(task_id=task.id).get()
+    assert any(part['part_kind']=='retry-prompt' for message in child.native_messages for part in message['parts'])
+
+
 def test_skill_snapshot_is_immutable_and_rejects_unknown_paths():
     raw = snapshot_skills()
     frozen = SkillSnapshot.model_validate(raw)
@@ -1047,8 +1087,10 @@ async def test_missing_image_prompt_is_saved_but_never_overwrites_a_concurrent_u
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_status", [None, 401, 403, 429, 500])
+@pytest.mark.parametrize('json_mode', [False, True])
 async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, failure_status, caplog, json_mode,
 ):
     import json
     import httpx
@@ -1059,7 +1101,7 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
         SkillExecution,
         current_execution,
     )
-    from services.remake.gateway import RemakeVideoAnalysisGateway
+    from services.remake.gateway import RemakeVideoAnalysisGateway, RemakeVideoAnalysisError
 
     novel, chapter, _ = await enabled_project()
     model_config = await AiModelConfig.create(
@@ -1068,7 +1110,8 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
         task_type=6,
         base_url="https://analysis.invalid/v1",
         api_key="test",
-        supports_tool_calls=True,
+        supports_tool_calls=not json_mode,
+        supports_json_output=json_mode,
         is_active=True,
     )
     workflow = await prepare_workflow({"novel_id": novel.id, "prompt_language": "en"})
@@ -1090,6 +1133,18 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
         assert video["video_url"]["url"].startswith("data:video/mp4;base64,")
         assert video["video_url"]["fps"] == 1.0
         assert "language=en" in str(payload["messages"])
+        if json_mode:
+            assert payload['response_format'] == {'type':'json_object'}
+            assert not payload.get('tools')
+        if failure_status:
+            return httpx.Response(failure_status, json={"error": {
+                "code": "AuthenticationError" if failure_status in {401, 403} else "InternalError",
+                "message": "private provider response must not leak",
+            }})
+        if json_mode:
+            return httpx.Response(200,json={'id':'completion','created':1,'model':'video-analysis','object':'chat.completion',
+                'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'characters':[],'scenes':[],'objects':[]})},'finish_reason':'stop'}],
+                'usage':{'prompt_tokens':200,'completion_tokens':20,'total_tokens':220}})
         return httpx.Response(
             200,
             json={
@@ -1142,7 +1197,7 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
     )
     token = current_execution.set(execution)
     try:
-        result = await RemakeVideoAnalysisGateway(
+        analysis = RemakeVideoAnalysisGateway(
             model_config, client=AsyncMock()
         ).analyze_one(
             index=1,
@@ -1152,6 +1207,22 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
             response_schema={},
             include_segment_metadata=False,
         )
+        if failure_status:
+            with caplog.at_level("WARNING"), pytest.raises(RemakeVideoAnalysisError) as raised:
+                await analysis
+            assert raised.value.error_code == (
+                "REMAKE_ANALYSIS_AUTH_FAILED" if failure_status in {401, 403}
+                else "REMAKE_ANALYSIS_RATE_LIMITED" if failure_status == 429
+                else "REMAKE_ANALYSIS_PROVIDER_UNAVAILABLE"
+            )
+            receipt = await AgentOperation.get(task=task, key="model:remake:RemakeAssets:1")
+            assert receipt.state == ("failed" if failure_status in {401, 403, 429} else "uncertain")
+            assert len(seen) == 1
+            assert f"status={failure_status}" in caplog.text
+            assert "private provider response" not in str(raised.value)
+            assert "private provider response" not in caplog.text
+            return
+        result = await analysis
         assert result == {"characters": [], "scenes": [], "objects": []}
         assert len(seen) == 1
         assert "legacy prompt must not be sent" not in str(seen)
@@ -1162,7 +1233,8 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
         )
         audit = json.dumps(child_message.native_messages)
         assert "sha256=" in audit and "base64" not in audit
-        assert len(audit) < 20000
+        projected = [{**message,'instructions':None} for message in child_message.native_messages]
+        assert len(json.dumps(projected)) < 20000
     finally:
         current_execution.reset(token)
 

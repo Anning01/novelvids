@@ -134,7 +134,7 @@ class SeedanceGenerator(BaseVideoGenerator):
             generate_audio,
             return_last_frame,
         )
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=600) as client:
             try:
                 resp = await client.post(url, headers=headers, json=payload)
             except httpx.HTTPError as exc:
@@ -143,7 +143,9 @@ class SeedanceGenerator(BaseVideoGenerator):
                     safe_url,
                     type(exc).__name__,
                 )
-                raise SeedanceGenerationError(localized_message('视频供应商网络请求失败')) from exc
+                not_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
+                raise SeedanceGenerationError(localized_message('视频供应商网络请求失败'),
+                    submission_uncertain=not not_sent) from exc
 
         request_id = _request_id(resp)
         if resp.status_code >= 400:
@@ -158,20 +160,22 @@ class SeedanceGenerator(BaseVideoGenerator):
             suffix = f"，request_id={request_id}" if request_id else ""
             if provider_error:
                 raise SeedanceGenerationError(
-                    localized_message('视频供应商请求失败：{p1}（HTTP {p3}{p4}）', p1=f'{provider_error}', p3=f'{resp.status_code}', p4=f'{suffix}')
+                    localized_message('视频供应商请求失败：{p1}（HTTP {p3}{p4}）', p1=f'{provider_error}', p3=f'{resp.status_code}', p4=f'{suffix}'),
+                    submission_uncertain=resp.status_code >= 500 or resp.status_code == 408,
                 )
-            raise SeedanceGenerationError(localized_message('视频供应商请求失败（HTTP {p1}{p2}）', p1=f'{resp.status_code}', p2=f'{suffix}'))
+            raise SeedanceGenerationError(localized_message('视频供应商请求失败（HTTP {p1}{p2}）', p1=f'{resp.status_code}', p2=f'{suffix}'),
+                submission_uncertain=resp.status_code >= 500 or resp.status_code == 408)
         try:
             data = resp.json()
         except ValueError as exc:
-            raise SeedanceGenerationError(localized_message('视频供应商返回了无法解析的响应')) from exc
+            raise SeedanceGenerationError(localized_message('视频供应商返回了无法解析的响应'), submission_uncertain=True) from exc
         if error := _provider_error(data):
             suffix = f"，request_id={request_id}" if request_id else ""
             raise SeedanceGenerationError(localized_message('视频供应商返回错误：{p1}{p2}', p1=f'{error}', p2=f'{suffix}'))
 
         task_id = data.get("id")
         if not isinstance(task_id, str) or not task_id.strip():
-            raise SeedanceGenerationError(localized_message('视频供应商未返回任务 ID'))
+            raise SeedanceGenerationError(localized_message('视频供应商未返回任务 ID'), submission_uncertain=True)
         logger.info("Seedance submit: task_id=%s, images=%d", task_id, prepared.reference_image_count)
         return task_id.strip()
 
@@ -183,7 +187,7 @@ class SeedanceGenerator(BaseVideoGenerator):
         url = f"{self.config.base_url.rstrip('/')}/contents/generations/tasks/{external_task_id}"
 
         safe_url = _safe_endpoint(url)
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=600) as client:
             try:
                 resp = await client.get(url, headers=headers)
             except httpx.HTTPError as exc:

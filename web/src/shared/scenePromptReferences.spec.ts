@@ -3,6 +3,26 @@ import type { VideoReferenceMedia } from '@/types'
 import { buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from './scenePromptReferences'
 
 describe('scenePromptReferences', () => {
+  it('caps asset images in mention order and reserves explicit uploads', () => {
+    const assets = Array.from({ length: 10 }, (_, index) => ({ assetId: index,
+      label: `角色${index}`, mentionNames: [`角色${index}`], imageUrls: [`/media/${index}.png`] }))
+    const upload: VideoReferenceMedia = { type: 'image', url: '/media/tail.png' }
+    const prompt = assets.map(asset => `@{${asset.label}}`).join(' ') + videoReferenceMentionSyntax(upload)
+    const references = buildVideoInputImageReferences(prompt, assets, [upload], 9)
+    expect(references).toHaveLength(9)
+    expect(references.slice(0, 8).map(reference => reference.url)).toEqual(assets.slice(0, 8).map(asset => asset.imageUrls[0]))
+    expect(references[8]).toMatchObject({ number: 9, source: 'upload', url: upload.url })
+    expect(buildVideoInputImageReferences(prompt, assets, [], 9)).toHaveLength(9)
+  })
+
+  it('numbers shared image URLs only once across assets and uploads', () => {
+    const upload: VideoReferenceMedia = { type: 'image', url: '/media/shared.png' }
+    expect(buildVideoInputImageReferences(`@{甲}@{乙}${videoReferenceMentionSyntax(upload)}`, [
+      { assetId: 1, label: '甲', mentionNames: ['甲'], imageUrls: [upload.url] },
+      { assetId: 2, label: '乙', mentionNames: ['乙'], imageUrls: [upload.url] },
+    ], [upload], 9)).toHaveLength(1)
+  })
+
   it('only returns uploaded media explicitly referenced by the prompt', () => {
     const image = { type: 'image' as const, url: '/media/video-references/look 1.png', name: '造型图' }
     const video = { type: 'video' as const, url: '/media/video-references/motion.mp4', name: '动作.mp4' }

@@ -35,6 +35,7 @@ from services.video.asset_resolver import (
 )
 from services.video.capabilities import validate_selection
 from services.video.capabilities import capabilities_for
+from services.video.content import limit_subject_images
 from services.video.reference_media import (
     reference_mention_syntax,
     render_reference_mentions,
@@ -466,6 +467,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             else:
                 reference_videos.append(resolve_media_url(reference.url) or reference.url)
 
+        subjects = limit_subject_images(subjects, capabilities.max_reference_images, reference_images)
         ordered_images = list(dict.fromkeys([image for subject in subjects for image in subject.get('images', [])] + reference_images))
         if len(ordered_images) > capabilities.max_reference_images:
             raise HTTPException(
@@ -597,6 +599,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             # 并使分镜状态在刷新页面后仍保持为红色。
             video.status = TaskStatusEnum.failed.value
             video.metadata = {**video_metadata, 'error': str(error)}
+            if error.submission_uncertain:
+                video.metadata.update(submission_uncertain=True,
+                    error=localized_message('视频提交结果待核对，系统不会重复提交') + '：' + str(error))
             await video.save(update_fields=['status', 'metadata', 'updated_at'])
             await self._set_scene_current_video(scene, video.id)
             logger.warning(

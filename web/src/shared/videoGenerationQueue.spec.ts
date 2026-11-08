@@ -2,6 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { runVideoGenerationQueue } from './videoGenerationQueue'
 
 describe('runVideoGenerationQueue', () => {
+  it.each([1, 2])('stops continuity submissions at failed scene %s', async failedScene => {
+    const started: number[] = []
+    const completed = await runVideoGenerationQueue([1, 2, 3], 3, true, async scene => {
+      started.push(scene)
+      return scene !== failedScene
+    })
+    expect(started).toEqual(failedScene === 1 ? [1] : [1, 2])
+    expect(completed).toBe(failedScene - 1)
+  })
+
+  it('continues independent generation after a failure when continuity is disabled', async () => {
+    const started: number[] = []
+    const completed = await runVideoGenerationQueue([1, 2, 3], 1, false, async scene => {
+      started.push(scene)
+      return scene !== 1
+    })
+    expect(started).toEqual([1, 2, 3])
+    expect(completed).toBe(2)
+  })
+
   it('runs strictly in scene order when last-frame continuity is enabled', async () => {
     const started: number[] = []
     const completed: number[] = []

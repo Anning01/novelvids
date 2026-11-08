@@ -42,10 +42,11 @@ class CreationNameConflict(ValueError):
 
 
 @asynccontextmanager
-async def project_write(novel_id: int):
+async def project_write(novel_id: int, *, include_deleted: bool = False):
     """Serialize dependent writes on PostgreSQL and acquire SQLite's write lock."""
     async with in_transaction() as connection:
-        changed = await Novel.filter(id=novel_id).using_db(connection).update(updated_at=F("updated_at"))
+        projects = Novel.with_deleted() if include_deleted else Novel.all()
+        changed = await projects.filter(id=novel_id).using_db(connection).update(updated_at=F("updated_at"))
         if not changed:
             raise ValueError(localized_message('项目不存在'))
         yield connection

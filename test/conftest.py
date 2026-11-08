@@ -150,7 +150,7 @@ async def clear_db():
     await Chapter.all().delete()
     await AssetVariant.all().delete()
     await Asset.all().delete()
-    await Novel.all().delete()
+    await Novel.with_deleted().delete()
     await AiModelConfig.all().delete()
     await ModelUsageRecord.all().delete()
     await GeneralConfig.all().delete()

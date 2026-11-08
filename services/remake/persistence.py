@@ -9,8 +9,10 @@ from tortoise.transactions import in_transaction
 
 from models.asset import Asset
 from models.chapter import Chapter
+from models.novel import Novel
 from models.remake_source import RemakeSource
 from models.scene import Scene
+from prompts.reference import CHARACTER_TURNAROUND, GROUP_PORTRAIT
 from utils.enums import AssetTypeEnum, TaskStatusEnum, WorkflowStatus
 
 
@@ -34,8 +36,23 @@ class RemakeResultPersistence:
         prompt_document: dict[str, Any],
         pipeline_metadata: dict[str, Any],
     ) -> dict[str, int]:
+        from prompts.skill_pack import SkillSnapshot, snapshot_skills
+        from services.creation_agent.skill_execution import current_execution
+        from services.language import task_language
+        from services.remake.asset_validation import validate_remake_assets
+        from services.remake.prompt_render import compact_catalog
+        from services.remake.storyboards import prepare_remake_prompt
+
+        execution = current_execution.get()
+        snapshot = execution.snapshot if execution else SkillSnapshot.model_validate(snapshot_skills())
+        project = await Novel.get(id=source.novel_id)
+        validate_remake_assets(assets, snapshot, execution.language if execution else task_language.get() or 'zh',
+                               project.aspect_ratio or '16:9')
+        language = execution.language if execution else task_language.get() or 'zh'
+        catalog = compact_catalog(assets, snapshot=snapshot, language=language)
         prompts = [
-            item
+            prepare_remake_prompt(item, catalog, snapshot, language, strategy_key=project.storyboard_strategy,
+                                 duration_seconds=item.get('duration_seconds'))
             for item in prompt_document.get("prompts", [])
             if isinstance(item, dict)
         ]
@@ -79,6 +96,8 @@ class RemakeResultPersistence:
                 name = str(item.get("name", "")).strip()
                 if not reference_id or not name:
                     continue
+                layout = ({'reference_layout':GROUP_PORTRAIT if item.get('label') == '群像' else CHARACTER_TURNAROUND}
+                          if asset_type == AssetTypeEnum.person else {})
                 existing = await Asset.get_or_none(
                     novel_id=source.novel_id,
                     asset_type=asset_type.value,
@@ -97,6 +116,7 @@ class RemakeResultPersistence:
                         source_chapters=[chapter.number],
                         last_updated_chapter=chapter.number,
                         metadata={
+                            **layout,
                             "analysis_source": "remake_decomposition",
                             "remake_source_id": source.id,
                             "remake_source_ids": [source.id],
@@ -134,6 +154,7 @@ class RemakeResultPersistence:
                         existing.last_updated_chapter = chapter.number
                         existing.metadata = {
                             **metadata,
+                            **layout,
                             "remake_source_ids": source_ids,
                             "remake_reference_id": reference_id,
                             "remake_label": str(item.get("label", "")),

@@ -40,7 +40,7 @@ def review_certainty(outcome, records):
 
 async def close_uncertain_task(task_id, resolution, *, user_id=None):
     task = await AiTask.get(id=task_id)
-    async with project_write(task.request_params["novel_id"]) as connection:
+    async with project_write(task.request_params["novel_id"], include_deleted=True) as connection:
         task = (
             await AiTask.filter(id=task.id)
             .using_db(connection)

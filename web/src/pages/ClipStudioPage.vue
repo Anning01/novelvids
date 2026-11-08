@@ -36,12 +36,13 @@ async function refresh() {
   refreshing.value = true
   try {
     const [shotList, assetList] = await Promise.all([api.scenes(value.chapter_id), api.assets(value.project_id, 1, 100, value.chapter_id)])
+    if (current !== epoch) return
+    scenes.value = shotList.data.items; assets.value = assetList.data.items
     const [history, generatedImages] = await Promise.all([
       Promise.all(shotList.data.items.map(shot => api.videoGenerationHistory(shot.id))),
       Promise.all(assetList.data.items.map(async asset => [asset.id, (await api.assetGenerationHistory(asset.id)).data] as const)),
     ])
     if (current !== epoch) return
-    scenes.value = shotList.data.items; assets.value = assetList.data.items
     imageHistory.value = Object.fromEntries(generatedImages)
     videos.value = history.flatMap(result => result.data)
     const active = videos.value.filter(video => isAgentRunning(video.status))
@@ -64,7 +65,7 @@ async function start() {
     if (current !== epoch) return
     session.value.conversation_id = response.data.conversation_id
     await router.replace({ name: 'clip-studio', params: { projectId: session.value.project_id } })
-  } catch (caught) { if (current === epoch) { startFailed.value = true; startErrorCode.value = caught instanceof ApiRequestError ? caught.code : null; error.value = caught instanceof Error ? caught.message : tr('创作未能开始，请重试') } }
+  } catch (caught) { if (current === epoch) { startFailed.value = true; startErrorCode.value = caught instanceof ApiRequestError ? caught.code : null; error.value = caught instanceof DOMException && caught.name === 'TimeoutError' ? tr('启动请求响应超时，请重试以确认任务状态') : caught instanceof Error ? caught.message : tr('创作未能开始，请重试') } }
   finally { if (current === epoch) starting.value = false }
 }
 async function load() {
@@ -76,11 +77,12 @@ async function load() {
     const response = await clipApi.session(Number(route.params.projectId))
     if (current !== epoch) return
     session.value = response.data
+    loading.value = false
     if (route.query.start === '1') await start()
     if (current !== epoch) return
     await refresh()
     timer = setInterval(() => { if (!document.hidden) void refresh() }, 4000)
-  } catch (caught) { if (current === epoch) error.value = caught instanceof Error ? caught.message : tr('无法打开片段') }
+  } catch (caught) { if (current === epoch) error.value = caught instanceof DOMException && caught.name === 'TimeoutError' ? tr('片段读取超时，请重试') : caught instanceof Error ? caught.message : tr('无法打开片段') }
   finally { if (current === epoch) loading.value = false }
 }
 async function generate(kind: 'image' | 'video', id: number) {
@@ -96,7 +98,7 @@ async function generate(kind: 'image' | 'video', id: number) {
   })
   if (accepted) void refresh()
 }
-watch(() => [route.params.projectId, auth.activeTeamId], load, { immediate: true })
+watch([() => route.params.projectId, () => auth.activeTeamId], load, { immediate: true })
 onBeforeUnmount(() => { ++epoch; clearInterval(timer); store.disconnect() })
 </script>
 

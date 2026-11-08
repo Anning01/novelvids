@@ -34,6 +34,7 @@ export function buildVideoInputImageReferences(
   prompt: string,
   assets: VideoInputAssetImageSource[],
   media: VideoReferenceMedia[],
+  maxImages = Infinity,
 ): VideoInputImageReference[] {
   const sourcesByName = new Map<string, VideoInputAssetImageSource>()
   for (const source of assets) {
@@ -69,12 +70,20 @@ export function buildVideoInputImageReferences(
     orderedAssets.push(source)
   }
 
+  const referencedUploads = new Set(
+    referencedVideoMedia(prompt, media)
+      .filter(reference => reference.type === 'image')
+      .map(reference => reference.url),
+  )
+  const selectedUrls = new Set(referencedUploads)
   const references: VideoInputImageReference[] = []
+  const emittedUrls = new Set<string>()
   for (const source of orderedAssets) {
-    const seenUrls = new Set<string>()
     source.imageUrls.forEach((url, assetImageIndex) => {
-      if (!url || seenUrls.has(url)) return
-      seenUrls.add(url)
+      if (!url || emittedUrls.has(url)) return
+      if (!selectedUrls.has(url) && selectedUrls.size >= maxImages) return
+      selectedUrls.add(url)
+      emittedUrls.add(url)
       references.push({
         number: references.length + 1,
         url,
@@ -86,13 +95,9 @@ export function buildVideoInputImageReferences(
     })
   }
 
-  const referencedUploads = new Set(
-    referencedVideoMedia(prompt, media)
-      .filter(reference => reference.type === 'image')
-      .map(reference => reference.url),
-  )
   media.forEach((reference, mediaIndex) => {
-    if (reference.type !== 'image' || !referencedUploads.has(reference.url)) return
+    if (reference.type !== 'image' || !referencedUploads.has(reference.url) || emittedUrls.has(reference.url)) return
+    emittedUrls.add(reference.url)
     references.push({
       number: references.length + 1,
       url: reference.url,

@@ -11,7 +11,7 @@ def test_asset_prompt_contract_matches_reference_pipeline():
     character = ASSET_SCHEMA["properties"]["characters"]["items"]
 
     assert character["properties"]["label"]["enum"] == ["人物", "动物", "群像"]
-    assert character["required"] == ["name", "label", "description"]
+    assert character["required"] == ["name", "label", "description", "visual_fields"]
     rules = render_remake_prompt("assets", "zh")
     assert "读取" in rules or "字幕" in rules
     assert "任务语言 language=zh" in rules
