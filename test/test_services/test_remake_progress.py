@@ -20,7 +20,7 @@ async def create_source(novel, episode_number, *, status, stage, progress):
         status=status,
         stage=stage,
         progress=progress,
-    )
+    ) if status is not None else None
     return await RemakeSource.create(
         novel=novel,
         chapter=chapter,
@@ -99,3 +99,26 @@ async def test_project_progress_becomes_terminal_when_every_source_finishes():
     assert snapshot["aggregate_status"] == "completed"
     assert snapshot["terminal"] is True
     assert snapshot["overall_progress"] == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('media_status,task_status,expected', [
+    ('completed', None, 'completed'),
+    ('ready', None, 'queued'),
+    ('processing', None, 'queued'),
+    ('completed', TaskStatusEnum.running.value, 'processing'),
+    ('completed', TaskStatusEnum.failed.value, 'failed'),
+])
+async def test_imported_completed_source_does_not_require_an_analysis_task(media_status, task_status, expected):
+    novel = await Novel.create(name='Imported remake', workflow_kind='remake')
+    source = await create_source(novel, 1, status=task_status, stage='queued', progress=0)
+    source.media_status = media_status
+    await source.save(update_fields=['media_status'])
+    before = await AiTask.all().count()
+    snapshot = await RemakeProgressService().snapshot(novel)
+    assert snapshot['aggregate_status'] == expected
+    assert snapshot['overall_progress'] == (100 if expected == 'completed' else 0)
+    assert snapshot['terminal'] is (expected in {'completed', 'failed'})
+    if task_status is None:
+        assert snapshot['sources'][0]['task'] is None
+    assert await AiTask.all().count() == before

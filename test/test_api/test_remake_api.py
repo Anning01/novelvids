@@ -395,7 +395,8 @@ async def test_local_upload_create_project_and_read_sources(
 
 
 @pytest.mark.asyncio
-async def test_completed_project_progress_is_available_as_snapshot_and_sse(client):
+@pytest.mark.parametrize('has_task', [True, False])
+async def test_completed_project_progress_is_available_as_snapshot_and_sse(client, has_task):
     novel = await Novel.create(
         name="SSE 重制项目",
         author="重制工坊",
@@ -412,7 +413,7 @@ async def test_completed_project_progress_is_available_as_snapshot_and_sse(clien
         status=TaskStatusEnum.completed.value,
         stage="completed",
         progress=100,
-    )
+    ) if has_task else None
     await RemakeSource.create(
         novel=novel,
         chapter=chapter,
