@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="#join-the-community">Join the community</a> · <a href="#see-the-result">Watch a sample</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a>
+  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a> · <a href="#support-the-project">Support the project</a>
 </p>
 
 ## Join the community
@@ -48,7 +48,13 @@ Sign in with Qiling through WeChat. Start with an image or video idea, add refer
 
 For open-source self-hosting and development, see Quick start below and the [development guide](docs/development.en.md).
 
-## See the result
+## Video tutorial
+
+**[Watch the tutorial on Bilibili →](https://www.bilibili.com/video/BV12JW76dEkj/)**
+
+Watch the tutorial to learn how to use NovelVids. For finished creations, see the example videos below.
+
+## Example videos
 
 **Commercial remake example**
 
@@ -182,6 +188,14 @@ Bring a real creative problem: [report a bug](https://github.com/Anning01/novelv
 Directions for discussion include **asset consistency, reproducible workflows, deployment and recovery, model/skill extensibility and production quality checks**. The [roadmap](ROADMAP.md) distinguishes current capabilities from proposed work; it is not a release commitment.
 
 If NovelVids helps you, consider a Star, report your experience, or share work and production notes you are authorized to publish.
+
+## Support the project
+
+If NovelVids helps you, consider supporting my work through WeChat Pay or Alipay. Your support helps me keep developing and maintaining the project. Thank you!
+
+| WeChat Pay | Alipay |
+| :---: | :---: |
+| <a href="docs/images/donate-wechat.jpg"><img src="docs/images/donate-wechat.jpg" width="260" alt="WeChat Pay donation QR code"></a> | <a href="docs/images/donate-alipay.jpg"><img src="docs/images/donate-alipay.jpg" width="260" alt="Alipay donation QR code"></a> |
 
 ## License
 
