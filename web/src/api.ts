@@ -70,7 +70,9 @@ export function retryableStatusError(error: unknown) {
 }
 
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
+  const headers: Record<string, string> = options?.body instanceof FormData
+    ? authHeaders()
+    : { 'Content-Type': 'application/json', ...authHeaders() }
   const generation = isGenerationRequest(url)
     ? await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]), url, options?.body) : null
   if (generation) headers['X-Creation-Request-Id'] = generation.id
