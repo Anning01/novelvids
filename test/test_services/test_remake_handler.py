@@ -86,6 +86,27 @@ class _Persistence:
 
 
 @pytest.mark.asyncio
+async def test_handler_preserves_actionable_worker_failure_without_persisting(tmp_path):
+    from unittest.mock import AsyncMock
+    from services.remake.remote_media import RemoteMediaError
+    novel, chapter, source, task = await _records(tmp_path)
+    pipeline = _Pipeline(error=RemoteMediaError("重制媒体工作服务器处理失败"))
+    persistence = _Persistence()
+    handler = RemakeDecompositionTaskHandler(
+        model_resolver=AsyncMock(return_value=SimpleNamespace(id=1, model="vision", supports_tool_calls=False)),
+        materializer=_Materializer(tmp_path / "source.mp4"), pipeline=pipeline, persistence=persistence,
+    )
+    with pytest.raises(RemakeDecompositionError) as raised:
+        await handler.execute({"ai_task_id": str(task.id), "novel_id": novel.id,
+                               "chapter_id": chapter.id, "remake_source_id": source.id})
+    assert raised.value.error_code == "REMAKE_MEDIA_WORKER_FAILED"
+    assert "工作服务器" in str(raised.value)
+    assert not persistence.calls
+    await source.refresh_from_db()
+    assert source.media_status == "failed"
+
+
+@pytest.mark.asyncio
 async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_billing_metadata(tmp_path: Path):
     novel, chapter, source, task = await _records(tmp_path)
     source_path = tmp_path / "source.mp4"

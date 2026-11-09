@@ -1,5 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
+import threading
+import time
 
 import pytest
 
@@ -144,3 +146,104 @@ async def test_pipeline_rejects_empty_scene_split(tmp_path: Path):
             model_config=SimpleNamespace(id=1, name="模型", model="vision", concurrency=1),
             work_dir=tmp_path / "work",
         )
+
+
+@pytest.mark.asyncio
+async def test_duration_probes_do_not_fan_out_subprocesses(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    paths = [tmp_path / f"scene-{index}.mp4" for index in range(8)]
+    active = maximum = 0
+    lock = threading.Lock()
+    probed = []
+
+    def probe(path):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.01)
+        probed.append(path)
+        with lock:
+            active -= 1
+        return 4.2
+
+    pipeline = RemakeDecompositionPipeline(
+        scene_detector=_Detector(paths), gateway_factory=lambda _: _Gateway(),
+        prepare_video=lambda path, *_args, **_kwargs: path, probe_duration=probe,
+    )
+    await pipeline.run(source_path=source, model_config=SimpleNamespace(id=1, model="vision"),
+                       work_dir=tmp_path / "work")
+    assert maximum == 1
+    assert probed == paths
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_remote_mode_never_runs_media_locally(monkeypatch, tmp_path, fails):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+    from services.remake.remote_media import RemoteMediaError
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    gateway = _Gateway()
+    remote = SimpleNamespace(prepare=AsyncMock(return_value=source),
+                             split=AsyncMock(return_value=([source], [4.2])))
+    if fails:
+        remote.prepare.side_effect = RemoteMediaError("offline")
+    closed = []
+
+    @asynccontextmanager
+    async def session():
+        try:
+            yield remote
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr("services.remake.pipeline.media_session", session)
+    def local(*_args, **_kwargs):
+        pytest.fail("remote failure must not fall back onto the small server")
+    pipeline = RemakeDecompositionPipeline(prepare_video=local,
+        scene_detector=SimpleNamespace(split=local), probe_duration=local,
+        gateway_factory=lambda _: gateway)
+    arguments = dict(source_path=source, model_config=SimpleNamespace(id=1, model="test"), work_dir=tmp_path / "work")
+    if fails:
+        with pytest.raises(RemoteMediaError, match="offline"):
+            await pipeline.run(**arguments)
+        assert not gateway.one_calls
+        remote.split.assert_not_called()
+    else:
+        result = await pipeline.run(**arguments)
+        assert result.metadata["segment_count"] == 1
+        remote.prepare.assert_awaited_once()
+        remote.split.assert_awaited_once()
+        assert len(gateway.one_calls) == 1
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_enabled,provider", [(False, "password"), (False, "qiling"), (True, "password")])
+async def test_non_qiling_edition_keeps_local_media_even_with_worker_address(monkeypatch, tmp_path, auth_enabled, provider):
+    from config import settings
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(settings, "AUTH_ENABLED", auth_enabled)
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", provider)
+    monkeypatch.setattr(settings, "REMAKE_MEDIA_SSH_HOST", "root@worker.example")
+    remote = Mock(side_effect=AssertionError("open source deployment must not create a remote job"))
+    monkeypatch.setattr("services.remake.remote_media.RemoteMediaSession", remote)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    prepare = Mock(return_value=source)
+    probe = Mock(return_value=4.2)
+    detector = _Detector([source])
+    pipeline = RemakeDecompositionPipeline(prepare_video=prepare, scene_detector=detector,
+        probe_duration=probe, gateway_factory=lambda _: _Gateway())
+    result = await pipeline.run(source_path=source, model_config=SimpleNamespace(id=1, model="test"),
+                                work_dir=tmp_path / "work")
+    assert result.metadata["segment_count"] == 1
+    prepare.assert_called_once()
+    probe.assert_called_once_with(source)
+    assert len(detector.calls) == 1
+    remote.assert_not_called()

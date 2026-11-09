@@ -5,7 +5,6 @@ from __future__ import annotations
 from utils.messages import localized_message
 
 import asyncio
-import subprocess
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -17,7 +16,8 @@ from prompts.skill_pack import SkillSnapshot, snapshot_skills
 from schemas.agent_workflow import RemakeShot
 from services.language import task_language
 from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisGateway
-from services.remake.media_prepare import prepare_video_for_model_input
+from services.remake.media_prepare import prepare_video_for_model_input, probe_media_duration
+from services.remake.remote_media import RemoteMediaSession, media_session
 from services.remake.prompt_render import (
     compact_catalog,
     normalize_global_assets,
@@ -69,17 +69,27 @@ class RemakeDecompositionPipeline:
         storyboard_strategy: str | None = None,
         aspect_ratio: str = '16:9',
     ) -> RemakePipelineResult:
+        async with media_session() as remote:
+            return await self._run(source_path=source_path, model_config=model_config, work_dir=work_dir,
+                                   progress=progress, storyboard_strategy=storyboard_strategy,
+                                   aspect_ratio=aspect_ratio, remote=remote)
+
+    async def _run(
+        self, *, source_path: Path, model_config: Any, work_dir: Path,
+        progress: ProgressCallback | None, storyboard_strategy: str | None,
+        aspect_ratio: str, remote: RemoteMediaSession | None,
+    ) -> RemakePipelineResult:
         pipeline_started_at = self.clock()
         if not source_path.is_file():
             raise RemakePipelineError(localized_message('来源视频不存在'))
         work_dir.mkdir(parents=True, exist_ok=True)
         await _report(progress, 10, "preparing")
-        model_source_path = await asyncio.to_thread(
-            self.prepare_video,
-            source_path,
-            work_dir / "model-input",
-            max_bytes=MAX_MODEL_VIDEO_BYTES,
-        )
+        if remote:
+            model_source_path = await remote.prepare(source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES)
+        else:
+            model_source_path = await asyncio.to_thread(
+                self.prepare_video, source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES,
+            )
 
         gateway = self.gateway_factory(model_config)
         from services.creation_agent.skill_execution import current_execution
@@ -101,16 +111,14 @@ class RemakeDecompositionPipeline:
         assets = normalize_global_assets(raw_assets, language)
 
         await _report(progress, 42, "detecting_scenes")
-        scene_paths = await asyncio.to_thread(
-            self.scene_detector.split,
-            model_source_path,
-            work_dir / "scenes",
-        )
-        if not scene_paths:
-            raise RemakePipelineError(localized_message('来源视频没有可分析的镜头'))
-        durations = await asyncio.gather(
-            *(asyncio.to_thread(self.probe_duration, path) for path in scene_paths)
-        )
+        if remote:
+            scene_paths, durations = await remote.split(work_dir / "scenes")
+        else:
+            scene_paths = await asyncio.to_thread(self.scene_detector.split, model_source_path, work_dir / "scenes")
+            if not scene_paths:
+                raise RemakePipelineError(localized_message('来源视频没有可分析的镜头'))
+            # Each probe starts a process; do not multiply native buffers by shot count.
+            durations = [await asyncio.to_thread(self.probe_duration, path) for path in scene_paths]
 
         catalog = compact_catalog(assets, snapshot=snapshot, language=language)
         await _report(progress, 55, "generating_storyboards")
@@ -172,29 +180,9 @@ async def _report(callback: ProgressCallback | None, value: int, stage: str) -> 
 
 def _probe_media_duration(path: Path) -> float:
     try:
-        process = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        duration = float(process.stdout.strip())
-    except FileNotFoundError as error:
-        raise RemakePipelineError(localized_message('找不到 ffprobe，无法读取镜头时长')) from error
-    except (subprocess.CalledProcessError, ValueError) as error:
-        raise RemakePipelineError(localized_message('无法读取镜头时长: {p1}', p1=f'{path.name}')) from error
-    if duration <= 0:
-        raise RemakePipelineError(localized_message('镜头时长无效: {p1}', p1=f'{path.name}'))
-    return duration
+        return probe_media_duration(path)
+    except RuntimeError as error:
+        raise RemakePipelineError(str(error)) from error
 
 
 remake_decomposition_pipeline = RemakeDecompositionPipeline()
