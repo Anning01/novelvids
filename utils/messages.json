@@ -9,7 +9,7 @@
   "账号已绑定，请重新发起登录": "This account is already linked. Start sign-in again.",
   "该账号须自行管理登录凭证": "This account manages its own sign-in credentials",
   "每个账号只能创建一个团队": "Each account can create only one team",
-  "请先切换到要创建作品的团队": "Switch to the team where you want to create the work",
+  "请先切换到要创建作品的团队": "Switch to the team you want to create in first",
   "请选择支持的作品类型": "Choose a supported work type",
   "作品不存在": "Work unavailable",
   "作品已更新，请刷新后重试": "The work has changed. Refresh and try again.",
@@ -788,5 +788,17 @@
   "视频接口返回了无效任务状态": "The video API returned an invalid task status",
   "视频任务已完成但未返回成片地址": "The video task completed without a result URL",
   "视频生成失败，请检查生成内容或联系管理员": "Video generation failed. Check the content or contact an administrator.",
-  "参考素材上传失败，请检查对象存储配置": "Reference media upload failed. Check the object storage configuration."
+  "参考素材上传失败，请检查对象存储配置": "Reference media upload failed. Check the object storage configuration.",
+  "按当前参数估算，最终按实际用量结算。": "Estimated from the current settings; settled using actual usage.",
+  "图片/视频按当前参数估算，助手费用按实际用量另计。": "Image and video costs are estimated from the current settings. Assistant usage is charged separately.",
+  "当前账号没有创作权限": "Your account does not have permission to create",
+  "当前模型尚未配置该档位价格，请联系管理员": "Pricing for this tier is not configured. Contact an administrator.",
+  "当前价格币种无法与人民币余额核对，请联系管理员": "This price currency cannot be checked against the CNY balance. Contact an administrator.",
+  "模型价格配置无效，请联系管理员": "The model pricing configuration is invalid. Contact an administrator.",
+  "无法确认预计价格，请联系管理员": "The estimated price could not be confirmed. Contact an administrator.",
+  "参考图片价格配置无效，请联系管理员": "Reference image pricing is invalid. Contact an administrator.",
+  "当前档位无法计算预计价格，请联系管理员": "The price estimate is unavailable for this tier. Contact an administrator.",
+  "参考视频时长尚未确认，暂时无法报价": "Reference video duration is not confirmed, so a price estimate is unavailable.",
+  "个人消费限额不足，请联系管理员调整": "Your personal spending limit is insufficient. Ask an administrator to adjust it.",
+  "团队余额不足，请先充值": "Insufficient team balance. Please top up first"
 }

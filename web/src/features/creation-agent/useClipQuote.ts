@@ -1,10 +1,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
-import { tr } from '@/i18n'
+import { locale, localeSaving, tr } from '@/i18n'
 import { clipApi, type ClipInput, type ClipQuote } from './clipApi'
 
 export function useClipQuote(input: Ref<Omit<ClipInput, 'request_id'> | null>, scope: Ref<string>) {
   const quote = ref<ClipQuote | null>(null), loading = ref(false), error = ref('')
-  const key = computed(() => JSON.stringify([scope.value, input.value]))
+  const key = computed(() => JSON.stringify([scope.value, input.value, locale.value, localeSaving.value]))
   const quotedKey = ref('')
   const allowed = computed(() => quotedKey.value === key.value && Boolean(quote.value?.allowed && quote.value.estimated_cost !== null) && !loading.value)
   let timer: ReturnType<typeof setTimeout> | undefined, polling: ReturnType<typeof setInterval> | undefined
@@ -14,7 +14,7 @@ export function useClipQuote(input: Ref<Omit<ClipInput, 'request_id'> | null>, s
     const current = ++sequence, currentKey = key.value, value = input.value
     controller?.abort()
     error.value = ''; quote.value = null; quotedKey.value = ''
-    if (!value) { loading.value = false; return false }
+    if (!value || localeSaving.value) { loading.value = false; return false }
     controller = new AbortController()
     loading.value = true
     try {
@@ -29,8 +29,8 @@ export function useClipQuote(input: Ref<Omit<ClipInput, 'request_id'> | null>, s
   }
   watch(key, () => {
     ++sequence; controller?.abort(); clearTimeout(timer)
-    quote.value = null; quotedKey.value = ''; error.value = ''; loading.value = Boolean(input.value)
-    if (input.value) timer = setTimeout(() => { void refresh() }, 250)
+    quote.value = null; quotedKey.value = ''; error.value = ''; loading.value = Boolean(input.value && !localeSaving.value)
+    if (input.value && !localeSaving.value) timer = setTimeout(() => { void refresh() }, 250)
   }, {immediate:true, flush:'sync'})
   function onFocus() { if (!document.hidden) void refresh() }
   onMounted(() => { window.addEventListener('focus', onFocus); polling = setInterval(onFocus, 30000) })

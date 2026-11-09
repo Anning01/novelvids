@@ -14,6 +14,7 @@ from schemas.experience import ExperienceQuoteIn
 from services.experience_quote import clip_quote
 from services.experience import create_clip, start_clip
 from test.test_api.test_experience_api import configured, payload
+from utils.messages import message_language
 
 
 async def member_context(balance, *, limit=None, used=0):
@@ -116,4 +117,40 @@ async def test_read_only_quote_accepts_empty_prompt_and_creates_no_task(client,c
     before=await Novel.all().count()
     response=await client.post('/api/experience/quote',json=request.model_dump(mode='json'))
     assert response.json()['data']['estimated_cost'] == '0.500000'
+    assert await Novel.all().count() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language,expected_reason', [
+    ('en', 'Switch to the team you want to create in first'),
+    ('zh', '请先切换到要创建作品的团队'),
+])
+async def test_quote_localizes_team_warning_and_keeps_the_same_estimate(configured, monkeypatch, language, expected_reason):
+    video, _ = configured
+    monkeypatch.setattr(settings, 'AUTH_ENABLED', True)
+    token = message_language.set(language)
+    try:
+        result = await clip_quote(payload(video.id, mode='direct'), AuthContext())
+    finally:
+        message_language.reset(token)
+    assert result.reason == expected_reason
+    assert result.estimated_cost == Decimal('0.5')
+    assert not result.allowed
+    if language == 'en':
+        assert result.note == 'Estimated from the current settings; settled using actual usage.'
+
+
+@pytest.mark.asyncio
+async def test_quote_returns_an_english_pricing_error_without_creating_a_project(configured):
+    video, _ = configured
+    video.pricing = None
+    await video.save()
+    before = await Novel.all().count()
+    token = message_language.set('en')
+    try:
+        result = await clip_quote(payload(video.id, mode='direct'), AuthContext())
+    finally:
+        message_language.reset(token)
+    assert result.reason == 'Pricing for this tier is not configured. Contact an administrator.'
+    assert result.estimated_cost is None and not result.allowed
     assert await Novel.all().count() == before

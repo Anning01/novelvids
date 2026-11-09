@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, ref } from 'vue'
 import catalog from './messages.json'
-import { applySavedLocale, dateLocale, elementLocale, locale, LOCALE_CACHE_KEY, refreshLocale, setLocale, tr } from './index'
+import { applySavedLocale, beginLocaleChange, dateLocale, elementLocale, locale, localeSaving, LOCALE_CACHE_KEY, refreshLocale, setLocale, tr } from './index'
 import AppThemeToggle from '@/components/AppThemeToggle.vue'
 
 const reply = (value: unknown) => ({ ok: true, json: async () => ({ code: 0, data: { locale: value } }) })
-afterEach(() => { vi.unstubAllGlobals(); localStorage.removeItem(LOCALE_CACHE_KEY) })
+afterEach(() => { applySavedLocale('zh'); vi.unstubAllGlobals(); localStorage.removeItem(LOCALE_CACHE_KEY) })
 
 describe('application language', () => {
   it('switches rendered copy, component locale and document metadata without replacing drafts', async () => {
@@ -63,6 +63,26 @@ describe('application language', () => {
     resolve(reply('zh'))
     await pending
     expect(locale.value).toBe('en')
+  })
+
+  it('keeps an immediate selection while saving and ignores background refreshes', async () => {
+    let finish!: (value: ReturnType<typeof reply>) => void
+    const fetch = vi.fn(() => new Promise<ReturnType<typeof reply>>(resolve => { finish = resolve }))
+    vi.stubGlobal('fetch', fetch)
+    const pending = refreshLocale()
+    beginLocaleChange('en')
+    expect(locale.value).toBe('en')
+    expect(localeSaving.value).toBe(true)
+    await refreshLocale()
+    expect(fetch).toHaveBeenCalledOnce()
+    finish(reply('zh'))
+    await pending
+    expect(locale.value).toBe('en')
+    applySavedLocale('en')
+    expect(localeSaving.value).toBe(false)
+    fetch.mockResolvedValueOnce(reply('en'))
+    await refreshLocale()
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('interpolates user content literally without treating it as message syntax', () => {

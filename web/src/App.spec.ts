@@ -4,6 +4,7 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import App from './App.vue'
 import { useAuthStore } from '@/features/auth/authStore'
+import { setLocale } from '@/i18n'
 
 function mountApp(pinia: Pinia) {
   const router = createRouter({
@@ -33,6 +34,22 @@ describe('App 侧边栏团队选择器与用户入口', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+  })
+
+  it('translates all shared navigation when switching languages in place', async () => {
+    const wrapper = mountApp(setupStore({ enabled: true, ready: true, token: 't',
+      user: { id: 1, username: 'admin', nickname: '保留用户昵称', is_super_admin: true },
+      memberships: [], activeTeamId: null }))
+    setLocale('en')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('a[href="/projects"]').text()).toBe('My creations')
+    expect(wrapper.get('a[href="/orders"]').text()).toBe('Order management')
+    expect(wrapper.get('nav').text()).not.toMatch(/[\u4e00-\u9fff]/)
+    expect(wrapper.get('.app-user-name').text()).toBe('保留用户昵称')
+    setLocale('zh')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('a[href="/projects"]').text()).toBe('我的创作')
+    wrapper.unmount()
   })
 
   it('侧边栏同步展示新头像，图片失败时回退到昵称首字', async () => {

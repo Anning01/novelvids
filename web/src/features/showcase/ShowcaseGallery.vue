@@ -98,14 +98,14 @@ onBeforeUnmount(close)
 <template>
   <section class="showcase-gallery" :aria-label="tr('优秀作品')">
     <header class="gallery-heading"><h2>{{ tr('优秀作品') }}</h2><RouterLink to="/finished-library">{{ tr('查看作品库') }}<ArrowUpRight :size="14" aria-hidden="true" /></RouterLink></header>
-    <div v-if="categories.length > 1" class="showcase-filters" role="group" :aria-label="tr('作品分类')"><button type="button" :aria-pressed="!category" @click="category = ''">{{ tr('全部作品') }}</button><button v-for="value in categories" :key="value" type="button" :aria-pressed="category === value" @click="category = value">{{ value }}</button></div>
+    <div v-if="categories.length > 1" class="showcase-filters" role="group" :aria-label="tr('作品分类')"><button type="button" :aria-pressed="!category" @click="category = ''">{{ tr('全部作品') }}</button><button v-for="value in categories" :key="value" type="button" :aria-pressed="category === value" @click="category = value">{{ tr(value) }}</button></div>
     <div v-if="error" class="gallery-state" role="alert"><p>{{ error }}</p><button type="button" @click="emit('retry')">{{ tr('重新加载') }}</button></div>
     <div v-else-if="loading" class="gallery-loading" role="status"><span class="sr-only">{{ tr('正在加载作品…') }}</span><div v-for="index in 4" :key="index" class="gallery-skeleton" aria-hidden="true" /></div>
     <div v-else-if="!visibleWorks.length" class="gallery-state"><Film :size="28" aria-hidden="true" /><p>{{ tr('还没有公开作品。下一个画面，由你开始。') }}</p></div>
     <div v-else class="showcase-masonry">
       <button v-for="work in visibleWorks" :key="work.id" type="button" class="showcase-card" :aria-label="tr('播放作品：{p0}', { p0: work.title })" aria-haspopup="dialog" @click="openWork(work, $event)">
         <span class="work-visual" :style="{aspectRatio: aspect(work)}"><img v-if="work.cover && !failedCovers.has(work.id)" :src="sourceUrl(work.cover)" :alt="work.title" loading="lazy" decoding="async" @load="measure($event,work)" @error="failedCovers.add(work.id)"><span v-else class="cover-fallback"><Film :size="26" aria-hidden="true" />{{ tr('封面暂不可用') }}</span><span class="work-play" aria-hidden="true"><Play :size="22" fill="currentColor" /></span><span v-if="work.duration" class="work-duration">{{ work.duration }}</span></span>
-        <span class="work-title">{{ work.title }}</span><span v-if="description(work) || work.category" class="work-description">{{ description(work) || work.category }}</span>
+        <span class="work-title">{{ work.title }}</span><span v-if="description(work) || work.category" class="work-description">{{ description(work) || tr(work.category) }}</span>
       </button>
     </div>
       <dialog ref="dialog" class="showcase-viewer" :aria-label="tr('作品播放器')" aria-labelledby="showcase-viewer-title" @cancel.prevent="close" @close="finishClose" @keydown="keydown">
@@ -121,7 +121,7 @@ onBeforeUnmount(close)
             <button v-if="visibleWorks.length > 1" type="button" class="viewer-next viewer-control" :disabled="activeIndex === visibleWorks.length - 1" :aria-label="tr('下一个作品')" @click="step(1)"><ArrowRight :size="22" /></button>
           </section>
           <aside class="viewer-information">
-            <header><img v-if="activeWork.cover && !failedCovers.has(activeWork.id)" :src="sourceUrl(activeWork.cover)" alt="" @error="failedCovers.add(activeWork.id)"><div><h2 id="showcase-viewer-title">{{ activeWork.title }}</h2><p v-if="activeWork.category">{{ activeWork.category }}</p></div></header>
+            <header><img v-if="activeWork.cover && !failedCovers.has(activeWork.id)" :src="sourceUrl(activeWork.cover)" alt="" @error="failedCovers.add(activeWork.id)"><div><h2 id="showcase-viewer-title">{{ activeWork.title }}</h2><p v-if="activeWork.category">{{ tr(activeWork.category) }}</p></div></header>
             <section class="viewer-introduction"><h3>{{ tr('作品介绍') }}</h3><p>{{ description(activeWork) || tr('暂无作品介绍') }}</p></section>
             <p v-if="activeWork.author" class="viewer-author">{{ activeWork.author }}</p>
             <RouterLink v-if="activeWork.novel_id && activeWork.episodes_count > 1" :to="`/works/${activeWork.novel_id}`" class="viewer-series" @click="close">{{ tr('查看全部 {p0} 集', { p0: activeWork.episodes_count }) }}<ArrowUpRight :size="14" aria-hidden="true" /></RouterLink>
