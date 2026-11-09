@@ -7,7 +7,7 @@ import ShowcaseGallery from '@/features/showcase/ShowcaseGallery.vue'
 import ClipReferencePrompt from '@/features/creation-agent/ClipReferencePrompt.vue'
 import { useClipQuote } from '@/features/creation-agent/useClipQuote'
 import { nameClipReference } from '@/features/creation-agent/clipReferences'
-import { tr } from '@/i18n'
+import { localeSaving, tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AgentActivity from '@/features/creation-agent/AgentActivity.vue'
@@ -75,16 +75,16 @@ const hasDiscount = computed(() => {
 })
 
 
-const canCreate = computed(() => Boolean(prompt.value.trim() && prompt.value.length <= 4000 && model.value && ratio.value && resolution.value && quoteAllowed.value && !checkingFunds.value && !loading.value && !entering.value && !uploading.value))
+const canCreate = computed(() => Boolean(prompt.value.trim() && prompt.value.length <= 4000 && model.value && ratio.value && resolution.value && quoteAllowed.value && !localeSaving.value && !checkingFunds.value && !loading.value && !entering.value && !uploading.value))
 
 
-const inspirations = [
-  { title: '雨夜追踪', text: '雨夜街头，黑衣侦探循着脚步声回头。镜头缓缓推近，路灯在湿润的地面留下倒影。' },
-  { title: '古风对决', text: '两位剑客在竹林中相对而立，风吹动衣摆。镜头从竹叶间穿过，停在两人之间，蓄势待发。' },
-  { title: '城市漫游', text: '黄昏的街角，骑车的人穿过光影。镜头平稳跟随，街边小店亮起暖灯，展现松弛的生活气息。' },
-  { title: '云海仙境', text: '镜头穿过翻涌的云海，远处的山峰与古老宫殿逐渐显现。金色晨光照亮屋檐，画面宁静壮阔。' },
-]
-function applyInspiration(item: (typeof inspirations)[number]) {
+const inspirations = computed(() => [
+  { title: tr('雨夜追踪'), text: tr('雨夜街头，黑衣侦探循着脚步声回头。镜头缓缓推近，路灯在湿润的地面留下倒影。') },
+  { title: tr('古风对决'), text: tr('两位剑客在竹林中相对而立，风吹动衣摆。镜头从竹叶间穿过，停在两人之间，蓄势待发。') },
+  { title: tr('城市漫游'), text: tr('黄昏的街角，骑车的人穿过光影。镜头平稳跟随，街边小店亮起暖灯，展现松弛的生活气息。') },
+  { title: tr('云海仙境'), text: tr('镜头穿过翻涌的云海，远处的山峰与古老宫殿逐渐显现。金色晨光照亮屋檐，画面宁静壮阔。') },
+])
+function applyInspiration(item: { text: string }) {
   prompt.value = item.text
   void nextTick(() => referencePrompt.value?.focus?.())
 }
@@ -119,8 +119,8 @@ async function load() {
   if (images.status === 'fulfilled') imageModels.value = images.value.data
   if (sessions.status === 'fulfilled') recent.value = sessions.value.data
   if (showcase.status === 'fulfilled') works.value = showcase.value.data
-  else galleryError.value = tr('作品暂时无法加载')
-  if (videos.status === 'rejected' || images.status === 'rejected' || sessions.status === 'rejected') error.value = tr('部分创作配置未能加载，请重试。')
+  else galleryError.value = '作品暂时无法加载'
+  if (videos.status === 'rejected' || images.status === 'rejected' || sessions.status === 'rejected') error.value = '部分创作配置未能加载，请重试。'
   loading.value = false
 }
 watch(() => auth.activeTeamId, load, { immediate: true })
@@ -136,11 +136,11 @@ async function upload(event: Event) {
       if (current !== epoch || selected !== modelId.value) return
       const kind = file.type.startsWith('video/') || /\.(mp4|mov)$/i.test(file.name) ? 'video' : 'image'
       if (!isVideo && kind !== 'image') {
-        throw new Error(tr('图片创作仅支持参考图片'))
+        throw new Error('图片创作仅支持参考图片')
       }
       const maximum = isVideo ? (kind === 'image' ? (caps?.max_reference_images ?? 10) : (caps?.max_reference_videos ?? 3)) : 10
       if (references.value.filter(item => item.type === kind).length >= maximum || references.value.length >= 10) {
-        throw new Error(tr('已达到当前模型的参考素材数量上限'))
+        throw new Error('已达到当前模型的参考素材数量上限')
       }
       const result = await api.uploadVideoReference(file, Number(selected))
       if (current !== epoch || selected !== modelId.value) return
@@ -148,7 +148,7 @@ async function upload(event: Event) {
         references.value = [...references.value, nameClipReference(result, references.value)]
       }
     }
-  } catch (caught) { if (current === epoch) error.value = caught instanceof Error ? caught.message : tr('参考素材上传失败') }
+  } catch (caught) { if (current === epoch) error.value = caught instanceof Error ? caught.message : '参考素材上传失败' }
   finally { uploading.value = false }
 }
 
@@ -168,7 +168,7 @@ async function create() {
     if (current !== epoch) return
     pending = null
     await router.push({ name: 'clip-studio', params: { projectId: session.data.project_id }, query: { start: '1' } })
-  } catch (caught) { error.value = caught instanceof Error ? caught.message : tr('无法进入创作，请重试'); entering.value = false }
+  } catch (caught) { error.value = caught instanceof Error ? caught.message : '无法进入创作，请重试'; entering.value = false }
 }
 </script>
 
@@ -202,7 +202,7 @@ async function create() {
           <div class="prompt-well">
             <ClipReferencePrompt ref="referencePrompt" v-model="prompt" :references="references" :uploading="uploading" @remove="index => references = references.filter((_item,i) => i !== index)" @upload="uploadInput?.click()" @submit="create" />
             <div class="prompt-tools">
-              <div class="inspiration-list"><span>{{ tr('试试这些灵感') }}</span><button v-for="item in inspirations" :key="item.title" type="button" @click="applyInspiration(item)">{{ tr(item.title) }}<ArrowUpRight :size="12" aria-hidden="true" /></button></div>
+              <div class="inspiration-list"><span>{{ tr('试试这些灵感') }}</span><button v-for="item in inspirations" :key="item.title" type="button" @click="applyInspiration(item)">{{ item.title }}<ArrowUpRight :size="12" aria-hidden="true" /></button></div>
               <input ref="uploadInput" type="file" multiple :accept="taskType === 'video' ? 'image/*,video/*' : 'image/*'" hidden @change="upload">
               <AppButton class="upload-reference" size="sm" :loading="uploading" :disabled="!model || loading" :aria-label="tr('上传参考素材')" @click="uploadInput?.click()"><Paperclip :size="15" />{{ tr('添加参考') }}</AppButton>
             </div>
@@ -246,16 +246,16 @@ async function create() {
           </div>
           <div v-if="(quote?.reason && !quote.allowed) || quoteError" class="composer-quote-warning composer-quote" aria-live="polite">
             <span v-if="quote?.reason && !quote.allowed" class="est-warning">
-              {{ quote.reason }}<template v-if="quote.shortfall && Number(quote.shortfall) > 0"> · {{ tr('还差') }} {{ money(quote.shortfall) }}</template>
+              {{ tr(quote.reason) }}<template v-if="quote.shortfall && Number(quote.shortfall) > 0"> · {{ tr('还差') }} {{ money(quote.shortfall) }}</template>
             </span>
             <span v-else-if="quoteError" class="est-error">
-              {{ quoteError }} · <button type="button" class="est-retry-btn" @click="refreshQuote">{{ tr('重新报价') }}</button>
+              {{ tr(quoteError) }} · <button type="button" class="est-retry-btn" @click="refreshQuote">{{ tr('重新报价') }}</button>
             </span>
           </div>
         </section>
         <p v-if="loading" class="home-status" role="status">{{ tr('正在读取可用模型…') }}</p>
         <p v-else-if="!models.length" class="home-status" role="status">{{ tr('暂未配置可用模型，请联系管理员。') }}</p>
-        <div v-if="error" class="home-error" role="alert">{{ error }}<AppButton size="sm" @click="load">{{ tr('重新加载') }}</AppButton></div>
+        <div v-if="error" class="home-error" role="alert">{{ tr(error) }}<AppButton size="sm" @click="load">{{ tr('重新加载') }}</AppButton></div>
 
         <div class="shortcut-heading"><span>{{ tr('创作工具') }}</span></div>
         <nav class="home-shortcuts" :aria-label="tr('我的创作')">
@@ -267,7 +267,7 @@ async function create() {
 
         <section v-if="recent.length" class="recent-section"><header><h2>{{ tr('最近的片段') }}</h2><span>{{ tr('随时接着创作') }}</span></header><div class="recent-list"><RouterLink v-for="item in recent.slice(0, 6)" :key="item.project_id" :to="{name:'clip-studio',params:{projectId:item.project_id}}"><Film :size="18" /><span>{{ item.name }}</span><small>{{ item.aspect_ratio }}</small><ArrowUpRight :size="15" /></RouterLink></div></section>
 
-        <ShowcaseGallery class="showcase-section" :works="works" :loading="loading" :error="galleryError" @retry="load" />
+        <ShowcaseGallery class="showcase-section" :works="works" :loading="loading" :error="tr(galleryError)" @retry="load" />
       </div>
     </Transition>
   </main>

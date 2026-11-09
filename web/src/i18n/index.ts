@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { createI18n, type MessageContext } from 'vue-i18n'
 import en from 'element-plus/es/locale/lang/en'
 import zh from 'element-plus/es/locale/lang/zh-cn'
@@ -30,6 +30,7 @@ for (const [group, entries] of Object.entries(catalog)) {
 }
 export const i18n = createI18n({ legacy: false, locale: cachedLocale(), fallbackLocale: 'en', messages })
 export const locale = i18n.global.locale
+export const localeSaving = ref(false)
 export const dateLocale = computed(() => locale.value === 'zh' ? 'zh-CN' : 'en-US')
 export const elementLocale = computed(() => locale.value === 'zh' ? zh : en)
 export function tr(source: string, parameters: Record<string, unknown> = {}): string {
@@ -46,17 +47,24 @@ export function setLocale(value: AppLocale): void {
 }
 let revision = 0
 export async function refreshLocale(): Promise<void> {
+  if (localeSaving.value) return
   const requestRevision = ++revision
   try {
     const base = ((import.meta.env.VITE_API_BASE ?? '') as string).replace(/\/+$/, '')
     const response = await fetch(`${base}/api/config/locale`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
     if (!response.ok) return
     const payload = await response.json()
-    if (requestRevision === revision && payload.code === 0 && isLocale(payload.data?.locale)) setLocale(payload.data.locale)
+    if (!localeSaving.value && requestRevision === revision && payload.code === 0 && isLocale(payload.data?.locale)) setLocale(payload.data.locale)
   } catch { /* Keep the last known language during network failures. */ }
 }
 export function applySavedLocale(value: AppLocale): void {
+  localeSaving.value = false
   ++revision // An older in-flight refresh cannot undo an explicit save.
+  setLocale(value)
+}
+export function beginLocaleChange(value: AppLocale): void {
+  localeSaving.value = true
+  ++revision
   setLocale(value)
 }
 export async function initializeLocale(): Promise<void> {

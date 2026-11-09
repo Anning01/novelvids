@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, expect, it, vi } from 'vitest'
 import HomePage from './HomePage.vue'
+import { applySavedLocale, beginLocaleChange, setLocale } from '@/i18n'
 import { api } from '@/api'
 import { clipApi } from '@/features/creation-agent/clipApi'
 import type { ClipSession } from '@/features/creation-agent/clipApi'
@@ -43,6 +44,81 @@ it('uses configured models, real empty works, and keeps series in My Creation', 
   expect(wrapper.text()).not.toContain('42.8w')
   expect(wrapper.text()).not.toContain('Wan 3.0')
   expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeDefined()
+})
+
+it.each(['light', 'dark'])('renders the English home, categories and quote warnings without rewriting user content (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  setLocale('en')
+  vi.mocked(clipApi.quote).mockResolvedValue(ok({ estimated_cost: '0.5', available_balance: null, shortfall: null,
+    currency: 'CNY', allowed: false, reason: '请先切换到要创建作品的团队', note: '' }))
+  const work = { id: 'work-1', title: '保留原作标题', cover: '', video_url: '', episodes_count: 1, duration: '00:05',
+    category: '写实通用', tags: [], heat: '', description: '创作者的原文说明', author: '作者原名', novel_id: 1 }
+  vi.mocked(api.experienceShowcase).mockResolvedValue(ok([work, { ...work, id: 'work-2', category: '3D仙侠', novel_id: 2 }]))
+  const { wrapper } = await render()
+  expect(wrapper.get('.home-heading').text()).toContain('Imagine it')
+  expect(wrapper.get('.home-heading').text()).not.toMatch(/[\u4e00-\u9fff]/)
+  for (const selector of ['.composer-tabs', '.models-label', '.inspiration-list', '.upload-reference', '.composer-settings', '.composer-actions', '.home-shortcuts', '.gallery-heading', '.showcase-filters', '.composer-quote-warning']) {
+    expect(wrapper.get(selector).text(), selector).not.toMatch(/[\u4e00-\u9fff]/)
+  }
+  expect(wrapper.get('.showcase-filters').text()).toContain('General realism')
+  expect(wrapper.get('.showcase-filters').text()).toContain('3D xianxia')
+  expect(wrapper.get('.composer-quote-warning').text()).toContain('Switch to the team you want to create in first')
+  expect(wrapper.get('.work-title').text()).toBe(work.title)
+  expect(wrapper.get('.work-description').text()).toBe(work.description)
+  await wrapper.get('#clip-idea').setValue('保留我的提示词 @{图片1}')
+  setLocale('zh')
+  await flushPromises()
+  expect(wrapper.get('.home-heading').text()).toContain('具现想象')
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('保留我的提示词 @{图片1}')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
+
+it('uses the current language for inspiration only when the user chooses it', async () => {
+  const { wrapper } = await render()
+  await wrapper.findAll('.inspiration-list button')[0]!.trigger('click')
+  const chineseDraft = (wrapper.get('textarea').element as HTMLTextAreaElement).value
+  setLocale('en')
+  await flushPromises()
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(chineseDraft)
+  expect(wrapper.findAll('.inspiration-list button')[0]!.text()).toBe('Rainy pursuit')
+  await wrapper.findAll('.inspiration-list button')[0]!.trigger('click')
+  const englishDraft = (wrapper.get('textarea').element as HTMLTextAreaElement).value
+  expect(englishDraft).toContain('On a rainy street at night')
+  expect(englishDraft).not.toMatch(/[\u4e00-\u9fff]/)
+  setLocale('zh')
+  await flushPromises()
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(englishDraft)
+})
+
+it('updates already displayed load errors when the language changes', async () => {
+  vi.mocked(api.videoGenerationModels).mockRejectedValue(new Error('unavailable'))
+  vi.mocked(api.experienceShowcase).mockRejectedValue(new Error('unavailable'))
+  const { wrapper } = await render()
+  expect(wrapper.get('.home-error').text()).toContain('部分创作配置未能加载')
+  setLocale('en')
+  await flushPromises()
+  expect(wrapper.get('.home-error').text()).toContain('Some creation settings could not load')
+  expect(wrapper.get('.gallery-state').text()).toContain('Works are temporarily unavailable')
+  setLocale('zh')
+  await flushPromises()
+  expect(wrapper.get('.home-error').text()).toContain('部分创作配置未能加载')
+  expect(api.videoGenerationModels).toHaveBeenCalledOnce()
+})
+
+it('waits for language persistence before refreshing quote messages or starting a creation', async () => {
+  const { wrapper } = await render()
+  await wrapper.get('#clip-idea').setValue('Keep this draft')
+  const previousRequests = vi.mocked(clipApi.quote).mock.calls.length
+  beginLocaleChange('en')
+  await settleQuote()
+  expect(clipApi.quote).toHaveBeenCalledTimes(previousRequests)
+  expect(wrapper.get('.generate-action-btn').attributes('disabled')).toBeDefined()
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Keep this draft')
+  applySavedLocale('en')
+  await settleQuote()
+  expect(clipApi.quote).toHaveBeenCalledTimes(previousRequests + 1)
+  expect(wrapper.get('.generate-action-btn').attributes('disabled')).toBeUndefined()
 })
 it('switches model capabilities and sends selected settings to the real clip API', async () => {
   vi.spyOn(clipApi, 'create').mockResolvedValue(ok({project_id: 90} as ClipSession))

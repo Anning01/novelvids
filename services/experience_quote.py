@@ -1,4 +1,6 @@
 """Read-only clip estimates, using the same pricing math as settlement."""
+from utils.messages import localized_message
+
 from decimal import Decimal, InvalidOperation
 import math
 
@@ -31,25 +33,25 @@ class ClipQuote(BaseModel):
 
 def _price(pricing, kind, tier):
     if not isinstance(pricing, dict) or pricing.get('type') != kind or tier not in (pricing.get('prices') or {}):
-        raise ValueError('当前模型尚未配置该档位价格，请联系管理员')
+        raise ValueError(localized_message('当前模型尚未配置该档位价格，请联系管理员'))
     if pricing.get('currency', 'CNY') != 'CNY':
-        raise ValueError('当前价格币种无法与人民币余额核对，请联系管理员')
+        raise ValueError(localized_message('当前价格币种无法与人民币余额核对，请联系管理员'))
     try:
         value = Decimal(str(pricing['prices'][tier]))
         discount = Decimal(str(pricing['discount'] if pricing.get('discount') is not None else 1))
     except (InvalidOperation, TypeError, ValueError):
-        raise ValueError('模型价格配置无效，请联系管理员') from None
+        raise ValueError(localized_message('模型价格配置无效，请联系管理员')) from None
     if not value.is_finite() or value < 0 or not discount.is_finite() or discount <= 0:
-        raise ValueError('模型价格配置无效，请联系管理员')
+        raise ValueError(localized_message('模型价格配置无效，请联系管理员'))
     fee = pricing.get('input_image')
     if fee is not None:
         try:
             unit = Decimal(str(fee['price_per_image']))
             free = Decimal(str(fee.get('first_free', 0)))
         except (InvalidOperation, TypeError, ValueError, KeyError):
-            raise ValueError('参考图片价格配置无效，请联系管理员') from None
+            raise ValueError(localized_message('参考图片价格配置无效，请联系管理员')) from None
         if not unit.is_finite() or unit < 0 or not free.is_finite() or free < 0 or free != free.to_integral_value():
-            raise ValueError('参考图片价格配置无效，请联系管理员')
+            raise ValueError(localized_message('参考图片价格配置无效，请联系管理员'))
     return pricing
 
 
@@ -65,9 +67,9 @@ def _references(payload):
 
 
 async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: AuthContext, *, reference_image_config_id: int | None = None) -> ClipQuote:
-    note = '按当前参数估算，最终按实际用量结算。'
+    note = localized_message('按当前参数估算，最终按实际用量结算。')
     if payload.mode != 'direct':
-        note = '图片/视频按当前参数估算，助手费用按实际用量另计。'
+        note = localized_message('图片/视频按当前参数估算，助手费用按实际用量另计。')
     quote = ClipQuote(note=note)
     config = await ai_model_config_controller.get_active(4 if payload.task_type == 'video' else 2,
         payload.model_config_id, team_id=ctx.team_id)
@@ -77,11 +79,11 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
                 aspect_ratio=payload.aspect_ratio, duration=payload.duration, output_format=None, generate_audio=None)
             pricing = _price(config.pricing, 'video', selected.resolution)
             if pricing.get('billing_unit') != 'second' and selected.resolution not in TOKENS_PER_SECOND:
-                raise ValueError('当前档位无法计算预计价格，请联系管理员')
+                raise ValueError(localized_message('当前档位无法计算预计价格，请联系管理员'))
             references = _references(payload)
             videos = [item for item in references if item.type == 'video']
             if any(item.duration is None or not math.isfinite(item.duration) or item.duration <= 0 for item in videos):
-                raise ValueError('参考视频时长尚未确认，暂时无法报价')
+                raise ValueError(localized_message('参考视频时长尚未确认，暂时无法报价'))
             reference_prices = pricing.get('video_reference_prices')
             if videos and reference_prices:
                 _price({**pricing, 'prices': reference_prices}, 'video', selected.resolution)
@@ -110,7 +112,7 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
             ref_undiscounted = {**ref_pricing, 'discount': 1}
             original_total += compute_image_cost(1, reference_selection.clarity, ref_undiscounted)
         if not total.is_finite() or total < 0:
-            raise ValueError('无法确认预计价格，请联系管理员')
+            raise ValueError(localized_message('无法确认预计价格，请联系管理员'))
         target_pricing = pricing if payload.task_type == 'video' else image_pricing
         model_discount = Decimal(str(target_pricing.get('discount') or 1)) if isinstance(target_pricing, dict) else Decimal('1')
         quote.discount = model_discount
@@ -120,19 +122,19 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
         quote.reason = str(error)
         return quote
     except InvalidOperation:
-        quote.reason = '无法确认预计价格，请联系管理员'
+        quote.reason = localized_message('无法确认预计价格，请联系管理员')
         return quote
     quote.estimated_cost = total
     if not settings.AUTH_ENABLED:
         quote.allowed = True
         return quote
     if ctx.team_id is None:
-        quote.reason = '请先切换到要创建作品的团队'
+        quote.reason = localized_message('请先切换到要创建作品的团队')
         return quote
     from auth.models import Team, TeamMember
     team = await Team.get_or_none(id=ctx.team_id)
     if team is None:
-        raise HTTPException(404, '团队不存在')
+        raise HTTPException(404, localized_message('团队不存在'))
     balance = Decimal(str(team.balance))
     member = await TeamMember.get_or_none(team_id=ctx.team_id, user_id=ctx.user.id) if ctx.user else None
     remaining = None
@@ -141,11 +143,11 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
     quote.available_balance = min(balance, remaining) if remaining is not None else balance
     quote.shortfall = max(Decimal('0'), total - quote.available_balance)
     if not ctx.is_super_admin and (member is None or member.role not in ('admin', 'creator')):
-        quote.reason = '当前账号没有创作权限'
+        quote.reason = localized_message('当前账号没有创作权限')
     elif balance < total or balance <= 0:
-        quote.reason = '团队余额不足，请先充值'
+        quote.reason = localized_message('团队余额不足，请先充值')
     elif remaining is not None and (remaining < total or remaining <= 0):
-        quote.reason = '个人消费限额不足，请联系管理员调整'
+        quote.reason = localized_message('个人消费限额不足，请联系管理员调整')
     else:
         quote.allowed = True
     return quote

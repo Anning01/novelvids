@@ -26,7 +26,7 @@ it('offers system, light, and dark choices and applies the selected preference',
 
   await wrapper.get('[aria-label^="外观主题"]').trigger('click')
   expect(wrapper.get('[role="menu"]').findAll('[role="menuitemradio"]')).toHaveLength(3)
-  await wrapper.get('[data-theme-preference="dark"]').trigger('click')
+  await wrapper.get('[data-preference-value="dark"]').trigger('click')
 
   expect(theme.preference.value).toBe('dark')
   expect(root.dataset.appTheme).toBe('dark')
