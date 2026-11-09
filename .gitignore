@@ -53,8 +53,15 @@ frontend/dist/
 
 # Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+.test.env
+.test.env.*
+!.test.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Data and storage
 data/
@@ -97,3 +104,28 @@ test.py
 
 *.anning.json
 *.anning.md
+
+# Local instructions, plans and production operations
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.agents/
+.codex/
+.cursor/
+.cursorrules
+/skills-lock.json
+/CONTRIBUTING.md
+/ROADMAP.md
+/design-qa.md
+/docs/*
+!/docs/images/
+!/docs/videos/
+!/docs/licenses/
+/prompts/design/
+/deploy/demo/
+/deploy/security/
+/web/nginx.demo.conf
+
+# Local investigation and preview artifacts
+/output/
+/web/.*-smoke.html

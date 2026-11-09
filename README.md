@@ -16,7 +16,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
   <a href="https://shortdramas.xiazq.com"><img src="https://img.shields.io/badge/online-猫影商业站-6864e8" alt="猫影商业站"></a>
-  <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="中文 / English"></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="中文 / English"></a>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#文档中心">文档</a> · <a href="CONTRIBUTING.md">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
+  <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
 </p>
 
 ## 加入交流群
@@ -46,7 +46,7 @@
 
 使用器灵账号微信扫码登录，从一句想法开始生成图片或视频，也可以把故事推进成系列短剧。在线版提供模型选择、参考素材、团队协作、用量记录与充值入口；生成费用以页面展示的报价和实际用量为准。
 
-开源版的自部署与二次开发说明见下方「快速开始」和[开发指南](docs/development.md)。
+开源版的自部署与二次开发说明见下方「快速开始」和「本地开发」。
 
 ## 使用教程
 
@@ -104,7 +104,7 @@
 | --- | --- |
 | [![角色与场景资产管理](docs/images/screenshots/asset.jpg)](docs/images/screenshots/asset.jpg) | [![新版作品库与成片归档](docs/images/screenshots/portfolio.jpg)](docs/images/screenshots/portfolio.jpg) |
 
-截图使用公开示例项目，展示当前版本的中文界面；系统也支持英文。[查看完整界面预览](docs/screenshots.md)。
+截图使用公开示例项目，展示当前版本的中文界面；系统也支持英文。
 
 ## 快速开始
 
@@ -114,7 +114,7 @@
 
 ### 开源自部署
 
-开源版适合自行管理模型、数据和部署的用户，默认可匿名使用；启用账号密码登录与团队协作见[团队部署指南](docs/team-auth-deployment.md)。
+开源版适合自行管理模型、数据和部署的用户，默认可匿名使用。
 
 <details>
 <summary>展开 Docker 自部署与首次配置步骤</summary>
@@ -135,18 +135,18 @@ docker compose up -d --build
 2. 配置要使用的图片、视频模型和价格。只配置文本模型，也可以先做故事、资产和分镜规划。
 3. 从一段短故事或一章正文开始，检查提取与分镜结果，再生成媒体。明确的生成请求会调用付费模型；只改提示词不会自动生图或生视频。
 
-当前 Docker 后端镜像未预装 FFmpeg。首次使用视频探测、合并、重制或高清化前，需在后端容器安装：
+Docker 后端镜像已包含 FFmpeg；使用旧镜像时，可安装并检查：
 
 ```bash
 docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
 docker compose exec backend ffprobe -version
 ```
 
-这是当前镜像的准备步骤，重建后端镜像后需重新执行。完整配置和排错见[模型与首次启动指南](docs/model-configuration.md)。
+可用 `docker compose exec backend ffprobe -version` 检查视频工具是否就绪。
 
 - **数据在本地：**`./data` 保存数据库和私有导出，`./media` 保存图片、视频、音频；更新前备份这两个目录。
-- **默认无登录：**适合个人本地使用。公网部署请先按[登录与团队部署指南](docs/team-auth-deployment.md)启用鉴权和 HTTPS。
-- **本地开发：**Python 3.12+、Node.js 22.12+、uv 与 FFmpeg，见[开发指南](docs/development.md)。
+- **默认无登录：**适合个人本地使用。公网部署前，请通过环境变量配置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=password`、`SUPER_ADMIN_USERNAME` 和 `SUPER_ADMIN_PASSWORD`，并启用 HTTPS。
+- **本地开发：**Python 3.12+、Node.js 22.12+、uv 与 FFmpeg，步骤见下方「本地开发」。
 
 </details>
 
@@ -165,27 +165,32 @@ flowchart LR
 
 故事板适合逐镜头检查，画布适合组织引用与工作流。开始生成后可以关闭页面，后台继续查询已受理任务；结果不确定时需核对，不会自动重复提交收费请求。
 
-## 文档中心
+## 本地开发
 
-| 你想做什么 | 指南 |
-| --- | --- |
-| 了解功能、创作助手、声音与工作区入口 | [创作指南](docs/creation-guide.md) |
-| 配置模型、价格和助手运行预算 | [模型与首次启动](docs/model-configuration.md) |
-| 做英文对白、上传 MP3/WAV、跨章节复用声音 | [English production guide](docs/english-production.md)（英文） |
-| 调整生图、分镜效果或新增风格 | [单套 Skills 开发指南](docs/agent-skills-workflow.md) |
-| 把单条视频或成片提升到更高清晰度 | [视频画质增强](docs/video-enhancement.md) |
-| 配置 PostgreSQL、OSS、媒体持久化与回填 | [数据库与媒体存储](docs/storage.md) |
-| 启用登录、团队、权限与部署安全设置 | [团队部署](docs/team-auth-deployment.md) |
-| 接入开发、了解结构与运行测试 | [开发指南](docs/development.md) · [贡献指南](CONTRIBUTING.md) |
-| 查阅专项行为 | [媒体资源库](docs/resource-library.md) · [项目统计](docs/project-overview.md) · [项目名称迁移](docs/project-name-scoping.md) |
+需要 Python 3.12+、Node.js 22.12+、uv 与 FFmpeg。
+
+```bash
+uv sync --frozen --dev
+make dev PORT=9000
+```
+
+另开终端启动前端：
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+打开 [http://localhost:3000](http://localhost:3000)。前端代理指向本地后端的 9000 端口。
 
 ## 开发与社区
 
 前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
 
-欢迎带着实际创作问题参与：[报告问题](https://github.com/Anning01/novelvids/issues/new) · [讨论需求](https://github.com/Anning01/novelvids/issues) · [提交贡献](CONTRIBUTING.md)。报告生成问题时，提供可公开的最小样例、模型配置类型和复现步骤，别附 Key 或私人素材。
+欢迎带着实际创作问题参与：[报告问题](https://github.com/Anning01/novelvids/issues/new) · [讨论需求](https://github.com/Anning01/novelvids/issues) · [提交贡献](https://github.com/Anning01/novelvids/pulls)。报告生成问题时，提供可公开的最小样例、模型配置类型和复现步骤，别附 Key 或私人素材。
 
-后续重点围绕**资产一致性、可复现工作流、部署恢复、模型与 Skills 扩展、成片质量检查**讨论和推进；当前能力与待讨论方向分开记录在[路线图](ROADMAP.md)，不作为交付承诺。
+后续重点围绕**资产一致性、可复现工作流、部署恢复、模型与 Skills 扩展、成片质量检查**讨论和推进。
 
 如果 NovelVids 帮到了你，欢迎 Star、反馈使用体验，或分享有权公开的作品与制作过程。
 
