@@ -15,7 +15,7 @@ export function formatTokens(value: number): string {
   return formatTokenCount(value, 1)
 }
 
-export function usageLabel(item: BillingRecord): string {
+export function usageLabel(item: { billing_type: string; usage: Record<string, unknown>; duration_seconds?: number | null }): string {
   const usage = item.usage || {}
   const num = (value: unknown) => Number(value) || 0
   if (item.billing_type === 'text') return tr('输入 {p0} · 输出 {p1} token', { p0: formatTokens(num(usage.input_tokens)), p1: formatTokens(num(usage.output_tokens)) })

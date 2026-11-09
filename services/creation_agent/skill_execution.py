@@ -45,6 +45,10 @@ async def prepare_workflow(params: dict) -> dict:
     chosen, limits = await require_agent(
         params.get("team_id"), params.get("assistant_model_config_id")
     )
+    if "prompt_language" not in params:
+        from services.language import generation_language
+
+        params = {**params, "prompt_language": await generation_language()}
     if params.get("workflow_version") == WORKFLOW_VERSION:
         SkillSnapshot.model_validate(params["skill_snapshot"])
         return dict(params)
@@ -56,12 +60,12 @@ async def prepare_workflow(params: dict) -> dict:
         inherited = {
             key: parent.params[key]
             for key in (
-                "prompt_language",
                 "skill_snapshot",
                 "assistant_model_config_id",
                 "agent_configuration",
             )
         }
+        inherited["prompt_language"] = parent.language
         inherited["origin_run_id"] = parent.params["task_id"]
         source_id = parent.params.get("instruction_message_id")
         if source_id is None:

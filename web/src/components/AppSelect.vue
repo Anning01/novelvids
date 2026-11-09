@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Check, ChevronDown } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
+import { tr } from '@/i18n'
 
 export interface AppSelectOption {
   value: string
@@ -22,6 +23,7 @@ const props = withDefaults(defineProps<{
   align?: 'start' | 'end'
   density?: 'default' | 'compact'
   disabled?: boolean
+  searchable?: boolean
 }>(), {
   menuLabel: '',
   menuClass: '',
@@ -31,6 +33,7 @@ const props = withDefaults(defineProps<{
   align: 'start',
   density: 'default',
   disabled: false,
+  searchable: false,
 })
 
 const emit = defineEmits<{
@@ -40,6 +43,7 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null)
 const menu = ref<HTMLElement | null>(null)
 const open = ref(false)
+const search = ref('')
 const opensUp = ref(false)
 const menuPosition = ref({ top: 0, left: 0, width: 0 })
 const menuTheme = ref<Record<string, string>>({})
@@ -47,6 +51,7 @@ const menuTheme = ref<Record<string, string>>({})
 const normalizedOptions = computed<AppSelectOption[]>(() => props.options.map(option => (
   typeof option === 'string' ? { value: option, label: option } : option
 )))
+const visibleOptions = computed(() => normalizedOptions.value.filter(option => option.label.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
 const selectedOption = computed(() => normalizedOptions.value.find(option => option.value === props.modelValue) ?? normalizedOptions.value[0])
 const menuStyle = computed(() => {
   const style: Record<string, string | number | undefined> = {
@@ -69,6 +74,7 @@ async function toggleMenu(fromEnd = false) {
   if (props.disabled || !normalizedOptions.value.length) return
   open.value = !open.value
   if (!open.value) return
+  search.value = ''
   if (root.value) {
     const style = getComputedStyle(root.value)
     const properties = ['--app-surface', '--app-surface-raised', '--app-surface-muted', '--app-surface-hover',
@@ -78,6 +84,10 @@ async function toggleMenu(fromEnd = false) {
   updatePlacement()
   await nextTick()
   updatePlacement()
+  if (props.searchable) {
+    menu.value?.querySelector<HTMLInputElement>('input')?.focus()
+    return
+  }
   const selected = normalizedOptions.value.findIndex(option => option.value === props.modelValue)
   focusOption(selected < 0 ? (fromEnd ? normalizedOptions.value.length - 1 : 0) : selected)
 }
@@ -141,6 +151,7 @@ function selectOption(option: AppSelectOption) {
 watch(() => props.disabled || !normalizedOptions.value.length, unavailable => {
   if (unavailable) open.value = false
 })
+watch(visibleOptions, async () => { if (open.value) { await nextTick(); updatePlacement() } })
 
 function closeFromOutside(event: PointerEvent) {
   const target = event.target as Node
@@ -209,8 +220,10 @@ onUnmounted(() => {
         @keydown="navigateMenu"
       >
         <p v-if="menuLabel" class="app-select__menu-label">{{ menuLabel }}</p>
+        <input v-if="searchable" v-model="search" class="app-select__search" type="search" :aria-label="tr('搜索{p0}', { p0: ariaLabel })" :placeholder="tr('搜索')" @keydown.enter.prevent @keydown.left.stop @keydown.right.stop @keydown.home.stop @keydown.end.stop />
+        <p v-if="!visibleOptions.length" class="app-select__menu-label">{{ tr('无匹配结果') }}</p>
         <AppButton
-          v-for="option in normalizedOptions"
+          v-for="option in visibleOptions"
           :key="option.value"
           type="button"
           class="app-select__option"
@@ -343,6 +356,8 @@ onUnmounted(() => {
   color: var(--app-text-muted);
   font-size: 11px;
 }
+.app-select__search { box-sizing: border-box; width: 100%; min-height: 36px; margin-bottom: 5px; padding: 7px 9px; border: 1px solid var(--app-border); border-radius: 7px; color: var(--app-text); background: var(--app-surface); font: inherit; }
+.app-select__search:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; }
 
 .app-select__option {
   display: flex;
