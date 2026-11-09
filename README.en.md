@@ -16,7 +16,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
   <a href="https://shortdramas.xiazq.com"><img src="https://img.shields.io/badge/online-hosted%20service-6864e8" alt="Hosted commercial service"></a>
-  <a href="docs/english-production.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="Chinese / English"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/language-中文%20%2F%20English-555" alt="Chinese / English"></a>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#documentation">Documentation</a> · <a href="CONTRIBUTING.md">Contribute</a> · <a href="#support-the-project">Support the project</a>
+  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
 </p>
 
 ## Join the community
@@ -46,7 +46,7 @@ Join the **NovelVids · 猫影短剧 WeChat group** to discuss AI animation, sho
 
 Sign in with Qiling through WeChat. Start with an image or video idea, add reference material, or develop a story into a short drama. The hosted service provides model selection, team collaboration, usage records and top-ups. Generation fees follow the displayed estimates and actual usage.
 
-For open-source self-hosting and development, see Quick start below and the [development guide](docs/development.en.md).
+For open-source self-hosting and development, see Quick start and Local development below.
 
 ## Video tutorial
 
@@ -104,7 +104,7 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 | --- | --- |
 | [![Character and scene assets](docs/images/screenshots/asset.jpg)](docs/images/screenshots/asset.jpg) | [![Current works library and finished episode archive](docs/images/screenshots/portfolio.jpg)](docs/images/screenshots/portfolio.jpg) |
 
-Screenshots use public example projects in the current Chinese interface. English is also supported. [View the complete gallery](docs/screenshots.md).
+Screenshots use public example projects in the current Chinese interface. English is also supported.
 
 ## Quick start
 
@@ -114,7 +114,7 @@ Screenshots use public example projects in the current Chinese interface. Englis
 
 ### Open-source self-hosting
 
-The open-source edition lets you manage models, data and deployment. It runs anonymously by default; password login and team setup are covered in the [team deployment guide](docs/team-auth-deployment.md).
+The open-source edition lets you manage models, data and deployment. It runs anonymously by default.
 
 <details>
 <summary>Expand Docker self-hosting and first-run configuration</summary>
@@ -135,18 +135,18 @@ Before creating your first project:
 2. Configure the image/video models you want and their prices. A text model alone is enough to start planning stories, assets and storyboards.
 3. Start with a short story or one chapter. Review extraction and storyboard results before generating media. Explicit generation requests can incur model charges; editing a prompt does not automatically generate images or videos.
 
-The current Docker backend image does not include FFmpeg. Before video probing, composition, remake analysis or enhancement, install it in the backend container:
+The Docker backend image includes FFmpeg. For older images, install and check it in the backend container:
 
 ```bash
 docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
 docker compose exec backend ffprobe -version
 ```
 
-Repeat this preparation after rebuilding the backend image. See [model setup and first run](docs/model-configuration.en.md) for configuration and troubleshooting.
+Use `docker compose exec backend ffprobe -version` to check that the video tools are ready.
 
 - **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
-- **No login by default:** intended for personal local use. Before public exposure, configure authentication and HTTPS using the [team deployment guide](docs/team-auth-deployment.md) (Chinese).
-- **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See the [development guide](docs/development.en.md).
+- **No login by default:** intended for personal local use. Before public exposure, set `AUTH_ENABLED=true`, `AUTH_PROVIDER=password`, `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD` through environment variables, and enable HTTPS.
+- **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See Local development below.
 
 </details>
 
@@ -165,27 +165,32 @@ flowchart LR
 
 Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
 
-## Documentation
+## Local development
 
-| What you want to do | Guide |
-| --- | --- |
-| Learn the workflow, assistant, voices and workspace | [Creation guide](docs/creation-guide.en.md) |
-| Configure models, prices and assistant budgets | [Model setup and first run](docs/model-configuration.en.md) |
-| Produce English dialogue and reuse uploaded MP3/WAV voices | [English production](docs/english-production.md) |
-| Improve image/storyboard prompts or add visual styles | [One skill pack](docs/agent-skills-workflow.en.md) |
-| Enhance a clip or an episode | [Video enhancement](docs/video-enhancement.en.md) |
-| Configure PostgreSQL, OSS, persistent media and backfills | [Database and storage](docs/storage.en.md) |
-| Enable authentication, teams and deployment protections | [Team deployment](docs/team-auth-deployment.md) (Chinese) |
-| Develop, understand the structure and run tests | [Development](docs/development.en.md) · [Contributing](CONTRIBUTING.md) |
-| Check specific behavior | [Media library](docs/resource-library.md) · [Project metrics](docs/project-overview.md) · [Project name migration](docs/project-name-scoping.md) (Chinese) |
+Install Python 3.12+, Node.js 22.12+, uv and FFmpeg.
+
+```bash
+uv sync --frozen --dev
+make dev PORT=9000
+```
+
+Start the frontend in another terminal:
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The frontend proxies requests to the local backend on port 9000.
 
 ## Development and community
 
 The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
 
-Bring a real creative problem: [report a bug](https://github.com/Anning01/novelvids/issues/new), [discuss an idea](https://github.com/Anning01/novelvids/issues), or [contribute](CONTRIBUTING.md). For generation problems, include a shareable minimal example, model configuration type and reproduction steps. Keep keys and private media out of reports.
+Bring a real creative problem: [report a bug](https://github.com/Anning01/novelvids/issues/new), [discuss an idea](https://github.com/Anning01/novelvids/issues), or [contribute](https://github.com/Anning01/novelvids/pulls). For generation problems, include a shareable minimal example, model configuration type and reproduction steps. Keep keys and private media out of reports.
 
-Directions for discussion include **asset consistency, reproducible workflows, deployment and recovery, model/skill extensibility and production quality checks**. The [roadmap](ROADMAP.md) distinguishes current capabilities from proposed work; it is not a release commitment.
+Directions for discussion include **asset consistency, reproducible workflows, deployment and recovery, model/skill extensibility and production quality checks**.
 
 If NovelVids helps you, consider a Star, report your experience, or share work and production notes you are authorized to publish.
 

@@ -38,3 +38,22 @@ temp
 .idea
 .vscode
 .DS_Store
+
+# Local instructions, internal documents and operations
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.agents
+.codex
+.claude
+.cursor
+.cursorrules
+skills-lock.json
+CONTRIBUTING.md
+ROADMAP.md
+design-qa.md
+docs/**/*.md
+prompts/design
+deploy/demo
+deploy/security
+output

@@ -23,6 +23,6 @@ npm run typecheck
 npm run build
 ```
 
-See the [development guide](../docs/development.en.md) for backend startup, tests and extension points.
+See the [project README](../README.en.md#local-development) for backend startup.
 
 Project source uses the [MIT License](../LICENSE); retain [third-party notices](../NOTICE.md).
