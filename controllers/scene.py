@@ -210,7 +210,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 video_model = await ai_model_config_controller.get_active(
                     AiTaskTypeEnum.video.value, chapter.novel.video_model_config_id, team_id=team_id
                 )
-                capabilities = capabilities_for(video_model.video_model_type)
+                capabilities = capabilities_for(video_model.video_model_type, video_model.api_protocol)
                 request_params["shot_duration_range"] = [capabilities.duration_min, capabilities.duration_max]
             from services.creation_agent.skill_execution import prepare_workflow
             request_params = await prepare_workflow(request_params)

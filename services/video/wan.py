@@ -13,7 +13,7 @@ import httpx
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for
-from services.video.content import PreparedVideoContent, prepare_video_content
+from services.video.content import PreparedVideoContent, prepare_video_content, reference_indexes, replace_display_mentions
 from services.video.dashscope_upload import DashScopeTemporaryFileUploader
 from services.video.provider_http import (
     http_provider_error,
@@ -61,40 +61,6 @@ def _wan_endpoint(base_url: str, operation: str, task_id: str | None = None) -> 
     raise ValueError(f"Unsupported Wan operation: {operation}")
 
 
-def _reference_indexes(
-    prepared: PreparedVideoContent,
-    role: str,
-    source_urls: list[str],
-) -> list[int]:
-    """Map controller display mentions back to their Wan per-media-type indexes."""
-    ordered_urls: list[str] = []
-    for item in prepared.items:
-        if item.get("role") != role:
-            continue
-        item_type = str(item.get("type") or "")
-        value = item.get(item_type)
-        url = value.get("url") if isinstance(value, dict) else None
-        if isinstance(url, str):
-            ordered_urls.append(url)
-    return [ordered_urls.index(url) + 1 for url in source_urls if url in ordered_urls]
-
-
-def _replace_display_mentions(
-    prompt: str,
-    *,
-    mention_label: str,
-    reference_label: str,
-    indexes: list[int],
-) -> str:
-    iterator = iter(indexes)
-
-    def replace(match: re.Match[str]) -> str:
-        index = next(iterator, None)
-        return f"{reference_label}{index}" if index is not None else match.group(0)
-
-    return re.sub(rf"【参考{mention_label}：[^】]+】", replace, prompt)
-
-
 def _wan_prompt(
     prompt: str,
     *,
@@ -102,13 +68,13 @@ def _wan_prompt(
     video_indexes: list[int],
 ) -> str:
     """Translate shared factory references to Wan's documented 图/视频/音频 syntax."""
-    rendered = _replace_display_mentions(
+    rendered = replace_display_mentions(
         prompt,
         mention_label="图片",
         reference_label="图",
         indexes=image_indexes,
     )
-    rendered = _replace_display_mentions(
+    rendered = replace_display_mentions(
         rendered,
         mention_label="视频",
         reference_label="视频",
@@ -184,12 +150,12 @@ class Wan3Generator(BaseVideoGenerator):
         input_payload: dict[str, Any] = {
             "prompt": _wan_prompt(
                 prepared.prompt,
-                image_indexes=_reference_indexes(
+                image_indexes=reference_indexes(
                     prepared,
                     "reference_image",
                     list(kwargs.get("reference_images") or []),
                 ),
-                video_indexes=_reference_indexes(
+                video_indexes=reference_indexes(
                     prepared,
                     "reference_video",
                     list(kwargs.get("reference_videos") or []),

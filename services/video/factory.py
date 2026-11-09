@@ -15,8 +15,10 @@ from services.video.base import BaseVideoGenerator
 from services.video.capabilities import capabilities_for
 from services.video.minimax import MiniMaxH3Generator
 from services.video.seedance import SeedanceGenerator
+from services.video.unified import UnifiedVideoGenerator
 from services.video.wan import Wan3Generator
 from utils.enums import VideoGenerationModelTypeEnum, VideoModelTypeEnum
+from utils.image_protocol import ImageApiProtocol
 
 
 GeneratorBuilder = Callable[[AiModelConfig], BaseVideoGenerator]
@@ -34,8 +36,10 @@ class VideoGeneratorFactory:
     def __init__(
         self,
         registry: dict[VideoGenerationModelTypeEnum, VideoGeneratorAdapterSpec],
+        protocol_registry: dict[ImageApiProtocol, GeneratorBuilder] | None = None,
     ):
         self._registry = dict(registry)
+        self._protocol_registry = dict(protocol_registry or {})
 
     @property
     def registered_model_types(self) -> frozenset[VideoGenerationModelTypeEnum]:
@@ -54,11 +58,12 @@ class VideoGeneratorFactory:
             raise HTTPException(status_code=400, detail=localized_message('该视频模型尚未配置请求适配器')) from exc
 
     def create(self, config: AiModelConfig) -> BaseVideoGenerator:
-        capabilities_for(config.video_model_type)
+        capabilities_for(config.video_model_type, config.api_protocol)
         self.validate_model_type(config.video_model_type)
         model_type = VideoGenerationModelTypeEnum(config.video_model_type)
         spec = self._registry[model_type]
-        return spec.builder(config)
+        builder = self._protocol_registry.get(config.api_protocol, spec.builder)
+        return builder(config)
 
     def record_model_type(
         self,
@@ -90,4 +95,4 @@ video_generator_factory = VideoGeneratorFactory({
     VideoGenerationModelTypeEnum.wan_3: VideoGeneratorAdapterSpec(
         Wan3Generator, VideoModelTypeEnum.wan
     ),
-})
+}, protocol_registry={ImageApiProtocol.unified_video: UnifiedVideoGenerator})

@@ -20,7 +20,7 @@ class AiModelConfigProperties(BaseModel):
     model: Optional[str] = Field(None, description="模型名称", max_length=200)
     api_protocol: ImageApiProtocol = Field(
         ImageApiProtocol.openai_compatible,
-        description="接口协议；生图任务可选择 OpenAI、OpenRouter 兼容或火山方舟",
+        description="接口协议；视频任务支持模型对应协议或通用视频接口",
     )
     image_model_type: Optional[ImageModelTypeEnum] = Field(
         None,

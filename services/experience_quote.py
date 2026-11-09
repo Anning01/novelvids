@@ -73,7 +73,7 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
         payload.model_config_id, team_id=ctx.team_id)
     try:
         if payload.task_type == 'video':
-            selected = video_selection(config.video_model_type, generation_mode='reference', resolution=payload.resolution,
+            selected = video_selection(config.video_model_type, api_protocol=config.api_protocol, generation_mode='reference', resolution=payload.resolution,
                 aspect_ratio=payload.aspect_ratio, duration=payload.duration, output_format=None, generate_audio=None)
             pricing = _price(config.pricing, 'video', selected.resolution)
             if pricing.get('billing_unit') != 'second' and selected.resolution not in TOKENS_PER_SECOND:

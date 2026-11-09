@@ -166,7 +166,8 @@ const videoRefPrices = ref<Record<string, number>>({})
 const discountPricing = ref({ discount: 1, description: '' })
 const pricingTierOptions = computed<string[]>(() => {
   if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
-  if (selectedCategoryId.value === 'video') return generationCapabilities.value.video[form.value.video_model_type] || []
+  if (selectedCategoryId.value === 'video') return selectedVideoProtocol.value?.resolutions
+    || generationCapabilities.value.video[form.value.video_model_type] || []
   return []
 })
 const selectedVideoPricingPreset = computed(() => (
@@ -209,6 +210,7 @@ function taskLabel(value: number) {
 }
 
 function protocolLabel(value: ImageApiProtocol) {
+  if (value === 'unified_video') return tr('通用视频接口')
   if (value === 'volcengine_mediakit') return 'AI MediaKit'
   if (value === 'autodl') return 'AutoDL ComfyUI'
   if (value === 'minimax') return tr('MiniMax 官方')
@@ -222,8 +224,18 @@ function videoProtocolFor(modelType: VideoGenerationModelType | ''): ImageApiPro
   return modelType ? VIDEO_MODEL_PRESETS[modelType].protocol : 'volcengine_ark'
 }
 
-const selectedVideoProtocolLabel = computed(() => protocolLabel(videoProtocolFor(form.value.video_model_type)))
+const videoProtocolOptions = computed(() => {
+  const modelType = form.value.video_model_type
+  const options = modelType ? generationCapabilities.value.video_protocols?.[modelType] : undefined
+  return options?.map(option => ({ ...option, label: tr(option.label) }))
+    || [{ value: videoProtocolFor(modelType), label: protocolLabel(videoProtocolFor(modelType)),
+      resolutions: generationCapabilities.value.video[modelType] || [] }]
+})
+const selectedVideoProtocol = computed(() => videoProtocolOptions.value.find(option => option.value === form.value.api_protocol))
 const selectedVideoProtocolHint = computed(() => {
+  if (form.value.api_protocol === 'unified_video') {
+    return tr('填写接口地址与模型名称，使用通用视频任务协议。')
+  }
   if (form.value.video_model_type === 'minimax_h3_autodl') {
     return tr('填写 ComfyUI 分组 Token；模型名称填写工作流 ID。支持参考图和音频，不支持参考视频或首尾帧。')
   }
@@ -235,15 +247,6 @@ const selectedVideoProtocolHint = computed(() => {
   }
   return tr('提交到 /contents/generations/tasks，并通过任务 ID 异步查询结果。')
 })
-
-function providerHost(baseUrl?: string) {
-  if (!baseUrl) return tr('未设置接口')
-  try {
-    return new URL(baseUrl).host
-  } catch {
-    return baseUrl
-  }
-}
 
 async function load() {
   loading.value = true
@@ -345,10 +348,22 @@ function changeImageModelType() {
 function changeVideoModelType() {
   if (!form.value.video_model_type) return
   const preset = VIDEO_MODEL_PRESETS[form.value.video_model_type]
+  if (form.value.api_protocol === 'unified_video' && videoProtocolOptions.value.some(option => option.value === 'unified_video')) {
+    applyVideoPricingPreset()
+    return
+  }
   form.value.base_url = preset.baseUrl
   form.value.model = preset.model
   form.value.api_protocol = preset.protocol
   applyVideoPricingPreset()
+}
+
+function selectVideoProtocol(value: string) {
+  if (value === form.value.api_protocol) return
+  form.value.api_protocol = value as ImageApiProtocol
+  const preset = form.value.video_model_type ? VIDEO_MODEL_PRESETS[form.value.video_model_type] : undefined
+  form.value.base_url = preset?.protocol === value ? preset.baseUrl : ''
+  form.value.model = preset?.protocol === value ? preset.model : ''
 }
 
 function selectImageModelType(value: string) {
@@ -437,9 +452,7 @@ async function saveConfig() {
     if (discountDescription) pricing.discount_description = discountDescription
     const payload = {
       ...form.value,
-      api_protocol: selectedCategoryId.value === 'video'
-        ? videoProtocolFor(form.value.video_model_type)
-        : form.value.api_protocol,
+      api_protocol: form.value.api_protocol,
       processing_options: selectedCategoryId.value === 'enhancement' ? processingOptions.value : null,
       task_type: taskTypes[0],
       task_types: taskTypes,
@@ -592,7 +605,6 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             <p>{{ configTaskTypes(item).filter(taskType => selectedCategory.taskTypes.includes(taskType)).map(taskLabel).join(' · ') }}</p>
             <div class="config-metadata">
               <span><Settings2 :size="13" />{{ item.model || tr('未设置模型名称') }}</span>
-              <span><Server :size="13" />{{ providerHost(item.base_url) }}</span>
               <span><Zap :size="13" />{{ tr('并发') }} {{ item.concurrency }}</span>
               <span v-if="selectedCategory.id === 'image'">{{ protocolLabel(item.api_protocol) }}</span>
               <span v-if="selectedCategory.id === 'image'">{{ imageModelTypes.find(type => type.value === item.image_model_type)?.label || tr('未选择受支持类型') }}</span>
@@ -684,7 +696,13 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
             <span>{{ tr('接口协议') }}</span>
-            <output class="model-readonly-value" :aria-label="tr('视频接口协议')">{{ selectedVideoProtocolLabel }}</output>
+            <AppSelect
+              :model-value="form.api_protocol"
+              :options="videoProtocolOptions"
+              :ariaLabel="tr('视频接口协议')"
+              :menu-z-index="2000"
+              @update:model-value="selectVideoProtocol"
+            />
             <small>{{ selectedVideoProtocolHint }}</small>
           </label>
           <label v-if="selectedCategory.id === 'image'" class="is-full">

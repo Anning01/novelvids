@@ -859,11 +859,12 @@ async def test_返回尾帧_注入同章下一分镜参考图():
 
 
 @pytest.mark.asyncio
-async def test_供应商未返回尾帧时_ffmpeg_提取并注入下一分镜():
+@pytest.mark.parametrize(("model_type", "protocol"), [("minimax_h3", "minimax"), ("seedance_2_5", "unified_video")])
+async def test_供应商未返回尾帧时_ffmpeg_提取并注入下一分镜(model_type, protocol):
     scene, config = await _create_scene_with_config(
         model_name="minimax-h3",
-        video_model_type="minimax_h3",
-        api_protocol="minimax",
+        video_model_type=model_type,
+        api_protocol=protocol,
         base_url="https://api.minimaxi.com",
     )
     next_scene = await Scene.create(
@@ -874,12 +875,12 @@ async def test_供应商未返回尾帧时_ffmpeg_提取并注入下一分镜():
     )
     video = await Video.create(
         scene=scene,
-        model_type=VideoModelTypeEnum.minimax.value,
+        model_type=VideoModelTypeEnum.seedance.value if protocol == "unified_video" else VideoModelTypeEnum.minimax.value,
         external_task_id="minimax-no-last-frame",
         status=TaskStatusEnum.running.value,
         metadata={
             "model_config_id": config.id,
-            "video_model_type": "minimax_h3",
+            "video_model_type": model_type,
             "return_last_frame": True,
             "team_id": 7,
         },

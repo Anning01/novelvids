@@ -13,6 +13,7 @@ from services.image_generation.capabilities import (
 from services.model_resolution import resolve_scope_configs
 from services.video.capabilities import (
     capabilities_for as video_capabilities_for,
+    protocol_options as video_protocol_options,
     validate_protocol as validate_video_protocol,
 )
 from services.video.factory import video_generator_factory
@@ -217,70 +218,33 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         cls._validate_video_payload(data, instance)
         cls._validate_pricing(data, instance)
 
-    @staticmethod
-    async def _enforce_single_active_image_type(instance: AiModelConfig) -> None:
-        if not instance.is_active or not instance.image_model_type:
-            return
-        if AiTaskTypeEnum.reference_image.value not in AiModelConfigController._capabilities(instance):
-            return
-        # 同作用域（官方 / 同团队）内同生图能力类型仅保留一个启用项
-        await AiModelConfig.filter(
-            is_active=True,
-            image_model_type=instance.image_model_type,
-            team_id=instance.team_id,
-        ).exclude(id=instance.id).update(is_active=False)
-
-    @staticmethod
-    async def _enforce_single_active_video_type(instance: AiModelConfig) -> None:
-        if not instance.is_active or not instance.video_model_type:
-            return
-        if AiTaskTypeEnum.video.value not in AiModelConfigController._capabilities(instance):
-            return
-        await AiModelConfig.filter(
-            is_active=True,
-            video_model_type=instance.video_model_type,
-            team_id=instance.team_id,
-        ).exclude(id=instance.id).update(is_active=False)
-
-    @classmethod
-    async def _enforce_single_active_generation_type(cls, instance: AiModelConfig) -> None:
-        await cls._enforce_single_active_image_type(instance)
-        await cls._enforce_single_active_video_type(instance)
-
     async def create(self, obj_in: AiModelConfigCreate, **kwargs) -> AiModelConfig:
         data = self._normalize_payload(obj_in)
         self._validate_generation_payload(data)
-        instance = await super().create(data, **kwargs)
-        await self._enforce_single_active_generation_type(instance)
-        return instance
+        return await super().create(data, **kwargs)
 
     async def update(self, config_id: int, obj_in: AiModelConfigUpdate) -> AiModelConfig:
         instance = await self.get(config_id)
         data = self._normalize_payload(obj_in)
         self._validate_generation_payload(data, instance)
-        updated = await super().update(instance, data)
-        await self._enforce_single_active_generation_type(updated)
-        return updated
+        return await super().update(instance, data)
 
     async def patch(self, config_id: int, obj_in) -> AiModelConfig:
         instance = await self.get(config_id)
         data = self._normalize_payload(obj_in)
         self._validate_generation_payload(data, instance)
-        updated = await super().patch(instance, data)
-        await self._enforce_single_active_generation_type(updated)
-        return updated
+        return await super().patch(instance, data)
 
     async def remove(self, config_id: int) -> None:
         instance = await self.get(config_id)
         await super().remove(instance)
 
     async def activate(self, config_id: int) -> AiModelConfig:
-        """启用配置；同一生图或视频能力类型自动停用旧项。"""
+        """独立启用当前渠道配置，同类型的其他渠道可同时运行。"""
         instance = await self.get(config_id)
         self._validate_generation_payload({'is_active': True} if instance.task_type == 8 else {}, instance)
         instance.is_active = True
         await instance.save(update_fields=["is_active", "updated_at"])
-        await self._enforce_single_active_generation_type(instance)
         return instance
 
     async def list_active_image_models(self, team_id: int | None = None) -> list[dict]:
@@ -319,7 +283,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 continue
             try:
                 self._validate_video_payload({}, config)
-                capabilities = video_capabilities_for(config.video_model_type)
+                capabilities = video_capabilities_for(config.video_model_type, config.api_protocol)
             except HTTPException:
                 continue
             result.append({
@@ -354,6 +318,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 model_type.value: list(video_capabilities_for(model_type.value).resolutions)
                 for model_type in VideoGenerationModelTypeEnum
             },
+            "video_protocols": video_protocol_options(),
             "video_pricing": VIDEO_PRICING,
             "text_pricing": {model: {"type": "text", "currency": "CNY", **prices} for model, prices in LLM_PRICING.items()},
         }

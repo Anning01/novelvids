@@ -6,6 +6,34 @@ from utils.enums import AiTaskTypeEnum
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("second_protocol", ["volcengine_ark", "unified_video"])
+async def test_api_video_channels_coexist_and_keep_independent_prices(client: AsyncClient, second_protocol):
+    configs = []
+    for name, protocol, discount in [("官方渠道", "volcengine_ark", 1), ("优惠渠道", second_protocol, 0.5)]:
+        response = await client.post("/api/config", json={
+            "task_type": 4, "task_types": [4], "name": name,
+            "base_url": "https://video.example.test/v1", "api_key": "test-key",
+            "model": "configured-model", "video_model_type": "seedance_2_mini", "api_protocol": protocol,
+            "is_active": True, "pricing": {"type": "video", "prices": {"480p": 23}, "discount": discount},
+        })
+        assert response.json()["code"] == 0, response.text
+        configs.append(response.json()["data"])
+    for config in configs:
+        response = await client.post(f"/api/config/{config['id']}/activate")
+        assert response.json()["code"] == 0
+    response = await client.get("/api/config/video-generation/models")
+    models = {model["config_id"]: model for model in response.json()["data"]}
+    assert set(models) == {config["id"] for config in configs}
+    assert models[configs[0]["id"]]["pricing"]["discount"] == 1
+    assert models[configs[1]["id"]]["pricing"]["discount"] == 0.5
+    assert models[configs[0]["id"]]["capabilities"]["supports_auto_duration"] is True
+    assert models[configs[1]["id"]]["capabilities"]["supports_auto_duration"] is (second_protocol == "volcengine_ark")
+    for config in configs:
+        response = await client.get(f"/api/config/{config['id']}")
+        assert response.json()["data"]["is_active"] is True
+
+
+@pytest.mark.asyncio
 async def test_api_general_config_defaults_to_english(client: AsyncClient):
     response = await client.get("/api/config/general")
     assert response.status_code == 200, response.text

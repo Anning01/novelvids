@@ -615,7 +615,7 @@ async def test_多个类型各有启用配置_互不干扰():
 
 
 @pytest.mark.asyncio
-async def test_同一生图模型类型同时只能启用一个():
+async def test_同一生图模型类型的多个渠道可同时启用():
     first = await ai_model_config_controller.create(AiModelConfigCreate(
         task_type=AiTaskTypeEnum.reference_image.value,
         name="seedream-lite-first",
@@ -649,13 +649,13 @@ async def test_同一生图模型类型同时只能启用一个():
     await first.refresh_from_db()
     await second.refresh_from_db()
     await pro.refresh_from_db()
-    assert first.is_active is False
+    assert first.is_active is True
     assert second.is_active is True
     assert pro.is_active is True
 
 
 @pytest.mark.asyncio
-async def test_同一视频模型类型同时只能启用一个_不同类型可并行():
+async def test_同一视频模型类型的多个渠道和不同类型可同时启用():
     first = await ai_model_config_controller.create(AiModelConfigCreate(
         task_type=AiTaskTypeEnum.video.value,
         name="seedance-2-first",
@@ -690,9 +690,49 @@ async def test_同一视频模型类型同时只能启用一个_不同类型可�
     await first.refresh_from_db()
     await second.refresh_from_db()
     await fast.refresh_from_db()
-    assert first.is_active is False
+    assert first.is_active is True
     assert second.is_active is True
     assert fast.is_active is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "activate", "patch", "update"])
+@pytest.mark.parametrize("task_type,model_type_field,model_type", [
+    (AiTaskTypeEnum.video.value, "video_model_type", "seedance_2_mini"),
+    (AiTaskTypeEnum.reference_image.value, "image_model_type", "seedream_5_lite"),
+])
+async def test_渠道配置独立启停并按配置ID选择(operation, task_type, model_type_field, model_type):
+    payload = dict(task_type=task_type, task_types=[task_type], base_url="https://models.example.test/api/v3",
+        api_key="test-key", model="configured-model", api_protocol="volcengine_ark", **{model_type_field: model_type})
+    kind = "video" if task_type == AiTaskTypeEnum.video.value else "image"
+    prices = {"480p": 23} if kind == "video" else {"2K": 0.4}
+    first = await ai_model_config_controller.create(AiModelConfigCreate(**payload, name="官方渠道", is_active=True,
+        pricing={"type": kind, "prices": prices, "discount": 1}))
+    second_input = AiModelConfigCreate(**payload, name="优惠渠道", is_active=operation == "create",
+        pricing={"type": kind, "prices": prices, "discount": 0.5})
+    second = await ai_model_config_controller.create(second_input)
+    if operation == "activate":
+        await ai_model_config_controller.activate(second.id)
+    elif operation == "patch":
+        await ai_model_config_controller.patch(second.id, AiModelConfigPatch(is_active=True))
+    elif operation == "update":
+        await ai_model_config_controller.update(second.id, AiModelConfigUpdate(**{
+            **second_input.model_dump(exclude_unset=True), "is_active": True,
+        }))
+    for config in (first, second):
+        await config.refresh_from_db()
+        assert config.is_active is True
+        assert (await ai_model_config_controller.get_active(task_type, config.id)).id == config.id
+    models = await (ai_model_config_controller.list_active_video_models() if kind == "video"
+        else ai_model_config_controller.list_active_image_models())
+    assert {model["config_id"] for model in models} == {first.id, second.id}
+    assert first.pricing["discount"] == 1
+    assert second.pricing["discount"] == 0.5
+    await ai_model_config_controller.deactivate(second.id)
+    await first.refresh_from_db()
+    await second.refresh_from_db()
+    assert first.is_active is True
+    assert second.is_active is False
 
 
 @pytest.mark.asyncio

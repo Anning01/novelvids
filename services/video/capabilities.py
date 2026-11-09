@@ -330,15 +330,40 @@ CAPABILITIES[VideoGenerationModelTypeEnum.minimax_h3_autodl] = replace(
 )
 
 
-def capabilities_for(model_type: str | VideoGenerationModelTypeEnum | None) -> VideoModelCapabilities:
+PROTOCOL_CAPABILITIES = {
+    ImageApiProtocol.unified_video: {
+        model_type: replace(
+            CAPABILITIES[model_type],
+            resolutions=tuple(value for value in CAPABILITIES[model_type].resolutions if value != "4k"),
+            output_formats=("mp4",),
+            supports_auto_duration=False,
+            supports_audio_data_uri=False,
+            api_protocol=ImageApiProtocol.unified_video,
+        )
+        for model_type in (
+            VideoGenerationModelTypeEnum.seedance_2,
+            VideoGenerationModelTypeEnum.seedance_2_fast,
+            VideoGenerationModelTypeEnum.seedance_2_mini,
+            VideoGenerationModelTypeEnum.seedance_2_5,
+        )
+    },
+}
+
+
+def capabilities_for(
+    model_type: str | VideoGenerationModelTypeEnum | None,
+    api_protocol: str | ImageApiProtocol | None = None,
+) -> VideoModelCapabilities:
     try:
+        if api_protocol in PROTOCOL_CAPABILITIES:
+            return PROTOCOL_CAPABILITIES[api_protocol][VideoGenerationModelTypeEnum(model_type)]
         return CAPABILITIES[VideoGenerationModelTypeEnum(model_type)]
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=localized_message('该视频配置未选择受支持的视频模型类型')) from exc
 
 
 def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: str) -> None:
-    capabilities = capabilities_for(model_type)
+    capabilities = capabilities_for(model_type, protocol)
     if protocol != capabilities.api_protocol.value:
         label = {
             ImageApiProtocol.volcengine_ark: "火山方舟",
@@ -347,6 +372,26 @@ def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: 
             ImageApiProtocol.dashscope: "阿里云百炼 DashScope",
         }.get(capabilities.api_protocol, capabilities.api_protocol.value)
         raise HTTPException(status_code=400, detail=localized_message('当前视频模型仅支持{p1}接口协议', p1=f'{label}'))
+
+
+def protocol_options() -> dict[str, list[dict]]:
+    labels = {
+        ImageApiProtocol.volcengine_ark: "火山方舟",
+        ImageApiProtocol.unified_video: "通用视频接口",
+        ImageApiProtocol.minimax: "MiniMax 官方",
+        ImageApiProtocol.autodl: "AutoDL ComfyUI",
+        ImageApiProtocol.dashscope: "阿里云百炼 DashScope",
+    }
+    return {
+        model.value: [
+            {"value": protocol.value, "label": labels[protocol], "resolutions": list(caps.resolutions)}
+            for protocol, caps in [
+                (default.api_protocol, default),
+                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models),
+            ]
+        ]
+        for model, default in CAPABILITIES.items()
+    }
 
 
 def _canonical_value(value: object, supported: tuple[str, ...], fallback: str) -> str:
@@ -364,9 +409,9 @@ def validate_selection(
     output_format: object,
     generate_audio: object,
     return_last_frame: object = None,
+    api_protocol: str | ImageApiProtocol | None = None,
 ) -> VideoGenerationSelection:
-    normalized = VideoGenerationModelTypeEnum(model_type)
-    capabilities = CAPABILITIES[normalized]
+    capabilities = capabilities_for(model_type, api_protocol)
     selected_resolution = _canonical_value(
         resolution,
         capabilities.resolutions,
