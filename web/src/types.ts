@@ -523,6 +523,41 @@ export interface BillingSummary {
   daily_trend: Array<{ date: string; cost: number }>
 }
 export interface BillingProject { novel_id: number; novel_name: string; total_cost: number; record_count: number }
+export interface BillingStatementFilters {
+  team_id?: number
+  user_id?: number
+  start_date?: string
+  end_date?: string
+  snapshot_id?: number
+}
+export interface BillingStatementRow {
+  id: number
+  created_at: string
+  team_id: number
+  team_name: string
+  user_id: number | null
+  user_name: string | null
+  novel_id: number | null
+  novel_name: string | null
+  usage_record_id: number | null
+  billing_type: string | null
+  task_type: number | null
+  task_status: number | null
+  video_id: number | null
+  usage: Record<string, unknown>
+  cost: string
+  balance_after: string
+}
+export interface BillingStatement {
+  items: BillingStatementRow[]
+  pagination: { total: number; page: number; page_size: number; pages: number }
+  summary: { total_cost: string; total_transactions: number; team_balance: string | null }
+  snapshot_id: number
+}
+export interface BillingStatementParties {
+  teams: Array<{ id: number; name: string }>
+  users: Array<{ id: number; name: string }>
+}
 export interface BillingProjectDetail {
   novel_id: number
   novel_name: string

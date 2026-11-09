@@ -2,6 +2,8 @@ import { generationRequest, finishGenerationRequest } from '@/shared/generationR
 
 import { tr } from '@/i18n'
 import type { ProjectOverview } from './types'
+import type { BillingStatement, BillingStatementFilters, BillingStatementParties } from './types'
+import { downloadFile } from '@/shared/downloadFile'
 import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, MemberItem, Novel, NovelMeta, PaginationResponse, RechargeOrder, RechargeOrderDetail, RechargeOrderItem, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoGenerationOptions, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
@@ -425,6 +427,9 @@ export const api = {
   deactivateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/deactivate`, { method: 'POST' }),
   deleteConfig: (id: number) => request<SingleResponse<null>>(`/config/${id}`, { method: 'DELETE' }),
   task: (id: string, signal?: AbortSignal) => request<SingleResponse<AiTask>>(`/task/${id}`, signal ? { signal } : undefined),
+  billingStatementParties: () => request<SingleResponse<BillingStatementParties>>('/billing/statements/parties'),
+  billingStatements: (params: BillingStatementFilters & { page?: number; page_size?: number } = {}) => request<SingleResponse<BillingStatement>>(`/billing/statements${qs({ ...params })}`),
+  exportBillingStatement: (params: BillingStatementFilters) => downloadFile(`${BASE}/billing/statements/export${qs({ ...params })}`, 'billing-statement.csv', authHeaders()),
   billingSummary: (novelId?: number) => request<SingleResponse<BillingSummary>>(`/billing/summary${qs({ novel_id: novelId })}`),
   billingProjects: (page = 1, pageSize = 20) => request<PaginationResponse<BillingProject>>(`/billing/projects${qs({ page, page_size: pageSize })}`),
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),

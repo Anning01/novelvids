@@ -7,6 +7,25 @@ const options = ['wan3', 'minimax-h3', 'seedance-2.5', 'seedance-mini', 'seedanc
 const rect = (top: number, height: number): DOMRect => ({ top, bottom: top + height, left: 100, right: 320, width: 220, height, x: 100, y: top, toJSON: () => ({}) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('searches all options and supports keyboard selection of a filtered result', async () => {
+  const wrapper = mount(AppSelect, { attachTo: document.body, props: {
+    modelValue: '', ariaLabel: '账单用户', searchable: true,
+    options: [{ value: '', label: '全部用户' }, { value: '17', label: '客户 (#17)' }, { value: '18', label: '其他 (#18)' }],
+  } })
+  await wrapper.get('button').trigger('click'); await flushPromises()
+  const input = document.querySelector<HTMLInputElement>('.app-select__search')!
+  expect(document.activeElement).toBe(input)
+  input.value = '#17'; input.dispatchEvent(new Event('input'))
+  await flushPromises()
+  const options = document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="账单用户"] [role="option"]')
+  expect(options).toHaveLength(1)
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  expect(document.activeElement).toBe(options[0])
+  options[0]!.click(); await flushPromises()
+  expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['17'])
+  expect(document.activeElement).toBe(wrapper.get('button').element)
+})
+
 it('keeps the trigger surface theme when its menu is teleported', async () => {
   const wrapper = mount(AppSelect, { props: { modelValue: 'one', options: ['one', 'two'], ariaLabel: '主题菜单' },
     attrs: { style: '--app-surface: #211e1b; --app-text: #eee9e2; --app-accent: #b8a7ff' },

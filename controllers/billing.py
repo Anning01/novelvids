@@ -2,6 +2,7 @@
 
 from auth.deps import AuthContext
 from services.billing import aggregation
+from services.billing.statements import billing_statements
 
 
 def billing_scope(ctx: AuthContext) -> tuple[int | None, int | None]:
@@ -14,6 +15,8 @@ def billing_scope(ctx: AuthContext) -> tuple[int | None, int | None]:
 
 
 class BillingController:
+    statements = billing_statements
+
     async def summary(
         self,
         novel_id: int | None = None,

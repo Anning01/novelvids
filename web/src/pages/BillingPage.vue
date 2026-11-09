@@ -5,6 +5,8 @@ import { computed, onMounted, ref } from 'vue'
 import { Activity, Clapperboard, Coins, Image, Type, ChevronRight } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AppPagination from '@/components/AppPagination.vue'
+import AppTabs from '@/components/AppTabs.vue'
+import BillingStatements from '@/features/billing/BillingStatements.vue'
 import { api } from '@/api'
 import BillingRecordDetails from '@/features/billing/BillingRecordDetails.vue'
 import { costSourceLabel, money, recordStatus, recordStatusHint, usageLabel } from '@/features/billing/recordDisplay'
@@ -22,6 +24,8 @@ const pageSize = ref(20)
 const selectedProjectId = ref('all')
 const expandedRecordId = ref<number | null>(null)
 const auth = useAuthStore()
+const view = ref(auth.isSuperAdmin ? 'statements' : 'costs')
+const views = computed(() => [{ value: 'statements', label: tr('消费账单') }, { value: 'costs', label: tr('调用成本') }])
 const showSourceColumn = computed(() => auth.enabled === true)
 
 const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') }, get media_processing() { return tr('画质增强') }, get asr() { return tr('语音识别') } }[value] || value)
@@ -119,7 +123,11 @@ function changePageSize(next: number) {
   void loadRecords()
 }
 
-onMounted(load)
+onMounted(() => { if (view.value === 'costs') void load() })
+function selectView(value: string) {
+  view.value = value
+  if (value === 'costs') void load()
+}
 </script>
 
 <template>
@@ -128,9 +136,10 @@ onMounted(load)
       <div>
         <span>COST DASHBOARD</span>
         <h1>{{ tr('成本看板') }}</h1>
-        <p>{{ tr('每个模型的调用成本，按项目与维度汇总。') }}</p>
+        <p>{{ auth.isSuperAdmin && view === 'statements' ? tr('按团队、用户查询实际扣款，随时导出消费明细。') : tr('每个模型的调用成本，按项目与维度汇总。') }}</p>
       </div>
       <AppSelect
+        v-if="view === 'costs'"
         v-model="selectedProjectId"
         class="billing-project-filter"
         :options="projectOptions"
@@ -138,8 +147,9 @@ onMounted(load)
         @update:model-value="selectProject"
       />
     </header>
-
-    <div v-if="loading" class="billing-state">{{ tr('正在读取成本数据…') }}</div>
+    <AppTabs v-if="auth.isSuperAdmin" :model-value="view" :items="views" :label="tr('账单视图')" @update:model-value="selectView" />
+    <BillingStatements v-if="auth.isSuperAdmin && view === 'statements'" />
+    <div v-else-if="loading" class="billing-state">{{ tr('正在读取成本数据…') }}</div>
     <template v-else>
       <section class="summary-grid" :aria-label="tr('成本汇总')">
         <article class="stat-card is-primary">

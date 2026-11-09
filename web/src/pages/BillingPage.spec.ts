@@ -15,12 +15,37 @@ vi.mock('@/api', async (importOriginal) => {
     billingProjects: vi.fn(),
     billingRecords: vi.fn(),
     billingRecordDetails: vi.fn(),
+    billingStatementParties: vi.fn(),
+    billingStatements: vi.fn(),
   },
     statusLabel: vi.fn((status?: number) => (status ? String(status) : '未知')),
   }
 })
 
 describe('BillingPage', () => {
+  it('opens actual spending statements for super admins and keeps the original costs view available', async () => {
+    vi.mocked(api.billingStatementParties).mockResolvedValue({ code: 0, message: '', data: { teams: [], users: [] } })
+    vi.mocked(api.billingStatements).mockResolvedValue({ code: 0, message: '', data: {
+      items: [], snapshot_id: 0, summary: { total_cost: '0.000000', total_transactions: 0, team_balance: null },
+      pagination: { total: 0, page: 1, page_size: 20, pages: 0 },
+    } })
+    vi.mocked(api.billingSummary).mockResolvedValue({ code: 0, message: '', data: {
+      total_cost: 0, total_records: 0, by_billing_type: [], by_task_type: [], by_model: [], daily_trend: [],
+    } })
+    vi.mocked(api.billingProjects).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 20, pages: 0 } } })
+    vi.mocked(api.billingRecords).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 20, pages: 0 } } })
+    const pinia = createPinia()
+    useAuthStore(pinia).$patch({ enabled: true, user: { id: 1, username: 'admin', nickname: '', avatar_url: '', is_super_admin: true } })
+    const wrapper = mount(BillingPage, { global: { plugins: [pinia] } })
+    await flushPromises()
+    expect(wrapper.find('[aria-label="消费账单"]').exists()).toBe(true)
+    expect(wrapper.find('.data-table').exists()).toBe(false)
+    await wrapper.findAll('[role="tab"]').find(t => t.text() === '调用成本')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.data-table').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="消费账单"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('渲染汇总卡片与项目成本表', async () => {
     vi.mocked(api.billingSummary).mockResolvedValue({
       code: 0, message: 'ok',
