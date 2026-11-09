@@ -39,6 +39,7 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
 
     selection = validate_selection(
         config.video_model_type,
+        api_protocol=config.api_protocol,
         generation_mode=req.generation_mode,
         resolution=req.resolution,
         aspect_ratio=req.aspect_ratio,

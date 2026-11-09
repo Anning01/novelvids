@@ -115,7 +115,7 @@ async def _reference_capabilities(config_id: int, ctx: AuthContext) -> VideoMode
         raise HTTPException(status_code=400, detail=localized_message('所选模型未启用或已被删除'))
     task_type = AiTaskTypeEnum.video if config.video_model_type else AiTaskTypeEnum.reference_image
     config = await ai_model_config_controller.get_active(task_type.value, config_id, team_id=ctx.team_id)
-    return capabilities_for(config.video_model_type) if config.video_model_type else IMAGE_REFERENCE_CAPABILITIES
+    return capabilities_for(config.video_model_type, config.api_protocol) if config.video_model_type else IMAGE_REFERENCE_CAPABILITIES
 
 
 @router.post("/reference/oss-finalize", summary="OSS 直传后登记视频或生图参考素材（不再经过服务器）")

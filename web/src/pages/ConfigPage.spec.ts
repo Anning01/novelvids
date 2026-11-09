@@ -53,6 +53,46 @@ describe('ConfigPage 平台配置仅超管可见', () => {
     vi.restoreAllMocks()
   })
 
+  it.each(['light', 'dark'])('配置卡片隐藏服务来源，地址仅在编辑表单中显示并保留（%s）', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    baseMocks()
+    const baseUrl = 'https://private-gateway.example.test/internal/v1'
+    const categories = [
+      { id: 'llm', task: 1 }, { id: 'image', task: 2 }, { id: 'video', task: 4 },
+      { id: 'enhancement', task: 8 }, { id: 'asr', task: 9 },
+    ]
+    const items = categories.map((category, index) => ({
+      id: index + 1, name: `配置 ${category.id}`, task_type: category.task, task_types: [category.task],
+      model: 'configured-model', base_url: baseUrl, api_key: 'test-only-key', api_protocol: 'unified_video',
+      video_model_type: category.id === 'video' ? 'seedance_2_5' : null,
+      is_active: index % 2 === 0, concurrency: 10, scope: 'official',
+    }))
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items } } as never)
+    const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+    const wrapper = mountPage(createPinia())
+    await flushPromises()
+    for (const category of categories) {
+      await wrapper.get(`.model-category-card.is-${category.id}`).trigger('click')
+      const card = wrapper.get('.model-config-card')
+      expect(card.text()).toContain(`配置 ${category.id}`)
+      expect(card.text()).toContain('configured-model')
+      expect(card.html()).not.toContain('private-gateway.example.test')
+      expect(card.html()).not.toContain(baseUrl)
+      expect(card.html()).not.toContain('test-only-key')
+      expect(card.find('.config-metadata .lucide-server').exists()).toBe(false)
+    }
+    await wrapper.get('.model-category-card.is-video').trigger('click')
+    await wrapper.get('[aria-label="编辑配置"]').trigger('click')
+    expect(wrapper.get<HTMLInputElement>('input[name="model-service-base-url"]').element.value).toBe(baseUrl)
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(3, expect.objectContaining({ base_url: baseUrl, api_key: 'test-only-key' }))
+    expect(wrapper.find('form.model-modal').exists()).toBe(false)
+    expect(wrapper.get('.model-config-card').html()).not.toContain('private-gateway.example.test')
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
+
   it.each(['light', 'dark'])('保留缓存价并独立调整倍率，官方价使用后台配置（%s）', async (theme) => {
     document.documentElement.dataset.theme = theme
     baseMocks()
@@ -522,6 +562,73 @@ it.each(['light', 'dark'])('selects AutoDL from the shared popup and submits its
   await flushPromises()
   expect(createConfig).toHaveBeenCalledWith(expect.objectContaining({ video_model_type: 'minimax_h3_autodl', base_url: 'https://autodl.art/api/v1/comfyui', model: 'minimax_h3_zm_u24', api_protocol: 'autodl' }))
   wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('配置通用视频协议，保留编辑值并显示加载、失败和成功状态（%s）', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.mocked(api.enums).mockResolvedValue({ data: {
+    ai_task_type: [{ value: 4, label: '视频片段生成' }], image_model_type: [],
+    video_model_type: [{ value: 'seedance_2', label: 'Doubao Seedance 2.0' }],
+  } } as never)
+  vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: {},
+    video: { seedance_2: ['480p', '720p', '1080p', '4k'] },
+    video_protocols: { seedance_2: [
+      { value: 'volcengine_ark', label: '火山方舟', resolutions: ['480p', '720p', '1080p', '4k'] },
+      { value: 'unified_video', label: '通用视频接口', resolutions: ['480p', '720p', '1080p'] },
+    ] },
+  } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  let rejectSave: (error: Error) => void = () => {}
+  const create = vi.spyOn(api, 'createConfig').mockImplementation(() => new Promise((_resolve, reject) => { rejectSave = reject }))
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+  const wrapper = mountPage(createPinia())
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-video').trigger('click')
+  expect(wrapper.find('.model-empty-state').exists()).toBe(true)
+  await wrapper.get('.model-config-section button').trigger('click')
+  const protocol = wrapper.get('button[aria-label="视频接口协议"]')
+  await protocol.trigger('focus')
+  await protocol.trigger('keydown', { key: 'ArrowDown' })
+  await flushPromises()
+  const menu = document.querySelector<HTMLElement>('[role="listbox"][aria-label="视频接口协议"]')!
+  expect(menu).not.toBeNull()
+  const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.trim() === '通用视频接口')!
+  option.dispatchEvent(new MouseEvent('mouseenter'))
+  option.click()
+  await flushPromises()
+  expect(protocol.text()).toBe('通用视频接口')
+  expect(wrapper.text()).not.toContain('4k')
+  expect(wrapper.text()).not.toMatch(/渠道|\/contents\/generations\/tasks/i)
+  expect(wrapper.get<HTMLInputElement>('input[name="model-service-base-url"]').element.value).toBe('')
+  expect(wrapper.get<HTMLInputElement>('input[name="model-id"]').element.value).toBe('')
+  await wrapper.get('input[name="model-config-name"]').setValue('视频服务')
+  await wrapper.get('input[name="model-service-base-url"]').setValue('https://video.example.test/v1')
+  await wrapper.get('input[name="model-id"]').setValue('configured-model')
+  await wrapper.get('input[name="model-service-api-key"]').setValue('key')
+  await wrapper.get('form.model-modal').trigger('submit')
+  expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({
+    api_protocol: 'unified_video', video_model_type: 'seedance_2', model: 'configured-model',
+    base_url: 'https://video.example.test/v1', pricing: expect.objectContaining({ prices: { '480p': 0, '720p': 0, '1080p': 0 } }),
+  }))
+  rejectSave(new Error('保存失败'))
+  await flushPromises()
+  expect(notice.error).toHaveBeenCalledWith('保存失败')
+  expect(wrapper.find('form.model-modal').exists()).toBe(true)
+  create.mockResolvedValueOnce({ data: {} } as never)
+  vi.mocked(api.configs).mockResolvedValue({ data: { items: [{ id: 9, ...create.mock.calls[0]![0] }] } } as never)
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(wrapper.find('form.model-modal').exists()).toBe(false)
+  await wrapper.get('[aria-label="编辑配置"]').trigger('click')
+  expect(wrapper.get('button[aria-label="视频接口协议"]').text()).toBe('通用视频接口')
+  expect(wrapper.get<HTMLInputElement>('input[name="model-service-base-url"]').element.value).toBe('https://video.example.test/v1')
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(update).toHaveBeenCalledWith(9, expect.objectContaining({ api_protocol: 'unified_video' }))
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
 })
 
 it.each(['light', 'dark'])('只展示模型配置，不加载旧通用配置（%s）', async theme => {

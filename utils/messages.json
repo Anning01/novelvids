@@ -774,5 +774,19 @@
   "本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。": "The incremental repair allowance for this task is used up. Candidates and call records are saved; review the failed step.",
   "这是故事分析的人物参考，请先完成资产提取再生成图片。": "This is a story analysis reference. Extract the chapter assets before generating images.",
   "引用的资产形态不存在或已移除，请重新选择": "The referenced asset variant no longer exists. Please choose it again.",
-  "方案中的形态不存在或选择重复": "The plan references a missing or duplicate variant."
+  "方案中的形态不存在或选择重复": "The plan references a missing or duplicate variant.",
+  "参考素材需要可访问的公网 HTTP(S) 地址": "Reference media requires an accessible public HTTP(S) URL",
+  "当前视频接口需要公网参考素材，请配置对象存储或使用公网 URL": "This video API requires public references. Configure object storage or use public URLs.",
+  "参考素材编码无效": "Invalid reference media encoding",
+  "参考素材内容为空": "Reference media is empty",
+  "本地参考素材不存在": "Local reference media not found",
+  "视频接口网络请求失败": "Video API network request failed",
+  "视频接口请求失败（HTTP {p1}）": "Video API request failed (HTTP {p1})",
+  "视频接口返回了无效响应": "The video API returned an invalid response",
+  "视频接口拒绝了生成请求": "The video API rejected the generation request",
+  "视频接口未返回任务 ID": "The video API did not return a task ID",
+  "视频接口返回了无效任务状态": "The video API returned an invalid task status",
+  "视频任务已完成但未返回成片地址": "The video task completed without a result URL",
+  "视频生成失败，请检查生成内容或联系管理员": "Video generation failed. Check the content or contact an administrator.",
+  "参考素材上传失败，请检查对象存储配置": "Reference media upload failed. Check the object storage configuration."
 }

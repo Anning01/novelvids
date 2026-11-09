@@ -179,7 +179,7 @@ async def delete_folder(folder_id: int, team: int | None = Depends(library_team)
 @router.post("/selection")
 async def selection(payload: ResourceSelection, team: int | None = Depends(library_team), ctx: AuthContext = _EDITOR):
     config = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value, payload.model_config_id, team_id=team or None)
-    caps = capabilities_for(config.video_model_type)
+    caps = capabilities_for(config.video_model_type, config.api_protocol)
     selected = []
     for resource_id in payload.ids:
         resource = await resource_for(None if ctx.is_super_admin else team, resource_id, kind=None)

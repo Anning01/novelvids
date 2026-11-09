@@ -145,3 +145,37 @@ def prepare_video_content(
         reference_video_count=len(deduplicated_videos),
         reference_audio_count=len(deduplicated_audios),
     )
+
+
+def reference_indexes(
+    prepared: PreparedVideoContent,
+    role: str,
+    source_urls: list[str],
+) -> list[int]:
+    """Map display mentions to the final per-media-type reference order."""
+    ordered_urls: list[str] = []
+    for item in prepared.items:
+        if item.get("role") != role:
+            continue
+        item_type = str(item.get("type") or "")
+        value = item.get(item_type)
+        url = value.get("url") if isinstance(value, dict) else None
+        if isinstance(url, str):
+            ordered_urls.append(url)
+    return [ordered_urls.index(url) + 1 for url in source_urls if url in ordered_urls]
+
+
+def replace_display_mentions(
+    prompt: str,
+    *,
+    mention_label: str,
+    reference_label: str,
+    indexes: list[int],
+) -> str:
+    iterator = iter(indexes)
+
+    def replace(match: re.Match[str]) -> str:
+        index = next(iterator, None)
+        return f"{reference_label}{index}" if index is not None else match.group(0)
+
+    return re.sub(rf"【参考{mention_label}：[^】]+】", replace, prompt)

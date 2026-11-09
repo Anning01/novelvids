@@ -684,9 +684,10 @@ async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
     await execution.before_request()
     team_id = execution.params.get('team_id') if settings.AUTH_ENABLED else None
     models = []
-    for task_type, kind, resolve in ((2, 'image', image_capabilities), (4, 'video', video_capabilities)):
+    for task_type, kind in ((2, 'image'), (4, 'video')):
         for item in await resolve_scope_configs(task_type, team_id):
-            capabilities = resolve(item.image_model_type if kind == 'image' else item.video_model_type)
+            capabilities = (image_capabilities(item.image_model_type) if kind == 'image'
+                else video_capabilities(item.video_model_type, item.api_protocol))
             models.append({'id': item.id, 'name': item.name, 'kind': kind, 'capabilities': capabilities.public_dict()})
     from models.remake_source import RemakeSource
     sources = await RemakeSource.filter(novel_id=execution.params['novel_id']).values('id', 'chapter_id', 'episode_number', 'media_status')

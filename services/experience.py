@@ -63,7 +63,7 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
     task_type = AiTaskTypeEnum.video if payload.task_type == 'video' else AiTaskTypeEnum.reference_image
     config = await ai_model_config_controller.get_active(task_type.value, payload.model_config_id, team_id=ctx.team_id)
     if payload.task_type == 'video':
-        selected = video_selection(config.video_model_type, generation_mode='reference', resolution=payload.resolution,
+        selected = video_selection(config.video_model_type, api_protocol=config.api_protocol, generation_mode='reference', resolution=payload.resolution,
             aspect_ratio=payload.aspect_ratio, duration=payload.duration, output_format=None, generate_audio=None)
         resolution = selected.resolution
     else:

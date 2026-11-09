@@ -380,6 +380,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         duration = req.duration if req.duration is not None else int(scene.duration or 6)
         selection = validate_selection(
             config.video_model_type,
+            api_protocol=config.api_protocol,
             generation_mode=req.generation_mode,
             resolution=req.resolution,
             aspect_ratio=req.aspect_ratio,
@@ -403,10 +404,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 last_frame = resolve_image_source(last_frame)
             except FileNotFoundError as error:
                 raise HTTPException(400, detail=localized_message('首尾帧图片不存在：{p1}', p1=f'{error}')) from error
-        capabilities = capabilities_for(config.video_model_type)
+        capabilities = capabilities_for(config.video_model_type, config.api_protocol)
         reference_images: list[str] = []
         image_mentions: dict[str, str] = {}
         reference_videos: list[str] = []
+        reference_video_names: list[str] = []
         reference_video_duration = 0.0
         seen_references: set[tuple[str, str]] = set()
         referenced_media = select_referenced_media(prompt, req.reference_media)
@@ -424,7 +426,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             len(req.reference_media),
             len(referenced_media),
         )
-        for reference in referenced_media:
+        for reference_index, reference in enumerate(referenced_media, start=1):
             library_verified = None
             if reference.library_resource_id is not None:
                 from services.resource_references import resource_for, validate_resource_model, reference_kind
@@ -456,6 +458,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             if not duration_value:
                 raise HTTPException(400, detail=localized_message('无法校验参考视频时长，请重新上传该视频'))
             reference_video_duration += float(duration_value)
+            reference_video_names.append(reference.name or f"参考视频 {reference_index}")
             if reference.url.startswith("/media/"):
                 if capabilities.supports_temporary_file_upload:
                     reference_videos.append(reference.url)
@@ -590,8 +593,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 last_frame_url=last_frame,
                 reference_images=reference_images,
                 reference_videos=reference_videos,
+                reference_video_names=reference_video_names,
                 reference_audios=audio_urls,
                 return_last_frame=selection.return_last_frame,
+                team_id=team_id,
             )
         except VideoProviderError as error:
             # 供应商在提交阶段直接拒绝请求时也创建失败记录，让异常在预览区可见，
