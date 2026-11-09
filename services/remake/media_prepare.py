@@ -129,3 +129,30 @@ def prepare_video_for_model_input(
 
     temporary.unlink(missing_ok=True)
     raise RuntimeError(localized_message('模型视频输入压缩 3 次后仍超过配置上限'))
+
+
+def probe_media_duration(path: Path) -> float:
+    try:
+        process = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        duration = float(process.stdout.strip())
+    except FileNotFoundError as error:
+        raise RuntimeError(localized_message('找不到 ffprobe，无法读取镜头时长')) from error
+    except (subprocess.CalledProcessError, ValueError) as error:
+        raise RuntimeError(localized_message('无法读取镜头时长: {p1}', p1=f'{path.name}')) from error
+    if duration <= 0:
+        raise RuntimeError(localized_message('镜头时长无效: {p1}', p1=f'{path.name}'))
+    return duration

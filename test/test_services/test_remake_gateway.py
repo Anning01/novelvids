@@ -389,3 +389,45 @@ async def test_gateway_rejects_video_larger_than_model_limit_before_call(tmp_pat
         )
 
     assert client.endpoint.requests == []
+
+
+@pytest.mark.asyncio
+async def test_skill_video_uses_binary_directly_without_base64_round_trip(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from services.creation_agent.skill_execution import current_execution
+    from schemas.agent_workflow import RemakeAssets
+
+    video = tmp_path / "source.mov"
+    video.write_bytes(b"original-video-bytes")
+    gateway = RemakeVideoAnalysisGateway(_config(), client=_Client([]))
+    execution = SimpleNamespace(generate=AsyncMock(return_value=RemakeAssets(characters=[], scenes=[], objects=[])))
+    monkeypatch.setattr("services.remake.gateway.base64.b64encode", lambda _: pytest.fail("video was base64 copied"))
+    token = current_execution.set(execution)
+    try:
+        await gateway.analyze_one(index=1, path=video, prompt="", schema_name="global_key_assets",
+                                  response_schema={}, include_segment_metadata=False)
+    finally:
+        current_execution.reset(token)
+    content = execution.generate.call_args.kwargs["media"][0]
+    assert content.data == b"original-video-bytes"
+    assert content.media_type == "video/quicktime"
+    assert content.vendor_metadata == {"fps": 1.0}
+
+
+@pytest.mark.asyncio
+async def test_skill_video_still_checks_size_before_model_call(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from services.creation_agent.skill_execution import current_execution
+
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"oversize")
+    execution = SimpleNamespace(generate=AsyncMock())
+    monkeypatch.setattr("services.remake.gateway.MAX_MODEL_VIDEO_BYTES", 1)
+    gateway = RemakeVideoAnalysisGateway(_config(), client=_Client([]))
+    token = current_execution.set(execution)
+    try:
+        with pytest.raises(RemakeVideoAnalysisError, match="模型输入视频超过"):
+            await gateway.analyze_one(index=1, path=video, prompt="", schema_name="global_key_assets", response_schema={})
+    finally:
+        current_execution.reset(token)
+    execution.generate.assert_not_called()

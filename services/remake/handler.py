@@ -17,6 +17,7 @@ from services.remake.gateway import ANALYSIS_ERROR_CODE, RemakeVideoAnalysisErro
 from services.remake.materializer import RemakeMediaMaterializer, remake_media_materializer
 from services.remake.persistence import RemakeResultPersistence, remake_result_persistence
 from services.remake.pipeline import RemakeDecompositionPipeline, remake_decomposition_pipeline
+from services.remake.remote_media import RemoteMediaError
 from utils.enums import AiTaskTypeEnum
 
 REMAKE_DECOMPOSITION_ERROR_CODE = "REMAKE_ANALYSIS_FAILED"
@@ -141,6 +142,9 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
         except RemakeDecompositionError:
             await self._mark_failed(source)
             raise
+        except RemoteMediaError as error:
+            await self._mark_failed(source)
+            raise RemakeDecompositionError(error_code=error.error_code, message=str(error)) from None
         except RemakeVideoAnalysisError as error:
             await self._mark_failed(source)
             raise RemakeDecompositionError(

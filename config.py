@@ -170,6 +170,12 @@ class Settings:
         1,
         int(os.getenv("REMAKE_ANALYSIS_CONCURRENCY", "2")),
     )
+    # 仅器灵版（开启鉴权且 provider=qiling）允许启用远程媒体处理。
+    REMAKE_MEDIA_SSH_HOST = os.getenv("REMAKE_MEDIA_SSH_HOST", "").strip()
+    REMAKE_MEDIA_WORKER_PATH = os.getenv("REMAKE_MEDIA_WORKER_PATH", "/opt/novelvids-media-worker").strip()
+    REMAKE_MEDIA_TIMEOUT_SECONDS = int(os.getenv("REMAKE_MEDIA_TIMEOUT_SECONDS", "3600"))
+    REMAKE_MEDIA_MEMORY_MB = int(os.getenv("REMAKE_MEDIA_MEMORY_MB", "2048"))
+    REMAKE_MEDIA_CPU_PERCENT = int(os.getenv("REMAKE_MEDIA_CPU_PERCENT", "100"))
 
 
 settings = Settings()

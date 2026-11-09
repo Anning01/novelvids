@@ -123,7 +123,6 @@ class RemakeVideoAnalysisGateway:
         include_segment_metadata: bool = True,
     ) -> dict[str, Any]:
         started_at = self.clock()
-        video_input = await asyncio.to_thread(self._build_video_input, path)
         from prompts.remake import render_remake_request
         from utils.prompt_language import task_language
         from services.creation_agent.skill_execution import current_execution
@@ -132,8 +131,9 @@ class RemakeVideoAnalysisGateway:
             from pydantic_ai import BinaryContent
             from schemas.agent_workflow import RemakeAssets, RemakeShot
             schema = RemakeAssets if schema_name == 'global_key_assets' else RemakeShot
-            video_content = BinaryContent.from_data_uri(video_input['video_url']['url'])
-            video_content.vendor_metadata = {'fps': video_input['video_url']['fps']}
+            video_bytes, mime = await asyncio.to_thread(self._read_video, path)
+            video_content = BinaryContent(data=video_bytes, media_type=mime,
+                                          vendor_metadata={'fps': VIDEO_INPUT_FPS})
             try:
                 result = await execution.generate(
                     'remake',
@@ -152,6 +152,7 @@ class RemakeVideoAnalysisGateway:
                 data.update(shot_index=index, file=path.name)
             self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='completed')
             return data
+        video_input = await asyncio.to_thread(self._build_video_input, path)
         instruction = render_remake_request(prompt, context=context, index=index,
             schema=response_schema, include_segment_metadata=include_segment_metadata, language=task_language.get() or "zh")
         messages = [
@@ -248,7 +249,7 @@ class RemakeVideoAnalysisGateway:
             status,
         )
 
-    def _build_video_input(self, path: Path) -> dict[str, Any]:
+    def _read_video(self, path: Path) -> tuple[bytes, str]:
         if not path.is_file():
             raise RemakeVideoAnalysisError(
                 localized_message('模型输入视频不存在'),
@@ -261,7 +262,11 @@ class RemakeVideoAnalysisGateway:
                 error_code="REMAKE_ANALYSIS_MEDIA_TOO_LARGE",
             )
         mime = "video/quicktime" if path.suffix.lower() == ".mov" else "video/mp4"
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return path.read_bytes(), mime
+
+    def _build_video_input(self, path: Path) -> dict[str, Any]:
+        data, mime = self._read_video(path)
+        encoded = base64.b64encode(data).decode("ascii")
         return {
             "type": "video_url",
             "video_url": {
