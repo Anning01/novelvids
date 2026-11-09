@@ -92,3 +92,17 @@ async def test_invalid_outputs_are_rejected_without_publishing(tmp_path, monkeyp
         with pytest.raises(ValueError):
             await export_media.save_enhanced(export,http)
     assert not export_media.local_path('/media/exports/102/1080p.mp4').exists()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_download_is_distinguished_from_a_permanent_output_mismatch(tmp_path, monkeypatch):
+    from services.video_enhancement.media import EnhancedMediaNotReady
+
+    monkeypatch.setattr(settings, 'MEDIA_PATH', str(tmp_path))
+    monkeypatch.setattr(settings, 'CHAPTER_EXPORT_PATH', str(tmp_path.with_name(tmp_path.name+'-private')))
+    export = SimpleNamespace(id=103, team_id=None,
+        provider_result={'result': {'video_url': 'https://download.example/result.mp4'}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=b'incomplete video'))) as http:
+        with pytest.raises(EnhancedMediaNotReady):
+            await export_media.save_enhanced(export, http)
+    assert not export_media.local_path('/media/exports/103/1080p.mp4').exists()

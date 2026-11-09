@@ -12,7 +12,7 @@ from models.chapter_export import ChapterExport
 from models.agent_operation import AgentOperation
 from tortoise.expressions import Q
 from services.video_enhancement.contract import EnhancementOptions
-from services.video_enhancement.media import export_media
+from services.video_enhancement.media import EnhancedMediaNotReady, export_media
 from services.video_enhancement.provider import MediaKitClient, MediaKitError
 from services.video_enhancement.settlement import settle_enhancement
 from utils.messages import localized_message
@@ -84,6 +84,8 @@ async def _collect_export(task: AiTask, export: ChapterExport):
             await AiTask.filter(id=task.id).exclude(status=5).update(stage='saving_result')
             try:
                 result = await export_media.save_enhanced(export, http)
+            except EnhancedMediaNotReady:
+                raise
             except ValueError as error:
                 await AiTask.filter(id=task.id).exclude(status=5).update(status=4,
                     stage='billing_pending' if billing_pending else 'needs_review',error_message=str(error))

@@ -121,3 +121,39 @@ async def test_collection_error_uses_frozen_task_language():
         task_language.reset(token)
     await task.refresh_from_db()
     assert 'expired' in task.error_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_unreadable_completed_media_retries_collection_without_a_second_debit():
+    from decimal import Decimal
+    from auth.models import Team, TeamMember, User, BalanceTransaction
+    from models.usage_record import ModelUsageRecord
+    from services.video_enhancement.media import EnhancedMediaNotReady
+
+    task, export = await completed_export()
+    team = await Team.create(name='Collection test', balance=Decimal('10'))
+    user = await User.create(username='collection-test')
+    member = await TeamMember.create(team=team, user=user, role='creator')
+    task.request_params = {**task.request_params, 'team_id': team.id, 'user_id': user.id}
+    await task.save(update_fields=['request_params'])
+    with patch.object(export_media, 'save_enhanced', AsyncMock(side_effect=EnhancedMediaNotReady('not ready'))):
+        with pytest.raises(EnhancedMediaNotReady):
+            await collect_export(export)
+    await export.refresh_from_db()
+    assert export.collection_complete is False and not export.media_ref
+    await team.refresh_from_db(); await member.refresh_from_db()
+    balance, spent = team.balance, member.total_cost
+    assert balance == Decimal('9.583333') and spent == Decimal('0.416667')
+    saved = {'ref': '/media/exports/ready.mp4', 'sha256': 'a'*64,
+        'probe': {'duration': '5', 'width': 1920, 'height': 1080, 'fps': '24'}}
+    with patch.object(export_media, 'save_enhanced', AsyncMock(return_value=saved)), \
+         patch('services.video_enhancement.provider.MediaKitClient.query', AsyncMock()) as query:
+        await collect_export(export)
+        await collect_export(export)
+        query.assert_not_awaited()
+    await task.refresh_from_db(); await export.refresh_from_db()
+    await team.refresh_from_db(); await member.refresh_from_db()
+    assert task.status == 3 and export.collection_complete and export.media_ref == saved['ref']
+    assert team.balance == balance and member.total_cost == spent
+    assert await ModelUsageRecord.filter(ai_task_id=task.id, billing_type='media_processing').count() == 1
+    assert await BalanceTransaction.filter(team=team, type='consume').count() == 1

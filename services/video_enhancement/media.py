@@ -20,6 +20,10 @@ from services.video_enhancement.contract import MediaProbe
 from utils.messages import localized_message
 
 
+class EnhancedMediaNotReady(ValueError):
+    """The completed operation's download is not yet a readable video."""
+
+
 def digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
 
@@ -117,7 +121,10 @@ class ExportMedia(ResourceStorage):
                 with downloaded.open('wb') as output:
                     async for block in response.aiter_bytes(1024 * 1024):
                         output.write(block)
-            actual = await asyncio.to_thread(inspect_media, downloaded)
+            try:
+                actual = await asyncio.to_thread(inspect_media, downloaded)
+            except ValueError as error:
+                raise EnhancedMediaNotReady(str(error)) from None
             from services.video_enhancement.contract import RESOLUTION_SHORT_SIDE
             resolution = (getattr(export, 'recipe', None) or {}).get('resolution', '1080p')
             source = MediaProbe.model_validate(export.source_probe)
