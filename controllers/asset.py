@@ -859,13 +859,15 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             previous = await previous_submission(2, {**request_params, "team_id": team_id, "user_id": user_id}, connection)
             if previous:
                 return previous
-            for existing in await AiTask.filter(task_type=AiTaskTypeEnum.reference_image.value).using_db(connection).order_by('-created_at'):
+            # New clicks may retry terminal jobs without replaying their original receipts.
+            active_tasks = await AiTask.filter(
+                task_type=AiTaskTypeEnum.reference_image.value,
+                status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.running.value, TaskStatusEnum.queued.value],
+            ).using_db(connection).order_by('-created_at')
+            for existing in active_tasks:
                 prior = existing.request_params or {}
                 if prior.get('asset_id') == asset.id and prior.get('variant_id') == variant_id:
-                    if existing.stage == 'needs_review':
-                        raise HTTPException(409, '已有图片请求结果待核对，不能重复提交')
-                    if existing.status in {1,2,6}:
-                        return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
+                    return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
             objects = CreationObjects(asset.novel_id)
             await objects.get('asset', asset.id)
             if variant:

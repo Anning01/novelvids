@@ -12,4 +12,15 @@ describe('faceGridPolylines', () => {
   it('does not create a grid for an empty selection', () => {
     expect(faceGridPolylines({ x: 1, y: 1 }, { x: 1, y: 1 })).toEqual([])
   })
+
+  it('matches the reference default and varies density inside an ellipse without an outer rectangle', () => {
+    const first = { x: 0, y: 0 }, last = { x: 100, y: 200 }
+    const standard = faceGridPolylines(first, last)
+    expect(standard).toHaveLength(30)
+    expect(standard.filter(line => line.length === 2)).toHaveLength(15)
+    expect(standard.filter(line => line.length > 2)).toHaveLength(15)
+    expect(faceGridPolylines(first, last, 8)).toHaveLength(14)
+    expect(faceGridPolylines(first, last, 24)).toHaveLength(46)
+    expect(standard.flat().every(point => ((point.x - 50) / 50) ** 2 + ((point.y - 100) / 100) ** 2 <= 1.000001)).toBe(true)
+  })
 })

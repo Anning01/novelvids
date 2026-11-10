@@ -149,7 +149,7 @@ const generationErrors = ref<Record<number, string>>({})
 const disconnectedStoryboardTasks = ref<Record<number, string>>({})
 const videoGenerationErrors = ref<Record<number, string>>({})
 const videoSyncErrors = ref<Record<number, { message: string; stopped: boolean }>>({})
-const videoPolls = new Map<number, { controller: AbortController; promise: Promise<VideoResult | null> }>()
+const videoPolls = new Map<number, { controller: AbortController; promise: Promise<VideoResult | null>; generated: Promise<VideoResult | null> }>()
 const submittingVideoSceneIds = new Set<number>()
 const focusedVideoSyncs = new Set<number>()
 const sceneDrafts = ref<Record<number, SceneDraft>>({})
@@ -469,9 +469,11 @@ function updateVideoSnapshot(current: VideoResult) {
   return current
 }
 
-function pollVideo(sceneId: number, videoId: number): Promise<VideoResult | null> {
+function pollVideo(sceneId: number, videoId: number, waitForEnhancement = true): Promise<VideoResult | null> {
   const existing = videoPolls.get(videoId)
-  if (existing) return existing.promise
+  if (existing) return waitForEnhancement ? existing.promise : existing.generated
+  let resolveGenerated!: (video: VideoResult | null) => void
+  const generated = new Promise<VideoResult | null>(resolve => { resolveGenerated = resolve })
   const version = chapterLoadVersion
   const controller = new AbortController()
   setSceneBusy(generatingVideoSceneIds, sceneId, true)
@@ -482,6 +484,8 @@ function pollVideo(sceneId: number, videoId: number): Promise<VideoResult | null
         const current = (await api.queryVideo(videoId, signal)).data
         if (!currentScope()) throw new DOMException('Video view changed', 'AbortError')
         const updated = updateVideoSnapshot(current)
+        // Release generation capacity while this same poll keeps tracking the HD result.
+        if (terminalTaskStatuses.has(updated.status)) resolveGenerated(updated)
         const followup = updated.metadata?.auto_enhancement as { stage?: string; applied_to_scene?: boolean; result_video_id?: number } | undefined
         if (followup?.stage === 'completed' && followup.applied_to_scene && followup.result_video_id) {
           const scene = scenes.value.find(item => item.id === sceneId)
@@ -496,12 +500,13 @@ function pollVideo(sceneId: number, videoId: number): Promise<VideoResult | null
       if (!isAbortError(error) && currentScope()) videoSyncErrors.value[sceneId] = { message: (error as Error).message, stopped: true }
       return null
     } finally {
+      resolveGenerated(null)
       if (videoPolls.get(videoId)?.controller === controller) videoPolls.delete(videoId)
       if (currentScope() && (videoSyncErrors.value[sceneId]?.stopped || !(videos.value[sceneId] || []).some(isVideoGenerationActive))) setSceneBusy(generatingVideoSceneIds, sceneId, false)
     }
   })()
-  videoPolls.set(videoId, { controller, promise })
-  return promise
+  videoPolls.set(videoId, { controller, promise, generated })
+  return waitForEnhancement ? promise : generated
 }
 
 function stopVideoPolling() {
@@ -1949,7 +1954,7 @@ async function generateVideo(
     scenes.value = scenes.value.map(item => item.id === scene.id
       ? { ...item, metadata: { ...(item.metadata || {}), current_video_id: result.id } } : item)
     if (isVideoGenerationActive(result)) {
-      const finished = await pollVideo(scene.id, result.id)
+      const finished = await pollVideo(scene.id, result.id, false)
       if (!finished) return false
       result = finished
     }
@@ -1968,12 +1973,13 @@ async function generateVideo(
     }
     if (showNotice) {
       if (completed && !continuityCompleted) notice.error(tr('视频已生成，但尾帧衔接未完成，后续分镜已停止'))
+      else if (completed && isVideoGenerationActive(result)) notice.success(tr('视频已生成，正在后台高清化'))
       else if (completed && !enhancementCompleted) notice.info(tr('视频已生成，但自动高清化未完成，原视频已保留'))
       else completed
         ? notice.success(tr('分镜视频生成完成'))
         : notice.error(tr('视频生成失败，详情已显示在预览区'))
     }
-    return completed && enhancementCompleted && continuityCompleted
+    return completed && continuityCompleted
   } catch (error) {
     if (!alive || version !== chapterLoadVersion) return false
     const message = error instanceof Error ? error.message : tr('视频生成失败')
@@ -1983,7 +1989,7 @@ async function generateVideo(
   } finally {
     if (alive && version === chapterLoadVersion) {
       submittingVideoSceneIds.delete(scene.id)
-      setSceneBusy(generatingVideoSceneIds, scene.id, false)
+      if (!(videos.value[scene.id] || []).some(isVideoGenerationActive)) setSceneBusy(generatingVideoSceneIds, scene.id, false)
     }
   }
 }
@@ -2216,8 +2222,10 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     )
     const failedCount = targets.length - completedCount
     failedCount
-      ? notice.error(request.autoEnhancement ? tr('批量处理结束：完成 {p0} 条，另有 {p1} 条视频或高清化未完成，原视频保留', { p0: completedCount, p1: failedCount }) : tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
-      : notice.success(tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
+      ? notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
+      : notice.success(request.autoEnhancement
+        ? tr('批量视频生成完成：成功 {p0} 条，高清化进度见各分镜', { p0: completedCount })
+        : tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
   } catch (error) {
     notice.error((error as Error).message)
   } finally {

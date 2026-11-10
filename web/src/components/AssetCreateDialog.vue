@@ -401,6 +401,8 @@ function snapshotForVariant(variant: AssetVariant, fallback: AssetEditorFormSnap
   const storedImageParameters = asRecord(stored.image_parameters)
   const storedLibrarySelection = asRecord(stored.library_selection)
   const modelConfigId = stored.model_config_id ?? metadata.model_config_id
+  const storedVoiceId = 'voice_reference_id' in stored ? stored.voice_reference_id
+    : 'voice_reference_id' in metadata ? metadata.voice_reference_id : fallback.voice_reference_id
   return {
     version: 1,
     canonical_name: stringField(stored, 'canonical_name', fallback.canonical_name),
@@ -411,9 +413,7 @@ function snapshotForVariant(variant: AssetVariant, fallback: AssetEditorFormSnap
     gender: stringField(stored, 'gender', stringField(metadata, 'gender', fallback.gender)),
     age_group: stringField(stored, 'age_group', stringField(metadata, 'age_group', fallback.age_group)),
     voice: stringField(stored, 'voice', stringField(metadata, 'voice', fallback.voice)),
-    voice_reference_id: Number(stored.voice_reference_id ?? metadata.voice_reference_id) > 0
-      ? Number(stored.voice_reference_id ?? metadata.voice_reference_id)
-      : fallback.voice_reference_id,
+    voice_reference_id: Number(storedVoiceId) > 0 ? Number(storedVoiceId) : null,
     reference_layout: stringField(stored, 'reference_layout', stringField(metadata, 'reference_layout', fallback.reference_layout)),
     generation_reference_images: Array.isArray(stored.generation_reference_images)
       ? stored.generation_reference_images.filter((item): item is string => typeof item === 'string' && Boolean(item))
@@ -901,20 +901,22 @@ function buildBaseAssetMetadata(existingMetadata: Record<string, unknown>): Reco
       gender: isGroupPortrait.value ? '' : gender.value,
       age_group: isGroupPortrait.value ? '' : age.value,
       voice: isGroupPortrait.value ? '' : voice.value,
-      voice_reference_id: isGroupPortrait.value ? undefined : voiceReferenceId.value || undefined,
+      voice_reference_id: isGroupPortrait.value ? null : voiceReferenceId.value,
       reference_layout: referenceLayout.value,
     })
   }
   return metadata
 }
 
-async function selectVoiceReference(reference: AudioReference) {
+async function selectVoiceReference(reference: AudioReference | null) {
   const previousVoice = voice.value
   const previousReferenceId = voiceReferenceId.value
+  const nextVoice = reference?.nickname || ''
+  const nextReferenceId = reference?.id ?? null
   const shouldPersist = Boolean(props.asset && !variantDraft.value?.is_new)
   if (shouldPersist) voiceSaving.value = true
-  voice.value = reference.nickname
-  voiceReferenceId.value = reference.id
+  voice.value = nextVoice
+  voiceReferenceId.value = nextReferenceId
   if (!props.asset || variantDraft.value?.is_new) {
     voicePickerOpen.value = false
     return
@@ -926,31 +928,33 @@ async function selectVoiceReference(reference: AudioReference) {
       const updated = (await api.updateAssetVariant(props.asset.id, selectedVariant.value.id, {
         metadata: {
           ...variantMetadata,
-          voice: reference.nickname,
-          voice_reference_id: reference.id,
+          voice: nextVoice,
+          voice_reference_id: nextReferenceId,
           [VARIANT_EDITOR_FORM_KEY]: {
             ...editorForm,
-            voice: reference.nickname,
-            voice_reference_id: reference.id,
+            voice: nextVoice,
+            voice_reference_id: nextReferenceId,
           },
         },
       })).data
       selectedVariant.value = updated
       variantStripRef.value?.upsertVariant(updated)
     } else {
-      const existingMetadata = asRecord(props.asset.metadata)
+      const existingMetadata = asRecord((promptSourceAsset.value || props.asset).metadata)
       const updated = (await api.updateAsset(props.asset.id, {
         metadata: {
           ...existingMetadata,
-          voice: reference.nickname,
-          voice_reference_id: reference.id,
+          voice: nextVoice,
+          voice_reference_id: nextReferenceId,
         },
       })).data
       promptSourceAsset.value = updated
       emit('saved', updated)
     }
     voicePickerOpen.value = false
-    notice.success(tr('已为“{p0}”设置音色', { p0: name.value || props.asset.canonical_name }))
+    notice.success(reference
+      ? tr('已为“{p0}”设置音色', { p0: name.value || props.asset.canonical_name })
+      : tr('已清除音色'))
   } catch (error) {
     voice.value = previousVoice
     voiceReferenceId.value = previousReferenceId
@@ -1025,7 +1029,7 @@ async function submit(regenerate = false) {
         gender: snapshot.gender,
         age_group: snapshot.age_group,
         voice: snapshot.voice,
-        voice_reference_id: snapshot.voice_reference_id || undefined,
+        voice_reference_id: snapshot.voice_reference_id,
         reference_layout: snapshot.reference_layout,
         generation_reference_images: generationReferenceImages,
         [VARIANT_EDITOR_FORM_KEY]: snapshot,
@@ -1093,7 +1097,7 @@ async function submit(regenerate = false) {
         gender: isGroupPortrait.value ? '' : gender.value,
         age_group: isGroupPortrait.value ? '' : age.value,
         voice: isGroupPortrait.value ? '' : voice.value,
-        voice_reference_id: isGroupPortrait.value ? undefined : voiceReferenceId.value || undefined,
+        voice_reference_id: isGroupPortrait.value ? null : voiceReferenceId.value,
         reference_layout: referenceLayout.value,
       })
     }
@@ -1348,7 +1352,13 @@ onUnmounted(() => {
             <label class="asset-field"><span><i>*</i>{{ tr('名称') }}</span><input v-model="name" maxlength="100" :placeholder="tr('请输入')" /></label>
             <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>{{ tr('性别') }}</span><AppSelect v-model="gender" :options="genderOptions" :ariaLabel="tr('选择性别')" :menu-label="tr('性别')" /></label>
             <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>{{ tr('年龄') }}</span><AppSelect v-model="age" :options="ageOptions" :ariaLabel="tr('选择年龄阶段')" :menu-label="tr('年龄')" /></label>
-            <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span>{{ tr('音色选择') }}</span><AppButton type="button" variant="secondary" block :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" />{{ voice || tr('选择音色') }}</AppButton></label>
+            <div v-if="kind === 'character' && !isGroupPortrait" class="asset-field" role="group" :aria-label="tr('音色选择')">
+              <span>{{ tr('音色选择') }}</span>
+              <div class="asset-voice-control">
+                <AppButton type="button" variant="secondary" class="asset-voice-choice" :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
+                <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
+              </div>
+            </div>
           </div>
 
           <fieldset class="asset-mode">
@@ -1544,6 +1554,12 @@ onUnmounted(() => {
 .asset-field > span { display: flex; align-items: center; gap: 6px; }
 .asset-field > span small { margin-left: auto; color: var(--app-text-muted); font-size: 9px; font-weight: 500; }
 .asset-field > span i,.asset-mode legend i { margin-right: 3px; color: var(--creation-danger); font-style: normal; }
+.asset-voice-control { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.asset-voice-choice { flex: 1; overflow: hidden; min-height: 40px; color: var(--app-text-secondary); background: var(--app-surface); }
+.asset-voice-control .asset-voice-choice:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
+.asset-voice-choice > span { overflow: hidden; text-overflow: ellipsis; }
+.asset-voice-clear { color: var(--app-text-secondary); }
+.asset-voice-clear:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
 .asset-field input,.asset-field textarea { width: 100%; padding: 10px 12px; border: 0; border-radius: 11px; outline: 0; color: var(--app-text); background: var(--app-surface-muted); font: inherit; font-weight: 450; box-shadow: inset 0 0 0 1px transparent; transition: .16s ease; resize: vertical; }
 .asset-field input { height: 40px; }
 .asset-field input:focus,.asset-field textarea:focus { background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-accent),0 0 0 3px color-mix(in srgb,var(--app-accent) 9%,transparent); }

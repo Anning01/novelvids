@@ -2,8 +2,9 @@
 import { tr } from '@/i18n'
 
 import type { MaterialMention, MaterialMentionOption } from './materialMentionTypes';
-import { AudioLines, FileText, Film, Image as ImageIcon, Search } from 'lucide-vue-next';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { AudioLines, Clock3, FileText, Film, Image as ImageIcon, Search } from 'lucide-vue-next';
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue';
+import { DURATION_MENTION_SOURCE, parseDurationMention } from '@/shared/durationMention';
 
 const props = defineProps<{
   modelValue: string;
@@ -139,7 +140,7 @@ watch(() => filteredMaterials.value.length, (length) => {
   void nextTick(updateMentionMenuPosition);
 });
 watch(
-  () => [props.modelValue, props.mentions.map(item => `${item.edgeKey}:${item.mode}:${item.name}:${item.previewUrl}:${item.assetCategory ?? ''}`).join('|')],
+  () => [props.modelValue, props.mentions.map(item => `${item.edgeKey}:${item.mode}:${item.name}:${item.previewUrl}:${item.assetCategory ?? ''}:${item.syntax ?? ''}`).join('|')],
   () => void nextTick(() => {
     const currentMentionNames = new Map(props.mentions.map(item => [item.edgeKey, item.name]));
     const connectedNames = new Set(props.mentions.map(item => item.name.toLocaleLowerCase()));
@@ -172,6 +173,7 @@ onMounted(() => {
   void nextTick(syncEditor);
 });
 onBeforeUnmount(() => {
+  clearDurationIcons();
   window.removeEventListener('keydown', handleCapturedKeydown, true);
   window.removeEventListener('pointerdown', handleCapturedPointerdown, true);
   window.removeEventListener('resize', updateMentionMenuPosition);
@@ -179,11 +181,11 @@ onBeforeUnmount(() => {
 
 function mentionPattern() {
   const names = props.mentions.map(item => item.name).filter(Boolean).sort((left, right) => right.length - left.length);
-  if (!names.length)
-    return null;
   const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const options = escaped.join('|');
-  return new RegExp(`(@\\{(?:${options})\\}|@(?:${options})|【@?(?:${options})】)`, 'g');
+  const explicit = props.mentions.flatMap(item => item.syntax ? [escapeRegExp(item.syntax)] : []);
+  const named = names.length ? [`@\\{(?:${options})\\}`, `@(?:${options})`, `【@?(?:${options})】`] : [];
+  return new RegExp([...explicit, ...named, DURATION_MENTION_SOURCE].join('|'), 'g');
 }
 
 function markerName(marker: string) {
@@ -284,12 +286,34 @@ function createMentionElement(mention: MaterialMention, marker = `@{${mention.na
   return token;
 }
 
+function clearDurationIcons() {
+  editor.value?.querySelectorAll<HTMLElement>('.workbench-inline-mention__duration-icon').forEach(host => render(null, host));
+}
+
+function createDurationElement(marker: string, seconds: number | null) {
+  const label = seconds === null ? tr('请设置时长') : `${seconds}s`;
+  const token = createMentionElement({ nodeKey: '', edgeKey: '', name: label, prompt: '', previewUrl: '',
+    hasImage: false, mediaKind: 'text', mode: 'prompt_injection' }, marker);
+  token.classList.replace('is-prompt_injection', 'is-duration');
+  token.removeAttribute('data-edge-key');
+  token.querySelector('.workbench-inline-mention__name')!.textContent = label;
+  token.setAttribute('aria-label', seconds === null ? label : tr('视频时长 {p0} 秒', { p0: seconds }));
+  token.title = token.getAttribute('aria-label')!;
+  const icon = document.createElement('span');
+  icon.className = 'workbench-inline-mention__duration-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  render(h(Clock3, { size: 13 }), icon);
+  token.prepend(icon);
+  return token;
+}
+
 function syncEditor() {
   const root = editor.value;
   if (!root || (document.activeElement === root && serializeEditor() === props.modelValue))
     return;
   const preservedSelection = pendingCaretOffset === null ? currentEditorSelection() : null;
   applyingDom = true;
+  clearDurationIcons();
   root.replaceChildren();
   const pattern = mentionPattern();
   let cursor = 0;
@@ -297,8 +321,13 @@ function syncEditor() {
     for (const match of props.modelValue.matchAll(pattern)) {
       const index = match.index ?? 0;
       appendText(root, props.modelValue.slice(cursor, index));
-      const mention = props.mentions.find(item => item.name === markerName(match[0]));
-      if (mention) {
+      const duration = parseDurationMention(match[0]);
+      const mention = props.mentions.find(item => item.syntax === match[0])
+        || props.mentions.find(item => item.name === markerName(match[0]));
+      if (duration) {
+        root.append(createDurationElement(match[0], duration.seconds));
+      }
+      else if (mention) {
         root.append(createMentionElement(mention, match[0]));
       }
       else {
@@ -329,7 +358,7 @@ function logicalOffsetAt(container: Node, offset: number) {
   catch {
     return null;
   }
-  return range.toString().length;
+  return Array.from(range.cloneContents().childNodes).map(serializeNode).join('').length;
 }
 
 function currentEditorSelection(): EditorSelection | null {
@@ -424,7 +453,7 @@ function textBeforeCaret() {
   const range = document.createRange();
   range.selectNodeContents(root);
   range.setEnd(current.startContainer, current.startOffset);
-  return range.toString();
+  return Array.from(range.cloneContents().childNodes).map(serializeNode).join('');
 }
 
 function currentCaretRect() {
@@ -737,7 +766,7 @@ function chooseMaterial(material: MaterialMentionOption) {
     return;
   const currentPrompt = serializeEditor();
   const currentTrigger = trigger.value;
-  const marker = `@{${material.name}}`;
+  const marker = material.syntax || `@{${material.name}}`;
   const nextPrompt = `${currentPrompt.slice(0, currentTrigger.start)}${marker} ${currentPrompt.slice(currentTrigger.end)}`;
   pendingCaretOffset = currentTrigger.start + marker.length + 1;
   recordMentionHistory({

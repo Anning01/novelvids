@@ -46,9 +46,6 @@ def require_continuity(video, next_scene_id):
     metadata = video.metadata or {}
     if video.status != 3 or not video.url:
         raise ValueError(metadata.get('error') or '分镜视频未完成，后续未提交')
-    enhancement = metadata.get('auto_enhancement')
-    if enhancement and enhancement.get('stage') not in {'completed', 'skipped'}:
-        raise ValueError('自动高清化未完成，后续未提交')
     if next_scene_id is None:
         return
     reference = metadata.get('last_frame_reference') or {}

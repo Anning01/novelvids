@@ -1,5 +1,11 @@
 {
   "common": {
+    "密度": "Density",
+    "网格密度": "Grid density",
+    "视频已生成，正在后台高清化": "Video generated. HD processing continues in the background",
+    "批量视频生成完成：成功 {p0} 条，高清化进度见各分镜": "Batch video generation finished: {p0} succeeded. Check each shot for HD progress",
+    "清除音色": "Clear voice",
+    "已清除音色": "Voice cleared",
     "格式": "Format",
     "{p0}中": "{p0} in progress",
     "帧数": "Frames",

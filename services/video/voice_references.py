@@ -161,11 +161,8 @@ async def resolve_voice_references(
         reference_id = _positive_reference_id(asset_metadata.get("voice_reference_id"))
         variant_id = selected_variant_ids.get(asset.id)
         variant = variants.get(variant_id) if variant_id else None
-        if variant is not None and isinstance(variant.metadata, dict):
-            reference_id = (
-                _positive_reference_id(variant.metadata.get("voice_reference_id"))
-                or reference_id
-            )
+        if variant is not None and isinstance(variant.metadata, dict) and "voice_reference_id" in variant.metadata:
+            reference_id = _positive_reference_id(variant.metadata["voice_reference_id"])
         return reference_id
 
     assigned_names: set[str] = set()

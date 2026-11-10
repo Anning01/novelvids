@@ -3,6 +3,7 @@ import { tr } from '@/i18n'
 
 import { ArrowUpRight, Check, Circle, Grid3X3, Hand, Minus, Pencil, Plus, RotateCcw, Square, Trash2, Undo2, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
+import { FACE_GRID_DENSITY, faceGridPolylines } from '@/shared/imageAnnotationGeometry'
 import {
   annotationReducer,
   emptyAnnotationState,
@@ -25,7 +26,7 @@ const tools: Array<{ value: AnnotationEditorTool; label: string; icon: typeof Ha
   { value: 'move', get label() { return tr('移动') }, icon: Hand },
   { value: 'rectangle', get label() { return tr('矩形') }, icon: Square },
   { value: 'ellipse', get label() { return tr('椭圆') }, icon: Circle },
-  { value: 'grid', get label() { return tr('网格') }, icon: Grid3X3 },
+  { value: 'face-grid', get label() { return tr('网格') }, icon: Grid3X3 },
   { value: 'arrow', get label() { return tr('箭头') }, icon: ArrowUpRight },
   { value: 'freehand', get label() { return tr('涂鸦') }, icon: Pencil },
 ]
@@ -33,6 +34,7 @@ const state = ref(emptyAnnotationState())
 const activeTool = ref<AnnotationEditorTool>('move')
 const stroke = ref('#000000')
 const strokeWidth = ref(1)
+const gridDivisions = ref<number>(FACE_GRID_DENSITY.default)
 const zoom = ref(1)
 const pan = ref<Point>({ x: 0, y: 0 })
 const draft = ref<ImageAnnotation | null>(null)
@@ -77,6 +79,7 @@ function beginPointer(event: PointerEvent) {
     points: activeTool.value === 'freehand' ? [point] : [point, point],
     stroke: stroke.value,
     strokeWidth: strokeWidth.value,
+    ...(activeTool.value === 'face-grid' ? { gridDivisions: gridDivisions.value } : {}),
   }
   ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
 }
@@ -142,8 +145,12 @@ function ellipse(shape: ImageAnnotation) {
   const bounds = box(shape)
   return { cx: bounds.x + bounds.width / 2, cy: bounds.y + bounds.height / 2, rx: bounds.width / 2, ry: bounds.height / 2 }
 }
-function points(shape: ImageAnnotation) {
+function points(shape: Pick<ImageAnnotation, 'points'>) {
   return shape.points.map(point => `${point.x},${point.y}`).join(' ')
+}
+function gridLines(shape: ImageAnnotation) {
+  const first = shape.points[0], last = shape.points.at(-1)
+  return first && last ? faceGridPolylines(first, last, shape.gridDivisions) : []
 }
 function normalizedStrokeWidth(shape: ImageAnnotation) {
   return Math.max(0.0015, shape.strokeWidth / 700)
@@ -167,6 +174,7 @@ function normalizedStrokeWidth(shape: ImageAnnotation) {
           </div>
           <label class="image-annotation-dialog__stroke"><span>{{ tr('颜色') }}</span><input v-model="stroke" type="color" :aria-label="tr('批注颜色')"></label>
           <label class="image-annotation-dialog__brush"><span>{{ tr('画笔') }} {{ strokeWidth }}</span><input v-model.number="strokeWidth" type="range" min="1" max="12" step="1" :aria-label="tr('画笔粗细')"></label>
+          <label v-if="activeTool === 'face-grid'" class="image-annotation-dialog__brush"><span>{{ tr('密度') }} {{ gridDivisions }}</span><input v-model.number="gridDivisions" type="range" :min="FACE_GRID_DENSITY.min" :max="FACE_GRID_DENSITY.max" :step="FACE_GRID_DENSITY.step" :aria-label="tr('网格密度')"></label>
           <div class="image-annotation-dialog__actions" role="group" :aria-label="tr('视图与历史操作')">
             <button type="button" :aria-label="tr('缩小图片')" @click="adjustZoom(-0.25)"><Minus :size="17" aria-hidden="true" /></button>
             <output :aria-label="tr('图片缩放比例')">{{ Math.round(zoom * 100) }}%</output>
@@ -189,6 +197,9 @@ function normalizedStrokeWidth(shape: ImageAnnotation) {
               <template v-for="shape in visibleShapes" :key="shape.id">
                 <rect v-if="shape.tool === 'rectangle'" v-bind="box(shape)" fill="none" :stroke="shape.stroke" :stroke-width="normalizedStrokeWidth(shape)" />
                 <ellipse v-else-if="shape.tool === 'ellipse'" v-bind="ellipse(shape)" fill="none" :stroke="shape.stroke" :stroke-width="normalizedStrokeWidth(shape)" />
+                <g v-else-if="shape.tool === 'face-grid'" fill="none" :stroke="shape.stroke" :stroke-width="normalizedStrokeWidth(shape)">
+                  <polyline v-for="(line, index) in gridLines(shape)" :key="index" :points="points({ points: line })" />
+                </g>
                 <g v-else-if="shape.tool === 'grid'" fill="none" :stroke="shape.stroke" :stroke-width="normalizedStrokeWidth(shape)">
                   <rect v-bind="box(shape)" />
                   <line :x1="box(shape).x + box(shape).width / 3" :y1="box(shape).y" :x2="box(shape).x + box(shape).width / 3" :y2="box(shape).y + box(shape).height" />

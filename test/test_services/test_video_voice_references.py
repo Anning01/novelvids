@@ -9,6 +9,7 @@ from models.chapter import Chapter
 from models.novel import Novel
 from models.scene import Scene
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from services.video.capabilities import capabilities_for
 from services.video.voice_references import resolve_voice_references
 from utils.enums import AssetTypeEnum
@@ -23,6 +24,24 @@ async def _scene(novel: Novel, *, narration=None) -> Scene:
         prompt_params={"narration": narration or []},
         duration=6,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant_metadata", [{}, {"voice_reference_id": None}])
+async def test_explicitly_cleared_variant_voice_does_not_inherit_or_reuse_stale_subject_voice(variant_metadata):
+    voice = await AudioReference.create(nickname="主形象音色", gender="女",
+        audio_url="https://cdn.example.com/voice.wav", avatar_url="", asset_id="base-voice")
+    novel = await Novel.create(name="清除音色")
+    scene = await _scene(novel)
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name="羽宁",
+        metadata={"voice_reference_id": voice.id})
+    variant = await AssetVariant.create(asset=asset, name="青年", metadata=variant_metadata)
+    await scene.assets.add(asset)
+    scene.metadata = {"asset_variant_ids": {str(asset.id): variant.id}}
+    await scene.save(update_fields=["metadata"])
+    references = await resolve_voice_references(scene=scene, novel=novel,
+        subjects=[{"name": "羽宁", "voice_reference_id": voice.id}], capabilities=capabilities_for("seedance_2"))
+    assert len(references) == (0 if "voice_reference_id" in variant_metadata else 1)
 
 
 @pytest.mark.asyncio

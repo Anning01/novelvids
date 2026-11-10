@@ -6,6 +6,7 @@ import { AtSign, Boxes, Clock3, Film, Image as ImageIcon, Map as MapIcon, Pause,
 import AppButton from './AppButton.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import { fallbackImage } from '@/shared/mediaFallback'
+import { DURATION_MENTION_SOURCE, parseDurationMention } from '@/shared/durationMention'
 
 export type ScenePromptMentionKind = 'person' | 'scene' | 'item' | 'image' | 'video' | 'audio' | 'duration'
 
@@ -57,7 +58,7 @@ const durationPosition = ref({ left: 0, top: 0 })
 const playingAudioMentionId = ref('')
 let playingAudio: HTMLAudioElement | null = null
 
-const DURATION_MENTION_PATTERN = /@\{(?:镜头|视频)时长(?::(\d+(?:\.\d+)?)s?)?\}/g
+const DURATION_MENTION_PATTERN = new RegExp(DURATION_MENTION_SOURCE, 'g')
 
 const filteredOptions = computed(() => {
   const normalized = query.value.trim().toLocaleLowerCase()
@@ -427,7 +428,7 @@ function activateMention(option: ScenePromptMentionOption) {
 }
 
 function parseDurationSyntax(value = '') {
-  return value.match(/^@\{(?:镜头|视频)时长(?::(\d+(?:\.\d+)?)s?)?\}$/)?.[1] || ''
+  return parseDurationMention(value)?.seconds?.toString() || ''
 }
 
 function placeDurationEditor(anchor: HTMLElement) {

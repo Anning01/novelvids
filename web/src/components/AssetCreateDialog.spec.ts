@@ -302,6 +302,79 @@ it('选择角色音色后立即保存绑定并更新当前资产', async () => {
   expect(wrapper.text()).toContain('沉稳男声')
 })
 
+async function mountVoiceEditor(asset: Asset, variant?: AssetVariant) {
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: 'ok', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+  vi.mocked(api.asset).mockResolvedValue({ code: 0, message: 'ok', data: asset })
+  vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: variant ? [variant] : [] })
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: 'ok', data: { prompt: asset.base_traits || '', prompt_language: 'zh' } })
+  const wrapper = mount(AssetCreateDialog, {
+    props: { open: true, kind: 'character', novelId: 9, asset },
+    global: { components: { AppButton }, stubs: { Teleport: true } },
+  })
+  await flushPromises()
+  if (variant) await wrapper.get(`button[aria-label="切换到${variant.name}"]`).trigger('click')
+  return wrapper
+}
+
+it.each(['light', 'dark'])('clears and persists the voice in %s mode with saving feedback', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const asset = { ...editedAsset, metadata: { voice: '沉稳男声', voice_reference_id: 19, gender: '男' } }
+  const cleared = { ...asset, metadata: { ...asset.metadata, voice: '', voice_reference_id: null } }
+  let finishSave!: (value: Awaited<ReturnType<typeof api.updateAsset>>) => void
+  vi.mocked(api.updateAsset).mockImplementationOnce(() => new Promise(resolve => { finishSave = resolve }))
+  const wrapper = await mountVoiceEditor(asset)
+  try {
+    await wrapper.get('button[aria-label="清除音色"]').trigger('click')
+    expect(wrapper.get('button[aria-label="清除音色"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.asset-voice-choice').attributes('aria-busy')).toBe('true')
+    expect(api.updateAsset).toHaveBeenLastCalledWith(asset.id, { metadata: cleared.metadata })
+    finishSave({ code: 0, message: 'ok', data: cleared })
+    await flushPromises()
+    expect(wrapper.find('button[aria-label="清除音色"]').exists()).toBe(false)
+    expect(wrapper.get('.asset-voice-choice').text()).toBe('选择音色')
+    expect(wrapper.findComponent(AudioReferencePicker).props('selectedId')).toBeNull()
+    expect(wrapper.emitted('saved')?.at(-1)).toEqual([cleared])
+    wrapper.unmount()
+    const reopened = await mountVoiceEditor(cleared)
+    expect(reopened.get('.asset-voice-choice').text()).toBe('选择音色')
+    expect(reopened.findComponent(AudioReferencePicker).props('selectedId')).toBeNull()
+  } finally {
+    delete document.documentElement.dataset.appTheme
+  }
+})
+
+it('restores the selected voice if clearing fails', async () => {
+  const asset = { ...editedAsset, metadata: { voice: '沉稳男声', voice_reference_id: 19 } }
+  vi.mocked(api.updateAsset).mockRejectedValueOnce(new Error('Save failed'))
+  const wrapper = await mountVoiceEditor(asset)
+  await wrapper.get('button[aria-label="清除音色"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('.asset-voice-choice').text()).toBe('沉稳男声')
+  expect(wrapper.get('button[aria-label="清除音色"]').attributes('disabled')).toBeUndefined()
+  expect(wrapper.findComponent(AudioReferencePicker).props('selectedId')).toBe(19)
+})
+
+it('keeps a cleared variant voice empty after reopening without changing the base voice', async () => {
+  const asset = { ...editedAsset, metadata: { voice: '沉稳男声', voice_reference_id: 19 } }
+  const variant: AssetVariant = { id: 31, asset_id: asset.id, name: '青年', base_traits: '青年形象', images: [],
+    metadata: { voice: '青年音色', voice_reference_id: 20 }, created_at: '', updated_at: '' }
+  const cleared: AssetVariant = { ...variant, metadata: { voice: '', voice_reference_id: null,
+    editor_form: { voice: '', voice_reference_id: null } } }
+  vi.mocked(api.updateAssetVariant).mockResolvedValueOnce({ code: 0, message: 'ok', data: cleared })
+  const wrapper = await mountVoiceEditor(asset, variant)
+  await wrapper.get('button[aria-label="清除音色"]').trigger('click')
+  await flushPromises()
+  expect(api.updateAssetVariant).toHaveBeenLastCalledWith(asset.id, variant.id, { metadata: cleared.metadata })
+  await wrapper.get('button[aria-label="切换到主形象"]').trigger('click')
+  expect(wrapper.get('.asset-voice-choice').text()).toBe('沉稳男声')
+  wrapper.unmount()
+  const reopened = await mountVoiceEditor(asset, cleared)
+  expect(reopened.get('.asset-voice-choice').text()).toBe('选择音色')
+  expect(reopened.findComponent(AudioReferencePicker).props('selectedId')).toBeNull()
+})
+
 it('shows an existing generated image and closes quickly with Escape', async () => {
   vi.clearAllMocks()
   const assetWithImage = { ...editedAsset, main_image: '/media/generated-character.png' }
