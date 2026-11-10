@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, ValidationError
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for, validate_selection
 from services.video.content import PreparedVideoContent, prepare_video_content, reference_indexes, replace_display_mentions
-from services.video.provider_http import request_id
+from services.video.provider_http import public_provider_error, request_id
 from services.video.public_media import PublicMediaResolver, public_media_url
 from utils.enums import TaskStatusEnum
 from utils.messages import localized_message
@@ -75,15 +75,19 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
                 raise VideoProviderError(localized_message('视频接口网络请求失败'),
                     submission_uncertain=submitting and not not_sent) from None
         logger.info("video_api_response operation=%s status=%s request_id=%s", method, response.status_code, request_id(response) or "-")
-        if response.status_code >= 400:
-            raise VideoProviderError(localized_message('视频接口请求失败（HTTP {p1}）', p1=response.status_code),
-                submission_uncertain=submitting and (response.status_code >= 500 or response.status_code == 408))
         try:
             data = response.json()
         except ValueError:
-            raise VideoProviderError(localized_message('视频接口返回了无效响应'), submission_uncertain=submitting) from None
+            data = None
+        if response.status_code >= 400:
+            raise VideoProviderError(public_provider_error(data, status_code=response.status_code,
+                transport_request_id=request_id(response), secrets=(self.config.api_key,)),
+                submission_uncertain=submitting and (response.status_code >= 500 or response.status_code == 408))
         if not isinstance(data, dict):
             raise VideoProviderError(localized_message('视频接口返回了无效响应'), submission_uncertain=submitting)
+        if data.get("error"):
+            data = {**data, "error": public_provider_error(data, status_code=response.status_code,
+                transport_request_id=request_id(response), secrets=(self.config.api_key,))}
         return data
 
     async def submit(self, prompt: str, negative_prompt: str = "", subjects: list[dict[str, Any]] | None = None,
@@ -117,7 +121,7 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             selection.duration, selection.resolution)
         data = await self._request("POST", payload=payload)
         if data.get("error"):
-            raise VideoProviderError(localized_message('视频接口拒绝了生成请求'))
+            raise VideoProviderError(data["error"])
         task_id = data.get("id")
         if not isinstance(task_id, str) or not task_id.strip():
             raise VideoProviderError(localized_message('视频接口未返回任务 ID'), submission_uncertain=True)
@@ -135,6 +139,7 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             url = public_media_url(task.metadata.url)
             return self._build_result(TaskStatusEnum.completed, progress=100, url=url)
         if task.status == "failed":
-            return self._build_result(TaskStatusEnum.failed, error=localized_message('视频生成失败，请检查生成内容或联系管理员'))
+            message = data.get("error") or localized_message('视频生成失败，请检查生成内容或联系管理员')
+            return self._build_result(TaskStatusEnum.failed, error=message)
         status = TaskStatusEnum.queued if task.status == "queued" else TaskStatusEnum.running
         return self._build_result(status, progress=task.progress)

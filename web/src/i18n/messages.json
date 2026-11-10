@@ -1,5 +1,8 @@
 {
   "common": {
+    "生成结果未通过内容审核": "Generated video did not pass content review",
+    "供应商判定生成的视频可能包含敏感信息，因此没有返回成片。": "The provider flagged the generated video as potentially sensitive and did not return a finished video.",
+    "请检查提示词与参考素材，调整不符合供应商内容规范的部分后再生成。": "Review the prompt and reference materials, revise anything that does not meet the provider's content rules, then generate again.",
     "密度": "Density",
     "网格密度": "Grid density",
     "视频已生成，正在后台高清化": "Video generated. HD processing continues in the background",
