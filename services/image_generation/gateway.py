@@ -11,6 +11,7 @@ from services.image_generation.adapters import (
     ImageGenerationInput,
     image_protocol_adapter,
 )
+from services.image_generation.uploads import image_uploads
 from utils.image_protocol import ImageApiProtocol
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ async def generate_images(
     output_format: str = "png",
     quality: str | None = None,
     extra_body: dict[str, Any] | None = None,
-    timeout: float | None = 300,
+    timeout: float | None = 600,
 ) -> list[GeneratedImage]:
     """Generate images through a backend-configured provider protocol."""
     prepared = image_protocol_adapter(api_protocol).prepare(
@@ -156,14 +157,16 @@ async def generate_images(
 
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.post(
-                endpoint,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=prepared.payload,
-            )
+            headers = {"Authorization": f"Bearer {api_key}"}
+            if prepared.images:
+                try:
+                    files = await image_uploads(client, prepared.images)
+                except (ValueError, OSError) as exc:
+                    raise ImageGenerationError("参考图片无法读取或格式不受支持") from exc
+                response = await client.post(endpoint, headers=headers,
+                    data={key: str(value) for key, value in prepared.payload.items()}, files=files)
+            else:
+                response = await client.post(endpoint, headers=headers, json=prepared.payload)
     except httpx.HTTPError as exc:
         logger.warning(
             "image_generation_network_error protocol=%s endpoint=%s error_type=%s",

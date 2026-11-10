@@ -3,6 +3,29 @@
 from prompts.skill_pack import render_skill
 
 
+def targeted_cast_instructions(language: str) -> str:
+    if language == 'en':
+        return ('This is a targeted omission check, overriding the complete-chapter inventory scope. '
+                'Read the chapter to resolve ONLY the objects specified in target_requirements, including relational '
+                'references such as the protagonist’s sword. Do not include their owner or other locations/props. '
+                'Use exact source quotes and registered names/IDs. An arbitrary unrelated quote is not identity evidence. '
+                'Never invent a missing object. Return empty arrays if no requested object has source evidence. '
+                'Explicitly requested objects may be included when only mentioned in the source.')
+    return ('本次是定点补漏，覆盖整章清点范围：阅读本章以确定 target_requirements 指定的对象，'
+            '包括“主角的剑”等关系称呼，只返回这些对象，不顺带提取其主人、其他场景或道具。'
+            '逐项提供能证明该对象身份的准确原文，不能用无关引文凑数；有目录身份时使用标准名和 ID。'
+            '不虚构原文没有的对象，无依据时返回空数组。用户明确要求的对象即使在原文中仅被提及也可列入。')
+
+
+def targeted_design_instructions(language: str) -> str:
+    if language == 'en':
+        return ('Generate only the source-verified required_asset_names. Do not add owners or other chapter assets. '
+                'Preserve the required visual templates. Existing accepted designs are retained by the server. '
+                'This omission request does not authorize new appearance variants.')
+    return ('只生成已经通过原文核对的 required_asset_names，不增加主人或本章其他资产；'
+            '严格保留必需视觉模板。已有合格设计由服务器保留。本次补漏不授权新增衍生形态。')
+
+
 def render_cast_instructions(language: str) -> str:
     if language == 'en':
         return (

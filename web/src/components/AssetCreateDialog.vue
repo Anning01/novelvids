@@ -169,6 +169,7 @@ const generatedImage = computed(() => variantDraft.value?.is_new
 function currentImageDerivative(kind: 'thumbnail' | 'preview') {
   const original = generatedImage.value
   if (!original) return ''
+  if (kind === 'preview' && /\.gif(?:[?#]|$)/i.test(original)) return original
   if (selectedVariant.value) {
     const index = selectedVariant.value.images?.indexOf(original) ?? -1
     const derivatives = kind === 'preview'
@@ -467,11 +468,10 @@ function activeFormKey() {
 }
 
 function resolveImageFormat(url: string, hint?: string) {
-  if (hint) return hint.toUpperCase().replace('JPG', 'JPEG')
   const dataMime = url.match(/^data:image\/([^;,]+)/i)?.[1]
   if (dataMime) return dataMime.toUpperCase().replace('JPG', 'JPEG')
   const extension = url.split(/[?#]/, 1)[0]?.match(/\.([a-z0-9]+)$/i)?.[1]
-  return extension?.toUpperCase().replace('JPG', 'JPEG') || 'IMAGE'
+  return extension?.toUpperCase().replace('JPG', 'JPEG') || hint?.toUpperCase().replace('JPG', 'JPEG') || 'IMAGE'
 }
 
 function imageInfoLabel(url: string, formatHint?: string) {

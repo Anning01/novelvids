@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, expect, it, vi } from 'vitest'
 import HomePage from './HomePage.vue'
-import { applySavedLocale, beginLocaleChange, setLocale } from '@/i18n'
+import { applySavedLocale, beginLocaleChange, setLocale, tr } from '@/i18n'
 import { api } from '@/api'
 import { clipApi } from '@/features/creation-agent/clipApi'
 import type { ClipSession } from '@/features/creation-agent/clipApi'
@@ -29,7 +29,7 @@ async function render() {
     { path: '/create/clip/:projectId', name: 'clip-studio', component: {template:'<div />'} },
   ] })
   await router.push('/'); await router.isReady()
-  const wrapper = mount(HomePage, { global: { plugins: [createPinia(), router], stubs: { AppSelect: select, ClipReferencePrompt: {props:['modelValue','references'],emits:['update:modelValue','remove'],template:'<div><textarea id="clip-idea" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></div>'} } } })
+  const wrapper = mount(HomePage, { global: { plugins: [createPinia(), router], stubs: { AppSelect: select, ClipReferencePrompt: {props:['modelValue','references','placeholder'],emits:['update:modelValue','remove'],template:'<div><textarea id="clip-idea" :value="modelValue" :placeholder="placeholder" @input="$emit(\'update:modelValue\', $event.target.value)" /></div>'} } } })
   await flushPromises()
   await settleQuote()
   return {wrapper, router}
@@ -43,7 +43,74 @@ it('uses configured models, real empty works, and keeps series in My Creation', 
   expect(wrapper.get('a[href="/projects"]').text()).toContain('我的创作')
   expect(wrapper.text()).not.toContain('42.8w')
   expect(wrapper.text()).not.toContain('Wan 3.0')
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeDefined()
+})
+
+it('shows only the three most recent clips in the returned order',async()=>{
+  vi.mocked(clipApi.recent).mockResolvedValue(ok(Array.from({length:8},(_,index)=>({
+    project_id:108-index,name:`片段 ${108-index}`,aspect_ratio:'16:9',created_at:'2026-11-10T00:00:00Z',
+  }))))
+  const {wrapper}=await render()
+  const links=wrapper.findAll('.recent-list a')
+  expect(links).toHaveLength(3)
+  expect(links.map(link=>link.attributes('href'))).toEqual(['/create/clip/108','/create/clip/107','/create/clip/106'])
+  expect(wrapper.get('.recent-list').text()).not.toContain('片段 105')
+  wrapper.unmount()
+})
+
+it.each(['light','dark'])('keeps the sliding switch, selected state and draft synchronized during rapid switching (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  const {wrapper}=await render()
+  const control=wrapper.get('.composer-tabs')
+  const [videoButton,imageButton]=control.findAll('button')
+  await wrapper.get('#clip-idea').setValue('保留这个画面描述')
+  expect(control.classes()).not.toContain('is-image')
+  expect(videoButton!.attributes('aria-pressed')).toBe('true')
+  await imageButton!.trigger('click')
+  expect(control.classes()).toContain('is-image')
+  expect(imageButton!.attributes('aria-pressed')).toBe('true')
+  expect(wrapper.text()).toContain('团队图片模型')
+  await videoButton!.trigger('click')
+  await imageButton!.trigger('click')
+  await videoButton!.trigger('click')
+  expect(control.classes()).not.toContain('is-image')
+  expect(videoButton!.attributes('aria-pressed')).toBe('true')
+  expect(imageButton!.attributes('aria-pressed')).toBe('false')
+  expect(wrapper.text()).toContain('团队视频模型')
+  expect((wrapper.get('#clip-idea').element as HTMLTextAreaElement).value).toBe('保留这个画面描述')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
+
+it.each(['light','dark'])('defaults to direct creation and switches Agent/direct without losing the draft (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  const create=vi.spyOn(clipApi,'create').mockRejectedValue(new Error('保留界面用于测试'))
+  const {wrapper}=await render()
+  const control=wrapper.get('.composer-mode-switch')
+  const [agent,direct]=control.findAll('button')
+  expect(control.findAll('button').map(button=>button.text())).toEqual(['Agent','直创'])
+  expect(control.classes()).toContain('is-direct')
+  expect(direct!.attributes('aria-pressed')).toBe('true')
+  expect(wrapper.find('select[aria-label="创作方式"]').exists()).toBe(false)
+  expect(clipApi.quote).toHaveBeenLastCalledWith(expect.objectContaining({mode:'direct'}),expect.any(AbortSignal))
+  await wrapper.get('#clip-idea').setValue('保留原样的创意描述')
+  await agent!.trigger('click')
+  expect(control.classes()).not.toContain('is-direct')
+  expect(agent!.attributes('aria-pressed')).toBe('true')
   expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[aria-label="开始创作"]').attributes('aria-busy')).toBe('true')
+  await settleQuote()
+  expect(clipApi.quote).toHaveBeenLastCalledWith(expect.objectContaining({mode:'agent'}),expect.any(AbortSignal))
+  await wrapper.get('[aria-label="开始创作"]').trigger('click');await flushPromises()
+  expect(create).toHaveBeenLastCalledWith(expect.objectContaining({mode:'agent',prompt:'保留原样的创意描述'}))
+  const restored=wrapper.get('.composer-mode-switch')
+  await restored.findAll('button')[1]!.trigger('click');await settleQuote()
+  expect(restored.classes()).toContain('is-direct')
+  expect((wrapper.get('#clip-idea').element as HTMLTextAreaElement).value).toBe('保留原样的创意描述')
+  await wrapper.get('[aria-label="立即生成"]').trigger('click');await flushPromises()
+  expect(create).toHaveBeenLastCalledWith(expect.objectContaining({mode:'direct',prompt:'保留原样的创意描述'}))
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
 })
 
 it.each(['light', 'dark'])('renders the English home, categories and quote warnings without rewriting user content (%s)', async theme => {
@@ -124,7 +191,6 @@ it('switches model capabilities and sends selected settings to the real clip API
   vi.spyOn(clipApi, 'create').mockResolvedValue(ok({project_id: 90} as ClipSession))
   const {wrapper, router} = await render()
   await wrapper.get('#clip-idea').setValue('我的完整提示词')
-  await wrapper.get('select[aria-label="创作方式"]').setValue('direct')
   await wrapper.get('select[aria-label="画面比例"]').setValue('9:16')
   await wrapper.get('select[aria-label="清晰度"]').setValue('1080p')
   await wrapper.get('select[aria-label="片段时长"]').setValue('8')
@@ -140,10 +206,10 @@ it('retains input and reuses the request ID after an uncertain creation failure'
   const create = vi.spyOn(clipApi, 'create').mockRejectedValue(new Error('连接中断'))
   const {wrapper} = await render()
   await wrapper.get('#clip-idea').setValue('保留这个想法')
-  await wrapper.get('[aria-label="开始创作"]').trigger('click'); await flushPromises()
+  await wrapper.get('[aria-label="立即生成"]').trigger('click'); await flushPromises()
   expect(wrapper.get('[role="alert"]').text()).toContain('连接中断')
   expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('保留这个想法')
-  await wrapper.get('[aria-label="开始创作"]').trigger('click'); await flushPromises()
+  await wrapper.get('[aria-label="立即生成"]').trigger('click'); await flushPromises()
   expect(create.mock.calls[0]?.[0].request_id).toBe(create.mock.calls[1]?.[0].request_id)
 })
 it('supports real image capabilities and reference image upload', async () => {
@@ -157,12 +223,62 @@ it('supports real image capabilities and reference image upload', async () => {
   expect(wrapper.text()).not.toContain('先做参考图')
   expect((wrapper.get('select[aria-label="画面比例"]').element as HTMLSelectElement).value).toBe('1:1')
 })
+
+it.each(['light', 'dark'])('offers GIF only from backend capabilities and passes GIF frame parameters to quote and generation (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const gifModel: ImageGenerationModel = { ...image, config_id:32, name:'GPT Image 2.6', model:'supplier-alias', model_type:'gpt_image_2_6',
+    capabilities:{...image.capabilities,clarities:['1K','2K','4K'],output_formats:['png','gif'],frame_counts:[2,4,9,16],default_frame_count:9,default_frame_duration_ms:200,frame_duration_ms_min:20,frame_duration_ms_max:655350,clarities_by_format:{gif:['1K']}} }
+  vi.mocked(api.imageGenerationModels).mockResolvedValue(ok([gifModel,{...gifModel,config_id:33,name:'GPT Image 2.5',model_type:'gpt_image_2_5',capabilities:{...gifModel.capabilities,output_formats:['png']}}]))
+  const create = vi.spyOn(clipApi,'create').mockRejectedValue(new Error('test-stop-before-navigation'))
+  const { wrapper } = await render()
+  await wrapper.findAll('.composer-tabs button')[1]!.trigger('click')
+  await flushPromises()
+  expect(wrapper.get('select[aria-label="图片格式"]').text()).toContain('PNG 静态图')
+  expect(wrapper.get('select[aria-label="图片格式"]').text()).toContain('GIF 动图')
+  await wrapper.get('select[aria-label="图片格式"]').setValue('gif')
+  expect(wrapper.find('select[aria-label="清晰度"]').exists()).toBe(false)
+  expect(wrapper.find('.generate-btn-discount').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('¥2.38')
+  expect(wrapper.find('select[aria-label="动图时长"]').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('目标时长')
+  expect(wrapper.get<HTMLSelectElement>('select[aria-label="动图帧数"]').element.value).toBe('9')
+  const interval=wrapper.get<HTMLInputElement>('input[aria-label="每帧间隔"]')
+  expect(interval.element.value).toBe('200')
+  await interval.setValue(19)
+  expect(interval.attributes('aria-invalid')).toBe('true')
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeDefined()
+  await wrapper.get('select[aria-label="动图帧数"]').setValue('4')
+  await interval.setValue(100)
+  await wrapper.get('#clip-idea').setValue('风吹竹叶，首尾循环')
+  expect(wrapper.find('.composer-gif-hint').exists()).toBe(false)
+  expect(wrapper.get('#clip-idea').attributes('placeholder')).toContain('运动与循环方式')
+  expect(wrapper.get('#clip-idea').attributes('placeholder')).toContain('输入 @')
+  await settleQuote()
+  expect(clipApi.quote).toHaveBeenLastCalledWith(expect.objectContaining({output_format:'gif',frame_count:4,frame_duration_ms:100}),expect.any(AbortSignal))
+  await wrapper.get('[aria-label="立即生成"]').trigger('click')
+  await flushPromises()
+  expect(create).toHaveBeenLastCalledWith(expect.objectContaining({model_config_id:32,output_format:'gif',resolution:'1K',frame_count:4,frame_duration_ms:100,prompt:'风吹竹叶，首尾循环'}))
+  await wrapper.get('select[aria-label="生成模型"]').setValue('33')
+  expect(wrapper.find('select[aria-label="图片格式"]').exists()).toBe(false)
+  expect(wrapper.find('select[aria-label="动图帧数"]').exists()).toBe(false)
+  expect(wrapper.find('input[aria-label="每帧间隔"]').exists()).toBe(false)
+  expect(wrapper.get('#clip-idea').attributes('placeholder')).toBeUndefined()
+  await settleQuote()
+  await wrapper.get('[aria-label="立即生成"]').trigger('click')
+  await flushPromises()
+  expect(create).toHaveBeenLastCalledWith(expect.objectContaining({model_config_id:33,output_format:'png'}))
+  expect(create.mock.calls.at(-1)?.[0]).not.toHaveProperty('frame_count')
+  expect(create.mock.calls.at(-1)?.[0]).not.toHaveProperty('frame_duration_ms')
+  expect(wrapper.text()).not.toContain('SVG')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
 it('shows unavailable models and load failures instead of demo success', async () => {
   vi.mocked(api.videoGenerationModels).mockRejectedValue(new Error('unavailable'))
   const {wrapper} = await render()
   await wrapper.get('#clip-idea').setValue('一个想法')
   expect(wrapper.text()).toContain('暂未配置可用模型')
-  expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeDefined()
   expect(wrapper.get('[role="alert"]').text()).toContain('未能加载')
 })
 
@@ -173,7 +289,48 @@ it('uses inspiration only as editable input without submitting a generation', as
   await wrapper.findAll('.inspiration-list button')[0]!.trigger('click')
   expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toContain('雨夜街头')
   expect(create).not.toHaveBeenCalled()
-  expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeUndefined()
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeUndefined()
+})
+
+it.each(['light','dark'])('switches to looping GIF inspirations, preserves drafts and restores ordinary inspirations (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  vi.mocked(api.imageGenerationModels).mockResolvedValue(ok([{...image,model_type:'gpt_image_2_6',capabilities:{
+    ...image.capabilities,clarities:['1K'],output_formats:['png','gif'],frame_counts:[2,9,16],clarities_by_format:{gif:['1K']},
+  }}]))
+  const create=vi.spyOn(clipApi,'create')
+  const {wrapper}=await render()
+  await wrapper.get('#clip-idea').setValue('保留我的草稿')
+  await wrapper.findAll('.composer-tabs button')[1]!.trigger('click')
+  await wrapper.get('select[aria-label="图片格式"]').setValue('gif')
+  expect(wrapper.get('.inspiration-list').text()).toContain('试试这些动效')
+  expect(wrapper.findAll('.inspiration-list button').map(button=>button.text())).toEqual(['弹跳小球','挥爪小猫','蒸汽咖啡','流动云海'])
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('保留我的草稿')
+  for(const button of wrapper.findAll('.inspiration-list button')) {
+    await button.trigger('click')
+    const prompt=(wrapper.get('textarea').element as HTMLTextAreaElement).value
+    expect(prompt).toContain('GIF')
+    expect(prompt).toContain('首尾无缝循环')
+    expect(prompt).toContain('所选帧数和帧间隔')
+  }
+  const chineseDraft=(wrapper.get('textarea').element as HTMLTextAreaElement).value
+  setLocale('en');await flushPromises()
+  expect(wrapper.get('.inspiration-list').text()).toContain('Try these animations')
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(chineseDraft)
+  for(const button of wrapper.findAll('.inspiration-list button')) {
+    await button.trigger('click')
+    const prompt=(wrapper.get('textarea').element as HTMLTextAreaElement).value
+    expect(prompt).toContain('animated GIF')
+    expect(prompt).toContain('seamless loop')
+    expect(prompt).toContain('selected frame count and frame interval')
+    expect(prompt).not.toMatch(/[\u4e00-\u9fff]/)
+  }
+  const gifDraft=(wrapper.get('textarea').element as HTMLTextAreaElement).value
+  await wrapper.get(`select[aria-label="${tr('图片格式')}"]`).setValue('png')
+  expect(wrapper.findAll('.inspiration-list button')[0]!.text()).toBe('Rainy pursuit')
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(gifDraft)
+  expect(create).not.toHaveBeenCalled()
+  setLocale('zh');wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
 })
 
 it('shows real work details, filters real categories and preserves native cover proportions', async () => {
@@ -217,7 +374,7 @@ it('keeps multiple named uploads and submits explicit mention binding', async ()
   await picker.trigger('change');await flushPromises()
   await wrapper.get('#clip-idea').setValue('按 @{图片2} 生成镜头。')
   await settleQuote()
-  await wrapper.get('[aria-label="开始创作"]').trigger('click');await flushPromises()
+  await wrapper.get('[aria-label="立即生成"]').trigger('click');await flushPromises()
   expect(clipApi.create).toHaveBeenCalledWith(expect.objectContaining({prompt:'按 @{图片2} 生成镜头。',reference_binding:'mentions',reference_media:[expect.objectContaining({mention_name:'图片1'}),expect.objectContaining({mention_name:'图片2'})]}))
 })
 
@@ -229,17 +386,17 @@ it('shows the estimate and blocks a positive balance below the estimated cost', 
   await wrapper.get('#clip-idea').setValue('雨夜街头')
   expect(wrapper.get('.generate-btn-discount').text()).toBe('¥0.50')
   expect(wrapper.get('.composer-quote').text()).toContain('还差 ¥0.01')
-  expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeDefined()
   expect(create).not.toHaveBeenCalled()
 })
 
 it('invalidates the old estimate immediately when parameters change',async()=>{
   const {wrapper}=await render()
   await wrapper.get('#clip-idea').setValue('雨夜街头')
-  expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeUndefined()
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeUndefined()
   vi.mocked(clipApi.quote).mockResolvedValue(ok({estimated_cost:'1',available_balance:'0.5',shortfall:'0.5',currency:'CNY',allowed:false,reason:'团队余额不足，请先充值',note:''}))
   await wrapper.get('select[aria-label="片段时长"]').setValue('10')
-  expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeDefined()
   await settleQuote()
   expect(wrapper.get('.generate-btn-discount').text()).toBe('¥1.00')
 })
@@ -249,7 +406,7 @@ it('rechecks funds before navigation and never proceeds with an unavailable quot
   const create=vi.spyOn(clipApi,'create')
   await wrapper.get('#clip-idea').setValue('雨夜街头')
   vi.mocked(clipApi.quote).mockResolvedValue(ok({estimated_cost:'0.5',available_balance:'0',shortfall:'0.5',currency:'CNY',allowed:false,reason:'团队余额不足，请先充值',note:''}))
-  await wrapper.get('[aria-label="开始创作"]').trigger('click');await flushPromises()
+  await wrapper.get('[aria-label="立即生成"]').trigger('click');await flushPromises()
   expect(create).not.toHaveBeenCalled()
   expect(router.currentRoute.value.path).toBe('/')
   expect(wrapper.find('.entry-state').exists()).toBe(false)
@@ -265,7 +422,7 @@ it('ignores an older response after a newer quote has blocked generation',async(
   await settleQuote()
   resolveFirst(ok({estimated_cost:'0.1',available_balance:'10',shortfall:'0',currency:'CNY',allowed:true,reason:'',note:''}))
   await flushPromises()
-  expect(wrapper.get('[aria-label="开始创作"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[aria-label="立即生成"]').attributes('disabled')).toBeDefined()
   expect(wrapper.get('.generate-btn-discount').text()).toBe('¥1.00')
   expect(wrapper.get('.generate-btn-discount').text()).not.toBe('¥0.10')
 })

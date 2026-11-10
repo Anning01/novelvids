@@ -427,6 +427,24 @@ async def test_reference_提交图生图参考图片并去重(configured_creatio
     assert task.request_params["reference_images"] == ["/media/reference.png"]
 
 
+@pytest.mark.parametrize("clarity,size", [("1K", "1024x1024"), ("2K", "2048x2048"), ("4K", "4096x4096")])
+async def test_reference_gpt_image_resolution_quality_reaches_task(configured_creation_agent, clarity, size):
+    from models.config import AiModelConfig
+
+    novel = await Novel.create(name="GPT Image", author="Author")
+    asset = await Asset.create(novel_id=novel.id, asset_type=AssetTypeEnum.person.value,
+        canonical_name="人物", metadata={"clarity": clarity, "aspect_ratio": "1:1"})
+    config = await AiModelConfig.create(task_type=2, task_types=[2], name="GPT Image 2.6",
+        base_url="https://custom.example/v1", api_key="test-key", model="gpt-image-2.6",
+        image_model_type="gpt_image_2_6", api_protocol="openai_compatible", is_active=True)
+    task = await asset_controller.reference(asset.id, media_model_config_id=config.id,
+        reference_images=["/media/reference.png"])
+    assert task.request_params["resolution"] == size
+    assert task.request_params["quality"] == "high"
+    assert task.request_params["reference_images"] == ["/media/reference.png"]
+    assert task.request_params["model_config_id"] == config.id
+
+
 @pytest.mark.asyncio
 async def test_reference_使用资产指定的生图模型(configured_creation_agent):
     """资产元数据指定已启用模型时，生成任务使用该模型而不是自动选择模型。"""
@@ -499,14 +517,14 @@ async def test_reference_衍生形态使用自身JSON配置的生图模型(confi
         novel_id=novel.id,
         asset_type=AssetTypeEnum.person.value,
         canonical_name="独立版本测试",
-        metadata={"model_config_id": base_config.id, "clarity": "low"},
+        metadata={"model_config_id": base_config.id, "clarity": "1K"},
     )
     variant = await AssetVariant.create(
         asset_id=asset.id,
         name="受伤形态",
         metadata={
             "model_config_id": variant_config.id,
-            "clarity": "high",
+            "clarity": "2K",
             "aspect_ratio": "3:2",
             "output_format": "webp",
         },
@@ -515,7 +533,7 @@ async def test_reference_衍生形态使用自身JSON配置的生图模型(confi
     task = await asset_controller.reference(asset.id, variant.id)
 
     assert task.request_params["model"] == "variant-model"
-    assert task.request_params["clarity"] == "high"
+    assert task.request_params["clarity"] == "2K"
     assert task.request_params["aspect_ratio"] == "3:2"
     assert task.request_params["output_format"] == "webp"
 

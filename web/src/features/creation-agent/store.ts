@@ -68,7 +68,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       // A successful snapshot proves the job is alive even if its event stream
       // disconnected. Do not keep a transport error displayed as a task failure.
       error.value = run.error_message || ''
-      if (!streamConnected.value) statusText.value = tr('任务仍在后台执行，可重新连接查看实时进度')
+      if (!streamConnected.value) statusText.value = tr('正在处理你的创作要求')
     } else {
       statusText.value = run.status === 3 ? (run.usage.turn_limited ? tr('本轮处理已结束，可以继续对话') : run.changes.length ? tr('修改已保存') : tr('回复已完成'))
         : run.status === 5 ? tr('已停止，已保存的修改仍保留') : tr('运行未完成，已保存的修改仍可查看')

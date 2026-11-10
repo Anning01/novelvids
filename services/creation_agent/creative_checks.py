@@ -28,6 +28,9 @@ async def record_storyboard_review(execution, report):
 
 
 async def check_preserved_result(execution, step, target_id, result):
+    if step.operation == 'assets' and step.mode == 'fill_missing':
+        # Extraction reuse already verifies source, rules and all saved designs locally.
+        return
     from services.creation_agent.step_context import step_context
     from models.asset import Asset
     from models.asset_variant import AssetVariant

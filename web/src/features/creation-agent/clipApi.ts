@@ -11,6 +11,9 @@ export interface ClipInput {
   aspect_ratio: string
   resolution: string
   duration: number
+  output_format?: 'png' | 'gif'
+  frame_count?: number
+  frame_duration_ms?: number
   reference_media: VideoReferenceMedia[]
   reference_binding?: 'all' | 'mentions'
 }

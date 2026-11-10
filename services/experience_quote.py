@@ -96,7 +96,7 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
                 input_image_count=sum(item.type == 'image' for item in references) + int(payload.mode == 'reference'))
         else:
             selected = image_selection(config.image_model_type, clarity=payload.resolution, aspect_ratio=payload.aspect_ratio,
-                output_format='png', generation_count=1)
+                output_format=payload.output_format, generation_count=1, frame_count=payload.frame_count, frame_duration_ms=payload.frame_duration_ms)
             image_pricing = _price(config.pricing, 'image', selected.clarity)
             references = _references(payload)
             input_image_count = sum(item.type == 'image' for item in references)

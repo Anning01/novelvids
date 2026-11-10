@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Maximize2, Minus, Plus, RotateCcw, X } from 'lucide-vue-next'
 
 const props = withDefaults(defineProps<{
@@ -16,6 +16,8 @@ const emit = defineEmits<{ close: [] }>()
 
 const zoom = ref(1)
 const dimensions = ref('')
+const dialog = ref<HTMLElement | null>(null)
+let previousFocus: HTMLElement | null = null
 
 const normalizedFormat = computed(() => {
   if (props.format) return props.format.toUpperCase().replace('JPG', 'JPEG')
@@ -50,17 +52,29 @@ function toggleZoom() {
   zoom.value = zoom.value === 1 ? 2 : 1
 }
 
-watch(() => props.open, open => {
-  if (!open) return
+function onDialogKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close'); return }
+  if (event.key !== 'Tab') return
+  const buttons = [...(dialog.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || [])]
+  const first = buttons[0], last = buttons.at(-1)
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+}
+watch(() => props.open, async open => {
+  if (!open) { previousFocus?.focus(); return }
+  previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   zoom.value = 1
   dimensions.value = ''
-})
+  await nextTick()
+  dialog.value?.querySelector<HTMLButtonElement>('[aria-label="' + tr('关闭大图') + '"]')?.focus()
+}, { immediate: true })
+onBeforeUnmount(() => { if (props.open) previousFocus?.focus() })
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="image-lightbox">
-      <div v-if="open" class="image-lightbox" role="dialog" aria-modal="true" :aria-label="tr('图片放大查看')" @click.self="emit('close')">
+      <div v-if="open" ref="dialog" class="image-lightbox" role="dialog" aria-modal="true" :aria-label="tr('图片放大查看')" @keydown="onDialogKeydown" @click.self="emit('close')">
         <header class="image-lightbox__toolbar">
           <div>
             <Maximize2 :size="16" />
@@ -102,6 +116,7 @@ watch(() => props.open, open => {
 .image-lightbox-enter-from .image-lightbox__stage img,.image-lightbox-leave-to .image-lightbox__stage img { opacity: 0; transform: scale(.96) !important; }
 @media (max-width: 640px) {
   .image-lightbox { padding: 10px; }
+  .image-lightbox__toolbar :deep(.app-button) { min-width: 44px; min-height: 44px; }
   .image-lightbox__toolbar { align-items: flex-start; flex-direction: column; }
   .image-lightbox__toolbar nav { align-self: flex-end; }
   .image-lightbox__stage img { max-width: calc(100vw - 20px); max-height: calc(100dvh - 164px); }

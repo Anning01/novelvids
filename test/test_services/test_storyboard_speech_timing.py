@@ -152,7 +152,7 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
         assert 'speech_timing' in info.instructions
         if attempts == 1:
             shots = [candidate('你先回家。我们明天再见。', .5)]
-        elif attempts == 2 or not repair:
+        elif not repair:
             assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
             shots = [candidate('你先回家。', 1.5)]
         else:
@@ -168,7 +168,7 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
         await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert attempts == 3
+    assert attempts == 2  # The shared budget permits one repair, never a third paid call.
     if repair:
         assert task.status == 3, task.error_message
         saved = await Scene.filter(chapter=chapter).order_by('sequence')

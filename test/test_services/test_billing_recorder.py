@@ -8,6 +8,22 @@ from services.billing.recorder import billing_recorder
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
+@pytest.mark.parametrize("clarity,expected", [("1K", "0.120000"), ("2K", "0.340000"), ("4K", "0.560000")])
+async def test_gpt_image_records_resolution_rate_with_high_quality(clarity, expected):
+    from services.image_generation.capabilities import validate_selection
+
+    config = await AiModelConfig.create(task_type=2, name="GPT Image", model="gpt-image-2",
+        base_url="https://provider.example/v1", api_key="test", image_model_type="gpt_image_2",
+        pricing={"type": "image", "prices": {"1K": 0.12, "2K": 0.34, "4K": 0.56}})
+    selection = validate_selection(config.image_model_type, clarity=clarity, aspect_ratio="1:1",
+        output_format="png", generation_count=1)
+    assert selection.provider_quality == "high"
+    record = await billing_recorder.record_image(novel_id=7, task_type=2, model_config_id=config.id,
+        image_count=1, clarity=selection.clarity, status=TaskStatusEnum.completed.value)
+    assert record.usage["clarity"] == clarity
+    assert record.cost == Decimal(expected)
+
+
 @pytest.mark.asyncio
 async def test_record_text_snapshots_pricing_and_cost():
     config = await AiModelConfig.create(

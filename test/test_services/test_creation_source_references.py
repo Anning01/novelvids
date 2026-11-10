@@ -121,16 +121,20 @@ async def test_cached_page_is_resolved_without_another_model_request():
 @pytest.mark.asyncio
 async def test_exhausted_reference_validation_is_not_an_uncertain_external_submission():
     from models.agent_operation import AgentOperation
-    from pydantic_ai.exceptions import UnexpectedModelBehavior
+    from services.creation_agent.reliability import RepairExhausted
     _, _, _, task, _, execution = await plan_fixture()
+    calls = 0
     def respond(messages, info):
+        nonlocal calls
+        calls += 1
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
             'summary': '摘要', 'candidates': [{'chapter_id': 7, 'first_paragraph': 999}]} )])
     model = FunctionModel(respond); model.client = AsyncMock()
-    with patch('services.creation_agent.handler.configured_model', return_value=model), pytest.raises(UnexpectedModelBehavior):
+    with patch('services.creation_agent.handler.configured_model', return_value=model), pytest.raises(RepairExhausted):
         await execution.generate('source_reading', facts('只有一个段落'), SourceReading)
     receipt = await AgentOperation.get(task=task, key='model:source_reading:SourceReading:')
     assert receipt.state == 'failed'
+    assert calls == 2  # Initial request and one shared repair; no third paid request.
 
 
 @pytest.mark.asyncio

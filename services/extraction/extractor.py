@@ -180,6 +180,8 @@ class AssetExtractor:
         supports_json_output: bool = False,
         prompt_language: str = "zh",
         required_assets: tuple[tuple[int, str], ...] = (),
+        initial_assets: AssetExtractionResult | None = None,
+        required_variants: tuple[tuple[int, str, str], ...] = (),
     ) -> None:
         self.client = client
         self.model = model
@@ -187,9 +189,25 @@ class AssetExtractor:
         self.last_usage: dict = {}
         self.prompt_language = prompt_language
         self.required_assets = required_assets
+        self.initial_assets = initial_assets
+        self.required_variants = required_variants
+        self.targeted_assets = None
+        self.targeted = False
+        self.not_applied_reason = None
 
     async def _validate_coverage(self, result: AssetExtractionResult) -> None:
         validate_required_design_assets(result, self.required_assets)
+        if self.targeted:
+            returned = {(kind, item.name) for field, kind in [('persons', 1), ('scenes', 2), ('items', 3)] for item in getattr(result, field)}
+            if returned - set(self.required_assets) or any(item.variant for field in ('persons', 'scenes', 'items') for item in getattr(result, field)):
+                from utils.messages import localized_message
+                raise ValueError(localized_message('定点补漏只允许返回已核对的指定资产，不增加其他对象或衍生形态'))
+        returned = {(kind, item.name, item.variant.name) for kind, items in
+                    ((1, result.persons), (2, result.scenes), (3, result.items)) for item in items if item.variant}
+        missing = [f'{name}/{variant}' for kind, name, variant in self.required_variants if (kind, name, variant) not in returned]
+        if missing:
+            from utils.messages import localized_message
+            raise ValueError(localized_message('需要补全资产形态：{p0}', p0='、'.join(missing)))
 
     async def extract(
         self,
@@ -200,10 +218,44 @@ class AssetExtractor:
         if execution:
             from services.extraction.cast import read_chapter_cast
             from prompts.extraction import render_cast_scope
-            cast = await read_chapter_cast(execution, messages)
-            self.required_assets = tuple(dict.fromkeys((*self.required_assets, *cast.required_assets())))
+            from services.creation_agent.step_context import step_context
+            context = await step_context(execution.params)
+            self.targeted = bool(context and context.step.asset_scope == 'targeted')
+            targets = None
+            if self.targeted:
+                targets = {'instructions': context.step.instructions,
+                    'requirements': [item.model_dump(mode='json') for item in context.requirements]}
+            cast = await read_chapter_cast(execution, messages, **({'target_requirements': targets} if targets is not None else {}))
+            if self.targeted:
+                from services.extraction.reuse import extraction_reuse
+                self.targeted_assets = await extraction_reuse.targeted(execution, cast)
+                self.required_assets = self.targeted_assets.required_assets
+                if not self.required_assets:
+                    from utils.messages import localized_message
+                    self.not_applied_reason = localized_message('本章原文未找到指定资产的依据，请提供对应段落；已有设定已保留，未生成新资产')
+                    return AssetExtractionResult(persons=[], scenes=[], items=[])
+                if context.step.mode == 'fill_missing':
+                    self.initial_assets = self.targeted_assets.accepted
+                    if self.targeted_assets.complete:
+                        return self.initial_assets
+            else:
+                self.required_assets = tuple(dict.fromkeys((*self.required_assets, *cast.required_assets())))
             messages = [*messages, {'role': 'user', 'content': render_cast_scope(self.prompt_language, cast.model_dump(mode='json'), self.required_assets)}]
             options = {'output_validator': self._validate_coverage} if self.required_assets else {}
+            options['asset_scope'] = self.required_assets
+            if self.initial_assets is not None:
+                from prompts.extraction import render_asset_repair
+                options['initial_assets'] = self.initial_assets
+                issues = []
+                try:
+                    await self._validate_coverage(self.initial_assets)
+                except ValueError as error:
+                    issues.append(str(error))
+                options['additional_instructions'] = render_asset_repair(self.prompt_language,
+                    {field: [item.name for item in getattr(self.initial_assets, field)] for field in ('persons', 'scenes', 'items')}, issues)
+            if self.targeted:
+                from prompts.extraction import targeted_design_instructions
+                options['additional_instructions'] = options.get('additional_instructions', '') + '\n' + targeted_design_instructions(self.prompt_language)
             return await execution.generate('assets', messages, self.response_model, **options)
         try:
             parsed, completion = await create_json_completion(

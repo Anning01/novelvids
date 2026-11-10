@@ -1,4 +1,9 @@
 {
+  "所选动图帧数不受当前模型支持": "The selected GIF frame count is not supported by this model.",
+  "所选动图帧间隔不受当前模型支持": "The selected GIF frame interval is not supported by this model.",
+  "定点补漏只允许返回已核对的指定资产，不增加其他对象或衍生形态": "Targeted completion may only return the verified requested assets, without additional objects or variants.",
+  "本章原文未找到指定资产的依据，请提供对应段落；已有设定已保留，未生成新资产": "No source evidence for the requested asset was found in this chapter. Please provide the passage; existing designs were kept and no new asset was generated.",
+  "所选动图时长不受当前模型支持": "The selected animation duration is not supported by this model.",
   "已停止未提交的后续步骤，模型请求或费用仍在收尾或待核对，请完成后再删除。已发生费用不会退款。": "Future steps have been stopped. Wait for in-flight requests and unsettled or uncertain charges before deleting. Incurred fees are not refunded.",
   "器灵登录尚未配置": "Qiling sign-in has not been configured",
   "器灵暂不可用，请重试": "Qiling is temporarily unavailable. Try again.",
@@ -829,5 +834,14 @@
   "画质增强": "Video enhancement",
   "语音识别": "Speech recognition",
   "正在清点本章角色、场景与道具": "Identifying characters, locations and props in this chapter",
-  "已核对本章资产清单": "Chapter asset inventory checked"
+  "已核对本章资产清单": "Chapter asset inventory checked",
+  "需要补全资产形态：{p0}": "Asset forms need completion: {p0}",
+  "已找到 {p0} 章可复用的完整资产，无需重复阅读生成": "Found complete assets for {p0} chapters; no repeated reading or generation needed",
+  "已完成的资产设定将直接复用": "Completed asset designs will be reused",
+  "保留已有完整资产设定": "Keep complete existing asset designs",
+  "复用第 {p0} 章资产": "Reuse assets from chapter {p0}",
+  "资产步骤模式必须与本轮确认的补缺或修改要求一致": "Asset step modes must match the requested fill-missing or revision mode",
+  "资产提取的原文或规则已变化，请重新提交": "The extraction source or rules changed. Submit a new request.",
+  "本章已有设定已移除，请先恢复后再补全，避免重复调用": "A saved chapter asset was removed. Restore it before completing missing designs to avoid repeated calls.",
+  "待补全的设定已有新修改，已保留人工编辑，请重新核对": "A design being completed was edited. Your edits were preserved; review before continuing."
 }

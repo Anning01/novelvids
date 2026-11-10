@@ -55,6 +55,31 @@ it('confirms a server-owned creation plan without sending client-authored operat
 })
 
 describe('creation assistant panel', () => {
+  it.each(['light','dark'])('keeps ordinary media progress free of reconnection notices and retains real failure recovery (%s)',async theme=>{
+    document.documentElement.dataset.appTheme=theme
+    const pinia=createPinia()
+    const wrapper=mount(CreationAgentPanel,{props:{projectId:7,chapterId:3},global:{plugins:[pinia]}})
+    await flushPromises()
+    const store=useCreationAgentStore(pinia)
+    store.messages=[{id:2,role:'assistant',content:'',task_id:'image-run',status:2,changes:[],usage:{},
+      created_at:'2026-11-10T04:00:00Z',production:[{task_id:'image-run',operation:'image',status:2}]}]
+    store.currentRun={task_id:'image-run',conversation_id:1,status:2,content:'',error_message:null,changes:[],usage:{},event_count:0}
+    store.streamConnected=false
+    store.statusText='正在处理你的创作要求'
+    await flushPromises()
+    expect(wrapper.text()).toContain('图片生成中')
+    expect(wrapper.find('.creation-agent-panel__run-details').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('重新连接')
+    store.messages[0]!.production![0]!.stage='billing_pending'
+    await flushPromises()
+    expect(wrapper.text()).toContain('用量正在结算')
+    store.error='暂时无法更新进度'
+    await flushPromises()
+    expect(wrapper.get('.creation-agent-panel__run-details').text()).toContain('暂时无法更新进度')
+    expect(wrapper.findAll('button').some(button=>button.text()==='重新连接')).toBe(true)
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
   it('folds all messages without hiding the composer or triggering another request', async () => {
     const pinia = createPinia()
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })

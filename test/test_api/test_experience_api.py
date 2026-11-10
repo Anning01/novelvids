@@ -103,6 +103,86 @@ async def test_real_image_selection_keeps_requested_ratio_and_model(configured):
     assert result['model_config_id'] == image.id
 
 
+async def test_gif_clip_preserves_frame_options_and_queued_request(configured):
+    from controllers.asset import asset_controller
+    from models.ai_task import AiTask
+    image = await AiModelConfig.create(name='GIF model', model='supplier-alias', task_type=2,
+        api_key='test', base_url='https://provider.example/v1', image_model_type='gpt_image_2_6',
+        api_protocol='openai_compatible', is_active=True,
+        pricing={'type':'image','currency':'CNY','prices':{'1K':0.1,'2K':0.2,'4K':0.4}})
+    request = payload(image.id, task_type='image', mode='direct', output_format='gif',frame_count=4,frame_duration_ms=100).model_copy(update={'resolution':'1K'})
+    session = await create_clip(request, AuthContext())
+    assert session['output_format'] == 'gif'
+    assert session['frame_count'] == 4
+    assert session['frame_duration_ms'] == 100
+    asset = await Asset.get(id=session['asset_id'])
+    assert asset.metadata['output_format'] == 'gif'
+    assert asset.metadata['frame_count'] == 4
+    assert asset.metadata['frame_duration_ms'] == 100
+    task = await asset_controller.reference(asset.id)
+    task = await AiTask.get(id=task.id)
+    assert task.request_params['output_format'] == 'gif'
+    assert task.request_params['frame_count'] == 4
+    assert task.request_params['frame_duration_ms'] == 100
+    assert task.request_params['quality'] == '1k'
+
+
+async def test_non_gif_models_reject_gif_before_creating_a_project(configured):
+    _, image = configured
+    before = await Novel.all().count()
+    with pytest.raises(HTTPException, match='格式'):
+        await create_clip(payload(image.id, task_type='image', output_format='gif').model_copy(update={'resolution':'2K'}), AuthContext())
+    assert await Novel.all().count() == before
+
+
+async def test_legacy_png_requests_keep_their_existing_idempotency_hash(configured):
+    import hashlib
+    video, _ = configured
+    request = payload(video.id)
+    session = await create_clip(request, AuthContext())
+    project = await Novel.get(id=session['project_id'])
+    old_serialized = request.model_dump_json(exclude={'output_format','reference_binding','frame_count','frame_duration_ms'})
+    assert project.creation_payload_hash == hashlib.sha256(old_serialized.encode()).hexdigest()
+    settings_data = __import__('json').loads(project.project_setting)
+    settings_data.pop('output_format', None)
+    project.project_setting = __import__('json').dumps(settings_data)
+    await project.save(update_fields=['project_setting'])
+    assert (await clip_session(project.id, AuthContext()))['output_format'] == 'png'
+    assert (await create_clip(request, AuthContext()))['project_id'] == project.id
+
+
+async def test_existing_gif_drafts_restore_frame_defaults_without_rewriting_history(configured):
+    import hashlib,json
+    from tortoise import Tortoise
+    from controllers.asset import asset_controller
+    image=await AiModelConfig.create(name='Legacy GIF',model='supplier-alias',task_type=2,
+        base_url='https://provider.example/v1',api_key='test',api_protocol='openai_compatible',
+        image_model_type='gpt_image_2_6',is_active=True,
+        pricing={'type':'image','currency':'CNY','prices':{'1K':0.1,'2K':0.2,'4K':0.4}})
+    request=payload(image.id,task_type='image',output_format='gif').model_copy(update={'resolution':'1K'})
+    result=await create_clip(request,AuthContext())
+    project=await Novel.get(id=result['project_id'])
+    old_body=request.model_dump_json(exclude={'frame_count','frame_duration_ms','reference_binding'})
+    assert project.creation_payload_hash==hashlib.sha256(old_body.encode()).hexdigest()
+    stored=json.loads(project.project_setting)
+    stored.pop('frame_count');stored.pop('frame_duration_ms')
+    project.project_setting=json.dumps(stored)
+    await project.save(update_fields=['project_setting'])
+    asset=await Asset.get(id=result['asset_id'])
+    metadata={key:value for key,value in asset.metadata.items() if key not in {'frame_count','frame_duration_ms'}}
+    metadata['gif_duration']=5
+    asset.metadata=metadata
+    await asset.save(update_fields=['metadata'])
+    for _ in range(2):await Tortoise.generate_schemas(safe=True)
+    restored=await clip_session(project.id,AuthContext())
+    assert (restored['frame_count'],restored['frame_duration_ms'])==(9,200)
+    assert (await create_clip(request,AuthContext()))['project_id']==project.id
+    task=await asset_controller.reference(asset.id)
+    assert (task.request_params['frame_count'],task.request_params['frame_duration_ms'])==(9,200)
+    await asset.refresh_from_db()
+    assert asset.metadata==metadata
+
+
 @pytest.mark.asyncio
 async def test_non_clip_projects_cannot_be_opened_as_clip(configured):
     project = await Novel.create(name='Series')
@@ -277,7 +357,7 @@ async def test_legacy_reference_requests_keep_their_original_idempotency_hash(co
     request=payload(video.id)
     result=await create_clip(request,AuthContext())
     project=await Novel.get(id=result['project_id'])
-    assert project.creation_payload_hash == hashlib.sha256(request.model_dump_json(exclude={'reference_binding'}).encode()).hexdigest()
+    assert project.creation_payload_hash == hashlib.sha256(request.model_dump_json(exclude={'reference_binding', 'output_format','frame_count','frame_duration_ms'}).encode()).hexdigest()
 
 
 def test_named_reference_contract_rejects_ambiguous_names_and_preserves_language():

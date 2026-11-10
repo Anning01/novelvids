@@ -27,6 +27,7 @@ from services.cover_derivatives import (
     render_cover_derivatives,
     write_local_cover_derivatives,
 )
+from services.image_generation.capabilities import PROTOCOLS as IMAGE_PROTOCOLS
 from services.video.poster import VideoPosterService, video_poster_reference
 from utils.enums import (
     AiTaskTypeEnum,
@@ -102,9 +103,6 @@ def _insert_demo_supported_models(
     if "ai_model_configs" not in _tables(connection):
         return
 
-    image_protocols = {
-        ImageModelTypeEnum.gpt_image_2: ImageApiProtocol.openai_compatible.value,
-    }
     video_protocols = {
         VideoGenerationModelTypeEnum.minimax_h3: ImageApiProtocol.minimax.value,
         VideoGenerationModelTypeEnum.wan_3: ImageApiProtocol.dashscope.value,
@@ -117,10 +115,7 @@ def _insert_demo_supported_models(
                 "task_types": json.dumps([AiTaskTypeEnum.reference_image.value]),
                 "name": model_type.nickname,
                 "model": model_type.value,
-                "api_protocol": image_protocols.get(
-                    model_type,
-                    ImageApiProtocol.volcengine_ark.value,
-                ),
+                "api_protocol": IMAGE_PROTOCOLS[model_type][0].value,
                 "image_model_type": model_type.value,
                 "video_model_type": None,
             }

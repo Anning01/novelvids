@@ -58,7 +58,22 @@ def validate_cast(cast: ChapterCast, content: str, registry: list[dict]):
             item.name, item.existing_asset_id = asset['canonical_name'], asset['id']
 
 
-async def read_chapter_cast(execution, messages) -> ChapterCast:
+def rebind_cast(cast: ChapterCast, content: str, registry: list[dict]) -> ChapterCast:
+    # The source inventory is stable; saved asset IDs can change after a deletion or rename.
+    cast = cast.model_copy(deep=True)
+    known = {asset['id']: asset for asset in registry}
+    for field, kind in INVENTORY_FIELDS:
+        for item in getattr(cast, field):
+            asset = known.get(item.existing_asset_id)
+            if asset and asset.get('asset_type', 1) == kind:
+                item.name = asset['canonical_name']
+            else:
+                item.existing_asset_id = None
+    validate_cast(cast, content, registry)
+    return cast
+
+
+async def read_chapter_cast(execution, messages, *, target_requirements=None) -> ChapterCast:
     chapter = json.loads(messages[3]['content'])
     registry = [{key: asset.get(key) for key in ('id', 'asset_type', 'canonical_name', 'aliases')}
                 for asset in json.loads(messages[2]['content'])]
@@ -66,18 +81,34 @@ async def read_chapter_cast(execution, messages) -> ChapterCast:
         validate_cast(cast, chapter['content'], registry)
 
     # Old character-only inventories cannot safely classify panels, props or locations.
-    source = json.dumps([chapter, execution.language, execution.snapshot.revision], ensure_ascii=False, sort_keys=True)
-    segment = f"chapter-cast:v2:{chapter['id']}:{hashlib.sha256(source.encode()).hexdigest()}"
+    segment = cast_segment(chapter, execution.language, execution.snapshot.revision)
+    instructions = render_cast_instructions(execution.language)
+    if target_requirements is not None:
+        from prompts.extraction import targeted_cast_instructions
+        from services.creation_agent.plan_sources import fingerprint
+        segment += ':targeted:' + fingerprint(target_requirements)
+        instructions += '\n' + targeted_cast_instructions(execution.language)
     await plan_activity(execution, 'chapter-cast', localized_message('正在清点本章角色、场景与道具'))
     from models.agent_operation import AgentOperation
-    saved = await AgentOperation.get_or_none(task_id=execution.params['task_id'],
-        key=f'model:structured:ChapterCast:{segment}', state='completed')
+    saved = await AgentOperation.filter(key=f'model:structured:ChapterCast:{segment}', state='completed').order_by('-id').first()
     if saved:
         cast = ChapterCast.model_validate(saved.result)
-    else:
-        cast = await execution.generate('structured', {'segment': segment, 'chapter': chapter, 'known_assets': registry},
-            ChapterCast, additional_instructions=render_cast_instructions(execution.language), output_validator=validate)
+        try:
+            cast = rebind_cast(cast, chapter['content'], registry)
+        except ValueError:
+            saved = None
+    if not saved:
+        cast = await execution.generate('structured', {'segment': segment, 'chapter': chapter, 'known_assets': registry,
+            **({'target_requirements': target_requirements} if target_requirements is not None else {})},
+            ChapterCast, additional_instructions=instructions, output_validator=validate)
     await validate(cast)
+    await AgentOperation.get_or_create(task_id=execution.params['task_id'], key=f'model:structured:ChapterCast:{segment}',
+        defaults={'state': 'completed', 'result': cast.model_dump(mode='json')})
     await plan_activity(execution, 'chapter-cast', localized_message('已核对本章资产清单'), status='completed',
         detail=str(len(cast.required_assets())))
     return cast
+
+
+def cast_segment(chapter: dict, language: str, revision: str) -> str:
+    source = json.dumps([chapter, language, revision], ensure_ascii=False, sort_keys=True)
+    return f"chapter-cast:v2:{chapter['id']}:{hashlib.sha256(source.encode()).hexdigest()}"

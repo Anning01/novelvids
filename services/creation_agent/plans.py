@@ -12,7 +12,7 @@ from models.chapter import Chapter
 from models.creation_agent import AgentMessage
 from models.scene import Scene
 from schemas.creation_agent import AgentRunRequest
-from schemas.creation_plan import CreationBrief, CreationPlan, CreationPlanDraft
+from schemas.creation_plan import CreationBrief, CreationPlan, CreationPlanDraft, CreationPlanStep, ChapterEvidence
 from services.creation_agent.object_state import object_version
 from services.creation_agent.plan_sources import CreationSourceLoader, chapter_version, fingerprint, plan_activity
 from utils.messages import localized_message
@@ -71,10 +71,11 @@ class CreationPlanner:
             'id', 'canonical_name', 'source_chapters', 'description')
         scenes = await Scene.filter(chapter__novel_id=self.novel_id).values('id', 'chapter_id', 'sequence', 'description')
         variants = await AssetVariant.filter(asset__novel_id=self.novel_id).values('id', 'asset_id', 'name', 'chapter_numbers')
+        from prompts.creation_plan import asset_request_instructions
         brief = await self.execution.generate('planning_request', {
             'user_message': request.message, 'selection': request.model_dump(mode='json'),
             'chapters': chapters, 'assets': assets, 'variants': variants, 'scenes': scenes,
-        }, CreationBrief)
+        }, CreationBrief, additional_instructions=asset_request_instructions(self.execution.language))
         if not brief.operations:
             return None
         if brief.missing_material:
@@ -103,7 +104,22 @@ class CreationPlanner:
         # Target chapters are also read, so source-version checks cover generated content.
         read_ids = list(dict.fromkeys([*brief.read_chapter_ids, *brief.write_chapter_ids, *brief.asset_chapter_ids]))
         loader = CreationSourceLoader(self.execution)
-        evidence = await loader.read(read_ids, [r.model_dump() for r in brief.requirements])
+        reusable = {}
+        asset_targets = set(brief.write_chapter_ids + brief.asset_chapter_ids)
+        if brief.operations == ['assets'] and brief.asset_mode == 'fill_missing' and brief.asset_scope == 'chapter':
+            from services.extraction.reuse import extraction_reuse
+            for chapter_id in read_ids:
+                if chapter_id not in asset_targets:
+                    continue
+                result = await extraction_reuse.find(self.execution, chapter_id)
+                if result and result.complete:
+                    chapter = await Chapter.get(id=chapter_id, novel_id=self.novel_id)
+                    reusable[chapter_id] = ChapterEvidence(chapter_id=chapter_id, number=chapter.number, name=chapter.name,
+                        version=chapter_version(chapter), characters=len(chapter.content or ''), pages=[])
+            if reusable:
+                await plan_activity(self.execution, 'reused-assets', localized_message('已找到 {p0} 章可复用的完整资产，无需重复阅读生成', p0=len(reusable)))
+        evidence = await loader.read([id for id in read_ids if id not in reusable], [r.model_dump() for r in brief.requirements])
+        evidence.extend(reusable.values())
         async def validate_draft(draft):
             from services.creation_agent.plan_normalization import coalesce_storyboards
             draft.steps, _ = coalesce_storyboards(draft.steps, {row['id']: row['number'] for row in chapters}, self.execution.language)
@@ -114,11 +130,19 @@ class CreationPlanner:
             await loader.excerpts([source for step in candidate.steps for source in step.sources], evidence, strict_refs=True)
             draft.steps = candidate.steps
         from prompts.creation_plan import plan_reference_instructions
-        draft = await self.execution.generate('creation_planning', {
-            'user_message': request.message, 'brief': brief.model_dump(), 'selection': request.model_dump(mode='json'),
-            'chapters': [item.model_dump() for item in evidence], 'assets': assets, 'variants': variants, 'scenes': scenes,
-        }, CreationPlanDraft, output_validator=validate_draft,
-            additional_instructions=plan_reference_instructions(self.execution.language))
+        if read_ids and len(reusable) == len(read_ids):
+            draft = CreationPlanDraft(summary=localized_message('已完成的资产设定将直接复用'), steps=[CreationPlanStep(
+                id=f'assets_{id}', operation='assets', target_id=id, mode='fill_missing',
+                requirement_ids=[r.id for r in brief.requirements if not r.chapter_ids or id in r.chapter_ids], instructions=localized_message('保留已有完整资产设定'),
+                label=localized_message('复用第 {p0} 章资产', p0=reusable[id].number)) for id in read_ids])
+            await validate_draft(draft)
+        else:
+            draft = await self.execution.generate('creation_planning', {
+                'user_message': request.message, 'brief': brief.model_dump(), 'selection': request.model_dump(mode='json'),
+                'chapters': [item.model_dump() for item in evidence], 'assets': assets, 'variants': variants, 'scenes': scenes,
+                'reused_asset_chapter_ids': list(reusable),
+            }, CreationPlanDraft, output_validator=validate_draft,
+                additional_instructions=plan_reference_instructions(self.execution.language))
         from services.creation_agent.plan_normalization import coalesce_storyboards
         draft.steps, _ = coalesce_storyboards(draft.steps, {row['id']: row['number'] for row in chapters}, self.execution.language)
         plan = CreationPlan(**draft.model_dump(), novel_id=self.novel_id, source_message_id=self.source.id,
@@ -182,6 +206,12 @@ class CreationPlanner:
             if not expected <= covered:
                 raise ValueError(localized_message('方案遗漏了要求生成的章节'))
         for step in plan.steps:
+            if step.operation == 'assets' and step.target_id in set(plan.brief.write_chapter_ids + plan.brief.asset_chapter_ids):
+                step.asset_scope = plan.brief.asset_scope
+            if step.operation == 'assets' and step.asset_scope == 'targeted' and not step.requirement_ids:
+                raise ValueError(localized_message('方案遗漏了用户的创作要求'))
+            if step.operation == 'assets' and plan.brief.operations == ['assets'] and step.mode != plan.brief.asset_mode:
+                raise ValueError(localized_message('资产步骤模式必须与本轮确认的补缺或修改要求一致'))
             if step.mode == 'regenerate' and step.operation not in {'image', 'video'}:
                 raise ValueError(localized_message('重新生成模式仅适用于图片或视频'))
             if step.operation not in plan.brief.operations and not (step.operation == 'assets' and 'storyboard' in plan.brief.operations):

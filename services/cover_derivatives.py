@@ -63,6 +63,7 @@ def image_derivative_reference(
         ".jpeg",
         ".png",
         ".webp",
+        ".gif",
     }:
         return None
     derivative = path.parent / "derivatives" / f"{path.stem}-{kind}.webp"

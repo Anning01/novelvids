@@ -7,6 +7,8 @@ from models.config import AiModelConfig, GeneralConfig
 from schemas.config import AiModelConfigCreate, AiModelConfigUpdate, GeneralConfigUpdate
 from services.billing.catalog import LLM_PRICING, VIDEO_PRICING
 from services.image_generation.capabilities import (
+    PROTOCOLS as IMAGE_PROTOCOLS,
+    GPT_IMAGE_MODELS,
     capabilities_for as image_capabilities_for,
     validate_protocol as validate_image_protocol,
 )
@@ -43,8 +45,10 @@ def _validate_image_pricing(pricing: dict, model_type) -> None:
     for tier, value in prices.items():
         if tier not in allowed:
             raise HTTPException(status_code=400, detail=localized_message('生图费用包含不支持的清晰度档位：{p1}', p1=f'{tier}'))
-        if not isinstance(value, (int, float)) or value < 0:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise HTTPException(status_code=400, detail=localized_message('清晰度档位 {p1} 的费用必须为非负数字', p1=f'{tier}'))
+    if model_type in GPT_IMAGE_MODELS and not allowed.issubset(prices):
+        raise HTTPException(status_code=400, detail=localized_message('请配置全部清晰度档位的输出图单价'))
     _validate_input_image_pricing(pricing, "生图")
 
 
@@ -135,6 +139,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             protocol = instance.api_protocol
         image_capabilities_for(model_type)
         validate_image_protocol(model_type, str(protocol))
+        pricing = data.get("pricing", instance.pricing if instance else None)
+        if pricing is not None:
+            _validate_image_pricing(pricing, model_type)
 
     @staticmethod
     def _validate_video_payload(data: dict, instance: AiModelConfig | None = None) -> None:
@@ -171,10 +178,6 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             task_types = instance.task_types or [instance.task_type]
         task_types = [int(value) for value in (task_types or [])]
         if AiTaskTypeEnum.reference_image.value in task_types:
-            model_type = data.get("image_model_type") or (
-                instance.image_model_type if instance else None
-            )
-            _validate_image_pricing(pricing, model_type)
             return
         if AiTaskTypeEnum.video.value in task_types:
             model_type = data.get("video_model_type") or (
@@ -314,6 +317,8 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 model_type.value: list(image_capabilities_for(model_type.value).clarities)
                 for model_type in ImageModelTypeEnum
             },
+            "image_protocols": {model_type.value: [protocol.value for protocol in protocols]
+                for model_type, protocols in IMAGE_PROTOCOLS.items()},
             "video": {
                 model_type.value: list(video_capabilities_for(model_type.value).resolutions)
                 for model_type in VideoGenerationModelTypeEnum

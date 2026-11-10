@@ -48,6 +48,10 @@ async def clip_session(project_id: int, ctx: AuthContext):
     if project is None:
         raise HTTPException(404, '片段不存在')
     data = _settings(project)
+    data.setdefault('output_format', 'png')
+    if data['output_format'] == 'gif':
+        data.setdefault('frame_count', 9)
+        data.setdefault('frame_duration_ms', 200)
     chapter = await Chapter.get(novel_id=project.id, number=1)
     scene = await Scene.filter(chapter=chapter).order_by('sequence').first()
     asset = await Asset.filter(novel=project).order_by('id').first()
@@ -68,7 +72,7 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
         resolution = selected.resolution
     else:
         selected = image_selection(config.image_model_type, clarity=payload.resolution, aspect_ratio=payload.aspect_ratio,
-            output_format='png', generation_count=1)
+            output_format=payload.output_format, generation_count=1, frame_count=payload.frame_count, frame_duration_ms=payload.frame_duration_ms)
         resolution = selected.clarity
     image_config = config if payload.task_type == 'image' else None
     if payload.mode == 'reference':
@@ -78,7 +82,11 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
     user_id = ctx.user.id if ctx.user else None
     key = 'clip:' + str(uuid5(NAMESPACE_URL, f'{ctx.team_id}:{user_id}:{payload.request_id}'))
     # Preserve idempotency hashes for clients created before named-reference support.
-    serialized = payload.model_dump_json(exclude={'reference_binding'} if payload.reference_binding == 'all' else None)
+    excluded = {'reference_binding'} if payload.reference_binding == 'all' else set()
+    if payload.output_format == 'png':
+        excluded.add('output_format')
+    excluded.update(field for field in ('frame_count', 'frame_duration_ms') if getattr(payload, field) is None)
+    serialized = payload.model_dump_json(exclude=excluded)
     digest = hashlib.sha256(serialized.encode()).hexdigest()
     project = await Novel.get_or_none(creation_idempotency_key=key)
     if project is None:
@@ -93,7 +101,8 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
                 project.creation_idempotency_key = key
                 project.creation_payload_hash = digest
                 project.project_setting = json.dumps({
-                    **payload.model_dump(mode='json'), 'resolution': resolution,
+                    **payload.model_dump(mode='json', exclude={'frame_count', 'frame_duration_ms'}), 'resolution': resolution,
+                    **({'frame_count': selected.frame_count, 'frame_duration_ms': selected.frame_duration_ms} if payload.output_format == 'gif' else {}),
                     'model_name': config.name, 'assistant_model_config_id': assistant.id,
                     'image_model_config_id': image_config.id if image_config else None,
                 }, ensure_ascii=False)
@@ -117,7 +126,8 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
                         metadata={'workbench': {'modelConfigId': config.id, 'aspectRatio': payload.aspect_ratio, 'resolution': resolution}})
                 if image_config:
                     clarity = image_selection(image_config.image_model_type, clarity=resolution if payload.task_type == 'image' else None,
-                        aspect_ratio=payload.aspect_ratio, output_format='png', generation_count=1).clarity
+                        aspect_ratio=payload.aspect_ratio, output_format=payload.output_format if payload.task_type == 'image' else 'png',
+                        generation_count=1, frame_count=payload.frame_count, frame_duration_ms=payload.frame_duration_ms).clarity
                     ref_image_urls = [item.url for item in payload.reference_media if item.type == 'image']
                     asset = await Asset.create(novel=project, asset_type=AssetTypeEnum.scene.value,
                         canonical_name='画面参考', base_traits=payload.prompt, description=payload.prompt,
@@ -127,6 +137,8 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
                             'resolution': clarity,
                             'model_config_id': image_config.id,
                             'reference_images': ref_image_urls,
+                            'output_format': payload.output_format if payload.task_type == 'image' else 'png',
+                            **({'frame_count': selected.frame_count, 'frame_duration_ms': selected.frame_duration_ms} if payload.output_format == 'gif' else {}),
                         })
                     if scene is not None:
                         await scene.assets.add(asset)
@@ -163,7 +175,8 @@ async def start_clip(project_id: int, ctx: AuthContext, *, media_base_url: str =
     return await creation_agent_controller.submit(session['conversation_id'], AgentRunRequest(
         request_id=request_id, chapter_id=session['chapter_id'], model_config_id=session['assistant_model_config_id'],
         message=opening_message(mode=mode, task_type=session['task_type'], prompt=session['prompt'],
-            scene_id=scene_id, asset_id=asset_id, aspect_ratio=session['aspect_ratio'], duration=session['duration']),
+            scene_id=scene_id, asset_id=asset_id, aspect_ratio=session['aspect_ratio'], duration=session['duration'],
+            output_format=session['output_format'], frame_count=session.get('frame_count'), frame_duration_ms=session.get('frame_duration_ms')),
         targets=targets, write_scope='chapter', production_intents=intents), ctx)
 
 

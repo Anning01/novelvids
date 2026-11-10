@@ -102,11 +102,11 @@ function imageModel(id: number, name: string): ImageGenerationModel {
     model_type: 'gpt_image_2',
     concurrency: 1,
     capabilities: {
-      clarities: ['low', 'medium', 'high'],
+      clarities: ['1K', '2K', '4K'],
       aspect_ratios: ['1:1', '3:2', '2:3'],
       output_formats: ['png', 'jpeg', 'webp'],
       generation_counts: [1],
-      default_clarity: 'medium',
+      default_clarity: '1K',
       default_aspect_ratio: '1:1',
       default_output_format: 'png',
       default_generation_count: 1,
@@ -589,7 +589,7 @@ it('switches and persists an independent JSON form version for each derived stat
       gender: '男',
       age_group: '中年',
       model_config_id: 12,
-      clarity: 'medium',
+      clarity: '1K',
       aspect_ratio: '1:1',
       output_format: 'png',
     },
@@ -607,7 +607,7 @@ it('switches and persists an independent JSON form version for each derived stat
     reference_layout: 'character_turnaround',
     model_config_id: 12,
     image_parameters: {
-      clarity: 'high',
+      clarity: '4K',
       aspect_ratio: '3:2',
       output_format: 'webp',
       generation_count: 1,
@@ -659,7 +659,7 @@ it('switches and persists an independent JSON form version for each derived stat
     base_traits: '练气后期的新提示词',
     metadata: expect.objectContaining({
       model_config_id: 12,
-      clarity: 'high',
+      clarity: '4K',
       aspect_ratio: '3:2',
       output_format: 'webp',
       editor_form: expect.objectContaining({

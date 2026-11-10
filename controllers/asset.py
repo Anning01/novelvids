@@ -797,6 +797,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             workbench = {}
         selection = validate_selection(
             config.image_model_type,
+            frame_count=effective_metadata.get("frame_count"),
+            frame_duration_ms=effective_metadata.get("frame_duration_ms"),
             clarity=(
                 effective_metadata.get("clarity")
                 or effective_metadata.get("resolution")
@@ -840,6 +842,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "output_format": selection.output_format,
             "quality": selection.provider_quality,
             "generation_count": selection.generation_count,
+            **({"frame_count": selection.frame_count, "frame_duration_ms": selection.frame_duration_ms} if selection.frame_count is not None else {}),
         }
         normalized_reference_images = list(dict.fromkeys(reference_images or []))
         if len(normalized_reference_images) > 10:
