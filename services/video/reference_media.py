@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.media_processing import run_media
+
 from utils.messages import localized_message
 
 import asyncio
@@ -98,7 +100,7 @@ def _media_kind(extension: str, capabilities: VideoModelCapabilities) -> MediaKi
 
 def _probe(path: Path) -> dict[str, Any]:
     try:
-        result = subprocess.run(
+        result = run_media(
             [
                 "ffprobe", "-v", "error", "-show_entries",
                 "format=duration,size,format_name:stream=codec_type,codec_name,width,height,duration,avg_frame_rate,r_frame_rate,color_transfer,color_primaries,color_space,sample_rate,channels,channel_layout",

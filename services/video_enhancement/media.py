@@ -1,5 +1,7 @@
 """Materialize frozen sources and validate actual media, independently of submission."""
 
+from services.media_processing import run_media
+
 import asyncio
 import hashlib
 import json
@@ -142,7 +144,7 @@ class ExportMedia(ResourceStorage):
                         raise ValueError(localized_message('原片来源已变化，请重新准备成片'))
                     final = Path(directory) / 'with-original-audio.mp4'
                     try:
-                        await asyncio.to_thread(subprocess.run, ['ffmpeg', '-v', 'error', '-y',
+                        await asyncio.to_thread(run_media, ['ffmpeg', '-v', 'error', '-y',
                             '-i', str(downloaded), '-i', str(original), '-map', '0:v:0', '-map', '1:a',
                             '-c', 'copy', str(final)], check=True, capture_output=True, timeout=300)
                     except (OSError, subprocess.SubprocessError):

@@ -176,6 +176,7 @@ class Settings:
     REMAKE_MEDIA_TIMEOUT_SECONDS = int(os.getenv("REMAKE_MEDIA_TIMEOUT_SECONDS", "3600"))
     REMAKE_MEDIA_MEMORY_MB = int(os.getenv("REMAKE_MEDIA_MEMORY_MB", "2048"))
     REMAKE_MEDIA_CPU_PERCENT = int(os.getenv("REMAKE_MEDIA_CPU_PERCENT", "100"))
+    MEDIA_PROCESSING_CONCURRENCY = max(1, int(os.getenv("MEDIA_PROCESSING_CONCURRENCY", "1")))
 
 
 settings = Settings()

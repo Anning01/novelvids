@@ -1,4 +1,6 @@
 """独立资源文件的读写、探测与清理，不承担团队或目录规则。"""
+
+from services.media_processing import run_media
 import asyncio
 import shutil
 import subprocess
@@ -104,7 +106,7 @@ class ResourceStorage:
             with TemporaryDirectory(prefix="resource-poster-") as temporary:
                 poster = Path(temporary) / "poster.jpg"
                 try:
-                    await asyncio.to_thread(subprocess.run, [
+                    await asyncio.to_thread(run_media, [
                         "ffmpeg", "-v", "error", "-y", "-i", str(path),
                         "-frames:v", "1", "-vf", "scale=480:-2", str(poster),
                     ], check=True, capture_output=True, timeout=30)

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from services.media_processing import run_media
+
 import asyncio
 import logging
 import os
@@ -110,7 +112,7 @@ class LastFrameService:
             str(frame_path),
         ]
         try:
-            result = subprocess.run(
+            result = run_media(
                 command,
                 capture_output=True,
                 text=True,

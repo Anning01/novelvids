@@ -107,9 +107,8 @@ async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str
     from services.oss import make_upload_key, oss
 
     if oss.enabled:
-        with open(local_path, "rb") as file:
-            key = make_upload_key(None, f"videos/{filename}")
-            await oss.put_bytes(key, file.read(), "video/mp4")
+        key = make_upload_key(None, f"videos/{filename}")
+        await oss.put_file(key, Path(local_path), "video/mp4")
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
         media_url = key
     posters: dict[str, str | float] = {}
@@ -158,9 +157,8 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
     from services.oss import make_upload_key, oss
 
     if oss.enabled:
-        with open(destination, "rb") as file:
-            key = make_upload_key(None, f"video-references/last-frame-{video_id}.png")
-            await oss.put_bytes(key, file.read(), "image/png")
+        key = make_upload_key(None, f"video-references/last-frame-{video_id}.png")
+        await oss.put_file(key, destination, "image/png")
         destination.unlink(missing_ok=True)
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
         return key
