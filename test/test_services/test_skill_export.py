@@ -85,12 +85,12 @@ def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path
     rules = (package / "references/screenplay.md").read_text()
     prompt = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "screenplay")
     assert rules in prompt and f"language={language}" in prompt
-    for marker in ("出场：", "仅声音：", "△", "（OS）", "（画外）", "旁白：", "【音效】", "【屏显】"):
+    for marker in ("出场：", "仅声音：", "关键道具：", "△", "（OS）", "（画外）", "旁白：", "【音效】", "【屏显】"):
         assert marker in rules
 
     example = rules.split("```text\n", 1)[1].split("```", 1)[0]
     voices = [line for line in example.splitlines() if "：" in line and not line.startswith(
-        ("出场：", "仅声音：", "△", "【音效】", "【屏显】", "旁白：")
+        ("出场：", "仅声音：", "关键道具：", "△", "【音效】", "【屏显】", "旁白：")
     )]
     assert all(re.fullmatch(r"[^：（]+(?:（[^）]+）)?：.+", line) for line in voices)
     assert all("（开口" not in line for line in voices)
@@ -98,3 +98,8 @@ def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path
     assert any("（压低声音）：" in line for line in voices)
     assert any("（OS）：" in line for line in voices)
     assert any("（画外）：" in line for line in voices)
+
+    headers, action = example.split("\n\n", 1)
+    assert "出场：阿岚、船工、驮马" in headers and "驮马" in action
+    assert "仅声音：守闸人" in headers
+    assert "关键道具：铜钱" in headers and "两枚铜钱" in action
