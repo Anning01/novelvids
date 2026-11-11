@@ -167,6 +167,38 @@ flowchart LR
 
 故事板适合逐镜头检查，画布适合组织引用与工作流。开始生成后可以关闭页面，后台继续查询已受理任务；结果不确定时需核对，不会自动重复提交收费请求。
 
+## 单独使用创作技能
+
+故事分析是工作台内置功能，导入书稿后提供故事速览。3 个可单独安装的猫影创作技能统一在本仓库的 `prompts/skills/` 下维护，每个技能一个目录。只做某个环节时，可以单独导出并安装对应的技能，再向助手提供正文、剧本或参考资料。
+
+| 技能名称 | 安装标识 | 交付内容 |
+| --- | --- | --- |
+| 猫影剧本改编 | `novelvids-screenplay` | 分场剧本、动作与对白 |
+| 猫影资产设定 | `novelvids-assets` | 人物、群像、场景、道具和形态的完整设计 |
+| 猫影分镜设计 | `novelvids-storyboard` | 镜头、资产引用与人声时间轴 |
+
+每个导出包自带所需的共享规则和脚本，安装一个包只会增加一个技能。图像制作、视频制作和视频拆解由工作台提供。
+
+改稿时继续使用负责该产物的技能，例如用资产设定修改某一章的服装形态，用分镜制作调整对白时间轴。跨章节、跨环节的步骤编排由宿主 Agent 负责。
+
+从仓库根目录导出或安装一个技能，只需 Python 标准库：
+
+```bash
+python3 scripts/export_skill.py --list
+python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
+python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
+```
+
+第一条列出可选环节。第二条导出包含所需规则的技能目录 `output/skills/novelvids-storyboard/`。第三条安装剧本技能到当前项目；在该项目的会话中可用 `$novelvids-screenplay` 指定它。例如：“把下面这一章改成 60 秒短剧，保留结尾那句对白。”
+
+分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段交付一张简约黑白线稿故事版和配套视频提示词，图内格数随动作与构图变化。
+
+工作台在剧本页保存作品画风、全片视听约定和故事版开关；开启后生成新分镜会逐镜出图。已有分镜可单独生成或重试故事版，成图可加入视频参考并保留配套提示词。
+
+分镜和视频技能默认交付通用提示词。Seedance 2.0（标准版、Mini、Fast）专项稿使用 `sd2-pe`，Seedance 2.5 使用 `sd25-pe`，MiniMax H3 使用 `h3-prompt-writing`，万相 3.0 使用 `wan3-pe`，按需单独安装。分镜包自带模型选择脚本；缺少专项技能时仍可使用通用稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。工作台从 `CREATION_AGENT_OPTIONAL_SKILLS_PATH`（默认 `.agents/skills`）读取已安装的官方技能，并按作品所选视频模型冻结本次优化规则；通用稿与专项稿分别保留。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
+
+规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
+
 ## 本地开发
 
 需要 Python 3.12+、Node.js 22.12+、uv 与 FFmpeg。
@@ -188,7 +220,7 @@ npm run dev
 
 ## 开发与社区
 
-前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
+前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Deep Agents 和 Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
 
 欢迎带着实际创作问题参与：[报告问题](https://github.com/Anning01/novelvids/issues/new) · [讨论需求](https://github.com/Anning01/novelvids/issues) · [提交贡献](https://github.com/Anning01/novelvids/pulls)。报告生成问题时，提供可公开的最小样例、模型配置类型和复现步骤，别附 Key 或私人素材。
 
@@ -219,3 +251,5 @@ npm run dev
   </a>
 </p>
 <!-- star-growth-card:end -->
+
+创作助手的新会话由 Python Deep Agents 管理工具循环、按需技能加载和上下文整理，业务工具继续校验权限、版本和输出协议。会话检查点默认保存在 `data/creation_agent_checkpoints.db`，可用 `CREATION_AGENT_CHECKPOINT_PATH` 指定位置；需要保留长会话恢复能力时，请将该状态文件纳入备份。历史运行保留原执行路径。

@@ -1,3 +1,15 @@
+from fastapi import HTTPException
+
+from models.asset import Asset
+from models.asset_variant import AssetVariant
+from models.chapter_export import ChapterExport
+from models.finished_episode import FinishedEpisodePublication
+from models.video_edit import ChapterEditDraft
+from models.scene import Scene
+from models.video import Video
+from services.creation_objects import project_write
+from services.extraction.context import normalize_source_chapters
+from utils.messages import localized_message
 from controllers.config import general_config_controller
 from models.ai_task import AiTask
 from models.chapter import Chapter
@@ -6,7 +18,7 @@ from schemas.chapter import ChapterCreate, ChapterPatch, ChapterUpdate
 from services.ai_task_executor import ai_task_executor
 from services.chapter_titles import normalize_chapter_title
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
@@ -18,50 +30,73 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
 
         number 未传时，自动取该小说下最大 number + 1。
         """
-        if obj_in.number is None:
-            max_row = await Chapter.filter(novel_id=obj_in.novel_id).order_by("-number").first()
-            obj_in.number = (max_row.number + 1) if max_row else 1
+        async with project_write(obj_in.novel_id) as db:
+            chapters = Chapter.filter(novel_id=obj_in.novel_id).using_db(db)
+            number = obj_in.number
+            if number is None:
+                last = await chapters.order_by("-number").first()
+                number = last.number + 1 if last else 1
+            elif await chapters.filter(number=number).exists():
+                raise HTTPException(409, localized_message('集号已存在'))
+            values = obj_in.model_dump(exclude_unset=True)
+            values.update(number=number, name=normalize_chapter_title(obj_in.name))
+            chapter = await Chapter.create(**values, using_db=db)
+            await Novel.filter(id=obj_in.novel_id).using_db(db).update(episodes_managed=True, total_chapters=await chapters.count())
+            return chapter
 
-        obj_in.name = normalize_chapter_title(obj_in.name)
-
-        chapter = await super().create(obj_in)
-
-        # 更新小说的总章节数
-        novel = await Novel.get(id=chapter.novel_id)
-        if novel:
-            count = await Chapter.filter(novel_id=chapter.novel_id).count()
-            await novel.update_from_dict({"total_chapters": count})
-            await novel.save()
-
-        return chapter
+    async def _edit(self, chapter_id: int, obj_in: ChapterUpdate | ChapterPatch) -> Chapter:
+        chapter = await self.get(chapter_id)
+        async with project_write(chapter.novel_id):
+            chapter = await self.get(chapter_id)
+            values = obj_in.model_dump(exclude_unset=True)
+            if values.pop('novel_id', chapter.novel_id) != chapter.novel_id:
+                raise HTTPException(409, localized_message('集数只能在所属作品中编辑'))
+            if 'number' in values and values['number'] is None:
+                raise HTTPException(422, localized_message('集号不能为空'))
+            if 'number' in values and values['number'] != chapter.number:
+                await self._ensure_unreferenced(chapter)
+                if await Chapter.filter(novel_id=chapter.novel_id, number=values['number']).exists():
+                    raise HTTPException(409, localized_message('集号已存在'))
+            if values.get('name') is not None:
+                values['name'] = normalize_chapter_title(values['name'])
+            return await super().patch(chapter, values)
 
     async def update(self, chapter_id: int, obj_in: ChapterUpdate) -> Chapter:
-        instance = await self.get(chapter_id)
-        if obj_in.name is not None:
-            obj_in.name = normalize_chapter_title(obj_in.name)
-        return await super().update(instance, obj_in)
+        return await self._edit(chapter_id, obj_in)
 
     async def patch(self, chapter_id: int, obj_in: ChapterPatch) -> Chapter:
-        instance = await self.get(chapter_id)
-        if obj_in.name is not None:
-            obj_in.name = normalize_chapter_title(obj_in.name)
-        return await super().patch(instance, obj_in)
+        return await self._edit(chapter_id, obj_in)
+
+    async def _ensure_unreferenced(self, chapter: Chapter) -> None:
+        for task in await AiTask.filter(status__in=[TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued]):
+            params = task.request_params or {}
+            if params.get('novel_id') == chapter.novel_id and (params.get('chapter_id') == chapter.id or task.task_type in {AiTaskTypeEnum.project_analysis, AiTaskTypeEnum.creation_agent}):
+                raise HTTPException(409, localized_message('本集仍有任务执行中'))
+        # Assets store chapter numbers; scenes, videos and exports store database IDs.
+        if (await Video.filter(scene__chapter_id=chapter.id).exists()
+                or await ChapterExport.filter(chapter_id=chapter.id).exists()
+                or await FinishedEpisodePublication.filter(chapter_id=chapter.id).exists()
+                or await ChapterEditDraft.filter(chapter_id=chapter.id).exists()):
+            raise HTTPException(409, localized_message('本集已有视频、成片或剪辑记录'))
+        if await Scene.with_deleted().filter(chapter_id=chapter.id).exists():
+            raise HTTPException(409, localized_message('本集已有分镜'))
+        for query, field in ((Asset.with_deleted().filter(novel_id=chapter.novel_id), 'source_chapters'),
+                             (AssetVariant.with_deleted().filter(asset__novel_id=chapter.novel_id), 'chapter_numbers')):
+            groups = await query.values_list(field, flat=True)
+            if any(chapter.number in normalize_source_chapters(group) for group in groups):
+                raise HTTPException(409, localized_message('本集已关联资产或形态'))
 
     async def remove(self, chapter_id: int) -> None:
-        """删除章节并更新小说的 total_chapters"""
-        instance = await self.get(chapter_id)
-        novel_id = instance.novel_id
-        await super().remove(instance)
-
-        # 更新小说的总章节数
-        novel = await Novel.get(id=novel_id)
-        if novel:
-            count = await Chapter.filter(novel_id=novel_id).count()
-            await novel.update_from_dict({"total_chapters": count})
-            await novel.save()
+        chapter = await self.get(chapter_id)
+        async with project_write(chapter.novel_id) as db:
+            chapter = await self.get(chapter_id)
+            await self._ensure_unreferenced(chapter)
+            await chapter.delete(using_db=db)
+            count = await Chapter.filter(novel_id=chapter.novel_id).using_db(db).count()
+            await Novel.filter(id=chapter.novel_id).using_db(db).update(episodes_managed=True, total_chapters=count)
 
     async def extract(
-        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None
+        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None
     ) -> AiTask:
         """提交提取任务，返回任务记录供前端轮询。"""
         chapter = await self.get(chapter_id)
@@ -87,6 +122,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             "max_context_characters": config.max_context_characters,
             "prompt_language": prompt_language,
         }
+        if conversation_id is not None:
+            request_params["conversation_id"] = conversation_id
         if team_id is not None:
             request_params["team_id"] = team_id
         if user_id is not None:

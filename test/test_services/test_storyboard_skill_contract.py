@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 """Complete saved prompts and verbatim speech in the skill production path."""
 import pytest
 from prompts.skill_pack import SkillSnapshot, snapshot_skills
@@ -140,7 +141,6 @@ async def test_rejected_summary_never_replaces_the_chapters_existing_scenes(monk
     from models.scene import Scene
     from controllers.scene import scene_controller
     from services.ai_task_executor import ai_task_executor
-    from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from test.test_services.test_skill_workflow import enabled_project
 
@@ -149,7 +149,7 @@ async def test_rejected_summary_never_replaces_the_chapters_existing_scenes(monk
     def respond(messages, info):
         shot = _shot().model_dump(); shot['prompt'] = 'A summary that drops all voices.'
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots':[shot]})])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args:model)
     task = await scene_controller.generate(chapter.id, replace_existing=True)
     await ai_task_executor.run(task)
@@ -298,3 +298,93 @@ def test_serialized_segments_keep_local_numbering_and_all_segment_content(langua
     assert '0s-2s' in compiled.prompt and '2s-4s' in compiled.prompt and '4s-6s' in compiled.prompt
     assert [int(n) for n in re.findall(re.escape(prompt_label('【镜头', language))+r'(\d+)\s*·', compiled.prompt)] == [1,2,3]
     assert compiled.sequence == 17
+
+
+@pytest.mark.parametrize('language,duration', [('zh', 15), ('en', 30)])
+def test_continuous_rack_focus_renders_one_request_with_unbroken_dialogue(language, duration):
+    from prompts.labels import prompt_label
+    from prompts.skill_pack import instructions
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.validation import prepare_skill_storyboard
+
+    snap = SkillSnapshot.model_validate(snapshot_skills())
+    guidance = instructions(snap, language, 'storyboard')
+    assert 'shot_duration_range' in guidance and 'segments 留空' in guidance
+    assert '根据剧情设计视听' in guidance and '画外的现场对白仍用 dialogue' in guidance
+    assert f'language={language}' in guidance
+    shot = _shot()
+    shot.duration = f'{duration}s'
+    shot.camera_movement = 'Push through the window; rack focus from the two seated speakers to the candle.'
+    shot.actions = [f'0s-{duration}s: The candle flame bends while both speakers stay seated.']
+    shot.dialogue = ['2s-4s: Alex (off-screen): Stay here.', '5s-7s: Sam (off-screen): I will.']
+    draft = StructuredSkillStoryboard.model_validate({'shots': [shot.model_dump(exclude={'prompt'})]})
+    result = prepare_skill_storyboard(draft, snap, language, [], 'cinematic').shots
+    assert len(result) == 1 and not result[0].segments
+    prompt = result[0].prompt
+    assert prompt.count(prompt_label('【镜头1 · ', language)) == 1
+    assert shot.camera_movement in prompt and all(line in prompt for line in shot.dialogue)
+
+
+def test_new_multicut_requires_one_map_shared_by_all_segments_but_old_runs_still_render():
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.validation import prepare_skill_storyboard
+    from test.test_services.test_creation_agent_prompts import segmented_shot, heroine
+
+    value = segmented_shot().model_dump(exclude={'prompt', 'blocking_map'})
+    board = StructuredSkillStoryboard(shots=[value])
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    with pytest.raises(ValueError, match='空间定位图'):
+        prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic')
+    snapshot.contents.pop('blocking_guide')
+    assert prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic').shots[0].prompt
+
+
+@pytest.mark.parametrize("problem", ["coverage", "cameras"])
+def test_incomplete_blocking_map_rejected_for_new_multicut(problem):
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.validation import prepare_skill_storyboard
+    from test.test_services.test_creation_agent_prompts import segmented_shot, heroine
+
+    data = segmented_shot().model_dump(exclude={'prompt'})
+    plan = data['blocking_map']
+    if problem == 'coverage':
+        plan['assets'][0]['name'] = '雨棚'
+        for camera in plan['cameras'][:2]:
+            camera['target'] = '雨棚'
+    else:
+        plan['cameras'].pop()
+    with pytest.raises(ValueError, match='空间定位图'):
+        prepare_skill_storyboard(StructuredSkillStoryboard(shots=[data]), SkillSnapshot.model_validate(snapshot_skills()),
+                                'zh', [heroine()], 'cinematic')
+
+
+@pytest.mark.parametrize('legacy', [True, False])
+def test_voice_from_outside_is_heard_without_a_character_image(legacy):
+    shot = _shot()
+    hero, speaker = characters()
+    shot.description = '苏玄听见门外赵无垢的声音。'
+    shot.visual_prose = '苏玄抬眼望向门口。'
+    shot.spatial_relationships = '苏玄站在门内。'
+    shot.dialogue = ['0s-2s: @{赵无垢}（画外）：“苏玄，回家！”']
+    shot.sound_design = '赵无垢的喊声隔着门板传来。'
+    shot.visible_asset_names = None if legacy else [hero.name]
+    shot.reference_only_types = ['人物']
+    prompt = format_storyboard_prompt(shot, entities=[hero, speaker])
+    assert referenced_entities(shot, [hero, speaker]) == [hero]
+    assert '角色参考：@{苏玄}\n' in prompt and shot.dialogue[0] in prompt
+    # The speaker appears later within the same generation segment.
+    shot.actions.append('2s-4s: 赵无垢推门入画。')
+    if not legacy:
+        shot.visible_asset_names.append(speaker.name)
+    assert referenced_entities(shot, [hero, speaker]) == [hero, speaker]
+    shot.visible_asset_names = []
+    assert not referenced_entities(shot, [hero, speaker])
+
+
+def test_visual_roster_uses_registered_asset_or_form_names():
+    from services.storyboard.validation import validate_skill_storyboard_shot
+    shot = _shot()
+    shot.visible_asset_names = ['缺失的形态']
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    with pytest.raises(ValueError, match='未登记的资产或形态'):
+        validate_skill_storyboard_shot(shot, snapshot, 'zh', characters())

@@ -1,0 +1,638 @@
+{
+  "episode.json": {
+    "$defs": {
+      "Identity": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Identity",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "format_version": {
+        "const": 1,
+        "title": "Format Version",
+        "type": "integer"
+      },
+      "work": {
+        "$ref": "#/$defs/Identity"
+      },
+      "episode": {
+        "$ref": "#/$defs/Identity"
+      },
+      "number": {
+        "minimum": 1,
+        "title": "Number",
+        "type": "integer"
+      },
+      "aspect_ratio": {
+        "default": "16:9",
+        "enum": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4"
+        ],
+        "title": "Aspect Ratio",
+        "type": "string"
+      },
+      "style_key": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Style Key"
+      },
+      "custom_style_prompt": {
+        "anyOf": [
+          {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Custom Style Prompt"
+      },
+      "storyboard_enabled": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Storyboard Enabled"
+      },
+      "language": {
+        "default": "zh",
+        "enum": [
+          "zh",
+          "en"
+        ],
+        "title": "Language",
+        "type": "string"
+      },
+      "screenplay": {
+        "default": "screenplay.md",
+        "title": "Screenplay",
+        "type": "string"
+      },
+      "source_text": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Text"
+      },
+      "assets": {
+        "default": "assets.json",
+        "title": "Assets",
+        "type": "string"
+      },
+      "storyboard": {
+        "default": "storyboard.json",
+        "title": "Storyboard",
+        "type": "string"
+      },
+      "originals": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Originals",
+        "type": "array"
+      }
+    },
+    "required": [
+      "format_version",
+      "work",
+      "episode",
+      "number"
+    ],
+    "title": "Episode",
+    "type": "object"
+  },
+  "assets.json": {
+    "$defs": {
+      "Media": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "main",
+              "angle_1",
+              "angle_2",
+              "reference",
+              "video",
+              "audio",
+              "blocking",
+              "storyboard"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "role"
+        ],
+        "title": "Media",
+        "type": "object"
+      },
+      "PackageAsset": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "prompt": {
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/$defs/Media"
+            },
+            "title": "Media",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "group",
+              "scene",
+              "item"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/$defs/Variant"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prompt",
+          "kind"
+        ],
+        "title": "PackageAsset",
+        "type": "object"
+      },
+      "Variant": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "prompt": {
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/$defs/Media"
+            },
+            "title": "Media",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prompt"
+        ],
+        "title": "Variant",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assets": {
+        "items": {
+          "$ref": "#/$defs/PackageAsset"
+        },
+        "title": "Assets",
+        "type": "array"
+      }
+    },
+    "required": [
+      "assets"
+    ],
+    "title": "Assets",
+    "type": "object"
+  },
+  "storyboard.json": {
+    "$defs": {
+      "Identity": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Identity",
+        "type": "object"
+      },
+      "Media": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "main",
+              "angle_1",
+              "angle_2",
+              "reference",
+              "video",
+              "audio",
+              "blocking",
+              "storyboard"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "role"
+        ],
+        "title": "Media",
+        "type": "object"
+      },
+      "Shot": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scene_id": {
+            "title": "Scene Id",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "duration": {
+            "exclusiveMinimum": 0,
+            "maximum": 3600,
+            "title": "Duration",
+            "type": "number"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "structure": {
+            "additionalProperties": true,
+            "title": "Structure",
+            "type": "object"
+          },
+          "drafts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Drafts",
+            "type": "object"
+          },
+          "visual": {
+            "items": {
+              "$ref": "#/$defs/VisualReference"
+            },
+            "title": "Visual",
+            "type": "array"
+          },
+          "voices": {
+            "items": {
+              "$ref": "#/$defs/Voice"
+            },
+            "title": "Voices",
+            "type": "array"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/$defs/Media"
+            },
+            "title": "Media",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scene_id",
+          "description",
+          "duration"
+        ],
+        "title": "Shot",
+        "type": "object"
+      },
+      "VisualReference": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "variant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Variant Id"
+          }
+        },
+        "required": [
+          "asset_id"
+        ],
+        "title": "VisualReference",
+        "type": "object"
+      },
+      "Voice": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "dialogue",
+              "offscreen",
+              "os",
+              "narration"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "start": {
+            "minimum": 0,
+            "title": "Start",
+            "type": "number"
+          },
+          "end": {
+            "exclusiveMinimum": 0,
+            "title": "End",
+            "type": "number"
+          }
+        },
+        "required": [
+          "asset_id",
+          "mode",
+          "text",
+          "start",
+          "end"
+        ],
+        "title": "Voice",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "scenes": {
+        "items": {
+          "$ref": "#/$defs/Identity"
+        },
+        "title": "Scenes",
+        "type": "array"
+      },
+      "shots": {
+        "items": {
+          "$ref": "#/$defs/Shot"
+        },
+        "title": "Shots",
+        "type": "array"
+      }
+    },
+    "required": [
+      "scenes",
+      "shots"
+    ],
+    "title": "Storyboard",
+    "type": "object"
+  },
+  "import_episode": {
+    "additionalProperties": false,
+    "properties": {
+      "directory": {
+        "title": "Directory",
+        "type": "string"
+      },
+      "request_id": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Request Id",
+        "type": "string"
+      },
+      "confirmed": {
+        "const": true,
+        "title": "Confirmed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "directory",
+      "request_id",
+      "confirmed"
+    ],
+    "title": "ImportEpisode",
+    "type": "object"
+  },
+  "read_episode": {
+    "additionalProperties": false,
+    "properties": {
+      "work_id": {
+        "title": "Work Id",
+        "type": "string"
+      },
+      "episode_id": {
+        "title": "Episode Id",
+        "type": "string"
+      },
+      "shot_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Shot Id"
+      }
+    },
+    "required": [
+      "work_id",
+      "episode_id"
+    ],
+    "title": "ReadEpisode",
+    "type": "object"
+  },
+  "update_shot": {
+    "additionalProperties": false,
+    "properties": {
+      "directory": {
+        "title": "Directory",
+        "type": "string"
+      },
+      "request_id": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Request Id",
+        "type": "string"
+      },
+      "confirmed": {
+        "const": true,
+        "title": "Confirmed",
+        "type": "boolean"
+      },
+      "work_id": {
+        "title": "Work Id",
+        "type": "string"
+      },
+      "episode_id": {
+        "title": "Episode Id",
+        "type": "string"
+      },
+      "shot_id": {
+        "title": "Shot Id",
+        "type": "string"
+      },
+      "base_version": {
+        "title": "Base Version",
+        "type": "string"
+      },
+      "changes": {
+        "additionalProperties": true,
+        "minProperties": 1,
+        "title": "Changes",
+        "type": "object"
+      }
+    },
+    "required": [
+      "directory",
+      "request_id",
+      "confirmed",
+      "work_id",
+      "episode_id",
+      "shot_id",
+      "base_version",
+      "changes"
+    ],
+    "title": "UpdateShot",
+    "type": "object"
+  }
+}

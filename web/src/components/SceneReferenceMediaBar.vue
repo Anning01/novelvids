@@ -126,7 +126,7 @@ function closeImagePreview() {
           @click="openImagePreview(item)"
         >
           <ImageIcon :size="16" aria-hidden="true" />
-          <img :src="item.url" :alt="item.name || tr('参考图片')" @error="fallbackImage($event)" />
+          <img :src="referenceUrl(item)" :alt="item.name || tr('参考图片')" @error="fallbackImage($event)" />
         </button>
         <video
           v-else-if="!unavailableReference(item)"

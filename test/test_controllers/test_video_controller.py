@@ -1371,3 +1371,36 @@ async def test_query_status_completed_minimax_h3_按秒与输入素材计费():
     assert record is not None
     assert record.usage["input_image_count"] == 7
     assert record.cost == Decimal("4.400000")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('model', 'protocol', 'expected'), [
+    ('seedance_2', 'volcengine_ark', '@图片3'), ('minimax_h3', 'minimax', '<Picture 3>')])
+async def test_specialized_storyboard_sheet_is_the_third_image_on_the_wire(monkeypatch, model, protocol, expected):
+    import json
+    import httpx
+    sheet = 'https://cdn.example.com/sheet.png'
+    identity = 'novelvids:storyboard-sheet'
+    stable = reference_mention_syntax('image', identity)
+    scene, config = await _create_scene_with_config(prompt=f'Use {stable} for staging.', video_model_type=model,
+                                                   api_protocol=protocol, base_url='https://example.com')
+    scene.metadata = {'video_prompt_model': model, 'work_package': {'drafts': {'general': '@{主角}进入@{房间}'}}}
+    await scene.save(update_fields=['metadata'])
+    inputs = ['https://cdn.example.com/hero.png', 'https://cdn.example.com/set.png', sheet]
+    mocked_assets = AsyncMock(return_value=[{'name': name, 'images':[url], 'description':name}
+                                             for name,url in zip(('主角','房间'), inputs)])
+    monkeypatch.setattr('controllers.video.resolve_assets', mocked_assets)
+    payloads = []
+    real = httpx.AsyncClient
+    def reply(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={'id':'mock','task_id':'mock'})
+    def client(*args,**kwargs):
+        return real(*args, **kwargs, transport=httpx.MockTransport(reply))
+    monkeypatch.setattr(httpx,'AsyncClient',client)
+    await video_controller._submit_generation(VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id,
+        generate_audio=False, reference_media=[VideoReferenceMedia(type='image',url=sheet,mention_url=identity)]))
+    assert '@{房间}' in mocked_assets.await_args.args[0]
+    parts=payloads[0]['content']
+    assert [p['image_url']['url'] for p in parts if p['type']=='image_url'] == inputs
+    assert expected in parts[0]['text'] and identity not in parts[0]['text']

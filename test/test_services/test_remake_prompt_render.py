@@ -111,3 +111,14 @@ def test_remake_services_do_not_inline_large_prompt_contracts():
 
     assert "先在内部判断出现次数" not in service_text
     assert "你是专业影视导演和视频生成提示词逆向工程师" not in service_text
+
+
+def test_remake_renders_music_decision_without_automatic_overlay_bans():
+    raw = {"shots": [], "effects": {"forbidden": "No strobe"}}
+    def render(audio):
+        return render_professional_prompt({**raw, "audio": audio}, {}, duration_seconds=4, language='en')['prompt']
+    scored = render({"has_bgm": True, "bgm_description": "Soft strings at the cut."})
+    assert "Soft strings at the cut." in scored and "No strobe" in scored
+    assert "no subtitles" not in scored.lower() and "no background music" not in scored.lower()
+    assert "No background music in this shot." in render({"has_bgm": False})
+    assert "[Background music]" not in render({})

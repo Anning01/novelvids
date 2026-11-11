@@ -1,0 +1,335 @@
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from prompts.skill_pack import FILES, ROOT, SkillSnapshot, instructions, snapshot_skills
+from scripts.export_skill import LINK, entrypoints, export_skill
+
+
+STAGES = ("screenplay", "assets", "storyboard")
+
+
+def test_only_professional_stages_are_publishable(tmp_path):
+    assert set(entrypoints()) == {f"novelvids-{stage}" for stage in STAGES}
+    for retired in ("novelvids-image", "novelvids-video", "novelvids-remake", "novelvids-story", "novelvids-planning", "novelvids-editing"):
+        with pytest.raises(ValueError, match="Unknown skill"):
+            export_skill(retired, tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("name", STAGES)
+def test_stage_exports_without_application_files(tmp_path, name):
+    package = export_skill(f"novelvids-{name}", tmp_path)
+    source = ROOT / package.name / "SKILL.md"
+    entry = (package / "SKILL.md").read_text()
+    assert f"name: {package.name}\n" in entry
+    targets = [package / match[2] for match in LINK.finditer(entry)]
+    metadata = package / "agents/openai.yaml"
+    assert metadata.read_bytes() == (source.parent / "agents/openai.yaml").read_bytes()
+    title = re.search(r'^description: (猫影[^。\n]+)。', entry, re.MULTILINE)[1]
+    assert f'  display_name: "{title}"' in metadata.read_text().splitlines()
+    assert targets and set(targets) | {metadata} == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
+    assert (package / "LICENSE").read_bytes() == (ROOT.parents[1] / "LICENSE").read_bytes()
+    for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
+        assert target.resolve().is_relative_to(package)
+        assert target.read_bytes() == (source.parent / match[2]).read_bytes()
+    scripts = {p.name for p in package.rglob("*.py")}
+    expected_scripts = {"draw_blocking.py", "storyboard_sheets.py", "select_video_optimizer.py", "attach_shot_draft.py"} if name == "storyboard" else set()
+    assert scripts == expected_scripts
+    assert list(tmp_path.iterdir()) == [package]
+
+
+def test_export_keeps_unrelated_and_preexisting_skills(tmp_path):
+    installed = export_skill("novelvids-storyboard", tmp_path)
+    entry = installed / "SKILL.md"
+    entry.write_text("Local edits")
+    with pytest.raises(FileExistsError):
+        export_skill("novelvids-storyboard", tmp_path)
+    with pytest.raises(ValueError):
+        export_skill("../runtime", tmp_path)
+    assert entry.read_text() == "Local edits"
+
+
+def test_saved_rules_come_from_the_same_files_as_the_standalone_package(tmp_path):
+    package = export_skill("novelvids-storyboard", tmp_path)
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    for key in ("storyboard", "storyboard_contract", "styles", "strategies"):
+        assert snapshot.read(key) == (package / "references" / Path(FILES[key]).name).read_text()
+    templates = json.loads(snapshot.read("storyboard_templates"))
+    templates["contract"] = "FROZEN CONTRACT LABEL"
+    snapshot.contents["storyboard_templates"] = json.dumps(templates)
+    assert "FROZEN CONTRACT LABEL" in instructions(snapshot, "en", "storyboard")
+    # A pre-split job has its original rules and no separate renderer template file.
+    del snapshot.contents["storyboard_templates"]
+    assert json.loads(snapshot.read("storyboard_contract"))["sections"]
+    assert "FROZEN CONTRACT LABEL" not in instructions(snapshot, "en", "storyboard")
+
+
+def test_task_uses_frozen_repair_rules_and_restores_caller_context():
+    from prompts.extraction import targeted_cast_instructions
+    from prompts.skill_pack import use_skill_snapshot
+
+    original = targeted_cast_instructions("en")
+    saved = snapshot_skills()
+    resource = json.loads(saved["contents"]["asset_templates"])
+    resource["targeted_cast_instructions"]["en"] = "Frozen task instruction"
+    saved["contents"]["asset_templates"] = json.dumps(resource)
+    with pytest.raises(RuntimeError), use_skill_snapshot(saved):
+        assert targeted_cast_instructions("en") == "Frozen task instruction"
+        with use_skill_snapshot(None):
+            assert targeted_cast_instructions("en") == original
+        assert snapshot_skills()["contents"] == saved["contents"]
+        raise RuntimeError("interrupted")
+    assert targeted_cast_instructions("en") == original
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path, language):
+    package = export_skill("novelvids-screenplay", tmp_path)
+    rules = (package / "references/screenplay.md").read_text()
+    prompt = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "screenplay")
+    assert rules in prompt and f"language={language}" in prompt
+    for marker in ("出场：", "仅声音：", "关键道具：", "△", "（OS）", "（画外）", "旁白：", "【音效】", "【屏显】"):
+        assert marker in rules
+
+    example = rules.split("```text\n", 1)[1].split("```", 1)[0]
+    voices = [line for line in example.splitlines() if "：" in line and not line.startswith(
+        ("出场：", "仅声音：", "关键道具：", "△", "【音效】", "【屏显】", "旁白：")
+    )]
+    assert all(re.fullmatch(r"[^：（]+(?:（[^）]+）)?：.+", line) for line in voices)
+    assert all("（开口" not in line for line in voices)
+    assert any(re.fullmatch(r"[^：（]+：.+", line) for line in voices)
+    assert any("（压低声音）：" in line for line in voices)
+    assert any("（OS）：" in line for line in voices)
+    assert any("（画外）：" in line for line in voices)
+
+    headers, action = example.split("\n\n", 1)
+    assert "出场：阿岚、船工、驮马" in headers and "驮马" in action
+    assert "仅声音：守闸人" in headers
+    assert "关键道具：铜钱" in headers and "两枚铜钱" in action
+
+
+@pytest.mark.parametrize("language,source", [("zh", "导演剧本"), ("en", "director's screenplay")])
+def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_path, language, source):
+    from prompts.extraction import render_cast_instructions, targeted_cast_instructions
+
+    package = export_skill("novelvids-assets", tmp_path)
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    prompt = instructions(snapshot, language, "assets")
+    for key in ("assets", "asset_lifecycle", "image"):
+        assert (package / "references" / Path(FILES[key]).name).read_text() == snapshot.read(key)
+        assert snapshot.read(key) in prompt
+    assert source in render_cast_instructions(language)
+    assert source in targeted_cast_instructions(language)
+    for handoff in ("导演剧本", "风格确认", "资产连续性.md", "参考图"):
+        assert handoff in prompt
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_asset_skill_alone_contains_the_workbench_image_rules_and_asset_layouts(tmp_path, language):
+    package = export_skill("novelvids-assets", tmp_path)
+    assert list(tmp_path.iterdir()) == [package]
+    rules = (package / "references/image.md").read_text()
+    layouts = json.loads((package / "references/asset_contract.json").read_text())[language]
+    styles = json.loads((package / "references/styles.json").read_text())
+    rendered = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "image")
+    assert rules in rendered and f"language={language}" in rendered
+    assert all(layout["heading"] in rendered for layout in layouts.values())
+    assert styles["xianxia-3d"]["image"].strip()
+
+
+def test_standalone_storyboard_offers_a_baseline_and_performance_guidance(tmp_path):
+    pkg = export_skill("novelvids-storyboard", tmp_path)
+    rules = (pkg / "references/speech_pacing.md").read_text()
+    contract = json.loads((pkg / "references/storyboard_contract.json").read_text())
+    assert contract["speech_baseline"] == {"characters_per_second": 3.5, "words_per_second": 2.1}
+    assert "speech_timing" not in contract
+    assert "争吵" in rules and "六字诀" in rules
+    assert not (pkg / "scripts/check_speech.py").exists()
+
+
+@pytest.mark.parametrize("stage", ["storyboard", "video", "remake"])
+def test_video_stages_share_one_script_driven_presentation_rule(tmp_path, stage):
+    package = export_skill("novelvids-storyboard", tmp_path)
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    rule = (package / "references/video_presentation.md").read_text()
+    assert rule == snapshot.read("video_presentation")
+    for language in ("zh", "en"):
+        rendered = instructions(snapshot, language, stage, output_kind="professional_video_prompt_material")
+        assert rule in rendered
+        assert all(element in rule for element in ("字幕", "水印", "LOGO", "背景音乐"))
+        assert "无字幕、无水印" not in rendered and "不得添加 BGM" not in rendered
+
+
+def test_portable_blocking_diagram_draws_assets_and_ordered_views(tmp_path):
+    import subprocess
+    import sys
+    from xml.etree import ElementTree
+
+    package = export_skill("novelvids-storyboard", tmp_path)
+    plan = {"orientation": "北墙", "assets": [{"name": "甲&乙", "x": 20, "y": 40, "end": {"x": 40, "y": 40}}],
+            "cameras": [{"x": 10, "y": 70, "target": "甲&乙"}, {"x": 60, "y": 70, "target": "甲&乙"}]}
+    src, dest = tmp_path / "plan.json", tmp_path / "plan.svg"
+    src.write_text(json.dumps(plan))
+    subprocess.run([sys.executable, "-I", "-S", package / "scripts/draw_blocking.py", src, dest], check=True)
+    labels = [el.text for el in ElementTree.parse(dest).findall(".//{*}text")]
+    assert {"C1", "C2", "甲&乙"} <= set(labels)
+
+
+def test_project_storyboard_sheet_switch_gates_every_shot_in_portable_package(tmp_path):
+    import subprocess
+    import sys
+
+    pkg = export_skill("novelvids-storyboard", tmp_path / "skills")
+    script = pkg / "scripts/storyboard_sheets.py"
+    def run(*args, cwd=tmp_path, check=True):
+        return subprocess.run([sys.executable, "-I", "-S", script, *args], cwd=cwd,
+                              capture_output=True, text=True, check=check)
+
+    assert json.loads(run("status").stdout) == {"storyboard_enabled": False}
+    assert json.loads(run("prepare", "not-needed.json").stdout) == []
+    settings = tmp_path / "novelvids.config.json"
+    assert not settings.exists()
+    settings.write_text('{"project_name":"Test"}')
+    run("on")
+    assert json.loads(settings.read_text()) == {"project_name": "Test", "storyboard_enabled": True}
+    shot = {"sequence": 1, "prompt": "FINAL 3D, trucks left, then dialogue and a fade.",
+            "visual_prose": "Two people meet.", "actions": ["0s-2s: hands meet."],
+            "duration": "3s", "camera_movement": "truck left", "visual_style": "cinematic CG"}
+    src = tmp_path / "shots.json"
+    src.write_text(json.dumps({"shots": [shot, {**shot, "sequence": 2, "segments": [
+        {"description": f"Cut {i}"} for i in range(8)
+    ]}]}))
+    jobs = json.loads(run("prepare", src).stdout)
+    assert [job['sequence'] for job in jobs] == [1, 2]
+    assert all('黑白线稿' in job['image_prompt'] and 'hands meet.' in job['image_prompt'] for job in jobs)
+    assert all(job['video_prompt'].startswith(shot['prompt']) for job in jobs)
+    assert 'cinematic CG' not in jobs[0]['image_prompt']
+    assert jobs[0]['file_stem'] != jobs[1]['file_stem']
+    assert all("同一张图" in job["image_prompt"] for job in jobs)
+    assert "Cut 7" in jobs[1]["image_prompt"]
+    english = json.loads(run('prepare', src, '--language', 'en').stdout)
+    assert len(english) == 2
+    assert all("single image" in job["image_prompt"] and "line art" in job["image_prompt"] for job in english)
+    other = tmp_path / "another_project"
+    other.mkdir()
+    assert json.loads(run("status", cwd=other).stdout)["storyboard_enabled"] is False
+    run("off")
+    assert json.loads(run("prepare", src).stdout) == []
+    assert json.loads(settings.read_text())["project_name"] == "Test"
+
+
+def test_storyboard_sheet_switch_preserves_bad_config_and_rejects_incomplete_shots(tmp_path):
+    import subprocess
+    import sys
+    pkg = export_skill("novelvids-storyboard", tmp_path / "skills")
+    script = pkg / "scripts/storyboard_sheets.py"
+    project = tmp_path / "project"
+    project.mkdir()
+    def call(*args):
+        return subprocess.run([sys.executable, "-I", "-S", script, "--project", project, *args],
+                              cwd=tmp_path, text=True, capture_output=True)
+    config = project / "novelvids.config.json"
+    config.write_text('{"storyboard_enabled":"false"}')
+    assert call("on").returncode != 0
+    assert config.read_text() == '{"storyboard_enabled":"false"}'
+    config.write_text('{"storyboard_enabled":true}')
+    board = project / "shots.json"
+    shot = {"sequence": 1, "visual_prose": "A door.", "actions": ["The door opens."], "prompt": "Finished prompt."}
+    for shots in ([], [shot, shot], [{**shot, "prompt": ""}]):
+        board.write_text(json.dumps({"shots": shots}))
+        result = call("prepare", "shots.json")
+        assert result.returncode != 0 and not result.stdout
+    board.write_text(json.dumps({"shots": [shot]}))
+    assert call("prepare", "shots.json").returncode == 0
+
+
+def test_exported_skill_selects_installed_optimizer_only_for_target_model(tmp_path):
+    import subprocess
+    import sys
+    pkg = export_skill("novelvids-storyboard", tmp_path / 'portable')
+    script = pkg / 'scripts/select_video_optimizer.py'
+    def select(*args):
+        res = subprocess.run([sys.executable, '-I', '-S', script, *args], cwd=tmp_path,
+                             capture_output=True, text=True, check=True)
+        return json.loads(res.stdout)
+    assert select()['mode'] == 'generic'
+    local = tmp_path / '.agents/skills/sd25-pe/SKILL.md'
+    (tmp_path / 'novelvids.config.json').write_text(json.dumps({
+        'video_model_type': 'seedance_2_5', 'storyboard_enabled': True}))
+    assert select()['mode'] == 'missing'
+    local.parent.mkdir(parents=True)
+    local.write_text('---\nname: sd25-pe\n---\nProvider instructions')
+    assert Path(select()['entry']) == local
+    assert select('--model', 'Seedance 2.5')['skill'] == 'sd25-pe'
+    h3 = tmp_path / '.agents/skills/h3-prompt-writing/SKILL.md'
+    assert select('--model', 'MiniMax-H3')['mode'] == 'missing'
+    h3.parent.mkdir()
+    h3.write_text('---\nname: h3-prompt-writing\n---\nProvider instructions')
+    for model, canonical in [('MiniMax H3', 'minimax_h3'), ('minimax_h3', 'minimax_h3'),
+                             ('minimax_h3_zm_u24', 'minimax_h3_autodl'), ('minimax_h3_autodl', 'minimax_h3_autodl')]:
+        (tmp_path / 'novelvids.config.json').write_text(json.dumps({'video_model_type': model}))
+        assert select() == {'mode': 'optimize', 'model_type': canonical, 'skill': 'h3-prompt-writing', 'entry': str(h3)}
+        assert select('--model', 'seedance_2_5')['skill'] == 'sd25-pe'
+    assert select('--model', 'wan_3') == {
+        'mode': 'missing', 'model_type': 'wan_3', 'skill': 'wan3-pe', 'source': 'wan3-pe/SKILL.md',
+    }
+    wan = tmp_path / '.agents/skills/wan3-pe/SKILL.md'
+    wan.parent.mkdir()
+    wan.write_text('---\nname: wan3-pe\n---\nLocal optimizer')
+    (tmp_path / 'novelvids.config.json').write_text(json.dumps({'video_model_type': 'wan_3'}))
+    for args in ((), ('--model', 'wan3.0-video'), ('--model', 'Wan 3.0'), ('--model', '万相3')):
+        assert select(*args) == {'mode': 'optimize', 'model_type': 'wan_3', 'skill': 'wan3-pe', 'entry': str(wan)}
+    for model in ('wan_2_6', 'wan3.0-video-preview', 'seedance_2_preview', 'minimax_h3_preview', 'my-seedance_2_5-alike', 'generic'):
+        assert select('--model', model)['mode'] == 'generic'
+
+
+@pytest.mark.parametrize(("model", "label", "provider_id"), [
+    ("seedance_2", "Doubao Seedance 2.0", "doubao-seedance-2-0-260128"),
+    ("seedance_2_mini", "Seedance 2.0 Mini", "doubao-seedance-2-0-mini-260615"),
+    ("seedance_2_fast", "Doubao Seedance 2.0 Fast", "doubao-seedance-2-0-fast-260128"),
+])
+def test_seedance_2_variants_share_official_optimizer_and_keep_model_identity(tmp_path, model, label, provider_id):
+    from prompts.skills.scripts.select_video_optimizer import select
+
+    pkg = export_skill("novelvids-storyboard", tmp_path)
+    registry = json.loads((pkg / "references/video_prompt_models.json").read_text())
+    (tmp_path / "novelvids.config.json").write_text(json.dumps({"video_model_type": model}))
+    entry = tmp_path / ".agents/skills/sd2-pe/SKILL.md"
+    assert select(tmp_path, None, registry)["mode"] == "missing"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("---\nname: sd2-pe\n---\nProvider instructions")
+    for key in (None, label, provider_id):
+        assert select(tmp_path, key, registry) == {
+            "mode": "optimize", "model_type": model, "skill": "sd2-pe", "entry": str(entry.resolve()),
+        }
+    assert select(tmp_path, "seedance_2_5", registry)["mode"] == "missing"
+
+
+def test_portable_model_drafts_follow_their_source_after_reordering(tmp_path):
+    import subprocess
+    import sys
+    pkg = export_skill("novelvids-storyboard", tmp_path)
+    path = tmp_path / "storyboard.json"
+    source = tmp_path / "source.txt"
+    draft = tmp_path / "draft.txt"
+    source.write_text("Base B")
+    draft.write_text("Model B\n")
+    rows = [{"id": key, "prompt": base, "drafts": {"general": base}} for key, base in
+            [("c", "Base C"), ("b", "Base B"), ("a", "Base A")]]
+    path.write_text(json.dumps({"shots": rows}))
+    command = [sys.executable, "-I", "-S", pkg / "scripts/attach_shot_draft.py", path,
+               "--model", "model_b", "--source", source, "--draft", draft]
+    assert subprocess.check_output(command, text=True).strip() == "b"
+    result = json.loads(path.read_text())["shots"]
+    assert result[0] == rows[0] and result[2] == rows[2]
+    assert result[1]["drafts"] == {"general": "Base B", "model_b": "Model B\n"}
+    result.append({"id": "d", "prompt": "Base B"})
+    path.write_text(json.dumps({"shots": result}))
+    before = path.read_bytes()
+    for args in ([], ["--shot-id", "a"]):
+        assert subprocess.run(command + args, capture_output=True).returncode != 0
+        assert path.read_bytes() == before
+    assert subprocess.check_output(command + ["--shot-id", "d"], text=True).strip() == "d"

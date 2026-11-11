@@ -25,6 +25,11 @@ def _normalize_scene_metadata(metadata: dict) -> dict:
         raw = metadata.get(key)
         if isinstance(raw, str) and raw:
             metadata[key] = normalize_media_url(raw) or raw
+    sheet = metadata.get("storyboard_sheet")
+    if isinstance(sheet, dict):
+        for key in ("image_url", "previous_image_url"):
+            if isinstance(sheet.get(key), str) and sheet[key]:
+                sheet[key] = normalize_media_url(sheet[key]) or sheet[key]
     reference_media = metadata.get("video_reference_media")
     if isinstance(reference_media, list):
         for item in reference_media:
@@ -210,8 +215,14 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 video_model = await ai_model_config_controller.get_active(
                     AiTaskTypeEnum.video.value, chapter.novel.video_model_config_id, team_id=team_id
                 )
+            else:
+                video_model = await ai_model_config_controller.find_active_default(AiTaskTypeEnum.video.value, team_id=team_id)
+            request_params["shot_duration_range"] = [1, chapter.novel.shot_duration_max]
+            if video_model is not None:
                 capabilities = capabilities_for(video_model.video_model_type, video_model.api_protocol)
-                request_params["shot_duration_range"] = [capabilities.duration_min, capabilities.duration_max]
+                request_params["shot_duration_range"] = [capabilities.duration_min, min(capabilities.duration_max, chapter.novel.shot_duration_max)]
+                if request_params["shot_duration_range"][0] > request_params["shot_duration_range"][1]:
+                    raise HTTPException(422, localized_message("单分镜最长时长低于所选模型支持的最短时长"))
             from services.creation_agent.skill_execution import prepare_workflow
             request_params = await prepare_workflow(request_params)
             task = await ai_task_executor.submit(

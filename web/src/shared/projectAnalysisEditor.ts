@@ -17,6 +17,13 @@ export interface ProjectAnalysisDraft {
   name: string
   tagsText: string
   storyOutline: string
+  aspectRatio?: string
+  resolution?: string
+  styleKey?: string
+  customStyle?: string
+  audiovisualGuidance?: string
+  storyboardEnabled?: boolean
+  shotDurationMax?: number
   projectType: string
   projectSetting: string
   storyboardStrategy: string
@@ -28,10 +35,13 @@ export interface ChapterEditDraft {
   id: number
   name: string
   content: string
+  screenplay?: string
 }
 
 type EditableNovel = Pick<
   Novel,
+  | 'aspect_ratio' | 'resolution'
+  | 'shot_duration_max' | 'style_key' | 'custom_style_prompt' | 'audiovisual_guidance' | 'storyboard_enabled'
   | 'name'
   | 'tags'
   | 'story_outline'
@@ -60,6 +70,13 @@ export function createProjectAnalysisDraft(
   const strategy = resolveStoryboardStrategy(novel.storyboard_strategy, strategies)
   return {
     name: novel.name,
+    aspectRatio: novel.aspect_ratio ?? undefined,
+    resolution: novel.resolution ?? undefined,
+    styleKey: novel.custom_style_prompt ? 'custom' : novel.style_key || 'auto',
+    customStyle: novel.custom_style_prompt || '',
+    audiovisualGuidance: novel.audiovisual_guidance || '',
+    storyboardEnabled: novel.storyboard_enabled ?? false,
+    shotDurationMax: novel.shot_duration_max ?? 15,
     tagsText: tags.join('，'),
     storyOutline: novel.story_outline ?? analysis?.story_outline ?? '',
     projectType: novel.project_type ?? tr(DEFAULT_PROJECT_TYPE),
@@ -87,8 +104,20 @@ export function projectPatchFromDraft(
   draft: ProjectAnalysisDraft,
   initial?: ProjectAnalysisDraft | null,
 ): Partial<Novel> {
+  const settings: Partial<Novel> = {}
+  if (draft.aspectRatio && draft.aspectRatio !== initial?.aspectRatio) settings.aspect_ratio = draft.aspectRatio
+  if (draft.resolution && draft.resolution !== initial?.resolution) settings.resolution = draft.resolution
+  if (draft.styleKey && (draft.styleKey !== initial?.styleKey ||
+      (draft.styleKey === 'custom' && draft.customStyle !== initial?.customStyle))) {
+    settings.style_key = ['auto', 'custom'].includes(draft.styleKey) ? null : draft.styleKey
+    settings.custom_style_prompt = draft.styleKey === 'custom' ? draft.customStyle?.trim() : null
+  }
+  if (draft.audiovisualGuidance !== initial?.audiovisualGuidance) settings.audiovisual_guidance = draft.audiovisualGuidance?.trim() || null
+  if (draft.shotDurationMax !== initial?.shotDurationMax) settings.shot_duration_max = draft.shotDurationMax
+  if (draft.storyboardEnabled !== initial?.storyboardEnabled) settings.storyboard_enabled = draft.storyboardEnabled
   if (!initial) {
     return {
+      ...settings,
       name: draft.name.trim(),
       tags: normalizeTags(draft.tagsText),
       story_outline: draft.storyOutline.trim(),
@@ -102,7 +131,7 @@ export function projectPatchFromDraft(
     }
   }
 
-  const patch: Partial<Novel> = {}
+  const patch: Partial<Novel> = settings
   const nextName = draft.name.trim()
   if (nextName !== initial.name.trim()) {
     patch.name = nextName
@@ -153,9 +182,10 @@ export function createChapterEditDraft(chapter: Chapter): ChapterEditDraft {
     id: chapter.id,
     name: stripChapterOrdinal(chapter.name) || tr('未命名'),
     content: chapter.content ?? '',
+    screenplay: chapter.screenplay ?? '',
   }
 }
 
 export function chapterDraftChanged(draft: ChapterEditDraft, chapter: Chapter): boolean {
-  return draft.name !== (stripChapterOrdinal(chapter.name) || '未命名') || draft.content !== (chapter.content ?? '')
+  return draft.name !== (stripChapterOrdinal(chapter.name) || '未命名') || draft.content !== (chapter.content ?? '') || (draft.screenplay ?? '') !== (chapter.screenplay ?? '')
 }

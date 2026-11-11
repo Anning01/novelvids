@@ -58,7 +58,6 @@ export function projectEntryRoute(project: Novel): RouteLocationRaw {
     return { name: 'remake-progress', params: { projectId: project.id } }
   }
   const settings = readShortDramaSettings(project)
-  if (settings.mode === 'agent') return { name: 'short-drama-agent', params: { projectId: project.id } }
-  if (settings.mode === 'manual') return { name: 'short-drama-manual', params: { projectId: project.id } }
+  if (settings.mode) return { name: 'short-drama-agent', params: { projectId: project.id } }
   return `/novel/${project.id}`
 }

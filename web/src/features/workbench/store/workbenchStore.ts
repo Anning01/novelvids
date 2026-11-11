@@ -421,7 +421,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (!this.nodeByKey(key)) return
       this.persistLayout()
     },
-    async saveChapter(patch: Pick<Partial<Chapter>, 'name' | 'content'>) {
+    async saveChapter(patch: Pick<Partial<Chapter>, 'name' | 'content' | 'screenplay'>) {
       if (!this.chapter) return null
       const updated = (await api.updateChapter(this.chapter.id, patch)).data
       this.chapter = updated

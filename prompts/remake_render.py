@@ -176,13 +176,9 @@ def render_professional_prompt(
     )
     audio = raw.get("audio") if isinstance(raw.get("audio"), dict) else {}
     effects = raw.get("effects") if isinstance(raw.get("effects"), dict) else {}
-    audio_rule = (
-        prompt_label("保留人物台词、环境音与背景音乐，声音层次清晰。", language)
-        if audio.get("has_bgm")
-        else prompt_label("无BGM，仅保留环境音效与人物台词。", language)
-    )
+    restrictions = _align_text(effects.get("forbidden"), mappings) or prompt_label("无", language)
     sections = [
-        prompt_label("【禁止项】\n无字幕、无水印、无LOGO。", language) + audio_rule,
+        prompt_label("【禁止项】", language) + "\n" + restrictions,
         "\n".join(
             [
                 prompt_label("【风格定调】", language),
@@ -255,11 +251,12 @@ def render_professional_prompt(
             ]
         )
     )
-    if audio.get("has_bgm") and str(audio.get("bgm_description", "")).strip():
-        sections.append(
-            prompt_label("【背景音乐】\n", language)
-            + str(audio["bgm_description"]).strip()
-        )
+    if isinstance(audio.get("has_bgm"), bool):
+        if audio["has_bgm"]:
+            music = str(audio.get("bgm_description") or "").strip() or prompt_label("保留背景音乐。", language)
+        else:
+            music = prompt_label("本镜无背景音乐。", language)
+        sections.append(prompt_label("【背景音乐】\n", language) + music)
     sections.append(f"{prompt_label('总时长：', language)}{integer_duration}s")
     prompt = _align_text("\n\n".join(sections), mappings)
     return {

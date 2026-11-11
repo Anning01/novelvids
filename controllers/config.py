@@ -301,7 +301,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         return result
 
     async def list_visual_styles(self) -> list[dict]:
-        """视觉风格清单（prompts/skills/styles.json 为唯一事实来源）。"""
+        """视觉风格清单（图片技能的 styles.json 为唯一事实来源）。"""
         from prompts.styles import list_styles
 
         return list_styles()
@@ -366,8 +366,21 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             if task_type == AiTaskTypeEnum.video.value:
                 self._validate_video_payload({}, selected)
             return selected
+        config = await self.find_active_default(task_type, team_id=team_id)
+        if config is None:
+            try:
+                name = AiTaskTypeEnum(task_type).nickname
+            except ValueError:
+                name = str(task_type)
+            raise HTTPException(
+                status_code=404,
+                detail=localized_message('请先在「配置」中为「{p1}」启用一个模型', p1=f'{name}'),
+            )
+        return config
+
+    async def find_active_default(self, task_type: int, team_id: int | None = None) -> AiModelConfig | None:
+        """Return the first usable scoped default when this capability is configured."""
         candidates = await resolve_scope_configs(task_type, team_id=team_id)
-        config = None
         for candidate in candidates:
             if task_type == AiTaskTypeEnum.reference_image.value:
                 try:
@@ -379,18 +392,8 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                     self._validate_video_payload({}, candidate)
                 except HTTPException:
                     continue
-            config = candidate
-            break
-        if config is None:
-            try:
-                name = AiTaskTypeEnum(task_type).nickname
-            except ValueError:
-                name = str(task_type)
-            raise HTTPException(
-                status_code=404,
-                detail=localized_message('请先在「配置」中为「{p1}」启用一个模型', p1=f'{name}'),
-            )
-        return config
+            return candidate
+        return None
 
     async def get_active_with_legacy_fallback(
         self,

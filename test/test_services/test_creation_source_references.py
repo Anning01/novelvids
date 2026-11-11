@@ -1,4 +1,5 @@
 """Reading selects stable source paragraphs; copied prose is never authoritative."""
+from test.agent_stream_fixtures import streaming_model
 
 from unittest.mock import AsyncMock, patch
 
@@ -90,7 +91,7 @@ async def test_real_model_boundary_repairs_bad_reference_inside_same_call():
             assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
             'summary': '阅读完成', 'candidates': [{'chapter_id': 7, 'first_paragraph': 99 if calls == 1 else 3}]} )])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await execution.generate('source_reading', value, SourceReading)
     assert calls == 2
@@ -110,7 +111,7 @@ async def test_cached_page_is_resolved_without_another_model_request():
     cached = SourceReading(summary='已完成的摘要', candidates=[SourceSelection(chapter_id=chapter.id,
         quote=chapter.content.replace('中间内容', '中间间内容'))])
     await AgentOperation.create(task=task, key=key, state='completed', external=True, result=cached.model_dump(mode='json'))
-    model = FunctionModel(lambda *_: (_ for _ in ()).throw(AssertionError('Must replay saved response')))
+    model = streaming_model(lambda *_: (_ for _ in ()).throw(AssertionError('Must replay saved response')))
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await CreationSourceLoader(execution).read([chapter.id], [])
@@ -129,7 +130,7 @@ async def test_exhausted_reference_validation_is_not_an_uncertain_external_submi
         calls += 1
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
             'summary': '摘要', 'candidates': [{'chapter_id': 7, 'first_paragraph': 999}]} )])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model), pytest.raises(RepairExhausted):
         await execution.generate('source_reading', facts('只有一个段落'), SourceReading)
     receipt = await AgentOperation.get(task=task, key='model:source_reading:SourceReading:')
@@ -164,7 +165,7 @@ async def test_complete_planner_repairs_an_invalid_evidence_id_before_saving():
         else:
             value = (await base('planning_request', payload, None)).model_dump()
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, value)])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await CreationPlanner(execution, source).prepare(request)
     assert reads == 10 and plan_attempts == 2

@@ -26,6 +26,12 @@ def test_truncated_output_stays_actionable_after_a_failed_automatic_retry():
     assert '减少选中的对象' in public_run_error('上下文超过配置上限', [])
 
 
+def test_summary_truncation_does_not_mask_main_validation_failure():
+    from services.creation_agent.handler import public_run_error
+    calls = [{'phase': 'main', 'finish_reason': 'tool_call'}, {'phase': 'summary', 'finish_reason': 'length'}]
+    assert '未通过工具或输出校验' in public_run_error('Exceeded maximum retries', calls)
+
+
 def test_hidden_tool_retry_at_turn_limit_is_actionable_without_masking_provider_errors():
     from services.creation_agent.handler import public_run_error
     assert '本轮处理次数' in public_run_error('Exceeded maximum retries (2) for output validation', [], turn_limited=True)
@@ -154,11 +160,13 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
 
     def transport(outgoing):
         payload = json.loads(outgoing.content)
+        assert 'max_tokens' not in payload
+        reported_output = 2048  # The provider may end a response at its own default limit.
         envelope = {'id': 'truncated', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model'}
         chunks = [
             {**envelope, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'reasoning_content': 'synthetic-reasoning'}, 'finish_reason': None}]},
             {**envelope, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'length'}]},
-            {**envelope, 'choices': [], 'usage': {'prompt_tokens': 100, 'completion_tokens': payload['max_tokens'], 'total_tokens': 100 + payload['max_tokens']}},
+            {**envelope, 'choices': [], 'usage': {'prompt_tokens': 100, 'completion_tokens': reported_output, 'total_tokens': 100 + reported_output}},
         ]
         return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=''.join(
             'data: ' + json.dumps(chunk) + '\n\n' for chunk in chunks) + 'data: [DONE]\n\n')

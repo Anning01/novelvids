@@ -11,7 +11,7 @@ class ChapterProperties(BaseModel):
     最基础的属性集合，不含大字段。
     用于列表(List)、关联查询(Relation)等轻量场景。
     """
-    number: Optional[int] = Field(None, description="章节序号")
+    number: Optional[int] = Field(None, ge=1, description="章节序号")
     name: Optional[str] = Field(None, description="章节名称", max_length=255)
     status: Optional[int] = Field(None, description=TaskStatusEnum.__doc__)
     workflow_status: Optional[int] = Field(None, description=WorkflowStatus.__doc__)
@@ -22,14 +22,25 @@ class ChapterFullProperties(ChapterProperties):
     完整的业务属性，包含 content 等大字段。
     用于创建、更新、详情。
     """
-    content: Optional[str] = Field(None, description="正文内容")
+    content: Optional[str] = Field(None, description="章节原文")
+    screenplay: str | None = Field(None, description="本集导演剧本")
 
 
 # --- 输入 Schema (In-bound) ---
 
+class ScreenplayGenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_screenplay: str | None = None
+
+
+class ChapterExtractRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    conversation_id: int | None = Field(None, gt=0)
+
+
 class ChapterCreate(ChapterFullProperties):
     """创建请求：number/name 可选（后端自动计算）"""
-    number: Optional[int] = Field(None, description="章节序号，不传则自动递增")
+    number: Optional[int] = Field(None, ge=1, description="章节序号，不传则自动递增")
     name: Optional[str] = Field(None, description="章节名称，不传则自动生成", max_length=255)
     content: str = Field(..., description="章节内容")
     novel_id: int = Field(..., description="所属小说/剧本")

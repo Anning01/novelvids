@@ -155,6 +155,27 @@ def test_creative_requirements_preserve_user_text_inside_mandatory_format():
         result = creative_requirements(text, language)
         assert result.endswith(text)
         assert '格式' in result if language == 'zh' else 'format' in result
-    from pathlib import Path
-    editing = (Path(__file__).parents[2] / 'prompts/skills/editing.md').read_text()
+    from prompts.skill_pack import read_skill
+    editing = read_skill('editing')
     assert '不要求固定自然语言栏位' not in editing
+
+
+@pytest.mark.parametrize(('language', 'empty_scene'), [('zh', '空场景'), ('en', 'unoccupied')])
+def test_scene_and_variant_require_the_empty_environment_guard(language, empty_scene):
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    contract = json.loads(snapshot.read('asset_contract'))[language]['scene']
+    guard = contract['suffix']
+    assert empty_scene in guard
+    for skill in ('image', 'assets', 'remake'):
+        assert guard in instructions(snapshot, language, skill)
+    prompt = fixed_asset_prompt(language, 'scene', snapshot=snapshot)
+    scene = Scene(name='Stable', base_traits=prompt, variant={
+        'name': 'After repairs', 'description': 'New roof', 'base_traits': prompt, 'change_reason': 'Rebuilt',
+    })
+    batch = AssetExtractionResult(persons=[], scenes=[scene], items=[])
+    validate_asset_prompt_contract(batch, snapshot, language, '16:9')
+    for target in (scene, scene.variant):
+        target.base_traits = prompt.removesuffix(guard).rstrip()
+        with pytest.raises(ValueError, match='suffix'):
+            validate_asset_prompt_contract(batch, snapshot, language, '16:9')
+        target.base_traits = prompt

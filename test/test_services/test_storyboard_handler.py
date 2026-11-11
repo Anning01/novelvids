@@ -149,7 +149,7 @@ async def test_save_scenes_persists_narration_strategy_and_voice_track():
     assert scene.metadata["storyboard_strategy"] == "narration"
     assert scene.metadata["storyboard_strategy_name"] == "旁白叙事"
     assert "【旁白 / 内心 OS】" in scene.prompt
-    assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in scene.prompt
+    assert "【禁止项】\n禁止廉价发光特效" in scene.prompt and shot.sound_design in scene.prompt
 
 
 @pytest.mark.asyncio

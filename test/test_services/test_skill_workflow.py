@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import completion_stream_response, streaming_model
 import asyncio
 from unittest.mock import AsyncMock, patch
 import pytest
@@ -35,7 +36,7 @@ async def test_remake_json_mode_repairs_model_validation_errors_without_losing_a
     def respond(request):
         seen.append(json.loads(request.content))
         value = invalid if len(seen)==1 else valid
-        return httpx.Response(200,json={'id':'completion','created':1,'model':'vision','object':'chat.completion',
+        return completion_stream_response({'id':'completion','created':1,'model':'vision','object':'chat.completion',
             'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps(value)},'finish_reason':'stop'}],
             'usage':{'prompt_tokens':200,'completion_tokens':20,'total_tokens':220}})
 
@@ -239,7 +240,7 @@ async def enabled_project():
     from models.novel import Novel
     from models.chapter import Chapter
 
-    await AgentSettings.create(id=1, configuration={"enabled": True})
+    await AgentSettings.create(id=1, configuration={"enabled": True, "runtime": "pydantic_ai"})
     assistant = await AiModelConfig.create(
         name="assistant",
         model="test",
@@ -305,7 +306,6 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
 async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result(language, custom_style, repair_format):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
-    from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from models.asset import Asset
 
@@ -361,7 +361,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
             ]
         )
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch("services.creation_agent.handler.configured_model", return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -383,21 +383,25 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("video_model_type,protocol,maximum", [
-    (None, None, None),
-    ("minimax_h3_autodl", "autodl", 15),
-    ("seedance_2_5", "volcengine_ark", 30),
+@pytest.mark.parametrize("video_model_type,protocol,maximum,project_selected", [
+    (None, None, None, False),
+    ("minimax_h3_autodl", "autodl", 15, True),
+    ("seedance_2_5", "volcengine_ark", 30, True),
+    ("minimax_h3_autodl", "autodl", 15, False),
+    ("seedance_2_5", "volcengine_ark", 30, False),
 ])
 async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically(
-    video_model_type, protocol, maximum,
+    video_model_type, protocol, maximum, project_selected, monkeypatch, tmp_path,
 ):
+    from config import settings
+    # This duration/atomic-replacement test must not load a developer's optional optimizer installs.
+    monkeypatch.setattr(settings, "CREATION_AGENT_OPTIONAL_SKILLS_PATH", str(tmp_path))
     import json
 
     from controllers.scene import scene_controller
     from models.config import AiModelConfig
     from models.scene import Scene
     from services.ai_task_executor import ai_task_executor
-    from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart, UserPromptPart
     from test.test_services.test_prompt_language import _shot
     from prompts.storyboard import format_storyboard_prompt
@@ -410,14 +414,17 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     expected_prompt = format_storyboard_prompt(candidate, "en")
 
     novel, chapter, _ = await enabled_project()
+    novel.shot_duration_max = maximum or 15
+    await novel.save(update_fields=["shot_duration_max"])
     if video_model_type:
         video_model = await AiModelConfig.create(
             name="video", model="test", task_type=4, api_key="test",
             base_url="https://example.test", video_model_type=video_model_type,
             api_protocol=protocol, is_active=True,
         )
-        novel.video_model_config_id = video_model.id
-        await novel.save(update_fields=["video_model_config_id"])
+        if project_selected:
+            novel.video_model_config_id = video_model.id
+            await novel.save(update_fields=["video_model_config_id"])
     old = await Scene.create(
         chapter=chapter,
         sequence=1,
@@ -433,7 +440,7 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
         facts = json.loads(user_part.content)["untrusted_task_facts"]["input"]
         assert "shot_duration_range" in info.instructions
         if maximum is None:
-            assert "shot_duration_range" not in facts
+            assert facts["shot_duration_range"] == [1, 15]
         else:
             assert facts["shot_duration_range"][1] == maximum
         shot = candidate.model_dump(exclude={"prompt"})
@@ -447,7 +454,7 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
             parts=[ToolCallPart(info.output_tools[0].name, {"shots": [shot]})]
         )
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch("services.creation_agent.handler.configured_model", return_value=model):
         task = await scene_controller.generate(chapter.id, replace_existing=True)
@@ -490,7 +497,6 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
     from services.ai_task_executor import ai_task_executor
     from services.billing.recorder import record_ai_task_usage
     from models.usage_record import ModelUsageRecord
-    from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.usage import RequestUsage
 
@@ -516,7 +522,7 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
             usage=RequestUsage(input_tokens=100, output_tokens=20),
         )
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch("services.creation_agent.handler.configured_model", return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -979,7 +985,6 @@ async def test_chat_authorization_uses_only_current_input_and_reuses_its_grant(
         current_execution,
     )
     from schemas.creation_agent import AgentRunRequest
-    from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     novel, chapter, _ = await enabled_project()
@@ -1025,7 +1030,7 @@ async def test_chat_authorization_uses_only_current_input_and_reuses_its_grant(
             ]
         )
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     execution = SkillExecution(
         {**workflow, "task_id": str(task.id)}, assistant, AsyncMock()
@@ -1142,12 +1147,11 @@ async def test_remake_agent_sends_video_url_and_never_stores_binary_in_audit(
                 "message": "private provider response must not leak",
             }})
         if json_mode:
-            return httpx.Response(200,json={'id':'completion','created':1,'model':'video-analysis','object':'chat.completion',
+            return completion_stream_response({'id':'completion','created':1,'model':'video-analysis','object':'chat.completion',
                 'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'characters':[],'scenes':[],'objects':[]})},'finish_reason':'stop'}],
                 'usage':{'prompt_tokens':200,'completion_tokens':20,'total_tokens':220}})
-        return httpx.Response(
-            200,
-            json={
+        return completion_stream_response(
+            {
                 "id": "completion",
                 "object": "chat.completion",
                 "created": 1,
@@ -1461,10 +1465,9 @@ async def test_started_model_failure_remains_uncertain_and_cannot_replay():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('explicit_cap', [None, 64000])
+@pytest.mark.parametrize('explicit_cap', [None, 64000, 2000])
 async def test_large_story_input_uses_model_limit_and_never_marks_local_rejection_uncertain(explicit_cap):
     from pydantic_ai.messages import ModelResponse, ToolCallPart
-    from pydantic_ai.models.function import FunctionModel
     from models.chapter import Chapter
     from models.novel import Novel
     from models.creation_agent import AgentMessage
@@ -1491,7 +1494,7 @@ async def test_large_story_input_uses_model_limit_and_never_marks_local_rejectio
             'book_types': ['冒险'], 'story_outline': 'A complete story outline.', 'key_characters': [],
         })])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await novel_controller.analyze(novel.id)
@@ -1500,7 +1503,7 @@ async def test_large_story_input_uses_model_limit_and_never_marks_local_rejectio
         await ai_task_executor.run(task)
     await task.refresh_from_db()
     receipt = await AgentOperation.get(task=task, key='model:story:BookAnalysis:')
-    if explicit_cap is None:
+    if explicit_cap in (None, 64000):
         assert task.status == 3, task.error_message
         assert calls
         assert receipt.state == 'completed'

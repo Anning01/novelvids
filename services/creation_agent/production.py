@@ -3,6 +3,7 @@
 from utils.messages import localized_message
 
 import hashlib
+from datetime import datetime, timezone
 from models.ai_task import AiTask
 from models.creation_agent import AgentConversation, AgentMessage
 from services.creation_agent.skill_execution import (
@@ -23,18 +24,19 @@ async def conversation_for_task(task):
     chosen, _ = await require_agent(
         params.get("team_id"), params["assistant_model_config_id"]
     )
-    conversation = await AgentConversation.create(
-        novel_id=params["novel_id"],
-        created_by=params.get("user_id"),
-        team_id=params.get("team_id"),
-    )
+    from services.creation_agent.handler import authorize_run
+    from services.creation_agent.sessions import agent_sessions
+    ctx = await authorize_run(params)
+    conversation = await agent_sessions.default(params['novel_id'], ctx, params.get('conversation_id'))
     digest = hashlib.sha256(str(task.id).encode()).hexdigest()
     operation = params.get("operation") or SKILLS.get(task.task_type, "editing")
     labels = {
+        "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         "image": ("生成图片", "Generate image"),
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
         "story": ("分析故事", "Analyze story"),
+        "screenplay": ("生成本集剧本", "Adapt episode screenplay"),
         "remake": ("重制视频", "Analyze source video"),
         "video": ("生成视频", "Generate video"),
         "compose": ("合成章节", "Compose episode"),
@@ -110,7 +112,11 @@ async def conversation_for_task(task):
             "pricing": chosen.pricing,
         },
     )
-    await AgentConversation.filter(id=conversation.id).update(active_task_id=task.id)
+    await AgentConversation.filter(id=conversation.id).update(updated_at=datetime.now(timezone.utc))
+    # A nested production task must not replace the active conversational run.
+    active = await AiTask.get_or_none(id=conversation.active_task_id) if conversation.active_task_id else None
+    if active is None or active.status not in {TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued}:
+        await AgentConversation.filter(id=conversation.id, active_task_id=conversation.active_task_id).update(active_task_id=task.id)
     return message
 
 
@@ -245,6 +251,7 @@ async def finish_production_message(task):
         return
     english = task.request_params.get("prompt_language", "en") == "en"
     labels = {
+        "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         3: ("已完成", "Completed"),
         4: ("任务未完成", "Task failed"),
         5: ("后续步骤已停止", "Further steps stopped"),

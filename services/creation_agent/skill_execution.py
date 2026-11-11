@@ -76,13 +76,22 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
-        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
+        for key in ('video_optimizer', 'conversation_id', 'agent_runtime', 'creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
             if key in parent.params:
                 inherited[key] = parent.params[key]
+    from services.creation_agent.video_optimizer import project_optimizer
+    if params.get('novel_id'):
+        from models.novel import Novel
+        project = await Novel.get(id=params['novel_id'])
+        duration_range = params.get('shot_duration_range') or [1, project.shot_duration_max]
+        params = {**params, 'shot_duration_range': [duration_range[0], min(duration_range[1], project.shot_duration_max)]}
+    optimizer = inherited.get('video_optimizer') or (await project_optimizer(params['novel_id'], params.get('team_id')) if params.get('novel_id') else {'mode': 'generic'})
     return {
+        'video_optimizer': optimizer,
         **params,
         **(submission.get() or {}),
         "workflow_version": WORKFLOW_VERSION,
+        "agent_runtime": params.get("agent_runtime", limits.runtime),
         "assistant_model_config_id": chosen.id,
         "agent_configuration": limits.model_dump(),
         "skill_snapshot": snapshot_skills(),
@@ -267,7 +276,14 @@ class SkillExecution:
                      "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}
             seq = await agent_event_log.start(child_message)
             await agent_event_log.append(child_message.id, [event], seq)
+            from services.creation_agent.skill_stream import forward_skill_event
+            await forward_skill_event(event)
             await task_signals.publish(str(self.message.task_id))
+
+        from services.creation_agent.skill_stream import SkillRunActivity
+
+        tool_activity = SkillRunActivity(child_message, str(self.message.task_id),
+            public_thinking=self.params.get('agent_runtime') != 'deepagents')
 
         recorded = RecordedAgentModel(
             model,
@@ -390,8 +406,9 @@ class SkillExecution:
                 from models.agent_operation import AgentOperation
                 from prompts.storyboard_repair import structural_repair
                 merged, checkpoint = storyboard_candidates.merge(output)
+                # JSON object keys must also work with the ORM's optional accelerated encoder.
                 await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:storyboard:{segment}',
-                    defaults={'state': 'completed', 'result': checkpoint})
+                    defaults={'state': 'completed', 'result': json.loads(json.dumps(checkpoint))})
                 if merged is None:
                     raise ModelRetry(structural_repair(self.language, checkpoint))
                 output = merged
@@ -417,8 +434,12 @@ class SkillExecution:
             request_aspect_ratio = project.aspect_ratio or "16:9"
             if initial_assets is not None and asset_candidates and not asset_checkpoint:
                 asset_candidates.merge(initial_assets, self.snapshot, self.language, request_aspect_ratio)
+            from prompts.project_settings import audiovisual_guidance
             project_facts = {
                 "name": project.name,
+                "audiovisual_guidance": audiovisual_guidance(project.audiovisual_guidance, self.language),
+                "shot_duration_max": project.shot_duration_max,
+                "storyboard_enabled": project.storyboard_enabled,
                 "style_key": project.style_key,
                 "custom_style_prompt": project.custom_style_prompt,
                 "aspect_ratio": project.aspect_ratio,
@@ -498,17 +519,13 @@ class SkillExecution:
                         user_input,
                         deps=self.snapshot,
                         model=recorded,
+                        event_stream_handler=tool_activity,
                         usage_limits=UsageLimits(
                             request_limit=limits.request_limit,
                             tool_calls_limit=limits.tool_calls_limit,
                             total_tokens_limit=limits.total_tokens_limit,
                         ),
-                        model_settings={
-                            "max_tokens": min(
-                                limits.max_output_tokens,
-                                chosen.max_tokens or limits.max_output_tokens,
-                            )
-                        },
+                        model_settings=limits.output_model_settings(chosen.max_tokens),
                     )
                 except ModelHTTPError as error:
                     request_rejected = 400 <= error.status_code < 500 and error.status_code not in {408, 409}

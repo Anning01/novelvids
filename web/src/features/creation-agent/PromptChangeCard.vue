@@ -13,8 +13,8 @@ const expanded = ref(false)
 const operations = { get create() { return tr('已新增') }, get update() { return tr('已修改') }, get delete() { return tr('已移除') } }
 const summary = computed(() => props.change.reverted_at ? tr('已撤销') : [...new Set(props.change.changes.map(item => item.operation ? operations[item.operation] : tr('已保存')))].join('、'))
 const removed = (target: AgentChangeItem) => props.change.reverted_at ? target.operation === 'create' : target.operation === 'delete'
-const labels: Record<string, string> = { get canonical_name() { return tr('名称') }, get name() { return tr('形态名称') }, get aliases() { return tr('别名') }, get description() { return tr('描述') },
-  get base_traits() { return tr('图片提示词') }, prompt: '分镜提示词', get duration() { return tr('时长') }, get source_chapters() { return tr('适用章节') }, get chapter_numbers() { return tr('适用章节') },
+const labels: Record<string, string> = { get canonical_name() { return tr('名称') }, get name() { return tr('名称') }, get aliases() { return tr('别名') }, get description() { return tr('描述') },
+  get content() { return tr('剧本正文') }, get base_traits() { return tr('图片提示词') }, prompt: '分镜提示词', get duration() { return tr('时长') }, get source_chapters() { return tr('适用章节') }, get chapter_numbers() { return tr('适用章节') },
   get is_global() { return tr('全书共用') }, get asset_ids() { return tr('出镜设定') }, get variant_bindings() { return tr('形态绑定') } }
 function text(value: Record<string, unknown>) {
   return Object.entries(value).filter(([key]) => key in labels).map(([key, content]) => {

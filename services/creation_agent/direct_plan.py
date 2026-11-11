@@ -36,7 +36,7 @@ async def prepare_direct_plan(task, execution):
         # The production handler supplies the full chapter to the model; no
         # separate reading call or fabricated reading-complete event is needed.
         plan.chapters = [ChapterEvidence(chapter_id=chapter.id, number=chapter.number, name=chapter.name,
-            version=chapter_version(chapter), characters=len(chapter.content or ''), pages=[])]
+            version=chapter_version(chapter), characters=len(chapter.production_text or ''), pages=[])]
     if operation == 'storyboard':
         plan.chapter_scenes[str(target_id)] = {str(row.id): await object_version(row) for row in await Scene.filter(chapter_id=target_id)}
     if operation in {'image', 'video'}:

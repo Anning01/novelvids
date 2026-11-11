@@ -17,6 +17,7 @@ from services.llm.json_output import (
 )
 from services.storyboard.chunking import NarrativeChunker
 from services.storyboard.strategies import storyboard_strategy_factory
+from services.storyboard.validation import validate_storyboard_duration
 
 
 def _message_characters(messages: list[dict[str, str]]) -> int:
@@ -74,6 +75,7 @@ async def generate_storyboard(
     creative_constraints: list[dict] | None = None,
     previously_seen_assets: list[str] | None = None,
     introduction_descriptions: dict[str, str] | None = None,
+    shot_duration_range: list[int] | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
     from services.creation_agent.skill_execution import current_execution
@@ -85,7 +87,7 @@ async def generate_storyboard(
         facts = {'chapter': long_text,
             'entities': [entity.model_dump() for entity in entities], 'strategy': storyboard_strategy,
             'constraints': creative_constraints or []}
-        if duration_range := execution.params.get("shot_duration_range"):
+        if duration_range := execution.params.get("shot_duration_range", shot_duration_range):
             facts["shot_duration_range"] = duration_range
         requirement = asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions)
         options = {"additional_instructions": requirement} if requirement else {}
@@ -104,6 +106,7 @@ async def generate_storyboard(
         creative_constraints=creative_constraints or [],
         previously_seen_assets=seen_assets,
         introduction_descriptions=introduction_descriptions,
+        shot_duration_range=shot_duration_range,
     )
     chunker = NarrativeChunker.for_context_limit(
         max_context_characters,
@@ -128,6 +131,7 @@ async def generate_storyboard(
             creative_constraints=creative_constraints or [],
             previously_seen_assets=seen_assets,
             introduction_descriptions=introduction_descriptions,
+            shot_duration_range=shot_duration_range,
         )
         try:
             batch_storyboard, completion = await create_json_completion(
@@ -149,6 +153,7 @@ async def generate_storyboard(
             continue
 
         for shot in batch_storyboard.shots:
+            validate_storyboard_duration(shot, shot_duration_range)
             shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
             for name in visible_storyboard_assets(shot, entities):
                 if name not in seen_assets:

@@ -52,6 +52,56 @@ class CreationChanges:
         if self.authorization_check:
             await self.authorization_check()
 
+    async def read_episode_script(self, chapter_id: int, page: int = 1):
+        from services.creation_agent.object_state import object_version
+        await self.authorize()
+        chapter = await self.objects.chapter(chapter_id)
+        size = self.chapter_character_budget
+        version = await object_version(chapter)
+        self.observed[('chapter', chapter.id)] = version
+        read = self.read_snapshots.setdefault(('chapter', chapter.id), {'version': version, 'pages': set()})
+        if read['version'] != version:
+            read.update(version=version, pages=set())
+        read['pages'].add(page)
+        return {'id': chapter.id, 'number': chapter.number, 'name': chapter.name, 'version': version,
+            'content': chapter.production_text[(page - 1) * size:page * size], 'page': page, 'has_more': page * size < len(chapter.production_text)}
+
+    async def revise_episode_script(self, chapter_id: int, content: str, name: str | None, tool_call_id: str):
+        from models.creation_agent import PromptChange
+        from services.creation_agent.object_state import object_state, object_version, object_label
+        from services.creation_objects import project_write
+        from services.creation_agent.tools import _digest
+        from controllers.chapter import chapter_controller
+        from schemas.chapter import ChapterPatch
+        digest = _digest({'chapter_id': chapter_id, 'content': content, 'name': name})
+        async with project_write(self.novel_id):
+            await self.authorize()
+            prior = await PromptChange.get_or_none(task_id=self.task_id, tool_call_id=tool_call_id)
+            if prior:
+                if prior.request_hash != digest:
+                    raise ValueError('同一操作标识不能对应不同内容')
+                return prior
+            chapter = await self.objects.chapter(chapter_id)
+            await self.scope.target('chapter', chapter)
+            await self.objects.ensure_idle('chapter', chapter)
+            if self.observed.get(('chapter', chapter.id)) != await object_version(chapter):
+                raise ValueError('剧本尚未读取或已有新修改，请重新读取')
+            read = self.read_snapshots.get(('chapter', chapter.id), {})
+            pages = max(1, (len(chapter.production_text) + self.chapter_character_budget - 1) // self.chapter_character_budget)
+            if not set(range(1, pages + 1)).issubset(read.get('pages', set())):
+                raise ValueError('请先读完本集正文的所有分页，再保存完整导演稿')
+            before = await object_state(chapter)
+            values = {'screenplay': content, **({'name': name} if name is not None else {})}
+            chapter = await chapter_controller.patch(chapter.id, ChapterPatch(**values))
+            after = await object_state(chapter)
+            version = await object_version(chapter)
+            change = await PromptChange.create(novel_id=self.novel_id, task_id=self.task_id,
+                tool_call_id=tool_call_id, request_hash=digest, changes=[{'kind': 'chapter', 'operation': 'update',
+                    'target_id': chapter.id, 'chapter_id': chapter.id, 'target_label': await object_label(chapter),
+                    'before': before, 'after': after, 'after_version': version}])
+            self.observed[('chapter', chapter.id)] = version
+            return change
+
     async def prepare_context(self) -> dict:
         """Resolve the frozen selection and its rules before asking the model."""
         await self.authorize()

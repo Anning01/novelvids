@@ -181,10 +181,11 @@ def _compose_video_prompt(
     custom_style_prompt: str | None = None,
     language: str = "zh",
     image_indices: dict[str, int] | None = None,
+    image_format: str = "[图{}]",
 ) -> str:
     """组合视频生成提示词：分镜提示词 + 参考素材提及 + 风格定调。"""
     from prompts.video import normalize_last_frame_continuity_prompt
-    prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(scene_prompt, language), referenced_media, image_indices=image_indices)
+    prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(scene_prompt, language), referenced_media, image_indices=image_indices, image_format=image_format)
     style_suffix = video_project_style_suffix(style_key, custom_style_prompt, language)
     if style_suffix:
         prompt = f"{prompt}\n\n{style_suffix}".strip()
@@ -368,9 +369,18 @@ class VideoController(CRUDBase[Video, dict, dict]):
         prompt_language = await generation_language()
         prompt = normalize_last_frame_continuity_prompt(scene.prompt or "", prompt_language)
         metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
+        prompt_model = metadata.get("video_prompt_model")
+        if prompt_model and prompt_model != config.video_model_type:
+            raise HTTPException(409, localized_message("请恢复通用稿或选择与专项稿匹配的视频模型"))
+        from prompts.storyboard_sheet_binding import model_image_format
+        image_format = model_image_format(prompt_model) if prompt_model else "[图{}]"
+        general = ((scene.prompt_params or {}).get("generic_prompt")
+                   or ((metadata.get("work_package") or {}).get("drafts") or {}).get("general")
+                   or (metadata.get("work_package") or {}).get("prompt") or metadata.get("generic_video_prompt") or "")
+        asset_prompt = general + "\n" + prompt if prompt_model else prompt
         try:
             subjects = await resolve_assets(
-                prompt, novel_id, chapter_number=scene.chapter.number,
+                asset_prompt, novel_id, chapter_number=scene.chapter.number,
                 selected_asset_ids=[asset.id for asset in scene.assets],
                 selected_variant_ids=normalize_selected_variant_ids(metadata.get("asset_variant_ids")),
             )
@@ -506,10 +516,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
             )
         image_indices = {mention: ordered_images.index(url) + 1 for mention, url in image_mentions.items()}
         provider_prompt = _compose_video_prompt(prompt, referenced_media, novel.style_key if novel else None,
-            novel.custom_style_prompt if novel else None, language=prompt_language, image_indices=image_indices)
-        if current_execution.get():
+            novel.custom_style_prompt if novel else None, language=prompt_language, image_indices=image_indices, image_format=image_format)
+        if current_execution.get() or prompt_model:
             from prompts.video import normalize_last_frame_continuity_prompt
-            provider_prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(prompt, prompt_language), referenced_media, image_indices=image_indices)
+            provider_prompt = render_reference_mentions(normalize_last_frame_continuity_prompt(prompt, prompt_language), referenced_media, image_indices=image_indices, image_format=image_format)
         if req.generation_mode == "keyframes":
             input_image_count = int(bool(first_frame)) + int(bool(last_frame))
         else:

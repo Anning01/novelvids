@@ -85,6 +85,8 @@ it('selects a backend strategy on project creation and persists it', async () =>
     style_key: 'realistic-general',
     custom_style_prompt: null,
   }))
+  expect(api.splitNovel).not.toHaveBeenCalled()
+  expect(push).toHaveBeenCalledWith({name: 'short-drama-agent', params: {projectId: 19}})
 })
 
 

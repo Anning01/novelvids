@@ -25,6 +25,7 @@ import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
 import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import { useCreationAgentStore } from '@/features/creation-agent/store'
 import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
@@ -42,6 +43,7 @@ interface ManualProjectMeta {
   aspectRatio: string
   resolution: string
   style: string
+  workflowKind?: 'script' | 'remake'
   creationMode: 'agent' | 'manual'
 }
 
@@ -64,6 +66,7 @@ function readProjectMeta(): ManualProjectMeta {
 
 const route = useRoute()
 const router = useRouter()
+const agentStore = useCreationAgentStore()
 const projectId = computed(() => Number(route.params.projectId))
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 const selectedChapterId = computed(() => Number(route.query.chapter))
@@ -220,6 +223,7 @@ async function loadProject(chapterId = selectedChapterId.value) {
       aspectRatio: settings.aspectRatio || project.value.aspectRatio,
       resolution: settings.resolution || project.value.resolution,
       style: settings.style || project.value.style,
+      workflowKind: projectResponse.data.workflow_kind,
       creationMode: projectResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     selectedChapter.value = chapterResponse?.data ?? null
@@ -365,7 +369,8 @@ async function extractSelectedChapterAssets() {
   submittingExtraction.value = true
   extractionSubmissionError.value = ''
   try {
-    const task = (await api.extract(chapter.id)).data
+    const conversationId = agentStore.projectId === projectId.value ? agentStore.conversationId : null
+    const task = (await (conversationId ? api.extract(chapter.id, conversationId) : api.extract(chapter.id))).data
     extractionTask.value = task
     await monitorExtractionTask(task.id, true)
   } catch (error) {
@@ -724,7 +729,7 @@ onBeforeUnmount(() => {
       :resolution="project.resolution"
       :style-name="project.style"
       active-phase="settings"
-      :creation-mode="project.creationMode"
+      :show-script-phase="project?.workflowKind !== 'remake'"
       :chapters="chapters"
       :active-chapter-id="selectedChapter?.id || 0"
       :agent-targets="editingVariantId ? [{ kind: 'variant', id: editingVariantId }] : editingAsset ? [{ kind: 'asset', id: editingAsset.id }] : []"

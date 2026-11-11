@@ -167,7 +167,7 @@ function findNextMention(value: string, start: number) {
   for (const option of props.options.filter(item => item.kind !== 'duration')) {
     const canonicalName = option.syntax.match(/^@\{([^{}:#]+)(?:#[^{}]+)?\}$/)?.[1]
     const legacyNames = canonicalName ? [canonicalName, ...(option.aliases || [])] : []
-    const syntaxes = [option.syntax, ...legacyNames.map(name => `@${name}`)]
+    const syntaxes = [option.syntax, ...(option.aliases || []).map(name => `@{${name}}`), ...legacyNames.map(name => `@${name}`)]
     for (const syntax of syntaxes) {
       const index = value.indexOf(syntax, start)
       if (index < 0 || (match && (index > match.index || (index === match.index && syntax.length <= match.length)))) continue

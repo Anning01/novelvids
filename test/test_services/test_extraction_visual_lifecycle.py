@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 import json
 
 import pytest
@@ -284,7 +285,7 @@ async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(
             [{'name': placeholder.canonical_name, 'base_traits': prompt}] if repair_omission else [])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
             {'persons': persons, 'scenes': [], 'items': []})])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -352,7 +353,7 @@ async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
             persons.append({'name': '合格人物', 'base_traits': '不允许覆盖已通过的设计'})
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'persons': persons, 'scenes': [], 'items': []})])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -366,3 +367,41 @@ async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
     checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
     assert checkpoint.result['issues'] == []
     assert len(checkpoint.result['accepted']['persons']) == 3
+
+
+@pytest.mark.asyncio
+async def test_return_to_registered_identity_uses_the_same_variant_across_chapters():
+    novel = await Novel.create(name='三种身份')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='主资产', base_traits='基础设计')
+    forms = [await AssetVariant.create(asset=asset, name=name, base_traits=name,
+        images=[name + '.png'], chapter_numbers=[number])
+        for number, name in enumerate(('行脚医装', '官服', '夜行装'), 1)]
+    service = AssetUpsertService()
+    for chapter, index, label in [(4, 2, '夜行装'), (9, 1, '巡官'), (10, 0, '郎中装'), (10, 0, '郎中装')]:
+        form = forms[index]
+        saved = await service.save_result(novel_id=novel.id, chapter_number=chapter, include_ids=True,
+            result=result(Person, 'persons', variant={'name': label, 'existing_variant_id': form.id,
+                'base_traits': '换一种说法', 'change_reason': '剧本沿用这一身份的旧装'}))
+        assert saved['persons'][0]['variant_id'] == form.id
+    await forms[0].refresh_from_db()
+    assert forms[0].chapter_numbers == [1, 10]
+    assert forms[0].base_traits == '行脚医装' and forms[0].images == ['行脚医装.png']
+    assert await AssetVariant.filter(asset=asset).count() == 3
+
+
+@pytest.mark.asyncio
+async def test_invalid_reuse_reference_cannot_fall_back_to_creating_or_binding_a_namesake():
+    novel = await Novel.create(name='核对形态归属')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='主资产', base_traits='基础设计')
+    mine = await AssetVariant.create(asset=asset, name='医装', chapter_numbers=[1])
+    other = await Asset.create(novel=novel, asset_type=1, canonical_name='另一人')
+    foreign = await AssetVariant.create(asset=other, name='医装')
+    other_form = await AssetVariant.create(asset=asset, name='捕房官服', chapter_numbers=[9])
+    for variant_id in (foreign.id, foreign.id + 1000, other_form.id):
+        with pytest.raises(ValueError):
+            await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=10,
+                result=result(Person, 'persons', variant={'name':'医装', 'existing_variant_id':variant_id,
+                    'base_traits':'候选', 'change_reason':'沿用'}))
+    await mine.refresh_from_db()
+    assert mine.chapter_numbers == [1]
+    assert await AssetVariant.filter(asset=asset).count() == 2

@@ -53,7 +53,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             or chapter.novel.storyboard_strategy
         )
         all_assets = await Asset.filter(novel_id=chapter.novel_id)
-        assets = [a for a in all_assets if chapter.number in (a.source_chapters or [])]
+        assets = [a for a in all_assets if a.is_global or chapter.number in (a.source_chapters or [])]
         from services.creation_agent.step_context import context_assets
         additional_assets = await context_assets(request_params)
         assets = list({asset.id: asset for asset in [*assets, *additional_assets]}.values())
@@ -70,6 +70,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
         # 3. 调用 OpenAI API 生成分镜
         creative_constraints = await creation_memory.for_generation(chapter, assets)
+        from prompts.project_settings import audiovisual_guidance
+        creative_constraints.append({"scope": {"kind": "project"},
+                                     "content": audiovisual_guidance(chapter.novel.audiovisual_guidance, prompt_language)})
         seen_assets = await previously_seen_assets(chapter, entities)
         start_time = time.time()
 
@@ -78,7 +81,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             
             storyboard, api_metadata = await generate_storyboard(
                 client=client,
-                long_text=chapter.content,
+                long_text=chapter.production_text,
                 entities=entities,
                 model=model,
                 supports_json_output=supports_json_output,
@@ -89,11 +92,27 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 storyboard_strategy=strategy.key,
                 creative_constraints=creative_constraints,
                 previously_seen_assets=seen_assets,
+                shot_duration_range=request_params.get("shot_duration_range"),
                 introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )
 
             end_time = time.time()
             request_duration = end_time - start_time
+
+            from services.creation_agent.skill_execution import current_execution
+            execution = current_execution.get()
+            optimizer = execution.params.get('video_optimizer', {}) if execution else {}
+            optimized = {}
+            if optimizer.get('mode') == 'optimize':
+                from schemas.agent_workflow import CompletePrompt
+                from services.creation_agent.video_optimizer import optimizer_instructions
+                for shot in storyboard.shots:
+                    result = await execution.generate('video', {'segment': f'optimizer:{shot.sequence}', 'generic_prompt': shot.prompt,
+                        'submitted_media': [],
+                        'duration': shot.duration, 'selected_model_type': optimizer['model_type'],
+                        'reference_assets': [entity.model_dump() for entity in entities]}, CompletePrompt,
+                        additional_instructions=optimizer_instructions(optimizer))
+                    optimized[shot.sequence] = {'model_type': optimizer['model_type'], 'skill': optimizer['skill'], 'prompt': result.prompt}
 
             # 4. 保存分镜到数据库
             scenes_created = await self._save_scenes(
@@ -104,7 +123,20 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 prompt_language=prompt_language,
                 entities=entities,
                 storyboard_strategy=strategy.key,
+                optimized_prompts=optimized,
             )
+
+            sheet_tasks, sheet_errors = [], []
+            if chapter.novel.storyboard_enabled:
+                from services.storyboard.sheets import submit_sheet
+                for scene in scenes_created:
+                    try:
+                        task = await submit_sheet(scene.id, team_id=request_params.get("team_id"), user_id=request_params.get("user_id"))
+                        sheet_tasks.append(str(task.id))
+                    except Exception as error:
+                        import logging
+                        logging.getLogger(__name__).warning("storyboard_sheet_submit_failed scene_id=%s error_type=%s", scene.id, type(error).__name__)
+                        sheet_errors.append(scene.id)
 
             from services.creation_agent.skill_execution import current_execution
             from models.agent_operation import AgentOperation
@@ -118,6 +150,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "chapter_id": chapter_id,
                 "scenes_created": len(scenes_created),
                 "scene_ids": [s.id for s in scenes_created],
+                "storyboard_sheet_task_ids": sheet_tasks, "storyboard_sheet_unsubmitted": sheet_errors,
+                "video_optimizer": {key: value for key, value in optimizer.items() if key != "files"},
                 "total_shots": len(storyboard.shots),
                 "request_duration": round(request_duration, 2),
                 "token_usage": api_metadata.get("usage", {}),
@@ -138,6 +172,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         prompt_language: str = "zh",
         entities: list[SceneEntity] | None = None,
         storyboard_strategy: str | None = None,
+        optimized_prompts: dict | None = None,
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
         chapter = await Chapter.get(id=chapter_id)
@@ -148,8 +183,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             # Validate all candidate shots before any persistent changes.
             from services.creation_agent.prompt_edits import validate_prompt_dependencies
             from services.creation_agent.operations import CreationOperations
+            from services.storyboard.validation import validate_skill_storyboard_shot
             for shot in storyboard.shots:
-                from services.storyboard.validation import validate_skill_storyboard_shot
                 validate_storyboard_duration(shot, execution.params.get("shot_duration_range"))
                 validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])
                 validate_prompt_dependencies(shot.prompt, entities or [])
@@ -171,21 +206,22 @@ class StoryboardTaskHandler(BaseTaskHandler):
                         task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
                         await task.save(update_fields=['request_params'])
                     rows = await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
-                        prompt_language, entities, storyboard_strategy)
+                        prompt_language, entities, storyboard_strategy, optimized_prompts)
                     return {'scene_ids': [row.id for row in rows]}
             result = await execute_step(execution.params['task_id'], 'persist:storyboard', persist, atomic=True)
             return await Scene.filter(id__in=result['scene_ids']).order_by('sequence')
         async with project_write(chapter.novel_id):
             return await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
-                                              prompt_language, entities, storyboard_strategy)
+                                              prompt_language, entities, storyboard_strategy, optimized_prompts)
 
     async def _persist_scenes(self, chapter: Chapter, storyboard, api_metadata: dict, request_duration: float,
-                             prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None) -> List[Scene]:
+                             prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None, optimized_prompts: dict | None = None) -> List[Scene]:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
+        await chapter.fetch_related("novel")
         for shot in storyboard.shots:
             normalized = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities or []))
             bindings = shot_variant_bindings(normalized, entities or [])
@@ -223,8 +259,12 @@ class StoryboardTaskHandler(BaseTaskHandler):
             }
 
             # 解析 duration 为浮点数
+            if shot.blocking_map:
+                prompt_params["blocking_map"] = shot.blocking_map.model_dump(exclude_none=True)
             if shot.segments:
                 prompt_params["segments"] = [segment.model_dump() for segment in shot.segments]
+            if shot.visible_asset_names is not None:
+                prompt_params["visible_asset_names"] = shot.visible_asset_names
             if shot.reference_only_types:
                 prompt_params["reference_only_types"] = list(shot.reference_only_types)
             duration_value = float(shot.duration.replace("s", ""))
@@ -273,6 +313,17 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     entities=entities or [],
                     strategy=strategy,
                 )
+            if optimized_prompts and shot.sequence in optimized_prompts:
+                prompt_params["model_optimized_prompt"] = optimized_prompts[shot.sequence]
+                prompt_params["generic_prompt"] = prompt
+            if chapter.novel.storyboard_enabled:
+                import json
+                from prompts.skills.scripts.storyboard_sheets import prepare
+                from prompts.skill_pack import read_skill
+                templates = json.loads(read_skill("storyboard_sheet_templates"))[normalize_prompt_language(prompt_language)]
+                data = shot.model_dump()
+                data["prompt"] = prompt
+                prompt_params["storyboard_sheet"] = prepare({"shots": [data]}, templates)[0]
             # 镜头实际引用的资产 ID，持久化到 scene.assets（与画布工作流共用同一份引用数据）
             referenced_asset_ids = list(dict.fromkeys(
                 entity.asset_id

@@ -167,6 +167,24 @@ flowchart LR
 
 Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
 
+## Standalone creative skills
+
+Story analysis is built into the workbench. The three installable creative skills are maintained in this repository under `prompts/skills/`, one directory per skill. Install any stage individually in an assistant that loads `SKILL.md`. Available packages cover screenplay adaptation (`novelvids-screenplay`), asset design and storyboarding. Image production, video production and reference-video analysis are available in the workbench. Each skill handles revisions to its own output. The host agent coordinates requests spanning chapters or stages.
+
+From the repository root, use Python's standard library to list, export or install a package:
+
+```bash
+python3 scripts/export_skill.py --list
+python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
+python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
+```
+
+The storyboard skill has a project-wide picture-board switch, off by default. From the production project root, run `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` (or `off`). When enabled, each video generation segment gets a single black-and-white storyboard image and a companion video prompt. The action determines the panel count.
+
+Storyboard and video skills keep the generic prompt. Install the optional optimizer for your video model: `sd2-pe` for Seedance 2.0 (standard, Mini and Fast), `sd25-pe` for Seedance 2.5, `h3-prompt-writing` for MiniMax H3, or `wan3-pe` for Wan 3.0. Pass the active video model to the skill or set `video_model_type` in the production project’s `novelvids.config.json`. See the [model routing and official installation instructions](prompts/skills/novelvids-video/references/model_optimization.md).
+
+The exported directory contains its entrypoint, referenced rules and MIT license. The last command installs a project-local skill. Invoke it with `$novelvids-screenplay` and supply the source passage and target running time. Each source entrypoint under `prompts/skills/novelvids-*/` explains the inputs and deliverable. The application and exports share the rules under `references/`. Shared resources are included in each export. To update a locally edited package, export to a fresh directory and review the differences.
+
 ## Local development
 
 Install Python 3.12+, Node.js 22.12+, uv and FFmpeg.
@@ -188,7 +206,7 @@ Open [http://localhost:3000](http://localhost:3000). The frontend proxies reques
 
 ## Development and community
 
-The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
+The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM, Deep Agents and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
 
 Bring a real creative problem: [report a bug](https://github.com/Anning01/novelvids/issues/new), [discuss an idea](https://github.com/Anning01/novelvids/issues), or [contribute](https://github.com/Anning01/novelvids/pulls). For generation problems, include a shareable minimal example, model configuration type and reproduction steps. Keep keys and private media out of reports.
 
@@ -213,3 +231,7 @@ Third-party dependencies, fonts, media and model services retain their own terms
 ## Star history
 
 [![NovelVids Star history](https://novelvids-star-history.864399407.workers.dev/card.svg)](https://github.com/Anning01/novelvids/stargazers)
+
+New creation-assistant conversations use the Python Deep Agents runtime for tool execution, on-demand skills and context compaction. Application services retain permission, version and output-contract checks. Conversation checkpoints default to `data/creation_agent_checkpoints.db`; set `CREATION_AGENT_CHECKPOINT_PATH` to change the location and include this state file in backups when retaining conversation recovery. Historical runs keep their original execution path.
+
+The script workspace stores project visual style, audiovisual direction and an optional line-art storyboard switch (off by default). New shots can generate one storyboard image each; existing shots offer individual generation and retry. Images can be attached as video references with companion guidance. Installed official prompt optimizers are loaded from `CREATION_AGENT_OPTIONAL_SKILLS_PATH` (default `.agents/skills`) for the selected project video model. Generic and model-specific prompts are retained separately.

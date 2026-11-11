@@ -252,7 +252,7 @@ async function createProject() {
       storyboard_strategy: storyboardStrategy.value,
       storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
     })
-    sessionStorage.setItem('short-drama-manual-project', JSON.stringify({
+    sessionStorage.setItem('short-drama-agent-project', JSON.stringify({
       projectId: response.data.id,
       name: response.data.name,
       aspectRatio: aspectRatio.value,
@@ -261,8 +261,8 @@ async function createProject() {
       styleKey: styleId.value,
       storyboardStrategy: storyboardStrategy.value,
     }))
-    notice.success(tr('人工短剧项目已创建，正在进入设定工作区'))
-    await router.push({ name: 'short-drama-manual', params: { projectId: response.data.id } })
+    notice.success(tr('空白项目已创建'))
+    await router.push({ name: 'short-drama-agent', params: { projectId: response.data.id } })
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
@@ -342,7 +342,7 @@ async function resumeImport() {
             <div class="manual-mode-copy">
               <p>MANUAL WORKSPACE</p>
               <h2 id="manual-mode-title">{{ tr('从空白项目开始') }}</h2>
-              <span>{{ tr('不上传剧本，进入工作台后手动建立创作内容与生产流程。') }}</span>
+              <span>{{ tr('可以先和创作助手构思，也可以新增一集开始写剧本。') }}</span>
             </div>
             <div class="manual-mode-features" :aria-label="tr('人工模式能力')">
               <span><Layers3 :size="15" />{{ tr('自由搭建') }}</span>

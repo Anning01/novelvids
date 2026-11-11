@@ -22,6 +22,7 @@ vi.mock('@/api', async (importOriginal) => {
     api: {
       ...actual.api,
       configs: vi.fn(),
+      remakeCapabilities: vi.fn(),
       novel: vi.fn(),
       novelMeta: vi.fn(),
       novelAnalysis: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api', async (importOriginal) => {
       assets: vi.fn(),
       storyboardStrategies: vi.fn(),
       analyzeNovel: vi.fn(),
+      generateScreenplay: vi.fn(),
       task: vi.fn(),
       updateNovel: vi.fn(),
       updateChapter: vi.fn(),
@@ -54,6 +56,11 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()
+  vi.mocked(api.remakeCapabilities).mockResolvedValue({code: 0, message: '', data: {
+    media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
+    aspect_ratios: ['16:9', '9:16'], resolutions: ['720p', '1080p', '1080P'],
+    styles: [{key: 'auto', label: 'AI 识别风格'}, {key: 'xianxia-3d', label: '3D仙侠'}],
+  }})
   vi.mocked(api.configs).mockResolvedValue({
     code: 0,
     message: 'ok',
@@ -68,7 +75,7 @@ beforeEach(() => {
       author: 'Agent 创建',
       description: 'Agent 模式 · 9:16 · 720p · 写实通用',
       total_chapters: 1,
-      content_length: 0,
+      content_length: 200,
       storyboard_strategy: 'narration',
       storyboard_setting: '旁白规则',
       created_at: '2026-08-06T00:00:00.000Z',
@@ -216,7 +223,8 @@ it('reanalysis replaces the old failed run only after a new task is admitted', a
   await flushPromises()
   expect(api.task).toHaveBeenCalledWith('new-run')
   expect(wrapper.text()).toContain('剧本分析完成')
-  expect(wrapper.text()).toContain('新的分析结果')
+  expect(wrapper.text()).toContain('冒险')
+  expect(wrapper.find('.outline-card').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('外部请求结果待核对')
 })
 
@@ -237,8 +245,10 @@ it('keeps completed story analysis usable when only the cover is awaiting review
   expect(wrapper.text()).toContain('剧本分析完成')
   expect(wrapper.text()).not.toContain('分析失败')
   expect(wrapper.text()).not.toContain('外部请求结果待核对')
-  expect(wrapper.text()).toContain('封面失败后仍可使用的大纲')
-  expect(wrapper.text()).toContain('林舟')
+  expect(wrapper.text()).toContain('冒险')
+  expect(wrapper.text()).not.toContain('封面失败后仍可使用的大纲')
+  expect(wrapper.text()).not.toContain('林舟')
+  expect(wrapper.text()).not.toContain('人物小传')
   expect(wrapper.get('.creation-cover-notice').text()).toContain('封面暂未生成')
   expect(wrapper.findAll('button').some(button => button.text() === '编辑内容')).toBe(true)
   expect(wrapper.find('.analysis-progress-card').exists()).toBe(false)
@@ -287,4 +297,175 @@ it('sends only changed fields via patch when saving edits', async () => {
   // updateNovel called with diff patch only
   expect(api.updateNovel).toHaveBeenCalledTimes(1)
   expect(api.updateNovel).toHaveBeenCalledWith(9, { name: '修改后的名字' })
+})
+
+it.each(['light', 'dark'])('shows story results while the cover is pending (%s)', async theme => {
+  document.documentElement.dataset.theme = theme
+  const task = {
+    id: 'cover-running', task_type: 5, status: TaskStatusEnum.PROCESSING, created_at: '',
+    response_data: { analysis_completed: true, cover_status: 'pending', book_types: ['冒险'],
+      story_outline: '旅人回家。', key_characters: [], chapter_count: 1 },
+  }
+  vi.mocked(api.novelAnalysis).mockResolvedValue({ code: 0, message: '', data: task })
+  vi.mocked(api.task).mockResolvedValue({ code: 0, message: '', data: task })
+  const wrapper = mount(ShortDramaAgentPage, { global: {
+    plugins: [pinia], components: { AppButton }, stubs: { RouterLink: { template: '<a><slot /></a>' } },
+  } })
+  try {
+    await flushPromises()
+    expect(wrapper.text()).toContain('分析已完成，封面生成中')
+    expect(wrapper.find('.outline-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('旅人回家。')
+    expect(wrapper.text()).toContain('冒险')
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.theme
+  }
+})
+
+
+it('opens and refreshes a finished imported script without creating an analysis task', async () => {
+  const source = (await api.novelMeta(9)).data
+  vi.mocked(api.novelMeta).mockResolvedValue({code: 0, message: '', data: {...source, content_length: 0, author: undefined}})
+  vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
+  for (let index = 0; index < 2; index += 1) {
+    const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+    await flushPromises()
+    expect(wrapper.text()).toContain(chapter.content)
+    expect(wrapper.text()).toContain('剧本已载入')
+    expect(wrapper.text()).not.toContain('没有可分析')
+    expect(wrapper.findAll('button').some(button => button.text() === '重新分析')).toBe(false)
+    wrapper.unmount()
+  }
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
+})
+
+it('opens the original and generates only when the user clicks, preserving both texts', async () => {
+  vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
+  const saved = { ...chapter, screenplay: '# 第一集 救人\n**1-1　徐家村泥路　外　黄昏**\n出场：徐长寿\n△ 长寿牵牛停下。' }
+  vi.mocked(api.chapter).mockResolvedValueOnce({code: 0, message: '', data: chapter})
+    .mockResolvedValue({code: 0, message: '', data: saved})
+  vi.mocked(api.generateScreenplay).mockResolvedValue({code: 0, message: '', data: {id: 'adapt', task_type: 10, status: 2, created_at: ''}})
+  vi.mocked(api.task).mockResolvedValue({code: 0, message: '', data: {id: 'adapt', task_type: 10, status: 3, created_at: ''}})
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  await flushPromises()
+  expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('原文')
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
+  expect(api.generateScreenplay).not.toHaveBeenCalled()
+  await wrapper.get('.episode-doc-tools > button').trigger('click')
+  await flushPromises()
+  expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id)
+  expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('导演剧本')
+  expect(wrapper.get('.scene-heading').text()).toBe('1-1　徐家村泥路　外　黄昏')
+  await wrapper.get('.episode-doc-tabs button').trigger('click')
+  expect(wrapper.text()).toContain(chapter.content)
+  wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('exposes the storyboard switch without edit mode and only patches its setting (%s)', async theme => {
+  document.documentElement.dataset.theme = theme
+  vi.mocked(api.updateNovel).mockResolvedValue({code: 0, message: 'ok', data: {id: 9, storyboard_enabled: true} as Novel})
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  try {
+    await flushPromises()
+    const toggle = wrapper.get('[role="switch"][aria-label="逐镜线稿故事版"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(api.updateNovel).toHaveBeenCalledWith(9, {storyboard_enabled: true})
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(api.analyzeNovel).not.toHaveBeenCalled()
+  } finally { wrapper.unmount(); delete document.documentElement.dataset.theme }
+})
+
+it('keeps the storyboard switch off after a save failure', async () => {
+  vi.mocked(api.updateNovel).mockRejectedValue(new Error('保存失败'))
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  await flushPromises()
+  await wrapper.get('[role="switch"][aria-label="逐镜线稿故事版"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false')
+  expect(wrapper.get('[role="switch"]').attributes('disabled')).toBeUndefined()
+  wrapper.unmount()
+})
+
+it('edits the maximum shot duration without changing other project preferences', async () => {
+  vi.mocked(api.updateNovel).mockResolvedValue({code: 0, message: 'ok', data: {id: 9, shot_duration_max: 12} as Novel})
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  await flushPromises()
+  expect(wrapper.get('.production-controls').text()).toContain('15s')
+  await wrapper.findAll('button').find(b => b.text() === '编辑内容')!.trigger('click')
+  await wrapper.get('input[aria-label="单分镜最长时长"]').setValue(12)
+  await wrapper.findAll('button').find(b => b.text().includes('保存修改'))!.trigger('click')
+  await flushPromises()
+  expect(api.updateNovel).toHaveBeenCalledWith(9, {shot_duration_max: 12})
+  wrapper.unmount()
+})
+
+
+it.each([true, false])('previews the duration during a drag and saves only on release (success=%s)', async success => {
+  const save = vi.mocked(api.updateNovel)
+  if (success) save.mockResolvedValue({code: 0, message: 'ok', data: {id: 9, shot_duration_max: 22} as Novel})
+  else save.mockRejectedValue(new Error('保存失败'))
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  try {
+    await flushPromises()
+    const range = wrapper.get<HTMLInputElement>('input[type="range"][aria-label="单分镜最长时长"]')
+    range.element.value = '22'
+    await range.trigger('input')
+    expect(wrapper.get('output.duration-value').text()).toBe('22s')
+    expect(save).not.toHaveBeenCalled()
+    await range.trigger('change')
+    await flushPromises()
+    expect(save).toHaveBeenCalledExactlyOnceWith(9, {shot_duration_max: 22})
+    expect(range.element.value).toBe(success ? '22' : '15')
+    expect(range.element.disabled).toBe(false)
+  } finally { wrapper.unmount() }
+})
+
+it('cancels and saves the title-row project format and custom visual style', async () => {
+  vi.mocked(api.updateNovel).mockImplementation(async (_id, patch) => ({code: 0, message: '', data: {...patch, id: 9, name: chapter.name} as Novel}))
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  const action = (text: string) => wrapper.findAll('button').find(b => b.text() === text)!.trigger('click')
+  async function choose(label: string, value: string) {
+    await wrapper.get(`button[aria-label="${label}"]`).trigger('click')
+    const option = [...document.querySelectorAll<HTMLElement>('[role=option]')].find(el => el.textContent?.trim() === value)
+    expect(option).toBeDefined()
+    option!.click()
+    await flushPromises()
+  }
+  try {
+    await flushPromises()
+    await action('编辑内容')
+    await choose('画面比例', '16:9')
+    await action('取消')
+    expect(api.updateNovel).not.toHaveBeenCalled()
+    await action('编辑内容')
+    await choose('画面比例', '16:9')
+    await choose('分辨率', '1080p')
+    await choose('视觉风格', '自定义风格')
+    await wrapper.get('textarea[aria-label="自定义风格"]').setValue('水墨淡彩')
+    await action('保存修改')
+    await flushPromises()
+    expect(api.updateNovel).toHaveBeenCalledExactlyOnceWith(9, {aspect_ratio: '16:9', resolution: '1080p', style_key: null, custom_style_prompt: '水墨淡彩'})
+    expect(wrapper.get('.episode-project-meta').text()).toContain('1080p')
+    expect(wrapper.get('[title="水墨淡彩"]').text()).toContain('自定义风格')
+  } finally { wrapper.unmount() }
+})
+
+it('offers regeneration on the original tab and keeps the existing screenplay when cancelled', async () => {
+  const {appConfirmState, resolveAppConfirm} = await import('@/shared/confirmDialog')
+  vi.mocked(api.chapter).mockResolvedValue({code: 0, message:'', data:{...chapter, screenplay:'已确认导演稿'}})
+  const wrapper = mount(ShortDramaAgentPage, {global:{plugins:[pinia],components:{AppButton},stubs:{RouterLink:{template:'<a><slot /></a>'}}}})
+  try {
+    await flushPromises()
+    await wrapper.get('.episode-doc-tabs button').trigger('click')
+    const button = wrapper.get('.episode-doc-tools > button')
+    expect(button.text()).toBe('重新生成本集剧本')
+    await button.trigger('click')
+    expect(appConfirmState.open).toBe(true)
+    resolveAppConfirm(false)
+    await flushPromises()
+    expect(api.generateScreenplay).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
 })

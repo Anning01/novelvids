@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -47,7 +48,7 @@ async def extraction_fixture(with_variant=False, repair_hook=None):
                 payload = {field: items if field == missing else [] for field, items in payload.items()}
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)], usage=RequestUsage(input_tokens=100, output_tokens=20))
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
 
     async def run(expect_success=True):

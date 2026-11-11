@@ -1,0 +1,116 @@
+{
+  "zh": {
+    "person": {
+      "task": "任务：完成角色的上半身正面平视特写和该角色的全身三视图，左边是角色的上半身正面平视特写，右边是该角色的全身三视图。中性浅灰白色、无缝摄影棚背景、无环境元素、无墙角和地平线、仅保留浅接触阴影。三视图不可以有分割线，比例是{aspect_ratio}，左侧为角色胸部以上特写大图，占画面约 40% 宽度，用于展示面部、发型、表情、眼神、上半身服装和配饰细节，右侧为同一角色的三视图，占画面约 60% 宽度，依次展示正面全身、侧面全身、背面全身。禁止生成任何文字、标签、Logo 或水印。",
+      "heading": "角色描述：",
+      "fields": [
+        "时代基底",
+        "国家/朝代",
+        "人种",
+        "类型基底",
+        "脸型",
+        "发型",
+        "耳饰",
+        "身材",
+        "头身比",
+        "上身着装",
+        "下身着装",
+        "鞋子",
+        "性别",
+        "年龄"
+      ],
+      "suffix": ""
+    },
+    "group": {
+      "task": "任务：生成同一组角色的群像关系参考图，比例为{aspect_ratio}。同一画面完整展示群体成员的服装轮廓、人数规模、相对位置与高矮体型关系，体现群体共性和自然个体差异，避免成员互相遮挡脸部与主要识别特征。中性浅灰白色无缝摄影棚背景，无环境元素、无墙角和地平线，仅保留浅接触阴影。不套用单人三视图，不复制同一张脸。禁止生成任何文字、标签、Logo 或水印。",
+      "heading": "群像描述：",
+      "fields": [
+        "人物特征",
+        "年龄段",
+        "性别",
+        "种族",
+        "人数规模",
+        "身材",
+        "脸型",
+        "眉毛",
+        "眼镜",
+        "鼻子",
+        "嘴唇",
+        "皮肤",
+        "特殊标记",
+        "发型",
+        "服饰和道具"
+      ],
+      "suffix": ""
+    },
+    "scene": {
+      "task": "生成四宫格画面，展示同一个空场景的四个环境机位，画幅 {aspect_ratio}。左上平视正面，右上高位俯瞰整体布局，左下移到空间另一端朝相反方向回看，右下从侧面呈现纵深。四格均使用透视，保持建筑、固定陈设、材料、尺度、天气、时间和光照一致。只绘制静态环境，四格均无人物、动物、群像或临时道具。禁止生成任何文字、标签、Logo 或水印。",
+      "heading": "场景描述:",
+      "fields": [],
+      "suffix": "四格都是空场景：只保留环境与固定陈设。包括远景、门窗及反射在内，画面中没有人物、动物、剪影或角色倒影。"
+    },
+    "item": {
+      "task": "",
+      "heading": "【道具描述】",
+      "fields": [],
+      "suffix": "禁止生成任何文字、标签、Logo 或水印。"
+    }
+  },
+  "en": {
+    "person": {
+      "task": "Task: Create an upper-body, front-facing, eye-level close-up of the character together with a full-body three-view turnaround. Place the upper-body close-up on the left and the full-body turnaround on the right. Use a seamless neutral light gray-white studio background with no environment, corners, or horizon line, retaining only soft contact shadows. Use a {aspect_ratio} aspect ratio. The left close-up occupies about 40% of the canvas and clearly shows the face, hairstyle, expression, eyes, upper-body clothing, and accessories. The right side occupies about 60% and shows the same character in front, side, and back full-body views in that order. Identity, proportions, clothing, hairstyle, and accessories must remain exactly consistent across every view. Do not output borders or divider lines. Do not generate text, labels, logos, or watermarks.",
+      "heading": "Character description:",
+      "fields": [
+        "Era",
+        "Country/Dynasty",
+        "Ethnicity/Species",
+        "World type",
+        "Face",
+        "Hair/Fur",
+        "Ear accessories",
+        "Build",
+        "Head-to-body ratio",
+        "Upper clothing",
+        "Lower clothing",
+        "Footwear",
+        "Gender",
+        "Age"
+      ],
+      "suffix": ""
+    },
+    "group": {
+      "task": "Task: Create an ensemble character relationship reference image in a {aspect_ratio} aspect ratio. Show complete clothing silhouettes, group size, relative positions and differences in height and build in one frame. Retain shared traits and natural individual differences; do not obscure faces or key identifying features. Use a seamless neutral light gray-white studio background with no environment, corners or horizon, and only soft contact shadows. Do not use individual three-view turnarounds or duplicate one face across members. Do not generate text, labels, logos, or watermarks.",
+      "heading": "Group description:",
+      "fields": [
+        "Group identity",
+        "Age range",
+        "Gender",
+        "Ethnicity/Species",
+        "Group size",
+        "Build",
+        "Face",
+        "Eyebrows",
+        "Eyewear",
+        "Nose",
+        "Lips",
+        "Skin",
+        "Distinctive marks",
+        "Hair/Fur",
+        "Clothing and props"
+      ],
+      "suffix": ""
+    },
+    "scene": {
+      "task": "Create a four-panel environment reference sheet of the same unoccupied location in a {aspect_ratio} frame. Top left: eye-level establishing view. Top right: high-angle overview of the layout. Bottom left: move to the opposite end of the space and look back. Bottom right: a side view showing depth. Use perspective in all four panels. Keep architecture, fixed furnishings, materials, scale, weather, time and lighting consistent. Show only the static environment, without people, animals, crowds or movable story props. No text, labels, logos or watermarks.",
+      "heading": "Scene description:",
+      "fields": [],
+      "suffix": "All four views are unoccupied environment plates with fixed furnishings only. Keep people, animals, silhouettes and character reflections out of every view, including the distance, doorways, windows and reflective surfaces."
+    },
+    "item": {
+      "task": "",
+      "heading": "[Prop description]",
+      "fields": [],
+      "suffix": "Do not generate text, labels, logos, or watermarks."
+    }
+  }
+}

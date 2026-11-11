@@ -40,6 +40,38 @@ class AssetSimple(BaseModel):
     is_global: Optional[bool] = Field(None, description="是否全局资产")
 
 
+class PlanPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    x: int = Field(ge=0, le=100)
+    y: int = Field(ge=0, le=100)
+
+
+class PlanAsset(PlanPoint):
+    name: str = Field(min_length=1, max_length=100, description="画面中的资产登记名或固定环境锚点")
+    end: PlanPoint | None = Field(default=None, description="有走位时的终点")
+    facing: str = Field(default="", max_length=80, description="朝向或视线目标")
+
+
+class PlanCamera(PlanPoint):
+    target: str = Field(min_length=1, max_length=100, description="本次切镜朝向的图上资产或锚点名")
+
+
+class BlockingMap(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    orientation: str = Field(min_length=1, max_length=120, description="图上方对应的固定场景方向")
+    assets: list[PlanAsset] = Field(min_length=1)
+    cameras: list[PlanCamera] = Field(min_length=1, description="按内部画面顺序排列的机位")
+
+    @model_validator(mode="after")
+    def cameras_have_targets(self):
+        names = {asset.name for asset in self.assets}
+        if len(names) != len(self.assets) or any(camera.target not in names for camera in self.cameras):
+            raise ValueError(localized_message("空间定位图的标注名须唯一，每个机位须指向图中已标记的目标"))
+        return self
+
+
 class ScenePromptSegment(BaseModel):
     """一次生成请求内的小镜头；编号和起止时间由渲染器产生。"""
 
@@ -75,6 +107,10 @@ class SoraScenePromptConfig(BaseModel):
         return [aliases.get(item, item) if isinstance(item, str) else item for item in value]
 
     prompt: str | None = Field(None, max_length=100_000)
+
+    visible_asset_names: list[str] | None = Field(
+        None, description="本生成段画面内实际可见的已登记人物、动物、地点和道具标准名；空镜可填空列表。"
+    )
 
     reference_only_types: list[Literal['人物', '场景', '物品']] = Field(
         default_factory=list, max_length=3,
@@ -157,20 +193,20 @@ class SoraScenePromptConfig(BaseModel):
 
     sound_design: str = Field(
         ...,
-        description="【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
+        description="【声音设计】。写出本镜的声音、声源和起止，按导演剧本安排配乐、同期声或静默。"
     )
 
     narration: list[str] = Field(
         default_factory=list,
         description=(
-            "镜头内旁白与人物内心 OS；每项必须包含精确开始/结束时间、声音主体、"
+            "镜头内旁白与人物内心 OS；每项严格写成 0s-2s: 说话者（语气）：完整正文，时间后和说话者后都必须有冒号。每项包含声音主体、"
             "语气和内容。是否允许使用及与对白的时间关系由当前分镜策略决定；"
             "没有时返回空数组"
         ),
     )
     dialogue: list[str] = Field(
         default_factory=list,
-        description="镜头内人物台词；每项包含人物、语气和原文，无台词时返回空数组",
+        description="镜头内人物台词；每项严格写成 0s-2s: 说话者（语气）：原文。时间后和说话者后都必须有冒号；无台词时返回空数组",
     )
     transition: str = Field(
         ...,
@@ -182,6 +218,10 @@ class SoraScenePromptConfig(BaseModel):
     allowed_effects: list[str] = Field(
         default_factory=list,
         description="允许使用的克制效果；无特殊效果时明确写自然光写实拍摄",
+    )
+
+    blocking_map: BlockingMap | None = Field(
+        default=None, description="同一生成段内部切镜共用的俯视定位图；坐标 0–100，自左向右、自上而下",
     )
 
     segments: list[ScenePromptSegment] = Field(
@@ -300,6 +340,8 @@ class SceneOut(SceneFullProperties, BaseResponse):
     chapter_id: int = Field(..., description="所属章节ID")
     prompt_params: Optional[dict[str, Any]] = Field(None, description="提示词参数配置")
 
+    storyboard_binding_rules: dict | None = None
+
     @model_validator(mode="after")
     def _resolve_media(self):
         """对 metadata 中持久化的媒体引用重新签发（首尾帧与参考素材）。"""
@@ -310,6 +352,13 @@ class SceneOut(SceneFullProperties, BaseResponse):
             raw = metadata.get(key)
             if isinstance(raw, str) and raw:
                 metadata[key] = resolve_media_url(raw) or raw
+        sheet = metadata.get('storyboard_sheet')
+        if isinstance(sheet, dict):
+            from prompts.storyboard_sheet_binding import sheet_binding_rules
+            self.storyboard_binding_rules = sheet_binding_rules(sheet, metadata.get("prompt_language", "zh"))
+            for key in ('image_url', 'previous_image_url'):
+                if isinstance(sheet.get(key), str):
+                    sheet[key] = resolve_media_url(sheet[key]) or sheet[key]
         reference_media = metadata.get("video_reference_media")
         if isinstance(reference_media, list):
             for item in reference_media:

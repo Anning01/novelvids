@@ -119,3 +119,9 @@ describe('project analysis editor', () => {
     expect(chapterDraftChanged(draft, chapter)).toBe(true)
   })
 })
+
+it('uses the default 15 second cap and only patches a changed maximum', () => {
+  const initial = createProjectAnalysisDraft({name: '项目'})
+  expect(initial.shotDurationMax).toBe(15)
+  expect(projectPatchFromDraft({...initial, shotDurationMax: 12}, initial)).toEqual({shot_duration_max: 12})
+})

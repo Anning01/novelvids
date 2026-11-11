@@ -144,7 +144,8 @@ def _structured_prompt_model(text):
     def respond(messages, info):
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': text})])
 
-    model = FunctionModel(respond)
+    from test.agent_stream_fixtures import streaming_model
+    model = streaming_model(respond)
     model.client = AsyncMock()
     return model
 

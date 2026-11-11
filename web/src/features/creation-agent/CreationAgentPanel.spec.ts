@@ -195,6 +195,17 @@ describe('creation assistant panel', () => {
     wrapper.unmount()
   })
 
+  it('can send in project scope before the first episode exists', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, {props: {projectId: 7, chapterId: 0}, global: {plugins: [pinia]}})
+    await flushPromises()
+    const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
+    expect(wrapper.get('button[aria-label="助手操作范围"]').text()).toContain('全项目')
+    await wrapper.get('[data-testid="sender"]').trigger('click')
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({chapter_id: null, write_scope: 'project', targets: []}))
+    wrapper.unmount()
+  })
+
   it('selects an existing variant independently from its parent asset', async () => {
     vi.mocked(api.assets).mockResolvedValue({ code: 0, message: '', data: {
       items: [{ id: 8, novel_id: 7, asset_type: 1, canonical_name: '女主', created_at: '', updated_at: '',

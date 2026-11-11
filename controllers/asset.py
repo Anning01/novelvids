@@ -206,6 +206,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             )
         novel_id = data.pop('novel_id')
         async with creation_write(novel_id):
+            if chapter_id is not None and not await Chapter.filter(id=chapter_id, novel_id=novel_id, number=chapter.number).exists():
+                raise HTTPException(409, localized_message('章节已移除或集号已修改，请重新选择'))
             asset = await CreationObjects(novel_id).create_setting({**data, **kwargs})
         await _ensure_asset_image_derivatives(_asset_image_references(data))
         return asset

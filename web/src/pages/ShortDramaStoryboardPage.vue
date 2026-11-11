@@ -33,6 +33,10 @@ import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
+import SceneVoiceTracks from '@/components/SceneVoiceTracks.vue'
+import SceneBlockingMap from '@/components/SceneBlockingMap.vue'
+import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
+import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
@@ -79,6 +83,7 @@ interface ProjectView extends Novel {
   aspectRatio: string
   resolution: string
   style: string
+  workflowKind?: 'script' | 'remake'
   creationMode: 'agent' | 'manual'
 }
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
@@ -86,6 +91,8 @@ const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>
 interface SceneDraft {
   description: string
   prompt: string
+  promptModel: string
+  sheetExcluded: boolean
   basePrompt: string | null
   duration: number
   selectedAssetIds: number[]
@@ -345,6 +352,15 @@ const selectedVideoModelInput = computed({
     const modelId = Number(value)
     if (!Number.isInteger(modelId) || modelId < 1 || String(modelId) === selectedVideoModel.value) return
     selectedVideoModel.value = String(modelId)
+    for (const scene of scenes.value) {
+      const draft = draftFor(scene)
+      if (draft.promptModel && draft.promptModel !== selectedVideoModelConfig.value?.model_type && genericPrompt(scene)) {
+        const original = modelDrafts(scene).find(v => v.model === draft.promptModel)?.text
+        if (original && (draft.prompt === original || draft.prompt === bindSheet(original, scene, draft.promptModel))) {
+          selectPromptVersion(scene, genericPrompt(scene), '')
+        }
+      }
+    }
     videoModelPreferenceSaveQueue = videoModelPreferenceSaveQueue.then(() => persistVideoModelPreference(modelId))
   },
 })
@@ -398,9 +414,24 @@ function makeSceneDraft(scene: Scene): SceneDraft {
   const defaults = project.value?.video_generation_defaults
   // 资产引用统一以持久化的 scene.assets / asset_ids 为准，与画布工作流共用同一份数据。
   const linkedAssetIds = scene.assets?.map(item => item.id) ?? scene.asset_ids ?? []
+  const sheet = sheetReference(scene)
+  const sheetExcluded = metadata.storyboard_sheet_excluded === true
+  let prompt = scene.prompt || ''
+  const promptModel = typeof metadata.video_prompt_model === 'string' ? metadata.video_prompt_model :
+    modelDrafts(scene).find(v => v.text === prompt)?.model || ''
+  const imported = metadata.imported_media
+  const importedImages: VideoReferenceMedia[] = Array.isArray(imported)
+    ? imported.filter(m => m?.role === 'reference' && typeof m.url === 'string' && /\.(?:png|jpe?g|webp|gif)$/i.test(m.path || ''))
+        .map(m => ({type: 'image', url: m.url, name: String(m.path).split('/').pop()}))
+    : []
+  const savedMedia = Array.isArray(metadata.video_reference_media) ? readReferenceMedia(metadata.video_reference_media) : importedImages
+  const previousSheet = sheet && savedMedia.find(item => item.url === sheet.url)
+  if (sheet && previousSheet) prompt = prompt.split(videoReferenceMentionSyntax(previousSheet)).join(videoReferenceMentionSyntax(sheet))
+  const media = sheet && !sheetExcluded ? includeSheet(savedMedia, sheet) : savedMedia
   return {
     description: scene.description || '',
-    prompt: scene.prompt || '',
+    prompt: sheet && !sheetExcluded && metadata.video_generation_mode !== 'keyframes' ? bindSheet(prompt, scene, promptModel) : prompt,
+    promptModel, sheetExcluded,
     basePrompt: scene.prompt ?? null,
     duration: scene.duration || 6,
     selectedAssetIds: [...new Set(linkedAssetIds)],
@@ -408,7 +439,7 @@ function makeSceneDraft(scene: Scene): SceneDraft {
     videoGenerationMode: metadata.video_generation_mode === 'keyframes' ? 'keyframes' : 'reference',
     firstFrameUrl: typeof metadata.first_frame_url === 'string' ? metadata.first_frame_url : '',
     lastFrameUrl: typeof metadata.last_frame_url === 'string' ? metadata.last_frame_url : '',
-    referenceMedia: readReferenceMedia(metadata.video_reference_media),
+    referenceMedia: media,
     videoResolution: typeof metadata.video_resolution === 'string' ? metadata.video_resolution : defaults?.resolution || '',
     videoAspectRatio: typeof metadata.video_aspect_ratio === 'string' ? metadata.video_aspect_ratio : defaults?.aspect_ratio || '',
     returnLastFrame: typeof metadata.return_last_frame === 'boolean' ? metadata.return_last_frame : defaults?.return_last_frame === true,
@@ -847,7 +878,7 @@ function sceneVoiceReferenceMappings(scene: Scene) {
       return [{
         assetId: asset.id,
         name: asset.canonical_name,
-        aliases: asset.aliases || [],
+        aliases: [...(asset.aliases || []), ...(selectedVariantFor(scene, asset) ? [`${asset.canonical_name}#${selectedVariantFor(scene, asset)!.name}`] : [])],
         referenceId,
       }]
     }),
@@ -1056,7 +1087,7 @@ function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelC
   const draft = draftFor(scene)
   const selectedAssets = assets.value.filter(asset => draft.selectedAssetIds.includes(asset.id))
   return buildVideoInputImageReferences(
-    draft.prompt,
+    draft.promptModel ? (genericPrompt(scene) + '\n' + draft.prompt) : draft.prompt,
     selectedAssets.map(asset => ({
       assetId: asset.id,
       label: selectedAssetLabel(scene, asset),
@@ -1268,7 +1299,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const model = selectedVideoModelConfig.value
   if (!model) return
   const draft = draftFor(scene)
-  const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
+  const additions = references.filter(item => !draft.referenceMedia.some(current => (item.library_resource_id != null && current.library_resource_id === item.library_resource_id) || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
   if (combined.filter(item => item.type === 'image').length > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
@@ -1281,7 +1312,12 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
 }
 
 async function removeReferenceMedia(scene: Scene, index: number) {
-  draftFor(scene).referenceMedia.splice(index, 1)
+  const draft = draftFor(scene)
+  if (draft.referenceMedia[index]?.mention_url === SHEET_ID) {
+    draft.sheetExcluded = true
+    draft.prompt = unbindSheet(draft.prompt, scene)
+  }
+  draft.referenceMedia.splice(index, 1)
   await saveScene(scene, false)
 }
 
@@ -1316,7 +1352,11 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
 }
 
 async function setVideoGenerationMode(scene: Scene, mode: 'reference' | 'keyframes') {
-  draftFor(scene).videoGenerationMode = mode
+  const draft = draftFor(scene)
+  draft.videoGenerationMode = mode
+  if (!draft.sheetExcluded && sheetReference(scene)) {
+    draft.prompt = mode === 'reference' ? bindSheet(draft.prompt, scene, draft.promptModel) : unbindSheet(draft.prompt, scene)
+  }
   await saveScene(scene, false)
 }
 
@@ -1587,6 +1627,7 @@ async function load() {
       aspectRatio: settings.aspectRatio || '9:16',
       resolution: settings.resolution || '720p',
       style: settings.style || tr('写实通用'),
+      workflowKind: novelResponse.data.workflow_kind,
       creationMode: novelResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     chapters.value = chapterResponse.data.items
@@ -1732,6 +1773,68 @@ function updateSceneText(scene: Scene, field: 'description' | 'prompt', event: E
   scheduleSceneSave(scene)
 }
 
+function restoreSheet(scene: Scene) {
+  const sheet = sheetReference(scene)
+  if (!sheet) return
+  const draft = draftFor(scene)
+  draft.sheetExcluded = false
+  draft.referenceMedia = includeSheet(draft.referenceMedia, sheet)
+  if (draft.videoGenerationMode === 'reference') draft.prompt = bindSheet(draft.prompt, scene, draft.promptModel)
+}
+
+function replaceSheetScene(updated: Scene) {
+  scenes.value = scenes.value.map(scene => scene.id === updated.id ? updated : scene)
+  restoreSheet(updated)
+}
+
+function useSavedSheet(scene: Scene) {
+  restoreSheet(scene)
+  scheduleSceneSave(scene)
+}
+
+function importedDrafts(scene: Scene): Record<string, unknown> {
+  const work = scene.metadata?.work_package as { drafts?: Record<string, unknown> } | undefined
+  return work?.drafts || {}
+}
+
+function genericPrompt(scene: Scene): string {
+  const work = scene.metadata?.work_package as {prompt?: string} | undefined
+  const value = scene.prompt_params?.generic_prompt || importedDrafts(scene).general || work?.prompt || scene.metadata?.generic_video_prompt
+  return typeof value === 'string' ? value : ''
+}
+
+function modelDrafts(scene: Scene) {
+  const drafts = new Map<string, string>()
+  for (const [model, text] of Object.entries(importedDrafts(scene))) {
+    if (model !== 'general' && model !== 'eight_columns' && typeof text === 'string' && text.trim()) drafts.set(model, text)
+  }
+  const generated = scene.prompt_params?.model_optimized_prompt as {model_type?: string; prompt?: string} | undefined
+  if (generated?.model_type && generated.prompt) {
+    drafts.set(generated.model_type, generated.prompt)
+  }
+  return Array.from(drafts, ([model, text]) => ({model, text,
+    label: videoModels.value.find(item => item.model_type === model)?.name || model}))
+}
+
+function previewModelDraft(scene: Scene, model: string, prompt: string) {
+  const sheet = sheetReference(scene)
+  const draft = draftFor(scene)
+  if (!sheet || draft.sheetExcluded || draft.videoGenerationMode !== 'reference') return prompt
+  return bindSheet(prompt, scene, model).split(videoReferenceMentionSyntax(sheet)).join('〔' + tr('逐镜线稿故事版') + '〕')
+}
+
+function selectPromptVersion(scene: Scene, prompt: string, model: string) {
+  const draft = draftFor(scene)
+  draft.promptModel = model
+  updateScenePrompt(scene, sheetReference(scene) && !draft.sheetExcluded && draft.videoGenerationMode === 'reference'
+    ? bindSheet(prompt, scene, model) : prompt)
+}
+
+function useOptimizedPrompt(scene: Scene, prompt: string, model: string) {
+  if (!genericPrompt(scene)) scene.metadata = {...(scene.metadata || {}), generic_video_prompt: unbindSheet(scene.prompt || '', scene)}
+  selectPromptVersion(scene, prompt, model)
+}
+
 function updateScenePrompt(scene: Scene, value: string) {
   draftFor(scene).prompt = value
   scheduleSceneSave(scene)
@@ -1782,6 +1885,8 @@ async function saveScene(
           first_frame_url: draft.firstFrameUrl || undefined,
           last_frame_url: draft.lastFrameUrl || undefined,
           asset_variant_ids: draft.selectedVariantIds,
+          video_prompt_model: draft.promptModel,
+          storyboard_sheet_excluded: draft.sheetExcluded,
           video_reference_media: draft.referenceMedia,
           video_resolution: sceneResolution(currentScene, model),
           video_aspect_ratio: sceneAspectRatio(currentScene, model),
@@ -1870,7 +1975,9 @@ async function duplicateScene(scene: Scene) {
         video_generation_mode: draft.videoGenerationMode,
         first_frame_url: draft.firstFrameUrl || undefined,
         last_frame_url: draft.lastFrameUrl || undefined,
-        video_reference_media: draft.referenceMedia,
+        video_prompt_model: draft.promptModel,
+          storyboard_sheet_excluded: draft.sheetExcluded,
+          video_reference_media: draft.referenceMedia,
         video_resolution: sceneResolution(scene),
         video_aspect_ratio: sceneAspectRatio(scene),
         return_last_frame: draft.returnLastFrame,
@@ -1922,6 +2029,10 @@ async function generateVideo(
   const selectedModel = settings?.model || selectedVideoModelConfig.value
   if (!selectedModel) {
     if (showNotice) notice.error(tr('请先在设置中启用一个视频模型'))
+    return false
+  }
+  if (draft.promptModel && draft.promptModel !== selectedModel.model_type) {
+    notice.error(tr('请恢复通用稿或选择与专项稿匹配的视频模型'))
     return false
   }
   if (generatingVideoSceneIds.value.has(scene.id)) return false
@@ -2053,7 +2164,9 @@ function syncInjectedLastFrame(result: VideoResult) {
   }
   targetScene.metadata = {
     ...(targetScene.metadata || {}),
-    video_reference_media: draft.referenceMedia,
+    video_prompt_model: draft.promptModel,
+          storyboard_sheet_excluded: draft.sheetExcluded,
+          video_reference_media: draft.referenceMedia,
   }
 }
 
@@ -2172,6 +2285,10 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     return
   }
 
+  if (targets.some(scene => draftFor(scene).promptModel && draftFor(scene).promptModel !== model.model_type)) {
+    notice.error(tr('请恢复通用稿或选择与专项稿匹配的视频模型'))
+    return
+  }
   batchVideoDialogOpen.value = false
   batchGeneratingVideos.value = true
   for (const scene of targets) {
@@ -2309,7 +2426,7 @@ onBeforeUnmount(() => {
       :resolution="project?.resolution || '720p'"
       :style-name="project?.style || tr('写实通用')"
       active-phase="storyboard"
-      :creation-mode="project?.creationMode || 'agent'"
+      :show-script-phase="project?.workflowKind !== 'remake'"
       :chapters="chapters"
       :active-chapter-id="activeChapterId"
       :video-enabled="videoPageEnabled"
@@ -2344,7 +2461,7 @@ onBeforeUnmount(() => {
           <button type="button" class="chapter-summary" :disabled="!activeChapter" :aria-label="tr('查看并编辑当前章节详情')" @click="openChapterDetails">
             <span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span>
             <h1>{{ activeChapter ? episodeDisplayLabel(activeChapter) : tr('分镜制作') }}</h1>
-            <p>{{ activeChapter?.content?.slice(0, 120) }}</p>
+            <p>{{ (activeChapter?.screenplay || activeChapter?.content)?.slice(0, 120) }}</p>
             <small>{{ tr('点击查看详情') }}</small>
           </button>
           <div class="chapter-actions">
@@ -2449,11 +2566,16 @@ onBeforeUnmount(() => {
                     @select="handleAssetPickerSelection(scene, group.type, $event)"
                   />
                 </section>
+                <SceneVoiceTracks :scene="scene" :assets="assets" :voice-busy="Boolean(savingAssetVoiceKey)" @voice="openAssetVoicePicker(scene, $event)" />
               </aside>
 
               <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
                 <header>
                   <div><span><strong>{{ tr('分镜视频生成') }}</strong><small>{{ tr('组合角色、场景和动作，生成连续镜头') }}</small></span></div>
+                  <div class="prompt-header-actions">
+                    <StoryboardSheetCard v-if="project?.storyboard_enabled || scene.metadata?.storyboard_sheet" :scene="scene"
+                      :enabled="project?.storyboard_enabled ?? false" :can-use="draftFor(scene).sheetExcluded"
+                      @updated="replaceSheetScene" @use="useSavedSheet(scene)" />
                   <AppButton
                     variant="ghost"
                     size="sm"
@@ -2463,6 +2585,7 @@ onBeforeUnmount(() => {
                     :title="tr('专注编辑')"
                     @click="openPromptFocus(scene)"
                   ><Maximize2 :size="16" /></AppButton>
+                  </div>
                 </header>
                 <div v-if="draftFor(scene).videoGenerationMode === 'keyframes'" class="keyframe-inputs">
                   <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" :alt="tr('首帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传首帧') }}</strong><small>{{ tr('视频开始画面') }}</small></span><i>{{ tr('首帧') }}</i></label>
@@ -2483,6 +2606,12 @@ onBeforeUnmount(() => {
                   @choose-library="addLibraryReferences(scene, $event)"
                   @remove="removeReferenceMedia(scene, $event)"
                 />
+                <SceneBlockingMap :scene="scene" />
+                <div v-for="version in modelDrafts(scene)" :key="version.model" class="model-optimized-prompt">
+                  <details><summary>{{ tr('模型专项稿') }} · {{ version.label }}</summary><p>{{ previewModelDraft(scene, version.model, version.text) }}</p></details>
+                  <AppButton v-if="version.model === selectedVideoModelConfig?.model_type && draftFor(scene).promptModel !== version.model" variant="secondary" size="sm" @click="useOptimizedPrompt(scene, version.text, version.model)">{{ tr('使用模型专项稿') }}</AppButton>
+                </div>
+                <AppButton v-if="genericPrompt(scene) && draftFor(scene).promptModel" variant="ghost" size="sm" @click="selectPromptVersion(scene, genericPrompt(scene), '')">{{ tr('恢复通用稿') }}</AppButton>
                 <ScenePromptEditor
                   :model-value="draftFor(scene).prompt"
                   :options="promptMentionOptions(scene)"
@@ -2557,7 +2686,7 @@ onBeforeUnmount(() => {
         :open="chapterDetailOpen"
         :chapter-number="activeChapter?.number || 0"
         :title="activeChapter ? stripChapterOrdinal(activeChapter.name) : ''"
-        :content="activeChapter?.content || ''"
+        :content="activeChapter?.screenplay || activeChapter?.content || ''"
         :saving="savingChapterDetails"
         @close="chapterDetailOpen = false"
         @save="saveChapterDetails"
@@ -2609,6 +2738,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.prompt-panel > header .prompt-header-actions { display:flex; flex:0 0 auto; align-items:center; gap:6px; }
+.model-optimized-prompt { min-width: 0; color: var(--app-text); }
+.model-optimized-prompt summary { padding: 8px 0; cursor: pointer; font-size: 13px; }
+.model-optimized-prompt summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.model-optimized-prompt p { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface-muted); color: var(--app-text-secondary); font-size: 12px; line-height: 1.65; }
+
 .video-sync-note { margin:8px 12px; color:var(--app-text-secondary); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .storyboard-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f7f8fb; }
 .storyboard-page.is-workflow-view { height: 100vh; overflow: hidden; }
