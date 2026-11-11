@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -5,7 +6,6 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelResponse, ToolCallPart
-from pydantic_ai.models.function import FunctionModel
 
 from auth.deps import AuthContext
 from controllers.creation_agent import creation_agent_controller
@@ -67,7 +67,7 @@ async def test_snapshot_and_history_include_child_model_steps_and_timing(failed)
             raise RuntimeError('synthetic provider failure')
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'result': 'ok'})])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         if failed:

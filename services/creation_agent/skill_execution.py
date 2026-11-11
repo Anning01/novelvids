@@ -269,6 +269,10 @@ class SkillExecution:
             await agent_event_log.append(child_message.id, [event], seq)
             await task_signals.publish(str(self.message.task_id))
 
+        from services.creation_agent.skill_stream import SkillRunActivity
+
+        tool_activity = SkillRunActivity(child_message, str(self.message.task_id))
+
         recorded = RecordedAgentModel(
             model,
             message=child_message,
@@ -498,6 +502,7 @@ class SkillExecution:
                         user_input,
                         deps=self.snapshot,
                         model=recorded,
+                        event_stream_handler=tool_activity,
                         usage_limits=UsageLimits(
                             request_limit=limits.request_limit,
                             tool_calls_limit=limits.tool_calls_limit,

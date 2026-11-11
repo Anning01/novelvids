@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 """Complete saved prompts and verbatim speech in the skill production path."""
 import pytest
 from prompts.skill_pack import SkillSnapshot, snapshot_skills
@@ -140,7 +141,6 @@ async def test_rejected_summary_never_replaces_the_chapters_existing_scenes(monk
     from models.scene import Scene
     from controllers.scene import scene_controller
     from services.ai_task_executor import ai_task_executor
-    from pydantic_ai.models.function import FunctionModel
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from test.test_services.test_skill_workflow import enabled_project
 
@@ -149,7 +149,7 @@ async def test_rejected_summary_never_replaces_the_chapters_existing_scenes(monk
     def respond(messages, info):
         shot = _shot().model_dump(); shot['prompt'] = 'A summary that drops all voices.'
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots':[shot]})])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args:model)
     task = await scene_controller.generate(chapter.id, replace_existing=True)
     await ai_task_executor.run(task)

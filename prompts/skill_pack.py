@@ -40,6 +40,10 @@ FILES = {
     "video": "novelvids-video/references/video.md",
 }
 
+# Package entrypoints share the same immutable snapshot as their references.
+FILES.update({path.parent.name: str(path.relative_to(ROOT))
+              for path in sorted(ROOT.glob("novelvids-*/SKILL.md"))})
+
 
 class SkillSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -143,6 +147,7 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_k
         + "\n任务语言 language="
         + language
         + "\n"
+        + (snapshot.read(package) + "\n" if (package := FILES[skill].split("/")[0]) in snapshot.contents else "")
         + snapshot.read(skill)
         + contract
     )

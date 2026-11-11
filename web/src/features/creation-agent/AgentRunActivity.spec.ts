@@ -78,3 +78,35 @@ it.each(['图片生成','视频生成'])('shows the known %s operation instead o
   expect(wrapper.text()).not.toContain('重新连接')
   wrapper.unmount()
 })
+
+it.each(['light', 'dark'])('renders live SDK skill tool states in %s mode without invented summaries', async theme => {
+  const { applyActivityEvent } = await import('./activity')
+  const { reactive } = await import('vue')
+  const steps = reactive<import('./types').AgentActivityStep[]>([])
+  document.documentElement.dataset.theme = theme
+  const wrapper = mount(AgentRunActivity, { props: {
+    status: 2, startedAt: '2026-11-07T04:00:00Z', steps,
+  } })
+  const tool = { id: 'tool:child:read', kind: 'tool' as const, tool_name: 'read_skill',
+    label: '执行步骤', status: 'running' as const, started_at: '2026-11-07T04:00:01Z' }
+  applyActivityEvent(steps, { type: 'CUSTOM', name: 'agent_activity', value: tool })
+  await wrapper.vm.$nextTick()
+  expect(wrapper.text()).toContain('正在读取创作规范')
+  expect(wrapper.text()).toContain('用时 10 秒')
+  expect(wrapper.findAll('.is-running')).toHaveLength(1)
+  expect(wrapper.find('details').exists()).toBe(false)
+  applyActivityEvent(steps, { type: 'CUSTOM', name: 'agent_activity', value: {
+    ...tool, status: 'completed', finished_at: '2026-11-07T04:00:02Z',
+  } })
+  await wrapper.vm.$nextTick()
+  expect(wrapper.text()).toContain('读取创作规范')
+  expect(wrapper.text()).toContain('已完成')
+  expect(wrapper.find('.agent-run-activity__spinner').exists()).toBe(false)
+  await wrapper.setProps({ status: 5, finishedAt: '2026-11-07T04:00:10Z' })
+  expect(wrapper.text()).toContain('本轮已停止')
+  await wrapper.get('button[aria-label="执行过程"]').trigger('click')
+  expect(wrapper.text()).toContain('读取创作规范')
+  expect(wrapper.find('details').exists()).toBe(false)
+  wrapper.unmount()
+  delete document.documentElement.dataset.theme
+})
