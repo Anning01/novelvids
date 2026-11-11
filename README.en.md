@@ -169,7 +169,7 @@ Use the storyboard to inspect each shot and the canvas to organize references an
 
 ## Standalone creative skills
 
-Choose a single stage for any assistant that loads `SKILL.md`. Available packages cover story analysis (`novelvids-story`), screenplay adaptation (`novelvids-screenplay`), asset design, storyboarding, image prompts, video production, remake analysis, planning and editing.
+Choose a single stage for any assistant that loads `SKILL.md`. Available packages cover story analysis (`novelvids-story`), screenplay adaptation (`novelvids-screenplay`), asset design, storyboarding, image prompts, video production and remake analysis. Each skill handles revisions to its own output. The host agent coordinates requests spanning chapters or stages.
 
 From the repository root, use Python's standard library to list, export or install a package:
 

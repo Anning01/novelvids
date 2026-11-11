@@ -1,6 +1,6 @@
 ---
 name: novelvids-storyboard
-description: 将已有剧本或章节拆成可以拍摄的分镜，安排画面、镜头运动、对白时间轴、旁白与转场。
+description: 将剧本或章节拆成分镜，或修改指定镜头的画面、运镜、时长、对白与转场。
 license: MIT
 ---
 

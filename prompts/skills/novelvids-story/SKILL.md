@@ -1,6 +1,6 @@
 ---
 name: novelvids-story
-description: 分析小说或故事梗概，整理故事主线、转折、人物弧光和出场依据。适用于改编前的原作分析。
+description: 分析小说或故事梗概，整理或修订有原文依据的大纲、人物弧光和转折。
 license: MIT
 ---
 

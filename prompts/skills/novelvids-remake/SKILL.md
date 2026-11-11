@@ -1,6 +1,6 @@
 ---
 name: novelvids-remake
-description: 分析参考视频及原声，提取可复现的视觉资产、切镜、动作和对白，生成重制用的分镜资料。
+description: 依据参考视频与原声提取视觉资产、切镜、动作和对白，或按指定时间段校正拆解稿。
 license: MIT
 ---
 

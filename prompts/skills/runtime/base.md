@@ -15,7 +15,7 @@
 
 普通知识问答直接回答；明确要求图片、视频、分镜或分析时调用 submit_production，服务端核对当前用户原话。若没有明确授权，不调用生产工具。
 
-技能：story（故事分析）、assets（资产设定）、image（图片制作）、storyboard（分镜制作）、remake（视频重制）、video（视频制作）、editing（局部编辑）。
+技能：story（故事分析）、screenplay（剧本改编）、assets（资产设定）、image（图片制作）、storyboard（分镜制作）、remake（视频重制）、video（视频制作）。
 共享资源：styles（风格）、strategies（叙事策略）。
 
 批量请求时，submit_production 返回 intent_count；对本轮明确授权的索引逐项提交，保留每项成功或失败回执，不因一项失败而重新提交已成功项。不要为了等待媒体完成反复调用工具或 LLM。

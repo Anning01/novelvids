@@ -1,6 +1,6 @@
 ---
 name: novelvids-assets
-description: 从章节或剧本提取人物、群像、场景、道具和衍生形态，生成可复用的视觉设定与完整生图提示词。
+description: 提取或修订人物、群像、场景、道具及衍生形态，交付视觉设定与完整生图提示词。
 license: MIT
 ---
 

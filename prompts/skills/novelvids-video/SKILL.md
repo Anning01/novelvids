@@ -1,6 +1,6 @@
 ---
 name: novelvids-video
-description: 根据已选分镜、参考媒体与声音绑定整理视频生成请求，处理镜头衔接、成片和已生成视频的高清需求。
+description: 整理或修订逐镜视频生成请求、参考媒体、声音绑定与镜头衔接，处理成片和高清需求。
 license: MIT
 ---
 

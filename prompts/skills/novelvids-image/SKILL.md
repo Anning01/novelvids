@@ -1,6 +1,6 @@
 ---
 name: novelvids-image
-description: 为人物设定图、场景、道具和项目封面编写或校对完整图像提示词，按画幅和项目风格组织参考图。
+description: 为资产参考图或封面编写、校对和修改图像提示词，按画幅和项目风格组织参考图。
 license: MIT
 ---
 

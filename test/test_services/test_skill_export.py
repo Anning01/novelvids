@@ -4,12 +4,21 @@ from pathlib import Path
 import pytest
 
 from prompts.skill_pack import FILES, ROOT, SkillSnapshot, instructions, snapshot_skills
-from scripts.export_skill import LINK, export_skill
+from scripts.export_skill import LINK, entrypoints, export_skill
 
 
-@pytest.mark.parametrize("name", [
-    "story", "screenplay", "assets", "image", "storyboard", "video", "remake", "planning", "editing",
-])
+STAGES = ("story", "screenplay", "assets", "image", "storyboard", "video", "remake")
+
+
+def test_only_professional_stages_are_publishable(tmp_path):
+    assert set(entrypoints()) == {f"novelvids-{stage}" for stage in STAGES}
+    for retired in ("novelvids-planning", "novelvids-editing"):
+        with pytest.raises(ValueError, match="Unknown skill"):
+            export_skill(retired, tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("name", STAGES)
 def test_stage_exports_without_application_files(tmp_path, name):
     package = export_skill(f"novelvids-{name}", tmp_path)
     source = ROOT / package.name / "SKILL.md"
