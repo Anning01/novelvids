@@ -10,3 +10,4 @@ license: MIT
 - [风格要求](../novelvids-image/references/styles.json)
 - [叙事与声音限制](../novelvids-storyboard/references/strategies.json)
 - [单片段制作](references/clip_templates.json)
+- [全片视听约定](../novelvids-storyboard/references/video_presentation.md)

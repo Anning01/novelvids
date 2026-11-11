@@ -129,3 +129,16 @@ def test_standalone_storyboard_offers_a_baseline_and_performance_guidance(tmp_pa
     assert "speech_timing" not in contract
     assert "争吵" in rules and "六字诀" in rules
     assert not (pkg / "scripts/check_speech.py").exists()
+
+
+@pytest.mark.parametrize("stage", ["storyboard", "video", "remake"])
+def test_video_stages_share_one_script_driven_presentation_rule(tmp_path, stage):
+    package = export_skill(f"novelvids-{stage}", tmp_path)
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    rule = (package / "references/video_presentation.md").read_text()
+    assert rule == snapshot.read("video_presentation")
+    for language in ("zh", "en"):
+        rendered = instructions(snapshot, language, stage, output_kind="professional_video_prompt_material")
+        assert rule in rendered
+        assert all(element in rule for element in ("字幕", "水印", "LOGO", "背景音乐"))
+        assert "无字幕、无水印" not in rendered and "不得添加 BGM" not in rendered

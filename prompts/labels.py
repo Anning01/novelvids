@@ -55,6 +55,8 @@ LABEL_KEYS = {
     "按镜头动作与视线自然衔接。": "continue_naturally_from_the_shot_action_and_eyelines",
     "【转场方式】\n": "transition_48",
     "【背景音乐】\n": "background_music",
+    "保留背景音乐。": "include_background_music",
+    "本镜无背景音乐。": "no_music_in_this_shot",
     "本片段无可复用的关键资产。": "no_reusable_key_assets_in_this_segment",
     "人物": "character",
     "角色参考": "character_references",

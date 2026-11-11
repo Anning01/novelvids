@@ -19,3 +19,4 @@ license: MIT
 - [首次出场与分镜修订](../novelvids-storyboard/references/storyboard_templates.json)
 - [按阶段提取资产与镜头](references/remake_templates.json)
 - [人物语速与表演](../novelvids-storyboard/references/speech_pacing.md)
+- [全片视听约定](../novelvids-storyboard/references/video_presentation.md)

@@ -157,7 +157,7 @@ class SoraScenePromptConfig(BaseModel):
 
     sound_design: str = Field(
         ...,
-        description="【声音设计】。Diegetic (介质音) only。包含具体的音量(LUFS)描述、环境底噪、材质摩擦声。例: 'Diegetic: Heavy breathing (-15 LUFS), distant wind howling, footsteps on snow.'"
+        description="【声音设计】。写出本镜的声音、声源和起止，按导演剧本安排配乐、同期声或静默。"
     )
 
     narration: list[str] = Field(

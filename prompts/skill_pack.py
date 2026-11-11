@@ -39,6 +39,7 @@ FILES = {
     "summary": "runtime/summary.md",
     "turn_limited": "runtime/turn_limited.md",
     "video": "novelvids-video/references/video.md",
+    "video_presentation": "novelvids-storyboard/references/video_presentation.md",
 }
 
 
@@ -132,6 +133,8 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_k
                 contract += (
                     snapshot.template("asset_templates", "contract") + json.dumps(specification, ensure_ascii=False)
                 )
+    if (skill in {"storyboard", "video"} or remake_shots) and "video_presentation" in snapshot.contents:
+        contract += "\n" + snapshot.read("video_presentation")
     if (skill == "storyboard" or remake_shots) and "storyboard_contract" in snapshot.contents:
         from prompts.labels import prompt_label
         if "speech_pacing" in snapshot.contents:

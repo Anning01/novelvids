@@ -553,7 +553,8 @@ def format_storyboard_prompt(
     prompt = "\n".join(
         (
             prompt_label("【禁止项】", language),
-            prompt_label(strategy.prohibitions, language),
+            prompt_label(strategy.prohibitions, language) if strategy.prohibitions else
+            _join_values(shot.effect_restrictions, prompt_label("无", language)),
             "",
             prompt_label("【风格定调】", language),
             f"{prompt_label('视觉风格：', language)}{shot.visual_style}",

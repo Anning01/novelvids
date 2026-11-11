@@ -13,3 +13,4 @@ license: MIT
 - [跨镜资产形态与引用](../novelvids-assets/references/asset_lifecycle.md)
 - [首次出场与分镜修订](references/storyboard_templates.json)
 - [人物语速与表演](references/speech_pacing.md)
+- [全片视听约定](references/video_presentation.md)

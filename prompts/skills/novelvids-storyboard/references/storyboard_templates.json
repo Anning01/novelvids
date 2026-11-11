@@ -12,8 +12,8 @@
     "en": "Return only corrected shots for pending original shot numbers. Set repair_of on every returned shot. To split one shot, return multiple shots with the same repair_of, in story order. The server retains all accepted shots; do not repeat, renumber or rewrite them. Preserve the failed shot’s complete speech, speakers and order; only fix timing, structure or references. Each split shot starts its timeline at zero."
   },
   "introduce": {
-    "zh": "以下人物、物品或场景在全剧首次实际出现时，根据昵称和描述推断并简短介绍一次：{targets}。介绍方式自行决定，不编造，口头提及不算出现；若使用介绍文字，仅该文字例外于无字幕限制，其余遵循原分镜策略。",
-    "en": "Introduce these subjects once on their first actual appearance in the entire story, inferring a brief introduction from their nickname and description: {targets}. Choose how to present it; do not invent facts or treat spoken mentions as appearances. Introduction text, if used, is exempt from the no-subtitles rule; otherwise follow the original strategy."
+    "zh": "以下人物、物品或场景在全剧首次实际出现时，根据昵称和描述推断并简短介绍一次：{targets}。介绍方式自行决定，不编造，口头提及不算出现；介绍方式遵循本场视听约定。",
+    "en": "Introduce these subjects once on their first actual appearance in the entire story, inferring a brief introduction from their nickname and description: {targets}. Choose how to present it; do not invent facts or treat spoken mentions as appearances. Follow the presentation choices for this scene."
   },
   "contract": "\n输出协议（系统按以下栏目序列化结构内容，不单独生成 prompt）：\n"
 }
