@@ -8,6 +8,8 @@ license: MIT
 
 开始时读取作品全局的「故事版」开关；开启后每个生成段交付一张黑白线稿故事版，画格随关键构图增减，配套视频提示词补齐动作、运镜、声音和成片风格。
 
+本段有空间定位图时，把实际图片随同本段提交，提示词引用该图说明站位、走位与机位。
+
 生成或修改视频提示词时，先完成通用稿，再按实际选中的视频模型执行专项优化。
 
 - [按稳定镜头 ID 与通用底稿挂载专项稿](../scripts/attach_shot_draft.py)
@@ -26,6 +28,7 @@ license: MIT
 - [人物语速与表演](references/speech_pacing.md)
 - [全片视听约定](references/video_presentation.md)
 - [内部切镜的空间定位图](references/blocking.md)
+- [定位图在视频提示词中的引用](references/blocking_prompt.json)
 - [定位线稿绘制工具](../scripts/draw_blocking.py)
 
 - [作品目录交接与用户明确要求时的本地 MCP 同步](../references/work_package.md)

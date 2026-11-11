@@ -1,4 +1,8 @@
 {
+  "空间定位图无法转为视频参考图，请提供 PNG 定位图": "Could not rasterize the blocking map. Supply a PNG map.",
+  "空间定位图文件不存在": "The blocking map file is missing",
+  "空间定位图来源无效": "Invalid blocking map source",
+  "空间定位图": "Blocking map",
     "请恢复通用稿或选择与专项稿匹配的视频模型": "Restore the general draft or select the video model for this prompt.",
   "本集缺少可改编的原文": "This episode has no source text to adapt",
   "本集原文或剧本已修改，请刷新后查看": "The source text or screenplay has changed. Refresh to view it.",

@@ -1405,3 +1405,36 @@ async def test_specialized_storyboard_sheet_is_the_third_image_on_the_wire(monke
     parts=payloads[0]['content']
     assert [p['image_url']['url'] for p in parts if p['type']=='image_url'] == inputs
     assert expected in parts[0]['text'] and identity not in parts[0]['text']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,protocol,tag", [("seedance_2_5","volcengine_ark","@图片2"), ("minimax_h3","minimax","<Picture 2>")])
+async def test_blocking_map_sent_as_image_with_its_actual_number(monkeypatch, tmp_path, model, protocol, tag):
+    import base64
+    import hashlib
+    import httpx
+    import json
+    from config import settings
+
+    monkeypatch.setattr(settings, "MEDIA_PATH", str(tmp_path))
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="736" height="420"><rect width="736" height="420" fill="white"/><circle cx="70" cy="49" r="6"/></svg>'
+    file = tmp_path / "work-packages" / (hashlib.sha256(svg).hexdigest() + ".svg")
+    file.parent.mkdir()
+    file.write_bytes(svg)
+    scene, config = await _create_scene_with_config(prompt="门前递窝头", video_model_type=model, api_protocol=protocol)
+    scene.metadata = {"video_prompt_model": model, "imported_media":[{"role":"blocking","url":"/media/work-packages/" + file.name}]}
+    await scene.save()
+    image = "https://cdn.example.com/hero.png"
+    monkeypatch.setattr("controllers.video.resolve_assets", AsyncMock(return_value=[{"name":"徐长寿","images":[image],"description":"放牛娃"}]))
+    bodies = []
+    real = httpx.AsyncClient
+    def reply(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"id":"mock", "task_id":"mock"})
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a,**kw: real(*a, **kw, transport=httpx.MockTransport(reply)))
+    await video_controller._submit_generation(VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id, generate_audio=False))
+    parts = bodies[0]["content"]
+    images = [p["image_url"]["url"] for p in parts if p["type"]=="image_url"]
+    assert len(images) == 2 and images[0] == image
+    assert images[1].startswith("data:image/png;base64,") and base64.b64decode(images[1].split(",")[1]).startswith(b"\x89PNG\r\n\x1a\n")
+    assert tag in parts[0]["text"] and ("机位" in parts[0]["text"] or "camera" in parts[0]["text"])

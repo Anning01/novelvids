@@ -10,6 +10,7 @@ import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPi
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import { fallbackImage } from '@/shared/mediaFallback'
+import { withBlockingReference } from '@/shared/sceneBlockingReference'
 import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 
@@ -58,7 +59,7 @@ const gallery = computed(() => {
   }
   return entries
 })
-const uploadedImages = computed(() => props.media.filter(item => item.type === 'image').length)
+const uploadedImages = computed(() => (props.scene && !props.disabled ? withBlockingReference(props.scene, props.media) : props.media).filter(item => item.type === 'image').length)
 const uploadedVideos = computed(() => props.media.filter(item => item.type === 'video').length)
 const totalVideoDuration = computed(() => props.media
   .filter(item => item.type === 'video')

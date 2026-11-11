@@ -23,7 +23,7 @@ from models.novel import Novel
 from models.scene import Scene
 from models.chapter import Chapter
 from models.video import Video
-from schemas.video import VideoGenerateRequest
+from schemas.video import VideoGenerateRequest, VideoReferenceMedia
 from services.billing.recorder import billing_recorder
 from services.oss import normalize_media_url, resolve_media_url
 from services.video import get_generator, get_record_model_type
@@ -377,6 +377,18 @@ class VideoController(CRUDBase[Video, dict, dict]):
         general = (metadata.get("generic_video_prompt") or (scene.prompt_params or {}).get("generic_prompt")
                    or ((metadata.get("work_package") or {}).get("drafts") or {}).get("general")
                    or (metadata.get("work_package") or {}).get("prompt") or "")
+        from services.storyboard.blocking_reference import BLOCKING_ID, blocking_source, provider_image
+        from services.video.reference_media import reference_mention_syntax
+        from prompts.storyboard_sheet_binding import bind_blocking, blocking_rules
+        references = list(req.reference_media)
+        source = blocking_source(scene.id, metadata, scene.prompt_params)
+        if source and req.generation_mode == "reference":
+            image_url = await provider_image(scene, source)
+            reference = VideoReferenceMedia(type="image", url=image_url, mention_url=BLOCKING_ID, name=localized_message("空间定位图"))
+            references = [item for item in references if item.mention_url != BLOCKING_ID and item.url not in {source, image_url}]
+            references.append(reference)
+            rules = blocking_rules(metadata.get("prompt_language", prompt_language))
+            prompt = bind_blocking(prompt, rules.get(prompt_model, rules["general"]), reference_mention_syntax("image", BLOCKING_ID))
         asset_prompt = general + "\n" + prompt if prompt_model else prompt
         try:
             subjects = await resolve_assets(
@@ -428,7 +440,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         reference_video_names: list[str] = []
         reference_video_duration = 0.0
         seen_references: set[tuple[str, str]] = set()
-        referenced_media = select_referenced_media(asset_prompt, req.reference_media)
+        referenced_media = select_referenced_media(asset_prompt, references)
         novel = await Novel.get_or_none(id=novel_id)
         voice_references = await resolve_voice_references(
             scene=scene,
@@ -440,7 +452,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         logger.info(
             "Video reference filter: scene_id=%s, supplied=%d, referenced=%d",
             scene.id,
-            len(req.reference_media),
+            len(references),
             len(referenced_media),
         )
         for reference_index, reference in enumerate(referenced_media, start=1):

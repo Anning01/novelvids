@@ -27,6 +27,11 @@ async def submit_prompt_optimization(scene_id, body, ctx):
         raise HTTPException(422, localized_message("当前视频模型尚未安装提示词优化技能"))
     facts = body.model_dump(exclude={"model_config_id"})
     facts["selected_model_type"] = model.video_model_type
+    from services.storyboard.blocking_reference import blocking_source
+    from prompts.storyboard_sheet_binding import blocking_rules
+    if body.generation_mode == "reference" and blocking_source(scene.id, scene.metadata, scene.prompt_params):
+        rules = blocking_rules((scene.metadata or {}).get("prompt_language", "zh"))
+        facts["blocking_guidance"] = rules.get(model.video_model_type, rules["general"])["line"].replace("{image}", localized_message("空间定位图"))
     params = await prepare_workflow(dict(operation="optimize_video_prompt", novel_id=scene.chapter.novel_id,
         chapter_id=scene.chapter_id, scene_id=scene.id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None,
         video_optimizer=optimizer, prompt_inputs=facts))

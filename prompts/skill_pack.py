@@ -15,6 +15,7 @@ FILES = {
     "assets": "novelvids-assets/references/assets.md",
     "authorization": "runtime/authorization.md",
     "base": "runtime/base.md",
+    "blocking_prompt": "novelvids-storyboard/references/blocking_prompt.json",
     "blocking_guide": "novelvids-storyboard/references/blocking.md",
     "clip_templates": "novelvids-video/references/clip_templates.json",
     "creation_planning": "runtime/creation_planning.md",

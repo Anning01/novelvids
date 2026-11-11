@@ -341,13 +341,18 @@ class SceneOut(SceneFullProperties, BaseResponse):
     prompt_params: Optional[dict[str, Any]] = Field(None, description="提示词参数配置")
 
     storyboard_binding_rules: dict | None = None
+    blocking_reference: dict | None = None
 
     @model_validator(mode="after")
     def _resolve_media(self):
         """对 metadata 中持久化的媒体引用重新签发（首尾帧与参考素材）。"""
-        metadata = self.metadata
-        if not isinstance(metadata, dict):
-            return self
+        from services.storyboard.blocking_reference import BLOCKING_ID, blocking_source
+        from prompts.storyboard_sheet_binding import blocking_rules
+        metadata = self.metadata if isinstance(self.metadata, dict) else {}
+        source = blocking_source(self.id, metadata, self.prompt_params)
+        if source:
+            self.blocking_reference = {"type": "image", "url": source, "mention_url": BLOCKING_ID,
+                "name": localized_message("空间定位图"), "rules": blocking_rules(metadata.get("prompt_language", "zh"))}
         for key in ("first_frame_url", "last_frame_url"):
             raw = metadata.get(key)
             if isinstance(raw, str) and raw:

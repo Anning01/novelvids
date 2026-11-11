@@ -25,3 +25,23 @@ describe('storyboard reference binding', () => {
     expect(videoReferenceMentionSyntax(first)).toBe(videoReferenceMentionSyntax(later))
   })
 })
+
+import { bindBlocking, unbindBlocking, withBlockingReference } from './sceneBlockingReference'
+
+it('binds the overhead image alongside the sheet, with the same order after changing drafts', () => {
+  const shot: Scene = {id: 5, sequence: 5, created_at: '', updated_at: '', blocking_reference: {
+    type: 'image', name: '定位图', url: '/media/map.svg', mention_url: 'novelvids:blocking-map',
+    rules: {general: {line: '{image} 按图调度', headings: ['空间关系：']},
+      minimax_h3: {line: '{image} defines the camera axis.', headings: ['subject_definitions:']}},
+  }}
+  const sheet: VideoReferenceMedia = {type:'image', url:'/media/sheet.png', mention_url:'novelvids:storyboard-sheet'}
+  const media = withBlockingReference(shot, [sheet])
+  for (const model of ['', 'minimax_h3']) {
+    const base = (model ? 'subject_definitions:' : '空间关系：王家牛棚门前') + '\n' + videoReferenceMentionSyntax(sheet)
+    const bound = bindBlocking(base, shot, model)
+    expect(bound.split('\n')[1]).toContain(videoReferenceMentionSyntax(shot.blocking_reference!))
+    expect(referencedVideoMedia(bound, media).map(item => item.url)).toEqual(['/media/sheet.png', '/media/map.svg'])
+    expect(bindBlocking(bound, shot, model)).toBe(bound)
+    expect(unbindBlocking(bound, shot)).toBe(base)
+  }
+})

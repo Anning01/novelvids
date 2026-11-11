@@ -35,6 +35,7 @@ import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import SceneVoiceTracks from '@/components/SceneVoiceTracks.vue'
+import { bindBlocking, unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
@@ -409,6 +410,15 @@ async function persistVideoModelPreference(modelId: number) {
   }
 }
 
+function boundPrompt(prompt: string, scene: Scene, model: string, sheetExcluded: boolean) {
+  const text = !sheetExcluded && sheetReference(scene) ? bindSheet(prompt, scene, model) : prompt
+  return bindBlocking(text, scene, model)
+}
+
+function plainPrompt(prompt: string, scene: Scene) {
+  return unbindBlocking(unbindSheet(prompt, scene), scene)
+}
+
 function makeSceneDraft(scene: Scene): SceneDraft {
   const metadata = scene?.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}
   const defaults = project.value?.video_generation_defaults
@@ -430,7 +440,7 @@ function makeSceneDraft(scene: Scene): SceneDraft {
   const media = sheet && !sheetExcluded ? includeSheet(savedMedia, sheet) : savedMedia
   return {
     description: scene.description || '',
-    prompt: sheet && !sheetExcluded && metadata.video_generation_mode !== 'keyframes' ? bindSheet(prompt, scene, promptModel) : prompt,
+    prompt: metadata.video_generation_mode === 'keyframes' ? unbindBlocking(prompt, scene) : boundPrompt(prompt, scene, promptModel, sheetExcluded),
     promptModel, sheetExcluded,
     generic: genericPrompt(scene),
     modelVersions: { ...(metadata.video_prompt_versions as SceneDraft['modelVersions'] || {}) },
@@ -1100,7 +1110,7 @@ function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelC
       mentionNames: [asset.canonical_name, ...(asset.aliases || [])],
       imageUrls: selectedAssetReferenceImages(scene, asset),
     })),
-    draft.referenceMedia,
+    withBlockingReference(scene, draft.referenceMedia),
     maxImages,
   )
 }
@@ -1168,14 +1178,14 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
     description: asset.description || asset.canonical_name,
     aliases: asset.aliases || [],
   })))
-  const mediaOptions: ScenePromptMentionOption[] = draftFor(scene).referenceMedia.map((reference, index) => ({
+  const mediaOptions: ScenePromptMentionOption[] = withBlockingReference(scene, draftFor(scene).referenceMedia).map((reference, index) => ({
     id: `reference-${reference.type}-${reference.url}`,
     kind: reference.type,
     label: reference.name || tr('{p0} {p1}', { p0: reference.type === 'image' ? '参考图片' : '参考视频', p1: index + 1 }),
     syntax: videoReferenceMentionSyntax(reference),
     group: reference.type === 'image' ? tr('参考图片') : tr('参考视频'),
-    previewUrl: reference.url,
-    thumbnailUrl: reference.url,
+    previewUrl: reference.url.startsWith('/api/') ? undefined : mediaUrl(reference.url),
+    thumbnailUrl: reference.url.startsWith('/api/') ? undefined : mediaUrl(reference.url),
     description: reference.type === 'image' ? tr('已上传参考图片') : tr('已上传参考视频'),
   }))
   const audioOptions: ScenePromptMentionOption[] = sceneVoiceReferenceMappings(scene).map((mapping, index) => {
@@ -1246,7 +1256,7 @@ function inspectVideoFile(file: File): Promise<{ duration: number; width: number
 
 async function validateReferenceFiles(scene: Scene, files: File[], model: VideoGenerationModel) {
   const capabilities = model.capabilities
-  const existingImages = draftFor(scene).referenceMedia.filter(item => item.type === 'image').length
+  const existingImages = withBlockingReference(scene, draftFor(scene).referenceMedia).filter(item => item.type === 'image').length
   const existingVideos = draftFor(scene).referenceMedia.filter(item => item.type === 'video')
   const imageFiles = files.filter(file => capabilities.reference_image_formats.includes(fileExtension(file)))
   const videoFiles = files.filter(file => capabilities.reference_video_formats.includes(fileExtension(file)))
@@ -1309,7 +1319,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const additions = references.filter(item => !draft.referenceMedia.some(current => (item.library_resource_id != null && current.library_resource_id === item.library_resource_id) || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
-  if (combined.filter(item => item.type === 'image').length > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
+  if (withBlockingReference(scene, combined).filter(item => item.type === 'image').length > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
   if (videos.length > model.capabilities.max_reference_videos || videos.reduce((total, item) => total + (item.duration || 0), 0) > model.capabilities.reference_video_total_duration_max + 0.001) {
     notice.error(tr('参考视频数量或总时长超过当前模型限制'))
     return
@@ -1361,9 +1371,7 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
 async function setVideoGenerationMode(scene: Scene, mode: 'reference' | 'keyframes') {
   const draft = draftFor(scene)
   draft.videoGenerationMode = mode
-  if (!draft.sheetExcluded && sheetReference(scene)) {
-    draft.prompt = mode === 'reference' ? bindSheet(draft.prompt, scene, draft.promptModel) : unbindSheet(draft.prompt, scene)
-  }
+  draft.prompt = mode === 'reference' ? boundPrompt(draft.prompt, scene, draft.promptModel, draft.sheetExcluded) : plainPrompt(draft.prompt, scene)
   await saveScene(scene, false)
 }
 
@@ -1827,17 +1835,18 @@ function modelDrafts(scene: Scene) {
 function previewModelDraft(scene: Scene, model: string, prompt: string) {
   const sheet = sheetReference(scene)
   const draft = draftFor(scene)
-  if (!sheet || draft.sheetExcluded || draft.videoGenerationMode !== 'reference') return prompt
-  return bindSheet(prompt, scene, model).split(videoReferenceMentionSyntax(sheet)).join('〔' + tr('逐镜线稿故事版') + '〕')
+  if (draft.videoGenerationMode !== 'reference') return prompt
+  let text = boundPrompt(prompt, scene, model, draft.sheetExcluded)
+  if (sheet) text = text.replace(videoReferenceMentionSyntax(sheet), tr('逐镜线稿故事版'))
+  return scene.blocking_reference ? text.replace(videoReferenceMentionSyntax(scene.blocking_reference), tr('空间定位图')) : text
 }
 
 function selectPromptVersion(scene: Scene, prompt: string, model: string) {
   const draft = draftFor(scene)
   const previous = draft.modelVersions[draft.promptModel]
-  if (previous) previous.prompt = unbindSheet(draft.prompt, scene)
+  if (previous) previous.prompt = plainPrompt(draft.prompt, scene)
   draft.promptModel = model
-  updateScenePrompt(scene, sheetReference(scene) && !draft.sheetExcluded && draft.videoGenerationMode === 'reference'
-    ? bindSheet(prompt, scene, model) : prompt)
+  updateScenePrompt(scene, draft.videoGenerationMode === 'reference' ? boundPrompt(prompt, scene, model, draft.sheetExcluded) : plainPrompt(prompt, scene))
 }
 
 const promptOptimizations = ref(new Map<number, AbortController>())
@@ -1862,7 +1871,7 @@ function optimizationInput(scene: Scene, model: VideoGenerationModel) {
       for (const mapping of sceneVoiceReferenceMappings(scene)) submitted.push({ type: 'audio', label: mapping.subjects.join('、') || tr('旁白') })
     }
   }
-  return { generic_prompt: unbindSheet(draft.prompt, scene), duration: sceneDuration(scene, model),
+  return { generic_prompt: plainPrompt(draft.prompt, scene), duration: sceneDuration(scene, model),
     aspect_ratio: sceneAspectRatio(scene, model), generation_mode: draft.videoGenerationMode, submitted_media: submitted }
 }
 
@@ -1880,7 +1889,7 @@ async function toggleModelPrompt(scene: Scene) {
   const importedBase = scene.prompt_params?.generic_prompt ?? importedDrafts(scene).general ??
     (scene.metadata?.work_package as {prompt?: string} | undefined)?.prompt
   let optimized = cached?.input === input ? cached.prompt : undefined
-  if (!cached && typeof importedBase === 'string' && unbindSheet(importedBase, scene) === facts.generic_prompt) {
+  if (!cached && typeof importedBase === 'string' && plainPrompt(importedBase, scene) === facts.generic_prompt) {
     optimized = modelDrafts(scene).find(item => item.model === model.model_type)?.text
   }
   const controller = new AbortController()
