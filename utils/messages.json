@@ -249,6 +249,8 @@
   "合并视频上传 OSS 失败": "Could not upload composed video to object storage",
   "从 OSS 读取视频失败: video_id={p1}": "Could not read video from object storage: video_id={p1}",
   "该视频模型尚未配置请求适配器": "No request adapter is configured for this video model",
+  "模型未返回提示词": "The model returned an empty prompt",
+  "当前视频模型尚未安装提示词优化技能": "No prompt optimization skill is installed for the selected video model",
   "当前视频模型仅支持{p1}接口协议": "This video model only supports the {p1} protocol",
   "所选生成方式不受当前视频模型支持": "This video model does not support the selected generation mode",
   "所选分辨率不受当前视频模型支持": "This video model does not support the selected resolution",

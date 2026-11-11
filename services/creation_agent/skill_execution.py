@@ -85,7 +85,7 @@ async def prepare_workflow(params: dict) -> dict:
         project = await Novel.get(id=params['novel_id'])
         duration_range = params.get('shot_duration_range') or [1, project.shot_duration_max]
         params = {**params, 'shot_duration_range': [duration_range[0], min(duration_range[1], project.shot_duration_max)]}
-    optimizer = inherited.get('video_optimizer') or (await project_optimizer(params['novel_id'], params.get('team_id')) if params.get('novel_id') else {'mode': 'generic'})
+    optimizer = inherited.get('video_optimizer') or params.get('video_optimizer') or (await project_optimizer(params['novel_id'], params.get('team_id')) if params.get('novel_id') else {'mode': 'generic'})
     return {
         'video_optimizer': optimizer,
         **params,

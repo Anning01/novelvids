@@ -24,6 +24,7 @@ import {
   UsersRound,
   Volume2,
   Workflow,
+  WandSparkles,
 } from 'lucide-vue-next'
 import AppSelect from '@/components/AppSelect.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
@@ -91,6 +92,8 @@ interface SceneDraft {
   description: string
   prompt: string
   promptModel: string
+  generic: string
+  modelVersions: Record<string, { prompt: string; input: string }>
   sheetExcluded: boolean
   basePrompt: string | null
   duration: number
@@ -350,14 +353,12 @@ const selectedVideoModelInput = computed({
   set: (value: string) => {
     const modelId = Number(value)
     if (!Number.isInteger(modelId) || modelId < 1 || String(modelId) === selectedVideoModel.value) return
+    cancelPromptOptimizations()
     selectedVideoModel.value = String(modelId)
     for (const scene of scenes.value) {
       const draft = draftFor(scene)
-      if (draft.promptModel && draft.promptModel !== selectedVideoModelConfig.value?.model_type && genericPrompt(scene)) {
-        const original = modelDrafts(scene).find(v => v.model === draft.promptModel)?.text
-        if (original && (draft.prompt === original || draft.prompt === bindSheet(original, scene, draft.promptModel))) {
-          selectPromptVersion(scene, genericPrompt(scene), '')
-        }
+      if (draft.promptModel && draft.promptModel !== selectedVideoModelConfig.value?.model_type && draft.generic) {
+        selectPromptVersion(scene, draft.generic, '')
       }
     }
     videoModelPreferenceSaveQueue = videoModelPreferenceSaveQueue.then(() => persistVideoModelPreference(modelId))
@@ -431,6 +432,8 @@ function makeSceneDraft(scene: Scene): SceneDraft {
     description: scene.description || '',
     prompt: sheet && !sheetExcluded && metadata.video_generation_mode !== 'keyframes' ? bindSheet(prompt, scene, promptModel) : prompt,
     promptModel, sheetExcluded,
+    generic: genericPrompt(scene),
+    modelVersions: { ...(metadata.video_prompt_versions as SceneDraft['modelVersions'] || {}) },
     basePrompt: scene.prompt ?? null,
     duration: scene.duration || 6,
     selectedAssetIds: [...new Set(linkedAssetIds)],
@@ -1082,11 +1085,15 @@ function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
   return [...new Set(sources)]
 }
 
+function referencePrompt(draft: SceneDraft) {
+  return draft.promptModel ? draft.generic + '\n' + draft.prompt : draft.prompt
+}
+
 function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelConfig.value?.capabilities.max_reference_images ?? Infinity) {
   const draft = draftFor(scene)
   const selectedAssets = assets.value.filter(asset => draft.selectedAssetIds.includes(asset.id))
   return buildVideoInputImageReferences(
-    draft.promptModel ? (genericPrompt(scene) + '\n' + draft.prompt) : draft.prompt,
+    referencePrompt(draft),
     selectedAssets.map(asset => ({
       assetId: asset.id,
       label: selectedAssetLabel(scene, asset),
@@ -1201,7 +1208,7 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
 function referenceLimitError(scene: Scene, model = selectedVideoModelConfig.value) {
   if (!model || draftFor(scene).videoGenerationMode !== 'reference') return ''
   const draft = draftFor(scene)
-  const referencedMedia = referencedVideoMedia(draft.prompt, draft.referenceMedia)
+  const referencedMedia = referencedVideoMedia(referencePrompt(draft), draft.referenceMedia)
   const imageCount = videoInputImageReferences(scene, model.capabilities.max_reference_images).length
   const videos = referencedMedia.filter(item => item.type === 'video')
   const duration = videos.reduce((total, item) => total + (item.duration || 0), 0)
@@ -1573,6 +1580,7 @@ async function regenerateStoryboard() {
 }
 
 async function loadChapter(chapterId: number) {
+  cancelPromptOptimizations()
   batchMonitor?.abort()
   batchGeneratingVideos.value = false
   const loadVersion = ++chapterLoadVersion
@@ -1798,7 +1806,7 @@ function importedDrafts(scene: Scene): Record<string, unknown> {
 
 function genericPrompt(scene: Scene): string {
   const work = scene.metadata?.work_package as {prompt?: string} | undefined
-  const value = scene.prompt_params?.generic_prompt || importedDrafts(scene).general || work?.prompt || scene.metadata?.generic_video_prompt
+  const value = scene.metadata?.generic_video_prompt ?? scene.prompt_params?.generic_prompt ?? importedDrafts(scene).general ?? work?.prompt
   return typeof value === 'string' ? value : ''
 }
 
@@ -1824,14 +1832,83 @@ function previewModelDraft(scene: Scene, model: string, prompt: string) {
 
 function selectPromptVersion(scene: Scene, prompt: string, model: string) {
   const draft = draftFor(scene)
+  const previous = draft.modelVersions[draft.promptModel]
+  if (previous) previous.prompt = unbindSheet(draft.prompt, scene)
   draft.promptModel = model
   updateScenePrompt(scene, sheetReference(scene) && !draft.sheetExcluded && draft.videoGenerationMode === 'reference'
     ? bindSheet(prompt, scene, model) : prompt)
 }
 
-function useOptimizedPrompt(scene: Scene, prompt: string, model: string) {
-  if (!genericPrompt(scene)) scene.metadata = {...(scene.metadata || {}), generic_video_prompt: unbindSheet(scene.prompt || '', scene)}
-  selectPromptVersion(scene, prompt, model)
+const promptOptimizations = ref(new Map<number, AbortController>())
+
+function cancelPromptOptimizations() {
+  for (const controller of promptOptimizations.value.values()) controller.abort()
+  promptOptimizations.value.clear()
+}
+
+function optimizationInput(scene: Scene, model: VideoGenerationModel) {
+  const draft = draftFor(scene)
+  const submitted: { type: 'image' | 'video' | 'audio'; label: string }[] = []
+  if (draft.videoGenerationMode === 'keyframes') {
+    if (draft.firstFrameUrl) submitted.push({ type: 'image', label: tr('首帧') })
+    if (draft.lastFrameUrl) submitted.push({ type: 'image', label: tr('尾帧') })
+  } else {
+    for (const ref of videoInputImageReferences(scene)) submitted.push({ type: 'image', label: ref.label })
+    for (const ref of referencedVideoMedia(draft.prompt, draft.referenceMedia).filter(item => item.type === 'video')) {
+      submitted.push({ type: 'video', label: ref.name || tr('参考视频') })
+    }
+    if (model.capabilities.supports_audio) {
+      for (const mapping of sceneVoiceReferenceMappings(scene)) submitted.push({ type: 'audio', label: mapping.subjects.join('、') || tr('旁白') })
+    }
+  }
+  return { generic_prompt: unbindSheet(draft.prompt, scene), duration: sceneDuration(scene, model),
+    aspect_ratio: sceneAspectRatio(scene, model), generation_mode: draft.videoGenerationMode, submitted_media: submitted }
+}
+
+async function toggleModelPrompt(scene: Scene) {
+  const draft = draftFor(scene)
+  if (draft.promptModel) {
+    selectPromptVersion(scene, draft.generic, '')
+    return
+  }
+  const model = selectedVideoModelConfig.value
+  if (!model || !draft.prompt.trim() || promptOptimizations.value.has(scene.id)) return
+  const facts = optimizationInput(scene, model)
+  const input = JSON.stringify(facts)
+  const cached = draft.modelVersions[model.model_type]
+  const importedBase = scene.prompt_params?.generic_prompt ?? importedDrafts(scene).general ??
+    (scene.metadata?.work_package as {prompt?: string} | undefined)?.prompt
+  let optimized = cached?.input === input ? cached.prompt : undefined
+  if (!cached && typeof importedBase === 'string' && unbindSheet(importedBase, scene) === facts.generic_prompt) {
+    optimized = modelDrafts(scene).find(item => item.model === model.model_type)?.text
+  }
+  const controller = new AbortController()
+  promptOptimizations.value.set(scene.id, controller)
+  try {
+    if (!optimized) {
+      const {data: task} = await api.optimizeScenePrompt(scene.id, {model_config_id: model.config_id, ...facts})
+      const result = terminalTaskStatuses.has(task.status) ? task : await pollUntilTerminal(
+        async signal => (await api.task(task.id, signal)).data,
+        { signal: controller.signal, intervalMs: 1500, terminalStatuses: terminalTaskStatuses, requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
+      if (result.status !== TaskStatusEnum.COMPLETED) throw new Error(result.error_message || tr('提示词优化失败'))
+      const text = result.response_data?.prompt
+      if (typeof text !== 'string' || !text.trim() || result.response_data?.model_type !== model.model_type ||
+          result.response_data?.scene_id !== scene.id) throw new Error(tr('模型未返回本镜头的提示词'))
+      optimized = text
+    }
+    if (controller.signal.aborted || selectedVideoModelConfig.value?.config_id !== model.config_id) return
+    if (JSON.stringify(optimizationInput(scene, model)) !== input) {
+      notice.info(tr('分镜内容已修改，请按当前内容重新优化'))
+      return
+    }
+    draft.generic = facts.generic_prompt
+    draft.modelVersions[model.model_type] = { prompt: optimized, input }
+    selectPromptVersion(scene, optimized, model.model_type)
+  } catch (error) {
+    if (!controller.signal.aborted) notice.error((error as Error).message)
+  } finally {
+    if (promptOptimizations.value.get(scene.id) === controller) promptOptimizations.value.delete(scene.id)
+  }
 }
 
 function updateScenePrompt(scene: Scene, value: string) {
@@ -1885,6 +1962,8 @@ async function saveScene(
           last_frame_url: draft.lastFrameUrl || undefined,
           asset_variant_ids: draft.selectedVariantIds,
           video_prompt_model: draft.promptModel,
+          ...(draft.generic ? {generic_video_prompt: draft.generic} : {}),
+          ...(Object.keys(draft.modelVersions).length ? {video_prompt_versions: draft.modelVersions} : {}),
           storyboard_sheet_excluded: draft.sheetExcluded,
           video_reference_media: draft.referenceMedia,
           video_resolution: sceneResolution(currentScene, model),
@@ -2055,7 +2134,7 @@ async function generateVideo(
       return_last_frame: settings?.returnLastFrame ?? draft.returnLastFrame,
       auto_enhancement: currentAutoEnhancement(settings?.autoEnhancement === undefined ? draft.autoEnhancement : settings.autoEnhancement, enhancementModels.value),
       reference_media: draft.videoGenerationMode === 'reference'
-        ? referencedVideoMedia(draft.prompt, draft.referenceMedia)
+        ? referencedVideoMedia(referencePrompt(draft), draft.referenceMedia)
         : [],
     })).data
     if (!alive || version !== chapterLoadVersion) return false
@@ -2320,7 +2399,7 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
           resolution: request.resolution, aspect_ratio: request.aspectRatio,
           output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
           return_last_frame: true, auto_enhancement: request.autoEnhancement || null,
-          reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(draft.prompt, draft.referenceMedia) : [] }
+          reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(referencePrompt(draft), draft.referenceMedia) : [] }
       })
       const task = (await api.generateVideoBatch(requests)).data
       await monitorVideoBatch(task.id)
@@ -2400,6 +2479,7 @@ onMounted(() => {
   window.addEventListener('keydown', closeAssetActionsFromEscape)
 })
 onBeforeUnmount(() => {
+  cancelPromptOptimizations()
   batchMonitor?.abort()
   void flushPendingSceneSaves()
   alive = false
@@ -2606,11 +2686,9 @@ onBeforeUnmount(() => {
                   @choose-library="addLibraryReferences(scene, $event)"
                   @remove="removeReferenceMedia(scene, $event)"
                 />
-                <div v-for="version in modelDrafts(scene)" :key="version.model" class="model-optimized-prompt">
+                <div v-for="version in modelDrafts(scene).filter(item => !videoModels.some(model => model.model_type === item.model))" :key="version.model" class="model-optimized-prompt">
                   <details><summary>{{ tr('模型专项稿') }} · {{ version.label }}</summary><p>{{ previewModelDraft(scene, version.model, version.text) }}</p></details>
-                  <AppButton v-if="version.model === selectedVideoModelConfig?.model_type && draftFor(scene).promptModel !== version.model" variant="secondary" size="sm" @click="useOptimizedPrompt(scene, version.text, version.model)">{{ tr('使用模型专项稿') }}</AppButton>
                 </div>
-                <AppButton v-if="genericPrompt(scene) && draftFor(scene).promptModel" variant="ghost" size="sm" @click="selectPromptVersion(scene, genericPrompt(scene), '')">{{ tr('恢复通用稿') }}</AppButton>
                 <ScenePromptEditor
                   :model-value="draftFor(scene).prompt"
                   :options="promptMentionOptions(scene)"
@@ -2636,7 +2714,17 @@ onBeforeUnmount(() => {
                       @update:auto-enhancement="updateSceneDraft(scene, 'autoEnhancement', $event)"
                     />
                   </div>
-                  <span v-if="draftFor(scene).autoEnhancement" class="scene-video-cost">{{ sceneEnhancementEstimate(scene) }}</span><AppButton variant="primary" size="md" :aria-label="tr('生成视频')" :disabled="!canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? tr('生成中') : tr('生成') }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
+                  <div class="prompt-actions">
+                    <span v-if="draftFor(scene).autoEnhancement" class="scene-video-cost">{{ sceneEnhancementEstimate(scene) }}</span>
+                    <AppButton class="prompt-version-toggle" variant="soft" size="md"
+                      :aria-pressed="Boolean(draftFor(scene).promptModel)" :loading="promptOptimizations.has(scene.id)"
+                      :disabled="draftFor(scene).promptModel ? !draftFor(scene).generic : !selectedVideoModelConfig || !draftFor(scene).prompt.trim()"
+                      @click="toggleModelPrompt(scene)">
+                      <WandSparkles v-if="!promptOptimizations.has(scene.id)" :size="15" aria-hidden="true" />
+                      {{ promptOptimizations.has(scene.id) ? tr('优化中') : draftFor(scene).promptModel ? tr('使用通用 Prompt') : tr('模型 Skills 优化') }}
+                    </AppButton>
+                    <AppButton variant="primary" size="md" :aria-label="tr('生成视频')" :disabled="promptOptimizations.has(scene.id) || !canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? tr('生成中') : tr('生成') }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
+                  </div>
                 </footer>
               </section>
 
@@ -2853,8 +2941,9 @@ onBeforeUnmount(() => {
 .keyframe-inputs label > span small { color: #a1a6b3; font-size: 9px; }
 .keyframe-inputs label > i { position: absolute; top: 8px; left: 8px; padding: 4px 7px; border-radius: 7px; color: #5e60e9; background: rgb(255 255 255 / 92%); box-shadow: 0 3px 10px rgb(37 40 58 / 8%); font-size: 9px; font-style: normal; font-weight: 700; }
 .prompt-panel > textarea { min-height: 420px; padding: 8px 16px 18px; background: #fff; font-size: 11px; line-height: 1.8; white-space: pre-wrap; }
-.prompt-panel > footer { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px 12px; border-top: 0; background: transparent; }
+.prompt-panel > footer { display: flex; flex-wrap: wrap; min-height: 58px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px 12px; border-top: 0; background: transparent; }
 .prompt-panel > footer > div { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.prompt-panel > footer > .prompt-actions { margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; overflow: visible; }
 .prompt-panel > footer > div > span { display: inline-flex; min-height: 34px; align-items: center; gap: 4px; padding: 0 10px; border-radius: 9px; color: #777d8d; background: #fff; box-shadow: 0 1px 3px rgb(35 39 55 / 8%); font-size: 10px; }
 .prompt-panel input { width: 23px; padding: 0; border: 0; outline: 0; color: #555b6a; background: transparent; font: inherit; text-align: right; }
 .preview-panel { display: grid; grid-template-rows: minmax(48px,auto) minmax(0,1fr) auto; overflow: hidden; }

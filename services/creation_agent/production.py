@@ -36,6 +36,7 @@ async def conversation_for_task(task):
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
         "story": ("分析故事", "Analyze story"),
+        "optimize_video_prompt": ("优化分镜提示词", "Optimize shot prompt"),
         "screenplay": ("生成本集剧本", "Adapt episode screenplay"),
         "remake": ("重制视频", "Analyze source video"),
         "video": ("生成视频", "Generate video"),
@@ -64,11 +65,11 @@ async def conversation_for_task(task):
             id=params["asset_id"], novel_id=params["novel_id"]
         )
         kind = "asset"
-    elif params.get("video_request", {}).get("scene_id"):
+    elif params.get("scene_id") or params.get("video_request", {}).get("scene_id"):
         from models.scene import Scene
 
         target = await Scene.get_or_none(
-            id=params["video_request"]["scene_id"], chapter__novel_id=params["novel_id"]
+            id=params.get("scene_id") or params["video_request"]["scene_id"], chapter__novel_id=params["novel_id"]
         )
         kind = "scene"
     if target:

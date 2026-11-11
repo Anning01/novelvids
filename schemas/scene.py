@@ -367,3 +367,17 @@ class SceneOut(SceneFullProperties, BaseResponse):
                     if isinstance(raw, str) and raw:
                         item["url"] = resolve_media_url(raw) or raw
         return self
+
+
+class PromptMediaReference(BaseModel):
+    type: Literal["image", "video", "audio"]
+    label: str = Field(min_length=1, max_length=1024)
+
+
+class ScenePromptOptimization(BaseModel):
+    model_config_id: int = Field(gt=0)
+    generic_prompt: str = Field(min_length=1, max_length=100_000)
+    generation_mode: Literal["reference", "keyframes"]
+    duration: int = Field(gt=0)
+    aspect_ratio: str = Field(min_length=1, max_length=32)
+    submitted_media: list[PromptMediaReference] = Field(default_factory=list, max_length=256)

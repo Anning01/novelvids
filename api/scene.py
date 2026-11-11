@@ -22,6 +22,7 @@ from schemas.scene import (
     SceneGenerateCreate,
     SceneOut,
     ScenePatch,
+    ScenePromptOptimization,
     SceneUpdate,
     StoryboardStrategyOut,
 )
@@ -138,6 +139,15 @@ async def patch_scene(
 ):
     scenes = await scene_controller.patch(scene_id, scene)
     return ResponseSchema(data=scenes)
+
+
+@router.post("/{scene_id}/optimize-prompt", summary="按所选视频模型优化分镜提示词", response_model=ResponseSchema[AiTaskOut])
+async def optimize_scene_prompt(scene_id: int, body: ScenePromptOptimization, bg: BackgroundTasks,
+                                ctx: AuthContext = Depends(require_scene_access), _: AuthContext = _EDITOR):
+    from services.storyboard.prompt_optimization import submit_prompt_optimization
+    task = await submit_prompt_optimization(scene_id, body, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
 
 
 @router.get("/{scene_id}/blocking-map.svg", summary="查看分镜空间定位图", response_class=Response,

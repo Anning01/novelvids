@@ -346,6 +346,10 @@ export const api = {
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
   extractVideoLastFrame: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/last-frame`, { method: 'POST' }),
+  optimizeScenePrompt: (sceneId: number, input: {
+    model_config_id: number; generic_prompt: string; generation_mode: 'reference' | 'keyframes'
+    duration: number; aspect_ratio: string; submitted_media: { type: 'image' | 'video' | 'audio'; label: string }[]
+  }) => request<SingleResponse<AiTask>>(`/scene/${sceneId}/optimize-prompt`, { method: 'POST', body: JSON.stringify(input) }),
   generateVideo: (sceneId: number, modelConfigId: number, options: VideoGenerationOptions = {}) => request<SingleResponse<Video>>('/video/generate/', { method: 'POST', body: JSON.stringify({ scene_id: sceneId, model_config_id: modelConfigId, ...options }) }),
   generateVideoBatch: (requests: Array<VideoGenerationOptions & { scene_id: number; model_config_id: number }>) => request<SingleResponse<AiTask>>('/video/batch', { method: 'POST', body: JSON.stringify({ requests }) }),
   latestVideoBatch: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/video/batch/latest/${chapterId}`),

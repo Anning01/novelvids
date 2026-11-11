@@ -211,6 +211,8 @@ ai_task_executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandle
 ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
 from services.chapter_screenplay import ScreenplayHandler
 ai_task_executor.register(AiTaskTypeEnum.screenplay, ScreenplayHandler())
+from services.storyboard.prompt_optimization import PromptOptimizationHandler
+ai_task_executor.register(AiTaskTypeEnum.prompt_optimization, PromptOptimizationHandler())
 ai_task_executor.register(
     AiTaskTypeEnum.remake_decomposition,
     RemakeDecompositionTaskHandler(),

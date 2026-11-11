@@ -127,6 +127,7 @@ class AiTaskTypeEnum(NicknameIntEnum):
     video_enhancement = 8, "视频画质增强"
     audio_recognition = 9, "语音识别"
     screenplay = 10, "生成本集剧本"
+    prompt_optimization = 11, "模型提示词优化"
 
 
 @enum_description

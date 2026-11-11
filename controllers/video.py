@@ -374,9 +374,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
             raise HTTPException(409, localized_message("请恢复通用稿或选择与专项稿匹配的视频模型"))
         from prompts.storyboard_sheet_binding import model_image_format
         image_format = model_image_format(prompt_model) if prompt_model else "[图{}]"
-        general = ((scene.prompt_params or {}).get("generic_prompt")
+        general = (metadata.get("generic_video_prompt") or (scene.prompt_params or {}).get("generic_prompt")
                    or ((metadata.get("work_package") or {}).get("drafts") or {}).get("general")
-                   or (metadata.get("work_package") or {}).get("prompt") or metadata.get("generic_video_prompt") or "")
+                   or (metadata.get("work_package") or {}).get("prompt") or "")
         asset_prompt = general + "\n" + prompt if prompt_model else prompt
         try:
             subjects = await resolve_assets(
@@ -428,7 +428,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         reference_video_names: list[str] = []
         reference_video_duration = 0.0
         seen_references: set[tuple[str, str]] = set()
-        referenced_media = select_referenced_media(prompt, req.reference_media)
+        referenced_media = select_referenced_media(asset_prompt, req.reference_media)
         novel = await Novel.get_or_none(id=novel_id)
         voice_references = await resolve_voice_references(
             scene=scene,
