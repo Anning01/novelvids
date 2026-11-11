@@ -34,7 +34,6 @@ import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import SceneVoiceTracks from '@/components/SceneVoiceTracks.vue'
-import SceneBlockingMap from '@/components/SceneBlockingMap.vue'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
@@ -1137,9 +1136,9 @@ async function locateProblemImageReference(scene: Scene, number: number) {
   }, 1800)
 }
 
-function selectedAssetReferenceImageCount(scene: Scene) {
+function selectedAssetReferenceImagesForBar(scene: Scene) {
   return videoInputImageReferences(scene)
-    .filter(reference => reference.source === 'asset').length
+    .filter(reference => reference.source === 'asset')
 }
 
 function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
@@ -2596,7 +2595,8 @@ onBeforeUnmount(() => {
                   :scene-id="scene.id"
                   :model="selectedVideoModelConfig"
                   :media="draftFor(scene).referenceMedia"
-                  :asset-image-count="selectedAssetReferenceImageCount(scene)"
+                  :scene="scene"
+                  :asset-images="selectedAssetReferenceImagesForBar(scene)"
                   :assets-use-descriptions="videoInputImageReferences(scene, Infinity).length > videoInputImageReferences(scene).length"
                   :audio-durations="sceneAudioDurations(scene)"
                   :highlighted-media-index="highlightedMediaIndex(scene)"
@@ -2606,7 +2606,6 @@ onBeforeUnmount(() => {
                   @choose-library="addLibraryReferences(scene, $event)"
                   @remove="removeReferenceMedia(scene, $event)"
                 />
-                <SceneBlockingMap :scene="scene" />
                 <div v-for="version in modelDrafts(scene)" :key="version.model" class="model-optimized-prompt">
                   <details><summary>{{ tr('模型专项稿') }} · {{ version.label }}</summary><p>{{ previewModelDraft(scene, version.model, version.text) }}</p></details>
                   <AppButton v-if="version.model === selectedVideoModelConfig?.model_type && draftFor(scene).promptModel !== version.model" variant="secondary" size="sm" @click="useOptimizedPrompt(scene, version.text, version.model)">{{ tr('使用模型专项稿') }}</AppButton>

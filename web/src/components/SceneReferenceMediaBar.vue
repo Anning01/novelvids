@@ -5,18 +5,21 @@ import { computed, ref, watch } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, Volume2, X } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
 import { catalogApi } from '@/features/resource-library/catalog'
-import type { VideoGenerationModel, VideoReferenceMedia } from '@/types'
+import type { Scene, VideoInputImageReference, VideoGenerationModel, VideoReferenceMedia } from '@/types'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import { fallbackImage } from '@/shared/mediaFallback'
+import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 
 const props = defineProps<{
   sceneId?: number
+  scene?: Scene
+  assetImages?: VideoInputImageReference[]
   model: VideoGenerationModel | null
   media: VideoReferenceMedia[]
-  assetImageCount: number
+  assetImageCount?: number
   assetsUseDescriptions?: boolean
   audioDurations?: Array<number | null>
   highlightedMediaIndex?: number
@@ -46,6 +49,22 @@ function referenceUrl(item: VideoReferenceMedia) { return mediaUrl((item.library
 function unavailableReference(item: VideoReferenceMedia) { return Boolean(item.library_resource_id && libraryStates.value[item.library_resource_id]?.failed) }
 const input = ref<HTMLInputElement | null>(null)
 const previewImage = ref<VideoReferenceMedia | null>(null)
+const blocking = useSceneBlockingMap(() => props.scene)
+interface GalleryEntry { item: VideoReferenceMedia; mediaIndex?: number; kind: 'asset' | 'media' | 'blocking' }
+const gallery = computed(() => {
+  const entries: GalleryEntry[] = []
+  const uploads = new Set(props.media.filter(m => m.type === 'image').map(m => referenceUrl(m)))
+  for (const ref of props.assetImages || []) {
+    if (!uploads.has(mediaUrl(ref.url))) entries.push({kind: 'asset', item: {type: 'image', url: ref.url, name: ref.label}})
+  }
+  props.media.forEach((item, mediaIndex) => entries.push({kind: 'media', item, mediaIndex}))
+  const plan = blocking.image.value
+  if (plan && !entries.some(entry => entry.item.type === 'image' && referenceUrl(entry.item) === plan)) {
+    entries.push({kind: 'blocking', item: {type: 'image', url: plan, name: tr('空间定位图')}})
+  }
+  return entries
+})
+const assetImageCount = computed(() => props.assetImages ? gallery.value.filter(entry => entry.kind === 'asset').length : props.assetImageCount || 0)
 const uploadedImages = computed(() => props.media.filter(item => item.type === 'image').length)
 const uploadedVideos = computed(() => props.media.filter(item => item.type === 'video').length)
 const totalVideoDuration = computed(() => props.media
@@ -85,7 +104,7 @@ function showFirstFrame(event: Event) {
 }
 
 function openImagePreview(item: VideoReferenceMedia) {
-  if (item.type === 'image') previewImage.value = item
+  if (item.type === 'image') previewImage.value = { ...item, url: referenceUrl(item) }
 }
 
 function closeImagePreview() {
@@ -109,13 +128,13 @@ function closeImagePreview() {
     </button>
     <AppButton size="sm" :disabled="unavailable || (!model?.capabilities.max_reference_videos && !model?.capabilities.max_reference_images)" @click="libraryOpen = true">{{ tr('资源库') }}</AppButton>
     <ResourceLibraryPicker v-if="libraryOpen" :open="libraryOpen" allow-images :max-image-selection="Math.max(0, (model?.capabilities.max_reference_images || 0) - assetImageCount - uploadedImages)" :max-video-selection="Math.max(0, (model?.capabilities.max_reference_videos || 0) - uploadedVideos)" :model-config-id="model?.config_id" :max-selection="Math.max(0, (model?.capabilities.max_reference_videos || 0) - uploadedVideos)" @close="libraryOpen = false" @choose="(_items, references) => { emit('chooseLibrary', references); libraryOpen = false }" />
-    <div v-if="media.length" class="reference-list" :aria-label="tr('已上传参考素材')">
+    <div v-if="gallery.length" class="reference-list" :aria-label="tr('已上传参考素材')">
       <article
-        v-for="(item, index) in media"
-        :key="`${item.type}:${item.url}`"
+        v-for="{ item, mediaIndex, kind } in gallery"
+        :key="`${kind}:${item.type}:${item.url}`"
         class="reference-item"
-        :class="{ 'is-reference-highlighted': highlightedMediaIndex === index }"
-        :data-reference-media-index="index"
+        :class="{ 'is-reference-highlighted': mediaIndex !== undefined && highlightedMediaIndex === mediaIndex }"
+        :data-reference-media-index="mediaIndex" :data-reference-kind="kind"
       >
         <button
           v-if="item.type === 'image'"
@@ -142,7 +161,7 @@ function closeImagePreview() {
         <span class="reference-name">
           <strong>{{ item.name || (item.type === 'image' ? tr('参考图片') : tr('参考视频')) }}</strong>
         </span>
-        <button type="button" class="reference-remove" :aria-label="tr('移除 {p0}', { p0: item.name || '参考素材' })" :title="tr('移除')" @click="emit('remove', index)"><X :size="10" /></button>
+        <button v-if="mediaIndex !== undefined" type="button" class="reference-remove" :aria-label="tr('移除 {p0}', { p0: item.name || '参考素材' })" :title="tr('移除')" @click="emit('remove', mediaIndex!)"><X :size="10" /></button>
       </article>
     </div>
     <div class="reference-summary" role="status" aria-atomic="true">
@@ -161,6 +180,7 @@ function closeImagePreview() {
       <small v-else-if="!model">{{ tr('请先启用视频模型') }}</small>
       <small v-else>{{ tr('支持图片与 MP4/MOV') }}</small>
     </div>
+    <p v-if="blocking.error.value" class="reference-audio-error" role="alert">{{ blocking.error.value }}</p>
     <p v-if="audioUsage.error && !disabled" class="reference-audio-error" role="alert">{{ audioUsage.error }}</p>
     <div v-if="sceneId" class="reference-save-actions"><span v-for="item in media.filter(value => value.type === 'video' && !value.library_resource_id)" :key="item.url"><small>{{ item.name || tr('参考视频') }}</small><SaveVideoToLibrary :source="{ source: 'scene', source_id: sceneId, media_url: item.url, name: item.name || tr('参考视频') }" /></span></div>
     <ImageLightbox
@@ -181,8 +201,7 @@ function closeImagePreview() {
 .reference-add:disabled { color: var(--app-text-muted); background: var(--app-surface-muted); cursor: not-allowed; }
 .reference-add svg.is-spinning, .reference-add svg { animation: none; }
 .reference-add svg:first-child:last-child:is(.lucide-loader-circle) { animation: spin 1s linear infinite; }
-.reference-list { display: flex; min-width: 0; max-width: 56%; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.reference-list::-webkit-scrollbar { display: none; }
+.reference-list { display: flex; flex-wrap: wrap; min-width: 0; max-width: 100%; gap: 6px; }
 .reference-item { position: relative; display: grid; width: 58px; height: 34px; flex: 0 0 58px; overflow: hidden; place-items: center; border-radius: 8px; color: var(--app-text-muted); background: var(--app-fill-subtle); box-shadow: inset 0 0 0 1px var(--app-border); }
 .reference-item.is-reference-highlighted { box-shadow: inset 0 0 0 2px #ff7a8c, 0 0 0 3px rgb(255 122 140 / 24%); animation: reference-pulse .7s ease 2; }
 .reference-image-preview { position: relative; display: grid; width: 100%; height: 100%; padding: 0; overflow: hidden; place-items: center; border: 0; border-radius: inherit; color: inherit; background: transparent; cursor: zoom-in; }
