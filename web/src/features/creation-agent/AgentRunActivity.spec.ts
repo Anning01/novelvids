@@ -83,7 +83,7 @@ it.each(['light', 'dark'])('renders live SDK skill tool states in %s mode withou
   const { applyActivityEvent } = await import('./activity')
   const { reactive } = await import('vue')
   const steps = reactive<import('./types').AgentActivityStep[]>([])
-  document.documentElement.dataset.theme = theme
+  document.documentElement.dataset.appTheme = theme
   const wrapper = mount(AgentRunActivity, { props: {
     status: 2, startedAt: '2026-11-07T04:00:00Z', steps,
   } })
@@ -108,5 +108,5 @@ it.each(['light', 'dark'])('renders live SDK skill tool states in %s mode withou
   expect(wrapper.text()).toContain('读取创作规范')
   expect(wrapper.find('details').exists()).toBe(false)
   wrapper.unmount()
-  delete document.documentElement.dataset.theme
+  delete document.documentElement.dataset.appTheme
 })

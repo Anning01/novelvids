@@ -106,7 +106,7 @@ async def test_recovery_endpoints_enforce_team_and_editor_role(client):
 
 
 @pytest.mark.asyncio
-async def test_agent_billing_uses_existing_balance_path_once(client, monkeypatch):
+async def test_agent_billing_uses_existing_balance_path_once(client, monkeypatch, tmp_path):
     from pydantic_ai.models.function import FunctionModel
     from services.ai_task_executor import AiTaskExecutor
     from services.creation_agent.handler import CreationAgentTaskHandler
@@ -114,11 +114,14 @@ async def test_agent_billing_uses_existing_balance_path_once(client, monkeypatch
     team, owner, _, _, task, _ = await setup_private_run(client)
     async def model(messages, info):
         yield '请选中需要修改的镜头。'
-    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args: FunctionModel(stream_function=model))
+    monkeypatch.setattr(settings, 'CREATION_AGENT_CHECKPOINT_PATH', str(tmp_path / 'auth-checkpoints.db'))
+    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args, **kwargs: FunctionModel(stream_function=model))
     executor = AiTaskExecutor()
     executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
     await executor.run(task)
     await task.refresh_from_db(); await team.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert task.request_params['agent_runtime'] == 'deepagents'
     balance = team.balance
     assert balance < Decimal('10')
     await record_ai_task_usage(task, task.response_data)

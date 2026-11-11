@@ -1,6 +1,7 @@
 """Project SDK tool events onto the existing, payload-free activity timeline."""
 
 from datetime import datetime, timezone
+from contextvars import ContextVar
 
 from pydantic_ai import FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.messages import RetryPromptPart
@@ -12,8 +13,18 @@ from services.creation_agent.event_log import agent_event_log
 from services.task_signals import task_signals
 
 
+skill_event_sink = ContextVar('skill_event_sink', default=None)
+
+
+async def forward_skill_event(event):
+    sink = skill_event_sink.get()
+    if sink is not None and event.get('type') == 'CUSTOM' and event.get('name') == 'agent_activity':
+        await sink(event)
+
+
 class SkillRunActivity:
-    def __init__(self, message: AgentMessage, owner_task_id: str):
+    def __init__(self, message: AgentMessage, owner_task_id: str, *, public_thinking=True):
+        self.public_thinking = public_thinking
         self.message = message
         self.owner_task_id = owner_task_id
         self.pending: dict[str, dict] = {}
@@ -29,6 +40,7 @@ class SkillRunActivity:
     async def publish_event(self, event: dict):
         seq = await agent_event_log.start(self.message)
         await agent_event_log.append(self.message.id, [event], seq)
+        await forward_skill_event(event)
         await task_signals.publish(self.owner_task_id)
 
     async def __call__(self, _ctx, events):
@@ -36,10 +48,11 @@ class SkillRunActivity:
             async for event in events:
                 # Only the SDK's public thinking content; ordinary text, signatures
                 # and encrypted reasoning never become a visible summary.
-                async for public in self.protocol.handle_event(event):
-                    if public.type in {'THINKING_TEXT_MESSAGE_START', 'THINKING_TEXT_MESSAGE_CONTENT',
-                                       'THINKING_TEXT_MESSAGE_END'}:
-                        await self.publish_event(public.model_dump(mode='json', by_alias=True, exclude_none=True))
+                if self.public_thinking:
+                    async for public in self.protocol.handle_event(event):
+                        if public.type in {'THINKING_TEXT_MESSAGE_START', 'THINKING_TEXT_MESSAGE_CONTENT',
+                                           'THINKING_TEXT_MESSAGE_END'}:
+                            await self.publish_event(public.model_dump(mode='json', by_alias=True, exclude_none=True))
                 if isinstance(event, FunctionToolCallEvent):
                     item = {'id': f'tool:{self.message.task_id}:{event.part.tool_call_id}',
                             'kind': 'tool', 'label': '执行步骤', 'tool_name': event.part.tool_name,

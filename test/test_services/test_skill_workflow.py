@@ -240,7 +240,7 @@ async def enabled_project():
     from models.novel import Novel
     from models.chapter import Chapter
 
-    await AgentSettings.create(id=1, configuration={"enabled": True})
+    await AgentSettings.create(id=1, configuration={"enabled": True, "runtime": "pydantic_ai"})
     assistant = await AiModelConfig.create(
         name="assistant",
         model="test",

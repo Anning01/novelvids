@@ -21,8 +21,9 @@ def main_request_count(calls) -> int:
 
 class RecordedAgentModel(WrapperModel):
     def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
-                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation'):
+                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation', manage_context=True):
         super().__init__(model)
+        self.manage_context = manage_context
         self.message = message
         self.on_activity = on_activity
         self.repair_root = repair_root
@@ -131,7 +132,7 @@ class RecordedAgentModel(WrapperModel):
         return any(code in body for code in ('context_length_exceeded', 'context_window_exceeded', 'maximum context length'))
 
     async def request(self, messages, model_settings, model_request_parameters):
-        messages = await self.budget.prepare(messages, model_request_parameters)
+        messages = await self.budget.prepare(messages, model_request_parameters) if self.manage_context else messages
         while True:
             call, started = await self._begin(messages, model_request_parameters)
             response = None
@@ -139,7 +140,7 @@ class RecordedAgentModel(WrapperModel):
                 response = await self.wrapped.request(messages, model_settings, model_request_parameters)
                 return response
             except Exception as exc:
-                if self.overflow_retried or not self._is_context_overflow(exc):
+                if not self.manage_context or self.overflow_retried or not self._is_context_overflow(exc):
                     raise
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
@@ -153,7 +154,7 @@ class RecordedAgentModel(WrapperModel):
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
-        messages = await self.budget.prepare(messages, model_request_parameters)
+        messages = await self.budget.prepare(messages, model_request_parameters) if self.manage_context else messages
         while True:
             call, started = await self._begin(messages, model_request_parameters)
             response = None
@@ -167,7 +168,7 @@ class RecordedAgentModel(WrapperModel):
             except Exception as exc:
                 # Once streaming starts the caller may have seen tool deltas.
                 # Never replay a partially consumed model response.
-                if entered or self.overflow_retried or not self._is_context_overflow(exc):
+                if not self.manage_context or entered or self.overflow_retried or not self._is_context_overflow(exc):
                     raise
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)

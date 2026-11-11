@@ -1,4 +1,5 @@
 """User requirements survive private chat -> production -> model boundaries."""
+from test.agent_stream_fixtures import streaming_model
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -91,7 +92,7 @@ async def test_model_receives_verbatim_creative_requirements_without_changing_au
 
     # This checks the shared model boundary; the extraction output contract is
     # independently exercised by test_skill_workflow's real asset schema tests.
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     from services.extraction.extractor import AssetExtractionResult
 

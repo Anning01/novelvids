@@ -1,4 +1,5 @@
 """Every agent asset writer must honor the run's frozen output contract."""
+from test.agent_stream_fixtures import streaming_model
 import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock
@@ -142,7 +143,7 @@ async def test_empty_image_prompt_is_repaired_to_contract_before_save(asset_type
             'prompt': 'Just a short unstructured summary.' if calls == 1 else complete,
         })])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     token = current_execution.set(execution)
     try:
@@ -191,7 +192,7 @@ async def test_project_cover_does_not_receive_an_asset_template():
     message = await conversation_for_task(task)
     execution = SkillExecution({**params, 'task_id': str(task.id)}, message, AsyncMock())
     prompt = 'Cinematic cover with a single composition and no asset reference sheet.'
-    model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': prompt})]))
+    model = streaming_model(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': prompt})]))
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await execution.generate('image', {'cover': 'A story cover'}, CompletePrompt)

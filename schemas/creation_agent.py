@@ -35,6 +35,7 @@ class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    runtime: Literal["deepagents", "pydantic_ai"] = "deepagents"
     production_concurrency: int = Field(4, ge=1, le=20)
     # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
     # 128K output. The assistant keeps the default output below that maximum,

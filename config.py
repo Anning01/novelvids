@@ -26,6 +26,8 @@ class Settings:
         "DATABASE_URL", "sqlite://./data/novelvids.db"  # 默认使用 SQLite 数据库
     )
 
+    CREATION_AGENT_CHECKPOINT_PATH: str = os.getenv("CREATION_AGENT_CHECKPOINT_PATH", "data/creation_agent_checkpoints.db")
+
     # 应用配置
     APP_NAME: str = "猫影短剧"
     APP_DESC: str = "基于第三方AI模型的短剧/小说生成平台"

@@ -165,6 +165,7 @@ class AgentSessions:
                 "novel_id": conversation.novel_id, "conversation_id": conversation.id,
                 "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None,
                 "model_config_id": chosen.id, "assistant_model_config_id": chosen.id, "agent_configuration": configuration.model_dump(),
+                "agent_runtime": recovery[0].request_params.get("agent_runtime", "pydantic_ai") if recovery else configuration.runtime,
             })
             if recovery:
                 original, source, _, _, root = recovery

@@ -156,6 +156,7 @@ export interface AgentRunInput {
 }
 
 export interface AgentConfiguration {
+  runtime?: 'deepagents' | 'pydantic_ai'
   production_concurrency?: number
   enabled: boolean
   request_limit: number | null

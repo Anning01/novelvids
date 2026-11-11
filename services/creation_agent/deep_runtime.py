@@ -1,14 +1,17 @@
-"""Optional Python Deep Agents host; the SDK owns the tool loop and checkpoint context."""
+"""Deep Agents conversation runtime; the SDK owns the tool loop and checkpoint context."""
 
 import json
+import sys
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
-from deepagents import create_deep_agent
+from deepagents import create_deep_agent, FilesystemMiddleware
 from deepagents.backends import StateBackend
 from deepagents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
+from langsmith import tracing_context
 
 
 class BusinessToolsOnly(AgentMiddleware):
@@ -31,7 +34,8 @@ class BusinessToolsOnly(AgentMiddleware):
 def create_runtime(*, model, tools, instructions, checkpointer, summarization=None):
     """Supply a per-user checkpointer and validated business tools at the Python boundary."""
     backend = StateBackend()
-    middleware = [BusinessToolsOnly({'read_file', *(tool.name for tool in tools)})]
+    middleware = [FilesystemMiddleware(backend=backend, tools=['read_file']),
+                  BusinessToolsOnly({'read_file', *(tool.name for tool in tools)})]
     if summarization is not None:
         middleware.append(SummarizationMiddleware(model=model, backend=backend, **summarization))
     return create_deep_agent(model=model, tools=tools, system_prompt=instructions,
@@ -40,33 +44,41 @@ def create_runtime(*, model, tools, instructions, checkpointer, summarization=No
 
 async def public_events(graph, inputs: dict, *, thread_id: str, run_id: str) -> AsyncIterator[dict]:
     """Expose prose and execution lifecycle without exposing reasoning or write payloads."""
-    config = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 50}
+    # Preserve the task executor's uncapped run policy and explicit cancellation.
+    config = {'configurable': {'thread_id': thread_id}, 'recursion_limit': sys.maxsize}
     messages = {}
+    started = {}
     yield {'type': 'RUN_STARTED', 'threadId': thread_id, 'runId': run_id}
-    async for event in graph.astream_events(inputs, config=config, version='v2'):
-        kind, identifier = event['event'], str(event['run_id'])
-        metadata = event.get('metadata', {})
-        if metadata.get('lc_internal_call') or metadata.get('lc_source') == 'summarization':
-            continue
-        if kind == 'on_chat_model_stream' and metadata.get('langgraph_node') == 'model':
-            content = event['data']['chunk'].content
-            texts = [content] if isinstance(content, str) else [
-                block['text'] for block in content if isinstance(block, dict) and block.get('type') == 'text']
-            for text in filter(None, texts):
-                if identifier not in messages:
-                    messages[identifier] = str(uuid4())
-                    yield {'type': 'TEXT_MESSAGE_START', 'messageId': messages[identifier], 'role': 'assistant'}
-                yield {'type': 'TEXT_MESSAGE_CONTENT', 'messageId': messages[identifier], 'delta': text}
-        elif kind == 'on_chat_model_end' and identifier in messages:
-            yield {'type': 'TEXT_MESSAGE_END', 'messageId': messages[identifier]}
-        elif kind == 'on_tool_start':
-            yield {'type': 'TOOL_CALL_START', 'toolCallId': identifier, 'toolCallName': event['name']}
-            yield {'type': 'TOOL_CALL_END', 'toolCallId': identifier}
-        elif kind == 'on_tool_end':
-            failed = getattr(event['data'].get('output'), 'status', None) == 'error'
-            yield {'type': 'TOOL_CALL_RESULT', 'toolCallId': identifier, 'messageId': str(uuid4()),
-                   'role': 'tool', 'content': json.dumps({'status': 'failed' if failed else 'completed'})}
-            yield {'type': 'CUSTOM', 'name': 'agent_activity', 'value': {
-                'id': f'tool:{identifier}', 'kind': 'tool', 'tool_name': event['name'],
-                'label': '执行步骤', 'status': 'failed' if failed else 'completed'}}
+    # The self-hosted app does not opt user conversations into a hosted trace service.
+    with tracing_context(enabled=False):
+        async for event in graph.astream_events(inputs, config=config, version='v2'):
+            kind, identifier = event['event'], str(event['run_id'])
+            metadata = event.get('metadata', {})
+            if metadata.get('lc_internal_call') or metadata.get('lc_source') == 'summarization':
+                continue
+            if kind == 'on_custom_event' and event['name'] == 'creation_agent_activity':
+                yield event['data']
+            elif kind == 'on_chat_model_stream' and metadata.get('langgraph_node') == 'model':
+                content = event['data']['chunk'].content
+                texts = [content] if isinstance(content, str) else [
+                    block['text'] for block in content if isinstance(block, dict) and block.get('type') == 'text']
+                for text in filter(None, texts):
+                    if identifier not in messages:
+                        messages[identifier] = str(uuid4())
+                        yield {'type': 'TEXT_MESSAGE_START', 'messageId': messages[identifier], 'role': 'assistant'}
+                    yield {'type': 'TEXT_MESSAGE_CONTENT', 'messageId': messages[identifier], 'delta': text}
+            elif kind == 'on_chat_model_end' and identifier in messages:
+                yield {'type': 'TEXT_MESSAGE_END', 'messageId': messages[identifier]}
+            elif kind == 'on_tool_start':
+                started[identifier] = datetime.now(timezone.utc).isoformat()
+                yield {'type': 'TOOL_CALL_START', 'toolCallId': identifier, 'toolCallName': event['name']}
+                yield {'type': 'TOOL_CALL_END', 'toolCallId': identifier}
+            elif kind in {'on_tool_end', 'on_tool_error'}:
+                failed = kind == 'on_tool_error' or getattr(event['data'].get('output'), 'status', None) == 'error'
+                yield {'type': 'TOOL_CALL_RESULT', 'toolCallId': identifier, 'messageId': str(uuid4()),
+                       'role': 'tool', 'content': json.dumps({'status': 'failed' if failed else 'completed'})}
+                yield {'type': 'CUSTOM', 'name': 'agent_activity', 'value': {
+                    'id': f'tool:{identifier}', 'kind': 'tool', 'tool_name': event['name'],
+                    'label': '执行步骤', 'status': 'failed' if failed else 'completed',
+                    'started_at': started.pop(identifier, None), 'finished_at': datetime.now(timezone.utc).isoformat()}}
     yield {'type': 'RUN_FINISHED', 'threadId': thread_id, 'runId': run_id}

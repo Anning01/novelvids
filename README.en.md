@@ -202,7 +202,7 @@ Open [http://localhost:3000](http://localhost:3000). The frontend proxies reques
 
 ## Development and community
 
-The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
+The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM, Deep Agents and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
 
 Bring a real creative problem: [report a bug](https://github.com/Anning01/novelvids/issues/new), [discuss an idea](https://github.com/Anning01/novelvids/issues), or [contribute](https://github.com/Anning01/novelvids/pulls). For generation problems, include a shareable minimal example, model configuration type and reproduction steps. Keep keys and private media out of reports.
 
@@ -227,3 +227,5 @@ Third-party dependencies, fonts, media and model services retain their own terms
 ## Star history
 
 [![NovelVids Star history](https://novelvids-star-history.864399407.workers.dev/card.svg)](https://github.com/Anning01/novelvids/stargazers)
+
+New creation-assistant conversations use the Python Deep Agents runtime for tool execution, on-demand skills and context compaction. Application services retain permission, version and output-contract checks. Conversation checkpoints default to `data/creation_agent_checkpoints.db`; set `CREATION_AGENT_CHECKPOINT_PATH` to change the location and include this state file in backups when retaining conversation recovery. Historical runs keep their original execution path.
