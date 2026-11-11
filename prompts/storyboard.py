@@ -289,7 +289,7 @@ def build_storyboard_messages(
     next_sequence=1, previous_shot=None, strategy=CINEMATIC_STORYBOARD_STRATEGY,
     creative_constraints=(),
     previously_seen_assets=(),
-    introduction_descriptions=None,
+    introduction_descriptions=None, shot_duration_range=None,
 ):
     system_prompt = render_skill("storyboard", prompt_language)
     requirement = asset_introduction_requirement(entities, previously_seen_assets, prompt_language, introduction_descriptions)
@@ -299,6 +299,7 @@ def build_storyboard_messages(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task_facts({
             "assets": json.loads(_asset_payload(entities)),
+            **({"shot_duration_range": shot_duration_range} if shot_duration_range else {}),
             "manuscript": long_text, "strategy": strategy.key,
             "batch_number": batch_index + 1, "batch_count": batch_count,
             "next_sequence": next_sequence, "constraints": list(creative_constraints),

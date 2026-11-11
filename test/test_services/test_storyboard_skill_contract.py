@@ -298,3 +298,27 @@ def test_serialized_segments_keep_local_numbering_and_all_segment_content(langua
     assert '0s-2s' in compiled.prompt and '2s-4s' in compiled.prompt and '4s-6s' in compiled.prompt
     assert [int(n) for n in re.findall(re.escape(prompt_label('【镜头', language))+r'(\d+)\s*·', compiled.prompt)] == [1,2,3]
     assert compiled.sequence == 17
+
+
+@pytest.mark.parametrize('language,duration', [('zh', 15), ('en', 30)])
+def test_continuous_rack_focus_renders_one_request_with_unbroken_dialogue(language, duration):
+    from prompts.labels import prompt_label
+    from prompts.skill_pack import instructions
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.validation import prepare_skill_storyboard
+
+    snap = SkillSnapshot.model_validate(snapshot_skills())
+    guidance = instructions(snap, language, 'storyboard')
+    assert 'shot_duration_range' in guidance and 'segments 留空' in guidance
+    assert f'language={language}' in guidance
+    shot = _shot()
+    shot.duration = f'{duration}s'
+    shot.camera_movement = 'Push through the window; rack focus from the two seated speakers to the candle.'
+    shot.actions = [f'0s-{duration}s: The candle flame bends while both speakers stay seated.']
+    shot.dialogue = ['2s-4s: Alex (off-screen): Stay here.', '5s-7s: Sam (off-screen): I will.']
+    draft = StructuredSkillStoryboard.model_validate({'shots': [shot.model_dump(exclude={'prompt'})]})
+    result = prepare_skill_storyboard(draft, snap, language, [], 'cinematic').shots
+    assert len(result) == 1 and not result[0].segments
+    prompt = result[0].prompt
+    assert prompt.count(prompt_label('【镜头1 · ', language)) == 1
+    assert shot.camera_movement in prompt and all(line in prompt for line in shot.dialogue)

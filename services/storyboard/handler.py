@@ -89,6 +89,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 storyboard_strategy=strategy.key,
                 creative_constraints=creative_constraints,
                 previously_seen_assets=seen_assets,
+                shot_duration_range=request_params.get("shot_duration_range"),
                 introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )
 

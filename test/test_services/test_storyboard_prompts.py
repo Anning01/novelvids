@@ -446,3 +446,9 @@ def test_script_driven_presentation_survives_structured_render(key, language):
         assert '无 BGM' not in shot.prompt and '无字幕' not in shot.prompt
         assert 'no subtitles' not in shot.prompt.lower()
         assert 'no background music' not in shot.prompt.lower()
+
+
+def test_legacy_storyboard_request_passes_the_model_duration_range_as_facts():
+    import json
+    messages = build_storyboard_messages('雨夜', [], 'zh', shot_duration_range=[4, 15])
+    assert json.loads(messages[1]['content'])['untrusted_task_facts']['shot_duration_range'] == [4, 15]

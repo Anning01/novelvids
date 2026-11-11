@@ -383,13 +383,15 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("video_model_type,protocol,maximum", [
-    (None, None, None),
-    ("minimax_h3_autodl", "autodl", 15),
-    ("seedance_2_5", "volcengine_ark", 30),
+@pytest.mark.parametrize("video_model_type,protocol,maximum,project_selected", [
+    (None, None, None, False),
+    ("minimax_h3_autodl", "autodl", 15, True),
+    ("seedance_2_5", "volcengine_ark", 30, True),
+    ("minimax_h3_autodl", "autodl", 15, False),
+    ("seedance_2_5", "volcengine_ark", 30, False),
 ])
 async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically(
-    video_model_type, protocol, maximum,
+    video_model_type, protocol, maximum, project_selected,
 ):
     import json
 
@@ -416,8 +418,9 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
             base_url="https://example.test", video_model_type=video_model_type,
             api_protocol=protocol, is_active=True,
         )
-        novel.video_model_config_id = video_model.id
-        await novel.save(update_fields=["video_model_config_id"])
+        if project_selected:
+            novel.video_model_config_id = video_model.id
+            await novel.save(update_fields=["video_model_config_id"])
     old = await Scene.create(
         chapter=chapter,
         sequence=1,
