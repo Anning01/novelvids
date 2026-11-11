@@ -1752,18 +1752,32 @@ async function applyStoryboardSheet(scene: Scene) {
 function replaceSheetScene(updated: Scene) {
   scenes.value = scenes.value.map(scene => scene.id === updated.id ? updated : scene)
 }
-function genericPrompt(scene: Scene): string {
-  const value = scene.prompt_params?.generic_prompt || scene.metadata?.generic_video_prompt
-  return typeof value === 'string' ? value : ''
-}
-function useOptimizedPrompt(scene: Scene) {
-  if (!genericPrompt(scene)) scene.metadata = {...(scene.metadata || {}), generic_video_prompt: scene.prompt || ''}
-  updateScenePrompt(scene, optimizedPrompt(scene))
+function importedDrafts(scene: Scene): Record<string, unknown> {
+  const work = scene.metadata?.work_package as { drafts?: Record<string, unknown> } | undefined
+  return work?.drafts || {}
 }
 
-function optimizedPrompt(scene: Scene): string {
-  const item = scene.prompt_params?.model_optimized_prompt as {model_type?: string; prompt?: string} | undefined
-  return item?.model_type === selectedVideoModelConfig.value?.model_type ? item?.prompt || '' : ''
+function genericPrompt(scene: Scene): string {
+  const value = scene.prompt_params?.generic_prompt || importedDrafts(scene).general || scene.metadata?.generic_video_prompt
+  return typeof value === 'string' ? value : ''
+}
+
+function modelDrafts(scene: Scene) {
+  const drafts = new Map<string, string>()
+  for (const [model, text] of Object.entries(importedDrafts(scene))) {
+    if (model !== 'general' && model !== 'eight_columns' && typeof text === 'string' && text.trim()) drafts.set(model, text)
+  }
+  const generated = scene.prompt_params?.model_optimized_prompt as {model_type?: string; prompt?: string} | undefined
+  if (generated?.model_type && generated.prompt && generated.model_type === selectedVideoModelConfig.value?.model_type) {
+    drafts.set(generated.model_type, generated.prompt)
+  }
+  return Array.from(drafts, ([model, text]) => ({model, text,
+    label: videoModels.value.find(item => item.model_type === model)?.name || model}))
+}
+
+function useOptimizedPrompt(scene: Scene, prompt: string) {
+  if (!genericPrompt(scene)) scene.metadata = {...(scene.metadata || {}), generic_video_prompt: scene.prompt || ''}
+  updateScenePrompt(scene, prompt)
 }
 
 function updateScenePrompt(scene: Scene, value: string) {
@@ -2518,7 +2532,11 @@ onBeforeUnmount(() => {
                   @remove="removeReferenceMedia(scene, $event)"
                 />
                 <StoryboardSheetCard v-if="project?.storyboard_enabled || scene.metadata?.storyboard_sheet" :scene="scene" :enabled="project?.storyboard_enabled ?? false" :can-use="draftFor(scene).videoGenerationMode === 'reference'" @updated="replaceSheetScene" @use="applyStoryboardSheet(scene)" />
-                <div v-if="optimizedPrompt(scene)" class="model-optimized-prompt"><details><summary>{{ tr('模型专项稿') }}</summary><p>{{ optimizedPrompt(scene) }}</p></details><AppButton variant="secondary" size="sm" @click="useOptimizedPrompt(scene)">{{ tr('使用模型专项稿') }}</AppButton><AppButton v-if="genericPrompt(scene) && draftFor(scene).prompt !== genericPrompt(scene)" variant="ghost" size="sm" @click="updateScenePrompt(scene, genericPrompt(scene))">{{ tr('恢复通用稿') }}</AppButton></div>
+                <div v-for="version in modelDrafts(scene)" :key="version.model" class="model-optimized-prompt">
+                  <details><summary>{{ tr('模型专项稿') }} · {{ version.label }}</summary><p>{{ version.text }}</p></details>
+                  <AppButton v-if="version.model === selectedVideoModelConfig?.model_type && draftFor(scene).prompt !== version.text" variant="secondary" size="sm" @click="useOptimizedPrompt(scene, version.text)">{{ tr('使用模型专项稿') }}</AppButton>
+                </div>
+                <AppButton v-if="genericPrompt(scene) && draftFor(scene).prompt !== genericPrompt(scene)" variant="ghost" size="sm" @click="updateScenePrompt(scene, genericPrompt(scene))">{{ tr('恢复通用稿') }}</AppButton>
                 <ScenePromptEditor
                   :model-value="draftFor(scene).prompt"
                   :options="promptMentionOptions(scene)"
