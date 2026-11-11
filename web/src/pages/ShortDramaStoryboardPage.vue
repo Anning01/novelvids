@@ -1143,9 +1143,10 @@ async function locateProblemImageReference(scene: Scene, number: number) {
   }, 1800)
 }
 
-function selectedAssetReferenceImagesForBar(scene: Scene) {
+function selectedAssetReferenceImageCount(scene: Scene) {
+  const uploaded = new Set(draftFor(scene).referenceMedia.filter(item => item.type === 'image').map(item => mediaUrl(item.url)))
   return videoInputImageReferences(scene)
-    .filter(reference => reference.source === 'asset')
+    .filter(reference => reference.source === 'asset' && !uploaded.has(mediaUrl(reference.url))).length
 }
 
 function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
@@ -2676,7 +2677,7 @@ onBeforeUnmount(() => {
                   :model="selectedVideoModelConfig"
                   :media="draftFor(scene).referenceMedia"
                   :scene="scene"
-                  :asset-images="selectedAssetReferenceImagesForBar(scene)"
+                  :asset-image-count="selectedAssetReferenceImageCount(scene)"
                   :assets-use-descriptions="videoInputImageReferences(scene, Infinity).length > videoInputImageReferences(scene).length"
                   :audio-durations="sceneAudioDurations(scene)"
                   :highlighted-media-index="highlightedMediaIndex(scene)"

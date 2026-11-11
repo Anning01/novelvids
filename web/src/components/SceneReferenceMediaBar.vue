@@ -5,7 +5,7 @@ import { computed, ref, watch } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, Volume2, X } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
 import { catalogApi } from '@/features/resource-library/catalog'
-import type { Scene, VideoInputImageReference, VideoGenerationModel, VideoReferenceMedia } from '@/types'
+import type { Scene, VideoGenerationModel, VideoReferenceMedia } from '@/types'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import ImageLightbox from './ImageLightbox.vue'
@@ -13,10 +13,9 @@ import { fallbackImage } from '@/shared/mediaFallback'
 import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   sceneId?: number
   scene?: Scene
-  assetImages?: VideoInputImageReference[]
   model: VideoGenerationModel | null
   media: VideoReferenceMedia[]
   assetImageCount?: number
@@ -25,7 +24,7 @@ const props = defineProps<{
   highlightedMediaIndex?: number
   disabled?: boolean
   uploading?: boolean
-}>()
+}>(), { assetImageCount: 0 })
 
 const emit = defineEmits<{
   upload: [files: File[]]
@@ -50,21 +49,15 @@ function unavailableReference(item: VideoReferenceMedia) { return Boolean(item.l
 const input = ref<HTMLInputElement | null>(null)
 const previewImage = ref<VideoReferenceMedia | null>(null)
 const blocking = useSceneBlockingMap(() => props.scene)
-interface GalleryEntry { item: VideoReferenceMedia; mediaIndex?: number; kind: 'asset' | 'media' | 'blocking' }
+interface GalleryEntry { item: VideoReferenceMedia; mediaIndex?: number; kind: 'media' | 'blocking' }
 const gallery = computed(() => {
-  const entries: GalleryEntry[] = []
-  const uploads = new Set(props.media.filter(m => m.type === 'image').map(m => referenceUrl(m)))
-  for (const ref of props.assetImages || []) {
-    if (!uploads.has(mediaUrl(ref.url))) entries.push({kind: 'asset', item: {type: 'image', url: ref.url, name: ref.label}})
-  }
-  props.media.forEach((item, mediaIndex) => entries.push({kind: 'media', item, mediaIndex}))
+  const entries: GalleryEntry[] = props.media.map((item, mediaIndex) => ({kind: 'media', item, mediaIndex}))
   const plan = blocking.image.value
   if (plan && !entries.some(entry => entry.item.type === 'image' && referenceUrl(entry.item) === plan)) {
     entries.push({kind: 'blocking', item: {type: 'image', url: plan, name: tr('空间定位图')}})
   }
   return entries
 })
-const assetImageCount = computed(() => props.assetImages ? gallery.value.filter(entry => entry.kind === 'asset').length : props.assetImageCount || 0)
 const uploadedImages = computed(() => props.media.filter(item => item.type === 'image').length)
 const uploadedVideos = computed(() => props.media.filter(item => item.type === 'video').length)
 const totalVideoDuration = computed(() => props.media
