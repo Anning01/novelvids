@@ -9,7 +9,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from auth import qiling
-from auth.deps import extract_bearer_token, get_current_user
+from auth.deps import AuthContext, extract_bearer_token, get_auth_context, get_current_user
+from uuid import UUID
 from auth.schemas import ChangePasswordIn, LoginIn, LoginOut, MeOut, ProfileUpdateIn, RegisterIn, UserOut
 from auth.service import auth_service
 from config import settings
@@ -21,6 +22,15 @@ from typing import Literal
 public_router = APIRouter()
 
 router = APIRouter()
+
+
+@router.post("/local-mcp/{code}/approve", summary="授权本机 MCP 连接当前团队")
+async def approve_local_mcp(code: UUID, request: Request, ctx: AuthContext = Depends(get_auth_context)):
+    from services.local_mcp.access import approve
+    if not ctx.team_id or request.headers.get("X-Team-Id") != str(ctx.team_id):
+        raise HTTPException(403, "请选择本次连接的目标团队")
+    await approve(code, extract_bearer_token(request) or "", ctx)
+    return ResponseSchema(data={"team_id": ctx.team_id})
 
 
 @public_router.get("/status", summary="登录功能状态探测", response_model=ResponseSchema[dict])

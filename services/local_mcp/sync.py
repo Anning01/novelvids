@@ -7,12 +7,16 @@ from models.novel import Novel
 from models.chapter import Chapter
 from schemas.chapter import ChapterCreate
 from controllers.chapter import chapter_controller
+from controllers.novel import novel_controller
+from schemas.novel import NovelCreate
 from controllers.asset import asset_controller
 from models.scene import Scene
 from models.work_sync import WorkSyncObject, WorkSyncRequest
 from prompts.skill_pack import SkillSnapshot, snapshot_skills, read_skill
 from services.project_config import validate_project_config
 from fastapi import HTTPException
+from auth.deps import AuthContext, ensure_novel_access
+from config import settings
 from prompts.reference import CHARACTER_TURNAROUND, GROUP_PORTRAIT
 from schemas.work_package import ImportEpisode, ReadEpisode, Shot, UpdateShot
 from services.creation_objects import CreationObjects, project_write
@@ -32,25 +36,48 @@ class WorkSync:
         parsed = urlsplit(app_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("猫影网页地址必须是无登录信息、查询或片段的 HTTP(S) 地址")
+        self.ctx = None
         self.app_url = app_url.rstrip("/")
         self.allowed_root = allowed_root
         self.archive_root = media_root / 'work-packages'
 
+    def for_context(self, ctx: AuthContext):
+        if not ctx.user or not ctx.team_id:
+            raise HTTPException(403, "需要已登录的团队成员")
+        scoped = WorkSync(self.allowed_root, self.archive_root.parent, self.app_url)
+        scoped.ctx = ctx
+        return scoped
+
+    def work_key(self, work):
+        if settings.AUTH_ENABLED and self.ctx is None:
+            raise HTTPException(401, "MCP 尚未连接猫影登录会话")
+        return f"t{self.ctx.team_id}:{digest(work)}" if self.ctx else work
+
+    def request_key(self, request_id):
+        if settings.AUTH_ENABLED and self.ctx is None:
+            raise HTTPException(401, "MCP 尚未连接猫影登录会话")
+        if self.ctx:
+            return f"t{self.ctx.team_id}:u{self.ctx.user.id}:{digest(request_id)}"
+        return request_id
+
     async def mapping(self, work, episode, kind, stable):
-        row = await WorkSyncObject.get_or_none(work_id=work, episode_id=episode, kind=kind, stable_id=stable)
+        row = await WorkSyncObject.get_or_none(work_id=self.work_key(work), episode_id=episode, kind=kind, stable_id=stable)
         if row is None:
             raise ValueError(f'未登记的 {kind} 稳定 ID')
         return row
 
     async def register(self, work, episode, kind, stable, local_id, payload):
-        return await WorkSyncObject.create(work_id=work, episode_id=episode, kind=kind,
+        return await WorkSyncObject.create(work_id=self.work_key(work), episode_id=episode, kind=kind,
                                          stable_id=stable, local_id=local_id, payload=payload)
 
     async def replay(self, request_id, fingerprint):
-        previous = await WorkSyncRequest.get_or_none(request_id=request_id)
+        previous = await WorkSyncRequest.get_or_none(request_id=self.request_key(request_id))
         if previous:
             if previous.payload_hash != fingerprint:
                 raise SyncConflict('request_id_reused', message='此请求 ID 已用于不同内容，请使用新的请求 ID')
+            project = await self.project(previous.receipt["work_id"])
+            if project.id != previous.receipt["novel_id"]:
+                raise HTTPException(403, "此回执不属于当前作品")
             receipt = {**previous.receipt}
             receipt["location"] = self.location(receipt["novel_id"], receipt["chapter_id"], receipt["location"]["episode_number"])
             return receipt
@@ -86,7 +113,11 @@ class WorkSync:
         project = await Novel.get_or_none(id=row.local_id)
         if project is None:
             raise ValueError('作品不存在或已移除，不能通过导入恢复')
-        if project.team_id is not None:
+        if self.ctx:
+            await ensure_novel_access(project.id, self.ctx)
+            if project.team_id != self.ctx.team_id:
+                raise HTTPException(404, "作品不属于当前团队")
+        elif project.team_id is not None:
             raise ValueError('本地 MCP 不支持团队作品；请使用独立的本地无登录实例')
         return project
 
@@ -153,15 +184,16 @@ class WorkSync:
                 return previous
             work = manifest.work.id
             episode = manifest.episode.id
-            mapping = await WorkSyncObject.get_or_none(work_id=work, episode_id='', kind='work', stable_id=work)
+            mapping = await WorkSyncObject.get_or_none(work_id=self.work_key(work), episode_id='', kind='work', stable_id=work)
             try:
                 preferences = validate_project_config(manifest.model_dump(exclude_none=True,
                     include={"style_key", "custom_style_prompt", "storyboard_enabled"}))
             except HTTPException as error:
                 raise ValueError(error.detail) from error
             if mapping is None:
-                project = await Novel.create(name=manifest.work.name, aspect_ratio=manifest.aspect_ratio,
-                                             author='Agent 创建', **preferences)
+                project = await novel_controller.create(
+                    NovelCreate(name=manifest.work.name, aspect_ratio=manifest.aspect_ratio, author="Agent 创建", **preferences),
+                    team_id=self.ctx.team_id if self.ctx else None, created_by=self.ctx.user.id if self.ctx else None)
                 await self.register(work, '', 'work', work, project.id, manifest.work.model_dump())
             else:
                 project = await self.project(work)
@@ -171,7 +203,7 @@ class WorkSync:
                 if previous:
                     files.receipt(previous)
                     return previous
-                if await WorkSyncObject.filter(work_id=work, episode_id=episode, kind='episode').exists():
+                if await WorkSyncObject.filter(work_id=self.work_key(work), episode_id=episode, kind='episode').exists():
                     raise SyncConflict('episode_exists', message='已导入的集不能整集覆盖；请使用单镜同步')
                 if await Chapter.filter(novel_id=project.id, number=manifest.number).exists():
                     raise SyncConflict('episode_number_exists')
@@ -184,7 +216,7 @@ class WorkSync:
                 objects = CreationObjects(project.id)
                 for asset in assets:
                     payload = asset.model_dump()
-                    existing = await WorkSyncObject.get_or_none(work_id=work, episode_id='', kind='asset', stable_id=asset.id)
+                    existing = await WorkSyncObject.get_or_none(work_id=self.work_key(work), episode_id='', kind='asset', stable_id=asset.id)
                     if existing:
                         target = await objects.get('asset', existing.local_id)
                         if existing.payload['source'] != payload or existing.payload['version'] != await objects.recovery_version(target):
@@ -220,7 +252,7 @@ class WorkSync:
                 await self.link_episode_assets(work, chapter, assets, board, objects)
                 receipt = await self.read_episode(ReadEpisode(work_id=work, episode_id=episode))
                 receipt['request_id'] = request.request_id
-                await WorkSyncRequest.create(request_id=request.request_id, payload_hash=fingerprint, receipt=receipt)
+                await WorkSyncRequest.create(request_id=self.request_key(request.request_id), payload_hash=fingerprint, receipt=receipt)
         files.receipt(receipt)
         return receipt
 
@@ -231,7 +263,7 @@ class WorkSync:
         if chapter is None:
             raise ValueError('集不存在')
         shots = []
-        for row in await WorkSyncObject.filter(work_id=request.work_id, episode_id=request.episode_id, kind='shot'):
+        for row in await WorkSyncObject.filter(work_id=self.work_key(request.work_id), episode_id=request.episode_id, kind='shot'):
             target = await Scene.get_or_none(id=row.local_id, chapter_id=chapter.id)
             if target:
                 item = {'shot_id': row.stable_id, 'local_id': target.id, 'sequence': target.sequence,
@@ -293,6 +325,6 @@ class WorkSync:
             await row.save(update_fields=['payload'])
             receipt = await self.read_episode(ReadEpisode(work_id=request.work_id, episode_id=request.episode_id))
             receipt['request_id'] = request.request_id
-            await WorkSyncRequest.create(request_id=request.request_id, payload_hash=fingerprint, receipt=receipt)
+            await WorkSyncRequest.create(request_id=self.request_key(request.request_id), payload_hash=fingerprint, receipt=receipt)
         files.receipt(receipt)
         return receipt

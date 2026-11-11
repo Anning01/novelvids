@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 import sys
 from pydantic import ValidationError
+from fastapi import HTTPException
+from services.local_mcp.access import ConnectionRequired, LocalMcpAccess
 from tortoise import Tortoise
 from config import settings
 from schemas.work_package import ImportEpisode, ReadEpisode, UpdateShot
@@ -20,7 +22,8 @@ VERSIONS = {'2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'}
 
 
 class MCPServer:
-    def __init__(self, sync):
+    def __init__(self, sync, access=None):
+        self.access = access
         self.sync = sync
         self.initialized = False
 
@@ -53,8 +56,18 @@ class MCPServer:
                 return {**response, 'error': {'code': -32602, 'message': 'Unknown tool'}}
             try:
                 request = TOOLS[name][0].model_validate(params.get('arguments', {}))
-                value = await getattr(self.sync, name)(request)
+                sync = self.sync
+                if self.access is not None:
+                    ctx = await self.access.authorize(writing=name != 'read_episode')
+                    sync = sync.for_context(ctx)
+                value = await getattr(sync, name)(request)
                 result = {'content': [{'type': 'text', 'text': json.dumps(value, ensure_ascii=False)}], 'isError': False}
+            except ConnectionRequired as exc:
+                result = {'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'authorization_required', 'url': exc.url, 'message': str(exc)}, ensure_ascii=False)}], 'isError': True}
+            except HTTPException as exc:
+                result = {'content': [{'type': 'text', 'text': json.dumps({
+                    'status': 'denied', 'code': exc.status_code, 'message': str(exc.detail)}, ensure_ascii=False)}], 'isError': True}
             except SyncConflict as exc:
                 result = {'content': [{'type': 'text', 'text': json.dumps(exc.details, ensure_ascii=False)}], 'isError': True}
             except ValidationError as exc:
@@ -74,17 +87,19 @@ class MCPServer:
 
 
 async def run(args):
-    if settings.AUTH_ENABLED:
-        raise ValueError('本地 MCP 仅支持 AUTH_ENABLED=false 的独立本地实例，不可连接启用登录的生产库')
+    if settings.AUTH_ENABLED and not settings.DATABASE_URL.startswith("sqlite://"):
+        raise ValueError("登录模式的本机 MCP 需要本地 SQLite 作品库")
     import models
     await Tortoise.init(db_url=settings.DATABASE_URL,
-                        modules={'models': [f'models.{name}' for name in models.__all__]}, timezone='Asia/Shanghai')
+                        modules={'models': [f'models.{name}' for name in models.__all__] + (['auth.models'] if settings.AUTH_ENABLED else [])}, use_tz=True, timezone=settings.TIMEZONE)
     try:
         # Only additive missing tables; no seeds, migrations, analysis or background jobs.
-        from services.schema_compat import ensure_chapter_screenplay_schema
-        await ensure_chapter_screenplay_schema()
-        await Tortoise.generate_schemas(safe=True)
-        server = MCPServer(WorkSync(args.allow_root.resolve(strict=True), Path(settings.MEDIA_PATH).resolve(), args.app_url))
+        if not settings.AUTH_ENABLED:
+            from services.schema_compat import ensure_chapter_screenplay_schema
+            await ensure_chapter_screenplay_schema()
+            await Tortoise.generate_schemas(safe=True)
+        access = LocalMcpAccess(args.app_url) if settings.AUTH_ENABLED else None
+        server = MCPServer(WorkSync(args.allow_root.resolve(strict=True), Path(settings.MEDIA_PATH).resolve(), args.app_url), access)
         while line := await asyncio.to_thread(sys.stdin.buffer.readline):
             try:
                 message = json.loads(line)

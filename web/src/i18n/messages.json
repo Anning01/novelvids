@@ -1,5 +1,11 @@
 {
   "common": {
+    "连接本机 MCP": "Connect local MCP",
+    "本机创作工具将使用当前登录身份，按所选团队权限读取和同步作品。退出登录后连接失效。": "Your local authoring tool will use this signed-in session and the selected team’s permissions to read and sync work. Signing out ends access.",
+    "已连接，可以返回创作工具。": "Connected. You can return to your authoring tool.",
+    "目标团队": "Destination team",
+    "确认连接": "Confirm connection",
+    "请选择团队": "Select a team",
     "请恢复通用稿或选择与专项稿匹配的视频模型": "Restore the general draft or select the video model for this prompt.",
     "重新生成本集剧本": "Regenerate episode screenplay",
     "将根据本集原文重新改编，成功后替换当前导演剧本。": "Adapt the original text again and replace the current screenplay when the new draft is ready.",

@@ -6,6 +6,7 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('./pages/LoginPage.vue'), meta: { public: true, fullscreen: true } },
+    { path: '/mcp/connect/:code', name: 'local-mcp-connect', component: () => import('./pages/LocalMcpConnectPage.vue'), meta: {fullscreen: true} },
     { path: '/invite/:token', name: 'invite', component: () => import('./pages/InvitePage.vue'), meta: { public: true, fullscreen: true } },
     { path: '/', component: () => import('./pages/HomePage.vue') },
     { path: '/create/clip/:projectId', name: 'clip-studio', component: () => import('./pages/ClipStudioPage.vue'), meta: { fullscreen: true } },
@@ -47,6 +48,9 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.ready) await auth.bootstrap()
   const decision = resolveAuthGuard(to, auth)
+  if (decision.redirect === '/login' && to.name === 'local-mcp-connect') {
+    return {path: '/login', query: {redirect: to.fullPath}}
+  }
   if (decision.redirect) return decision.redirect
   return true
 })

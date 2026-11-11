@@ -243,3 +243,14 @@ class RechargeOrder(AbstractBaseModel):
 
     def __str__(self):
         return f"Order({self.out_trade_no}, {self.amount}, {self.status})"
+
+
+class LocalMcpConnection(AbstractBaseModel):
+    """One local MCP process, delegated by an existing browser session."""
+    code = fields.UUIDField(unique=True)
+    expires_at = fields.DatetimeField()
+    session = fields.ForeignKeyField("models.UserSession", null=True, on_delete=fields.CASCADE)
+    team = fields.ForeignKeyField("models.Team", null=True, on_delete=fields.CASCADE)
+
+    class Meta:
+        table = "local_mcp_connections"
