@@ -161,6 +161,14 @@ class Settings:
     OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 
+    # Private temporary-object bucket on the platform; the local studio needs only its scoped API key.
+    STUDIO_TEMP_BUCKET = os.getenv("STUDIO_TEMP_BUCKET", "")
+    STUDIO_TEMP_REGION = os.getenv("STUDIO_TEMP_REGION", "")
+    STUDIO_TEMP_TEAM_BYTES = int(os.getenv("STUDIO_TEMP_TEAM_BYTES", str(20 * 1024**3)))
+    STUDIO_PLATFORM_BASE_URL = os.getenv("STUDIO_PLATFORM_BASE_URL", "").rstrip("/")
+    STUDIO_PLATFORM_API_KEY = os.getenv("STUDIO_PLATFORM_API_KEY", "")
+    STUDIO_MEDIA_CACHE_PATH = os.getenv("STUDIO_MEDIA_CACHE_PATH", "./data/studio-media")
+
     # 视频供应商任务由后端持续收口，不依赖浏览器页面保持打开。
     VIDEO_RECONCILE_INTERVAL_SECONDS: int = max(
         5,

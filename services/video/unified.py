@@ -104,7 +104,7 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             max_reference_images=caps.max_reference_images, first_frame_url=kwargs.get("first_frame_url"),
             last_frame_url=kwargs.get("last_frame_url"), reference_images=images,
             reference_videos=videos, reference_audios=kwargs.get("reference_audios") or [])
-        resolver = PublicMediaResolver(team_id=kwargs.get("team_id", self.config.team_id))
+        resolver = PublicMediaResolver(team_id=kwargs.get("team_id", self.config.team_id), model_config=self.config)
         references = []
         for item in prepared.items[1:]:
             kind = item["type"].removesuffix("_url")

@@ -124,15 +124,18 @@ async def lifespan(_: FastAPI):
             await ensure_super_admin()
     if settings.DEPLOYMENT_ROLE == "platform":
         import asyncio
+        from services.platform.temporary_media import expire_periodically
         from services.platform.calls import recover_measured
         from services.platform.chat import settle_periodically, stop_streams
         await recover_measured()
         reconciler = asyncio.create_task(settle_periodically())
+        expiry = asyncio.create_task(expire_periodically())
         try:
             yield
         finally:
             reconciler.cancel()
-            await asyncio.gather(reconciler, return_exceptions=True)
+            expiry.cancel()
+            await asyncio.gather(reconciler, expiry, return_exceptions=True)
             await stop_streams()
             await Tortoise.close_connections()
         return

@@ -4,7 +4,8 @@ import secrets
 
 from fastapi import Depends, HTTPException, Request
 from auth.deps import AuthContext, context_for_team, require_roles
-from auth.models import PlatformApiKey, Team
+from auth.models import PlatformApiKey, StudioKeyGrant, Team
+from tortoise.transactions import in_transaction
 from auth.security import hash_token
 from utils.enums import UserStatusEnum
 
@@ -19,11 +20,14 @@ def key_view(row):
     return {"id": row.id, "name": row.name, "preview": row.preview, "created_at": row.created_at}
 
 
-async def create_key(ctx, name):
+async def create_key(ctx, name, *, studio=False):
     raw = "nv_" + secrets.token_urlsafe(32)
-    row = await PlatformApiKey.create(user_id=ctx.user.id, team_id=ctx.team_id, name=name,
-                                     token_hash=hash_token(raw), preview=raw[:7] + "…" + raw[-4:])
-    return {**key_view(row), "key": raw}
+    async with in_transaction() as db:
+        row = await PlatformApiKey.create(using_db=db, user_id=ctx.user.id, team_id=ctx.team_id, name=name,
+                                          token_hash=hash_token(raw), preview=raw[:7] + "…" + raw[-4:])
+        if studio:
+            await StudioKeyGrant.create(using_db=db, key=row)
+    return {**key_view(row), "key": raw, "purpose":"studio" if studio else "api"}
 
 
 async def revoke_key(ctx, key_id):
@@ -42,7 +46,14 @@ async def developer_identity(request: Request) -> AuthContext:
         raise HTTPException(401, "API Key 无效或已撤销", headers={"WWW-Authenticate": "Bearer"})
     if row.user.status != UserStatusEnum.active.value or row.team.status != 1:
         raise HTTPException(403, "账户或团队已停用")
+    request.state.platform_key_id = row.id
     ctx = await context_for_team(row.user, row.team_id)
     if not ctx.is_super_admin and (not ctx.membership or ctx.membership.role not in {"admin", "creator"}):
         raise HTTPException(403, "当前团队角色不能调用模型")
+    return ctx
+
+
+async def studio_identity(request: Request, ctx: AuthContext = Depends(developer_identity)):
+    if not await StudioKeyGrant.filter(key_id=request.state.platform_key_id).exists():
+        raise HTTPException(403, "此密钥未授权本地猫影")
     return ctx

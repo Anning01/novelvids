@@ -132,6 +132,15 @@ async def generate_images(
     timeout: float | None = 600,
 ) -> list[GeneratedImage]:
     """Generate images through a backend-configured provider protocol."""
+    # URL-capable protocols can use private studio storage instead of embedding image bytes.
+    images = (extra_body or {}).get("image")
+    if images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value}:
+        from services.oss.studio_client import studio_client
+        studio = studio_client(None, base_url=base_url, api_key=api_key)
+        if studio:
+            refs = [images] if isinstance(images, str) else images
+            uploaded = [await studio.resolve(ref) if ref.startswith(("data:", "/media/")) else ref for ref in refs]
+            extra_body = {**extra_body, "image":uploaded[0] if isinstance(images, str) else uploaded}
     prepared = image_protocol_adapter(api_protocol).prepare(
         ImageGenerationInput(
             model=model,

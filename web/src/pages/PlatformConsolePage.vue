@@ -10,7 +10,7 @@ import AppButton from '@/components/AppButton.vue'
 
 type Section = 'usage' | 'models' | 'docs' | 'keys'
 type PlatformModel = {id:string; name:string; kinds:string[]; pricing:ModelPricing}
-type KeyRow = {id:number; name:string; preview:string; created_at:string}
+type KeyRow = {purpose?:'api'|'studio'; id:number; name:string; preview:string; created_at:string}
 const props = defineProps<{section:Section}>()
 const auth = useAuthStore()
 const summary = ref<BillingSummary | null>(null)
@@ -19,6 +19,7 @@ const keys = ref<KeyRow[]>([])
 const kind = ref('all')
 const days = ref(7)
 const name = ref('')
+const purpose = ref<'api'|'studio'>('api')
 const secret = ref('')
 const changes = ref(false)
 const loading = ref(false)
@@ -61,10 +62,10 @@ async function create() {
   const revision=epoch
   changes.value=true
   try {
-    const {data}=await request<SingleResponse<KeyRow & {key:string}>>('/platform/keys',{method:'POST',body:JSON.stringify({name:name.value.trim()})})
+    const {data}=await request<SingleResponse<KeyRow & {key:string}>>('/platform/keys',{method:'POST',body:JSON.stringify({name:name.value.trim(),purpose:purpose.value})})
     if (revision === epoch) {
       secret.value=data.key
-      keys.value=[{id:data.id,name:data.name,preview:data.preview,created_at:data.created_at},...keys.value]
+      keys.value=[{id:data.id,name:data.name,preview:data.preview,created_at:data.created_at,purpose:data.purpose},...keys.value]
       name.value=''
     }
   } catch(e){if (revision===epoch) notice.error((e as Error).message)}
@@ -124,9 +125,9 @@ onBeforeUnmount(()=>{++epoch;secret.value=''})
       <p v-if="!catalog.length">{{ tr('暂无可用模型') }}</p>
     </template>
     <template v-else-if="section==='keys'"><p v-if="!auth.activeTeamId">{{ tr('请选择可用团队') }}</p><template v-else>
-      <form class="row key-form" @submit.prevent="create"><label>{{ tr('密钥名称') }}<input v-model="name" maxlength="80" autocomplete="off" :placeholder="tr('例如：我的本地猫影')"></label><AppButton type="submit" variant="primary" :disabled="!name.trim() || changes">{{ tr('创建密钥') }}</AppButton></form>
+      <form class="row key-form" @submit.prevent="create"><label>{{ tr('密钥名称') }}<input v-model="name" maxlength="80" autocomplete="off" :placeholder="tr('例如：我的本地猫影')"></label><label>{{ tr('用途') }}<select v-model="purpose"><option value="api">{{ tr('通用 API') }}</option><option value="studio">{{ tr('本地猫影') }}</option></select></label><AppButton type="submit" variant="primary" :disabled="!name.trim() || changes">{{ tr('创建密钥') }}</AppButton></form>
       <div v-if="secret" class="panel revealed"><h2>{{ tr('请保存新密钥，仅显示一次') }}</h2><code>{{ secret }}</code><AppButton @click="copy(secret)">{{ tr('复制') }}</AppButton><AppButton @click="secret=''">{{ tr('完成') }}</AppButton></div>
-      <section class="panel"><div v-for="k in keys" :key="k.id" class="line"><span><b>{{ k.name }}</b> <code>{{ k.preview }}</code></span><AppButton :disabled="changes" @click="revoke(k)">{{ tr('停用') }}</AppButton></div><p v-if="!keys.length">{{ tr('当前团队下还没有个人 API Key') }}</p></section>
+      <section class="panel"><div v-for="k in keys" :key="k.id" class="line"><span><b>{{ k.name }}</b> <code>{{ k.preview }}</code> <small>{{ k.purpose==='studio' ? tr('本地猫影') : tr('通用 API') }}</small></span><AppButton :disabled="changes" @click="revoke(k)">{{ tr('停用') }}</AppButton></div><p v-if="!keys.length">{{ tr('当前团队下还没有个人 API Key') }}</p></section>
     </template></template>
     <template v-else-if="section==='docs'"><section class="panel"><h2>{{ tr('身份认证') }}</h2><p>{{ tr('在 API Keys 中创建密钥，通过 Authorization 请求头发送。') }}</p><code>Authorization: Bearer &lt;API_KEY&gt;</code></section>
       <section class="panel"><h2>{{ tr('查询模型列表') }}</h2><code>GET /v1/models</code><p>{{ tr('返回当前启用的平台模型、模型 ID 和配置价格。') }}</p><pre>curl "{{ apiBase }}/models" \
@@ -153,6 +154,6 @@ for part in stream:
 .console header,.row,.line,.dates{display:flex;align-items:center;justify-content:space-between;gap:14px}.console header{margin-bottom:32px;border-bottom:1px solid var(--app-border);padding-bottom:18px}
 .console h1{margin:0;font-size:clamp(25px,3vw,34px);letter-spacing:-.04em}.console h2{font-size:16px;margin:0;line-height:1.5}.console header span,.console small,.dates,.console p{color:var(--app-text-secondary)}.console a{color:var(--app-accent)}
 .totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--app-surface);border:1px solid var(--app-border);border-radius:12px}.totals article,.panel,.catalog article{padding:22px}.totals article+article{border-inline-start:1px solid var(--app-border)}.totals h2{font-weight:500;color:var(--app-text-secondary)}.totals strong{display:block;font-size:clamp(22px,3vw,36px);margin:10px 0}.panel,.catalog article{background:var(--app-surface);border:1px solid var(--app-border);border-radius:12px;margin-top:18px}
-.period{display:flex;gap:4px;flex-wrap:wrap}.period button{background:var(--app-surface-muted);color:var(--app-text-secondary);border:0;border-radius:7px;padding:6px 12px;cursor:pointer}.period button[aria-pressed=true]{color:var(--app-accent);background:var(--app-accent-soft);font-weight:650}.console button:focus-visible,.chart div:focus-visible{outline:2px solid var(--app-accent)}.period-total{font-size:23px;margin:12px 0}.chart{display:flex;gap:5px;height:140px;align-items:end;border-bottom:1px solid var(--app-border);background:repeating-linear-gradient(to top,transparent 0 34px,var(--app-border) 34px 35px)}.chart div{min-width:0;height:100%;flex:1;display:flex;align-items:end;justify-content:center}.chart i{width:min(65%,28px);background:var(--app-accent);border-radius:3px 3px 0 0}.dates{margin-top:8px;font-size:12px}.line{padding:12px 0;border-bottom:1px solid var(--app-border)}.line:last-child{border-bottom:0}.catalog{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(270px,100%),1fr));gap:12px}.catalog h2{margin:8px 0}.catalog ul{list-style:none;padding:0;color:var(--app-text-secondary)}.key-form{justify-content:flex-start;align-items:end}.key-form label{display:grid;gap:6px}.key-form input{background:var(--app-surface);color:inherit;border:1px solid var(--app-border);border-radius:7px;padding:8px}.console code,.console pre{font-family:ui-monospace,monospace;overflow-wrap:anywhere}.revealed code{display:block;margin:12px 0}.console pre{background:var(--app-surface-muted);border-radius:6px;padding:12px;white-space:pre-wrap}
+.period{display:flex;gap:4px;flex-wrap:wrap}.period button{background:var(--app-surface-muted);color:var(--app-text-secondary);border:0;border-radius:7px;padding:6px 12px;cursor:pointer}.period button[aria-pressed=true]{color:var(--app-accent);background:var(--app-accent-soft);font-weight:650}.console button:focus-visible,.chart div:focus-visible{outline:2px solid var(--app-accent)}.period-total{font-size:23px;margin:12px 0}.chart{display:flex;gap:5px;height:140px;align-items:end;border-bottom:1px solid var(--app-border);background:repeating-linear-gradient(to top,transparent 0 34px,var(--app-border) 34px 35px)}.chart div{min-width:0;height:100%;flex:1;display:flex;align-items:end;justify-content:center}.chart i{width:min(65%,28px);background:var(--app-accent);border-radius:3px 3px 0 0}.dates{margin-top:8px;font-size:12px}.line{padding:12px 0;border-bottom:1px solid var(--app-border)}.line:last-child{border-bottom:0}.catalog{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(270px,100%),1fr));gap:12px}.catalog h2{margin:8px 0}.catalog ul{list-style:none;padding:0;color:var(--app-text-secondary)}.key-form{justify-content:flex-start;align-items:end}.key-form label{display:grid;gap:6px}.key-form input,.key-form select{background:var(--app-surface);color:inherit;border:1px solid var(--app-border);border-radius:7px;padding:8px}.console code,.console pre{font-family:ui-monospace,monospace;overflow-wrap:anywhere}.revealed code{display:block;margin:12px 0}.console pre{background:var(--app-surface-muted);border-radius:6px;padding:12px;white-space:pre-wrap}
 @media(max-width:640px){.totals{grid-template-columns:1fr}.totals article+article{border-inline-start:0;border-top:1px solid var(--app-border)}.panel,.catalog article,.totals article{padding:14px}.row{flex-wrap:wrap}}
 </style>

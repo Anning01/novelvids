@@ -279,3 +279,17 @@ class PlatformCallReceipt(AbstractBaseModel):
     provider_id = fields.CharField(max_length=255, null=True)
     usage = fields.JSONField(null=True)
     usage_record_id = fields.IntField(null=True)
+
+
+class StudioKeyGrant(AbstractBaseModel):
+    key = fields.OneToOneField("models.PlatformApiKey", on_delete=fields.CASCADE)
+
+
+class StudioMediaLease(AbstractBaseModel):
+    object_key = fields.CharField(max_length=220, unique=True)
+    bucket = fields.CharField(max_length=64)
+    region = fields.CharField(max_length=64)
+    team_id = fields.IntField(db_index=True)
+    byte_length = fields.BigIntField()
+    expires_epoch = fields.BigIntField(db_index=True)
+    retry_epoch = fields.BigIntField(null=True)
