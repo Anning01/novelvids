@@ -13,7 +13,7 @@ from auth.models import PlatformCallReceipt
 from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
 from services.balance import accumulate_member_cost, consume, ensure_solvent
-from services.billing.pricing import compute_text_cost
+from services.billing.pricing import compute_image_cost, compute_input_image_cost, compute_text_cost
 from utils.enums import AiTaskTypeEnum
 
 CALL_TIMEOUT = 600
@@ -34,7 +34,20 @@ def text_pricing(config):
     return rates
 
 
-async def admit(ctx, model_id, body, key):
+def chat_options(config, body):
+    if not set(config.task_types or [config.task_type]).intersection({1,3,5,6,7,10,11}):
+        raise HTTPException(422, "该模型不支持对话请求")
+    if body.get("tools") and not config.supports_tool_calls:
+        raise HTTPException(422, "该模型配置未启用工具调用")
+    if body.get("response_format", {}).get("type") in {"json_object", "json_schema"} and not config.supports_json_output:
+        raise HTTPException(422, "该模型配置未启用结构化输出")
+    requested = body.get("max_tokens") or body.get("max_completion_tokens")
+    if requested and config.max_tokens and requested > config.max_tokens:
+        raise HTTPException(422, "请求的输出 token 超出模型配置上限")
+    return text_pricing(config)
+
+
+async def admit(ctx, model_id, body, key, *, validate=chat_options):
     identifier = uuid4()
     dedup = digest([ctx.team_id, ctx.user.id, key or str(identifier)])
     signature = digest(body)
@@ -48,16 +61,7 @@ async def admit(ctx, model_id, body, key):
         if previous:
             detail = "请求标识已用于不同的请求" if previous.payload_hash != signature else "该请求已受理，请查询原请求状态"
             raise HTTPException(409, detail, headers={"X-Request-Id":str(previous.public_id)})
-        if not set(config.task_types or [config.task_type]).intersection({1,3,5,6,7,10,11}):
-            raise HTTPException(422, "该模型不支持对话请求")
-        if body.get("tools") and not config.supports_tool_calls:
-            raise HTTPException(422, "该模型配置未启用工具调用")
-        if body.get("response_format", {}).get("type") in {"json_object", "json_schema"} and not config.supports_json_output:
-            raise HTTPException(422, "该模型配置未启用结构化输出")
-        requested = body.get("max_tokens") or body.get("max_completion_tokens")
-        if requested and config.max_tokens and requested > config.max_tokens:
-            raise HTTPException(422, "请求的输出 token 超出模型配置上限")
-        rates = text_pricing(config)
+        rates = validate(config, body)
         await ensure_solvent(ctx.team_id, ctx.user.id)
         count = await PlatformCallReceipt.filter(model_config_id=model_id, state="submitted",
             created_at__gte=datetime.now(timezone.utc)-timedelta(seconds=CALL_TIMEOUT+15)).using_db(db).count()
@@ -76,9 +80,14 @@ async def settle(receipt_id):
         if not changed:
             return
         r = await PlatformCallReceipt.get(id=receipt_id).using_db(db)
-        cost = compute_text_cost(r.usage, r.pricing)
-        record = await ModelUsageRecord.create(using_db=db, novel_id=0, task_type=AiTaskTypeEnum.creation_agent,
-            billing_type="text", model_config_id=r.model_config_id, model_name=r.model_name, model=r.model,
+        kind = r.pricing["type"]
+        if kind == "image":
+            cost = compute_image_cost(r.usage["image_count"], r.usage["clarity"], r.pricing)
+            cost += compute_input_image_cost(r.usage["input_image_count"], r.pricing)
+        else:
+            cost = compute_text_cost(r.usage, r.pricing)
+        record = await ModelUsageRecord.create(using_db=db, novel_id=0, task_type=AiTaskTypeEnum.reference_image if kind == "image" else AiTaskTypeEnum.creation_agent,
+            billing_type=kind, model_config_id=r.model_config_id, model_name=r.model_name, model=r.model,
             pricing_snapshot=r.pricing, usage={**r.usage, "platform_request_id":str(r.public_id)},
             cost=cost, cost_source="balance", team_id=r.team_id, user_id=r.user_id)
         await consume(r.team_id, cost, usage_record_id=record.id, strict=True)
@@ -92,8 +101,12 @@ async def finish(receipt, usage, provider_id):
         raise ValueError("Missing provider token counts")
     from services.llm.usage import completion_cache_usage
     tokens = {"input_tokens":usage.prompt_tokens, "output_tokens":usage.completion_tokens, **completion_cache_usage(usage)}
+    await record_measurement(receipt, tokens, provider_id)
+
+
+async def record_measurement(receipt, usage, provider_id):
     await PlatformCallReceipt.filter(id=receipt.id, state="submitted").update(
-        state="measured", usage=tokens, provider_id=provider_id)
+        state="measured", usage=usage, provider_id=provider_id)
     await settle(receipt.id)
 
 

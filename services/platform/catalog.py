@@ -26,10 +26,12 @@ def public_tariff(raw):
 
 
 async def model_catalog():
-    rows = await AiModelConfig.filter(scope="official", team_id__isnull=True, is_active=True).order_by("id").values(
-        "id","name","task_type","task_types","pricing","supports_tool_calls","supports_json_output")
+    rows = await AiModelConfig.filter(scope="official", team_id__isnull=True, is_active=True).exclude(api_protocol="novelvids").order_by("id").values(
+        "id","name","image_model_type","video_model_type","api_protocol","task_type","task_types","pricing","supports_tool_calls","supports_json_output")
     kinds = {2:"image", 4:"video", 8:"media_processing", 9:"asr"}
     return [{"id": f"nv-{r['id']}", "name":r["name"],
              "kinds":list(dict.fromkeys(kinds.get(t, "text") for t in (r["task_types"] or [r["task_type"]]))),
+             "image_model_type":r["image_model_type"], "video_model_type":r["video_model_type"],
+             "reference_image_urls":bool(r["image_model_type"] and r["api_protocol"] in {"volcengine_ark","openrouter_compatible"}),
              "pricing":public_tariff(r["pricing"]), "tool_calls":r["supports_tool_calls"], "json_output":r["supports_json_output"]}
             for r in rows]

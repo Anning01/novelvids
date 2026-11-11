@@ -107,7 +107,7 @@ async def _save_cover(image: Any, novel_id: int) -> str:
     filename = f"novel-{novel_id}-{uuid4().hex}{suffix}"
     from services.oss import make_upload_key, oss
 
-    if oss.enabled:
+    if oss.enabled and not getattr(image, "keep_local", False):
         derivatives = await asyncio.to_thread(render_cover_derivatives, image_bytes)
         key = make_upload_key(None, filename)
         await oss.put_bytes(key, image_bytes, _cover_content_type(suffix))

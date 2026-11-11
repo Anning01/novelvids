@@ -10,6 +10,7 @@ from services.billing.aggregation import summary
 from auth.models import PlatformApiKey, PlatformCallReceipt, StudioKeyGrant
 from services.platform.temporary_media import UploadSpec, issue_upload
 from schemas.platform_chat import ChatRequest
+from services.platform.images import ImageRequest, generate as generate_platform_image
 from services.platform.chat import complete
 from services.platform.access import console_owner, create_key, developer_identity, key_view, revoke_key, studio_identity
 from services.platform.catalog import model_catalog
@@ -89,3 +90,9 @@ async def call_status(request_id: UUID, ctx: AuthContext = Depends(developer_ide
 async def studio_media_lease(body: UploadSpec, response: Response, ctx: AuthContext = Depends(studio_identity)):
     response.headers["Cache-Control"] = "no-store"
     return await issue_upload(ctx.team_id, body)
+
+
+@developer_router.post("/images/generations", summary="生成图像并返回结果链接")
+async def images(body: ImageRequest, ctx: AuthContext = Depends(developer_identity),
+    idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
+    return await generate_platform_image(ctx, body, idempotency_key)

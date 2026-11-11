@@ -125,8 +125,22 @@ class VolcengineArkImageAdapter:
         return PreparedImageRequest(path="/images/generations", payload=payload)
 
 
+class StudioPlatformImageAdapter:
+    def prepare(self, request: ImageGenerationInput) -> PreparedImageRequest:
+        payload = {"model":request.model, "prompt":request.prompt, "n":request.count,
+                   "output_format":request.output_format, **(request.extra_body or {})}
+        if request.resolution:
+            payload["size"] = request.resolution
+        if request.aspect_ratio:
+            payload["aspect_ratio"] = request.aspect_ratio
+        if isinstance(payload.get("image"), str):
+            payload["image"] = [payload["image"]]
+        return PreparedImageRequest(path="/images/generations", payload=payload)
+
+
 _ADAPTERS: dict[ImageApiProtocol, ImageProtocolAdapter] = {
     ImageApiProtocol.openai_compatible: OpenAICompatibleImageAdapter(),
+    ImageApiProtocol.novelvids: StudioPlatformImageAdapter(),
     ImageApiProtocol.openrouter_compatible: OpenRouterCompatibleImageAdapter(),
     ImageApiProtocol.volcengine_ark: VolcengineArkImageAdapter(),
 }

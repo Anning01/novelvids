@@ -812,7 +812,7 @@ async def test_list_generation_capabilities_returns_all_types():
     for model_type in ("gpt_image_2", "gpt_image_2_5", "gpt_image_2_6", "gpt_image_2_6_sunburst", "gpt_image_2_6_flare"):
         assert capabilities["image"][model_type] == ["1K", "2K", "4K"]
     for model_type in ("gpt_image_2_5", "gpt_image_2_6", "gpt_image_2_6_sunburst", "gpt_image_2_6_flare"):
-        assert capabilities["image_protocols"][model_type] == ["openai_compatible"]
+        assert capabilities["image_protocols"][model_type] == ["openai_compatible", "novelvids"]
 
 
 @pytest.mark.parametrize("model_type", ["gpt_image_2_5", "gpt_image_2_6", "gpt_image_2_6_sunburst", "gpt_image_2_6_flare"])

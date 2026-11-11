@@ -25,6 +25,7 @@ class ImageGenerationError(RuntimeError):
 class GeneratedImage:
     url: str | None = None
     b64_json: str | None = None
+    keep_local: bool = False
 
 
 def _endpoint(base_url: str, path: str) -> str:
@@ -91,7 +92,7 @@ def _payload_error(payload: Any) -> tuple[str | None, int | None, str | None]:
     return code, status, request_id
 
 
-def _parse_images(payload: Any) -> list[GeneratedImage]:
+def _parse_images(payload: Any, *, keep_local=False) -> list[GeneratedImage]:
     if not isinstance(payload, dict):
         return []
     raw_items = payload.get("data")
@@ -103,15 +104,15 @@ def _parse_images(payload: Any) -> list[GeneratedImage]:
     images: list[GeneratedImage] = []
     for item in raw_items:
         if isinstance(item, str) and item.strip():
-            images.append(GeneratedImage(url=item.strip()))
+            images.append(GeneratedImage(url=item.strip(), keep_local=keep_local))
             continue
         if not isinstance(item, dict):
             continue
         url = item.get("url")
         b64_json = item.get("b64_json") or item.get("base64")
         if isinstance(url, str) and url.strip():
-            images.append(GeneratedImage(url=url.strip()))
-        elif isinstance(b64_json, str) and b64_json.strip():
+            images.append(GeneratedImage(url=url.strip(), keep_local=keep_local))
+        elif not keep_local and isinstance(b64_json, str) and b64_json.strip():
             images.append(GeneratedImage(b64_json=b64_json.strip()))
     return images
 
@@ -134,9 +135,11 @@ async def generate_images(
     """Generate images through a backend-configured provider protocol."""
     # URL-capable protocols can use private studio storage instead of embedding image bytes.
     images = (extra_body or {}).get("image")
-    if images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value}:
+    if images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value, ImageApiProtocol.novelvids.value}:
         from services.oss.studio_client import studio_client
         studio = studio_client(None, base_url=base_url, api_key=api_key)
+        if not studio and api_protocol == ImageApiProtocol.novelvids.value:
+            raise ImageGenerationError("本地猫影的平台密钥尚未配置")
         if studio:
             refs = [images] if isinstance(images, str) else images
             uploaded = [await studio.resolve(ref) if ref.startswith(("data:", "/media/")) else ref for ref in refs]
@@ -167,6 +170,9 @@ async def generate_images(
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             headers = {"Authorization": f"Bearer {api_key}"}
+            if api_protocol == ImageApiProtocol.novelvids.value:
+                from uuid import uuid4
+                headers["Idempotency-Key"] = str(uuid4())
             if prepared.images:
                 try:
                     files = await image_uploads(client, prepared.images)
@@ -236,7 +242,7 @@ async def generate_images(
             f"生图供应商返回错误（{error_code}{status_suffix}{request_suffix}）"
         )
 
-    images = _parse_images(payload)
+    images = _parse_images(payload, keep_local=api_protocol == ImageApiProtocol.novelvids.value)
     keys = sorted(payload.keys()) if isinstance(payload, dict) else []
     logger.info(
         "image_generation_inbound protocol=%s endpoint=%s status=%s request_id=%s keys=%s image_count=%s",

@@ -131,6 +131,7 @@ const imageProtocolOptions = computed(() => {
     { value: 'openai_compatible', label: tr('OpenAI 兼容（GPT Image / 中转服务）') },
     { value: 'openrouter_compatible', label: tr('OpenRouter 兼容（/images）') },
     { value: 'volcengine_ark', label: tr('火山方舟 Seedream') },
+    { value: 'novelvids', label: tr('猫影开放平台') },
   ]
   return allowed ? allowed.flatMap(value => options.filter(option => option.value === value)) : options
 })
@@ -214,6 +215,7 @@ function taskLabel(value: number) {
 }
 
 function protocolLabel(value: ImageApiProtocol) {
+  if (value === 'novelvids') return tr('猫影开放平台')
   if (value === 'unified_video') return tr('通用视频接口')
   if (value === 'volcengine_mediakit') return 'AI MediaKit'
   if (value === 'autodl') return 'AutoDL ComfyUI'

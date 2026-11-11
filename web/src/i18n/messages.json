@@ -1,5 +1,10 @@
 {
   "common": {
+    "从目录选择图像模型 ID。size 可使用模型支持的清晰度或像素尺寸；支持参考图的模型接受 image 数组中的 HTTPS 地址。结果在 data[].url 中，由调用方直接下载。": "Use an image model ID from the catalog. Set size to a supported tier or pixel size. Models with reference support accept an image array of HTTPS URLs. Download the results directly using data[].url.",
+    "图像生成": "Image generation",
+    "文生图": "Text to image",
+    "支持参考图": "Reference images supported",
+    "猫影开放平台": "Cat Shadow platform",
     "本地猫影": "Local Cat Shadow Studio",
     "通用 API": "General API",
     "用途": "Purpose",
