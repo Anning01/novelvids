@@ -47,7 +47,8 @@ class EditRenderer:
             raise asyncio.CancelledError
         extra_files = [Path(path) for value in args for path in re.findall(r"(?:filename|fontsdir)='([^']+)'", value)]
         communication = asyncio.create_task(run_media_async(
-            ['ffmpeg', '-hide_banner', '-v', 'error', '-nostdin', '-y', '-xerror', *args],
+            ['ffmpeg', '-hide_banner', '-v', 'error', '-nostdin', '-y', '-xerror',
+             '-filter_complex_threads', '1', '-filter_threads', '1', *args],
             cwd=cwd, extra_files=extra_files, timeout=settings.VIDEO_EDITOR_RENDER_TIMEOUT))
         try:
             while not communication.done():

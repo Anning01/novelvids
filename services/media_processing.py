@@ -22,6 +22,15 @@ async def media_file_io(function, *args, **kwargs):
     return await asyncio.get_running_loop().run_in_executor(_file_io, partial(function, *args, **kwargs))
 
 
+def remote_processing_enabled():
+    if not settings.MEDIA_PROCESSING_REMOTE_ENABLED:
+        return False
+    if not settings.REMAKE_MEDIA_SSH_HOST:
+        from services.remake.remote_media import RemoteMediaError
+        raise RemoteMediaError('Media worker is enabled but its connection is not configured')
+    return True
+
+
 def bounded_command(command):
     command = [str(value) for value in command]
     if command[0] not in {'ffmpeg', 'ffprobe'}:
@@ -154,45 +163,46 @@ def _result(command, result, options):
 
 
 def run_media(command, *, extra_files=(), **options):
-    from config import settings
+    if not remote_processing_enabled():
+        return subprocess.run(command, **options)
     with _slots:
-        if not settings.REMAKE_MEDIA_SSH_HOST:
-            return subprocess.run(bounded_command(command), **options)
         with CommandBundle(bounded_command(command), cwd=options.get('cwd'),
                            timeout=options.get('timeout', 1200), extra_files=extra_files) as bundle:
             return _result(command, asyncio.run(_remote(bundle)), options)
 
 
 async def run_media_async(command, *, extra_files=(), **options):
-    from config import settings
+    if not remote_processing_enabled():
+        return await _local_async(command, options)
     while not _slots.acquire(blocking=False):
         await asyncio.sleep(.05)
     try:
-        if settings.REMAKE_MEDIA_SSH_HOST:
-            bundle = await media_file_io(CommandBundle, bounded_command(command), cwd=options.get('cwd'),
-                                             timeout=options.get('timeout', 1200), extra_files=extra_files)
-            with bundle:
-                return _result(command, await _remote(bundle), options)
-        process = await asyncio.create_subprocess_exec(*bounded_command(command), cwd=options.get('cwd'),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), options.get('timeout', 1200))
-        finally:
-            if process.returncode is None:
-                process.kill()
-                await process.communicate()
-        return _result(command, {'returncode': process.returncode,
-                                'stdout': stdout.decode(errors='replace'), 'stderr': stderr.decode(errors='replace')}, options)
+        bundle = await media_file_io(CommandBundle, bounded_command(command), cwd=options.get('cwd'),
+                                     timeout=options.get('timeout', 1200), extra_files=extra_files)
+        with bundle:
+            return _result(command, await _remote(bundle), options)
     finally:
         _slots.release()
 
 
+async def _local_async(command, options):
+    process = await asyncio.create_subprocess_exec(*command, cwd=options.get('cwd'),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), options.get('timeout', 1200))
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    return _result(command, {'returncode': process.returncode,
+                            'stdout': stdout.decode(errors='replace'), 'stderr': stderr.decode(errors='replace')}, options)
+
+
 def image_derivatives(image_bytes):
-    from config import settings
     from services.media_images import render_derivatives
+    if not remote_processing_enabled():
+        return render_derivatives(image_bytes)
     with _slots:
-        if not settings.REMAKE_MEDIA_SSH_HOST:
-            return render_derivatives(image_bytes)
         with TemporaryDirectory(prefix='image-input-') as directory:
             source = Path(directory) / 'image.bin'
             source.write_bytes(image_bytes)

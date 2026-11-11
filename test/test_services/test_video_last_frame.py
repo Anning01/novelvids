@@ -156,8 +156,7 @@ def test_ffmpeg只解码视频尾部并输出真实最后一帧(tmp_path, monkey
     LastFrameService._extract_with_ffmpeg(source, output)
 
     command = captured["command"]
-    assert command[0] == "ffmpeg" and command[command.index('-sseof') + 1] == '-1'
-    assert command[command.index('-i') - 2:command.index('-i')] == ['-threads', '1']
+    assert command[:5] == ["ffmpeg", "-y", "-sseof", "-1", "-i"]
     assert command[command.index("-vf") + 1] == "reverse"
     assert command[command.index("-frames:v") + 1] == "1"
 

@@ -58,6 +58,7 @@ def test_configured_worker_failure_never_runs_local_ffmpeg(monkeypatch, tmp_path
     from services import media_processing as media
     from services.remake.remote_media import RemoteMediaError
     monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', 'worker.invalid')
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', True)
     async def fail(*args, **kwargs):
         raise RemoteMediaError('worker unavailable')
     monkeypatch.setattr(media, '_remote', fail)
@@ -66,16 +67,79 @@ def test_configured_worker_failure_never_runs_local_ffmpeg(monkeypatch, tmp_path
         media.run_media(['ffmpeg', '-i', str(tmp_path / 'source.mp4'), str(tmp_path / 'out.mp4')])
 
 
-def test_local_processing_is_bounded_and_limits_decoder_threads(monkeypatch):
+def test_local_processing_keeps_original_command_and_does_not_acquire_slots(monkeypatch):
     from config import settings
     from services import media_processing as media
     monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', '')
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', False)
     calls = []
     monkeypatch.setattr(media.subprocess, 'run', lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
-    media.run_media(['ffmpeg', '-i', 'source.mp4', 'result.mp4'])
-    cmd = calls[0]
-    assert cmd[cmd.index('-i') - 2:cmd.index('-i')] == ['-threads', '1']
-    assert '-filter_complex_threads' in cmd
+    command = ['ffmpeg', '-i', 'source.mp4', 'result.mp4']
+    with media._slots:
+        media.run_media(command)
+    assert calls == [command]
+
+
+def test_worker_host_alone_does_not_enable_generic_offload(monkeypatch):
+    from config import settings
+    from services import media_processing as media
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', False)
+    monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', 'worker.invalid')
+    calls = []
+    monkeypatch.setattr(media.subprocess, 'run', lambda command, **kwargs:
+        calls.append(command) or subprocess.CompletedProcess(command, 0))
+    command = ['ffmpeg', '-i', 'source.mp4', 'out.mp4']
+    with media._slots:
+        media.run_media(command)
+    assert calls == [command]
+
+
+def test_remote_processing_is_disabled_without_explicit_deployment_setting():
+    import os
+    import sys
+    env = dict(os.environ)
+    env.pop('MEDIA_PROCESSING_REMOTE_ENABLED', None)
+    # dotenv must not silently enable a server-only setting in default installations.
+    env['PYTHON_DOTENV_DISABLED'] = '1'
+    result = subprocess.run([sys.executable, '-c',
+        'from config import settings; assert settings.MEDIA_PROCESSING_REMOTE_ENABLED is False'],
+        env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_local_async_processing_bypasses_remote_limits_and_preserves_arguments(monkeypatch):
+    from config import settings
+    from services import media_processing as media
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', False)
+    monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', 'worker.invalid')
+    from unittest.mock import AsyncMock
+    execute = AsyncMock(return_value=subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(media, '_local_async', execute)
+    command = ['ffmpeg', '-threads', '4', '-i', 'source.mp4', 'out.mp4']
+    with media._slots:
+        await media.run_media_async(command, timeout=30)
+    execute.assert_awaited_once_with(command, {'timeout': 30})
+
+
+def test_local_image_derivatives_bypass_remote_limits(monkeypatch):
+    from config import settings
+    from services import media_processing as media
+    import services.media_images
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', False)
+    monkeypatch.setattr(services.media_images, 'render_derivatives', lambda value: {'thumbnail': value})
+    with media._slots:
+        assert media.image_derivatives(b'image') == {'thumbnail': b'image'}
+
+
+def test_enabled_worker_without_connection_fails_instead_of_running_locally(monkeypatch):
+    from config import settings
+    from services import media_processing as media
+    from services.remake.remote_media import RemoteMediaError
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', True)
+    monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', '')
+    with pytest.raises(RemoteMediaError):
+        media.run_media(['ffmpeg', '-i', 'source.mp4', 'out.mp4'])
 
 
 @pytest.fixture
@@ -104,6 +168,7 @@ def staged_worker(monkeypatch, tmp_path):
             assert action == 'process'
             execute(self.work)
     monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', 'worker.invalid')
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', True)
     monkeypatch.setattr(remote_media, 'media_session', Session)
     return jobs
 
@@ -183,6 +248,7 @@ async def test_concurrent_media_jobs_are_serialized_before_staging(monkeypatch, 
     from config import settings
     from services import media_processing as media
     monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', 'worker.invalid')
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', True)
     active = peak = 0
     async def remote(bundle):
         nonlocal active, peak
@@ -236,6 +302,7 @@ async def test_remote_cancellation_releases_slot_and_cleans_session(monkeypatch)
     from config import settings
     from services import media_processing as media
     monkeypatch.setattr(settings, 'REMAKE_MEDIA_SSH_HOST', 'worker.invalid')
+    monkeypatch.setattr(settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', True)
     started = asyncio.Event()
     cleaned = []
     async def wait(*args, **kwargs):

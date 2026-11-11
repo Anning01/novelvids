@@ -54,8 +54,7 @@ def test_有声与无声分镜可以生成混合音轨合并命令(tmp_path, mon
     assert '1:a:0' in captured[1]
     assert 'anullsrc=channel_layout=stereo:sample_rate=44100' in captured[1]
     assert all('-t' in command and command[command.index('-t') + 1] == '1.25' for command in captured[:2])
-    assert all(command[0] == 'ffmpeg' and command[command.index('-filter_threads') + 1] == '1' for command in captured[:2])
-    assert all(command[command.index('-i') - 2:command.index('-i')] == ['-threads', '1'] for command in captured[:2])
+    assert all(command[:7] == ['ffmpeg', '-v', 'error', '-nostdin', '-y', '-filter_threads', '1'] for command in captured[:2])
     assert all(command.count('-i') <= 2 for command in captured)
     assert 'concat' in captured[-1] and captured[-1][captured[-1].index('-c') + 1] == 'copy'
 
