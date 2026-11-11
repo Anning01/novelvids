@@ -5,7 +5,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
-  Bot,
   Check,
   Clapperboard,
   FileText,
@@ -106,13 +105,6 @@ const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
 const activeEpisode = ref(1)
 const episodeBusy = ref(false)
-const styles = ref<{key: string, label: string}[]>([])
-const styleOptions = computed(() => [
-  {value: 'auto', label: tr('按剧情决定')},
-  ...styles.value.filter(item => item.key !== 'auto').map(item => ({value: item.key, label: tr(item.label)})),
-  {value: 'custom', label: tr('自定义风格')},
-])
-const styleLabel = computed(() => projectView.value.customStyle || styleOptions.value.find(item => item.value === projectView.value.styleKey)?.label || projectView.value.styleKey)
 const analysisTask = ref<AiTask | null>(null)
 const analysisError = ref('')
 const {
@@ -561,7 +553,6 @@ onMounted(async () => {
   const [, projectReady] = await Promise.all([
     loadStoryboardStrategies(),
     loadProject(),
-    api.visualStyles().then(response => { styles.value = response.data }).catch(error => notice.error(error.message)),
   ])
   if (projectReady) await loadAnalysis()
   observeEpisodeSentinel()
@@ -645,20 +636,6 @@ onBeforeUnmount(() => {
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>{{ tr('项目设定') }}</h2></div></header>
         <div class="profile-grid">
-          <article class="profile-card">
-            <span><Bot :size="18" /></span>
-            <div>
-              <small>{{ tr('全局风格') }}</small>
-              <template v-if="editing && projectDraft">
-                <AppSelect :model-value="projectDraft.styleKey || 'auto'" @update:model-value="projectDraft.styleKey = $event" :options="styleOptions" :ariaLabel="tr('全局风格')" />
-                <textarea v-if="projectDraft.styleKey === 'custom'" v-model="projectDraft.customStyle" :aria-label="tr('自定义风格')" maxlength="2000" rows="3" />
-              </template>
-              <strong v-else>{{ styleLabel }}</strong>
-              <small>{{ tr('项目设定说明') }}</small>
-              <textarea v-if="editing && projectDraft" v-model="projectDraft.projectSetting" :aria-label="tr('项目设定说明')" rows="3" />
-              <p v-else>{{ projectView.projectSetting }}</p>
-            </div>
-          </article>
           <article class="profile-card">
             <span><Clapperboard :size="18" /></span>
             <div>
@@ -784,7 +761,7 @@ onBeforeUnmount(() => {
 .analysis-section > header > span { color: #999eac; font-size: 10px; }
 .analysis-section > header > a { display: inline-flex; align-items: center; gap: 5px; color: #5b5cf6; font-size: 11px; }
 .section-kicker { color: #7779ef; font-size: 8px; font-weight: 750; letter-spacing: .16em; }
-.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.profile-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .profile-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .profile-card > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .profile-card > div { display: grid; gap: 4px; }
