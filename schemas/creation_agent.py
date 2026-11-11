@@ -9,7 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from pydantic.json_schema import SkipJsonSchema
 
-from schemas.scene import ScenePromptSegment
+from schemas.scene import BlockingMap, ScenePromptSegment
 from schemas.creation_plan import PlanConfirmation
 
 
@@ -322,6 +322,7 @@ class StoryboardVisualChanges(BaseModel):
     camera_movement: str | SkipJsonSchema[None] = Field(None, min_length=1)
     transition: str | SkipJsonSchema[None] = Field(None, min_length=1)
     allowed_effects: list[str] | SkipJsonSchema[None] = None
+    blocking_map: BlockingMap | SkipJsonSchema[None] = None
     segments: list[ScenePromptSegment] | SkipJsonSchema[None] = None
     reference_only_types: list[Literal['人物', '场景', '物品']] | SkipJsonSchema[None] = Field(None, max_length=3)
 

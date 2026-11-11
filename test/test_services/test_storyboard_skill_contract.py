@@ -323,3 +323,36 @@ def test_continuous_rack_focus_renders_one_request_with_unbroken_dialogue(langua
     prompt = result[0].prompt
     assert prompt.count(prompt_label('【镜头1 · ', language)) == 1
     assert shot.camera_movement in prompt and all(line in prompt for line in shot.dialogue)
+
+
+def test_new_multicut_requires_one_map_shared_by_all_segments_but_old_runs_still_render():
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.validation import prepare_skill_storyboard
+    from test.test_services.test_creation_agent_prompts import segmented_shot, heroine
+
+    value = segmented_shot().model_dump(exclude={'prompt', 'blocking_map'})
+    board = StructuredSkillStoryboard(shots=[value])
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    with pytest.raises(ValueError, match='空间定位图'):
+        prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic')
+    snapshot.contents.pop('blocking_guide')
+    assert prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic').shots[0].prompt
+
+
+@pytest.mark.parametrize("problem", ["coverage", "cameras"])
+def test_incomplete_blocking_map_rejected_for_new_multicut(problem):
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.validation import prepare_skill_storyboard
+    from test.test_services.test_creation_agent_prompts import segmented_shot, heroine
+
+    data = segmented_shot().model_dump(exclude={'prompt'})
+    plan = data['blocking_map']
+    if problem == 'coverage':
+        plan['assets'][0]['name'] = '雨棚'
+        for camera in plan['cameras'][:2]:
+            camera['target'] = '雨棚'
+    else:
+        plan['cameras'].pop()
+    with pytest.raises(ValueError, match='空间定位图'):
+        prepare_skill_storyboard(StructuredSkillStoryboard(shots=[data]), SkillSnapshot.model_validate(snapshot_skills()),
+                                'zh', [heroine()], 'cinematic')

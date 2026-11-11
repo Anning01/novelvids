@@ -15,6 +15,7 @@ FILES = {
     "assets": "novelvids-assets/references/assets.md",
     "authorization": "runtime/authorization.md",
     "base": "runtime/base.md",
+    "blocking_guide": "novelvids-storyboard/references/blocking.md",
     "clip_templates": "novelvids-video/references/clip_templates.json",
     "creation_planning": "runtime/creation_planning.md",
     "creative_check": "runtime/creative_check.md",
@@ -137,6 +138,8 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_k
         contract += "\n" + snapshot.read("video_presentation")
     if (skill == "storyboard" or remake_shots) and "storyboard_contract" in snapshot.contents:
         from prompts.labels import prompt_label
+        if "blocking_guide" in snapshot.contents:
+            contract += "\n" + snapshot.read("blocking_guide")
         if "speech_pacing" in snapshot.contents:
             contract += "\n" + snapshot.read("speech_pacing")
         specification = json.loads(snapshot.read("storyboard_contract"))

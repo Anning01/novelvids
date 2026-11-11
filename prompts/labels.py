@@ -32,6 +32,7 @@ LABEL_KEYS = {
     "【全局前置条件】": "global_conditions",
     "时间：": "time",
     "环境：": "environment",
+    "空间定位图（左上 0,0；右下 100,100）": "blocking_map_coordinates",
     "空间关系：": "spatial_relationships",
     "【镜头描述】": "shot_description",
     "【转场方式】": "transition",

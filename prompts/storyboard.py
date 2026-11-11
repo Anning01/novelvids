@@ -551,6 +551,14 @@ def format_storyboard_prompt(
             prompt_label("【详细执行】", language),
             *shot_body_parts,
         ]
+    blocking = getattr(shot, "blocking_map", None)
+    layout = []
+    if blocking and len(segments) > 1:
+        layout.append(f"{prompt_label('空间定位图（左上 0,0；右下 100,100）', language)} · {blocking.orientation}")
+        for asset in blocking.assets:
+            end = f" → ({asset.end.x},{asset.end.y})" if asset.end else ""
+            layout.append(f"{asset.name} ({asset.x},{asset.y}){end} {asset.facing}".rstrip())
+        layout.extend(f"C{i} ({cam.x},{cam.y}) → {cam.target}" for i, cam in enumerate(blocking.cameras, 1))
     prompt = "\n".join(
         (
             prompt_label("【禁止项】", language),
@@ -570,6 +578,7 @@ def format_storyboard_prompt(
             f"{prompt_label('时间：', language)}{shot.time_setting}",
             f"{prompt_label('环境：', language)}{shot.environment}",
             f"{prompt_label('空间关系：', language)}{shot.spatial_relationships}",
+            *layout,
             "",
             prompt_label("【镜头描述】", language),
             *details,

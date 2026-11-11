@@ -224,6 +224,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             }
 
             # 解析 duration 为浮点数
+            if shot.blocking_map:
+                prompt_params["blocking_map"] = shot.blocking_map.model_dump(exclude_none=True)
             if shot.segments:
                 prompt_params["segments"] = [segment.model_dump() for segment in shot.segments]
             if shot.reference_only_types:

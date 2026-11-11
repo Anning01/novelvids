@@ -1,4 +1,9 @@
 {
+  "空间定位图的标注名须唯一，每个机位须指向图中已标记的目标": "Use unique blocking diagram labels and mark each camera target on the plan.",
+  "内部切镜需要一张空间定位图，每个子镜头按顺序对应一个机位": "Internal cuts require a shared blocking diagram with one camera entry per segment, in order.",
+  "空间定位图缺少出镜资产：{p0}": "Visible assets missing from the blocking diagram: {p0}",
+  "空间定位图数据无效": "Invalid blocking diagram data.",
+  "此分镜没有空间定位图": "No blocking diagram is available for this shot.",
   "所选动图帧数不受当前模型支持": "The selected GIF frame count is not supported by this model.",
   "所选动图帧间隔不受当前模型支持": "The selected GIF frame interval is not supported by this model.",
   "定点补漏只允许返回已核对的指定资产，不增加其他对象或衍生形态": "Targeted completion may only return the verified requested assets, without additional objects or variants.",

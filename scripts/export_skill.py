@@ -25,12 +25,16 @@ def export_skill(name: str, destination: Path) -> Path:
 
     def package_link(match: re.Match) -> str:
         source = (entry.parent / match[2]).resolve(strict=True)
-        if (not source.is_relative_to(SKILLS) or source.parent.name != "references"
-                or source.suffix not in {".md", ".json"} or not source.is_file()):
+        if source == SKILLS / "scripts/draw_blocking.py":
+            relative = f"scripts/{source.name}"
+        elif (source.is_relative_to(SKILLS) and source.parent.name == "references"
+              and source.suffix in {".md", ".json"} and source.is_file()):
+            relative = f"references/{source.name}"
+        else:
             raise ValueError(f"Unsupported skill reference: {match[2]}")
-        if resources.setdefault(source.name, source) != source:
-            raise ValueError(f"Conflicting skill references: {source.name}")
-        return f"{match[1]}references/{source.name}{match[3]}"
+        if resources.setdefault(relative, source) != source:
+            raise ValueError(f"Conflicting skill references: {relative}")
+        return f"{match[1]}{relative}{match[3]}"
 
     # Entrypoints link to leaf resources. Exports are self-contained even for shared rules.
     body = LINK.sub(package_link, entry.read_text(encoding="utf-8"))
@@ -44,7 +48,9 @@ def export_skill(name: str, destination: Path) -> Path:
         (package / "SKILL.md").write_text(body, encoding="utf-8")
         shutil.copyfile(ROOT / "LICENSE", package / "LICENSE")
         for filename, source in resources.items():
-            shutil.copyfile(source, package / "references" / filename)
+            target_file = package / filename
+            target_file.parent.mkdir(exist_ok=True)
+            shutil.copyfile(source, target_file)
         package.rename(target)
     return target
 

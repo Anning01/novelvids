@@ -16,6 +16,13 @@ def segmented_shot(sequence: int = 4) -> SoraScenePromptConfig:
         duration="6s",
         visual_prose="夜色下的站台。",
         actions=["0s-6s: 女主从候车处走到站台门边。"],
+        blocking_map={
+            "orientation": "上方为轨道",
+            "assets": [{"name": "女主", "x": 37, "y": 40, "facing": "轨道"},
+                       {"name": "站台门", "x": 50, "y": 20}],
+            "cameras": [{"x": 20, "y": 80, "target": "女主"}, {"x": 35, "y": 60, "target": "女主"},
+                        {"x": 66, "y": 76, "target": "站台门"}],
+        },
         segments=[
             {
                 "duration": 2,
@@ -81,7 +88,7 @@ def test_single_shot_rendering_stays_independent_of_database_sequence():
 
 
 @pytest.mark.asyncio
-async def test_storyboard_persistence_keeps_segments_and_their_references():
+async def test_storyboard_persistence_keeps_segments_and_their_references(client):
     from models.asset import Asset
     from models.chapter import Chapter
     from models.novel import Novel
@@ -105,3 +112,9 @@ async def test_storyboard_persistence_keeps_segments_and_their_references():
     assert len(scene.prompt_params["segments"]) == 3
     assert await scene.assets.all().values_list("id", flat=True) == [asset.id]
     assert re.findall(r"【镜头(\d+) ·", scene.prompt) == ["1", "2", "3"]
+
+    assert scene.prompt_params['blocking_map']['cameras'][2]['target'] == '站台门'
+    diagram = await client.get(f'/api/scene/{scene.id}/blocking-map.svg')
+    assert diagram.status_code == 200 and 'image/svg+xml' in diagram.headers['content-type']
+    assert all(name in diagram.text for name in ('女主', '站台门', 'C1', 'C2', 'C3'))
+    assert 'C3 (66,76) →' in scene.prompt

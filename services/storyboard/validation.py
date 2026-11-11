@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from services.storyboard.speech_tracks import spoken_parts
 from prompts.labels import prompt_label
 from prompts.skill_pack import SkillSnapshot
-from prompts.storyboard import TIMELINE, normalized_storyboard_reference_fields, format_storyboard_prompt
+from prompts.storyboard import visible_storyboard_assets, TIMELINE, normalized_storyboard_reference_fields, format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig, SceneEntity
 from utils.messages import localized_message
 
@@ -53,6 +53,18 @@ def validate_skill_storyboard_timing(shot: SoraScenePromptConfig) -> None:
         raise ValueError(localized_message("分镜中的对白、旁白或内心独白时间重叠"))
 
 
+def validate_blocking_map(shot, snapshot, entities=()):
+    if "blocking_guide" not in snapshot.contents or len(shot.segments) < 2:
+        return
+    plan = shot.blocking_map
+    if plan is None or len(plan.cameras) != len(shot.segments):
+        raise ValueError(localized_message("内部切镜需要一张空间定位图，每个子镜头按顺序对应一个机位"))
+    visible = visible_storyboard_assets(shot, [entity for entity in entities if entity.asset_type != "场景"])
+    missing = set(visible) - {asset.name for asset in plan.assets}
+    if missing:
+        raise ValueError(localized_message("空间定位图缺少出镜资产：{p0}", p0="、".join(sorted(missing))))
+
+
 def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
                              entities: Sequence[SceneEntity], strategy_key: str):
     from schemas.agent_workflow import SkillStoryboard, SkillShot
@@ -82,6 +94,7 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     prompt = shot.prompt or ""
     from services.storyboard.entities import shot_variant_bindings
     shot_variant_bindings(shot, entities)
+    validate_blocking_map(shot, snapshot, entities)
     position = 0
     for section in contract["sections"]:
         label = prompt_label(section, language)

@@ -1,6 +1,8 @@
 from api._production_request import production_request
 
 from utils.messages import localized_message
+from fastapi.responses import Response
+from pydantic import ValidationError
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 
 from auth.deps import (
@@ -14,6 +16,7 @@ from controllers.scene import scene_controller
 from models.chapter import Chapter
 from models.scene import Scene
 from schemas.scene import (
+    BlockingMap,
     SceneBriefOut,
     SceneCreate,
     SceneGenerateCreate,
@@ -135,6 +138,21 @@ async def patch_scene(
 ):
     scenes = await scene_controller.patch(scene_id, scene)
     return ResponseSchema(data=scenes)
+
+
+@router.get("/{scene_id}/blocking-map.svg", summary="查看分镜空间定位图", response_class=Response,
+            responses={200: {"content": {"image/svg+xml": {}}}})
+async def scene_blocking_map(scene_id: int, _: AuthContext = Depends(require_scene_access)):
+    from prompts.skills.scripts.draw_blocking import draw
+    scene = await Scene.get_or_none(id=scene_id)
+    params = (scene.prompt_params or {}) if scene else {}
+    if not params.get("blocking_map") or len(params.get("segments") or []) < 2:
+        raise HTTPException(404, detail=localized_message("此分镜没有空间定位图"))
+    try:
+        plan = BlockingMap.model_validate(params["blocking_map"])
+    except ValidationError as error:
+        raise HTTPException(422, detail=localized_message("空间定位图数据无效")) from error
+    return Response(draw(plan.model_dump(exclude_none=True)), media_type="image/svg+xml")
 
 
 @router.get(

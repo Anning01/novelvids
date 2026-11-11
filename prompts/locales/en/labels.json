@@ -26,6 +26,7 @@
   "global_conditions": "[Global conditions]",
   "time": "Time: ",
   "environment": "Environment: ",
+  "blocking_map_coordinates": "Blocking plan (top left 0,0; bottom right 100,100)",
   "spatial_relationships": "Spatial relationships: ",
   "shot_description": "[Shot description]",
   "transition": "[Transition]",

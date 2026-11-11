@@ -31,7 +31,8 @@ def test_stage_exports_without_application_files(tmp_path, name):
     for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
         assert target.resolve().is_relative_to(package)
         assert target.read_bytes() == (source.parent / match[2]).read_bytes()
-    assert not list(package.rglob("*.py"))
+    scripts = [p.name for p in package.rglob("*.py")]
+    assert scripts == (["draw_blocking.py"] if name in {"storyboard", "remake"} else [])
     assert list(tmp_path.iterdir()) == [package]
 
 
@@ -142,3 +143,18 @@ def test_video_stages_share_one_script_driven_presentation_rule(tmp_path, stage)
         assert rule in rendered
         assert all(element in rule for element in ("字幕", "水印", "LOGO", "背景音乐"))
         assert "无字幕、无水印" not in rendered and "不得添加 BGM" not in rendered
+
+
+def test_portable_blocking_diagram_draws_assets_and_ordered_views(tmp_path):
+    import subprocess
+    import sys
+    from xml.etree import ElementTree
+
+    package = export_skill("novelvids-storyboard", tmp_path)
+    plan = {"orientation": "北墙", "assets": [{"name": "甲&乙", "x": 20, "y": 40, "end": {"x": 40, "y": 40}}],
+            "cameras": [{"x": 10, "y": 70, "target": "甲&乙"}, {"x": 60, "y": 70, "target": "甲&乙"}]}
+    src, dest = tmp_path / "plan.json", tmp_path / "plan.svg"
+    src.write_text(json.dumps(plan))
+    subprocess.run([sys.executable, "-I", "-S", package / "scripts/draw_blocking.py", src, dest], check=True)
+    labels = [el.text for el in ElementTree.parse(dest).findall(".//{*}text")]
+    assert {"C1", "C2", "甲&乙"} <= set(labels)

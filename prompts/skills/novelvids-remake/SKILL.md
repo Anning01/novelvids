@@ -20,3 +20,5 @@ license: MIT
 - [按阶段提取资产与镜头](references/remake_templates.json)
 - [人物语速与表演](../novelvids-storyboard/references/speech_pacing.md)
 - [全片视听约定](../novelvids-storyboard/references/video_presentation.md)
+- [内部切镜的空间定位图](../novelvids-storyboard/references/blocking.md)
+- [定位线稿绘制工具](../scripts/draw_blocking.py)

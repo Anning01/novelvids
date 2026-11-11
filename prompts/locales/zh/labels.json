@@ -26,6 +26,7 @@
   "global_conditions": "【全局前置条件】",
   "time": "时间：",
   "environment": "环境：",
+  "blocking_map_coordinates": "空间定位图（左上 0,0；右下 100,100）",
   "spatial_relationships": "空间关系：",
   "shot_description": "【镜头描述】",
   "transition": "【转场方式】",

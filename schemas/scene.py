@@ -40,6 +40,38 @@ class AssetSimple(BaseModel):
     is_global: Optional[bool] = Field(None, description="是否全局资产")
 
 
+class PlanPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    x: int = Field(ge=0, le=100)
+    y: int = Field(ge=0, le=100)
+
+
+class PlanAsset(PlanPoint):
+    name: str = Field(min_length=1, max_length=100, description="画面中的资产登记名或固定环境锚点")
+    end: PlanPoint | None = Field(default=None, description="有走位时的终点")
+    facing: str = Field(default="", max_length=80, description="朝向或视线目标")
+
+
+class PlanCamera(PlanPoint):
+    target: str = Field(min_length=1, max_length=100, description="本次切镜朝向的图上资产或锚点名")
+
+
+class BlockingMap(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    orientation: str = Field(min_length=1, max_length=120, description="图上方对应的固定场景方向")
+    assets: list[PlanAsset] = Field(min_length=1)
+    cameras: list[PlanCamera] = Field(min_length=1, description="按内部画面顺序排列的机位")
+
+    @model_validator(mode="after")
+    def cameras_have_targets(self):
+        names = {asset.name for asset in self.assets}
+        if len(names) != len(self.assets) or any(camera.target not in names for camera in self.cameras):
+            raise ValueError(localized_message("空间定位图的标注名须唯一，每个机位须指向图中已标记的目标"))
+        return self
+
+
 class ScenePromptSegment(BaseModel):
     """一次生成请求内的小镜头；编号和起止时间由渲染器产生。"""
 
@@ -182,6 +214,10 @@ class SoraScenePromptConfig(BaseModel):
     allowed_effects: list[str] = Field(
         default_factory=list,
         description="允许使用的克制效果；无特殊效果时明确写自然光写实拍摄",
+    )
+
+    blocking_map: BlockingMap | None = Field(
+        default=None, description="同一生成段内部切镜共用的俯视定位图；坐标 0–100，自左向右、自上而下",
     )
 
     segments: list[ScenePromptSegment] = Field(

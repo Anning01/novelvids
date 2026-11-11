@@ -5,6 +5,61 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/scene/{scene_id}/blocking-map.svg": {
+      "get": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "查看分镜空间定位图",
+        "operationId": "scene_blocking_map_api_scene__scene_id__blocking_map_svg_get",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Scene Id"
+            }
+          },
+          {
+            "name": "x-creation-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Creation-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "image/svg+xml": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/novel": {
       "post": {
         "tags": [
@@ -2302,6 +2357,146 @@
   },
   "components": {
     "schemas": {
+      "BlockingMap": {
+        "additionalProperties": false,
+        "properties": {
+          "orientation": {
+            "description": "图上方对应的固定场景方向",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Orientation",
+            "type": "string"
+          },
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/PlanAsset"
+            },
+            "minItems": 1,
+            "title": "Assets",
+            "type": "array"
+          },
+          "cameras": {
+            "description": "按内部画面顺序排列的机位",
+            "items": {
+              "$ref": "#/components/schemas/PlanCamera"
+            },
+            "minItems": 1,
+            "title": "Cameras",
+            "type": "array"
+          }
+        },
+        "required": [
+          "orientation",
+          "assets",
+          "cameras"
+        ],
+        "title": "BlockingMap",
+        "type": "object"
+      },
+      "PlanPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "maximum": 100,
+            "minimum": 0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "PlanPoint",
+        "type": "object"
+      },
+      "PlanCamera": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "maximum": 100,
+            "minimum": 0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Y",
+            "type": "integer"
+          },
+          "target": {
+            "description": "本次切镜朝向的图上资产或锚点名",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "target"
+        ],
+        "title": "PlanCamera",
+        "type": "object"
+      },
+      "PlanAsset": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "maximum": 100,
+            "minimum": 0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Y",
+            "type": "integer"
+          },
+          "name": {
+            "description": "画面中的资产登记名或固定环境锚点",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanPoint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "有走位时的终点"
+          },
+          "facing": {
+            "default": "",
+            "description": "朝向或视线目标",
+            "maxLength": 80,
+            "title": "Facing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "name"
+        ],
+        "title": "PlanAsset",
+        "type": "object"
+      },
       "AiModelConfigCreate": {
         "properties": {
           "task_type": {
@@ -6018,6 +6213,18 @@
       },
       "SoraScenePromptConfig": {
         "properties": {
+          "blocking_map": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockingMap"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "同一生成段内部切镜共用的俯视定位图；坐标 0–100，自左向右、自上而下"
+          },
           "sequence": {
             "type": "integer",
             "title": "Sequence",

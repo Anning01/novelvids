@@ -14,3 +14,5 @@ license: MIT
 - [首次出场与分镜修订](references/storyboard_templates.json)
 - [人物语速与表演](references/speech_pacing.md)
 - [全片视听约定](references/video_presentation.md)
+- [内部切镜的空间定位图](references/blocking.md)
+- [定位线稿绘制工具](../scripts/draw_blocking.py)
