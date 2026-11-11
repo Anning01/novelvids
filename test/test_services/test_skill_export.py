@@ -103,3 +103,19 @@ def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path
     assert "出场：阿岚、船工、驮马" in headers and "驮马" in action
     assert "仅声音：守闸人" in headers
     assert "关键道具：铜钱" in headers and "两枚铜钱" in action
+
+
+@pytest.mark.parametrize("language,source", [("zh", "导演剧本"), ("en", "director's screenplay")])
+def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_path, language, source):
+    from prompts.extraction import render_cast_instructions, targeted_cast_instructions
+
+    package = export_skill("novelvids-assets", tmp_path)
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    prompt = instructions(snapshot, language, "assets")
+    for key in ("assets", "asset_lifecycle", "image"):
+        assert (package / "references" / Path(FILES[key]).name).read_text() == snapshot.read(key)
+        assert snapshot.read(key) in prompt
+    assert source in render_cast_instructions(language)
+    assert source in targeted_cast_instructions(language)
+    for handoff in ("导演剧本", "风格确认", "资产连续性.md", "参考图"):
+        assert handoff in prompt
