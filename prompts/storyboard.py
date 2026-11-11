@@ -324,20 +324,6 @@ def _join_values(values: Sequence[str], fallback: str = "无") -> str:
     return "、".join(normalized) if normalized else fallback
 
 
-def _shot_search_text(shot: StoryboardShot) -> str:
-    values: list[object] = [
-        *(getattr(shot, field_name) for field_name in _REFERENCE_TEXT_FIELDS),
-        *(
-            split_storyboard_voice_track(value)[0] if field_name in {"dialogue", "narration"} else value
-            for field_name in _REFERENCE_LIST_FIELDS
-            for value in getattr(shot, field_name)
-        ),
-    ]
-    for segment in getattr(shot, "segments", ()):
-        values.extend((segment.description, segment.visual_prose, *segment.actions))
-    return "\n".join(str(value) for value in values)
-
-
 def entity_reference_names(
     text: str,
     entities: Sequence[StoryboardEntity],
@@ -359,15 +345,19 @@ def referenced_entities(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
 ) -> list[StoryboardEntity]:
-    """返回镜头实际引用的实体。"""
-    names = {entity.name for entity in entity_reference_names(_shot_search_text(shot), entities)}
-    names.update(reference.asset_name for reference in getattr(shot, 'asset_refs', ()))
+    """Resolve image references independently of dialogue and sound bindings."""
+    names = set(visible_storyboard_assets(shot, entities))
+    if getattr(shot, 'visible_asset_names', None) is None:
+        names.update(reference.asset_name for reference in getattr(shot, 'asset_refs', ()))
     return [entity for entity in entities if entity.name in names]
 
 
 def visible_storyboard_assets(shot: object, entities: Sequence[StoryboardEntity]) -> list[str]:
     """Count visual presence of assets; spoken mentions do not consume a debut."""
-    values = [getattr(shot, "visual_prose", "") or "", getattr(shot, "spatial_relationships", "") or "",
+    declared = getattr(shot, "visible_asset_names", None)
+    if declared is not None:
+        return [entity.name for entity in entities if entity.name in declared]
+    values = [getattr(shot, "shot_size_and_camera", "") or "", getattr(shot, "visual_prose", "") or "", getattr(shot, "spatial_relationships", "") or "",
               getattr(shot, "environment", "") or "",
               *(getattr(shot, "actions", ()) or ())]
     for segment in getattr(shot, "segments", ()) or ():
@@ -429,10 +419,7 @@ def without_inline_reference_descriptions(
 def _format_asset_references(
     shot: StoryboardShot, entities: Sequence[StoryboardEntity], language: str = "zh"
 ) -> str:
-    text = _normalize_asset_reference_text(_shot_search_text(shot), _asset_reference_candidates(entities))
-    names = {entity.name for entity in entity_reference_names(text, entities)}
-    names.update(entity.name for entity in referenced_entities(shot, entities))
-    referenced = [entity for entity in entities if entity.name in names]
+    referenced = referenced_entities(shot, entities)
     if not referenced:
         return prompt_label("本镜头未引用已登记资产。", language)
     sections: list[str] = []

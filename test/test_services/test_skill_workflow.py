@@ -391,8 +391,11 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     ("seedance_2_5", "volcengine_ark", 30, False),
 ])
 async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomically(
-    video_model_type, protocol, maximum, project_selected,
+    video_model_type, protocol, maximum, project_selected, monkeypatch, tmp_path,
 ):
+    from config import settings
+    # This duration/atomic-replacement test must not load a developer's optional optimizer installs.
+    monkeypatch.setattr(settings, "CREATION_AGENT_OPTIONAL_SKILLS_PATH", str(tmp_path))
     import json
 
     from controllers.scene import scene_controller

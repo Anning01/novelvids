@@ -10,6 +10,7 @@ license: MIT
 
 生成或修改视频提示词时，先完成通用稿，再按实际选中的视频模型执行专项优化。
 
+- [按稳定镜头 ID 与通用底稿挂载专项稿](../scripts/attach_shot_draft.py)
 - [模型专项提示词交付](../novelvids-video/references/model_optimization.md)
 - [模型与专项技能映射](../novelvids-video/references/video_prompt_models.json)
 - [选择专项技能](../scripts/select_video_optimizer.py)
@@ -26,3 +27,6 @@ license: MIT
 - [全片视听约定](references/video_presentation.md)
 - [内部切镜的空间定位图](references/blocking.md)
 - [定位线稿绘制工具](../scripts/draw_blocking.py)
+
+- [作品目录交接与用户明确要求时的本地 MCP 同步](../references/work_package.md)
+- [作品文件与 MCP 工具的 JSON Schema（按文件名或工具名选择）](../references/work_package.schema.json)

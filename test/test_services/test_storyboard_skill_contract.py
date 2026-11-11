@@ -356,3 +356,35 @@ def test_incomplete_blocking_map_rejected_for_new_multicut(problem):
     with pytest.raises(ValueError, match='空间定位图'):
         prepare_skill_storyboard(StructuredSkillStoryboard(shots=[data]), SkillSnapshot.model_validate(snapshot_skills()),
                                 'zh', [heroine()], 'cinematic')
+
+
+@pytest.mark.parametrize('legacy', [True, False])
+def test_voice_from_outside_is_heard_without_a_character_image(legacy):
+    shot = _shot()
+    hero, speaker = characters()
+    shot.description = '苏玄听见门外赵无垢的声音。'
+    shot.visual_prose = '苏玄抬眼望向门口。'
+    shot.spatial_relationships = '苏玄站在门内。'
+    shot.dialogue = ['0s-2s: @{赵无垢}（画外）：“苏玄，回家！”']
+    shot.sound_design = '赵无垢的喊声隔着门板传来。'
+    shot.visible_asset_names = None if legacy else [hero.name]
+    shot.reference_only_types = ['人物']
+    prompt = format_storyboard_prompt(shot, entities=[hero, speaker])
+    assert referenced_entities(shot, [hero, speaker]) == [hero]
+    assert '角色参考：@{苏玄}\n' in prompt and shot.dialogue[0] in prompt
+    # The speaker appears later within the same generation segment.
+    shot.actions.append('2s-4s: 赵无垢推门入画。')
+    if not legacy:
+        shot.visible_asset_names.append(speaker.name)
+    assert referenced_entities(shot, [hero, speaker]) == [hero, speaker]
+    shot.visible_asset_names = []
+    assert not referenced_entities(shot, [hero, speaker])
+
+
+def test_visual_roster_uses_registered_asset_or_form_names():
+    from services.storyboard.validation import validate_skill_storyboard_shot
+    shot = _shot()
+    shot.visible_asset_names = ['缺失的形态']
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    with pytest.raises(ValueError, match='未登记的资产或形态'):
+        validate_skill_storyboard_shot(shot, snapshot, 'zh', characters())

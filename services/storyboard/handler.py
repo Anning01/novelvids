@@ -262,6 +262,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 prompt_params["blocking_map"] = shot.blocking_map.model_dump(exclude_none=True)
             if shot.segments:
                 prompt_params["segments"] = [segment.model_dump() for segment in shot.segments]
+            if shot.visible_asset_names is not None:
+                prompt_params["visible_asset_names"] = shot.visible_asset_names
             if shot.reference_only_types:
                 prompt_params["reference_only_types"] = list(shot.reference_only_types)
             duration_value = float(shot.duration.replace("s", ""))

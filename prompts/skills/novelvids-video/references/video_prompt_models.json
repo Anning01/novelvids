@@ -1,4 +1,35 @@
 {
+  "seedance_2": {
+    "skill": "sd2-pe",
+    "aliases": [
+      "Seedance 2.0",
+      "Doubao Seedance 2.0",
+      "doubao-seedance-2-0",
+      "doubao-seedance-2-0-260128",
+      "doubao-seedance-2.0"
+    ],
+    "source": "https://arkdocs.tos-cn-beijing.volces.com/skills/"
+  },
+  "seedance_2_mini": {
+    "skill": "sd2-pe",
+    "aliases": [
+      "Seedance 2.0 Mini",
+      "Doubao Seedance 2.0 Mini",
+      "doubao-seedance-2-0-mini",
+      "doubao-seedance-2-0-mini-260615"
+    ],
+    "source": "https://arkdocs.tos-cn-beijing.volces.com/skills/"
+  },
+  "seedance_2_fast": {
+    "skill": "sd2-pe",
+    "aliases": [
+      "Seedance 2.0 Fast",
+      "Doubao Seedance 2.0 Fast",
+      "doubao-seedance-2-0-fast",
+      "doubao-seedance-2-0-fast-260128"
+    ],
+    "source": "https://arkdocs.tos-cn-beijing.volces.com/skills/"
+  },
   "seedance_2_5": {
     "skill": "sd25-pe",
     "aliases": [
@@ -22,5 +53,17 @@
       "minimax_h3_zm_u24"
     ],
     "source": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing"
+  },
+  "wan_3": {
+    "skill": "wan3-pe",
+    "aliases": [
+      "Wan 3.0",
+      "Wan 3",
+      "wan3",
+      "wan3.0-video",
+      "万相3",
+      "万相 3.0"
+    ],
+    "source": "wan3-pe/SKILL.md"
   }
 }

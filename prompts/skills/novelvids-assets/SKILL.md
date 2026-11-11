@@ -12,3 +12,6 @@ license: MIT
 - [参考图版式](../novelvids-image/references/image.md)
 - [内置风格，按选定项读取](../novelvids-image/references/styles.json)
 - [资产清点、定点补漏与修订](references/asset_templates.json)
+
+- [作品目录交接与用户明确要求时的本地 MCP 同步](../references/work_package.md)
+- [作品文件与 MCP 工具的 JSON Schema（按文件名或工具名选择）](../references/work_package.schema.json)

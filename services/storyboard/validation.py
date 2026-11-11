@@ -90,6 +90,10 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     if "storyboard_contract" not in snapshot.contents:
         return
     contract = json.loads(snapshot.read("storyboard_contract"))
+    if entities and shot.visible_asset_names is not None:
+        unknown = set(shot.visible_asset_names) - {entity.name for entity in entities}
+        if unknown:
+            raise ValueError(localized_message("出镜名单含未登记的资产或形态：{p0}", p0="、".join(sorted(unknown))))
     shot = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities))
     prompt = shot.prompt or ""
     from services.storyboard.entities import shot_variant_bindings

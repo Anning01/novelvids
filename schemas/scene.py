@@ -108,6 +108,10 @@ class SoraScenePromptConfig(BaseModel):
 
     prompt: str | None = Field(None, max_length=100_000)
 
+    visible_asset_names: list[str] | None = Field(
+        None, description="本生成段画面内实际可见的已登记人物、动物、地点和道具标准名；空镜可填空列表。"
+    )
+
     reference_only_types: list[Literal['人物', '场景', '物品']] = Field(
         default_factory=list, max_length=3,
         description='这些资产类型只保留名称引用，不在分镜中展开外貌设定；其他类型保持默认展开',

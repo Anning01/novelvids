@@ -36,7 +36,7 @@ def test_stage_exports_without_application_files(tmp_path, name):
         assert target.resolve().is_relative_to(package)
         assert target.read_bytes() == (source.parent / match[2]).read_bytes()
     scripts = {p.name for p in package.rglob("*.py")}
-    expected_scripts = {"draw_blocking.py", "storyboard_sheets.py", "select_video_optimizer.py"} if name == "storyboard" else set()
+    expected_scripts = {"draw_blocking.py", "storyboard_sheets.py", "select_video_optimizer.py", "attach_shot_draft.py"} if name == "storyboard" else set()
     assert scripts == expected_scripts
     assert list(tmp_path.iterdir()) == [package]
 
@@ -273,5 +273,63 @@ def test_exported_skill_selects_installed_optimizer_only_for_target_model(tmp_pa
         (tmp_path / 'novelvids.config.json').write_text(json.dumps({'video_model_type': model}))
         assert select() == {'mode': 'optimize', 'model_type': canonical, 'skill': 'h3-prompt-writing', 'entry': str(h3)}
         assert select('--model', 'seedance_2_5')['skill'] == 'sd25-pe'
-    for model in ('seedance_2', 'minimax_h3_preview', 'my-seedance_2_5-alike', 'generic'):
+    assert select('--model', 'wan_3') == {
+        'mode': 'missing', 'model_type': 'wan_3', 'skill': 'wan3-pe', 'source': 'wan3-pe/SKILL.md',
+    }
+    wan = tmp_path / '.agents/skills/wan3-pe/SKILL.md'
+    wan.parent.mkdir()
+    wan.write_text('---\nname: wan3-pe\n---\nLocal optimizer')
+    (tmp_path / 'novelvids.config.json').write_text(json.dumps({'video_model_type': 'wan_3'}))
+    for args in ((), ('--model', 'wan3.0-video'), ('--model', 'Wan 3.0'), ('--model', '万相3')):
+        assert select(*args) == {'mode': 'optimize', 'model_type': 'wan_3', 'skill': 'wan3-pe', 'entry': str(wan)}
+    for model in ('wan_2_6', 'wan3.0-video-preview', 'seedance_2_preview', 'minimax_h3_preview', 'my-seedance_2_5-alike', 'generic'):
         assert select('--model', model)['mode'] == 'generic'
+
+
+@pytest.mark.parametrize(("model", "label", "provider_id"), [
+    ("seedance_2", "Doubao Seedance 2.0", "doubao-seedance-2-0-260128"),
+    ("seedance_2_mini", "Seedance 2.0 Mini", "doubao-seedance-2-0-mini-260615"),
+    ("seedance_2_fast", "Doubao Seedance 2.0 Fast", "doubao-seedance-2-0-fast-260128"),
+])
+def test_seedance_2_variants_share_official_optimizer_and_keep_model_identity(tmp_path, model, label, provider_id):
+    from prompts.skills.scripts.select_video_optimizer import select
+
+    pkg = export_skill("novelvids-storyboard", tmp_path)
+    registry = json.loads((pkg / "references/video_prompt_models.json").read_text())
+    (tmp_path / "novelvids.config.json").write_text(json.dumps({"video_model_type": model}))
+    entry = tmp_path / ".agents/skills/sd2-pe/SKILL.md"
+    assert select(tmp_path, None, registry)["mode"] == "missing"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("---\nname: sd2-pe\n---\nProvider instructions")
+    for key in (None, label, provider_id):
+        assert select(tmp_path, key, registry) == {
+            "mode": "optimize", "model_type": model, "skill": "sd2-pe", "entry": str(entry.resolve()),
+        }
+    assert select(tmp_path, "seedance_2_5", registry)["mode"] == "missing"
+
+
+def test_portable_model_drafts_follow_their_source_after_reordering(tmp_path):
+    import subprocess
+    import sys
+    pkg = export_skill("novelvids-storyboard", tmp_path)
+    path = tmp_path / "storyboard.json"
+    source = tmp_path / "source.txt"
+    draft = tmp_path / "draft.txt"
+    source.write_text("Base B")
+    draft.write_text("Model B\n")
+    rows = [{"id": key, "prompt": base, "drafts": {"general": base}} for key, base in
+            [("c", "Base C"), ("b", "Base B"), ("a", "Base A")]]
+    path.write_text(json.dumps({"shots": rows}))
+    command = [sys.executable, "-I", "-S", pkg / "scripts/attach_shot_draft.py", path,
+               "--model", "model_b", "--source", source, "--draft", draft]
+    assert subprocess.check_output(command, text=True).strip() == "b"
+    result = json.loads(path.read_text())["shots"]
+    assert result[0] == rows[0] and result[2] == rows[2]
+    assert result[1]["drafts"] == {"general": "Base B", "model_b": "Model B\n"}
+    result.append({"id": "d", "prompt": "Base B"})
+    path.write_text(json.dumps({"shots": result}))
+    before = path.read_bytes()
+    for args in ([], ["--shot-id", "a"]):
+        assert subprocess.run(command + args, capture_output=True).returncode != 0
+        assert path.read_bytes() == before
+    assert subprocess.check_output(command + ["--shot-id", "d"], text=True).strip() == "d"
