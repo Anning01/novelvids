@@ -78,7 +78,7 @@ async def _project_usage_totals(
 ) -> dict[int, dict]:
     if project_ids == []:
         return {}
-    query = ModelUsageRecord.all()
+    query = ModelUsageRecord.exclude(novel_id=0)
     if team_id is not None:
         query = query.filter(team_id=team_id)
     if user_id is not None:

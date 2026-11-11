@@ -55,7 +55,7 @@ const billingBreakdown = computed(() => {
   for (const item of summary.value?.by_billing_type ?? []) map[item.billing_type] = item.cost
   return map
 })
-const projectName = (novelId: number) => (
+const projectName = (novelId: number) => novelId === 0 ? tr('平台 API 调用') : (
   projects.value.find(item => item.novel_id === novelId)?.novel_name || tr('项目 {p0}', { p0: novelId })
 )
 

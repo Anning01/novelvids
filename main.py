@@ -123,9 +123,17 @@ async def lifespan(_: FastAPI):
             from auth.bootstrap import ensure_super_admin
             await ensure_super_admin()
     if settings.DEPLOYMENT_ROLE == "platform":
+        import asyncio
+        from services.platform.calls import recover_measured
+        from services.platform.chat import settle_periodically, stop_streams
+        await recover_measured()
+        reconciler = asyncio.create_task(settle_periodically())
         try:
             yield
         finally:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
+            await stop_streams()
             await Tortoise.close_connections()
         return
     # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）

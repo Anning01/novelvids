@@ -1,5 +1,10 @@
 {
   "common": {
+    "响应头 X-Request-Id 是请求编号。建议每次生成发送唯一 Idempotency-Key；重复提交返回 409 和原编号。用同一账户和团队的密钥可查询结算状态与实际 token 用量。": "The X-Request-Id response header identifies the call. Send a unique Idempotency-Key for each generation. A duplicate returns 409 and the original ID. A key for the same account and team can retrieve settlement status and actual token usage.",
+    "本地文本模型选择 OpenAI 兼容协议，Base URL 使用下方地址，模型 ID 从模型目录复制。支持流式输出与已启用的工具调用。": "Choose the OpenAI-compatible protocol in your local studio, use the base URL below, and copy a text model ID from the catalog. Streaming and enabled tool calls are supported.",
+    "查询请求状态": "Request status",
+    "对话生成": "Chat completions",
+    "平台 API 调用": "Platform API",
     "输入图前 {p0} 张免费，之后 ¥{p1} / 张": "First {p0} input images free, then ¥{p1} / image",
     "充值订单": "Recharge orders",
     "已复制": "Copied",

@@ -1,11 +1,15 @@
 """Account console, read-only legacy migration and external developer API."""
-from fastapi import APIRouter, Depends, Response
+from typing import Annotated
+from uuid import UUID
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from auth.deps import AuthContext, require_roles
 from controllers.billing import billing_scope
 from services.billing.aggregation import summary
-from auth.models import PlatformApiKey
+from auth.models import PlatformApiKey, PlatformCallReceipt
+from schemas.platform_chat import ChatRequest
+from services.platform.chat import complete
 from services.platform.access import console_owner, create_key, developer_identity, key_view, revoke_key
 from services.platform.catalog import model_catalog
 from utils.response_format import ResponseSchema
@@ -59,3 +63,18 @@ async def delete_key(key_id: int, ctx: AuthContext = Depends(console_owner)):
 @developer_router.get("/models", summary="列出当前平台模型")
 async def models(_: AuthContext = Depends(developer_identity)):
     return {"object":"list","data":[{"object":"model", "owned_by":"novelvids", **item} for item in await model_catalog()]}
+
+
+
+@developer_router.post("/chat/completions", summary="对话生成与流式返回")
+async def chat_completions(body: ChatRequest, ctx: AuthContext = Depends(developer_identity),
+    idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
+    return await complete(ctx, body, idempotency_key)
+
+
+@developer_router.get("/requests/{request_id}", summary="查询调用及结算状态")
+async def call_status(request_id: UUID, ctx: AuthContext = Depends(developer_identity)):
+    row = await PlatformCallReceipt.get_or_none(public_id=request_id, team_id=ctx.team_id, user_id=ctx.user.id)
+    if not row:
+        raise HTTPException(404, "请求不存在")
+    return {"id": str(row.public_id), "model": f"nv-{row.model_config_id}", "status": row.state, "usage": row.usage}

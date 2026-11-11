@@ -37,7 +37,7 @@ const range = computed(() => {
   })
 })
 const max = computed(() => Math.max(0.000001,...range.value.map(d=>d.cost)))
-const endpoint = computed(() => new URL(API_BASE, location.href).origin + '/v1/models')
+const apiBase = computed(() => new URL(API_BASE, location.href).origin + '/v1')
 async function load() {
   const revision = ++epoch
   loading.value = true; error.value = ''; secret.value = ''; name.value = ''; changes.value = false
@@ -129,8 +129,23 @@ onBeforeUnmount(()=>{++epoch;secret.value=''})
       <section class="panel"><div v-for="k in keys" :key="k.id" class="line"><span><b>{{ k.name }}</b> <code>{{ k.preview }}</code></span><AppButton :disabled="changes" @click="revoke(k)">{{ tr('停用') }}</AppButton></div><p v-if="!keys.length">{{ tr('当前团队下还没有个人 API Key') }}</p></section>
     </template></template>
     <template v-else-if="section==='docs'"><section class="panel"><h2>{{ tr('身份认证') }}</h2><p>{{ tr('在 API Keys 中创建密钥，通过 Authorization 请求头发送。') }}</p><code>Authorization: Bearer &lt;API_KEY&gt;</code></section>
-      <section class="panel"><h2>{{ tr('查询模型列表') }}</h2><code>GET /v1/models</code><p>{{ tr('返回当前启用的平台模型、模型 ID 和配置价格。') }}</p><pre>curl "{{ endpoint }}" \
-  -H "Authorization: Bearer $NOVELVIDS_API_KEY"</pre><RouterLink to="/platform/models">{{ tr('查看模型目录') }} ↗</RouterLink></section></template>
+      <section class="panel"><h2>{{ tr('查询模型列表') }}</h2><code>GET /v1/models</code><p>{{ tr('返回当前启用的平台模型、模型 ID 和配置价格。') }}</p><pre>curl "{{ apiBase }}/models" \
+  -H "Authorization: Bearer $NOVELVIDS_API_KEY"</pre><RouterLink to="/platform/models">{{ tr('查看模型目录') }} ↗</RouterLink></section>
+      <section class="panel"><h2>{{ tr('对话生成') }}</h2><code>POST /v1/chat/completions</code><p>{{ tr('本地文本模型选择 OpenAI 兼容协议，Base URL 使用下方地址，模型 ID 从模型目录复制。支持流式输出与已启用的工具调用。') }}</p><code>{{ apiBase }}</code><pre>import os, uuid
+from openai import OpenAI
+
+client = OpenAI(base_url="{{ apiBase }}", api_key=os.environ["NOVELVIDS_API_KEY"])
+stream = client.chat.completions.create(
+    model=os.environ["NOVELVIDS_MODEL_ID"],
+    messages=[{"role": "user", "content": "Hello"}],
+    stream=True,
+    stream_options={"include_usage": True},
+    extra_headers={"Idempotency-Key": str(uuid.uuid4())},
+)
+for part in stream:
+    if part.choices:
+        print(part.choices[0].delta.content or "", end="")</pre></section>
+      <section class="panel"><h2>{{ tr('查询请求状态') }}</h2><code>GET /v1/requests/{id}</code><p>{{ tr('响应头 X-Request-Id 是请求编号。建议每次生成发送唯一 Idempotency-Key；重复提交返回 409 和原编号。用同一账户和团队的密钥可查询结算状态与实际 token 用量。') }}</p></section></template>
   </main>
 </template>
 <style scoped>

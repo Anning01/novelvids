@@ -263,3 +263,19 @@ class PlatformApiKey(AbstractBaseModel):
     token_hash = fields.CharField(max_length=64, unique=True)
     preview = fields.CharField(max_length=20)
     revoked_at = fields.DatetimeField(null=True)
+
+
+class PlatformCallReceipt(AbstractBaseModel):
+    public_id = fields.UUIDField(unique=True)
+    dedup_key = fields.CharField(max_length=64, unique=True)
+    payload_hash = fields.CharField(max_length=64)
+    team_id = fields.IntField(db_index=True)
+    user_id = fields.IntField()
+    model_config_id = fields.IntField(db_index=True)
+    model_name = fields.CharField(max_length=100)
+    model = fields.CharField(max_length=200)
+    pricing = fields.JSONField()
+    state = fields.CharField(max_length=16, db_index=True, default="submitted")
+    provider_id = fields.CharField(max_length=255, null=True)
+    usage = fields.JSONField(null=True)
+    usage_record_id = fields.IntField(null=True)

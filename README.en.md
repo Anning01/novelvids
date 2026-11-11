@@ -156,7 +156,7 @@ Use `docker compose exec backend ffprobe -version` to check that the video tools
 
 The default `NOVELVIDS_ROLE=studio` runs the creative workspace. Use **Export project** in the project menu and **Import project** in another local studio to restore a new project. The exporting browser downloads cloud media directly from storage, which must permit cross-origin reads from the studio origin.
 
-`NOVELVIDS_ROLE=platform` requires `AUTH_ENABLED=true`. Its console provides usage, recharge, a model catalog, API keys and developer documentation. Legacy projects remain available for export. Route both `/api/` and `/v1/` to the platform backend and retain legacy media download paths. Verify migration and handle in-flight jobs before switching an existing hosted studio.
+`NOVELVIDS_ROLE=platform` requires `AUTH_ENABLED=true`. Its console provides usage, recharge, a model catalog, API keys and developer documentation. Legacy projects remain available for export. For hosted text inference, use an OpenAI-compatible model configured with the platform’s `/v1` base URL, a catalog model ID and a console-issued API key. The platform serves streaming and non-streaming `POST /v1/chat/completions`, `GET /v1/models` and `GET /v1/requests/{id}`. Reuse the same `Idempotency-Key` when retrying a logical request. Route both `/api/` and `/v1/` to the platform backend and retain legacy media download paths. Verify migration and handle in-flight jobs before switching an existing hosted studio.
 
 ## Creative workflow
 

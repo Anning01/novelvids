@@ -152,6 +152,8 @@ async def clear_db():
     await Asset.all().delete()
     await Novel.with_deleted().delete()
     await AiModelConfig.all().delete()
+    from auth.models import PlatformCallReceipt
+    await PlatformCallReceipt.all().delete()
     await ModelUsageRecord.all().delete()
     await GeneralConfig.all().delete()
     await AgentSettings.all().delete()
