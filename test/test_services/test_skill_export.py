@@ -184,14 +184,20 @@ def test_project_storyboard_sheet_switch_gates_every_shot_in_portable_package(tm
             "visual_prose": "Two people meet.", "actions": ["0s-2s: hands meet."],
             "duration": "3s", "camera_movement": "truck left", "visual_style": "cinematic CG"}
     src = tmp_path / "shots.json"
-    src.write_text(json.dumps({"shots": [shot, {**shot, "sequence": 2}]}))
+    src.write_text(json.dumps({"shots": [shot, {**shot, "sequence": 2, "segments": [
+        {"description": f"Cut {i}"} for i in range(8)
+    ]}]}))
     jobs = json.loads(run("prepare", src).stdout)
     assert [job['sequence'] for job in jobs] == [1, 2]
     assert all('黑白线稿' in job['image_prompt'] and 'hands meet.' in job['image_prompt'] for job in jobs)
     assert all(job['video_prompt'].startswith(shot['prompt']) for job in jobs)
     assert 'cinematic CG' not in jobs[0]['image_prompt']
     assert jobs[0]['file_stem'] != jobs[1]['file_stem']
-    assert 'line art' in json.loads(run('prepare', src, '--language', 'en').stdout)[0]['image_prompt']
+    assert all("同一张图" in job["image_prompt"] for job in jobs)
+    assert "Cut 7" in jobs[1]["image_prompt"]
+    english = json.loads(run('prepare', src, '--language', 'en').stdout)
+    assert len(english) == 2
+    assert all("single image" in job["image_prompt"] and "line art" in job["image_prompt"] for job in english)
     other = tmp_path / "another_project"
     other.mkdir()
     assert json.loads(run("status", cwd=other).stdout)["storyboard_enabled"] is False

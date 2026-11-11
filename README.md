@@ -193,7 +193,7 @@ python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
 
 第一条列出可选环节。第二条生成可独立发布的目录 `output/skills/novelvids-storyboard/`。第三条安装剧本技能到当前项目；在该项目的会话中可用 `$novelvids-screenplay` 指定它。例如：“把下面这一章改成 60 秒短剧，保留结尾那句对白。”
 
-分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段都附简约黑白线稿和配套的视频提示词，格数随动作与构图变化。
+分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段交付一张简约黑白线稿故事版和配套视频提示词，图内格数随动作与构图变化。
 
 规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
 

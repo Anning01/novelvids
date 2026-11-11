@@ -1,10 +1,10 @@
 {
   "zh": {
-    "image": "绘制这一生成段的简约黑白线稿故事版。依据下方镜内时间轴选择关键构图，按发生顺序从左到右、从上到下排列。白底细黑线、清楚的格框、简练的轮廓和表情，每格是一台摄影机所见的一个瞬间。保持人物位置、造型、视线、道具状态和机位轴线连续；移动或换手时交代前后落点。台词里的名字和画外声源不自动入画。按本镜实际可见的主体画人和动物，地点名称只决定环境；每个内部机位的景别要在对应画格里清楚可辨。按动作需要选择格数，格框只属于故事版。",
+    "image": "绘制这一生成段的简约黑白线稿故事版。依据下方镜内时间轴选择关键构图，把所有画格按发生顺序排进同一张图，格数和行列随内容调整。白底细黑线、清楚的格框、简练的轮廓和表情，每格是一台摄影机所见的一个瞬间。保持人物位置、造型、视线、道具状态和机位轴线连续；移动或换手时交代前后落点。台词里的名字和画外声源不自动入画。按本镜实际可见的主体画人和动物，地点名称只决定环境；每个内部机位的景别要在对应画格里清楚可辨。按动作需要选择格数，格框只属于故事版。",
     "video": "故事版图片只作本段构图、站位和动作顺序参考。以本提示词中的时间轴、运镜、光线、声音和成片风格生成连续的全幅视频，线稿笔触、故事版格框与格下说明不进入成片。"
   },
   "en": {
-    "image": "Draw a simple black-and-white line art storyboard for this video generation segment. Choose key compositions from the timed action below and arrange them in reading order. Use white paper, thin black outlines, simple expressions and clear panel borders. Each panel shows one instant from the camera. Keep identity, screen direction, gaze, prop ownership and camera axis consistent. Show the start and end of important movement. Off-screen speakers and people merely mentioned stay off screen. Draw only the people and animals visible in this shot. A location name supplies the setting. Make each specified camera framing legible in its panels. Choose the panel count to suit the action.",
+    "image": "Draw a simple black-and-white line art storyboard for this video generation segment. Choose key compositions from the timed action below and arrange every panel on a single image in reading order. Adapt the rows and columns to the action. Use white paper, thin black outlines, simple expressions and clear panel borders. Each panel shows one instant from the camera. Keep identity, screen direction, gaze, prop ownership and camera axis consistent. Show the start and end of important movement. Off-screen speakers and people merely mentioned stay off screen. Draw only the people and animals visible in this shot. A location name supplies the setting. Make each specified camera framing legible in its panels. Choose the panel count to suit the action.",
     "video": "Use the storyboard image to guide framing, blocking and action order. Render continuous full-frame video using the timing, camera motion, lighting, sound and final visual style in this prompt. Keep the planning linework, panel borders and panel notes out of the finished footage."
   }
 }
