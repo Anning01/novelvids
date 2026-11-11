@@ -122,7 +122,10 @@ const loadingChapterId = ref<number | null>(null)
 const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
-const savingStoryboard = ref(false)
+const pendingStoryboard = ref<boolean | null>(null)
+const savingStoryboard = computed(() => pendingStoryboard.value !== null)
+const savingDuration = ref(false)
+const durationPreview = ref<number | null>(null)
 const projectDraft = ref<ProjectAnalysisDraft | null>(null)
 const initialProjectDraft = ref<ProjectAnalysisDraft | null>(null)
 const storyboardStrategies = ref<StoryboardStrategy[]>([])
@@ -404,7 +407,7 @@ function cancelEditing(restoreVoice = true) {
 
 const storyboardEnabled = computed(() => editing.value && projectDraft.value
   ? projectDraft.value.storyboardEnabled
-  : projectView.value.storyboardEnabled)
+  : pendingStoryboard.value ?? projectView.value.storyboardEnabled)
 
 async function toggleStoryboard() {
   if (!novel.value || !canEdit.value || savingEdits.value || savingStoryboard.value) return
@@ -413,14 +416,42 @@ async function toggleStoryboard() {
     return
   }
   const enabled = !storyboardEnabled.value
-  savingStoryboard.value = true
+  pendingStoryboard.value = enabled
   try {
     await api.updateNovel(projectId.value, { storyboard_enabled: enabled })
     novel.value = { ...novel.value, storyboard_enabled: enabled }
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
-    savingStoryboard.value = false
+    pendingStoryboard.value = null
+  }
+}
+
+const durationSeconds = computed(() => durationPreview.value ?? (editing.value
+  ? projectDraft.value?.shotDurationMax
+  : projectView.value.shotDurationMax) ?? 15)
+
+function previewDuration(event: Event) {
+  const value = (event.currentTarget as HTMLInputElement).valueAsNumber
+  if (editing.value && projectDraft.value) projectDraft.value.shotDurationMax = value
+  else durationPreview.value = value
+}
+
+async function commitDuration(event: Event) {
+  if (!novel.value || !canEdit.value || savingDuration.value || savingEdits.value) return
+  previewDuration(event)
+  if (editing.value) return
+  const value = durationSeconds.value
+  try {
+    if (value === projectView.value.shotDurationMax) return
+    savingDuration.value = true
+    await api.updateNovel(projectId.value, {shot_duration_max: value})
+    novel.value = {...novel.value, shot_duration_max: value}
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    durationPreview.value = null
+    savingDuration.value = false
   }
 }
 
@@ -636,7 +667,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <AppButton v-if="canEdit && manuscriptLength > 0" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
-            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
+            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
       </div>
@@ -701,14 +732,23 @@ onBeforeUnmount(() => {
 
       </div>
       <div class="production-controls">
-        <label class="shot-duration-control"><span>{{ tr('单分镜最长时长') }}</span>
-          <input v-if="editing && projectDraft" v-model.number="projectDraft.shotDurationMax" type="number" min="1" max="30" :aria-label="tr('单分镜最长时长')" />
-          <strong v-else>{{ projectView.shotDurationMax }}s</strong>
+        <label class="shot-duration-control">
+          <span>{{ tr('单分镜最长时长') }}</span>
+          <input type="range" min="1" max="30" step="1" :value="durationSeconds"
+            :style="{ '--filled': ((durationSeconds - 1) / 29 * 100) + '%' }"
+            :aria-label="tr('单分镜最长时长')" :aria-valuetext="durationSeconds + 's'"
+            :aria-busy="savingDuration" :disabled="!canEdit || savingEdits || savingDuration"
+            @input="previewDuration" @change="commitDuration" />
+          <output class="duration-value"><span :key="durationSeconds">{{ durationSeconds }}s</span></output>
         </label>
-          <div class="storyboard-switch-row">
-            <span>{{ tr('逐镜线稿故事版') }}</span>
-            <AppButton type="button" role="switch" :aria-label="tr('逐镜线稿故事版')" :aria-checked="storyboardEnabled" variant="soft" size="sm" :active="storyboardEnabled" :loading="savingStoryboard" :disabled="!canEdit || savingEdits || savingStoryboard" @click="toggleStoryboard">{{ storyboardEnabled ? tr('开启') : tr('关闭') }}</AppButton>
-          </div>
+        <label class="storyboard-switch-row">
+          <span>{{ tr('逐镜线稿故事版') }}</span>
+          <button class="storyboard-switch" type="button" role="switch" :aria-label="tr('逐镜线稿故事版')"
+            :aria-checked="storyboardEnabled" :aria-busy="savingStoryboard"
+            :disabled="!canEdit || savingEdits || savingStoryboard" @click="toggleStoryboard">
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb" /></span>
+          </button>
+        </label>
       </div>
       <section class="analysis-section episode-section">
         <header>
@@ -797,13 +837,54 @@ onBeforeUnmount(() => {
 .production-settings > section { display: flex; flex-direction: column; }
 .production-settings .profile-card { flex: 1; box-sizing: border-box; }
 .production-settings > section > header { height: 44px; flex: 0 0 44px; align-items: center; }
-.production-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; padding-top: 16px; font-size: 12px; color: var(--app-text-secondary); }
-.shot-duration-control { display: flex; align-items: center; gap: 12px; }
-.shot-duration-control input { width: 72px; min-height: 32px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); color: var(--app-text); padding: 4px 8px; }
+.production-controls {
+  display: flex; align-items: center; width: fit-content; max-width: 100%; box-sizing: border-box;
+  margin-top: 12px; padding: 3px 14px; border: 1px solid var(--app-border); border-radius: 12px;
+  background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; font-weight: 600;
+}
+.shot-duration-control, .storyboard-switch-row { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
+.storyboard-switch-row { margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--app-border); }
+.shot-duration-control input {
+  appearance: none; width: 96px; height: 30px; margin: 0; border: 0; border-radius: 5px; cursor: pointer;
+  background: linear-gradient(to right, var(--app-accent) var(--filled), var(--app-border-strong) var(--filled)) center / 100% 4px no-repeat;
+}
+.shot-duration-control input::-webkit-slider-thumb {
+  appearance: none; width: 14px; height: 14px; border: 3px solid var(--app-accent); border-radius: 50%; background: var(--app-surface);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.shot-duration-control input::-moz-range-thumb {
+  box-sizing: border-box; width: 14px; height: 14px; border: 3px solid var(--app-accent); border-radius: 50%; background: var(--app-surface);
+  transition: transform 150ms ease;
+}
+.shot-duration-control input:enabled:is(:hover,:active)::-webkit-slider-thumb { transform: scale(1.15); box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-accent) 15%, transparent); }
+.shot-duration-control input:enabled:is(:hover,:active)::-moz-range-thumb { transform: scale(1.15); }
+.duration-value {
+  display: grid; place-items: center; min-width: 34px; padding: 2px 0; border-radius: 6px;
+  color: var(--app-text); background: var(--app-surface-muted); font-variant-numeric: tabular-nums;
+}
+.duration-value span { animation: duration-tick 140ms ease-out; }
+@keyframes duration-tick { from { transform: translateY(2px); opacity: .6; } }
+.storyboard-switch { display: grid; place-items: center; padding: 0; width: 40px; height: 32px; background: transparent; border: 0; border-radius: 8px; cursor: pointer; }
+.switch-track { display: flex; align-items: center; width: 36px; height: 21px; padding: 3px; box-sizing: border-box; border-radius: 20px; background: var(--app-border-strong); transition: background-color 180ms ease; }
+.switch-thumb { width: 15px; height: 15px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0003; transition: transform 190ms cubic-bezier(.2,.8,.2,1); }
+.storyboard-switch[aria-checked="true"] .switch-track { background: var(--app-accent); }
+.storyboard-switch[aria-checked="true"] .switch-thumb { transform: translateX(15px); }
+.storyboard-switch:enabled:hover .switch-track { box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 12%, transparent); }
+.production-controls :is(input,button):focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.production-controls :disabled { opacity: .6; cursor: default; }
+@container creation-workspace (max-width: 540px) {
+  .production-controls { flex-wrap: wrap; column-gap: 14px; }
+  .storyboard-switch-row { margin: 0; padding: 0; border: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch-track, .switch-thumb { transition: none; }
+  .shot-duration-control input::-webkit-slider-thumb { transition: none; }
+  .shot-duration-control input::-moz-range-thumb { transition: none; }
+  .duration-value span { animation: none; }
+}
 .production-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .audiovisual-card { grid-template-columns: minmax(0, 1fr); }
 .audiovisual-card p, .audiovisual-card small { font-size: 12px; line-height: 1.6; }
-.production-controls > .storyboard-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--app-text-secondary); }
 @container creation-workspace (max-width: 800px) { .production-settings { grid-template-columns: minmax(0, 1fr); gap: 0; } }
 .profile-card > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .profile-card > div { display: grid; gap: 4px; }

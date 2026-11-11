@@ -382,3 +382,24 @@ it('edits the maximum shot duration without changing other project preferences',
   expect(api.updateNovel).toHaveBeenCalledWith(9, {shot_duration_max: 12})
   wrapper.unmount()
 })
+
+
+it.each([true, false])('previews the duration during a drag and saves only on release (success=%s)', async success => {
+  const save = vi.mocked(api.updateNovel)
+  if (success) save.mockResolvedValue({code: 0, message: 'ok', data: {id: 9, shot_duration_max: 22} as Novel})
+  else save.mockRejectedValue(new Error('保存失败'))
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  try {
+    await flushPromises()
+    const range = wrapper.get<HTMLInputElement>('input[type="range"][aria-label="单分镜最长时长"]')
+    range.element.value = '22'
+    await range.trigger('input')
+    expect(wrapper.get('output.duration-value').text()).toBe('22s')
+    expect(save).not.toHaveBeenCalled()
+    await range.trigger('change')
+    await flushPromises()
+    expect(save).toHaveBeenCalledExactlyOnceWith(9, {shot_duration_max: 22})
+    expect(range.element.value).toBe(success ? '22' : '15')
+    expect(range.element.disabled).toBe(false)
+  } finally { wrapper.unmount() }
+})
