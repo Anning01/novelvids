@@ -7,6 +7,8 @@ import {
   ArrowRight,
   Check,
   Clapperboard,
+  GalleryHorizontalEnd,
+  Timer,
   FileText,
   Film,
   MonitorPlay,
@@ -773,7 +775,7 @@ onBeforeUnmount(() => {
       <template v-if="novel">
       <div class="production-settings">
       <section class="analysis-section">
-        <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>{{ tr('项目设定') }}</h2></div></header>
+        <header><h2>{{ tr('项目设定') }}</h2></header>
         <div class="profile-grid">
           <article class="profile-card">
             <span><Clapperboard :size="18" /></span>
@@ -817,7 +819,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="production-controls">
         <label class="shot-duration-control">
-          <span>{{ tr('单分镜最长时长') }}</span>
+          <span class="production-control-label"><Timer :size="16" aria-hidden="true" />{{ tr('单分镜最长时长') }}</span>
           <input type="range" min="1" max="30" step="1" :value="durationSeconds"
             :style="{ '--filled': ((durationSeconds - 1) / 29 * 100) + '%' }"
             :aria-label="tr('单分镜最长时长')" :aria-valuetext="durationSeconds + 's'"
@@ -826,7 +828,7 @@ onBeforeUnmount(() => {
           <output class="duration-value"><span :key="durationSeconds">{{ durationSeconds }}s</span></output>
         </label>
         <label class="storyboard-switch-row">
-          <span>{{ tr('逐镜线稿故事版') }}</span>
+          <span class="production-control-label"><GalleryHorizontalEnd :size="16" aria-hidden="true" />{{ tr('逐镜线稿故事版') }}</span>
           <button class="storyboard-switch" type="button" role="switch" :aria-label="tr('逐镜线稿故事版')"
             :aria-checked="storyboardEnabled" :aria-busy="savingStoryboard"
             :disabled="!canEdit || savingEdits || savingStoryboard" @click="toggleStoryboard">
@@ -836,7 +838,7 @@ onBeforeUnmount(() => {
       </div>
       <section class="analysis-section episode-section">
         <header>
-          <div><span class="section-kicker">EPISODE CHAPTERS</span><h2>{{ tr('分集剧情') }}</h2><p>{{ tr('复用项目的分章节结构，每一集对应一个章节。') }}</p></div>
+          <h2>{{ tr('分集剧情') }}</h2>
           <div v-if="canEdit && !editing" class="episode-actions">
             <AppButton variant="secondary" size="sm" :disabled="episodeBusy" @click="addEpisode">{{ tr('新增集') }}</AppButton>
             <AppButton v-if="selectedEpisodeBrief" variant="ghost" size="sm" :disabled="episodeBusy" @click="removeEpisode">{{ tr('删除本集') }}</AppButton>
@@ -849,9 +851,7 @@ onBeforeUnmount(() => {
         <div ref="episodeSentinel" class="episode-sentinel" aria-hidden="true"></div>
         <article v-if="selectedEpisode" class="episode-content">
           <header>
-            <span>{{ String(selectedEpisode.number).padStart(2, '0') }}</span>
             <div>
-              <small>EPISODE {{ selectedEpisode.number }}</small>
               <label v-if="editing && selectedEpisodeDraft" class="chapter-title-editor">
                 <span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('集') }}</span>
                 <input v-model="selectedEpisodeDraft.name" :aria-label="tr('章节标题')" maxlength="255" />
@@ -869,6 +869,7 @@ onBeforeUnmount(() => {
               {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : tr('生成本集剧本') }}
             </AppButton>
           </div>
+          <div class="episode-document">
           <p v-if="selectedEpisodeLoading" class="episode-content-state">{{ tr('正在加载章节正文…') }}</p>
           <template v-else-if="episodeView === 'source'">
             <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" :aria-label="tr('章节内容')" />
@@ -877,9 +878,10 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.screenplay" class="chapter-content-editor" :aria-label="tr('导演剧本')" />
-            <EpisodeScreenplay v-else-if="selectedEpisode.screenplay" :text="selectedEpisode.screenplay" />
+            <EpisodeScreenplay v-else-if="selectedEpisode.screenplay" :text="selectedEpisode.screenplay" :episode-number="selectedEpisode.number" :episode-name="selectedEpisode.name" />
             <p v-else class="episode-content-state">{{ tr('本集暂无导演剧本') }}</p>
           </template>
+          </div>
           <footer><span><UsersRound :size="14" />{{ selectedEpisodeCharacters }}</span><span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('章') }}</span></footer>
         </article>
       </section>
@@ -953,14 +955,21 @@ onBeforeUnmount(() => {
 .production-settings .profile-card { flex: 1; box-sizing: border-box; }
 .production-settings > section > header { height: 44px; flex: 0 0 44px; align-items: center; }
 .production-controls {
-  display: flex; align-items: center; width: fit-content; max-width: 100%; box-sizing: border-box;
-  margin-top: 12px; padding: 3px 14px; border: 1px solid var(--app-border); border-radius: 12px;
-  background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; font-weight: 600;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 8px;
+  color: var(--app-text); font-size: 13px;
 }
-.shot-duration-control, .storyboard-switch-row { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
-.storyboard-switch-row { margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--app-border); }
+.shot-duration-control, .storyboard-switch-row {
+  min-width: 0; min-height: 48px; box-sizing: border-box; padding: 4px 16px;
+  display: grid; align-items: center; gap: 10px;
+  border-radius: 10px; border: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-surface) 65%, var(--app-surface-muted));
+}
+.shot-duration-control { grid-template-columns: minmax(max-content, 1fr) minmax(64px, 160px) auto; }
+.storyboard-switch-row { grid-template-columns: 1fr auto; }
+.production-control-label { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; }
+.production-control-label svg { flex: none; color: var(--app-text-secondary); }
 .shot-duration-control input {
-  appearance: none; width: 96px; height: 30px; margin: 0; border: 0; border-radius: 5px; cursor: pointer;
+  appearance: none; width: 100%; min-width: 0; height: 36px; margin: 0; border: 0; border-radius: 5px; cursor: pointer;
   background: linear-gradient(to right, var(--app-accent) var(--filled), var(--app-border-strong) var(--filled)) center / 100% 4px no-repeat;
 }
 .shot-duration-control input::-webkit-slider-thumb {
@@ -974,12 +983,12 @@ onBeforeUnmount(() => {
 .shot-duration-control input:enabled:is(:hover,:active)::-webkit-slider-thumb { transform: scale(1.15); box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-accent) 15%, transparent); }
 .shot-duration-control input:enabled:is(:hover,:active)::-moz-range-thumb { transform: scale(1.15); }
 .duration-value {
-  display: grid; place-items: center; min-width: 34px; padding: 2px 0; border-radius: 6px;
-  color: var(--app-text); background: var(--app-surface-muted); font-variant-numeric: tabular-nums;
+  display: grid; place-items: center; min-width: 4ch; padding: 3px 6px; border-radius: 6px; font-weight: 650;
+  color: var(--app-accent); background: var(--app-accent-soft); font-variant-numeric: tabular-nums;
 }
 .duration-value span { animation: duration-tick 140ms ease-out; }
 @keyframes duration-tick { from { transform: translateY(2px); opacity: .6; } }
-.storyboard-switch { display: grid; place-items: center; padding: 0; width: 40px; height: 32px; background: transparent; border: 0; border-radius: 8px; cursor: pointer; }
+.storyboard-switch { display: grid; place-items: center; padding: 0; width: 44px; height: 40px; background: transparent; border: 0; border-radius: 8px; cursor: pointer; }
 .switch-track { display: flex; align-items: center; width: 36px; height: 21px; padding: 3px; box-sizing: border-box; border-radius: 20px; background: var(--app-border-strong); transition: background-color 180ms ease; }
 .switch-thumb { width: 15px; height: 15px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0003; transition: transform 190ms cubic-bezier(.2,.8,.2,1); }
 .storyboard-switch[aria-checked="true"] .switch-track { background: var(--app-accent); }
@@ -987,9 +996,12 @@ onBeforeUnmount(() => {
 .storyboard-switch:enabled:hover .switch-track { box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 12%, transparent); }
 .production-controls :is(input,button):focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
 .production-controls :disabled { opacity: .6; cursor: default; }
-@container creation-workspace (max-width: 540px) {
-  .production-controls { flex-wrap: wrap; column-gap: 14px; }
-  .storyboard-switch-row { margin: 0; padding: 0; border: 0; }
+@container creation-workspace (max-width: 800px) {
+  .production-controls { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+@container creation-workspace (max-width: 420px) {
+  .shot-duration-control, .storyboard-switch-row { padding-inline: 10px; gap: 8px; }
+  .shot-duration-control { grid-template-columns: max-content minmax(48px, 1fr) auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   .switch-track, .switch-thumb { transition: none; }
@@ -1033,18 +1045,17 @@ onBeforeUnmount(() => {
 .episode-tabs:focus-visible { outline: 3px solid rgb(91 92 246 / 14%); outline-offset: 2px; border-radius: 10px; }
 .episode-tabs button { display: grid; width: 34px; min-width: 34px; height: 34px; flex: 0 0 34px; place-items: center; scroll-snap-align: center; border: 0; border-radius: 9px; color: #777d8e; background: #f1f2f7; cursor: pointer; font-size: 11px; }
 .episode-tabs button.is-active { color: #fff; background: #6768ef; box-shadow: 0 7px 18px rgb(91 92 246 / 20%); }
-.episode-content { overflow: hidden; border-radius: 15px; background: #fff; box-shadow: 0 8px 28px rgb(45 49 68 / 6%); }
-.episode-content > header { display: flex; align-items: center; gap: 12px; padding: 16px 18px; }
-.episode-content > header > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; font-size: 16px; font-weight: 700; }
-.episode-content > header small { color: #8b8ff1; font-size: 8px; font-weight: 700; letter-spacing: .12em; }
-.episode-content h3 { margin: 4px 0 0; font-size: 14px; }
-.episode-content > header > div { min-width: 0; flex: 1; }
+.episode-content { scroll-margin-top: calc(var(--short-drama-header-height, 72px) + 12px); --reading-inset: clamp(16px, 3vw, 40px); min-width: 0; border: 1px solid var(--app-border); border-radius: 14px; background: var(--app-surface); }
+.episode-content > header { padding: 22px var(--reading-inset) 0; }
+.episode-content h3 { margin: 0; color: var(--app-text); font-size: 20px; letter-spacing: -.02em; }
+.episode-content .episode-doc-tools { margin: 0; padding: 12px var(--reading-inset) 16px; border-bottom: 1px solid var(--app-border); }
+.episode-document { padding: clamp(18px, 2vw, 30px) var(--reading-inset); }
 .chapter-title-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 5px; }
 .chapter-title-editor > span { color: #555b6b; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.episode-content > p { margin: 0; padding: 20px 22px; color: #5e6474; font-size: 12px; line-height: 2; overflow-wrap: anywhere; white-space: pre-wrap; }
-.episode-content > p.episode-content-state { min-height: 100px; display: grid; place-items: center; color: #9a9ead; }
-.chapter-content-editor { display: block; width: calc(100% - 36px); min-height: 520px; margin: 0 18px 18px; padding: 18px 20px; resize: vertical; color: #515767; font: inherit; font-size: 12px; line-height: 2; white-space: pre-wrap; }
-.episode-content > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 18px; color: #8b909f; background: #f5f6f9; font-size: 9px; }
+.episode-document > p { max-width: 52em; margin: 0 auto; color: var(--app-text); font-size: 15px; line-height: 2; overflow-wrap: anywhere; white-space: pre-wrap; }
+.episode-document > p.episode-content-state { min-height: 100px; display: grid; place-items: center; color: var(--app-text-secondary); }
+.chapter-content-editor { display: block; width: 100%; min-height: 520px; margin: 0; padding: 18px 20px; resize: vertical; color: var(--app-text); font: inherit; font-size: 15px; line-height: 2; white-space: pre-wrap; }
+.episode-content > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px var(--reading-inset); border-top: 1px solid var(--app-border); border-radius: 0 0 14px 14px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; }
 .episode-content > footer span { display: inline-flex; align-items: center; gap: 5px; }
 .episode-sentinel { height: 2px; margin-top: 8px; }
 .episode-load-more { align-self: center; padding: 0 8px; color: var(--app-text-muted); font-size: 11px; white-space: nowrap; }
