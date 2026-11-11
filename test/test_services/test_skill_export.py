@@ -35,6 +35,8 @@ def test_stage_exports_without_application_files(tmp_path, name):
     expected_scripts = {"draw_blocking.py"} if name in {"storyboard", "remake"} else set()
     if name == "storyboard":
         expected_scripts.add("storyboard_sheets.py")
+    if name in {"storyboard", "video"}:
+        expected_scripts.add("select_video_optimizer.py")
     assert scripts == expected_scripts
     assert list(tmp_path.iterdir()) == [package]
 
@@ -229,3 +231,26 @@ def test_storyboard_sheet_switch_preserves_bad_config_and_rejects_incomplete_sho
         assert result.returncode != 0 and not result.stdout
     board.write_text(json.dumps({"shots": [shot]}))
     assert call("prepare", "shots.json").returncode == 0
+
+
+@pytest.mark.parametrize("stage", ["storyboard", "video"])
+def test_exported_skill_selects_installed_optimizer_only_for_target_model(tmp_path, stage):
+    import subprocess
+    import sys
+    pkg = export_skill(f"novelvids-{stage}", tmp_path / 'portable')
+    script = pkg / 'scripts/select_video_optimizer.py'
+    def select(*args):
+        res = subprocess.run([sys.executable, '-I', '-S', script, *args], cwd=tmp_path,
+                             capture_output=True, text=True, check=True)
+        return json.loads(res.stdout)
+    assert select()['mode'] == 'generic'
+    local = tmp_path / '.agents/skills/sd25-pe/SKILL.md'
+    (tmp_path / 'novelvids.config.json').write_text(json.dumps({
+        'video_model_type': 'seedance_2_5', 'storyboard_enabled': True}))
+    assert select()['mode'] == 'missing'
+    local.parent.mkdir(parents=True)
+    local.write_text('---\nname: sd25-pe\n---\nProvider instructions')
+    assert Path(select()['entry']) == local
+    assert select('--model', 'Seedance 2.5')['skill'] == 'sd25-pe'
+    for model in ('seedance_2', 'minimax_h3_autodl', 'my-seedance_2_5-alike', 'generic'):
+        assert select('--model', model)['mode'] == 'generic'

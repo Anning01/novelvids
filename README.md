@@ -195,6 +195,8 @@ python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
 
 分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段交付一张简约黑白线稿故事版和配套视频提示词，图内格数随动作与构图变化。
 
+分镜和视频技能默认交付通用提示词。选用 `seedance_2_5` 时，调用本项目安装的火山方舟 `sd25-pe`，另出一份模型专项稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
+
 规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
 
 ## 本地开发

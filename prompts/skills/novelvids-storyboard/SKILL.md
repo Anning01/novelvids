@@ -8,6 +8,11 @@ license: MIT
 
 开始时读取作品全局的「故事版」开关；开启后每个生成段交付一张黑白线稿故事版，画格随关键构图增减，配套视频提示词补齐动作、运镜、声音和成片风格。
 
+生成或修改视频提示词时，先完成通用稿，再按实际选中的视频模型执行专项优化。
+
+- [模型专项提示词交付](../novelvids-video/references/model_optimization.md)
+- [模型与专项技能映射](../novelvids-video/references/video_prompt_models.json)
+- [选择专项技能](../scripts/select_video_optimizer.py)
 - [故事版开关与出图交付](references/storyboard_sheets.md)
 - [线稿与视频配套提示词](references/storyboard_sheet_templates.json)
 - [查询、切换和准备逐镜出图](../scripts/storyboard_sheets.py)
