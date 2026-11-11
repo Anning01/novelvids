@@ -69,5 +69,6 @@ it('routes remake projects through the recoverable decomposition progress page',
 
 it('returns independent clips to their studio while keeping series in the existing workflow', () => {
   expect(projectEntryRoute({id:17,author:'片段创作'} as Novel)).toEqual({name:'clip-studio',params:{projectId:17}})
+  expect(projectEntryRoute({id:19,author:'人工创建'} as Novel)).toEqual({name:'short-drama-agent',params:{projectId:19}})
   expect(projectEntryRoute({id:18,author:'Agent 创建'} as Novel)).toEqual({name:'short-drama-agent',params:{projectId:18}})
 })

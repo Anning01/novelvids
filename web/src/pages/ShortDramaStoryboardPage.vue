@@ -80,6 +80,7 @@ interface ProjectView extends Novel {
   aspectRatio: string
   resolution: string
   style: string
+  workflowKind?: 'script' | 'remake'
   creationMode: 'agent' | 'manual'
 }
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
@@ -1588,6 +1589,7 @@ async function load() {
       aspectRatio: settings.aspectRatio || '9:16',
       resolution: settings.resolution || '720p',
       style: settings.style || tr('写实通用'),
+      workflowKind: novelResponse.data.workflow_kind,
       creationMode: novelResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     chapters.value = chapterResponse.data.items
@@ -2357,7 +2359,7 @@ onBeforeUnmount(() => {
       :resolution="project?.resolution || '720p'"
       :style-name="project?.style || tr('写实通用')"
       active-phase="storyboard"
-      :creation-mode="project?.creationMode || 'agent'"
+      :show-script-phase="project?.workflowKind !== 'remake'"
       :chapters="chapters"
       :active-chapter-id="activeChapterId"
       :video-enabled="videoPageEnabled"

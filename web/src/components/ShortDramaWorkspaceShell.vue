@@ -26,7 +26,7 @@ const props = withDefaults(defineProps<{
   resolution: string
   styleName: string
   activePhase: ShortDramaPhase
-  creationMode?: 'agent' | 'manual'
+  showScriptPhase?: boolean
   chapters?: Chapter[]
   activeChapterId?: number
   showEpisodeRail?: boolean
@@ -35,7 +35,7 @@ const props = withDefaults(defineProps<{
   immersive?: boolean
   agentTargets?: AgentTarget[]
 }>(), {
-  creationMode: 'agent',
+  showScriptPhase: true,
   chapters: () => [],
   activeChapterId: 0,
   showEpisodeRail: true,
@@ -60,7 +60,7 @@ onMounted(async () => {
   catch { /* Keep the project's saved style visible while settings are unavailable. */ }
 })
 const phases = computed(() => [
-  ...(props.creationMode === 'agent' ? [{ key: 'script' as const, get label() { return tr('剧本') }, icon: BookOpenText }] : []),
+  ...(props.showScriptPhase ? [{ key: 'script' as const, get label() { return tr('剧本') }, icon: BookOpenText }] : []),
   { key: 'settings' as const, get label() { return tr('设定') }, icon: Settings2 },
   { key: 'storyboard' as const, get label() { return tr('分镜') }, icon: Clapperboard },
   { key: 'video' as const, get label() { return tr('视频') }, icon: Video, disabled: !props.videoEnabled },

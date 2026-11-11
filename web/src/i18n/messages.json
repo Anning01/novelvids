@@ -1,5 +1,8 @@
 {
   "common": {
+    "待添加分集": "No episodes yet",
+    "可以先和创作助手构思，也可以新增一集开始写剧本。": "Plan the story with the assistant or add an episode to start writing.",
+    "空白项目已创建": "Blank project created",
     "单分镜最长时长须为 1–30 秒": "Maximum shot duration must be between 1 and 30 seconds",
     "单分镜最长时长": "Maximum shot duration",
     "导演剧本": "Director’s screenplay",

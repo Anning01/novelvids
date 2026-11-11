@@ -242,7 +242,7 @@ const analysisStatus = computed(() => {
   if (analysisResult.value) return tr('剧本分析完成')
   if (analysisTask.value?.status === TaskStatusEnum.FAILED) return tr('分析失败')
   if (hasScriptPreview.value) return tr('剧本已载入')
-  return tr('准备分析')
+  return manuscriptLength.value ? tr('准备分析') : tr('待添加分集')
 })
 async function loadProject(): Promise<boolean> {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
@@ -700,7 +700,6 @@ onBeforeUnmount(() => {
       :resolution="project.resolution"
       :style-name="displayStyle"
       active-phase="script"
-      creation-mode="agent"
       :show-episode-rail="false"
       :chapters="chapters"
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
@@ -757,7 +756,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section v-if="!hasScriptPreview || analysisRunning || startingAnalysis || analysisError || (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult)" class="analysis-progress-card" :class="{ 'is-failed': (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult) || analysisError }" role="status">
+      <section v-if="(!hasScriptPreview && manuscriptLength > 0) || analysisRunning || startingAnalysis || analysisError || (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult)" class="analysis-progress-card" :class="{ 'is-failed': (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult) || analysisError }" role="status">
         <span><RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="25" /><FileText v-else :size="25" /></span>
         <div>
           <h2>{{ analysisStatus }}</h2>
@@ -885,7 +884,7 @@ onBeforeUnmount(() => {
         </article>
       </section>
 
-      <AppButton class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />{{ tr('确认分析，进入设定') }}</span><ArrowRight :size="18" /></AppButton>
+      <AppButton v-if="selectedEpisodeBrief" class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />{{ tr('确认分析，进入设定') }}</span><ArrowRight :size="18" /></AppButton>
       </template>
       </section>
     <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />

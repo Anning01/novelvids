@@ -43,6 +43,7 @@ interface ManualProjectMeta {
   aspectRatio: string
   resolution: string
   style: string
+  workflowKind?: 'script' | 'remake'
   creationMode: 'agent' | 'manual'
 }
 
@@ -222,6 +223,7 @@ async function loadProject(chapterId = selectedChapterId.value) {
       aspectRatio: settings.aspectRatio || project.value.aspectRatio,
       resolution: settings.resolution || project.value.resolution,
       style: settings.style || project.value.style,
+      workflowKind: projectResponse.data.workflow_kind,
       creationMode: projectResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     selectedChapter.value = chapterResponse?.data ?? null
@@ -727,7 +729,7 @@ onBeforeUnmount(() => {
       :resolution="project.resolution"
       :style-name="project.style"
       active-phase="settings"
-      :creation-mode="project.creationMode"
+      :show-script-phase="project?.workflowKind !== 'remake'"
       :chapters="chapters"
       :active-chapter-id="selectedChapter?.id || 0"
       :agent-targets="editingVariantId ? [{ kind: 'variant', id: editingVariantId }] : editingAsset ? [{ kind: 'asset', id: editingAsset.id }] : []"

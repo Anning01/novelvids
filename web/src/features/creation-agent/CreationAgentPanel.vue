@@ -50,6 +50,8 @@ const options = ref<(AgentTargetOption & { key: string })[]>([])
 const pickerOpen = ref(false)
 const writeScope = ref<'chapter' | 'project' | 'read_only'>('chapter')
 
+const effectiveWriteScope = computed(() => !props.chapterId && writeScope.value === 'chapter' ? 'project' : writeScope.value)
+
 function changeWriteScope(next: string) {
   if (next === writeScope.value) return
   writeScope.value = next as typeof writeScope.value
@@ -209,7 +211,7 @@ async function send(text: string) {
   if (!text.trim() || !ready.value || store.busy || props.suspended) return
   const key = draftKey.value
   if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null,
-    targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : writeScope.value })) {
+    targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : effectiveWriteScope.value })) {
     workspace.drafts[key] = ''
     // The first accepted request creates a conversation with its own draft slot.
     workspace.drafts[draftKey.value] = ''
@@ -328,11 +330,11 @@ onMounted(() => {
       <AppSelect
         class="creation-agent-panel__scope-select"
         density="compact"
-        :model-value="writeScope"
+        :model-value="effectiveWriteScope"
         :ariaLabel="tr('助手操作范围')"
         :disabled="store.busy"
         :options="[
-          { value: 'chapter', label: targets.length ? tr('指定对象') : tr('当前章') },
+          ...(chapterId || targets.length ? [{ value: 'chapter', label: targets.length ? tr('指定对象') : tr('当前章') }] : []),
           { value: 'project', label: tr('全项目') },
           { value: 'read_only', label: tr('只查询') },
         ]"
