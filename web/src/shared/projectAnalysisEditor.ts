@@ -17,6 +17,8 @@ export interface ProjectAnalysisDraft {
   name: string
   tagsText: string
   storyOutline: string
+  aspectRatio?: string
+  resolution?: string
   styleKey?: string
   customStyle?: string
   audiovisualGuidance?: string
@@ -38,6 +40,7 @@ export interface ChapterEditDraft {
 
 type EditableNovel = Pick<
   Novel,
+  | 'aspect_ratio' | 'resolution'
   | 'shot_duration_max' | 'style_key' | 'custom_style_prompt' | 'audiovisual_guidance' | 'storyboard_enabled'
   | 'name'
   | 'tags'
@@ -67,6 +70,8 @@ export function createProjectAnalysisDraft(
   const strategy = resolveStoryboardStrategy(novel.storyboard_strategy, strategies)
   return {
     name: novel.name,
+    aspectRatio: novel.aspect_ratio ?? undefined,
+    resolution: novel.resolution ?? undefined,
     styleKey: novel.custom_style_prompt ? 'custom' : novel.style_key || 'auto',
     customStyle: novel.custom_style_prompt || '',
     audiovisualGuidance: novel.audiovisual_guidance || '',
@@ -100,6 +105,8 @@ export function projectPatchFromDraft(
   initial?: ProjectAnalysisDraft | null,
 ): Partial<Novel> {
   const settings: Partial<Novel> = {}
+  if (draft.aspectRatio && draft.aspectRatio !== initial?.aspectRatio) settings.aspect_ratio = draft.aspectRatio
+  if (draft.resolution && draft.resolution !== initial?.resolution) settings.resolution = draft.resolution
   if (draft.styleKey && (draft.styleKey !== initial?.styleKey ||
       (draft.styleKey === 'custom' && draft.customStyle !== initial?.customStyle))) {
     settings.style_key = ['auto', 'custom'].includes(draft.styleKey) ? null : draft.styleKey

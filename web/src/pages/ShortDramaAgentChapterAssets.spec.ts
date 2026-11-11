@@ -22,6 +22,7 @@ vi.mock('@/api', async (importOriginal) => {
     api: {
       ...actual.api,
       configs: vi.fn(),
+      remakeCapabilities: vi.fn(),
       novel: vi.fn(),
       novelMeta: vi.fn(),
       novelAnalysis: vi.fn(),
@@ -55,6 +56,11 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()
+  vi.mocked(api.remakeCapabilities).mockResolvedValue({code: 0, message: '', data: {
+    media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
+    aspect_ratios: ['16:9', '9:16'], resolutions: ['720p', '1080p', '1080P'],
+    styles: [{key: 'auto', label: 'AI 识别风格'}, {key: 'xianxia-3d', label: '3D仙侠'}],
+  }})
   vi.mocked(api.configs).mockResolvedValue({
     code: 0,
     message: 'ok',
@@ -414,5 +420,35 @@ it.each([true, false])('previews the duration during a drag and saves only on re
     expect(save).toHaveBeenCalledExactlyOnceWith(9, {shot_duration_max: 22})
     expect(range.element.value).toBe(success ? '22' : '15')
     expect(range.element.disabled).toBe(false)
+  } finally { wrapper.unmount() }
+})
+
+it('cancels and saves the title-row project format and custom visual style', async () => {
+  vi.mocked(api.updateNovel).mockImplementation(async (_id, patch) => ({code: 0, message: '', data: {...patch, id: 9, name: chapter.name} as Novel}))
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  const action = (text: string) => wrapper.findAll('button').find(b => b.text() === text)!.trigger('click')
+  async function choose(label: string, value: string) {
+    await wrapper.get(`button[aria-label="${label}"]`).trigger('click')
+    const option = [...document.querySelectorAll<HTMLElement>('[role=option]')].find(el => el.textContent?.trim() === value)
+    expect(option).toBeDefined()
+    option!.click()
+    await flushPromises()
+  }
+  try {
+    await flushPromises()
+    await action('编辑内容')
+    await choose('画面比例', '16:9')
+    await action('取消')
+    expect(api.updateNovel).not.toHaveBeenCalled()
+    await action('编辑内容')
+    await choose('画面比例', '16:9')
+    await choose('分辨率', '1080p')
+    await choose('视觉风格', '自定义风格')
+    await wrapper.get('textarea[aria-label="自定义风格"]').setValue('水墨淡彩')
+    await action('保存修改')
+    await flushPromises()
+    expect(api.updateNovel).toHaveBeenCalledExactlyOnceWith(9, {aspect_ratio: '16:9', resolution: '1080p', style_key: null, custom_style_prompt: '水墨淡彩'})
+    expect(wrapper.get('.episode-project-meta').text()).toContain('1080p')
+    expect(wrapper.get('[title="水墨淡彩"]').text()).toContain('自定义风格')
   } finally { wrapper.unmount() }
 })

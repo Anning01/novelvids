@@ -10,6 +10,7 @@ import {
   FileText,
   Film,
   MonitorPlay,
+  Palette,
   Pencil,
   RefreshCw,
   Save,
@@ -45,7 +46,7 @@ import type {
   ChapterEditDraft,
   ProjectAnalysisDraft,
 } from '@/shared/projectAnalysisEditor'
-import type { AiTask, Asset, AudioReference, Chapter, Novel, StoryboardStrategy } from '@/types'
+import type { AiTask, Asset, AudioReference, Chapter, Novel, RemakeCapabilities, StoryboardStrategy } from '@/types'
 
 interface AgentProjectMeta {
   projectId?: number
@@ -280,6 +281,31 @@ async function loadProject(): Promise<boolean> {
   }
 }
 
+const displayOptions = ref<Pick<RemakeCapabilities, 'aspect_ratios' | 'resolutions' | 'styles'> | null>(null)
+async function loadDisplayOptions() {
+  try {
+    displayOptions.value = (await api.remakeCapabilities()).data
+  } catch (error) {
+    notice.error((error as Error).message)
+  }
+}
+
+const resolutionOptions = computed(() => {
+  const values = new Map<string, string>()
+  for (const value of displayOptions.value?.resolutions || []) {
+    if (!values.has(value.toLowerCase()) || value === project.value.resolution) values.set(value.toLowerCase(), value)
+  }
+  return [...values.values()]
+})
+const styleOptions = computed(() => [
+  ...(displayOptions.value?.styles || []).filter(item => item.key !== 'custom').map(item => ({value: item.key, label: tr(item.label)})),
+  {value: 'custom', label: tr('自定义风格'), separator: true},
+])
+const displayStyle = computed(() => {
+  const key = projectView.value.styleKey
+  return styleOptions.value.find(item => item.value === key)?.label || (key === 'auto' ? tr('AI 识别风格') : key || project.value.style)
+})
+
 async function loadStoryboardStrategies() {
   try {
     const response = await api.storyboardStrategies()
@@ -408,6 +434,9 @@ function beginEditing() {
     analysisResult.value,
     storyboardStrategies.value,
   )
+  projectDraft.value.aspectRatio ||= project.value.aspectRatio
+  projectDraft.value.resolution ||= project.value.resolution
+  if (!displayOptions.value) void loadDisplayOptions()
   initialProjectDraft.value = { ...projectDraft.value }
   chapterDrafts.value = {}
   if (selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
@@ -543,7 +572,9 @@ async function saveEdits() {
       }
       project.value = {
         ...project.value,
-        name: projectResponse.data.name ?? project.value.name,
+        name: novel.value.name,
+        aspectRatio: novel.value.aspect_ratio || project.value.aspectRatio,
+        resolution: novel.value.resolution || project.value.resolution,
         cover: projectResponse.data.cover ?? project.value.cover,
         coverPreview: projectResponse.data.cover_preview || project.value.coverPreview,
       }
@@ -644,6 +675,7 @@ function observeEpisodeSentinel() {
 }
 onMounted(async () => {
   observeEpisodeSentinel()
+  void loadDisplayOptions()
   const [, projectReady] = await Promise.all([
     loadStoryboardStrategies(),
     loadProject(),
@@ -666,7 +698,7 @@ onBeforeUnmount(() => {
       :project-name="displayedProjectName"
       :aspect-ratio="project.aspectRatio"
       :resolution="project.resolution"
-      :style-name="project.style"
+      :style-name="displayStyle"
       active-phase="script"
       creation-mode="agent"
       :show-episode-rail="false"
@@ -688,7 +720,23 @@ onBeforeUnmount(() => {
           </AppBadge>
           <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" :aria-label="tr('小说昵称')" maxlength="255" />
           <h1 v-else>{{ project.name }}</h1>
-          <p><FileText :size="14" />{{ chaptersTotal }} {{ tr('章') }} <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
+          <div class="episode-project-meta">
+            <span><FileText :size="14" />{{ chaptersTotal }} {{ tr('章') }}</span>
+            <template v-if="editing && projectDraft">
+              <label><Film :size="14" /><AppSelect density="compact" :ariaLabel="tr('画面比例')" :model-value="projectDraft.aspectRatio || project.aspectRatio" :options="displayOptions?.aspect_ratios || [project.aspectRatio]" :disabled="!displayOptions || savingEdits" @update:model-value="projectDraft.aspectRatio = $event" /></label>
+              <label><MonitorPlay :size="14" /><AppSelect density="compact" :ariaLabel="tr('分辨率')" :model-value="projectDraft.resolution || project.resolution" :options="resolutionOptions.length ? resolutionOptions : [project.resolution]" :disabled="!displayOptions || savingEdits" @update:model-value="projectDraft.resolution = $event" /></label>
+              <label><Palette :size="14" /><AppSelect density="compact" :ariaLabel="tr('视觉风格')" :model-value="projectDraft.styleKey || 'auto'" :options="styleOptions" :disabled="!displayOptions || savingEdits" @update:model-value="projectDraft.styleKey = $event" /></label>
+            </template>
+            <template v-else>
+              <span><Film :size="14" />{{ project.aspectRatio }}</span>
+              <span><MonitorPlay :size="14" />{{ project.resolution }}</span>
+              <span :title="projectView.customStyle || displayStyle"><Palette :size="14" />{{ displayStyle }}</span>
+            </template>
+          </div>
+          <label v-if="editing && projectDraft?.styleKey === 'custom'" class="tag-editor">
+            <span>{{ tr('自定义风格') }}</span>
+            <textarea v-model="projectDraft.customStyle" :aria-label="tr('自定义风格')" rows="2" maxlength="2000" />
+          </label>
           <label v-if="editing && projectDraft" class="tag-editor">
             <span>{{ tr('项目标签') }}</span>
             <input v-model="projectDraft.tagsText" :placeholder="tr('使用逗号分隔，例如：都市，热血，成长')" />
@@ -846,6 +894,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.episode-project-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; color: var(--app-text-secondary); font-size: 12px; }
+.episode-project-meta > span, .episode-project-meta > label { display: inline-flex; align-items: center; gap: 6px; }
+.episode-project-meta svg { flex: none; }
+.episode-project-meta :deep(.app-select) { width: auto; }
+.tag-editor textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; }
+.tag-editor textarea:focus-visible { outline: 2px solid var(--app-accent); }
+
 .episode-doc-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
 .episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
 .episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
