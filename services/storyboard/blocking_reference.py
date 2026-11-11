@@ -67,7 +67,7 @@ async def provider_image(scene, source):
         plan = BlockingMap.model_validate(scene.prompt_params["blocking_map"])
         svg = draw(plan.model_dump(exclude_none=True)).encode()
     else:
-        if not re.fullmatch(r"/media/work-packages/[0-9a-f]{64}\.(svg|png|jpe?g|webp)", source):
+        if not re.fullmatch(r"/media/(?:work-packages|project-imports/[0-9a-f]{32})/[0-9a-f]{64}\.(svg|png|jpe?g|webp)", source):
             raise HTTPException(422, localized_message("空间定位图来源无效"))
         path = Path(settings.MEDIA_PATH) / source.removeprefix("/media/")
         if not path.is_file():
