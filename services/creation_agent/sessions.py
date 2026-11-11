@@ -39,11 +39,30 @@ async def agent_models(ctx: AuthContext):
 
 class AgentSessions:
     async def create(self, novel_id: int, ctx: AuthContext) -> AgentConversation:
+        return await self._project_conversation(novel_id, ctx, reuse=False)
+
+    async def default(self, novel_id: int, ctx: AuthContext, conversation_id: int | None = None) -> AgentConversation:
+        if conversation_id is not None:
+            conversation = await self.get(conversation_id, ctx)
+            if conversation.novel_id != novel_id:
+                raise HTTPException(404, localized_message('会话不属于当前项目'))
+            return conversation
+        return await self._project_conversation(novel_id, ctx, reuse=True)
+
+    async def _project_conversation(self, novel_id: int, ctx: AuthContext, *, reuse: bool) -> AgentConversation:
         await ensure_novel_access(novel_id, ctx)
-        novel = await Novel.get_or_none(id=novel_id)
-        if novel is None:
-            raise HTTPException(404, localized_message('项目不存在'))
-        return await AgentConversation.create(novel=novel, created_by=ctx.user.id if ctx.user else None, team_id=novel.team_id)
+        async with in_transaction() as connection:
+            await Novel.filter(id=novel_id).using_db(connection).update(updated_at=F('updated_at'))
+            novel = await Novel.get_or_none(id=novel_id).using_db(connection)
+            if novel is None:
+                raise HTTPException(404, localized_message('项目不存在'))
+            owner = ctx.user.id if ctx.user else None
+            if reuse:
+                conversation = await AgentConversation.filter(novel_id=novel_id, created_by=owner,
+                    team_id=novel.team_id, deleted_at__isnull=True).using_db(connection).order_by('-updated_at', '-id').first()
+                if conversation is not None:
+                    return conversation
+            return await AgentConversation.create(novel=novel, created_by=owner, team_id=novel.team_id, using_db=connection)
 
     async def get(self, conversation_id: int, ctx: AuthContext, *, include_deleted: bool = False, include_deleted_project: bool = False) -> AgentConversation:
         query = AgentConversation.filter(id=conversation_id, created_by=ctx.user.id if ctx.user else None)

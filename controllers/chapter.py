@@ -61,7 +61,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             await novel.save()
 
     async def extract(
-        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None
+        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None
     ) -> AiTask:
         """提交提取任务，返回任务记录供前端轮询。"""
         chapter = await self.get(chapter_id)
@@ -87,6 +87,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             "max_context_characters": config.max_context_characters,
             "prompt_language": prompt_language,
         }
+        if conversation_id is not None:
+            request_params["conversation_id"] = conversation_id
         if team_id is not None:
             request_params["team_id"] = team_id
         if user_id is not None:

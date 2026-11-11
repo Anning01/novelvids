@@ -84,7 +84,7 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
         return localized_message('本轮用量已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。')
     if 'Context remains above the input budget' in message:
         return localized_message('当前工作上下文压缩后仍超过设置额度。请提高工作上下文额度，或减少本轮输入；已保存的修改仍然有效。')
-    last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason')), None)
+    last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason') and call.get('phase', 'main') != 'summary'), None)
     if last_finish == 'length':
         return localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。')
     if '增量修复已用完' in message or 'incremental repair' in message:

@@ -18,6 +18,9 @@ export const agentApi = {
   conversations: (novelId: number, deleted = false) => request<SingleResponse<AgentConversation[]>>(`${base}/conversations?novel_id=${novelId}${deleted ? '&deleted=true' : ''}`),
   deleteConversation: (id: number) => request<SingleResponse<null>>(`${base}/conversations/${id}`, { method: 'DELETE' }),
   restoreConversation: (id: number) => request<SingleResponse<AgentConversation>>(`${base}/conversations/${id}/restore`, { method: 'POST' }),
+  resumeOrCreate: (novelId: number) => request<SingleResponse<AgentConversation>>(`${base}/conversations/default`, {
+    method: 'POST', body: JSON.stringify({ novel_id: novelId }),
+  }),
   create: (novelId: number) => request<SingleResponse<AgentConversation>>(`${base}/conversations`, {
     method: 'POST', body: JSON.stringify({ novel_id: novelId }),
   }),

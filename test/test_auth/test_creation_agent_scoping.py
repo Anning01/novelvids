@@ -192,3 +192,25 @@ async def test_uncertain_task_review_cannot_bypass_private_task_access_or_viewer
         f"/api/task/{task.id}/review", headers=headers, json=body
     )
     assert denied.json()["code"] == 403
+
+
+@pytest.mark.asyncio
+async def test_project_default_and_extract_attachment_keep_user_and_team_privacy(client, monkeypatch):
+    _, owner, teammate, conversation, _, owner_ctx = await setup_private_run(client)
+    teammate_membership = await TeamMember.get(user=teammate, team_id=owner_ctx.team_id)
+    other_ctx = AuthContext(user=teammate, membership=teammate_membership, team_id=owner_ctx.team_id)
+    own = await agent_sessions.default(conversation.novel_id, owner_ctx)
+    other = await agent_sessions.default(conversation.novel_id, other_ctx)
+    assert own.id == conversation.id and other.id != conversation.id
+    assert other.created_by == teammate.id and other.team_id == owner_ctx.team_id
+    with pytest.raises(HTTPException) as forbidden:
+        await agent_sessions.default(conversation.novel_id, other_ctx, conversation.id)
+    assert forbidden.value.status_code == 404
+    from models.chapter import Chapter
+    chapter = await Chapter.create(novel_id=conversation.novel_id, number=1, name='第一章', content='合成材料')
+    runner = AsyncMock()
+    monkeypatch.setattr('api.chapter.chapter_controller.extract', runner)
+    response = await client.post(f'/api/chapter/extract/{chapter.id}', json={'conversation_id': conversation.id},
+        headers=_auth(await _login(client, teammate.username)))
+    assert response.json()['code'] == 404
+    runner.assert_not_called()

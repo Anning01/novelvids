@@ -333,3 +333,30 @@ def test_sdk_counter_respects_both_admin_token_and_character_budgets():
     characters = wire_size(native_messages(messages), request_parameters([]))['total_characters']
     assert normalized == max(normal, math.ceil(characters * token_budget / character_limit))
     assert normalized > normal
+
+
+@pytest.mark.asyncio
+async def test_truncated_public_prose_is_not_reported_as_a_completed_run(monkeypatch, tmp_path):
+    from contextlib import asynccontextmanager
+    conversation, request, _ = await session_fixture(runtime='deepagents')
+    monkeypatch.setattr(settings, 'CREATION_AGENT_CHECKPOINT_PATH', str(tmp_path / 'truncated.db'))
+    async def respond(messages, info):
+        yield '这是一段尚未写完的正文'
+    class TruncatedModel(FunctionModel):
+        @asynccontextmanager
+        async def request_stream(self, *args, **kwargs):
+            async with super().request_stream(*args, **kwargs) as response:
+                response.finish_reason = 'length'
+                yield response
+    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args, **kwargs: TruncatedModel(stream_function=respond))
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
+    await executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 4
+    assistant = await AgentMessage.get(task_id=task.id, role='assistant')
+    assert assistant.usage['requests'] == 1
+    assert assistant.usage['calls'][0]['status'] == 'completed'
+    assert assistant.usage['calls'][0]['finish_reason'] == 'length'
+    assert (await agent_event_log.load(assistant))[-1]['type'] == 'RUN_ERROR'

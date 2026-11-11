@@ -76,7 +76,7 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
-        for key in ('agent_runtime', 'creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
+        for key in ('conversation_id', 'agent_runtime', 'creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
             if key in parent.params:
                 inherited[key] = parent.params[key]
     return {

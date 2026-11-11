@@ -75,7 +75,8 @@ async def test_snapshot_and_history_include_child_model_steps_and_timing(failed)
                 await execution.generate('story', {'source': 'synthetic'}, Output)
         else:
             assert (await execution.generate('story', {'source': 'synthetic'}, Output)).result == 'ok'
-    children = await AgentMessage.filter(conversation=message.conversation_id, role='assistant').exclude(id=message.id)
+    children = [row for row in await AgentMessage.filter(conversation=message.conversation_id, role='assistant')
+                if (row.run_input or {}).get('internal_production_step')]
     assert len(children) == 1
     events = await agent_event_log.load(children[0])
     assert [event['value']['status'] for event in events] == ['running', 'failed' if failed else 'completed']

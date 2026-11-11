@@ -303,7 +303,11 @@ onBeforeUnmount(() => {
 })
 onMounted(() => {
   window.addEventListener('focus', refreshVisibleState)
-  productionTimer = setInterval(() => { if (!document.hidden) void store.refreshProduction() }, 4000)
+  productionTimer = setInterval(() => {
+    if (document.hidden) return
+    void store.refreshProduction()
+    void store.refreshConversations().catch(() => {})
+  }, 4000)
 })
 </script>
 

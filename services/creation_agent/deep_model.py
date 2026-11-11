@@ -144,5 +144,7 @@ class RecordedChatModel(BaseChatModel):
                     'input_tokens': usage.input_tokens, 'output_tokens': usage.output_tokens,
                     'total_tokens': usage.input_tokens + usage.output_tokens,
                 }, response_metadata={'finish_reason': response.finish_reason, 'model_provider': self._llm_type}))
+            if not internal and response.finish_reason == 'length':
+                raise ValueError('模型本次输出达到上限，未能完成要求')
         finally:
             self.recorded.phase = previous_phase

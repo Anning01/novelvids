@@ -6,7 +6,7 @@ import type { AgentRun } from './types'
 import { reactive } from 'vue'
 
 vi.mock('./api', () => ({
-  agentApi: { capabilities: vi.fn(), conversations: vi.fn(), create: vi.fn(), history: vi.fn(),
+  agentApi: { capabilities: vi.fn(), conversations: vi.fn(), resumeOrCreate: vi.fn(), create: vi.fn(), history: vi.fn(),
     submit: vi.fn(), snapshot: vi.fn(), stop: vi.fn(), undo: vi.fn(), deleteConversation: vi.fn(), restoreConversation: vi.fn() },
   runSubscription: vi.fn(),
 }))
@@ -19,8 +19,10 @@ beforeEach(() => {
   vi.resetAllMocks()
   setActivePinia(createPinia())
   localStorage.clear()
+  sessionStorage.clear()
   vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: { enabled: true, can_write: true, max_targets: 8, models: [] } })
   vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [conversation] })
+  vi.mocked(agentApi.resumeOrCreate).mockResolvedValue({ code: 0, message: '', data: conversation })
   vi.mocked(agentApi.history).mockResolvedValue({ code: 0, message: '', data: { items: [], next_before: null } })
   vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: run })
   vi.mocked(runSubscription).mockResolvedValue({ runAgent: vi.fn().mockResolvedValue({}), abortRun: vi.fn() } as unknown as Awaited<ReturnType<typeof runSubscription>>)
@@ -321,4 +323,58 @@ it('keeps streamed reasoning and tool steps visible, then restores the persisted
   await store.follow('run-1')
   expect(store.messages[0]?.activity).toEqual(activity)
   expect(store.messages[0]?.finished_at).toBe('2026-11-07T01:00:03Z')
+})
+
+it('keeps the selected project conversation across chapter changes, remounts and newer button records', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  const newer = { ...conversation, id: 2 }
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [newer, conversation] })
+  await store.open(7)
+  expect(store.conversationId).toBe(1)
+  setActivePinia(createPinia())
+  const remounted = useCreationAgentStore()
+  await remounted.open(7)
+  expect(remounted.conversationId).toBe(1)
+  expect(agentApi.create).not.toHaveBeenCalled()
+  expect(agentApi.resumeOrCreate).not.toHaveBeenCalled()
+})
+
+it('resolves the project default for an automatic first message but keeps explicit new conversation separate', async () => {
+  const store = useCreationAgentStore()
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [] })
+  vi.mocked(agentApi.resumeOrCreate).mockResolvedValue({ code: 0, message: '', data: { ...conversation, id: 8 } })
+  vi.mocked(agentApi.submit).mockResolvedValue({ code: 0, message: '', data: { ...run, conversation_id: 8 } })
+  await store.open(7)
+  expect(await store.send(input)).toBe(true)
+  expect(store.conversationId).toBe(8)
+  expect(agentApi.resumeOrCreate).toHaveBeenCalledWith(7)
+  expect(agentApi.create).not.toHaveBeenCalled()
+  vi.mocked(agentApi.create).mockResolvedValue({ code: 0, message: '', data: { ...conversation, id: 9 } })
+  await store.newConversation()
+  expect(store.conversationId).toBe(9)
+  expect(agentApi.create).toHaveBeenCalledWith(7)
+})
+
+it('never restores a remembered conversation outside the server-authorized project list', async () => {
+  sessionStorage.setItem('creation-agent:conversation:personal:7', '999')
+  const store = useCreationAgentStore()
+  await store.open(7)
+  expect(store.conversationId).toBe(1)
+  expect(agentApi.history).toHaveBeenCalledWith(1, undefined)
+})
+
+it('reloads new button-task messages in the selected project conversation without selecting a different conversation', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [
+    { ...conversation, id: 2 }, { ...conversation, updated_at: '2026-11-11T09:00:00Z' },
+  ] })
+  vi.mocked(agentApi.history).mockResolvedValue({ code: 0, message: '', data: { items: [{
+    id: 90, role: 'assistant', task_id: 'button', content: '本章资产提取已完成', status: 3, changes: [], usage: {}, created_at: '',
+  }], next_before: null } })
+  await store.refreshConversations()
+  expect(store.conversationId).toBe(1)
+  expect(store.messages[0]?.content).toBe('本章资产提取已完成')
+  expect(agentApi.create).not.toHaveBeenCalled()
 })

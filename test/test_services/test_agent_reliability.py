@@ -467,3 +467,20 @@ async def test_storyboard_draft_renders_canonical_sections_with_default_strategy
     await scene.refresh_from_db()
     assert '【禁止项】' in scene.prompt and '【全局前置条件】' in scene.prompt
     assert '镜头时长:6s' in scene.prompt and '老人在晨雾中漫步' in scene.prompt
+
+
+@pytest.mark.asyncio
+async def test_summary_output_limit_does_not_block_main_tool_repair():
+    from pydantic_ai.messages import ModelRequest, RetryPromptPart
+    from pydantic_ai.models.function import FunctionModel
+    from services.creation_agent.model_boundary import RecordedAgentModel
+    from models.creation_agent import AgentConversation
+    from pydantic_ai.models import ModelRequestParameters
+    changes, _, _, _, task = await crud()
+    conversation = await AgentConversation.create(novel_id=changes.novel_id)
+    message = await AgentMessage.create(conversation=conversation, task=task, request_id=task.id, request_hash='summary-limit', role='assistant')
+    model = RecordedAgentModel(FunctionModel(lambda messages, info: None), message=message, before_request=AsyncMock(), max_characters=None, repair_root=str(task.id))
+    model.calls = [{'phase': 'main', 'finish_reason': 'tool_call', 'usage_reported': True}, {'phase': 'summary', 'finish_reason': 'length', 'usage_reported': True}]
+    await model._begin([ModelRequest(parts=[RetryPromptPart('invalid tool arguments', tool_name='link_scene_references', tool_call_id='repair')])], ModelRequestParameters())
+    repair = await AgentOperation.get(task=task, key='recovery:repair')
+    assert repair.state == 'completed'

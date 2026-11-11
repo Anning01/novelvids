@@ -21,6 +21,8 @@ def main():
     parser.add_argument('--model-config-id', type=int, required=True)
     parser.add_argument('--database', type=Path, default=Path('data/deep-agent-acceptance.db'))
     parser.add_argument('--checkpoints', type=Path, default=Path('data/deep-agent-acceptance-checkpoints.db'))
+    parser.add_argument('--max-output-tokens', type=int)
+    parser.add_argument('--ten-chapter-identities', action='store_true')
     parser.add_argument('--port', type=int, default=9010)
     args = parser.parse_args()
     source = args.source_database.resolve(strict=True)
@@ -67,12 +69,16 @@ def main():
         async with original_lifespan(app):
             await AiModelConfig.update_or_create(name='DeepSeek · Deep Agents 验收', task_type=7, defaults={
                 'base_url': model['base_url'], 'api_key': 'runtime-only', 'model': model['model'],
-                'supports_tool_calls': True, 'is_active': True, 'pricing': model['pricing'], 'max_tokens': 2048,
+                'supports_tool_calls': True, 'is_active': True, 'pricing': model['pricing'], 'max_tokens': args.max_output_tokens or 2048,
             })
             await AgentSettings.get_or_create(id=1, defaults={'configuration': AgentConfiguration(
                 enabled=True, runtime='deepagents', working_input_tokens=16000, max_output_tokens=2048,
                 compaction_trigger_ratio=0.7, compaction_target_ratio=0.25, summary_output_tokens=768,
             ).model_dump()})
+            if args.max_output_tokens is not None:
+                stored = await AgentSettings.get(id=1)
+                stored.configuration = AgentConfiguration.model_validate({**stored.configuration, 'max_output_tokens': args.max_output_tokens}).model_dump()
+                await stored.save(update_fields=['configuration'])
             await GeneralConfig.get_or_create(id=1, defaults={'prompt_language': 'zh'})
             novel = await Novel.get_or_none(name='Deep Agents 七技能验收')
             if novel is None:
@@ -84,6 +90,9 @@ def main():
                     prompt='渡口，阿宁穿灰色长衣，把旧船票交给林舟。', duration=6)
                 await Scene.create(chapter=second, sequence=1, description='灯塔回应',
                     prompt='灯塔外，林舟穿蓝色外套，攥紧旧船票，低声回应信号。', duration=6)
+            if args.ten_chapter_identities:
+                from test.project_identity_fixture import seed_project_identities
+                await seed_project_identities(novel)
             chapters = await Chapter.filter(novel=novel).order_by('number').values('id', 'number', 'name')
             scenes = await Scene.filter(chapter__novel_id=novel.id).values('id', 'chapter_id')
             print(json.dumps({'acceptance_project': novel.id, 'chapters': chapters, 'scenes': scenes}, ensure_ascii=False), flush=True)

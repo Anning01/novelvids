@@ -51,7 +51,8 @@ class RecordedAgentModel(WrapperModel):
                 from services.creation_agent.reliability import retry_issues, failure_checkpoint, claim_repair
                 issues = retry_issues(messages)
                 if issues:
-                    if self.calls and self.calls[-1].get('finish_reason') == 'length':
+                    last_main = next((call for call in reversed(self.calls) if call.get('phase', 'main') != 'summary'), None)
+                    if last_main and last_main.get('finish_reason') == 'length':
                         await failure_checkpoint(self.repair_root, self.message.id,
                             [{'code': 'output_length'}], stage=self.stage)
                         raise ValueError(localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'))

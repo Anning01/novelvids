@@ -25,6 +25,7 @@ import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
 import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import { useCreationAgentStore } from '@/features/creation-agent/store'
 import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
@@ -64,6 +65,7 @@ function readProjectMeta(): ManualProjectMeta {
 
 const route = useRoute()
 const router = useRouter()
+const agentStore = useCreationAgentStore()
 const projectId = computed(() => Number(route.params.projectId))
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 const selectedChapterId = computed(() => Number(route.query.chapter))
@@ -365,7 +367,8 @@ async function extractSelectedChapterAssets() {
   submittingExtraction.value = true
   extractionSubmissionError.value = ''
   try {
-    const task = (await api.extract(chapter.id)).data
+    const conversationId = agentStore.projectId === projectId.value ? agentStore.conversationId : null
+    const task = (await (conversationId ? api.extract(chapter.id, conversationId) : api.extract(chapter.id))).data
     extractionTask.value = task
     await monitorExtractionTask(task.id, true)
   } catch (error) {
