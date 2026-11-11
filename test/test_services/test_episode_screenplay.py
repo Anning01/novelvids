@@ -77,3 +77,24 @@ asyncio.run(main())
     with sqlite3.connect(db) as conn:
         assert conn.execute('SELECT content,screenplay FROM chapters ORDER BY id').fetchall() == [
             ('原文', None), ('', '已编辑的导演稿')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concurrent_edit", [False, True])
+async def test_regenerate_requires_the_confirmed_script_and_protects_later_edits(configured_creation_agent, monkeypatch, concurrent_edit):
+    from fastapi import HTTPException
+    novel = await Novel.create(name="重新改编")
+    chapter = await Chapter.create(novel=novel, number=1, name="救人", content="小说", screenplay="原导演稿")
+    with pytest.raises(HTTPException):
+        await submit_screenplay(chapter.id, AuthContext())
+    async def generate(*args):
+        if concurrent_edit:
+            await Chapter.filter(id=chapter.id).update(screenplay="手动改稿")
+        return EpisodeScript(screenplay="新导演稿")
+    monkeypatch.setattr(SkillExecution, "generate", generate)
+    task = await submit_screenplay(chapter.id, AuthContext(), "原导演稿")
+    await ai_task_executor.run(task)
+    await chapter.refresh_from_db()
+    await task.refresh_from_db()
+    assert task.status == (4 if concurrent_edit else 3)
+    assert chapter.content == "小说" and chapter.screenplay == ("手动改稿" if concurrent_edit else "新导演稿")

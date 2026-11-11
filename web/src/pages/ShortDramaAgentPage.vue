@@ -185,9 +185,15 @@ function taskKey(id: number) { return `novelvids:screenplay:${projectId.value}:$
 
 async function generateScreenplay(id: number, existingTask = sessionStorage.getItem(taskKey(id))) {
   if (generatingScripts.value[id] || (!existingTask && (!canEdit.value || editing.value))) return
+  const previous = chapterDetails.value[id]?.screenplay
+  if (!existingTask && previous && !await appConfirm({
+    title: tr('重新生成本集剧本'),
+    message: tr('将根据本集原文重新改编，成功后替换当前导演剧本。'),
+    confirmLabel: tr('重新生成'),
+  })) return
   generatingScripts.value[id] = true
   try {
-    const taskId = existingTask || (await api.generateScreenplay(id)).data.id
+    const taskId = existingTask || (previous ? await api.generateScreenplay(id, previous) : await api.generateScreenplay(id)).data.id
     sessionStorage.setItem(taskKey(id), taskId)
     const task = await pollUntilTerminal(async signal => (await api.task(taskId, signal)).data, {
       signal: scriptRequests.signal, intervalMs: 1200,
@@ -864,9 +870,9 @@ onBeforeUnmount(() => {
               <button type="button" :aria-pressed="episodeView === 'source'" @click="episodeViews[selectedEpisode.id] = 'source'">{{ tr('原文') }}</button>
               <button type="button" :aria-pressed="episodeView === 'screenplay'" @click="episodeViews[selectedEpisode.id] = 'screenplay'">{{ tr('导演剧本') }}</button>
             </div>
-            <AppButton v-if="canEdit && selectedEpisode.content && !selectedEpisode.screenplay && !editing" variant="primary" size="sm"
-              :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
-              {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : tr('生成本集剧本') }}
+            <AppButton v-if="canEdit && selectedEpisode.content?.trim()" variant="primary" size="sm"
+              :disabled="editing" :title="editing ? tr('请先保存或取消编辑') : undefined" :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
+              {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : selectedEpisode.screenplay ? tr('重新生成本集剧本') : tr('生成本集剧本') }}
             </AppButton>
           </div>
           <div class="episode-document">
@@ -902,7 +908,7 @@ onBeforeUnmount(() => {
 .tag-editor textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; }
 .tag-editor textarea:focus-visible { outline: 2px solid var(--app-accent); }
 
-.episode-doc-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
+.episode-doc-tools { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
 .episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
 .episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
 .episode-doc-tabs button[aria-pressed="true"] { background:var(--app-surface); color:var(--app-accent); box-shadow:0 1px 3px #0002; }

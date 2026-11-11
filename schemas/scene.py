@@ -340,6 +340,8 @@ class SceneOut(SceneFullProperties, BaseResponse):
     chapter_id: int = Field(..., description="所属章节ID")
     prompt_params: Optional[dict[str, Any]] = Field(None, description="提示词参数配置")
 
+    storyboard_binding_rules: dict | None = None
+
     @model_validator(mode="after")
     def _resolve_media(self):
         """对 metadata 中持久化的媒体引用重新签发（首尾帧与参考素材）。"""
@@ -352,6 +354,8 @@ class SceneOut(SceneFullProperties, BaseResponse):
                 metadata[key] = resolve_media_url(raw) or raw
         sheet = metadata.get('storyboard_sheet')
         if isinstance(sheet, dict):
+            from prompts.storyboard_sheet_binding import sheet_binding_rules
+            self.storyboard_binding_rules = sheet_binding_rules(sheet, metadata.get("prompt_language", "zh"))
             for key in ('image_url', 'previous_image_url'):
                 if isinstance(sheet.get(key), str):
                     sheet[key] = resolve_media_url(sheet[key]) or sheet[key]

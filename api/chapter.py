@@ -11,7 +11,7 @@ from auth.deps import (
 from controllers.chapter import chapter_controller
 from models.chapter import Chapter
 from schemas.ai_task import AiTaskOut
-from schemas.chapter import ChapterBriefOut, ChapterCreate, ChapterUpdate, ChapterPatch, ChapterOut, ChapterExtractRequest
+from schemas.chapter import ChapterBriefOut, ChapterCreate, ChapterUpdate, ChapterPatch, ChapterOut, ChapterExtractRequest, ScreenplayGenerationRequest
 from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
@@ -95,9 +95,10 @@ async def delete_chapter(
 
 @router.post("/{chapter_id}/screenplay", summary="根据本集原文生成导演剧本", response_model=ResponseSchema[AiTaskOut])
 async def generate_episode_screenplay(chapter_id: int, bg: BackgroundTasks,
+                                      body: ScreenplayGenerationRequest | None = None,
                                       ctx: AuthContext = Depends(require_chapter_access), _: AuthContext = _EDITOR):
     from services.chapter_screenplay import submit_screenplay
-    task = await submit_screenplay(chapter_id, ctx)
+    task = await submit_screenplay(chapter_id, ctx, body.expected_screenplay if body else None)
     bg.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)
 

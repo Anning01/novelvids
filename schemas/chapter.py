@@ -28,6 +28,11 @@ class ChapterFullProperties(ChapterProperties):
 
 # --- 输入 Schema (In-bound) ---
 
+class ScreenplayGenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_screenplay: str | None = None
+
+
 class ChapterExtractRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     conversation_id: int | None = Field(None, gt=0)

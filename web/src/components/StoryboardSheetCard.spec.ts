@@ -17,7 +17,7 @@ it('displays a generated image without replacing the video prompt', async () => 
   expect(wrapper.emitted('updated')?.[0]).toEqual([saved])
   expect(saved.prompt).toBe(scene.prompt)
   await wrapper.setProps({scene: saved})
-  expect(wrapper.get('img').attributes('src')).toBe('/media/board.png')
+  expect(wrapper.get('button').attributes('aria-label')).toBe('重新生成故事版')
   wrapper.unmount()
 })
 it('recovers an active task after reload and exposes failure without retrying', async () => {
@@ -28,9 +28,12 @@ it('recovers an active task after reload and exposes failure without retrying', 
   expect(api.generateStoryboardSheet).not.toHaveBeenCalled()
   wrapper.unmount()
 })
-it('keeps a saved image visible when generation is disabled', () => {
+it('can restore an excluded reference without regenerating when generation is disabled', async () => {
   const wrapper = mount(StoryboardSheetCard, {props: {scene: {...scene, metadata: {storyboard_sheet: {image_url: '/media/old.png'}}}, enabled: false}})
   expect(wrapper.find('button').exists()).toBe(false)
-  expect(wrapper.get('img').attributes('src')).toBe('/media/old.png')
+  expect(wrapper.find('img').exists()).toBe(false)
+  await wrapper.setProps({canUse: true})
+  await wrapper.get('button').trigger('click')
+  expect(wrapper.emitted('use')).toHaveLength(1)
   wrapper.unmount()
 })

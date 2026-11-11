@@ -452,3 +452,20 @@ it('cancels and saves the title-row project format and custom visual style', asy
     expect(wrapper.get('[title="水墨淡彩"]').text()).toContain('自定义风格')
   } finally { wrapper.unmount() }
 })
+
+it('offers regeneration on the original tab and keeps the existing screenplay when cancelled', async () => {
+  const {appConfirmState, resolveAppConfirm} = await import('@/shared/confirmDialog')
+  vi.mocked(api.chapter).mockResolvedValue({code: 0, message:'', data:{...chapter, screenplay:'已确认导演稿'}})
+  const wrapper = mount(ShortDramaAgentPage, {global:{plugins:[pinia],components:{AppButton},stubs:{RouterLink:{template:'<a><slot /></a>'}}}})
+  try {
+    await flushPromises()
+    await wrapper.get('.episode-doc-tabs button').trigger('click')
+    const button = wrapper.get('.episode-doc-tools > button')
+    expect(button.text()).toBe('重新生成本集剧本')
+    await button.trigger('click')
+    expect(appConfirmState.open).toBe(true)
+    resolveAppConfirm(false)
+    await flushPromises()
+    expect(api.generateScreenplay).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
+})

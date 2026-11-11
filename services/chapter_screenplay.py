@@ -17,7 +17,7 @@ class EpisodeScript(BaseModel):
     screenplay: str = Field(min_length=1, description="可直接交给演员和制作团队的完整分场导演剧本")
 
 
-async def submit_screenplay(chapter_id, ctx):
+async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = None):
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
         raise HTTPException(404, localized_message("章节不存在"))
@@ -26,8 +26,12 @@ async def submit_screenplay(chapter_id, ctx):
     params = await prepare_workflow(params)
     async with project_write(chapter.novel_id) as db:
         await chapter.refresh_from_db(using_db=db)
-        if chapter.screenplay or not (chapter.content or "").strip():
-            raise HTTPException(409, localized_message("本集已有导演剧本或缺少原文"))
+        if not (chapter.content or "").strip():
+            raise HTTPException(409, localized_message("本集缺少可改编的原文"))
+        if (chapter.screenplay or None) != expected_screenplay:
+            raise HTTPException(409, localized_message("本集原文或剧本已修改，请刷新后查看"))
+        if expected_screenplay is not None:
+            params["screenplay_version"] = fingerprint(expected_screenplay)
         for task in await AiTask.filter(task_type=AiTaskTypeEnum.screenplay, status__in=ACTIVE_TASK_STATUSES).using_db(db):
             if task.request_params.get("chapter_id") == chapter_id:
                 return task
@@ -41,7 +45,8 @@ class ScreenplayHandler(BaseTaskHandler):
         chapter = await Chapter.get(id=params["chapter_id"], novel_id=params["novel_id"])
 
         def verify_source():
-            if chapter.screenplay or fingerprint([chapter.name, chapter.content]) != params["source_version"]:
+            current = fingerprint(chapter.screenplay) if chapter.screenplay else None
+            if current != params.get("screenplay_version") or fingerprint([chapter.name, chapter.content]) != params["source_version"]:
                 raise ValueError(localized_message("本集原文或剧本已修改，请刷新后查看"))
 
         from models.agent_operation import AgentOperation

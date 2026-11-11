@@ -381,3 +381,18 @@ async def test_full_script_write_requires_every_page_and_replays_only_identical_
     assert change.id == again.id
     with pytest.raises(ValueError, match='标识'):
         await service.revise_episode_script(request.chapter_id, '同标识不同正文', None, 'saved')
+
+
+@pytest.mark.parametrize(('model', 'tag'), [('', '[图3]'), ('minimax_h3', '<Picture 3>'),
+    ('minimax_h3_autodl', '<Picture 3>'), ('seedance_2_5', '@图片3'), ('seedance_2_fast', '@图片3'), ('wan_3', '图3')])
+def test_sheet_reference_uses_final_order_and_draft_language(model, tag):
+    from prompts.storyboard_sheet_binding import model_image_format, sheet_binding_rules
+    from schemas.video import VideoReferenceMedia
+    from services.video.reference_media import reference_mention_syntax, render_reference_mentions, select_referenced_media
+    sheet = VideoReferenceMedia(type='image', url='/media/new-sheet.png', mention_url='novelvids:storyboard-sheet')
+    rule = sheet_binding_rules({},'zh')[model or 'general']
+    prompt = rule['line'].replace('{image}', reference_mention_syntax('image', sheet.mention_url))
+    chosen = select_referenced_media(prompt, [sheet])
+    assert chosen == [sheet]
+    sent = render_reference_mentions(prompt, chosen, image_indices={sheet.mention_url:3}, image_format=model_image_format(model))
+    assert tag in sent and 'novelvids:' not in sent and sheet.url not in sent

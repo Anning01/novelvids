@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch, ref } from 'vue'
-import { api, mediaUrl, sleep } from '@/api'
+import { api, sleep } from '@/api'
 import { tr } from '@/i18n'
+import { GalleryHorizontalEnd } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
 import type { Scene } from '@/types'
 const props = defineProps<{ scene: Scene; enabled: boolean; canUse?: boolean }>()
@@ -56,19 +57,16 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
-  <section class="sheet-card" :aria-label="tr('逐镜线稿故事版')">
-    <header><strong>{{ tr('逐镜线稿故事版') }}</strong><AppButton v-if="enabled" variant="secondary" size="sm" :loading="busy || submitting" :disabled="busy || submitting" @click="generate">{{ busy || submitting ? tr('生成中') : image ? tr('重新生成故事版') : tr('生成故事版') }}</AppButton></header>
-    <a v-if="image" :href="mediaUrl(image)" target="_blank" rel="noopener"><img :src="mediaUrl(image)" :alt="tr('分镜 {p0} 的线稿故事版', {p0: scene.sequence})" loading="lazy" /></a>
-    <AppButton v-if="image && canUse" variant="secondary" size="sm" @click="emit('use')">{{ tr('使用故事版参考') }}</AppButton>
-    <p v-else-if="!image" role="status">{{ busy ? tr('正在绘制本镜故事版') : tr('尚未生成故事版') }}</p>
-    <p v-if="error" class="sheet-error" role="alert">{{ error }}</p>
-  </section>
+  <div class="sheet-actions">
+    <AppButton v-if="enabled" variant="secondary" size="sm" :aria-label="image ? tr('重新生成故事版') : tr('生成故事版')" :title="image ? tr('重新生成故事版') : tr('生成故事版')" :loading="busy || submitting" :disabled="busy || submitting" @click="generate">
+      <GalleryHorizontalEnd v-if="!busy && !submitting" :size="15" />{{ busy || submitting ? tr('生成中') : tr('逐镜线稿故事版') }}
+    </AppButton>
+    <AppButton v-if="image && canUse" variant="ghost" size="sm" @click="emit('use')">{{ tr('使用故事版参考') }}</AppButton>
+    <small v-if="error" role="alert">{{ error }}</small>
+  </div>
 </template>
 
 <style scoped>
-.sheet-card { padding: 12px; border: 1px solid var(--app-border); border-radius: 10px; color: var(--app-text); background: var(--app-surface-muted); }
-header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-img { display:block; width:100%; max-height:360px; object-fit:contain; margin-top:12px; border-radius:6px; }
-p { color:var(--app-text-secondary); font-size:13px; margin:10px 0 0; }
-.sheet-error { color: var(--app-danger, var(--app-text)); }
+.sheet-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+small { color:var(--app-danger); }
 </style>

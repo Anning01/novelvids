@@ -1,5 +1,9 @@
 {
   "common": {
+    "请恢复通用稿或选择与专项稿匹配的视频模型": "Restore the general draft or select the video model for this prompt.",
+    "重新生成本集剧本": "Regenerate episode screenplay",
+    "将根据本集原文重新改编，成功后替换当前导演剧本。": "Adapt the original text again and replace the current screenplay when the new draft is ready.",
+    "请先保存或取消编辑": "Save or cancel your edits first.",
     "对白": "Dialogue",
     "画外音": "Off-screen",
     "内心 OS": "Inner voice",

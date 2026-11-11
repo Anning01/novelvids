@@ -25,6 +25,11 @@ def _normalize_scene_metadata(metadata: dict) -> dict:
         raw = metadata.get(key)
         if isinstance(raw, str) and raw:
             metadata[key] = normalize_media_url(raw) or raw
+    sheet = metadata.get("storyboard_sheet")
+    if isinstance(sheet, dict):
+        for key in ("image_url", "previous_image_url"):
+            if isinstance(sheet.get(key), str) and sheet[key]:
+                sheet[key] = normalize_media_url(sheet[key]) or sheet[key]
     reference_media = metadata.get("video_reference_media")
     if isinstance(reference_media, list):
         for item in reference_media:
