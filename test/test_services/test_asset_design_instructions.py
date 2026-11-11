@@ -8,7 +8,7 @@ from test.visual_fields import trait_labels
 
 
 def synthetic_asset_contract():
-    # Generic protocol fixtures; never copy the developer's private prompt text into tests.
+    # Synthetic templates isolate contract validation from editorial changes.
     return {language: {kind: {
         "task": f"Task:{language}:{kind}:{{aspect_ratio}}" if kind != "item" else "",
         "heading": "角色描述：" if kind == "person" else f"Description:{kind}:",
@@ -77,7 +77,7 @@ def test_optional_template_requires_both_heading_and_final_guard():
             validate_asset_prompt_contract(result, snapshot, 'zh', '16:9')
 
 
-def test_public_empty_contract_keeps_existing_free_text_behavior():
+def test_historical_empty_contract_keeps_existing_free_text_behavior():
     raw = snapshot_skills()
     raw['contents']['asset_contract'] = '{}'
     snapshot = SkillSnapshot.model_validate(raw)

@@ -1,4 +1,4 @@
-"""Public skill resources with optional local overrides and immutable run snapshots."""
+"""Shared creative rules and immutable run snapshots."""
 
 from pathlib import Path
 import hashlib
@@ -49,30 +49,23 @@ class SkillSnapshot(BaseModel):
 def read_skill(name: str) -> str:
     path = ROOT / FILES[name]
     content = path.read_text(encoding="utf-8")
-    private_path = path.with_name(f"{path.stem}.anning{path.suffix}")
-    if not private_path.is_file():
-        return content
-    private_content = private_path.read_text(encoding="utf-8")
     if path.suffix == ".md":
-        if not private_content.strip():
-            raise ValueError(f"Invalid private {name}: instructions must not be empty")
-        return private_content
-    if path.suffix == ".json":
-        public = json.loads(content)
+        if not content.strip():
+            raise ValueError(f"Invalid {name}: instructions must not be empty")
+    else:
         try:
-            private = json.loads(private_content)
+            resource = json.loads(content)
         except json.JSONDecodeError:
-            raise ValueError(f"Invalid private {name}: expected a JSON object") from None
-        if not isinstance(private, dict):
-            raise ValueError(f"Invalid private {name}: expected a JSON object")
+            raise ValueError(f"Invalid {name}: expected a JSON object") from None
+        if not isinstance(resource, dict):
+            raise ValueError(f"Invalid {name}: expected a JSON object")
         if name == "styles" and any(
             not isinstance(style, dict)
             or any(not isinstance(style.get(field), str) or not style[field].strip()
                    for field in ("label", "image", "video"))
-            for style in private.values()
+            for style in resource.values()
         ):
-            raise ValueError("Invalid private styles: expected label, image and video strings")
-        content = json.dumps({**public, **private}, ensure_ascii=False)
+            raise ValueError("Invalid styles: expected label, image and video strings")
     return content
 
 

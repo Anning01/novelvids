@@ -9,19 +9,19 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(not settings.AUTH_ENABLED,
 
 
 @pytest.mark.parametrize("path", ["/api/auth/login", "/api/auth/register", "/api/auth/change-password", "/api/team/members/1/reset-password", "/api/users"])
-async def test_qiling_edition_blocks_password_flows(client, monkeypatch, path):
+async def test_qiling_login_blocks_password_flows(client, monkeypatch, path):
     monkeypatch.setattr(settings, "AUTH_PROVIDER", "qiling")
     result = await client.post(path, json={"username": "legacy", "password": "password123"})
     assert result.json()["code"] == 404
 
 
-async def test_password_edition_is_independent_of_qiling(client, monkeypatch):
+async def test_password_login_is_independent_of_qiling(client, monkeypatch):
     monkeypatch.setattr(settings, "AUTH_PROVIDER", "password")
     monkeypatch.setattr(settings, "QILING_API_BASE_URL", "https://configured-but-disabled.example.test")
-    await User.create(username="open-source", password_hash=hash_password("password123"))
+    await User.create(username="local-user", password_hash=hash_password("password123"))
     status = (await client.get("/api/auth/status")).json()["data"]
     assert status["provider"] == "password" and not status["qiling_enabled"]
-    reply = (await client.post("/api/auth/login", json={"username": "open-source", "password": "password123"})).json()
+    reply = (await client.post("/api/auth/login", json={"username": "local-user", "password": "password123"})).json()
     assert reply["code"] == 0
     for path in ("/api/auth/qiling/start", "/api/auth/qiling/poll"):
         response = await client.post(path, json={"attempt": "a" * 32})

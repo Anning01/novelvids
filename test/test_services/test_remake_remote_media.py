@@ -182,7 +182,7 @@ async def test_rejects_oversize_remote_artifact_before_downloading(monkeypatch, 
 @pytest.mark.parametrize("auth_enabled", [False, True])
 @pytest.mark.parametrize("provider", ["password", "qiling"])
 @pytest.mark.parametrize("host", ["", "root@worker.example"])
-def test_only_qiling_edition_with_configured_host_uses_remote_worker(monkeypatch, auth_enabled, provider, host):
+def test_configured_host_selects_remote_worker_for_any_login_method(monkeypatch, auth_enabled, provider, host):
     from config import settings
     from contextlib import nullcontext
 
@@ -190,7 +190,7 @@ def test_only_qiling_edition_with_configured_host_uses_remote_worker(monkeypatch
     monkeypatch.setattr(settings, "AUTH_PROVIDER", provider)
     monkeypatch.setattr(settings, "REMAKE_MEDIA_SSH_HOST", host)
     worker = media_session()
-    if auth_enabled and provider == "qiling" and host:
+    if host:
         assert isinstance(worker, RemoteMediaSession)
         assert worker.connection.host == host
         assert worker.connection.memory_mb == settings.REMAKE_MEDIA_MEMORY_MB

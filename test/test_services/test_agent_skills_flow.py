@@ -27,15 +27,6 @@ from test.test_services.test_skill_workflow import enabled_project
 from test.test_services.test_prompt_language import _shot
 
 
-@pytest.fixture(autouse=True)
-def public_prompt_pack(tmp_path, monkeypatch):
-    """Exercise the public flow independently of ignored private timing policy."""
-    import prompts.skill_pack as pack
-    for filename in pack.FILES.values():
-        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
-    monkeypatch.setattr(pack, 'ROOT', tmp_path)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
@@ -43,6 +34,7 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
 ):
     novel, first, _ = await enabled_project()
     novel.storyboard_strategy = 'narration'
+    novel.aspect_ratio = '16:9'
     second = await Chapter.create(
         novel=novel,
         number=2,
@@ -72,12 +64,12 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
         api_protocol="volcengine_ark",
         is_active=True,
     )
-    visual = (
-        "完整角色设定图，朴素外套，白色背景。"
-        if language == "zh"
-        else "Complete character sheet, plain coat, white background."
-    )
-    words = "信号来了。" if language == "zh" else "The signal is here."
+    from prompts.skill_pack import SkillSnapshot, snapshot_skills
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt
+
+    visual = fixed_asset_prompt(language, snapshot=SkillSnapshot.model_validate(snapshot_skills()),
+                                ratio=novel.aspect_ratio)
+    words = "信号。" if language == "zh" else "Signal."
     narrator = "旁白" if language == "zh" else "Narrator"
     seen = []
     storyboard_prompt = ""
@@ -110,7 +102,7 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
                 reference_only_types=["人物", "场景", "物品"],
                 visual_prose="@{Alex Chen} meets @{Sam Lee}.",
                 actions=["0s-4s: @{Alex Chen} meets @{Sam Lee}."],
-                dialogue=[f"0s-2s: @{{Alex Chen}}: {words}", f"2s-3s: @{{Sam Lee}}: {words}"],
+                dialogue=[f"0s-1s: @{{Alex Chen}}: {words}", f"2s-3s: @{{Sam Lee}}: {words}"],
                 narration=[f"3s-4s: {narrator}: {words}"],
             )
             storyboard_prompt = format_storyboard_prompt(SoraScenePromptConfig.model_validate(shot), language,

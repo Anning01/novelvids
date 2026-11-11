@@ -66,7 +66,7 @@ it('explains when the only sign-in provider is unavailable', async () => {
   expect(wrapper.findComponent(QilingLogin).exists()).toBe(false)
 })
 
-it('shows account/password login in the open source edition and does not mount Qiling', async () => {
+it('shows account/password login when password login is enabled and does not mount Qiling', async () => {
   const { wrapper, auth } = await mountPage()
   auth.$patch({ provider: 'password', qilingEnabled: false, legalReady: false })
   await flushPromises()
@@ -81,7 +81,7 @@ it('shows account/password login in the open source edition and does not mount Q
   expect(login).toHaveBeenCalledWith('local-admin', 'local-password')
 })
 
-it('does not allow accepting an incomplete legal notice in the Qiling edition', async () => {
+it('does not allow accepting an incomplete legal notice when Qiling login is enabled', async () => {
   const { wrapper, auth } = await mountPage()
   auth.$patch({ legalReady: false })
   await flushPromises()

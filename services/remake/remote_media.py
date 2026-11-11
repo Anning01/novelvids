@@ -123,7 +123,7 @@ class RemoteMediaSession:
 def media_session():
     from config import settings
 
-    if not (settings.AUTH_ENABLED and settings.AUTH_PROVIDER == "qiling" and settings.REMAKE_MEDIA_SSH_HOST):
+    if not settings.REMAKE_MEDIA_SSH_HOST:
         return nullcontext(None)
     return RemoteMediaSession(MediaWorkerConnection(
         host=settings.REMAKE_MEDIA_SSH_HOST, root=settings.REMAKE_MEDIA_WORKER_PATH,

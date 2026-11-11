@@ -120,7 +120,7 @@ class Settings:
     tz = ZoneInfo(TIMEZONE)
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
-    # 登录与团队功能开关（默认关闭，与无鉴权版本行为一致）
+    # 登录与团队功能开关（个人本地使用默认关闭）
     AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", False)
     AUTH_PROVIDER: str = os.getenv("AUTH_PROVIDER", "password").strip().lower()
     if AUTH_PROVIDER not in {"password", "qiling"}:
@@ -170,7 +170,7 @@ class Settings:
         1,
         int(os.getenv("REMAKE_ANALYSIS_CONCURRENCY", "2")),
     )
-    # 仅器灵版（开启鉴权且 provider=qiling）允许启用远程媒体处理。
+    # 配置工作机地址时，重制工坊通过 SSH 处理媒体。
     REMAKE_MEDIA_SSH_HOST = os.getenv("REMAKE_MEDIA_SSH_HOST", "").strip()
     REMAKE_MEDIA_WORKER_PATH = os.getenv("REMAKE_MEDIA_WORKER_PATH", "/opt/novelvids-media-worker").strip()
     REMAKE_MEDIA_TIMEOUT_SECONDS = int(os.getenv("REMAKE_MEDIA_TIMEOUT_SECONDS", "3600"))
