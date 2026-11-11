@@ -26,6 +26,7 @@ class Settings:
         "DATABASE_URL", "sqlite://./data/novelvids.db"  # 默认使用 SQLite 数据库
     )
 
+    CREATION_AGENT_OPTIONAL_SKILLS_PATH: str = os.getenv("CREATION_AGENT_OPTIONAL_SKILLS_PATH", ".agents/skills")
     CREATION_AGENT_CHECKPOINT_PATH: str = os.getenv("CREATION_AGENT_CHECKPOINT_PATH", "data/creation_agent_checkpoints.db")
 
     # 应用配置

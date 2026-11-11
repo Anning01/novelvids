@@ -31,6 +31,8 @@ def skill_files(snapshot):
         def include(match):
             source = posixpath.normpath(posixpath.join(package, match[2]))
             relative = '/'.join(source.split('/')[-2:])
+            if source not in resources:
+                raise ValueError(f'Missing skill reference: {source}')
             if source in resources:
                 files[f'/skills/{package}/{relative}'] = create_file_data(resources[source])
             return f'{match[1]}{relative}{match[3]}'
@@ -54,7 +56,8 @@ async def stream_deep_agent(*, request, conversation, assistant, deps, recorded,
     recent = await AgentMessage.filter(conversation_id=conversation.id, role='assistant', task_id__in=turn_ids).order_by('-id').select_related('task')
     lifecycle = [{'run_id': str(item.task_id), 'status': TaskStatusEnum(item.task.status).name}
                  for item in recent if not (item.run_input or {}).get('internal_production_step')]
-    context = {**deps.context, 'project_facts': facts,
+    optimizer = execution.params.get('video_optimizer', {})
+    context = {**deps.context, 'video_optimizer': {key: value for key, value in optimizer.items() if key != 'files'}, 'project_facts': facts,
         'current_turn': {'run_id': str(assistant.task_id), 'user_request': request.message, 'authorized_scope': scope},
         'recent_run_states': lifecycle}
     async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
@@ -74,7 +77,8 @@ async def stream_deep_agent(*, request, conversation, assistant, deps, recorded,
             history = [(HumanMessage if item.role == 'user' else AIMessage)(content=item.content)
                        for item in previous if item.content and not (item.run_input or {}).get('internal_production_step')]
         inputs = {'messages': [*history, HumanMessage(content=user_request(request.message, scope))],
-                  'files': {**skill_files(execution.snapshot), CATALOG_PATH: create_file_data(manifest)}}
+                  'files': {**skill_files(execution.snapshot),
+                    **{f'/skills/{optimizer["skill"]}/{name}': create_file_data(content) for name, content in optimizer.get('files', {}).items()}, CATALOG_PATH: create_file_data(manifest)}}
         try:
             async for event in public_events(graph, inputs, thread_id=thread_id, run_id=str(assistant.task_id)):
                 if 'threadId' in event:

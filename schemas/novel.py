@@ -149,6 +149,7 @@ class NovelOut(NovelFullProperties, BaseResponse):
     详情输出：返回包括正文在内的所有信息。
     """
     model_config = ConfigDict(from_attributes=True)
+    episodes_managed: bool = False
 
     id: int = Field(..., description="小说/剧本ID")
     workflow_kind: Literal["script", "remake"] = Field(..., description="项目工作流类型")

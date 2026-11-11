@@ -18,7 +18,7 @@ from schemas.chapter import ChapterCreate, ChapterPatch, ChapterUpdate
 from services.ai_task_executor import ai_task_executor
 from services.chapter_titles import normalize_chapter_title
 from utils.crud import CRUDBase
-from utils.enums import AiTaskTypeEnum
+from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
 class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
@@ -51,6 +51,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             values = obj_in.model_dump(exclude_unset=True)
             if values.pop('novel_id', chapter.novel_id) != chapter.novel_id:
                 raise HTTPException(409, localized_message('集数只能在所属作品中编辑'))
+            if 'number' in values and values['number'] is None:
+                raise HTTPException(422, localized_message('集号不能为空'))
             if 'number' in values and values['number'] != chapter.number:
                 await self._ensure_unreferenced(chapter)
                 if await Chapter.filter(novel_id=chapter.novel_id, number=values['number']).exists():
@@ -66,6 +68,10 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         return await self._edit(chapter_id, obj_in)
 
     async def _ensure_unreferenced(self, chapter: Chapter) -> None:
+        for task in await AiTask.filter(status__in=[TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued]):
+            params = task.request_params or {}
+            if params.get('novel_id') == chapter.novel_id and (params.get('chapter_id') == chapter.id or task.task_type in {AiTaskTypeEnum.project_analysis, AiTaskTypeEnum.creation_agent}):
+                raise HTTPException(409, localized_message('本集仍有任务执行中'))
         # Assets store chapter numbers; scenes, videos and exports store database IDs.
         if (await Video.filter(scene__chapter_id=chapter.id).exists()
                 or await ChapterExport.filter(chapter_id=chapter.id).exists()

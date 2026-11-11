@@ -238,27 +238,32 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             self._parse_chapters, novel.content or ""
         )
 
-        # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
-        await Chapter.bulk_create([
-            Chapter(
-                novel_id=novel.id,
-                number=idx + 1,
-                name=normalize_chapter_title(
-                    chapter_result.title,
-                    fallback=novel.name,
-                ),
-                content=chapter_result.content,
-            )
-            for idx, chapter_result in enumerate(parsed_chapters)
-        ])
+        from services.creation_objects import project_write
+        async with project_write(novel_id) as connection:
+            novel = await self.get(novel_id)
+            if novel.episodes_managed or await Chapter.filter(novel_id=novel_id).exists():
+                return novel
+            # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
+            await Chapter.bulk_create([
+                Chapter(
+                    novel_id=novel.id,
+                    number=idx + 1,
+                    name=normalize_chapter_title(
+                        chapter_result.title,
+                        fallback=novel.name,
+                    ),
+                    content=chapter_result.content,
+                )
+                for idx, chapter_result in enumerate(parsed_chapters)
+            ])
 
-        # 更新小说的总章节数和状态
-        await novel.update_from_dict(
-            {
-                "total_chapters": len(parsed_chapters),
-            }
-        )
-        await novel.save()
+            # 更新小说的总章节数和状态
+            await novel.update_from_dict(
+                {
+                    "total_chapters": len(parsed_chapters),
+                }
+            )
+            await novel.save(update_fields=["total_chapters", "updated_at"])
         return novel
 
     @staticmethod

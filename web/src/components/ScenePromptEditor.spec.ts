@@ -384,3 +384,11 @@ it('removes a selection spanning text and the reference chip as a whole', async 
   await editor.trigger('keydown', { key: 'Backspace' })
   expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['之后'])
 })
+
+
+it('renders a saved core-skill variant reference with its selected identity label', () => {
+  const wrapper = mount(ScenePromptEditor, {props: {modelValue: '@{林舟#灯塔守望者} 保持闭口。', options: [{id: 'person-1', kind: 'person', label: '林舟 · 灯塔守望者', syntax: '@{林舟}', group: '角色', aliases: ['林舟#灯塔守望者']}]}})
+  expect(wrapper.get('[data-mention-id="person-1"]').text()).toBe('林舟 · 灯塔守望者')
+  expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  wrapper.unmount()
+})

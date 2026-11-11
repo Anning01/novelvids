@@ -68,7 +68,7 @@ beforeEach(() => {
       author: 'Agent 创建',
       description: 'Agent 模式 · 9:16 · 720p · 写实通用',
       total_chapters: 1,
-      content_length: 0,
+      content_length: 200,
       storyboard_strategy: 'narration',
       storyboard_setting: '旁白规则',
       created_at: '2026-08-06T00:00:00.000Z',
@@ -238,7 +238,8 @@ it('keeps completed story analysis usable when only the cover is awaiting review
   expect(wrapper.text()).not.toContain('分析失败')
   expect(wrapper.text()).not.toContain('外部请求结果待核对')
   expect(wrapper.text()).toContain('封面失败后仍可使用的大纲')
-  expect(wrapper.text()).toContain('林舟')
+  expect(wrapper.text()).not.toContain('林舟')
+  expect(wrapper.text()).not.toContain('人物小传')
   expect(wrapper.get('.creation-cover-notice').text()).toContain('封面暂未生成')
   expect(wrapper.findAll('button').some(button => button.text() === '编辑内容')).toBe(true)
   expect(wrapper.find('.analysis-progress-card').exists()).toBe(false)
@@ -310,4 +311,31 @@ it.each(['light', 'dark'])('shows story results while the cover is pending (%s)'
     wrapper.unmount()
     delete document.documentElement.dataset.theme
   }
+})
+
+
+it('opens and refreshes a finished imported script without creating an analysis task', async () => {
+  const source = (await api.novelMeta(9)).data
+  vi.mocked(api.novelMeta).mockResolvedValue({code: 0, message: '', data: {...source, content_length: 0, author: undefined}})
+  vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
+  for (let index = 0; index < 2; index += 1) {
+    const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+    await flushPromises()
+    expect(wrapper.text()).toContain(chapter.content)
+    expect(wrapper.text()).toContain('剧本已载入')
+    expect(wrapper.text()).not.toContain('没有可分析')
+    expect(wrapper.findAll('button').some(button => button.text() === '重新分析')).toBe(false)
+    wrapper.unmount()
+  }
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
+})
+
+it('still automatically analyzes a normal source manuscript', async () => {
+  vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
+  vi.mocked(api.analyzeNovel).mockResolvedValue({code: 0, message: '', data: {id: 'book-analysis', task_type: 5, status: 3, created_at: ''}})
+  vi.mocked(api.task).mockResolvedValue({code: 0, message: '', data: {id: 'book-analysis', task_type: 5, status: 3, created_at: ''}})
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  await flushPromises()
+  expect(api.analyzeNovel).toHaveBeenCalledWith(9)
+  wrapper.unmount()
 })

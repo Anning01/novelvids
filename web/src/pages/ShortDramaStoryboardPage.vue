@@ -33,6 +33,7 @@ import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
+import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
@@ -847,7 +848,7 @@ function sceneVoiceReferenceMappings(scene: Scene) {
       return [{
         assetId: asset.id,
         name: asset.canonical_name,
-        aliases: asset.aliases || [],
+        aliases: [...(asset.aliases || []), ...(selectedVariantFor(scene, asset) ? [`${asset.canonical_name}#${selectedVariantFor(scene, asset)!.name}`] : [])],
         referenceId,
       }]
     }),
@@ -1268,7 +1269,7 @@ async function addLibraryReferences(scene: Scene, references: VideoReferenceMedi
   const model = selectedVideoModelConfig.value
   if (!model) return
   const draft = draftFor(scene)
-  const additions = references.filter(item => !draft.referenceMedia.some(current => current.library_resource_id === item.library_resource_id || current.url === item.url))
+  const additions = references.filter(item => !draft.referenceMedia.some(current => (item.library_resource_id != null && current.library_resource_id === item.library_resource_id) || current.url === item.url))
   const combined = [...draft.referenceMedia, ...additions]
   const videos = combined.filter(item => item.type === 'video')
   if (combined.filter(item => item.type === 'image').length > model.capabilities.max_reference_images) { notice.error(tr('参考图片数量超过当前模型限制')); return }
@@ -1730,6 +1731,39 @@ function scheduleSceneSave(scene: Scene, delay = 600) {
 function updateSceneText(scene: Scene, field: 'description' | 'prompt', event: Event) {
   draftFor(scene)[field] = (event.target as HTMLTextAreaElement).value
   scheduleSceneSave(scene)
+}
+
+async function applyStoryboardSheet(scene: Scene) {
+  const sheet = scene.metadata?.storyboard_sheet as {image_url?: string; video_prompt?: string; video_guidance?: string} | undefined
+  if (!sheet?.image_url || !sheet.video_prompt) return
+  const draft = draftFor(scene)
+  const model = selectedVideoModelConfig.value
+  if (!model || draft.videoGenerationMode !== 'reference') return
+  if (!draft.referenceMedia.some(item => item.url === sheet.image_url) && draft.referenceMedia.filter(item => item.type === 'image').length >= model.capabilities.max_reference_images) {
+    notice.error(tr('参考图片数量超过当前模型限制'))
+    return
+  }
+  const guidance = sheet.video_guidance || (sheet.video_prompt.startsWith(scene.prompt || '') ? sheet.video_prompt.slice((scene.prompt || '').length).trim() : '')
+  if (!guidance) { notice.error(tr('分镜已更新，请重新生成故事版')); return }
+  if (!draft.prompt.endsWith(guidance)) draft.prompt = `${draft.prompt.trim()}\n\n${guidance}`
+  await addLibraryReferences(scene, [{type: 'image', url: sheet.image_url, name: tr('逐镜线稿故事版')}])
+}
+
+function replaceSheetScene(updated: Scene) {
+  scenes.value = scenes.value.map(scene => scene.id === updated.id ? updated : scene)
+}
+function genericPrompt(scene: Scene): string {
+  const value = scene.prompt_params?.generic_prompt || scene.metadata?.generic_video_prompt
+  return typeof value === 'string' ? value : ''
+}
+function useOptimizedPrompt(scene: Scene) {
+  if (!genericPrompt(scene)) scene.metadata = {...(scene.metadata || {}), generic_video_prompt: scene.prompt || ''}
+  updateScenePrompt(scene, optimizedPrompt(scene))
+}
+
+function optimizedPrompt(scene: Scene): string {
+  const item = scene.prompt_params?.model_optimized_prompt as {model_type?: string; prompt?: string} | undefined
+  return item?.model_type === selectedVideoModelConfig.value?.model_type ? item?.prompt || '' : ''
 }
 
 function updateScenePrompt(scene: Scene, value: string) {
@@ -2483,6 +2517,8 @@ onBeforeUnmount(() => {
                   @choose-library="addLibraryReferences(scene, $event)"
                   @remove="removeReferenceMedia(scene, $event)"
                 />
+                <StoryboardSheetCard v-if="project?.storyboard_enabled || scene.metadata?.storyboard_sheet" :scene="scene" :enabled="project?.storyboard_enabled ?? false" :can-use="draftFor(scene).videoGenerationMode === 'reference'" @updated="replaceSheetScene" @use="applyStoryboardSheet(scene)" />
+                <div v-if="optimizedPrompt(scene)" class="model-optimized-prompt"><details><summary>{{ tr('模型专项稿') }}</summary><p>{{ optimizedPrompt(scene) }}</p></details><AppButton variant="secondary" size="sm" @click="useOptimizedPrompt(scene)">{{ tr('使用模型专项稿') }}</AppButton><AppButton v-if="genericPrompt(scene) && draftFor(scene).prompt !== genericPrompt(scene)" variant="ghost" size="sm" @click="updateScenePrompt(scene, genericPrompt(scene))">{{ tr('恢复通用稿') }}</AppButton></div>
                 <ScenePromptEditor
                   :model-value="draftFor(scene).prompt"
                   :options="promptMentionOptions(scene)"
@@ -2609,6 +2645,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.model-optimized-prompt { min-width: 0; color: var(--app-text); }
+.model-optimized-prompt summary { padding: 8px 0; cursor: pointer; font-size: 13px; }
+.model-optimized-prompt summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.model-optimized-prompt p { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface-muted); color: var(--app-text-secondary); font-size: 12px; line-height: 1.65; }
+
 .video-sync-note { margin:8px 12px; color:var(--app-text-secondary); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .storyboard-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f7f8fb; }
 .storyboard-page.is-workflow-view { height: 100vh; overflow: hidden; }

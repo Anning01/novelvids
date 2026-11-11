@@ -849,5 +849,17 @@
   "资产步骤模式必须与本轮确认的补缺或修改要求一致": "Asset step modes must match the requested fill-missing or revision mode",
   "资产提取的原文或规则已变化，请重新提交": "The extraction source or rules changed. Submit a new request.",
   "本章已有设定已移除，请先恢复后再补全，避免重复调用": "A saved chapter asset was removed. Restore it before completing missing designs to avoid repeated calls.",
-  "待补全的设定已有新修改，已保留人工编辑，请重新核对": "A design being completed was edited. Your edits were preserved; review before continuing."
+  "待补全的设定已有新修改，已保留人工编辑，请重新核对": "A design being completed was edited. Your edits were preserved; review before continuing.",
+  "集号已存在": "Episode number already exists.",
+  "集号不能为空": "Episode number is required.",
+  "集数只能在所属作品中编辑": "Episodes can only be edited within their original project.",
+  "本集仍有任务执行中": "This episode still has an active task.",
+  "本集已有视频、成片或剪辑记录": "This episode has video, export or edit records.",
+  "本集已有分镜": "This episode already has shots.",
+  "本集已关联资产或形态": "This episode has linked assets or variants.",
+  "请先在剧本页开启逐镜线稿故事版": "Enable line-art storyboards on the script page first.",
+  "分镜或故事版设置已修改，请重新生成": "The shot or storyboard setting has changed. Generate it again.",
+  "故事版须返回一张图片": "A storyboard request must return one image.",
+  "人声条目必须写成 0s-2s: 说话者（语气）：完整台词正文；时间后和说话者后都需要冒号": "Use 0s-2s: Speaker (delivery): Full spoken text, with a colon after the time range and another after the speaker.",
+  "章节已移除或集号已修改，请重新选择": "The episode was removed or renumbered. Select it again."
 }

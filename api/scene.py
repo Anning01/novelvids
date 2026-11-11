@@ -190,3 +190,12 @@ async def delete_scene(
 ):
     await scene_controller.remove(scene_id)
     return ResponseSchema()
+
+
+@router.post('/{scene_id}/storyboard-sheet', response_model=ResponseSchema[AiTaskOut], summary='生成本镜线稿故事版')
+async def generate_storyboard_sheet(scene_id: int, background_tasks: BackgroundTasks,
+    ctx: AuthContext = Depends(get_auth_context), _: AuthContext = Depends(require_scene_access), __: AuthContext = _EDITOR):
+    from services.storyboard.sheets import submit_sheet
+    task = await submit_sheet(scene_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    background_tasks.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)

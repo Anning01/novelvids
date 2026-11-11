@@ -8,11 +8,14 @@ from datetime import datetime, timezone
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.scene import Scene
+from models.chapter import Chapter
 from services.creation_agent.tools import _digest
 from services.creation_objects import CreationObjects
 
 
 async def object_state(target) -> dict:
+    if isinstance(target, Chapter):
+        return {'name': target.name, 'content': target.content}
     if isinstance(target, Scene):
         return {'description': target.description, 'prompt': target.prompt,
                 'prompt_params': deepcopy(target.prompt_params), 'duration': target.duration,
@@ -26,7 +29,7 @@ async def object_state(target) -> dict:
 
 async def object_version(target) -> str:
     data = await object_state(target)
-    return _digest({'state': data, 'updated_at': target.updated_at, 'deleted_at': target.deleted_at,
+    return _digest({'state': data, 'updated_at': target.updated_at, 'deleted_at': getattr(target, 'deleted_at', None),
                     **({'sequence': target.sequence} if isinstance(target, Scene) else {})})
 
 
@@ -60,6 +63,8 @@ async def write_fields(objects: CreationObjects, target, fields: dict):
 
 
 async def object_label(target) -> str:
+    if isinstance(target, Chapter):
+        return f'第 {target.number} 集 · {target.name}'
     if isinstance(target, Scene):
         await target.fetch_related('chapter')
         return f'第 {target.chapter.number} 章 · 分镜 {target.sequence}'

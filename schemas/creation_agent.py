@@ -37,9 +37,6 @@ class AgentConfiguration(BaseModel):
     enabled: bool = False
     runtime: Literal["deepagents", "pydantic_ai"] = "deepagents"
     production_concurrency: int = Field(4, ge=1, le=20)
-    # DeepSeek's current agent-oriented envelope is 840K prompt tokens with
-    # 128K output. The assistant keeps the default output below that maximum,
-    # while leaving enough room for tool schemas and provider-side reasoning.
     request_limit: int | None = Field(None, ge=1, le=30)
     tool_calls_limit: int | None = Field(None, ge=1, le=100)
     max_targets: int = Field(32, ge=1, le=100)
@@ -55,7 +52,7 @@ class AgentConfiguration(BaseModel):
     # context window; the agent can page forward when the next section matters.
     context_page_characters: int = Field(4000, ge=500, le=64000)
     history_runs: int = Field(12, ge=1, le=100)
-    max_output_tokens: int = Field(64000, ge=256, le=384000)
+    max_output_tokens: int | None = Field(None, ge=256, le=384000)
     total_tokens_limit: int | None = Field(None, ge=1000, le=10_000_000)
 
     @field_validator('timeout_seconds', 'summary_timeout_seconds')
@@ -68,6 +65,10 @@ class AgentConfiguration(BaseModel):
     def retire_cumulative_caps(cls, value):
         # Accept historical snapshots without re-enabling retired run-wide caps.
         return None
+
+    def output_model_settings(self, model_limit: int | None = None) -> dict:
+        limits = [value for value in (self.max_output_tokens, model_limit) if value is not None]
+        return {'max_tokens': min(limits)} if limits else {}
 
     def context_character_limit(self, model_limit: int | None) -> int | None:
         return min((limit for limit in (self.max_context_characters, model_limit) if limit is not None), default=None)
@@ -146,7 +147,7 @@ class AgentConversationOut(BaseModel):
 
 class PromptChangeItemOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["asset", "variant", "scene"]
+    kind: Literal["asset", "variant", "scene", "chapter"]
     operation: Literal['create', 'update', 'delete'] = 'update'
     target_id: int
     asset_id: int | None = None

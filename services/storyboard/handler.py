@@ -53,7 +53,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             or chapter.novel.storyboard_strategy
         )
         all_assets = await Asset.filter(novel_id=chapter.novel_id)
-        assets = [a for a in all_assets if chapter.number in (a.source_chapters or [])]
+        assets = [a for a in all_assets if a.is_global or chapter.number in (a.source_chapters or [])]
         from services.creation_agent.step_context import context_assets
         additional_assets = await context_assets(request_params)
         assets = list({asset.id: asset for asset in [*assets, *additional_assets]}.values())
@@ -98,6 +98,21 @@ class StoryboardTaskHandler(BaseTaskHandler):
             end_time = time.time()
             request_duration = end_time - start_time
 
+            from services.creation_agent.skill_execution import current_execution
+            execution = current_execution.get()
+            optimizer = execution.params.get('video_optimizer', {}) if execution else {}
+            optimized = {}
+            if optimizer.get('mode') == 'optimize':
+                from schemas.agent_workflow import CompletePrompt
+                from services.creation_agent.video_optimizer import optimizer_instructions
+                for shot in storyboard.shots:
+                    result = await execution.generate('video', {'segment': f'optimizer:{shot.sequence}', 'generic_prompt': shot.prompt,
+                        'submitted_media': [],
+                        'duration': shot.duration, 'selected_model_type': optimizer['model_type'],
+                        'reference_assets': [entity.model_dump() for entity in entities]}, CompletePrompt,
+                        additional_instructions=optimizer_instructions(optimizer))
+                    optimized[shot.sequence] = {'model_type': optimizer['model_type'], 'skill': optimizer['skill'], 'prompt': result.prompt}
+
             # 4. 保存分镜到数据库
             scenes_created = await self._save_scenes(
                 chapter_id=chapter_id,
@@ -107,7 +122,20 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 prompt_language=prompt_language,
                 entities=entities,
                 storyboard_strategy=strategy.key,
+                optimized_prompts=optimized,
             )
+
+            sheet_tasks, sheet_errors = [], []
+            if chapter.novel.storyboard_enabled:
+                from services.storyboard.sheets import submit_sheet
+                for scene in scenes_created:
+                    try:
+                        task = await submit_sheet(scene.id, team_id=request_params.get("team_id"), user_id=request_params.get("user_id"))
+                        sheet_tasks.append(str(task.id))
+                    except Exception as error:
+                        import logging
+                        logging.getLogger(__name__).warning("storyboard_sheet_submit_failed scene_id=%s error_type=%s", scene.id, type(error).__name__)
+                        sheet_errors.append(scene.id)
 
             from services.creation_agent.skill_execution import current_execution
             from models.agent_operation import AgentOperation
@@ -121,6 +149,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "chapter_id": chapter_id,
                 "scenes_created": len(scenes_created),
                 "scene_ids": [s.id for s in scenes_created],
+                "storyboard_sheet_task_ids": sheet_tasks, "storyboard_sheet_unsubmitted": sheet_errors,
+                "video_optimizer": {key: value for key, value in optimizer.items() if key != "files"},
                 "total_shots": len(storyboard.shots),
                 "request_duration": round(request_duration, 2),
                 "token_usage": api_metadata.get("usage", {}),
@@ -141,6 +171,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         prompt_language: str = "zh",
         entities: list[SceneEntity] | None = None,
         storyboard_strategy: str | None = None,
+        optimized_prompts: dict | None = None,
     ) -> List[Scene]:
         """将生成的分镜保存到数据库，并在 metadata 中存储元数据"""
         chapter = await Chapter.get(id=chapter_id)
@@ -174,16 +205,16 @@ class StoryboardTaskHandler(BaseTaskHandler):
                         task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
                         await task.save(update_fields=['request_params'])
                     rows = await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
-                        prompt_language, entities, storyboard_strategy)
+                        prompt_language, entities, storyboard_strategy, optimized_prompts)
                     return {'scene_ids': [row.id for row in rows]}
             result = await execute_step(execution.params['task_id'], 'persist:storyboard', persist, atomic=True)
             return await Scene.filter(id__in=result['scene_ids']).order_by('sequence')
         async with project_write(chapter.novel_id):
             return await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
-                                              prompt_language, entities, storyboard_strategy)
+                                              prompt_language, entities, storyboard_strategy, optimized_prompts)
 
     async def _persist_scenes(self, chapter: Chapter, storyboard, api_metadata: dict, request_duration: float,
-                             prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None) -> List[Scene]:
+                             prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None, optimized_prompts: dict | None = None) -> List[Scene]:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         objects = CreationObjects(chapter.novel_id)
@@ -279,6 +310,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     entities=entities or [],
                     strategy=strategy,
                 )
+            if optimized_prompts and shot.sequence in optimized_prompts:
+                prompt_params["model_optimized_prompt"] = optimized_prompts[shot.sequence]
+                prompt_params["generic_prompt"] = prompt
             if chapter.novel.storyboard_enabled:
                 import json
                 from prompts.skills.scripts.storyboard_sheets import prepare

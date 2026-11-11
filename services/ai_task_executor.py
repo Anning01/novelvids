@@ -163,6 +163,10 @@ class AiTaskExecutor:
                 return previous
             for secret in ('api_key', 'base_url'):
                 request_params.pop(secret, None)
+        if request_params.get('chapter_id') is not None and request_params.get('novel_id') is not None:
+            from models.chapter import Chapter
+            if not await Chapter.filter(id=request_params['chapter_id'], novel_id=request_params['novel_id']).using_db(db_connection).exists():
+                raise ValueError(localized_message('章节不存在'))
         async def create(connection):
             return await AiTask.create(task_type=task_type.value, request_params=request_params,
                 status=TaskStatusEnum.pending.value, using_db=connection)

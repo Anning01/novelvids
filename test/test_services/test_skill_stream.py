@@ -25,14 +25,14 @@ from test.test_services.test_creation_agent_sessions import session_fixture
 
 def test_selected_package_is_frozen_without_changing_language_or_required_contracts():
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
-    entry = (ROOT / 'novelvids-story/SKILL.md').read_text()
-    assert snapshot.read('novelvids-story') == entry
-    snapshot.contents['novelvids-story'] = 'Frozen package entry'
-    assert 'Frozen package entry' in instructions(snapshot, 'en', 'story')
-    assert 'language=en' in instructions(snapshot, 'en', 'story')
-    assert snapshot.read('story') in instructions(snapshot, 'en', 'story')
-    del snapshot.contents['novelvids-story']
-    assert snapshot.read('story') in instructions(snapshot, 'zh', 'story')
+    entry = (ROOT / 'novelvids-screenplay/SKILL.md').read_text()
+    assert snapshot.read('novelvids-screenplay') == entry
+    snapshot.contents['novelvids-screenplay'] = 'Frozen package entry'
+    assert 'Frozen package entry' in instructions(snapshot, 'en', 'screenplay')
+    assert 'language=en' in instructions(snapshot, 'en', 'screenplay')
+    assert snapshot.read('screenplay') in instructions(snapshot, 'en', 'screenplay')
+    del snapshot.contents['novelvids-screenplay']
+    assert snapshot.read('screenplay') in instructions(snapshot, 'zh', 'screenplay')
     with pytest.raises(ValueError):
         snapshot.read('novelvids-story/../../.env')
 
@@ -58,13 +58,13 @@ async def test_selected_skill_stream_is_visible_in_snapshot_before_completion(ca
     async def respond(messages, info):
         nonlocal calls
         calls += 1
-        assert 'name: novelvids-story' in info.instructions
+        assert 'name: novelvids-screenplay' in info.instructions
         if calls == 1:
             yield {0: DeltaToolCall(name='read_skill', tool_call_id='skill-selection',
-                                   json_args=json.dumps({'name': 'novelvids-story'}))}
+                                   json_args=json.dumps({'name': 'novelvids-screenplay'}))}
         else:
             returned = [part for msg in messages for part in msg.parts if isinstance(part, ToolReturnPart)]
-            assert 'name: novelvids-story' in returned[-1].content
+            assert 'name: novelvids-screenplay' in returned[-1].content
             reached.set()
             await release.wait()
             yield {0: DeltaToolCall(name=info.output_tools[0].name, tool_call_id='final',
@@ -73,7 +73,7 @@ async def test_selected_skill_stream_is_visible_in_snapshot_before_completion(ca
     model = FunctionModel(stream_function=respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
-        work = asyncio.create_task(execution.generate('story', {'source': 'synthetic'}, Output))
+        work = asyncio.create_task(execution.generate('screenplay', {'source': 'synthetic'}, Output))
         try:
             await asyncio.wait_for(reached.wait(), 5)
             assert not work.done()

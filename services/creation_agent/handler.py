@@ -250,7 +250,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                 from services.creation_agent.deep_execution import stream_deep_agent
                 events = stream_deep_agent(request=request, conversation=conversation, assistant=assistant,
                     deps=deps, recorded=recorded_model, execution=execution, before_request=before_request,
-                    model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)})
+                    model_settings=limits.output_model_settings(chosen.max_tokens))
             else:
                 history = await prepare_history(conversation, assistant, limits, recorded_model)
                 context['conversation_summary'] = conversation.summary
@@ -259,7 +259,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                     model=recorded_model, deps=deps,
                     usage_limits=UsageLimits(request_limit=limits.request_limit, tool_calls_limit=limits.tool_calls_limit,
                                              total_tokens_limit=limits.total_tokens_limit),
-                    model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)},
+                    model_settings=limits.output_model_settings(chosen.max_tokens),
                     message_history=history, on_complete=complete,
                 )
             async for event in events:

@@ -100,6 +100,7 @@ function readProjectMeta(): AgentProjectMeta {
 
 const project = ref(readProjectMeta())
 const novel = ref<Novel | null>(null)
+const manuscriptLength = ref(0)
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
@@ -198,6 +199,7 @@ const hasScriptPreview = computed(() => Boolean(
   analysisResult.value
   || chaptersTotal.value
   || novel.value?.total_chapters
+  || novel.value?.episodes_managed
 ))
 const analysisRunning = computed(() => {
   const status = analysisTask.value?.status
@@ -223,6 +225,7 @@ async function loadProject(): Promise<boolean> {
       narratorVoice.value = null
     }
     const contentLength = response.data.content_length || 0
+    manuscriptLength.value = contentLength
     if (!response.data.episodes_managed && contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
       notice.error(tr('书稿约 {p0} 字但只拆分出 {p1} 章，已阻止进入。请重新上传并检查文件编码或章节标题。', { p0: contentLength.toLocaleString(dateLocale.value), p1: response.data.total_chapters || 0 }))
       await router.replace('/create/short-drama')
@@ -345,7 +348,7 @@ async function loadAnalysis() {
     const response = await api.novelAnalysis(projectId.value)
     analysisTask.value = response.data
     if (!response.data) {
-      if (canEdit.value) await startAnalysis()
+      if (canEdit.value && manuscriptLength.value > 0 && !novel.value?.episodes_managed) await startAnalysis()
     } else if (analysisRunning.value) {
       await pollAnalysis(response.data.id)
     }
@@ -476,6 +479,16 @@ async function saveEdits() {
   }
 }
 
+async function refreshAgentEpisodes() {
+  if (editing.value) {
+    notice.info(tr('助手修改已保存，当前编辑草稿已保留'))
+    return
+  }
+  chapterDetails.value = {}
+  await loadChapters(selectedEpisodeBrief.value?.id)
+  if (selectedEpisodeBrief.value) await loadChapterContent(selectedEpisodeBrief.value)
+}
+
 async function addEpisode() {
   if (episodeBusy.value || editing.value || !canEdit.value) return
   episodeBusy.value = true
@@ -563,6 +576,7 @@ onBeforeUnmount(() => {
 <template>
   <main class="agent-page">
     <ShortDramaWorkspaceShell
+      @prompts-changed="refreshAgentEpisodes"
       :project-id="projectId"
       :project-name="displayedProjectName"
       :aspect-ratio="project.aspectRatio"
@@ -608,7 +622,7 @@ onBeforeUnmount(() => {
             <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />{{ tr('保存修改') }}</AppButton>
           </template>
           <template v-else>
-            <AppButton v-if="canEdit" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
+            <AppButton v-if="canEdit && manuscriptLength > 0" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
             <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
@@ -619,7 +633,7 @@ onBeforeUnmount(() => {
         <div>
           <h2>{{ analysisStatus }}</h2>
           <p v-if="analysisError">{{ analysisError }}</p>
-          <p v-else-if="analysisRunning && analysisResult">{{ tr('标签、大纲和人物已可查看。') }}</p>
+          <p v-else-if="analysisRunning && analysisResult">{{ tr('标签和大纲已可查看。') }}</p>
           <p v-else-if="analysisRunning || startingAnalysis">{{ tr('正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。') }}</p>
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
           <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>
@@ -638,7 +652,7 @@ onBeforeUnmount(() => {
             <div>
               <small>{{ tr('全局风格') }}</small>
               <template v-if="editing && projectDraft">
-                <AppSelect v-model="projectDraft.styleKey" :options="styleOptions" :aria-label="tr('全局风格')" />
+                <AppSelect :model-value="projectDraft.styleKey || 'auto'" @update:model-value="projectDraft.styleKey = $event" :options="styleOptions" :ariaLabel="tr('全局风格')" />
                 <textarea v-if="projectDraft.styleKey === 'custom'" v-model="projectDraft.customStyle" :aria-label="tr('自定义风格')" maxlength="2000" rows="3" />
               </template>
               <strong v-else>{{ styleLabel }}</strong>
@@ -738,7 +752,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .episode-actions { display: flex; gap: 8px; }
-.profile-card input[type="checkbox"] { width: auto; accent-color: var(--app-accent); }
+.profile-card input[type="checkbox"] { width: auto; min-height: 0; height: auto; accent-color: var(--app-accent); }
 .creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }
 .creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
 .creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 24px; padding: 18px 20px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }
@@ -757,7 +771,7 @@ onBeforeUnmount(() => {
 .status-spinner { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .analysis-hero h1 { margin: 0 0 10px; color: #282c3a; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.035em; }
-.analysis-title-input { width: min(620px, 100%); margin: 0 0 10px; padding: 5px 9px; color: #282c3a; font-size: clamp(22px, 3vw, 30px); font-weight: 700; letter-spacing: -.035em; }
+.analysis-title-input { width: min(620px, 100%); margin: 0 0 10px; padding: 5px 9px; color: var(--app-text); font-size: clamp(22px, 3vw, 30px); font-weight: 700; letter-spacing: -.035em; }
 .analysis-hero-copy p { margin: 0; font-size: 11px; }
 .genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
 .tag-editor { display: grid; width: min(620px, 100%); gap: 5px; margin-top: 13px; }
@@ -789,15 +803,15 @@ onBeforeUnmount(() => {
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
 .narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid #dedff0; border-radius: 9px; color: #5b5cf6; background: #f8f8ff; cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: #999af3; }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: #969baa; font-size: 8px; }.narrator-voice-button strong { color: #4f5464; font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: #6567e9; font-size: 9px; }
-.analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid #dfe1ea; border-radius: 9px; outline: 0; background: #fbfbfe; box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
-.analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: #7779ef; background: #fff; box-shadow: 0 0 0 3px rgb(91 92 246 / 10%); }
-.tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: #454a59; font-size: 11px; }
+.analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
+.tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--app-text); font-size: 11px; }
 .storyboard-strategy-select { width: min(260px, 100%); }
-.profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: #656b7b; font: inherit; font-size: 10px; line-height: 1.6; }
+.profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: var(--app-text-secondary); font: inherit; font-size: 10px; line-height: 1.6; }
 .outline-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 20px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .outline-card > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .outline-card p { margin: 0; color: #5e6474; font-size: 12px; line-height: 1.9; }
-.outline-card textarea { width: 100%; min-height: 190px; padding: 12px 14px; resize: vertical; color: #5e6474; font: inherit; font-size: 12px; line-height: 1.9; }
+.outline-card textarea { width: 100%; min-height: 190px; padding: 12px 14px; resize: vertical; color: var(--app-text-secondary); font: inherit; font-size: 12px; line-height: 1.9; }
 .character-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .character-card { display: grid; gap: 12px; padding: 17px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .character-title { display: flex; align-items: center; gap: 11px; }

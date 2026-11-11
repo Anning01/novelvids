@@ -5,6 +5,7 @@ from utils.messages import localized_message
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.scene import Scene
+from models.chapter import Chapter
 from schemas.creation_agent import AgentRunRequest
 from services.creation_objects import CreationObjects
 
@@ -42,7 +43,10 @@ class CreationWriteScope:
         if self.request.write_scope == 'project':
             return
         chapter = await self.chapter(self.request.chapter_id)
-        if isinstance(target, Scene):
+        if isinstance(target, Chapter):
+            if target.id != chapter.id:
+                raise ValueError(localized_message('目标章节超出本轮授权范围'))
+        elif isinstance(target, Scene):
             if target.chapter_id != chapter.id:
                 raise ValueError(localized_message('目标分镜不在本轮章节范围内'))
         elif isinstance(target, Asset):

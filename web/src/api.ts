@@ -60,7 +60,7 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/generate\/|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
+const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly code: number, readonly httpStatus: number) { super(message) }
@@ -338,6 +338,7 @@ export const api = {
   insertSceneAfter: (sceneId: number) => request<SingleResponse<Scene>>(`/scene/${sceneId}/insert-after`, { method: 'POST' }),
   updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
+  generateStoryboardSheet: (sceneId: number) => request<SingleResponse<AiTask>>(`/scene/${sceneId}/storyboard-sheet`, {method: 'POST'}),
   generateScenes: (chapterId: number, replaceExisting = false) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
   storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),

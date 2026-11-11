@@ -160,11 +160,13 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
 
     def transport(outgoing):
         payload = json.loads(outgoing.content)
+        assert 'max_tokens' not in payload
+        reported_output = 2048  # The provider may end a response at its own default limit.
         envelope = {'id': 'truncated', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model'}
         chunks = [
             {**envelope, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'reasoning_content': 'synthetic-reasoning'}, 'finish_reason': None}]},
             {**envelope, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'length'}]},
-            {**envelope, 'choices': [], 'usage': {'prompt_tokens': 100, 'completion_tokens': payload['max_tokens'], 'total_tokens': 100 + payload['max_tokens']}},
+            {**envelope, 'choices': [], 'usage': {'prompt_tokens': 100, 'completion_tokens': reported_output, 'total_tokens': 100 + reported_output}},
         ]
         return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=''.join(
             'data: ' + json.dumps(chunk) + '\n\n' for chunk in chunks) + 'data: [DONE]\n\n')

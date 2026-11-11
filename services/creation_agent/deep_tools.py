@@ -41,17 +41,28 @@ async def link_scene_references(ctx: RunContext, scene_id: Annotated[int, Field(
     return runtime.change_receipt(await ctx.deps.changes.apply(changes, tool_call_id=ctx.tool_call_id or ''))
 
 
+async def read_episode_script(ctx: RunContext, chapter_id: Annotated[int, Field(gt=0)], page: Annotated[int, Field(ge=1)] = 1) -> dict:
+    """读取本作品导演剧本正文与当前版本；长正文按页读取。"""
+    return await ctx.deps.changes.read_episode_script(chapter_id, page)
+
+
+async def revise_episode_script(ctx: RunContext, chapter_id: Annotated[int, Field(gt=0)],
+    content: Annotated[str, Field(min_length=1, max_length=128000)], name: Annotated[str | None, Field(min_length=1, max_length=255)] = None) -> dict:
+    """保存本轮授权集的完整导演稿；先读完正文，校验并发修改，记录差异并支持撤销，不改集号。"""
+    return runtime.change_receipt(await ctx.deps.changes.revise_episode_script(chapter_id, content, name, ctx.tool_call_id))
+
+
 async def business_tools(deps, model, before_request):
     names = (
         'get_creation_context', 'query_creation_objects', 'get_creation_prompt_rules',
         'read_creation_objects', 'read_creation_history', 'patch_creation_prompts',
-        'create_creation_setting', 'undo_creation_change', 'link_scene_references',
+        'create_creation_setting', 'undo_creation_change', 'link_scene_references', 'read_episode_script', 'revise_episode_script',
         'revise_creation_object', 'get_production_context', 'submit_production', 'remember_creation_constraints',
     ) if deps.changes else ('get_creation_context', 'update_image_prompt', 'update_storyboard_prompt')
     if deps.changes and deps.changes.request.write_scope == 'read_only':
         names = tuple(name for name in names if name in {'get_creation_context', 'query_creation_objects',
-            'get_creation_prompt_rules', 'read_creation_objects', 'read_creation_history', 'get_production_context'})
-    local = {'remember_creation_constraints': remember_creation_constraints, 'link_scene_references': link_scene_references}
+            'get_creation_prompt_rules', 'read_creation_objects', 'read_creation_history', 'get_production_context', 'read_episode_script'})
+    local = {'remember_creation_constraints': remember_creation_constraints, 'link_scene_references': link_scene_references, 'read_episode_script': read_episode_script, 'revise_episode_script': revise_episode_script}
     native = {name: Tool(local[name] if name in local else getattr(runtime, name)) for name in names}
     context = RunContext(deps=deps, model=model, usage=RunUsage())
     definitions = await runtime.prepare_creation_tools(context, [tool.tool_def for tool in native.values()])

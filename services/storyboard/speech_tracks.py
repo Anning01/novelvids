@@ -14,7 +14,7 @@ def spoken_parts(line: str) -> tuple[float, str, str]:
     label = prefix[match.end():-1].strip() if match else ''
     speaker = re.split(r"[（(]", label, maxsplit=1)[0].strip().removeprefix("@{").removesuffix("}")
     if not match or not speaker or not any(c.isalnum() for c in text):
-        raise ValueError(localized_message("人声条目必须包含时间轴、说话者和完整台词正文"))
+        raise ValueError(localized_message("人声条目必须写成 0s-2s: 说话者（语气）：完整台词正文；时间后和说话者后都需要冒号"))
     return float(match[1]), speaker, text
 
 

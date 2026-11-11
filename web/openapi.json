@@ -2353,6 +2353,65 @@
           }
         }
       }
+    },
+    "/api/scene/{scene_id}/storyboard-sheet": {
+      "post": {
+        "tags": [
+          "分镜管理"
+        ],
+        "summary": "生成本镜线稿故事版",
+        "operationId": "generate_storyboard_sheet_api_scene__scene_id__storyboard_sheet_post",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Scene Id"
+            }
+          },
+          {
+            "name": "x-creation-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Creation-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseSchema_AiTaskOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2844,7 +2903,7 @@
           "task_type": {
             "type": "integer",
             "title": "Task Type",
-            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频"
+            "description": "1=提取任务, 2=生成参考图, 3=生成分镜, 4=生成视频, 5=项目分析, 6=重制, 7=创作助手, 8=视频画质增强, 9=语音识别"
           },
           "status": {
             "type": "integer",
@@ -2881,6 +2940,27 @@
             ],
             "title": "Error Message",
             "description": "错误消息"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage",
+            "description": "任务当前业务阶段"
+          },
+          "progress": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress",
+            "description": "任务进度",
+            "default": 0
           },
           "started_at": {
             "anyOf": [
@@ -3249,9 +3329,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -3454,9 +3532,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -3641,9 +3717,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -3665,6 +3739,23 @@
           },
           "asset_type": {
             "$ref": "#/components/schemas/AssetTypeEnum"
+          },
+          "canonical_name": {
+            "type": "string",
+            "title": "Canonical Name",
+            "description": "资产名称"
+          },
+          "main_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Image",
+            "description": "资产主图"
           },
           "description": {
             "anyOf": [
@@ -3688,7 +3779,7 @@
               }
             ],
             "title": "Base Traits",
-            "description": "固有特征 (英文, 用于 prompt)"
+            "description": "固有特征（语言由通用配置决定，用于 prompt）"
           },
           "is_global": {
             "anyOf": [
@@ -3706,16 +3797,23 @@
         "type": "object",
         "required": [
           "id",
-          "asset_type"
+          "asset_type",
+          "canonical_name"
         ],
         "title": "AssetSimple",
         "description": "用于在 Scene 中嵌套展示资产的简化模型"
       },
       "AssetTypeEnum": {
         "type": "integer",
-        "enum": [1, 2, 3],
+        "enum": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
         "title": "AssetTypeEnum",
-        "description": "1=人物, 2=场景, 3=物品"
+        "description": "1=人物, 2=场景, 3=物品, 4=商品, 5=风格"
       },
       "AssetUpdate": {
         "properties": {
@@ -3859,9 +3957,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -4000,15 +4096,30 @@
       "ChapterCreate": {
         "properties": {
           "number": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Number",
-            "description": "章节序号"
+            "description": "章节序号，不传则自动递增"
           },
           "name": {
-            "type": "string",
-            "maxLength": 255,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "章节名称"
+            "description": "章节名称，不传则自动生成"
           },
           "status": {
             "anyOf": [
@@ -4047,13 +4158,11 @@
         },
         "type": "object",
         "required": [
-          "number",
-          "name",
           "content",
           "novel_id"
         ],
         "title": "ChapterCreate",
-        "description": "创建请求：name 必填"
+        "description": "创建请求：number/name 可选（后端自动计算）"
       },
       "ChapterOut": {
         "properties": {
@@ -4156,7 +4265,8 @@
           "number": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -4222,15 +4332,30 @@
       "ChapterUpdate": {
         "properties": {
           "number": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Number",
-            "description": "章节序号"
+            "description": "章节序号，不传则自动递增"
           },
           "name": {
-            "type": "string",
-            "maxLength": 255,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "章节名称"
+            "description": "章节名称，不传则自动生成"
           },
           "status": {
             "anyOf": [
@@ -4269,8 +4394,6 @@
         },
         "type": "object",
         "required": [
-          "number",
-          "name",
           "content",
           "novel_id"
         ],
@@ -4292,7 +4415,10 @@
       },
       "ImageSourceEnum": {
         "type": "integer",
-        "enum": [1, 2],
+        "enum": [
+          1,
+          2
+        ],
         "title": "ImageSourceEnum",
         "description": "1=AI 生成, 2=用户上传"
       },
@@ -4528,6 +4654,23 @@
             "title": "Cover",
             "description": "封面图URL"
           },
+          "audiovisual_guidance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiovisual Guidance"
+          },
+          "storyboard_enabled": {
+            "type": "boolean",
+            "title": "Storyboard Enabled",
+            "default": false
+          },
           "total_chapters": {
             "anyOf": [
               {
@@ -4539,6 +4682,94 @@
             ],
             "title": "Total Chapters",
             "description": "总章节数"
+          },
+          "video_generation_defaults": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "video_model_config_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Model Config Id",
+            "description": "分镜页面默认视频模型配置 ID"
+          },
+          "narrator_audio_reference_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrator Audio Reference Id",
+            "description": "旁白模式使用的参考音频 ID"
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio",
+            "description": "项目默认画面比例"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution",
+            "description": "项目默认视频清晰度"
+          },
+          "custom_style_prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Style Prompt",
+            "description": "自定义视觉风格 Prompt"
+          },
+          "style_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style Key",
+            "description": "视觉风格 key"
           },
           "content": {
             "anyOf": [
@@ -4552,17 +4783,134 @@
             "title": "Content",
             "description": "正文内容"
           },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "项目标签"
+          },
+          "story_outline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Outline",
+            "description": "故事大纲"
+          },
+          "project_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Type",
+            "description": "项目设定类型"
+          },
+          "project_setting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Setting",
+            "description": "项目设定说明"
+          },
+          "storyboard_strategy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storyboard Strategy",
+            "description": "分镜策略名称"
+          },
+          "storyboard_setting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storyboard Setting",
+            "description": "分镜策略说明"
+          },
+          "episodes_managed": {
+            "type": "boolean",
+            "title": "Episodes Managed",
+            "default": false
+          },
           "id": {
             "type": "integer",
             "title": "Id",
             "description": "小说/剧本ID"
+          },
+          "workflow_kind": {
+            "type": "string",
+            "enum": [
+              "script",
+              "remake"
+            ],
+            "title": "Workflow Kind",
+            "description": "项目工作流类型"
+          },
+          "cover_thumbnail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Thumbnail",
+            "description": "项目列表封面缩略图"
+          },
+          "cover_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Preview",
+            "description": "项目详情封面预览图"
           }
         },
         "type": "object",
         "required": [
           "created_at",
           "updated_at",
-          "id"
+          "id",
+          "workflow_kind"
         ],
         "title": "NovelOut",
         "description": "详情输出：返回包括正文在内的所有信息。"
@@ -4942,13 +5290,9 @@
           },
           "data": {
             "anyOf": [
+              {},
               {
-
-              },
-              {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -4972,9 +5316,7 @@
         "description": "统一API响应格式\n\n属性:\n    code (int): 响应状态码，0表示成功，非0表示异常\n    data (T): 响应数据，泛型类型\n    message (str): 响应消息",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -4991,9 +5333,7 @@
                 "$ref": "#/components/schemas/AiModelConfigOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5016,9 +5356,7 @@
         "title": "ResponseSchema[AiModelConfigOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5035,34 +5373,20 @@
                 "$ref": "#/components/schemas/AiTaskOut"
               },
               {
-                "items": {
-
-                },
-                "type": "array"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
                 "type": "null"
               }
-            ],
-            "title": "Data"
+            ]
           },
           "message": {
             "type": "string",
-            "title": "Message",
-            "default": "操作成功"
+            "title": "Message"
           }
         },
         "type": "object",
         "title": "ResponseSchema[AiTaskOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5079,9 +5403,7 @@
                 "$ref": "#/components/schemas/AssetOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5104,9 +5426,7 @@
         "title": "ResponseSchema[AssetOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5123,9 +5443,7 @@
                 "$ref": "#/components/schemas/ChapterOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5148,9 +5466,7 @@
         "title": "ResponseSchema[ChapterOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5167,9 +5483,7 @@
                 "$ref": "#/components/schemas/NovelOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5192,9 +5506,7 @@
         "title": "ResponseSchema[NovelOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5211,9 +5523,7 @@
                 "$ref": "#/components/schemas/PaginationResponse_AiModelConfigOut_"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5236,9 +5546,7 @@
         "title": "ResponseSchema[PaginationResponse[AiModelConfigOut]]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5255,9 +5563,7 @@
                 "$ref": "#/components/schemas/PaginationResponse_AssetBriefOut_"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5280,9 +5586,7 @@
         "title": "ResponseSchema[PaginationResponse[AssetBriefOut]]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5299,9 +5603,7 @@
                 "$ref": "#/components/schemas/PaginationResponse_ChapterBriefOut_"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5324,9 +5626,7 @@
         "title": "ResponseSchema[PaginationResponse[ChapterBriefOut]]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5343,9 +5643,7 @@
                 "$ref": "#/components/schemas/PaginationResponse_NovelBriefOut_"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5368,9 +5666,7 @@
         "title": "ResponseSchema[PaginationResponse[NovelBriefOut]]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5387,9 +5683,7 @@
                 "$ref": "#/components/schemas/PaginationResponse_SceneBriefOut_"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5412,9 +5706,7 @@
         "title": "ResponseSchema[PaginationResponse[SceneBriefOut]]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5431,9 +5723,7 @@
                 "$ref": "#/components/schemas/PaginationResponse_VideoBriefOut_"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5456,9 +5746,7 @@
         "title": "ResponseSchema[PaginationResponse[VideoBriefOut]]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5475,9 +5763,7 @@
                 "$ref": "#/components/schemas/SceneOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5500,9 +5786,7 @@
         "title": "ResponseSchema[SceneOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5519,9 +5803,7 @@
                 "$ref": "#/components/schemas/VideoOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5544,9 +5826,7 @@
         "title": "ResponseSchema[VideoOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5563,9 +5843,7 @@
                 "$ref": "#/components/schemas/VideoQueryOut"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5588,9 +5866,7 @@
         "title": "ResponseSchema[VideoQueryOut]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5608,9 +5884,7 @@
                 "type": "object"
               },
               {
-                "items": {
-
-                },
+                "items": {},
                 "type": "array"
               },
               {
@@ -5629,9 +5903,7 @@
         "title": "ResponseSchema[dict]",
         "example": {
           "code": 0,
-          "data": {
-
-          },
+          "data": {},
           "message": "操作成功"
         }
       },
@@ -5772,9 +6044,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -5921,9 +6191,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -5966,15 +6234,22 @@
             "title": "Id",
             "description": "分镜ID"
           },
+          "chapter_id": {
+            "type": "integer",
+            "title": "Chapter Id",
+            "description": "所属章节ID"
+          },
           "prompt_params": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SoraScenePromptConfig"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
+            "title": "Prompt Params",
             "description": "提示词参数配置"
           }
         },
@@ -5982,7 +6257,8 @@
         "required": [
           "created_at",
           "updated_at",
-          "id"
+          "id",
+          "chapter_id"
         ],
         "title": "SceneOut",
         "description": "详情输出：返回包括正文在内的所有信息。"
@@ -6050,9 +6326,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -6156,9 +6430,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -6307,7 +6579,14 @@
       },
       "TaskStatusEnum": {
         "type": "integer",
-        "enum": [1, 2, 3, 4, 5, 6],
+        "enum": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
         "title": "TaskStatusEnum",
         "description": "1=待处理, 2=处理中, 3=已完成, 4=处理失败, 5=已取消, 6=队列中"
       },
@@ -6435,7 +6714,12 @@
       },
       "VideoModelTypeEnum": {
         "type": "integer",
-        "enum": [1, 2, 3, 4],
+        "enum": [
+          1,
+          2,
+          3,
+          4
+        ],
         "title": "VideoModelTypeEnum",
         "description": "1=Viduq2, 2=Sora2, 3=Seedance/即梦, 4=Veo3"
       },
@@ -6511,9 +6795,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -6569,9 +6851,7 @@
           },
           "metadata": {
             "anyOf": [
-              {
-
-              },
+              {},
               {
                 "type": "null"
               }
@@ -6587,6 +6867,103 @@
         ],
         "title": "VideoQueryOut",
         "description": "查询视频生成状态的结果"
+      },
+      "PromptChangeItemOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "asset",
+              "variant",
+              "scene",
+              "chapter"
+            ],
+            "title": "Kind"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ],
+            "title": "Operation",
+            "default": "update"
+          },
+          "target_id": {
+            "type": "integer",
+            "title": "Target Id"
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "target_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Label"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "recovery": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Recovery"
+          },
+          "constraint_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Constraint Ids"
+          },
+          "before": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Before"
+          },
+          "after": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "After"
+          },
+          "after_version": {
+            "type": "string",
+            "title": "After Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "target_id",
+          "before",
+          "after",
+          "after_version"
+        ],
+        "title": "PromptChangeItemOut"
       }
     }
   }

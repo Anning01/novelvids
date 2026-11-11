@@ -31,6 +31,7 @@ async def conversation_for_task(task):
     digest = hashlib.sha256(str(task.id).encode()).hexdigest()
     operation = params.get("operation") or SKILLS.get(task.task_type, "editing")
     labels = {
+        "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         "image": ("生成图片", "Generate image"),
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
@@ -249,6 +250,7 @@ async def finish_production_message(task):
         return
     english = task.request_params.get("prompt_language", "en") == "en"
     labels = {
+        "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         3: ("已完成", "Completed"),
         4: ("任务未完成", "Task failed"),
         5: ("后续步骤已停止", "Further steps stopped"),

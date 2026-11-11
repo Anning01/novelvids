@@ -193,7 +193,9 @@ python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
 
 分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段交付一张简约黑白线稿故事版和配套视频提示词，图内格数随动作与构图变化。
 
-分镜和视频技能默认交付通用提示词。Seedance 2.5 专项稿使用火山方舟的 `sd25-pe`，MiniMax H3 专项稿使用 `h3-prompt-writing`，两者按需单独安装。分镜包自带模型选择脚本；缺少专项技能时仍可使用通用稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
+工作台在剧本页保存作品画风、全片视听约定和故事版开关；开启后生成新分镜会逐镜出图。已有分镜可单独生成或重试故事版，成图可加入视频参考并保留配套提示词。
+
+分镜和视频技能默认交付通用提示词。Seedance 2.5 专项稿使用火山方舟的 `sd25-pe`，MiniMax H3 专项稿使用 `h3-prompt-writing`，两者按需单独安装。分镜包自带模型选择脚本；缺少专项技能时仍可使用通用稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。工作台从 `CREATION_AGENT_OPTIONAL_SKILLS_PATH`（默认 `.agents/skills`）读取已安装的官方技能，并按作品所选视频模型冻结本次优化规则；通用稿与专项稿分别保留。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
 
 规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
 

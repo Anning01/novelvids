@@ -76,10 +76,13 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
-        for key in ('conversation_id', 'agent_runtime', 'creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
+        for key in ('video_optimizer', 'conversation_id', 'agent_runtime', 'creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
             if key in parent.params:
                 inherited[key] = parent.params[key]
+    from services.creation_agent.video_optimizer import project_optimizer
+    optimizer = inherited.get('video_optimizer') or (await project_optimizer(params['novel_id'], params.get('team_id')) if params.get('novel_id') else {'mode': 'generic'})
     return {
+        'video_optimizer': optimizer,
         **params,
         **(submission.get() or {}),
         "workflow_version": WORKFLOW_VERSION,
@@ -428,6 +431,8 @@ class SkillExecution:
                 asset_candidates.merge(initial_assets, self.snapshot, self.language, request_aspect_ratio)
             project_facts = {
                 "name": project.name,
+                "audiovisual_guidance": project.audiovisual_guidance,
+                "storyboard_enabled": project.storyboard_enabled,
                 "style_key": project.style_key,
                 "custom_style_prompt": project.custom_style_prompt,
                 "aspect_ratio": project.aspect_ratio,
@@ -513,12 +518,7 @@ class SkillExecution:
                             tool_calls_limit=limits.tool_calls_limit,
                             total_tokens_limit=limits.total_tokens_limit,
                         ),
-                        model_settings={
-                            "max_tokens": min(
-                                limits.max_output_tokens,
-                                chosen.max_tokens or limits.max_output_tokens,
-                            )
-                        },
+                        model_settings=limits.output_model_settings(chosen.max_tokens),
                     )
                 except ModelHTTPError as error:
                     request_rejected = 400 <= error.status_code < 500 and error.status_code not in {408, 409}

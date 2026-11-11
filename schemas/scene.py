@@ -195,14 +195,14 @@ class SoraScenePromptConfig(BaseModel):
     narration: list[str] = Field(
         default_factory=list,
         description=(
-            "镜头内旁白与人物内心 OS；每项必须包含精确开始/结束时间、声音主体、"
+            "镜头内旁白与人物内心 OS；每项严格写成 0s-2s: 说话者（语气）：完整正文，时间后和说话者后都必须有冒号。每项包含声音主体、"
             "语气和内容。是否允许使用及与对白的时间关系由当前分镜策略决定；"
             "没有时返回空数组"
         ),
     )
     dialogue: list[str] = Field(
         default_factory=list,
-        description="镜头内人物台词；每项包含人物、语气和原文，无台词时返回空数组",
+        description="镜头内人物台词；每项严格写成 0s-2s: 说话者（语气）：原文。时间后和说话者后都必须有冒号；无台词时返回空数组",
     )
     transition: str = Field(
         ...,
@@ -346,6 +346,11 @@ class SceneOut(SceneFullProperties, BaseResponse):
             raw = metadata.get(key)
             if isinstance(raw, str) and raw:
                 metadata[key] = resolve_media_url(raw) or raw
+        sheet = metadata.get('storyboard_sheet')
+        if isinstance(sheet, dict):
+            for key in ('image_url', 'previous_image_url'):
+                if isinstance(sheet.get(key), str):
+                    sheet[key] = resolve_media_url(sheet[key]) or sheet[key]
         reference_media = metadata.get("video_reference_media")
         if isinstance(reference_media, list):
             for item in reference_media:

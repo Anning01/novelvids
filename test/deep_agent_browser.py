@@ -19,6 +19,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-database', type=Path, required=True)
     parser.add_argument('--model-config-id', type=int, required=True)
+    parser.add_argument('--image-model-config-id', type=int)
+    parser.add_argument('--video-model-config-id', type=int)
     parser.add_argument('--database', type=Path, default=Path('data/deep-agent-acceptance.db'))
     parser.add_argument('--checkpoints', type=Path, default=Path('data/deep-agent-acceptance-checkpoints.db'))
     parser.add_argument('--max-output-tokens', type=int)
@@ -34,6 +36,12 @@ def main():
                                  (args.model_config_id,)).fetchone()
     if row is None:
         raise SystemExit('Model configuration not found')
+    media_configs = {}
+    with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        for kind, identifier in [('image', args.image_model_config_id), ('video', args.video_model_config_id)]:
+            if identifier:
+                media_configs[kind] = dict(connection.execute('SELECT * FROM ai_model_configs WHERE id=?', (identifier,)).fetchone())
     model = dict(row)
     model['pricing'] = json.loads(model['pricing']) if model['pricing'] else None
     os.environ['DATABASE_URL'] = 'sqlite://' + str(args.database.resolve())
@@ -62,6 +70,15 @@ def main():
             config.api_key = previous
 
     handler.configured_model = authorized_model
+    from controllers.config import ai_model_config_controller
+    original_active = ai_model_config_controller.get_active
+    memory_keys = {}
+    async def active_with_memory_key(*positional, **kwargs):
+        config = await original_active(*positional, **kwargs)
+        if config.id in memory_keys:
+            config.api_key = memory_keys[config.id]
+        return config
+    ai_model_config_controller.get_active = active_with_memory_key
     original_lifespan = application.app.router.lifespan_context
 
     @asynccontextmanager
@@ -69,16 +86,24 @@ def main():
         async with original_lifespan(app):
             await AiModelConfig.update_or_create(name='DeepSeek · Deep Agents 验收', task_type=7, defaults={
                 'base_url': model['base_url'], 'api_key': 'runtime-only', 'model': model['model'],
-                'supports_tool_calls': True, 'is_active': True, 'pricing': model['pricing'], 'max_tokens': args.max_output_tokens or 2048,
+                'supports_tool_calls': True, 'is_active': True, 'pricing': model['pricing'], 'max_tokens': args.max_output_tokens,
             })
+            video_id = None
+            for kind, source_config in media_configs.items():
+                fields = ('base_url', 'model', 'api_protocol', 'image_model_type', 'video_model_type', 'concurrency')
+                data = {key: source_config[key] for key in fields}
+                data.update(api_key='runtime-only', is_active=True, pricing=json.loads(source_config['pricing']) if source_config['pricing'] else None)
+                item, _ = await AiModelConfig.update_or_create(name=f'{kind} · Assembly 验收', task_type=2 if kind == 'image' else 4, defaults=data)
+                memory_keys[item.id] = source_config['api_key']
+                if kind == 'video':
+                    video_id = item.id
             await AgentSettings.get_or_create(id=1, defaults={'configuration': AgentConfiguration(
-                enabled=True, runtime='deepagents', working_input_tokens=16000, max_output_tokens=2048,
+                enabled=True, runtime='deepagents', working_input_tokens=16000, max_output_tokens=args.max_output_tokens,
                 compaction_trigger_ratio=0.7, compaction_target_ratio=0.25, summary_output_tokens=768,
             ).model_dump()})
-            if args.max_output_tokens is not None:
-                stored = await AgentSettings.get(id=1)
-                stored.configuration = AgentConfiguration.model_validate({**stored.configuration, 'max_output_tokens': args.max_output_tokens}).model_dump()
-                await stored.save(update_fields=['configuration'])
+            stored = await AgentSettings.get(id=1)
+            stored.configuration = AgentConfiguration.model_validate({**stored.configuration, 'max_output_tokens': args.max_output_tokens}).model_dump()
+            await stored.save(update_fields=['configuration'])
             await GeneralConfig.get_or_create(id=1, defaults={'prompt_language': 'zh'})
             novel = await Novel.get_or_none(name='Deep Agents 七技能验收')
             if novel is None:
@@ -93,6 +118,9 @@ def main():
             if args.ten_chapter_identities:
                 from test.project_identity_fixture import seed_project_identities
                 await seed_project_identities(novel)
+            if video_id:
+                novel.video_model_config_id = video_id
+                await novel.save(update_fields=['video_model_config_id'])
             chapters = await Chapter.filter(novel=novel).order_by('number').values('id', 'number', 'name')
             scenes = await Scene.filter(chapter__novel_id=novel.id).values('id', 'chapter_id')
             print(json.dumps({'acceptance_project': novel.id, 'chapters': chapters, 'scenes': scenes}, ensure_ascii=False), flush=True)
