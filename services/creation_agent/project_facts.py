@@ -2,6 +2,8 @@
 
 import json
 
+from prompts.project_settings import audiovisual_guidance
+
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.novel import Novel
@@ -34,7 +36,7 @@ async def load_project_facts(*, novel_id, chapter_id, page_size, character_budge
     world = {'project_id': project.id, 'style_key': project.style_key,
         'custom_style_prompt': (project.custom_style_prompt or '')[:character_budget],
         'project_setting': (project.project_setting or '')[:character_budget],
-        'storyboard_enabled': project.storyboard_enabled, 'audiovisual_guidance': project.audiovisual_guidance,
+        'storyboard_enabled': project.storyboard_enabled, 'audiovisual_guidance': audiovisual_guidance(project.audiovisual_guidance), 'shot_duration_max': project.shot_duration_max,
         'aspect_ratio': project.aspect_ratio, 'storyboard_strategy': project.storyboard_strategy}
     relevant = [row for row in rows if row['id'] in active_ids] if chapter else rows
     preview, used = [], 0

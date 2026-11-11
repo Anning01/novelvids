@@ -21,6 +21,7 @@ export interface ProjectAnalysisDraft {
   customStyle?: string
   audiovisualGuidance?: string
   storyboardEnabled?: boolean
+  shotDurationMax?: number
   projectType: string
   projectSetting: string
   storyboardStrategy: string
@@ -36,7 +37,7 @@ export interface ChapterEditDraft {
 
 type EditableNovel = Pick<
   Novel,
-  | 'style_key' | 'custom_style_prompt' | 'audiovisual_guidance' | 'storyboard_enabled'
+  | 'shot_duration_max' | 'style_key' | 'custom_style_prompt' | 'audiovisual_guidance' | 'storyboard_enabled'
   | 'name'
   | 'tags'
   | 'story_outline'
@@ -69,6 +70,7 @@ export function createProjectAnalysisDraft(
     customStyle: novel.custom_style_prompt || '',
     audiovisualGuidance: novel.audiovisual_guidance || '',
     storyboardEnabled: novel.storyboard_enabled ?? false,
+    shotDurationMax: novel.shot_duration_max ?? 15,
     tagsText: tags.join('，'),
     storyOutline: novel.story_outline ?? analysis?.story_outline ?? '',
     projectType: novel.project_type ?? tr(DEFAULT_PROJECT_TYPE),
@@ -103,6 +105,7 @@ export function projectPatchFromDraft(
     settings.custom_style_prompt = draft.styleKey === 'custom' ? draft.customStyle?.trim() : null
   }
   if (draft.audiovisualGuidance !== initial?.audiovisualGuidance) settings.audiovisual_guidance = draft.audiovisualGuidance?.trim() || null
+  if (draft.shotDurationMax !== initial?.shotDurationMax) settings.shot_duration_max = draft.shotDurationMax
   if (draft.storyboardEnabled !== initial?.storyboardEnabled) settings.storyboard_enabled = draft.storyboardEnabled
   if (!initial) {
     return {

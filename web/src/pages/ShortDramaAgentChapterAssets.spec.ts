@@ -342,3 +342,43 @@ it('still automatically analyzes a normal source manuscript', async () => {
   expect(api.analyzeNovel).toHaveBeenCalledWith(9)
   wrapper.unmount()
 })
+
+it.each(['light', 'dark'])('exposes the storyboard switch without edit mode and only patches its setting (%s)', async theme => {
+  document.documentElement.dataset.theme = theme
+  vi.mocked(api.updateNovel).mockResolvedValue({code: 0, message: 'ok', data: {id: 9, storyboard_enabled: true} as Novel})
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  try {
+    await flushPromises()
+    const toggle = wrapper.get('[role="switch"][aria-label="逐镜线稿故事版"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(api.updateNovel).toHaveBeenCalledWith(9, {storyboard_enabled: true})
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(api.analyzeNovel).not.toHaveBeenCalled()
+  } finally { wrapper.unmount(); delete document.documentElement.dataset.theme }
+})
+
+it('keeps the storyboard switch off after a save failure', async () => {
+  vi.mocked(api.updateNovel).mockRejectedValue(new Error('保存失败'))
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  await flushPromises()
+  await wrapper.get('[role="switch"][aria-label="逐镜线稿故事版"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false')
+  expect(wrapper.get('[role="switch"]').attributes('disabled')).toBeUndefined()
+  wrapper.unmount()
+})
+
+it('edits the maximum shot duration without changing other project preferences', async () => {
+  vi.mocked(api.updateNovel).mockResolvedValue({code: 0, message: 'ok', data: {id: 9, shot_duration_max: 12} as Novel})
+  const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
+  await flushPromises()
+  expect(wrapper.get('.production-controls').text()).toContain('15s')
+  await wrapper.findAll('button').find(b => b.text() === '编辑内容')!.trigger('click')
+  await wrapper.get('input[aria-label="单分镜最长时长"]').setValue(12)
+  await wrapper.findAll('button').find(b => b.text().includes('保存修改'))!.trigger('click')
+  await flushPromises()
+  expect(api.updateNovel).toHaveBeenCalledWith(9, {shot_duration_max: 12})
+  wrapper.unmount()
+})

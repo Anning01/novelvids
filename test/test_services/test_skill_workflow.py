@@ -414,6 +414,8 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     expected_prompt = format_storyboard_prompt(candidate, "en")
 
     novel, chapter, _ = await enabled_project()
+    novel.shot_duration_max = maximum or 15
+    await novel.save(update_fields=["shot_duration_max"])
     if video_model_type:
         video_model = await AiModelConfig.create(
             name="video", model="test", task_type=4, api_key="test",
@@ -438,7 +440,7 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
         facts = json.loads(user_part.content)["untrusted_task_facts"]["input"]
         assert "shot_duration_range" in info.instructions
         if maximum is None:
-            assert "shot_duration_range" not in facts
+            assert facts["shot_duration_range"] == [1, 15]
         else:
             assert facts["shot_duration_range"][1] == maximum
         shot = candidate.model_dump(exclude={"prompt"})

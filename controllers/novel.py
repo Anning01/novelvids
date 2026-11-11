@@ -1,5 +1,6 @@
 
 from utils.messages import localized_message
+from prompts.project_settings import audiovisual_guidance
 import asyncio
 from itertools import count
 
@@ -46,7 +47,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "tags": novel.tags,
             "story_outline": novel.story_outline,
             "episodes_managed": novel.episodes_managed,
-            "audiovisual_guidance": novel.audiovisual_guidance,
+            "audiovisual_guidance": audiovisual_guidance(novel.audiovisual_guidance),
+            "shot_duration_max": novel.shot_duration_max,
             "storyboard_enabled": novel.storyboard_enabled,
             "project_type": novel.project_type,
             "project_setting": novel.project_setting,

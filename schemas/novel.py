@@ -4,6 +4,7 @@ from schemas._base import BaseResponse
 from services.cover_derivatives import cover_derivative_reference
 from services.oss import normalize_media_url, resolve_media_url
 from schemas.video_defaults import VideoDefaults
+from prompts.project_settings import audiovisual_guidance
 
 
 def _cover_urls(cover: str | None) -> tuple[str | None, str | None, str | None]:
@@ -28,6 +29,7 @@ class NovelProperties(BaseModel):
     cover: Optional[str] = Field(None, description="封面图URL")
     audiovisual_guidance: str | None = Field(None, max_length=4000)
     storyboard_enabled: bool = False
+    shot_duration_max: int = Field(15, ge=1, le=30)
     total_chapters: Optional[int] = Field(None, description="总章节数")
     video_generation_defaults: VideoDefaults | None = None
     video_model_config_id: Optional[int] = Field(
@@ -123,6 +125,7 @@ class NovelMetaOut(NovelProperties, BaseResponse):
 
     @model_validator(mode="after")
     def _resolve_media(self):
+        self.audiovisual_guidance = audiovisual_guidance(self.audiovisual_guidance)
         self.cover, self.cover_thumbnail, self.cover_preview = _cover_urls(self.cover)
         return self
 
@@ -140,6 +143,7 @@ class NovelBriefOut(NovelProperties, BaseResponse):
 
     @model_validator(mode="after")
     def _resolve_media(self):
+        self.audiovisual_guidance = audiovisual_guidance(self.audiovisual_guidance)
         self.cover, self.cover_thumbnail, self.cover_preview = _cover_urls(self.cover)
         return self
 
@@ -158,5 +162,6 @@ class NovelOut(NovelFullProperties, BaseResponse):
 
     @model_validator(mode="after")
     def _resolve_media(self):
+        self.audiovisual_guidance = audiovisual_guidance(self.audiovisual_guidance)
         self.cover, self.cover_thumbnail, self.cover_preview = _cover_urls(self.cover)
         return self

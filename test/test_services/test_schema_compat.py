@@ -68,6 +68,7 @@ async def test_novel_analysis_schema_adds_editable_fields_once_across_repeated_s
         {"name": "story_outline"},
         {"name": "episodes_managed"},
         {"name": "audiovisual_guidance"},
+        {"name": "shot_duration_max"},
         {"name": "storyboard_enabled"},
         {"name": "project_type"},
         {"name": "project_setting"},
@@ -95,6 +96,7 @@ async def test_novel_analysis_schema_adds_editable_fields_once_across_repeated_s
     script = connection.execute_script.await_args.args[0]
     assert "ADD COLUMN tags JSON" in script
     assert "ADD COLUMN audiovisual_guidance TEXT" in script
+    assert "ADD COLUMN shot_duration_max INT NOT NULL DEFAULT 15" in script
     assert "ADD COLUMN storyboard_enabled BOOL NOT NULL DEFAULT 0" in script
     assert "ADD COLUMN episodes_managed BOOL NOT NULL DEFAULT 0" in script
     assert "ADD COLUMN story_outline TEXT" in script

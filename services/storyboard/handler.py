@@ -70,8 +70,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
         # 3. 调用 OpenAI API 生成分镜
         creative_constraints = await creation_memory.for_generation(chapter, assets)
-        if chapter.novel.audiovisual_guidance:
-            creative_constraints.append({"scope": {"kind": "project"}, "content": chapter.novel.audiovisual_guidance})
+        from prompts.project_settings import audiovisual_guidance
+        creative_constraints.append({"scope": {"kind": "project"},
+                                     "content": audiovisual_guidance(chapter.novel.audiovisual_guidance, prompt_language)})
         seen_assets = await previously_seen_assets(chapter, entities)
         start_time = time.time()
 

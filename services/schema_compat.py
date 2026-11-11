@@ -178,6 +178,7 @@ async def ensure_novel_analysis_schema() -> None:
             'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS video_generation_defaults JSONB;'
             'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS episodes_managed BOOLEAN NOT NULL DEFAULT FALSE;'
             'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS audiovisual_guidance TEXT;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS shot_duration_max INT NOT NULL DEFAULT 15;'
             'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS storyboard_enabled BOOLEAN NOT NULL DEFAULT FALSE;')
         return
     if not settings.DATABASE_URL.startswith("sqlite"):
@@ -194,6 +195,7 @@ async def ensure_novel_analysis_schema() -> None:
         "story_outline": "TEXT",
         "episodes_managed": "BOOL NOT NULL DEFAULT 0",
         "audiovisual_guidance": "TEXT",
+        "shot_duration_max": "INT NOT NULL DEFAULT 15",
         "storyboard_enabled": "BOOL NOT NULL DEFAULT 0",
         "project_type": "VARCHAR(120)",
         "project_setting": "TEXT",

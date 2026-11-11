@@ -4502,6 +4502,13 @@
             "type": "integer",
             "title": "Id",
             "description": "小说/剧本ID"
+          },
+          "shot_duration_max": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Shot Duration Max",
+            "default": 15
           }
         },
         "type": "object",
@@ -4581,6 +4588,13 @@
             ],
             "title": "Content",
             "description": "正文内容"
+          },
+          "shot_duration_max": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Shot Duration Max",
+            "default": 15
           }
         },
         "type": "object",
@@ -4903,6 +4917,13 @@
             ],
             "title": "Cover Preview",
             "description": "项目详情封面预览图"
+          },
+          "shot_duration_max": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Shot Duration Max",
+            "default": 15
           }
         },
         "type": "object",
@@ -4990,6 +5011,13 @@
             ],
             "title": "Content",
             "description": "正文内容"
+          },
+          "shot_duration_max": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Shot Duration Max",
+            "default": 15
           }
         },
         "type": "object",
@@ -5064,6 +5092,13 @@
             ],
             "title": "Content",
             "description": "正文内容"
+          },
+          "shot_duration_max": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Shot Duration Max",
+            "default": 15
           }
         },
         "type": "object",

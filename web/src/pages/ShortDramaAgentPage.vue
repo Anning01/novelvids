@@ -122,6 +122,7 @@ const loadingChapterId = ref<number | null>(null)
 const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
+const savingStoryboard = ref(false)
 const projectDraft = ref<ProjectAnalysisDraft | null>(null)
 const initialProjectDraft = ref<ProjectAnalysisDraft | null>(null)
 const storyboardStrategies = ref<StoryboardStrategy[]>([])
@@ -401,10 +402,36 @@ function cancelEditing(restoreVoice = true) {
   chapterDrafts.value = {}
 }
 
+const storyboardEnabled = computed(() => editing.value && projectDraft.value
+  ? projectDraft.value.storyboardEnabled
+  : projectView.value.storyboardEnabled)
+
+async function toggleStoryboard() {
+  if (!novel.value || !canEdit.value || savingEdits.value || savingStoryboard.value) return
+  if (editing.value && projectDraft.value) {
+    projectDraft.value.storyboardEnabled = !projectDraft.value.storyboardEnabled
+    return
+  }
+  const enabled = !storyboardEnabled.value
+  savingStoryboard.value = true
+  try {
+    await api.updateNovel(projectId.value, { storyboard_enabled: enabled })
+    novel.value = { ...novel.value, storyboard_enabled: enabled }
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    savingStoryboard.value = false
+  }
+}
+
 async function saveEdits() {
   if (!novel.value || !projectDraft.value || savingEdits.value) return
   if (projectDraft.value.styleKey === 'custom' && !projectDraft.value.customStyle?.trim()) {
     notice.error(tr('自定义风格不能为空'))
+    return
+  }
+  if (!Number.isInteger(projectDraft.value.shotDurationMax) || projectDraft.value.shotDurationMax! < 1 || projectDraft.value.shotDurationMax! > 30) {
+    notice.error(tr('单分镜最长时长须为 1–30 秒'))
     return
   }
   const projectPatch = projectPatchFromDraft(projectDraft.value, initialProjectDraft.value)
@@ -584,7 +611,7 @@ onBeforeUnmount(() => {
         <AppButton variant="soft" size="sm" :disabled="!selectedEpisodeBrief" @click="continueToSettings">{{ tr('前往资产提取') }}<ArrowRight :size="15" /></AppButton>
       </section>
       <div class="analysis-hero">
-        <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover" :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="tr('{p0}封面', { p0: displayedProjectName })" :max-width="240" :max-height="180" />
+        <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover" :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="tr('{p0}封面', { p0: displayedProjectName })" :max-width="144" :max-height="96" />
         <div class="analysis-hero-copy">
           <AppBadge
             class="analysis-ready"
@@ -613,7 +640,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <AppButton v-if="canEdit && manuscriptLength > 0" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
-            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
+            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
       </div>
@@ -633,6 +660,7 @@ onBeforeUnmount(() => {
 
       <div v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status"><p>{{ analysisResult.cover_warning }}</p><p v-if="analysisResult.cover_error">{{ analysisResult.cover_error }}</p></div>
       <template v-if="novel">
+      <div class="production-settings">
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>{{ tr('项目设定') }}</h2></div></header>
         <div class="profile-grid">
@@ -666,15 +694,26 @@ onBeforeUnmount(() => {
 
       <section class="analysis-section">
         <header><h2>{{ tr('全片视听约定') }}</h2></header>
-        <article class="profile-card">
+        <article class="profile-card audiovisual-card">
           <div v-if="editing && projectDraft">
             <textarea v-model="projectDraft.audiovisualGuidance" :aria-label="tr('全片视听约定')" :placeholder="tr('按剧情决定')" maxlength="4000" rows="3" />
-            <label><input type="checkbox" v-model="projectDraft.storyboardEnabled" /> {{ tr('逐镜线稿故事版') }}</label>
           </div>
-          <div v-else><p>{{ projectView.audiovisualGuidance || tr('按剧情决定') }}</p><small>{{ tr('逐镜线稿故事版') }} · {{ projectView.storyboardEnabled ? tr('开启') : tr('关闭') }}</small></div>
+          <div v-else><p>{{ projectView.audiovisualGuidance }}</p></div>
+
         </article>
       </section>
 
+      </div>
+      <div class="production-controls">
+        <label class="shot-duration-control"><span>{{ tr('单分镜最长时长') }}</span>
+          <input v-if="editing && projectDraft" v-model.number="projectDraft.shotDurationMax" type="number" min="1" max="30" :aria-label="tr('单分镜最长时长')" />
+          <strong v-else>{{ projectView.shotDurationMax }}s</strong>
+        </label>
+          <div class="storyboard-switch-row">
+            <span>{{ tr('逐镜线稿故事版') }}</span>
+            <AppButton type="button" role="switch" :aria-label="tr('逐镜线稿故事版')" :aria-checked="storyboardEnabled" variant="soft" size="sm" :active="storyboardEnabled" :loading="savingStoryboard" :disabled="!canEdit || savingEdits || savingStoryboard" @click="toggleStoryboard">{{ storyboardEnabled ? tr('开启') : tr('关闭') }}</AppButton>
+          </div>
+      </div>
       <section class="analysis-section episode-section">
         <header>
           <div><span class="section-kicker">EPISODE CHAPTERS</span><h2>{{ tr('分集剧情') }}</h2><p>{{ tr('复用项目的分章节结构，每一集对应一个章节。') }}</p></div>
@@ -721,7 +760,7 @@ onBeforeUnmount(() => {
 .profile-card input[type="checkbox"] { width: auto; min-height: 0; height: auto; accent-color: var(--app-accent); }
 .creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }
 .creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
-.creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 24px; padding: 18px 20px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }
+.creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }
 .creation-stage-guide > div { flex: 1 1 240px; }
 .creation-stage-guide strong { font-size: 14px; }
 .creation-stage-guide p { margin: 6px 0 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
@@ -730,14 +769,14 @@ onBeforeUnmount(() => {
 .agent-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f9fafc; }
 .analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
 .analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }
-.agent-content { width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 36px 22px 80px; box-sizing: border-box; }
-.analysis-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 26px; padding: 24px; border-radius: 20px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
+.agent-content { width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 20px 22px 48px; box-sizing: border-box; }
+.analysis-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
 .analysis-hero-copy { display: grid; justify-items: start; }
 .analysis-ready { margin-bottom: 9px; }
 .status-spinner { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
-.analysis-hero h1 { margin: 0 0 10px; color: #282c3a; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.035em; }
-.analysis-title-input { width: min(620px, 100%); margin: 0 0 10px; padding: 5px 9px; color: var(--app-text); font-size: clamp(22px, 3vw, 30px); font-weight: 700; letter-spacing: -.035em; }
+.analysis-hero h1 { margin: 0 0 10px; color: #282c3a; font-size: clamp(20px, 2vw, 24px); letter-spacing: -.035em; }
+.analysis-title-input { width: min(620px, 100%); margin: 0 0 10px; padding: 5px 9px; color: var(--app-text); font-size: clamp(20px, 2vw, 24px); font-weight: 700; letter-spacing: -.035em; }
 .analysis-hero-copy p { margin: 0; font-size: 11px; }
 .genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
 .tag-editor { display: grid; width: min(620px, 100%); gap: 5px; margin-top: 13px; }
@@ -753,8 +792,8 @@ onBeforeUnmount(() => {
 .analysis-progress-card p { margin: 0; color: #858a99; font-size: 11px; line-height: 1.7; }
 .analysis-progress-card > button { min-height: 36px; padding: 0 15px; border: 0; border-radius: 9px; color: #fff; background: #5b5cf6; cursor: pointer; font-size: 11px; font-weight: 650; }
 .analysis-progress-card.is-failed > span { color: #bb5b68; background: #fff0f2; }
-.analysis-section { padding-top: 38px; }
-.analysis-section > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
+.analysis-section { padding-top: 20px; }
+.analysis-section > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .analysis-section > header > div:not(.episode-actions) { display: grid; gap: 4px; }
 .analysis-section > header h2 { margin: 0; color: #303442; font-size: 17px; }
 .analysis-section > header p { margin: 2px 0 0; color: #9297a7; font-size: 11px; }
@@ -763,6 +802,17 @@ onBeforeUnmount(() => {
 .section-kicker { color: #7779ef; font-size: 8px; font-weight: 750; letter-spacing: .16em; }
 .profile-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .profile-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
+.production-settings > section { display: flex; flex-direction: column; }
+.production-settings .profile-card { flex: 1; box-sizing: border-box; }
+.production-settings > section > header { height: 44px; flex: 0 0 44px; align-items: center; }
+.production-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; padding-top: 16px; font-size: 12px; color: var(--app-text-secondary); }
+.shot-duration-control { display: flex; align-items: center; gap: 12px; }
+.shot-duration-control input { width: 72px; min-height: 32px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); color: var(--app-text); padding: 4px 8px; }
+.production-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.audiovisual-card { grid-template-columns: minmax(0, 1fr); }
+.audiovisual-card p, .audiovisual-card small { font-size: 12px; line-height: 1.6; }
+.production-controls > .storyboard-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--app-text-secondary); }
+@container creation-workspace (max-width: 800px) { .production-settings { grid-template-columns: minmax(0, 1fr); gap: 0; } }
 .profile-card > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
 .profile-card > div { display: grid; gap: 4px; }
 .profile-card small { color: #969baa; font-size: 9px; }
@@ -824,7 +874,7 @@ onBeforeUnmount(() => {
   .analysis-hero h1 { font-size: 19px; }
   .genre-tags { margin-top: 11px; }
   .profile-grid, .character-grid { grid-template-columns: 1fr; }
-  .analysis-section { padding-top: 30px; }
+  .analysis-section { padding-top: 20px; }
   .analysis-progress-card { grid-template-columns: 44px minmax(0, 1fr); }
   .analysis-progress-card > span { width: 44px; height: 44px; }
   .analysis-progress-card > button { grid-column: 2; justify-self: start; }

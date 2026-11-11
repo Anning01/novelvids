@@ -221,6 +221,10 @@ class CreationOperations:
 
     async def create_scene(self, operation: CreateScene):
         chapter = await self.service.scope.chapter(operation.chapter_id)
+        from models.novel import Novel
+        project = await Novel.get(id=self.objects.novel_id)
+        if operation.duration > project.shot_duration_max:
+            raise ValueError(localized_message("镜头时长超过项目的单分镜最长时长"))
         await self.service._check_creation_context(chapter.id)
         after = await self.ref(operation.after, 'scene') if operation.after else operation.after
         await self.service.scope.creation(kind='scene', chapter_ids=[chapter.id], anchor_id=after)

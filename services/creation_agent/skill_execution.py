@@ -80,6 +80,11 @@ async def prepare_workflow(params: dict) -> dict:
             if key in parent.params:
                 inherited[key] = parent.params[key]
     from services.creation_agent.video_optimizer import project_optimizer
+    if params.get('novel_id'):
+        from models.novel import Novel
+        project = await Novel.get(id=params['novel_id'])
+        duration_range = params.get('shot_duration_range') or [1, project.shot_duration_max]
+        params = {**params, 'shot_duration_range': [duration_range[0], min(duration_range[1], project.shot_duration_max)]}
     optimizer = inherited.get('video_optimizer') or (await project_optimizer(params['novel_id'], params.get('team_id')) if params.get('novel_id') else {'mode': 'generic'})
     return {
         'video_optimizer': optimizer,
@@ -429,9 +434,11 @@ class SkillExecution:
             request_aspect_ratio = project.aspect_ratio or "16:9"
             if initial_assets is not None and asset_candidates and not asset_checkpoint:
                 asset_candidates.merge(initial_assets, self.snapshot, self.language, request_aspect_ratio)
+            from prompts.project_settings import audiovisual_guidance
             project_facts = {
                 "name": project.name,
-                "audiovisual_guidance": project.audiovisual_guidance,
+                "audiovisual_guidance": audiovisual_guidance(project.audiovisual_guidance, self.language),
+                "shot_duration_max": project.shot_duration_max,
                 "storyboard_enabled": project.storyboard_enabled,
                 "style_key": project.style_key,
                 "custom_style_prompt": project.custom_style_prompt,
