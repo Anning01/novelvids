@@ -606,10 +606,6 @@ onBeforeUnmount(() => {
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
     >
       <section class="agent-content">
-      <section class="creation-stage-guide" :aria-label="tr('当前创作步骤')">
-        <div><strong>{{ tr('第一步 · 理解故事') }}</strong><p>{{ tr('查看本章正文和故事设定，再提取角色、场景与道具。之后可以在助手里用日常语言调整画面。') }}</p></div>
-        <AppButton variant="soft" size="sm" :disabled="!selectedEpisodeBrief" @click="continueToSettings">{{ tr('前往资产提取') }}<ArrowRight :size="15" /></AppButton>
-      </section>
       <div class="analysis-hero">
         <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover" :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="tr('{p0}封面', { p0: displayedProjectName })" :max-width="144" :max-height="96" />
         <div class="analysis-hero-copy">
@@ -760,10 +756,6 @@ onBeforeUnmount(() => {
 .profile-card input[type="checkbox"] { width: auto; min-height: 0; height: auto; accent-color: var(--app-accent); }
 .creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }
 .creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
-.creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }
-.creation-stage-guide > div { flex: 1 1 240px; }
-.creation-stage-guide strong { font-size: 14px; }
-.creation-stage-guide p { margin: 6px 0 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
 @container creation-workspace (max-width: 800px) { .agent-content { padding: 20px 18px; }.analysis-hero { gap: 18px; }.profile-grid { grid-template-columns: 1fr; } }
 
 .agent-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f9fafc; }
