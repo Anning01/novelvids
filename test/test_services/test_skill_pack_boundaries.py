@@ -18,15 +18,6 @@ from services.project_analysis.handler import _build_analysis_material
 from services.remake.pipeline import RemakeDecompositionPipeline
 
 
-@pytest.fixture(autouse=True)
-def public_prompt_pack(tmp_path, monkeypatch):
-    """Public contracts must be independent of ignored developer resources."""
-    import prompts.skill_pack as pack
-    for filename in pack.FILES.values():
-        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
-    monkeypatch.setattr(pack, 'ROOT', tmp_path)
-
-
 def test_old_creative_templates_are_removed_and_only_ui_locales_remain():
     root = Path(__file__).parents[2] / "prompts"
     assert not (root / "legacy").exists()
@@ -184,41 +175,10 @@ def test_video_enhancement_skill_keeps_targets_authorization_and_source_identity
         assert rule in rendered
 
 
-def test_private_styles_override_defaults_and_reach_snapshots(tmp_path, monkeypatch):
-    import prompts.skill_pack as pack
-    from prompts.styles import get_style, image_style_suffix, video_style_suffix
-    from services.project_config import validate_project_config
-
-    for filename in pack.FILES.values():
-        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
-    monkeypatch.setattr(pack, "ROOT", tmp_path)
-    before = snapshot_skills()
-    public = json.loads(pack.read_skill("styles"))
-    key = next(iter(public))
-    private = {
-        key: {"label": "Private override", "image": "private image", "video": "private video"},
-        "private-style": {"label": "Private style", "image": "extra image", "video": "extra video"},
-    }
-    (tmp_path / "styles.anning.json").write_text(json.dumps(private))
-    merged = json.loads(pack.read_skill("styles"))
-    assert set(merged) == set(public) | {"private-style"}
-    assert get_style(key).image_prompt == "private image"
-    assert "extra image" in image_style_suffix("private-style")
-    assert "extra video" in video_style_suffix("private-style")
-    assert validate_project_config({"style_key": "private-style"}) == {"style_key": "private-style"}
-    assert {"key": "private-style", "label": "Private style"} in list_styles()
-    after = snapshot_skills()
-    assert after["revision"] != before["revision"]
-    assert json.loads(after["contents"]["styles"]) == merged
-    assert json.loads(before["contents"]["styles"]) == public
-    assert json.loads((tmp_path / "styles.json").read_text()) == public
-
-
 @pytest.mark.parametrize('value', [[], {'bad': {}}, {'bad': {'label': 'X', 'image': 1, 'video': 'v'}}])
-def test_private_styles_reject_malformed_config_without_exposing_contents(tmp_path, monkeypatch, value):
+def test_styles_reject_malformed_config_without_exposing_contents(tmp_path, monkeypatch, value):
     import prompts.skill_pack as pack
-    (tmp_path / 'styles.json').write_text('{}')
-    (tmp_path / 'styles.anning.json').write_text(json.dumps(value))
+    (tmp_path / 'styles.json').write_text(json.dumps(value))
     monkeypatch.setattr(pack, 'ROOT', tmp_path)
-    with pytest.raises(ValueError, match='Invalid private styles'):
+    with pytest.raises(ValueError, match='Invalid styles'):
         pack.read_skill('styles')

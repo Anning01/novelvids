@@ -161,6 +161,8 @@ class AssetUpsertService:
         result: AssetExtractionResult,
         preserve_existing: bool = False,
         include_ids: bool = False,
+        repair_asset_ids: frozenset[int] = frozenset(),
+        repair_variant_ids: frozenset[int] = frozenset(),
     ) -> dict[str, list[dict[str, str | int]]]:
         summary: dict[str, list[dict[str, str | int]]] = {}
         async with in_transaction() as connection:
@@ -173,6 +175,7 @@ class AssetUpsertService:
                     items=getattr(result, result_key),
                     preserve_existing=preserve_existing,
                     include_ids=include_ids,
+                    repair_asset_ids=repair_asset_ids, repair_variant_ids=repair_variant_ids,
                 )
         return summary
 
@@ -186,6 +189,8 @@ class AssetUpsertService:
         items: list[ExtractedAsset],
         preserve_existing: bool = False,
         include_ids: bool = False,
+        repair_asset_ids: frozenset[int] = frozenset(),
+        repair_variant_ids: frozenset[int] = frozenset(),
     ) -> list[dict[str, str | int]]:
         saved: list[dict[str, str | int]] = []
         existing_assets = await Asset.filter(
@@ -215,6 +220,7 @@ class AssetUpsertService:
                 needs_base_design = (
                     replaces_project_analysis
                     or not (existing.base_traits or '').strip()
+                    or existing.id in repair_asset_ids
                 )
                 merged_aliases = _ordered_strings(
                     existing.aliases,
@@ -257,7 +263,7 @@ class AssetUpsertService:
                         "updated_at",
                     ],
                 )
-                variant = await self._save_variant(existing, item, chapter_number, connection)
+                variant = await self._save_variant(existing, item, chapter_number, connection, repair_variant_ids)
                 saved.append({"name": item.name,
                     "action": "updated" if needs_base_design or variant or not preserve_existing else "preserved",
                     **({'asset_id': existing.id} if include_ids else {}),
@@ -277,7 +283,7 @@ class AssetUpsertService:
                 last_updated_chapter=chapter_number,
             )
             existing_assets.append(created)
-            variant = await self._save_variant(created, item, chapter_number, connection)
+            variant = await self._save_variant(created, item, chapter_number, connection, repair_variant_ids)
             saved.append({"name": item.name, "action": "created", **({'asset_id': created.id} if include_ids else {}),
                 **({'variant_id': variant.id} if variant else {})})
 
@@ -285,7 +291,7 @@ class AssetUpsertService:
 
     @staticmethod
     async def _save_variant(asset: Asset, item: ExtractedAsset, chapter_number: int,
-                            connection: BaseDBAsyncClient) -> AssetVariant | None:
+                            connection: BaseDBAsyncClient, repair_ids: frozenset[int] = frozenset()) -> AssetVariant | None:
         if item.variant is None:
             return None
         from services.creation_objects import CreationObjects
@@ -294,10 +300,13 @@ class AssetUpsertService:
         variant = await AssetVariant.filter(asset_id=asset.id, name=incoming.name).using_db(connection).first()
         objects = CreationObjects(asset.novel_id)
         if variant:
+            if variant.id in repair_ids:
+                variant.base_traits = incoming.base_traits
+                variant.description = incoming.description
             chapters = list(normalize_source_chapters([*(variant.chapter_numbers or []), chapter_number]))
             await objects.ensure_variant_chapters(asset.id, chapters, exclude_id=variant.id)
             variant.chapter_numbers = chapters
-            await variant.save(using_db=connection, update_fields=['chapter_numbers', 'updated_at'])
+            await variant.save(using_db=connection, update_fields=['chapter_numbers', 'base_traits', 'description', 'updated_at'])
             return variant
         return await objects.create_variant(asset.id, {
             'name': incoming.name, 'description': incoming.description,

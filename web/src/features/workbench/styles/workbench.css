@@ -1530,6 +1530,14 @@
   white-space: nowrap;
   cursor: default;
 }
+.workbench-inline-mention.is-duration {
+  gap: 5px;
+  padding-inline: 6px;
+  border-color: var(--vf-border-regular);
+  color: var(--vf-text-primary);
+  background: var(--vf-bg-elevated);
+}
+.workbench-inline-mention__duration-icon { display: inline-flex; align-items: center; }
 .workbench-inline-mention__name {
   display: block;
   min-width: 0;

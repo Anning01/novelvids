@@ -6,7 +6,7 @@ import { api, mediaUrl, persistedMediaRef, retryableStatusError } from '@/api'
 import { catalogApi, type CatalogResource } from '@/features/resource-library/catalog'
 import { libraryApi } from '@/features/resource-library/api'
 import type { VideoResource } from '@/features/resource-library/types'
-import { readVideoReferenceMedia } from '@/shared/scenePromptReferences'
+import { readVideoReferenceMedia, referencedVideoMedia } from '@/shared/scenePromptReferences'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import type { VideoReferenceMedia } from '@/types'
 import { notice } from '@/shared/notice'
@@ -1376,7 +1376,13 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       let submittedVideoId: number | null = null
       if (!this.busySceneIds.includes(sceneId)) this.busySceneIds.push(sceneId)
       try {
-        const references = options.generation_mode === 'keyframes' ? [] : this.libraryVideoReferences(sceneId)
+        const sourceScene = this.scenes.find(item => item.id === sceneId)
+        const savedReferences = readVideoReferenceMedia(sourceScene?.metadata?.video_reference_media)
+          .filter(item => !item.library_resource_id)
+        const references = options.generation_mode === 'keyframes' ? [] : [
+          ...referencedVideoMedia(sourceScene?.prompt || '', savedReferences),
+          ...this.libraryVideoReferences(sceneId),
+        ]
         let video = (await api.generateVideo(sceneId, modelConfigId, { ...options, ...(references.length ? { reference_media: references } : {}) })).data
         submittedVideoId = video.id
         if (controller.signal.aborted) return

@@ -6,7 +6,7 @@ import { useWorkbenchStore } from './workbenchStore'
 
 vi.mock('@/api', async importOriginal => ({
   ...await importOriginal<typeof import('@/api')>(),
-  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn(), scene: vi.fn(), workbenchBootstrap: vi.fn() },
+  api: { createAsset: vi.fn(), createScene: vi.fn(), deleteAsset: vi.fn(), generateVideo: vi.fn(), mergeAssets: vi.fn(), queryVideo: vi.fn(), reuseAsset: vi.fn(), updateAsset: vi.fn(), updateChapter: vi.fn(), updateScene: vi.fn(), scene: vi.fn(), workbenchBootstrap: vi.fn() },
   sleep: vi.fn(),
 }))
 
@@ -22,10 +22,30 @@ const updateSceneMock = vi.mocked(api.updateScene)
 let store: ReturnType<typeof useWorkbenchStore>
 
 beforeEach(() => {
+  vi.clearAllMocks()
   setActivePinia(createPinia())
   store = useWorkbenchStore()
   store.chapterId = 2162
   store.novelId = 9
+})
+
+it('submits the persisted continuity frame with its original marker identity and resolved URL', async () => {
+  const reference = { type: 'image' as const, name: '上一镜头尾帧', url: 'https://cdn.example.com/tail.png',
+    mention_url: 'uploads/1/tail.png' }
+  const unused = { ...reference, url: 'https://cdn.example.com/unused.png', mention_url: 'uploads/1/unused.png' }
+  const scene = { id: 10, chapter_id: store.chapterId, sequence: 2,
+    prompt: '首帧参考：@{参考图片:uploads%2F1%2Ftail.png}\n@{镜头时长:5s}',
+    metadata: { video_reference_media: [reference, unused] }, created_at: '', updated_at: '' }
+  store.scenes = [scene]
+  vi.mocked(api.generateVideo).mockResolvedValue({ code: 0, message: '', data: {
+    id: 1, scene_id: 10, status: TaskStatusEnum.COMPLETED, model_type: 1, url: '/media/result.mp4', created_at: '', updated_at: '',
+  } })
+  updateSceneMock.mockResolvedValue({ code: 0, message: '', data: scene })
+  await store.generateVideo(scene.id, 11, { generation_mode: 'reference' })
+  expect(api.generateVideo).toHaveBeenLastCalledWith(scene.id, 11, {
+    generation_mode: 'reference', reference_media: [reference],
+  })
+  expect(store.scenes[0]?.prompt).toBe(scene.prompt)
 })
 
 it('adopts the enhanced selection without removing the source video or local prompt', async () => {

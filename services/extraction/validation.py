@@ -13,8 +13,10 @@ class AssetExtractionValidationError(ValueError):
 
 
 class AssetCandidateValidator:
-    def __init__(self, output_type=None):
+    def __init__(self, output_type=None, asset_scope=()):
         self.output_type = output_type
+        self.asset_scope = set(asset_scope)
+        self.extra = {}
         self.draft_type = None
         if output_type:
             fields = {}
@@ -23,12 +25,21 @@ class AssetCandidateValidator:
                 repair_type = create_model(item_type.__name__ + 'Repair', __base__=item_type,
                     repair_of=(str | None, Field(None, description='Original failed asset name or #slot; omit for initial output')))
                 fields[name] = (list[SkipValidation[repair_type]], Field(...))
-            self.draft_type = create_model(output_type.__name__ + 'Candidate', **fields)
+            self.draft_type = create_model(output_type.__name__ + 'Candidate', __base__=output_type, **fields)
         self.accepted = {name: {} for name in ('persons', 'scenes', 'items')}
         self.pending = {}
         self.issues = []
 
     def merge(self, output, snapshot, language, aspect_ratio):
+        field_types = {'persons': 1, 'scenes': 2, 'items': 3}
+        known_names = {name for _, name in self.asset_scope}
+        def misplaced(field, name):
+            return name in known_names and (field_types[field], name) not in self.asset_scope
+        for field in self.accepted:
+            self.accepted[field] = {name: value for name, value in self.accepted[field].items() if not misplaced(field, name)}
+        self.pending = {key: issue for key, issue in self.pending.items() if not misplaced(*key)}
+        if self.output_type:
+            self.extra.update(output.model_dump(exclude=set(field_types), mode='json', warnings=False))
         for field, kind in (('persons', 'person'), ('scenes', 'scene'), ('items', 'item')):
             for index, raw in enumerate(getattr(output, field), 1):
                 original = None
@@ -37,6 +48,8 @@ class AssetCandidateValidator:
                     data = dict(data) if isinstance(data, dict) else {}
                     original = data.pop('repair_of', None)
                     name = original or str(data.get('name') or f'#{index}').strip()
+                    if misplaced(field, str(data.get('name') or '').strip()):
+                        continue
                     if str(data.get('name') or '').strip() in self.accepted[field]:
                         continue
                     try:
@@ -66,13 +79,14 @@ class AssetCandidateValidator:
                         self.pending.pop((field, original), None)
         self.issues = list(self.pending.values())
         accepted = {field: list(items.values()) for field, items in self.accepted.items()}
-        return self.output_type(**accepted) if self.output_type else output.model_copy(update=accepted)
+        return self.output_type(**self.extra, **accepted) if self.output_type else output.model_copy(update=accepted)
 
     def names(self):
         return {field: list(items) for field, items in self.accepted.items()}
 
     def restore(self, checkpoint, output_type):
         output = output_type.model_validate(checkpoint['accepted'])
+        self.extra = output.model_dump(exclude=set(self.accepted), mode='json')
         self.accepted = {field: {item.name.strip(): item for item in getattr(output, field)}
                          for field in self.accepted}
         self.issues = list(checkpoint['issues'])

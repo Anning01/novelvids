@@ -125,11 +125,15 @@ const videoModelTypeOptions = computed(() => [
   { value: '', label: tr('请选择受支持的视频模型') },
   ...videoModelTypes.value.map(item => ({ value: String(item.value), label: tr(item.label) })),
 ])
-const imageProtocolOptions = computed(() => [
-  { value: 'openai_compatible', label: tr('OpenAI 兼容（GPT Image / 中转服务）') },
-  { value: 'openrouter_compatible', label: tr('OpenRouter 兼容（/images）') },
-  { value: 'volcengine_ark', label: tr('火山方舟 Seedream') },
-])
+const imageProtocolOptions = computed(() => {
+  const allowed = form.value.image_model_type ? generationCapabilities.value.image_protocols?.[form.value.image_model_type] : undefined
+  const options = [
+    { value: 'openai_compatible', label: tr('OpenAI 兼容（GPT Image / 中转服务）') },
+    { value: 'openrouter_compatible', label: tr('OpenRouter 兼容（/images）') },
+    { value: 'volcengine_ark', label: tr('火山方舟 Seedream') },
+  ]
+  return allowed ? allowed.flatMap(value => options.filter(option => option.value === value)) : options
+})
 const thinkingOptions = computed(() => [
   { value: '', label: tr('按模型默认') },
   { value: 'enabled', label: tr('开启思考（enabled）') },
@@ -339,10 +343,10 @@ function openEdit(item: AiModelConfig) {
 }
 
 function changeImageModelType() {
-  if (form.value.api_protocol === 'openrouter_compatible') return
-  form.value.api_protocol = form.value.image_model_type === 'gpt_image_2'
-    ? 'openai_compatible'
-    : 'volcengine_ark'
+  if (!imageProtocolOptions.value.some(option => option.value === form.value.api_protocol)) {
+    const first = imageProtocolOptions.value[0]
+    if (first) form.value.api_protocol = first.value as ImageApiProtocol
+  }
 }
 
 function changeVideoModelType() {
@@ -392,6 +396,11 @@ async function saveConfig() {
   // 原生 select 的 required 校验由共享选择器接管，避免空模型类型被提交。
   if (selectedCategoryId.value === 'image' && !form.value.image_model_type) {
     notice.error(tr('请选择受支持的模型'))
+    return
+  }
+  if (selectedCategoryId.value === 'image' && pricingTierOptions.value.some(tier =>
+    typeof tierPrices.value[tier] !== 'number' || !Number.isFinite(tierPrices.value[tier]) || tierPrices.value[tier]! < 0)) {
+    notice.error(tr('请配置全部清晰度档位的输出图单价'))
     return
   }
   if (selectedCategoryId.value === 'video' && !form.value.video_model_type) {
@@ -681,7 +690,7 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
               :menu-z-index="2000"
               @update:model-value="selectImageModelType"
             />
-            <small>{{ tr('仅支持 Lite、Pro 和 GPT Image 2；清晰度、比例与格式由所选类型的后台能力定义。') }}</small>
+            <small>{{ tr('支持 Seedream 与 GPT Image 系列；清晰度、比例与格式由所选类型的后台能力定义。') }}</small>
           </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
             <span>{{ tr('视频模型类型') }}</span>
@@ -790,7 +799,7 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
               <span>{{ tr('清晰度') }} {{ tier }}</span>
-              <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
+              <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" required />
             </label>
           </div>
           <div class="pricing-sub">

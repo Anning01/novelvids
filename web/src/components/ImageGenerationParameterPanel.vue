@@ -45,6 +45,7 @@ const summary = computed(() => [
   tr('1张'),
   props.modelValue.outputFormat.toUpperCase(),
 ].filter(Boolean).join(' · '))
+const clarityOptions = computed(() => props.capabilities?.clarities_by_format?.[props.modelValue.outputFormat] || props.capabilities?.clarities || [])
 
 function clarityLabel(value: string) {
   return ({ get low() { return tr('低') }, get medium() { return tr('中') }, get high() { return tr('高') } } as Record<string, string>)[value] || value
@@ -60,7 +61,10 @@ function ratioStyle(value: string, maxWidth = 31, maxHeight = 22, minSize = 8) {
 }
 
 function update<K extends keyof ImageGenerationParameters>(key: K, value: ImageGenerationParameters[K]) {
-  emit('update:modelValue', { ...props.modelValue, generationCount: 1, [key]: value })
+  const next = { ...props.modelValue, generationCount: 1, [key]: value }
+  const allowed = props.capabilities?.clarities_by_format?.[next.outputFormat] || props.capabilities?.clarities
+  if (allowed?.length && !allowed.includes(next.clarity)) next.clarity = allowed[0]!
+  emit('update:modelValue', next)
 }
 
 function updatePlacement() {
@@ -151,7 +155,7 @@ onUnmounted(() => {
         <fieldset>
           <legend>{{ tr('清晰度') }}</legend>
           <div class="image-parameters__segments">
-            <button v-for="value in capabilities.clarities" :key="value" type="button" :class="{ 'is-selected': modelValue.clarity === value }" :aria-pressed="modelValue.clarity === value" @click="update('clarity', value)">{{ clarityLabel(value) }}</button>
+            <button v-for="value in clarityOptions" :key="value" type="button" :class="{ 'is-selected': modelValue.clarity === value }" :aria-pressed="modelValue.clarity === value" @click="update('clarity', value)">{{ clarityLabel(value) }}</button>
           </div>
         </fieldset>
         <fieldset>

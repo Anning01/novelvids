@@ -3,6 +3,10 @@ import { imageDerivativeUrl, videoPosterUrl } from './mediaDerivatives'
 import { TaskStatusEnum, type Video } from '@/types'
 
 describe('mediaDerivatives', () => {
+  it('keeps GIF previews animated while using first-frame thumbnails', () => {
+    expect(imageDerivativeUrl('/media/assets/result.gif', 'preview')).toBe('/media/assets/result.gif')
+    expect(imageDerivativeUrl('/media/assets/result.gif', 'thumbnail')).toBe('/media/assets/derivatives/result-thumbnail.webp')
+  })
   it('derives local thumbnails and never rewrites signed remote URLs', () => {
     expect(imageDerivativeUrl('/media/assets/actor.png')).toBe(
       '/media/assets/derivatives/actor-thumbnail.webp',

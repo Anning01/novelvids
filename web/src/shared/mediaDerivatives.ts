@@ -32,6 +32,7 @@ export function imageDerivativeUrl(
   source: string | null | undefined,
   kind: ImageDerivativeKind = 'thumbnail',
 ): string {
+  if (kind === 'preview' && /\.gif(?:[?#]|$)/i.test(source || '')) return source || ''
   return managedDerivativeUrl(source, 'derivatives', kind)
 }
 

@@ -47,6 +47,101 @@ function teamAdminStore(): Pinia {
   return pinia
 }
 
+it.each(['light', 'dark'])('GPT Image 型号按 1K/2K/4K 分辨率计价，并保留自定义渠道（%s）', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  const models = ['gpt_image_2', 'gpt_image_2_5', 'gpt_image_2_6', 'gpt_image_2_6_sunburst', 'gpt_image_2_6_flare']
+  vi.mocked(api.enums).mockResolvedValue({ data: { ai_task_type: [{ value: 2, label: '参考图' }],
+    image_model_type: models.map(value => ({ value, label: value })), video_model_type: [] } } as never)
+  vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: Object.fromEntries(models.map(model => [model, ['1K', '2K', '4K']])),
+    image_protocols: { ...Object.fromEntries(models.map(model => [model, ['openai_compatible']])),
+      seedream_5_lite: ['volcengine_ark', 'openrouter_compatible'] }, video: {} } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  let rejectSave: (error: Error) => void = () => {}
+  const create = vi.spyOn(api, 'createConfig').mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject }))
+    .mockResolvedValue({ data: {} } as never)
+  const wrapper = mountPage(createPinia())
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-image').trigger('click')
+  expect(wrapper.find('.model-empty-state').exists()).toBe(true)
+  await wrapper.get('.model-config-section header button').trigger('click')
+  await wrapper.get('input[name="model-config-name"]').setValue('我的生图渠道')
+  await wrapper.get('input[name="model-service-base-url"]').setValue('https://custom.example/proxy/v1')
+  await wrapper.get('input[name="model-service-api-key"]').setValue('test-key')
+  await wrapper.get('input[name="model-id"]').setValue('supplier-model-alias')
+  const modelSelect = wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === '生图模型类型')!
+  for (const model of models) {
+    modelSelect.vm.$emit('update:modelValue', model)
+    await flushPromises()
+    expect(wrapper.findAll('.pricing-editor .pricing-grid label').slice(0, 3).map(label => label.text())).toEqual(['清晰度 1K', '清晰度 2K', '清晰度 4K'])
+    const protocol = wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === '接口协议')!
+    expect(protocol.props('modelValue')).toBe('openai_compatible')
+    expect(protocol.props('options')).toHaveLength(1)
+  }
+  modelSelect.vm.$emit('update:modelValue', 'seedream_5_lite')
+  await flushPromises()
+  expect(wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === '接口协议')!.props('modelValue')).toBe('volcengine_ark')
+  modelSelect.vm.$emit('update:modelValue', 'gpt_image_2_6_flare')
+  await flushPromises()
+  await wrapper.get('form.model-modal').trigger('submit')
+  expect(create).not.toHaveBeenCalled()
+  expect(notice.error).toHaveBeenCalledWith('请配置全部清晰度档位的输出图单价')
+  for (const [index, price] of [0.06, 0.08, 0.16].entries()) {
+    await wrapper.findAll('.pricing-editor .pricing-grid label').at(index)!.get('input').setValue(price)
+  }
+  await modelSelect.get('button').trigger('mouseenter')
+  await modelSelect.get('button').trigger('focus')
+  await modelSelect.get('button').trigger('keydown', { key: 'ArrowDown' })
+  expect(document.querySelector('[role="listbox"][aria-label="生图模型类型"]')).not.toBeNull()
+  await modelSelect.get('button').trigger('keydown', { key: 'Escape' })
+  await wrapper.get('form.model-modal').trigger('submit')
+  expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('button[type="submit"]').attributes('aria-busy')).toBe('true')
+  rejectSave(new Error('渠道保存失败'))
+  await flushPromises()
+  expect(notice.error).toHaveBeenCalledWith('渠道保存失败')
+  expect(wrapper.find('form.model-modal').exists()).toBe(true)
+  expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ image_model_type: 'gpt_image_2_6_flare',
+    base_url: 'https://custom.example/proxy/v1', model: 'supplier-model-alias', api_protocol: 'openai_compatible',
+    pricing: expect.objectContaining({ prices: { '1K': 0.06, '2K': 0.08, '4K': 0.16 } }) }))
+  expect(wrapper.find('form.model-modal').exists()).toBe(false)
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
+
+it.each(['light', 'dark'])('旧质量单价需要手动填写分辨率单价，不自动换算（%s）', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.mocked(api.generationCapabilities).mockResolvedValue({ data: { image: { gpt_image_2: ['1K', '2K', '4K'] },
+    image_protocols: { gpt_image_2: ['openai_compatible'] }, video: {} } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 12, name: 'GPT Image 2', task_type: 2,
+    task_types: [2], image_model_type: 'gpt_image_2', model: 'gpt-image-2', api_protocol: 'openai_compatible',
+    base_url: 'https://custom.example/v1', api_key: 'test', is_active: true, concurrency: 1,
+    pricing: { type: 'image', prices: { low: 0.06, medium: 0.08, high: 0.16 } } }] } } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+  const wrapper = mountPage(createPinia())
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-image').trigger('click')
+  await wrapper.get('[aria-label="编辑配置"]').trigger('click')
+  const prices = wrapper.findAll('.pricing-editor .pricing-grid label').slice(0, 3)
+  expect(prices.map(item => item.text())).toEqual(['清晰度 1K', '清晰度 2K', '清晰度 4K'])
+  expect(prices.map(item => item.get<HTMLInputElement>('input').element.value)).toEqual(['', '', ''])
+  await wrapper.get('form.model-modal').trigger('submit')
+  expect(update).not.toHaveBeenCalled()
+  expect(notice.error).toHaveBeenCalledWith('请配置全部清晰度档位的输出图单价')
+  for (const [index, price] of [0, 0.2, 0.4].entries()) await prices[index]!.get('input').setValue(price)
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(update).toHaveBeenCalledWith(12, expect.objectContaining({
+    pricing: expect.objectContaining({ prices: { '1K': 0, '2K': 0.2, '4K': 0.4 } }),
+  }))
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
+
 describe('ConfigPage 平台配置仅超管可见', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

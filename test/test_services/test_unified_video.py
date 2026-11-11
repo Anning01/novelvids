@@ -116,6 +116,84 @@ async def test_query_maps_progress_and_metadata_url_without_exposing_provider(mo
         assert result["progress"] == 65
 
 
+async def test_query_preserves_output_moderation_code_without_exposing_provider_details(monkeypatch):
+    config = await config_for()
+    client_type = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={"id": "task-1", "status": "failed", "error": {
+            "code": "OutputVideoSensitiveContentDetected",
+            "message": "private-vendor private-key https://private.example.test?token=secret",
+        }})
+
+    monkeypatch.setattr("services.video.unified.httpx.AsyncClient", lambda **kw: client_type(transport=httpx.MockTransport(handler), **kw))
+    result = await get_generator(config).query("task-1")
+    assert result["status"] == TaskStatusEnum.failed
+    assert "OutputVideoSensitiveContentDetected" in result["metadata"]["error"]
+    assert "private" not in json.dumps(result)
+    assert "secret" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("phase", ["http_rejection", "receipt_rejection", "failed_task"])
+@pytest.mark.parametrize("kind", ["privacy", "wrapped_privacy", "image_download", "video_download", "output"])
+async def test_public_error_extraction_is_shared_by_submission_and_polling(monkeypatch, phase, kind):
+    config = await config_for()
+    client_type = httpx.AsyncClient
+    if kind in {"privacy", "wrapped_privacy"}:
+        code = "InputImageSensitiveContentDetected.PrivacyInformation"
+        message = "input image 'content[2]' may contain real person"
+    elif kind == "output":
+        code = "OutputVideoSensitiveContentDetected"
+        message = "The output video may contain sensitive information"
+    else:
+        code = "InvalidParameterValue"
+        param = "content[1].video_url" if kind == "video_download" else "content[1].image_uri"
+        message = f"The parameter {param} is not valid: resource download failed"
+    error = {"code": code, "message": message + " private-vendor private-key https://private.example.test?token=secret Request id: upstream-123"}
+    if kind == "wrapped_privacy":
+        error = {"code": "video_generation_failed", "message": "上游 HTTP 400: " + json.dumps({"error": error})}
+
+    def handler(request):
+        return httpx.Response(400 if phase == "http_rejection" else 200,
+            json={"id": "task-1", "status": "failed", "error": error}, headers={"x-request-id": "gateway-456"})
+
+    monkeypatch.setattr("services.video.unified.httpx.AsyncClient", lambda **kw: client_type(transport=httpx.MockTransport(handler), **kw))
+    generator = get_generator(config)
+    if phase == "failed_task":
+        result = await generator.query("task-1")
+        assert result["status"] == TaskStatusEnum.failed
+        detail = result["metadata"]["error"]
+    else:
+        with pytest.raises(VideoProviderError) as exc:
+            await generator.submit(prompt="A forest", duration=6)
+        assert not exc.value.submission_uncertain
+        detail = str(exc.value)
+    assert code in detail
+    assert "upstream-123" in detail
+    assert "private" not in detail and "secret" not in detail
+    if kind in {"privacy", "wrapped_privacy"}:
+        assert "content[2]" in detail and "may contain real person" in detail
+    elif kind.endswith("download"):
+        assert param in detail and "resource download failed" in detail
+    if phase == "http_rejection" or kind == "wrapped_privacy":
+        assert "HTTP 400" in detail
+
+
+@pytest.mark.parametrize("identifier", ["private-key", "sk-" + "s" * 24, "https://private.example.test?token=secret"])
+def test_public_error_extraction_never_uses_credentials_as_a_request_id(identifier):
+    from services.video.provider_http import public_provider_error
+
+    message = public_provider_error({"error": {
+        "code": "InputImageSensitiveContentDetected.PrivacyInformation",
+        "message": "input image may contain real person Request id: " + identifier,
+        "param": "content[2]", "request_id": identifier,
+    }}, transport_request_id=identifier, secrets=("private-key",))
+    assert "content[2]" in message
+    assert "PrivacyInformation" in message
+    assert identifier not in message
+    assert "Request id" not in message
+
+
 async def test_unified_uploads_local_images_through_existing_object_storage(monkeypatch):
     from services.video.public_media import PublicMediaResolver
 

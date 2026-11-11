@@ -1,4 +1,4 @@
-"""Private speech budgets, retry preservation, and public-edition compatibility."""
+"""Speech budgets, retry preservation, and historical snapshot compatibility."""
 import json
 
 import pytest
@@ -17,11 +17,13 @@ POLICY = {
 }
 
 
-def snapshot(private=True):
+def snapshot(with_timing=True):
     contents = {name: (ROOT / filename).read_text() for name, filename in FILES.items()}
     contract = json.loads(contents['storyboard_contract'])
-    if private:
+    if with_timing:
         contract['speech_timing'] = POLICY
+    else:
+        contract.pop('speech_timing', None)
     contents['storyboard_contract'] = json.dumps(contract)
     return SkillSnapshot(revision='test', contents=contents)
 
@@ -48,7 +50,7 @@ def test_slow_speech_requires_shorter_voice_window_not_faster_playback(field):
         StoryboardSpeechValidator(snapshot()).validate([shot('你好。', field)])
 
 
-def test_public_and_historical_snapshots_do_not_enable_budget():
+def test_snapshots_without_timing_policy_keep_historical_behavior():
     validator = StoryboardSpeechValidator(snapshot(False))
     validator.validate([shot('很长的一段台词' * 10, end=1)])
     old = snapshot(False)
@@ -93,7 +95,7 @@ def test_malformed_entry_can_be_repaired_before_freezing_speech():
     validator.validate([shot('你好。', end=1)])
 
 
-def test_private_budget_is_checked_before_compilation_and_on_saved_prompt_validation():
+def test_speech_budget_is_checked_before_compilation_and_on_saved_prompt_validation():
     from schemas.agent_workflow import StructuredSkillStoryboard
     from prompts.storyboard import format_storyboard_prompt
     from services.storyboard.validation import prepare_skill_storyboard, validate_skill_storyboard_shot
@@ -117,7 +119,7 @@ def test_invalid_policy_is_rejected():
 def test_policy_is_visible_in_model_instructions_and_snapshot_is_frozen():
     value = snapshot()
     assert 'speech_timing' in instructions(value, 'zh', 'storyboard')
-    assert 'speech_timing' not in instructions(snapshot(False), 'zh', 'storyboard')
+    assert '"speech_timing"' not in instructions(snapshot(False), 'zh', 'storyboard')
     validator = StoryboardSpeechValidator(value)
     value.contents['storyboard_contract'] = '{}'
     with pytest.raises(ValueError):
@@ -152,7 +154,7 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
         assert 'speech_timing' in info.instructions
         if attempts == 1:
             shots = [candidate('你先回家。我们明天再见。', .5)]
-        elif attempts == 2 or not repair:
+        elif not repair:
             assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
             shots = [candidate('你先回家。', 1.5)]
         else:
@@ -168,7 +170,7 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
         await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert attempts == 3
+    assert attempts == 2  # The shared budget permits one repair, never a third paid call.
     if repair:
         assert task.status == 3, task.error_message
         saved = await Scene.filter(chapter=chapter).order_by('sequence')

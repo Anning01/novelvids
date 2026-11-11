@@ -152,6 +152,34 @@ it('continues polling through automatic enhancement and selects the finished HD 
   expect(api.generateVideo).not.toHaveBeenCalled()
 })
 
+it.each(['light', 'dark'])('releases the batch generation slot while HD continues in %s mode', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const shots = [scene, { ...scene, id: 110, sequence: 2 }].map(shot => ({ ...shot, metadata: {} }))
+  const auto = { model_config_id: 8, resolution: '1080p' as const }
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ code: 0, message: '', data: [model] })
+  vi.mocked(exportApi.models).mockResolvedValue({ data: [{ id: 8, name: 'HD', resolutions: [{ value: '1080p', short_side: 1080 }] }] })
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: shots, assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...shots.find(shot => shot.id === id), ...update } }) as never)
+  vi.mocked(api.generateVideo).mockImplementation(async sceneId => ({ data: { ...pending, id: sceneId, scene_id: sceneId,
+    metadata: { auto_enhancement: { stage: 'waiting_video' } } } }) as never)
+  vi.mocked(api.queryVideo).mockImplementation(async videoId => ({ data: { ...completed, id: videoId, scene_id: videoId,
+    metadata: { auto_enhancement: { stage: 'enhancing' } } } }) as never)
+  const { wrapper } = await render()
+  wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
+    sceneIds: shots.map(shot => shot.id), modelConfigId: model.config_id, resolution: '480p',
+    aspectRatio: '16:9', returnLastFrame: false, autoEnhancement: auto,
+  })
+  await flushPromises()
+  expect(vi.mocked(api.generateVideo).mock.calls.map(call => call[0])).toEqual([109, 110])
+  expect(wrapper.text()).toContain('正在自动高清化')
+  // Both HD operations remain unfinished; polling must continue independently.
+  const queries = vi.mocked(api.queryVideo).mock.calls.length
+  await vi.advanceTimersByTimeAsync(4000)
+  await flushPromises()
+  expect(vi.mocked(api.queryVideo).mock.calls.length).toBeGreaterThan(queries)
+  expect(api.generateVideo).toHaveBeenCalledTimes(2)
+})
+
 it('resumes an existing task and displays a background completion without refreshing or generating', async () => {
   vi.mocked(api.queryVideo).mockResolvedValue({ data: completed } as never)
   const { wrapper } = await render()

@@ -9,5 +9,17 @@
     "【核心生成指令｜高优先级】",
     "【转场方式】",
     "【特效规范】"
-  ]
+  ],
+  "speech_timing": {
+    "characters_per_second": [
+      2.5,
+      4.5
+    ],
+    "words_per_second": [
+      1.5,
+      2.7
+    ],
+    "pause_seconds": 0.2,
+    "slack_seconds": 0.5
+  }
 }

@@ -223,15 +223,15 @@ async def test_remote_mode_never_runs_media_locally(monkeypatch, tmp_path, fails
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("auth_enabled,provider", [(False, "password"), (False, "qiling"), (True, "password")])
-async def test_non_qiling_edition_keeps_local_media_even_with_worker_address(monkeypatch, tmp_path, auth_enabled, provider):
+@pytest.mark.parametrize("auth_enabled,provider", [(False, "password"), (False, "qiling"), (True, "password"), (True, "qiling")])
+async def test_unconfigured_worker_keeps_media_local(monkeypatch, tmp_path, auth_enabled, provider):
     from config import settings
     from unittest.mock import Mock
 
     monkeypatch.setattr(settings, "AUTH_ENABLED", auth_enabled)
     monkeypatch.setattr(settings, "AUTH_PROVIDER", provider)
-    monkeypatch.setattr(settings, "REMAKE_MEDIA_SSH_HOST", "root@worker.example")
-    remote = Mock(side_effect=AssertionError("open source deployment must not create a remote job"))
+    monkeypatch.setattr(settings, "REMAKE_MEDIA_SSH_HOST", "")
+    remote = Mock(side_effect=AssertionError("no worker configured"))
     monkeypatch.setattr("services.remake.remote_media.RemoteMediaSession", remote)
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")

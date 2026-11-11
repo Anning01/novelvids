@@ -3,12 +3,12 @@ import { tr } from '@/i18n'
 
 import { ArrowUpRight, Circle, Grid3X3, Move, Pencil, RotateCcw, Square, Trash2, Undo2, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { faceGridPolylines } from '@/shared/imageAnnotationGeometry'
+import { FACE_GRID_DENSITY, faceGridPolylines } from '@/shared/imageAnnotationGeometry'
 
 type Tool = 'move' | 'rectangle' | 'ellipse' | 'face-grid' | 'arrow' | 'pen'
 type DrawingTool = Exclude<Tool, 'move'>
 interface Point { x: number; y: number }
-interface Mark { tool: DrawingTool; color: string; brushSize: number; points: Point[] }
+interface Mark { tool: DrawingTool; color: string; brushSize: number; points: Point[]; gridDivisions?: number }
 interface MarkDrag { index: number; pointerStart: Point; originalPoints: Point[] }
 
 const props = withDefaults(defineProps<{ open: boolean; imageUrl: string; title?: string; saving?: boolean }>(), {
@@ -23,6 +23,7 @@ const stage = ref<HTMLElement | null>(null)
 const tool = ref<Tool>('rectangle')
 const color = ref('#000000')
 const brushSize = ref(1)
+const gridDivisions = ref<number>(FACE_GRID_DENSITY.default)
 const zoom = ref(1)
 const fittedSize = ref({ width: 0, height: 0 })
 const marks = ref<Mark[]>([])
@@ -30,7 +31,7 @@ const drawing = ref<Mark | null>(null)
 const markDrag = ref<MarkDrag | null>(null)
 const loading = ref(false)
 const error = ref('')
-const sourceImage = new Image()
+let sourceImage: HTMLImageElement | null = null
 let resizeObserver: ResizeObserver | null = null
 
 const canSave = computed(() => marks.value.length > 0 && !loading.value && !props.saving)
@@ -44,8 +45,19 @@ const viewportStyle = computed(() => fittedSize.value.width > 0 ? {
 } : undefined)
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
 
-watch(() => [props.open, props.imageUrl] as const, async ([open, url]) => {
+watch(() => [props.open, props.imageUrl] as const, async ([open, url], _previous, onCleanup) => {
   if (!open || !url) return
+  const request = new AbortController()
+  const image = new Image()
+  sourceImage = image
+  let objectUrl: string | null = null
+  onCleanup(() => {
+    request.abort()
+    image.onload = null
+    image.onerror = null
+    image.src = ''
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+  })
   marks.value = []
   drawing.value = null
   markDrag.value = null
@@ -54,22 +66,38 @@ watch(() => [props.open, props.imageUrl] as const, async ([open, url]) => {
   error.value = ''
   loading.value = true
   await nextTick()
+  if (request.signal.aborted) return
   root.value?.focus()
-  sourceImage.onload = () => {
+  image.onload = () => {
     const target = canvas.value
-    if (!target) return
-    target.width = sourceImage.naturalWidth
-    target.height = sourceImage.naturalHeight
+    if (!target || request.signal.aborted) return
+    target.width = image.naturalWidth
+    target.height = image.naturalHeight
     loading.value = false
     render()
     void nextTick(updateFittedSize)
   }
-  sourceImage.onerror = () => {
+  const failed = () => {
+    if (request.signal.aborted) return
     loading.value = false
     error.value = tr('图片加载失败，请检查图片是否仍可访问')
   }
-  sourceImage.crossOrigin = /^(data:|blob:)/.test(url) ? null : 'anonymous'
-  sourceImage.src = url
+  image.onerror = failed
+  try {
+    if (/^(data:|blob:)/.test(url)) image.src = url
+    else {
+      // A normal preview may have cached a response without CORS headers.
+      // Reload with CORS, then decode a local blob so canvas export stays safe.
+      const response = await fetch(url, { mode: 'cors', cache: 'reload', signal: request.signal })
+      if (!response.ok) throw new Error('Image request failed')
+      const blob = await response.blob()
+      if (request.signal.aborted) return
+      objectUrl = URL.createObjectURL(blob)
+      image.src = objectUrl
+    }
+  } catch {
+    failed()
+  }
 }, { immediate: true })
 
 watch(stage, target => {
@@ -83,13 +111,11 @@ watch(stage, target => {
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
-  sourceImage.onload = null
-  sourceImage.onerror = null
 })
 
 function updateFittedSize() {
   const target = stage.value
-  if (!target || !sourceImage.naturalWidth || !sourceImage.naturalHeight) return
+  if (!target || !sourceImage?.naturalWidth || !sourceImage.naturalHeight) return
   const scale = Math.min(1, (target.clientWidth - 28) / sourceImage.naturalWidth, (target.clientHeight - 28) / sourceImage.naturalHeight)
   fittedSize.value = { width: sourceImage.naturalWidth * scale, height: sourceImage.naturalHeight * scale }
 }
@@ -105,7 +131,7 @@ function point(event: PointerEvent): Point {
 }
 
 function start(event: PointerEvent) {
-  if (loading.value || !canvas.value) return
+  if (loading.value || error.value || !canvas.value) return
   const origin = point(event)
   if (tool.value === 'move') {
     const index = findMarkAt(origin)
@@ -115,7 +141,8 @@ function start(event: PointerEvent) {
     return
   }
   canvas.value.setPointerCapture(event.pointerId)
-  drawing.value = { tool: tool.value, color: color.value, brushSize: brushSize.value, points: [origin, origin] }
+  drawing.value = { tool: tool.value, color: color.value, brushSize: brushSize.value, points: [origin, origin],
+    ...(tool.value === 'face-grid' ? { gridDivisions: gridDivisions.value } : {}) }
   render()
 }
 
@@ -183,7 +210,7 @@ function findMarkAt(position: Point) {
 function render() {
   const target = canvas.value
   const context = target?.getContext('2d')
-  if (!target || !context || !sourceImage.complete) return
+  if (!target || !context || !sourceImage?.complete || !sourceImage.naturalWidth) return
   context.clearRect(0, 0, target.width, target.height)
   context.drawImage(sourceImage, 0, 0, target.width, target.height)
   for (const mark of [...marks.value, ...(drawing.value ? [drawing.value] : [])]) drawMark(context, mark, target.width)
@@ -203,7 +230,7 @@ function drawMark(context: CanvasRenderingContext2D, mark: Mark, width: number) 
   context.beginPath()
   if (mark.tool === 'rectangle') context.strokeRect(first.x, first.y, last.x - first.x, last.y - first.y)
   else if (mark.tool === 'face-grid') {
-    for (const line of faceGridPolylines(first, last)) {
+    for (const line of faceGridPolylines(first, last, mark.gridDivisions)) {
       if (!line[0]) continue
       context.beginPath(); context.moveTo(line[0].x, line[0].y)
       for (const item of line.slice(1)) context.lineTo(item.x, item.y)
@@ -252,6 +279,7 @@ function save() {
           <button type="button" :class="{ 'is-active': tool === 'face-grid' }" :title="tr('拖出椭圆范围生成人脸网格')" @click="tool = 'face-grid'"><Grid3X3 :size="17" />{{ tr('网格') }}</button>
           <button type="button" :class="{ 'is-active': tool === 'arrow' }" @click="tool = 'arrow'"><ArrowUpRight :size="17" />{{ tr('箭头') }}</button>
           <button type="button" :class="{ 'is-active': tool === 'pen' }" @click="tool = 'pen'"><Pencil :size="17" />{{ tr('涂鸦') }}</button>
+          <label v-if="tool === 'face-grid'"><span>{{ tr('密度') }}</span><input v-model.number="gridDivisions" type="range" :min="FACE_GRID_DENSITY.min" :max="FACE_GRID_DENSITY.max" :step="FACE_GRID_DENSITY.step" :aria-label="tr('网格密度')"><output>{{ gridDivisions }}</output></label>
           <label><span>{{ tr('粗细') }}</span><input v-model.number="brushSize" type="range" min="0.5" max="6" step="0.5" :aria-label="tr('画笔粗细')"><output>{{ brushSize }}</output></label>
           <label class="image-annotation__color"><span>{{ tr('颜色') }}</span><input v-model="color" type="color" :aria-label="tr('标注颜色')"></label>
           <span class="image-annotation__zoom"><button type="button" :disabled="zoom <= .5" :aria-label="tr('缩小')" @click="setZoom(zoom - .25)"><ZoomOut :size="17" /></button><output>{{ zoomLabel }}</output><button type="button" :disabled="zoom >= 3" :aria-label="tr('放大')" @click="setZoom(zoom + .25)"><ZoomIn :size="17" /></button><button type="button" :disabled="zoom === 1" :aria-label="tr('重置缩放')" @click="setZoom(1)"><RotateCcw :size="16" /></button></span>
@@ -274,6 +302,7 @@ function save() {
 .image-annotation__panel{display:grid;width:min(1760px,96vw);height:min(94vh,1180px);grid-template-rows:auto auto minmax(0,1fr) auto auto;overflow:hidden;border:1px solid var(--app-border-strong);border-radius:18px;color:var(--app-text);background:var(--app-surface);box-shadow:0 32px 90px rgb(0 0 0 / 36%)}
 .image-annotation__panel>header,.image-annotation__panel>footer{display:flex;align-items:center;justify-content:space-between;padding:16px 20px}.image-annotation__panel>header{border-bottom:1px solid var(--app-border);font-size:16px}.image-annotation button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 10px;border:1px solid var(--app-border-strong);border-radius:9px;color:var(--app-text-secondary);background:var(--app-surface-muted);cursor:pointer}.image-annotation button:hover:not(:disabled),.image-annotation button.is-active{border-color:var(--app-accent);color:var(--app-accent);background:var(--app-accent-soft)}.image-annotation button:disabled{opacity:.38;cursor:not-allowed}
 .image-annotation__toolbar{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:10px 16px;border-bottom:1px solid var(--app-border);color:var(--app-text-secondary);background:var(--app-surface-raised);scrollbar-width:none}.image-annotation__toolbar::-webkit-scrollbar{display:none}.image-annotation__toolbar label{display:flex;align-items:center;gap:8px;min-height:34px;padding:0 10px;border:1px solid var(--app-border-strong);border-radius:9px;background:var(--app-surface-muted);white-space:nowrap}.image-annotation__toolbar input[type=range]{width:100px;accent-color:var(--app-accent)}.image-annotation__color input{width:34px;height:25px;padding:0;border:0;background:none}.image-annotation__zoom{display:flex;align-items:center;border:1px solid var(--app-border-strong);border-radius:9px;background:var(--app-surface-muted)}.image-annotation__zoom button{border:0;background:transparent}.image-annotation__zoom output{min-width:52px;text-align:center}.image-annotation__undo{transform:scaleX(-1)}
+.image-annotation__toolbar>*{flex-shrink:0}.image-annotation__toolbar button{white-space:nowrap}
 .image-annotation__stage{position:relative;min-height:320px;overflow:auto;padding:14px;background:var(--app-canvas);scrollbar-width:none}.image-annotation__stage::-webkit-scrollbar{display:none}.image-annotation__viewport{display:grid;place-items:center}.image-annotation canvas{display:block;max-width:none;touch-action:none;cursor:crosshair}.image-annotation canvas.is-move{cursor:move}.image-annotation__stage>span{position:absolute;inset:0;display:grid;place-items:center;color:var(--app-text-secondary);background:color-mix(in srgb,var(--app-surface-raised) 82%,transparent)}
 .image-annotation__panel>p{margin:0;padding:8px 20px;color:#c45461;background:color-mix(in srgb,#df596c 12%,var(--app-surface));font-size:12px}.image-annotation__panel>footer{border-top:1px solid var(--app-border);color:var(--app-text-muted);background:var(--app-surface-raised)}.image-annotation__panel>footer button{border-color:#7e63dc;color:#fff;background:#6650c5}.image-annotation__panel>footer button:hover:not(:disabled){border-color:#7055d3;color:#fff;background:#5943b8}.image-annotation__panel>footer small{font-size:11px}
 @media(max-width:900px){.image-annotation{padding:8px}.image-annotation__panel{width:100%;height:98vh}.image-annotation__toolbar button{font-size:0}.image-annotation__toolbar button svg{margin:0}}

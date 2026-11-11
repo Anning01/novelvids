@@ -27,7 +27,7 @@ _BILLING = Depends(require_roles("admin", "creator"))
 
 
 async def statement_admin(ctx: AuthContext = Depends(require_super_admin)) -> AuthContext:
-    # The anonymous edition has no team ledger; never expose this administrative view there.
+    # Anonymous access has no team ledger; never expose this administrative view there.
     if not ctx.is_super_admin:
         raise HTTPException(403, localized_message('仅超级管理员可执行此操作'))
     return ctx

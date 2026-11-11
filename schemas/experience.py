@@ -15,11 +15,18 @@ class ExperienceGenerateIn(BaseModel):
     aspect_ratio: str = Field(min_length=3, max_length=16)
     resolution: str = Field(min_length=1, max_length=32)
     duration: int = Field(default=5, ge=1, le=30)
+    output_format: Literal['png', 'gif'] = 'png'
+    frame_count: int | None = Field(None, ge=2, le=16, strict=True)
+    frame_duration_ms: int | None = Field(None, ge=20, le=655350, strict=True)
     reference_binding: Literal['all', 'mentions'] = 'all'
     reference_media: list[VideoReferenceMedia] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode='after')
     def reference_mode(self):
+        if self.task_type != 'image' and self.output_format == 'gif':
+            raise ValueError('GIF 格式仅用于图片创作')
+        if self.output_format != 'gif' and (self.frame_count is not None or self.frame_duration_ms is not None):
+            raise ValueError('帧数与帧间隔仅支持 GIF 格式')
         if self.task_type == 'image' and (self.mode == 'reference' or self.reference_media):
             raise ValueError('参考图模式与参考视频素材仅用于视频片段')
         if self.reference_binding == 'mentions':

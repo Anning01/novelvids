@@ -70,3 +70,11 @@ it('does not repeat the operation name in the active summary', () => {
   expect(wrapper.get('.agent-run-activity__header').text()).toBe('图片生成')
   wrapper.unmount()
 })
+
+it.each(['图片生成','视频生成'])('shows the known %s operation instead of connection details',operationLabel=>{
+  const wrapper=mount(AgentRunActivity,{props:{status:2,operationLabel,startedAt:'2026-11-07T04:00:00Z',statusText:'任务仍在后台执行，可重新连接查看实时进度'}})
+  expect(wrapper.get('.agent-run-activity__header').text()).toContain(operationLabel+'中')
+  expect(wrapper.text()).toContain('用时 10 秒')
+  expect(wrapper.text()).not.toContain('重新连接')
+  wrapper.unmount()
+})

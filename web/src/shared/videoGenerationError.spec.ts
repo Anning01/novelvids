@@ -2,6 +2,32 @@ import { describe, expect, it } from 'vitest'
 import { formatVideoGenerationError } from './videoGenerationError'
 
 describe('formatVideoGenerationError', () => {
+  it.each([
+    ["input image 'content[2]' may contain real person Request id: upstream-123（InputImageSensitiveContentDetected.PrivacyInformation）", 'privacy', 2, 'InputImageSensitiveContentDetected.PrivacyInformation'],
+    ['resource download failed: content[1].image_uri Request id: upstream-123（InvalidParameterValue）', 'download', 1, 'InvalidParameterValue'],
+    ['resource download failed: content[1].video_url（InvalidParameter）（HTTP 400，request_id=upstream-123）', 'download', 1, 'InvalidParameter'],
+    ['output video may contain sensitive information Request id: upstream-123（OutputVideoSensitiveContentDetected）', 'moderation', undefined, 'OutputVideoSensitiveContentDetected'],
+  ])('recognizes sanitized unified-channel facts: %s', (raw, category, reference, code) => {
+    const result = formatVideoGenerationError(String(raw))
+    expect(result.category).toBe(category)
+    expect(result.referenceImageNumber).toBe(reference)
+    expect(result.errorCode).toBe(code)
+    expect(result.requestId).toBe('upstream-123')
+  })
+
+  it.each([
+    '视频生成失败，请检查生成内容或联系管理员（OutputVideoSensitiveContentDetected）',
+    'The request failed because the output video may contain sensitive information. (OutputVideoSensitiveContentDetected)',
+  ])('identifies output moderation without blaming an input image', raw => {
+    const result = formatVideoGenerationError(raw)
+    expect(result.title).toBe('生成结果未通过内容审核')
+    expect(result.category).toBe('moderation')
+    expect(result.message).toContain('生成的视频可能包含敏感信息')
+    expect(result.suggestion).toContain('提示词与参考素材')
+    expect(result.errorCode).toBe('OutputVideoSensitiveContentDetected')
+    expect(result.referenceImageNumber).toBeUndefined()
+  })
+
   it('把真人隐私错误转换为素材序号明确的中文提示', () => {
     const result = formatVideoGenerationError(
       "视频供应商请求失败：The request failed because the input image 'content[2]' may contain real person. Request id: req-123 (InputImageSensitiveContentDetected.PrivacyInformation)（HTTP 400，request_id=req-123）",

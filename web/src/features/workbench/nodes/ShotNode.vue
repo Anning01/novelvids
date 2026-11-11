@@ -31,6 +31,7 @@ import { sceneHasRunningVideo } from '../graph/videoVersions'
 import { videoAspectRatio, videoCoverUrl, videoPixelSize, videoResolution } from '../graph/videoMedia'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import { estimateVideoCost } from '@/shared/modelPricing'
+import { readVideoReferenceMedia, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { TaskStatusEnum } from '@/types'
 
 const props = defineProps<NodeProps>()
@@ -182,7 +183,7 @@ const materialOptions = computed<MaterialMentionOption[]>(() => disambiguateMate
 ))
 
 const materialMentions = computed<MaterialMention[]>(() => {
-  return disambiguateMaterialMentionNames(referenceEdges.value.flatMap((edge) => {
+  const connected = disambiguateMaterialMentionNames(referenceEdges.value.flatMap((edge) => {
     const source = store.nodeByKey(edge.source)
     if (!source) return []
     return materialOptions.value
@@ -194,7 +195,21 @@ const materialMentions = computed<MaterialMention[]>(() => {
         mode: referenceMode(edge, source),
       }))
   }))
+  const saved = referencedVideoMedia(prompt.value, readVideoReferenceMedia(scene.value.metadata?.video_reference_media))
+    .map(reference => ({
+      nodeKey: props.id,
+      edgeKey: `saved:${videoReferenceMentionSyntax(reference)}`,
+      syntax: videoReferenceMentionSyntax(reference),
+      name: reference.name || (reference.type === 'image' ? tr('参考图片') : tr('参考视频')),
+      prompt: '',
+      previewUrl: reference.url,
+      hasImage: reference.type === 'image',
+      mediaKind: reference.type,
+      mode: reference.type === 'image' ? 'reference_image' as const : 'reference_video' as const,
+    }))
+  return [...connected, ...saved]
 })
+const editorMaterials = computed(() => [...materialOptions.value, ...materialMentions.value.filter(item => item.syntax)])
 const referenceImageCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_image').length)
 const referenceVideoCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_video').length)
 const referenceAudioCount = computed(() => materialMentions.value.filter(item => item.mode === 'reference_audio').length)
@@ -323,7 +338,8 @@ registerWorkbenchPromptAction(props.id, {
 registerWorkbenchNodeRun(props.id, { enabled: canGenerate, run: generate })
 
 function addMaterialReference(material: MaterialMentionOption, nextPrompt: string) {
-  if (!referenceEdges.value.some(edge => edge.source === material.nodeKey)) return
+  if (!referenceEdges.value.some(edge => edge.source === material.nodeKey)
+    && !materialMentions.value.some(item => item.syntax && item.syntax === material.syntax)) return
   prompt.value = nextPrompt
 }
 
@@ -412,7 +428,7 @@ watch([selectedModel, generationMode], ([model]) => {
       :node-key="props.id"
       :config="promptEditorConfig"
       :model-value="prompt"
-      :materials="materialOptions"
+      :materials="editorMaterials"
       :mentions="materialMentions"
       @update:model-value="prompt = $event"
       @add="addMaterialReference"

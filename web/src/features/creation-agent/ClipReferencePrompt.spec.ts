@@ -14,6 +14,19 @@ beforeEach(() => {
 function render(modelValue='') {
   return mount(ClipReferencePrompt,{attachTo:document.body,props:{modelValue,references}})
 }
+it.each(['light','dark'])('uses the supplied placeholder without changing the draft (%s)',async theme=>{
+  document.documentElement.dataset.appTheme=theme
+  const wrapper=render()
+  const input=wrapper.get('[role="textbox"]')
+  expect(input.attributes('data-placeholder')).toContain('描述画面、动作与氛围')
+  await wrapper.setProps({placeholder:'描述运动、循环和时长，输入 @ 引用素材…'})
+  expect(input.attributes('data-placeholder')).toContain('描述运动、循环和时长')
+  expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  await wrapper.setProps({placeholder:undefined})
+  expect(input.attributes('data-placeholder')).toContain('描述画面、动作与氛围')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
 it('uses the canvas mention picker, supports keyboard selection and inserts a named token',async()=>{
   const wrapper=render()
   await flushPromises()

@@ -6,6 +6,7 @@ from utils.messages import localized_message
 
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+import re
 
 import httpx
 
@@ -43,6 +44,57 @@ def provider_error(data: Any) -> str | None:
             return f"{normalized_message}（{str(code).strip()[:80]}）"
         return normalized_message
     return None
+
+
+def public_provider_error(
+    data: Any, *, status_code: int | None = None, transport_request_id: str | None = None,
+    secrets: tuple[str, ...] = (),
+) -> str:
+    """Keep recognized failure facts, never arbitrary provider text or media URLs."""
+    payload = data if isinstance(data, dict) else {}
+    error = payload.get("error")
+    fields = error if isinstance(error, dict) else {}
+    metadata = fields.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    detail = provider_error(payload) or ""
+    raw_message = str(fields.get("message") or error or payload.get("message") or "")
+    lowered = detail.casefold()
+    params = list(dict.fromkeys(re.findall(
+        r"content\[\d{1,4}\](?:\.(?:image_uri|image_url|video_url))?",
+        str(fields.get("param") or detail),
+    )))
+    code = None
+    if "OutputVideoSensitiveContentDetected" in detail or "output video may contain sensitive information" in lowered:
+        code, message = "OutputVideoSensitiveContentDetected", "output video may contain sensitive information"
+    elif "InputImageSensitiveContentDetected.PrivacyInformation" in detail or "may contain real person" in lowered:
+        code = "InputImageSensitiveContentDetected.PrivacyInformation"
+        message = "input image " + " ".join(f"'{param}'" for param in params) + " may contain real person"
+    elif "resource download failed" in lowered or (
+        any(name in lowered for name in ("image_uri", "video_url")) and "not valid" in lowered
+    ):
+        original_code = re.search(r"\bInvalidParameter(?:Value)?\b", detail)
+        code = original_code[0] if original_code else "ResourceDownloadFailed"
+        message = "resource download failed: " + " ".join(params)
+    else:
+        message = localized_message('视频生成失败，请检查生成内容或联系管理员')
+
+    body_request_id = re.search(r"(?:Request id:\s*|request_id[=:]\s*[\"']?)([A-Za-z0-9_-]{1,120})(?=$|[\s.,\"'）})])", raw_message, re.I)
+    candidates = (fields.get("request_id"), metadata.get("request_id"), payload.get("request_id"),
+        body_request_id[1] if body_request_id else None, transport_request_id)
+    trace = next((value for value in candidates if isinstance(value, str)
+        and re.fullmatch(r"[A-Za-z0-9_-]{1,120}", value)
+        and not re.match(r"(?:sk|ark|secret)[-_]", value, re.I)
+        and not any(secret and secret in value for secret in secrets)), None)
+    original_status = re.search(r"\bHTTP\s*([45]\d{2})\b", raw_message, re.I)
+    status = int(original_status[1]) if original_status else status_code
+    status = status if isinstance(status, int) and 400 <= status < 600 else None
+    if trace and status is None:
+        message += f" Request id: {trace}"
+    if code:
+        message += f"（{code}）"
+    if status:
+        message += f"（HTTP {status}" + (f"，request_id={trace}" if trace else "") + "）"
+    return message
 
 
 def http_provider_error(response: httpx.Response) -> str | None:

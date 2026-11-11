@@ -1,0 +1,78 @@
+{
+  "standard": {
+    "zh": [
+      {
+        "title": "雨夜追踪",
+        "prompt": "雨夜街头，黑衣侦探循着脚步声回头。镜头缓缓推近，路灯在湿润的地面留下倒影。"
+      },
+      {
+        "title": "古风对决",
+        "prompt": "两位剑客在竹林中相对而立，风吹动衣摆。镜头从竹叶间穿过，停在两人之间，蓄势待发。"
+      },
+      {
+        "title": "城市漫游",
+        "prompt": "黄昏的街角，骑车的人穿过光影。镜头平稳跟随，街边小店亮起暖灯，展现松弛的生活气息。"
+      },
+      {
+        "title": "云海仙境",
+        "prompt": "镜头穿过翻涌的云海，远处的山峰与古老宫殿逐渐显现。金色晨光照亮屋檐，画面宁静壮阔。"
+      }
+    ],
+    "en": [
+      {
+        "title": "Rainy pursuit",
+        "prompt": "On a rainy street at night, a detective in black turns toward the sound of footsteps. The camera slowly moves closer as streetlights reflect on the wet pavement."
+      },
+      {
+        "title": "Sword duel",
+        "prompt": "Two swordsmen face each other in a bamboo grove, their robes stirring in the wind. The camera passes through the leaves and pauses between them as tension builds."
+      },
+      {
+        "title": "City stroll",
+        "prompt": "At dusk, a cyclist passes through light and shadow on a street corner. The camera follows smoothly as warm lights glow in nearby shops, capturing a relaxed moment of daily life."
+      },
+      {
+        "title": "Cloud realm",
+        "prompt": "The camera glides through rolling clouds, revealing distant peaks and an ancient palace. Golden morning light illuminates the rooftops in a serene, sweeping view."
+      }
+    ]
+  },
+  "gif": {
+    "zh": [
+      {
+        "title": "弹跳小球",
+        "prompt": "白色背景上的红色小球有节奏地上下弹跳，触地时轻微挤压，弹起后恢复圆形。固定镜头，保持背景不变，首尾无缝循环，按所选帧数和帧间隔生成 GIF 动图。"
+      },
+      {
+        "title": "挥爪小猫",
+        "prompt": "一只 Q 版小猫抬起前爪轻轻招手，耳朵微动，再回到起始姿势。固定镜头，动作连贯，首尾无缝循环，按所选帧数和帧间隔生成 GIF 动图。"
+      },
+      {
+        "title": "蒸汽咖啡",
+        "prompt": "桌上的咖啡杯保持不动，杯口的白色蒸汽缓缓升起、卷曲、消散，再自然出现。固定镜头，首尾无缝循环，按所选帧数和帧间隔生成 GIF 动图。"
+      },
+      {
+        "title": "流动云海",
+        "prompt": "山峰间的云海缓慢流动，云层轻轻起伏，暖色光线保持稳定。固定镜头，让云的形态自然衔接回起始画面，首尾无缝循环，按所选帧数和帧间隔生成 GIF 动图。"
+      }
+    ],
+    "en": [
+      {
+        "title": "Bouncing ball",
+        "prompt": "A red ball bounces rhythmically on a white background, squashing slightly as it lands and regaining its round shape as it rises. Keep the camera and background fixed. Create an animated GIF with a seamless loop using the selected frame count and frame interval."
+      },
+      {
+        "title": "Waving kitten",
+        "prompt": "A chibi kitten gently waves one front paw, twitches its ears, and returns to its starting pose. Keep the camera fixed and the motion continuous. Create an animated GIF with a seamless loop using the selected frame count and frame interval."
+      },
+      {
+        "title": "Coffee steam",
+        "prompt": "A coffee cup stays still on a table while delicate white steam rises, curls, fades, and naturally reappears. Keep the camera fixed. Create an animated GIF with a seamless loop using the selected frame count and frame interval."
+      },
+      {
+        "title": "Flowing clouds",
+        "prompt": "A sea of clouds flows slowly between mountain peaks, gently rising and falling under steady warm light. Keep the camera fixed and let the clouds return naturally to the starting arrangement. Create an animated GIF with a seamless loop using the selected frame count and frame interval."
+      }
+    ]
+  }
+}

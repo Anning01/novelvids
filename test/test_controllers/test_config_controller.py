@@ -809,3 +809,61 @@ async def test_list_generation_capabilities_returns_all_types():
     assert "1K" in capabilities["image"]["seedream_5_pro"]
     assert "720p" in capabilities["video"]["seedance_2"]
     assert capabilities["video"]["wan_3"] == ["480P", "720P", "1080P"]
+    for model_type in ("gpt_image_2", "gpt_image_2_5", "gpt_image_2_6", "gpt_image_2_6_sunburst", "gpt_image_2_6_flare"):
+        assert capabilities["image"][model_type] == ["1K", "2K", "4K"]
+    for model_type in ("gpt_image_2_5", "gpt_image_2_6", "gpt_image_2_6_sunburst", "gpt_image_2_6_flare"):
+        assert capabilities["image_protocols"][model_type] == ["openai_compatible"]
+
+
+@pytest.mark.parametrize("model_type", ["gpt_image_2_5", "gpt_image_2_6", "gpt_image_2_6_sunburst", "gpt_image_2_6_flare"])
+async def test_gpt_image_config_survives_safe_schema_initialization_and_provider_change(model_type):
+    from tortoise import Tortoise
+
+    legacy = await AiModelConfig.create(task_type=2, task_types=[2], name="legacy",
+        base_url="https://legacy.example/v1", api_key="legacy-key", model="gpt-image-2",
+        image_model_type="gpt_image_2", is_active=True)
+    config = await ai_model_config_controller.create(AiModelConfigCreate(
+        task_type=2, task_types=[2], name=model_type, base_url="https://provider.example/v1",
+        api_key="test-key", model="supplier-model-alias", image_model_type=model_type,
+        api_protocol="openai_compatible", is_active=True))
+    for _ in range(2):
+        await Tortoise.generate_schemas(safe=True)
+    await legacy.refresh_from_db()
+    assert legacy.model == "gpt-image-2"
+    assert legacy.base_url == "https://legacy.example/v1"
+    assert legacy.is_active is True
+    assert await AiModelConfig.filter(id=config.id).count() == 1
+    configs = await ai_model_config_controller.list_active_image_models()
+    current = next(item for item in configs if item["config_id"] == config.id)
+    assert current["capabilities"]["clarities"] == ["1K", "2K", "4K"]
+    assert next(item for item in configs if item["config_id"] == legacy.id)["capabilities"]["clarities"] == ["1K", "2K", "4K"]
+    await ai_model_config_controller.patch(config.id, AiModelConfigPatch(base_url="https://replacement.example/custom/v1"))
+    await config.refresh_from_db()
+    assert config.base_url == "https://replacement.example/custom/v1"
+    assert config.model == "supplier-model-alias"
+
+
+async def test_legacy_gpt_quality_prices_require_explicit_resolution_prices():
+    from tortoise import Tortoise
+
+    old_prices = {"type": "image", "prices": {"low": 0.06, "medium": 0.08, "high": 0.16}}
+    config = await AiModelConfig.create(task_type=2, task_types=[2], name="GPT Image 2",
+        base_url="https://provider.example/v1", api_key="test", model="gpt-image-2",
+        image_model_type="gpt_image_2", is_active=True, pricing=old_prices)
+    for _ in range(2):
+        await Tortoise.generate_schemas(safe=True)
+    with pytest.raises(HTTPException, match="清晰度"):
+        await ai_model_config_controller.get_active(2, config.id)
+    await config.refresh_from_db()
+    assert config.pricing == old_prices
+    new_prices = {"type": "image", "prices": {"1K": 0.1, "2K": 0.2, "4K": 0.4}}
+    await ai_model_config_controller.patch(config.id, AiModelConfigPatch(pricing=new_prices))
+    assert (await ai_model_config_controller.get_active(2, config.id)).pricing == new_prices
+
+
+@pytest.mark.parametrize("prices", [{"1K": 0.1, "2K": 0.2}, {"1K": 0.1, "2K": 0.2, "4K": float("nan")}])
+async def test_gpt_image_rejects_incomplete_or_invalid_resolution_prices(prices):
+    with pytest.raises(HTTPException):
+        await ai_model_config_controller.create(AiModelConfigCreate(task_type=2, task_types=[2],
+            name="GPT", model="gpt-image-2", image_model_type="gpt_image_2",
+            base_url="https://provider.example/v1", api_key="test", pricing={"type": "image", "prices": prices}))

@@ -3,6 +3,8 @@ export interface AnnotationPoint {
   y: number
 }
 
+export const FACE_GRID_DENSITY = { min: 4, max: 32, step: 2, default: 16 } as const
+
 function sampleAngles(start: number, end: number, count: number) {
   return Array.from({ length: count + 1 }, (_, index) => start + ((end - start) * index) / count)
 }
@@ -10,7 +12,7 @@ function sampleAngles(start: number, end: number, count: number) {
 export function faceGridPolylines(
   first: AnnotationPoint,
   last: AnnotationPoint,
-  divisions = 16,
+  divisions: number = FACE_GRID_DENSITY.default,
   curveSamples = 40,
 ): AnnotationPoint[][] {
   const left = Math.min(first.x, last.x)
@@ -23,7 +25,8 @@ export function faceGridPolylines(
   const radiusY = (bottom - top) / 2
   if (radiusX <= 0 || radiusY <= 0) return []
 
-  const safeDivisions = Math.max(2, Math.round(divisions))
+  const safeDivisions = Math.min(FACE_GRID_DENSITY.max, Math.max(2,
+    Number.isFinite(divisions) ? Math.round(divisions) : FACE_GRID_DENSITY.default))
   const safeSamples = Math.max(8, Math.round(curveSamples))
   const latitudes = Array.from({ length: safeDivisions - 1 }, (_, index) => {
     const latitude = -Math.PI / 2 + (Math.PI * (index + 1)) / safeDivisions

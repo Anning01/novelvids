@@ -23,6 +23,8 @@ async def generate_for_sora_consistency(
     quality=None,
     prompt_language="en",
     style_prompt="",
+    frame_count=9,
+    frame_duration_ms=200,
 ):
     """Execute a reference-image generation task with optional image references."""
     final_prompt = build_sora_compatible_prompt(
@@ -31,8 +33,13 @@ async def generate_for_sora_consistency(
     )
     if style_prompt:
         final_prompt = f"{final_prompt}\n\n{style_prompt}".strip()
+    if output_format == "gif":
+        from prompts.image_animation import render_gif_prompt
+        final_prompt = render_gif_prompt(final_prompt, frame_count=frame_count, frame_duration_ms=frame_duration_ms, language=prompt_language)
 
     extra_body = {}
+    if output_format == "gif":
+        extra_body.update(frame_count=frame_count, frame_duration_ms=frame_duration_ms)
 
     if reference_images:
         extra_body["image"] = reference_images

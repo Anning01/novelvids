@@ -427,6 +427,24 @@ async def test_reference_提交图生图参考图片并去重(configured_creatio
     assert task.request_params["reference_images"] == ["/media/reference.png"]
 
 
+@pytest.mark.parametrize("clarity,size", [("1K", "1024x1024"), ("2K", "2048x2048"), ("4K", "4096x4096")])
+async def test_reference_gpt_image_resolution_quality_reaches_task(configured_creation_agent, clarity, size):
+    from models.config import AiModelConfig
+
+    novel = await Novel.create(name="GPT Image", author="Author")
+    asset = await Asset.create(novel_id=novel.id, asset_type=AssetTypeEnum.person.value,
+        canonical_name="人物", metadata={"clarity": clarity, "aspect_ratio": "1:1"})
+    config = await AiModelConfig.create(task_type=2, task_types=[2], name="GPT Image 2.6",
+        base_url="https://custom.example/v1", api_key="test-key", model="gpt-image-2.6",
+        image_model_type="gpt_image_2_6", api_protocol="openai_compatible", is_active=True)
+    task = await asset_controller.reference(asset.id, media_model_config_id=config.id,
+        reference_images=["/media/reference.png"])
+    assert task.request_params["resolution"] == size
+    assert task.request_params["quality"] == "high"
+    assert task.request_params["reference_images"] == ["/media/reference.png"]
+    assert task.request_params["model_config_id"] == config.id
+
+
 @pytest.mark.asyncio
 async def test_reference_使用资产指定的生图模型(configured_creation_agent):
     """资产元数据指定已启用模型时，生成任务使用该模型而不是自动选择模型。"""
@@ -499,14 +517,14 @@ async def test_reference_衍生形态使用自身JSON配置的生图模型(confi
         novel_id=novel.id,
         asset_type=AssetTypeEnum.person.value,
         canonical_name="独立版本测试",
-        metadata={"model_config_id": base_config.id, "clarity": "low"},
+        metadata={"model_config_id": base_config.id, "clarity": "1K"},
     )
     variant = await AssetVariant.create(
         asset_id=asset.id,
         name="受伤形态",
         metadata={
             "model_config_id": variant_config.id,
-            "clarity": "high",
+            "clarity": "2K",
             "aspect_ratio": "3:2",
             "output_format": "webp",
         },
@@ -515,7 +533,7 @@ async def test_reference_衍生形态使用自身JSON配置的生图模型(confi
     task = await asset_controller.reference(asset.id, variant.id)
 
     assert task.request_params["model"] == "variant-model"
-    assert task.request_params["clarity"] == "high"
+    assert task.request_params["clarity"] == "2K"
     assert task.request_params["aspect_ratio"] == "3:2"
     assert task.request_params["output_format"] == "webp"
 
@@ -582,6 +600,63 @@ async def test_reference_重复提交返回原任务(configured_creation_agent):
 
     task = await asset_controller.reference(asset.id)
     assert task.id == existing.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [4, 5])
+@pytest.mark.parametrize("use_variant", [False, True])
+async def test_reference_manual_retry_after_terminal_review_preserves_original_request(
+    configured_creation_agent, status, use_variant,
+):
+    from uuid import uuid4
+    from models.ai_task import AiTask
+    from models.agent_operation import AgentOperation
+    from models.config import AiModelConfig
+    from models.usage_record import ModelUsageRecord
+    from services.creation_agent.submissions import submission
+
+    novel = await Novel.create(name="Reference retry")
+    config = await AiModelConfig.create(
+        task_type=2, name="retry-image", base_url="https://example.com/v1",
+        api_key="test-key", model="gpt-image-2", image_model_type="gpt_image_2", is_active=True,
+    )
+    asset = await Asset.create(novel=novel, asset_type=3, canonical_name="Door",
+        metadata={"model_config_id": config.id})
+    variant = await AssetVariant.create(asset=asset, name="Open") if use_variant else None
+    variant_id = variant.id if variant else None
+    original_request = {"submission_id": str(uuid4()), "submission_hash": "same-input"}
+    token = submission.set(original_request)
+    try:
+        original = await asset_controller.reference(asset.id, variant_id)
+        await AiTask.filter(id=original.id).update(status=status, stage="needs_review",
+            error_message="Original submission outcome unknown")
+        receipt = await AgentOperation.create(task=original, key="media:image",
+            external=True, state="uncertain")
+        ledger = await ModelUsageRecord.create(novel_id=novel.id, task_type=2,
+            billing_type="image", ai_task_id=original.id, model=config.model,
+            status=status, usage={"missing_usage": True, "submission_uncertain": True})
+
+        # Replaying the same HTTP request must never submit another paid call.
+        assert (await asset_controller.reference(asset.id, variant_id)).id == original.id
+        submission.set({**original_request, "submission_id": str(uuid4())})
+        retry = await asset_controller.reference(asset.id, variant_id)
+        assert retry.id != original.id
+        assert retry.request_params["variant_id"] == variant_id
+
+        # A further click joins the active retry instead of creating a third job.
+        submission.set({**original_request, "submission_id": str(uuid4())})
+        assert (await asset_controller.reference(asset.id, variant_id)).id == retry.id
+        assert await AiTask.filter(task_type=2).count() == 2
+        await original.refresh_from_db()
+        await receipt.refresh_from_db()
+        await ledger.refresh_from_db()
+        assert (original.status, original.stage) == (status, "needs_review")
+        assert original.error_message == "Original submission outcome unknown"
+        assert receipt.state == "uncertain" and receipt.result == {}
+        assert ledger.usage == {"missing_usage": True, "submission_uncertain": True}
+        assert ledger.cost == 0
+    finally:
+        submission.reset(token)
 
 
 

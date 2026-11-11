@@ -95,7 +95,7 @@ function removeTarget(option: AgentTargetOption) {
 const productionLabel = (operation: string) => tr(({ story: '项目分析', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
 function singleProductionResult(message: { role: string; content: string; production?: ProductionReceipt[] }): ProductionReceipt | undefined {
   const receipt = message.production?.length === 1 ? message.production[0] : undefined
-  return message.role === 'assistant' && ['已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined
+  return message.role === 'assistant' && ['', '已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined
 }
 const bubbles = computed(() => store.messages.map(message => props.initialUserText && store.conversationId === props.initialConversationId
   && message.id === store.messages.find(item => item.role === 'user')?.id ? { ...message, content: props.initialUserText } : message).filter(message => message.role === 'user' ||
@@ -368,18 +368,19 @@ onMounted(() => {
           </li>
         </ul>
         <p v-if="item.singleProductionResult?.error" class="creation-agent-panel__round-status">{{ item.singleProductionResult.error }}</p>
+        <p v-if="item.singleProductionResult?.stage === 'billing_pending'" class="creation-agent-panel__round-status">{{ tr('用量正在结算') }}</p>
         <AgentUsageDetails v-if="item.role === 'assistant'" :usage="item.usage" />
         </AgentDisclosure>
       </template>
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? tr('{p0} 条新消息', { p0: unreadCount }) : tr('回到最新') }}</AppButton></template>
     </BubbleList>
     <footer v-if="ready && !store.loading">
-      <AgentDisclosure v-if="(!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4 || store.currentRun?.status === 5)) || store.error || pendingCount || statusError || (store.busy && !store.streamConnected)" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
+      <AgentDisclosure v-if="(!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4 || store.currentRun?.status === 5)) || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
         <template #title><AgentActivity :text="statusLabel" :active="false" /></template>
         <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待核对', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('待核对') }} {{ pendingCount }}</button></template>
       <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">{{ tr('编辑后重试') }}</AppButton><AppButton size="xs" @click="router.push('/settings')">{{ tr('查看设置') }}</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">{{ tr('重新连接') }}</AppButton></p>
-      <AppButton v-if="store.currentRun && !store.streamConnected && store.busy" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />{{ tr('重新连接') }}</AppButton>
+      <AppButton v-if="store.currentRun && !store.streamConnected && store.busy && store.error" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />{{ tr('重新连接') }}</AppButton>
       <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} {{ tr('个对象有新设定待核对') }} <span>{{ tr('查看') }}</span></button></p>
       <p v-if="statusError && (pickerOpen || targets.length)" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
       </AgentDisclosure>

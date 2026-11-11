@@ -8,8 +8,8 @@ export type JSONPrimitive = string | number | boolean | null
 export type JSONValue = JSONPrimitive | JSONObject | JSONValue[]
 export interface JSONObject { [key: string]: JSONValue }
 export type JsonRecord = JSONObject
-export type ImageAnnotationTool = 'rectangle' | 'ellipse' | 'grid' | 'arrow' | 'freehand'
-export interface ImageAnnotation { id: string; tool: ImageAnnotationTool; points: Point[]; stroke: string; strokeWidth: number }
+export type ImageAnnotationTool = 'rectangle' | 'ellipse' | 'grid' | 'face-grid' | 'arrow' | 'freehand'
+export interface ImageAnnotation { id: string; tool: ImageAnnotationTool; points: Point[]; stroke: string; strokeWidth: number; gridDivisions?: number }
 export interface UploadedMediaData {
   url: string
   filename: string

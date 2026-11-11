@@ -155,6 +155,8 @@ class SkillExecution:
         media=None,
         additional_instructions: str = "",
         output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
+        initial_assets: BaseModel | None = None,
+        asset_scope: tuple[tuple[int, str], ...] = (),
     ):
         from services.creation_agent.handler import configured_model
 
@@ -183,7 +185,10 @@ class SkillExecution:
                                        if k not in {'request_id', 'resume_from_task_id'}}
         input_key = 'model-input:' + fingerprint(key)
         revision = fingerprint([skill, stable_facts, self.snapshot.revision, self.language, chosen.id,
-                                output_type.model_json_schema(), additional_instructions])
+                                output_type.model_json_schema(), additional_instructions,
+                                *([initial_assets.model_dump(mode='json')] if initial_assets is not None else [])])
+        if asset_scope:
+            revision = fingerprint([revision, asset_scope])
         saved_input, _ = await AgentOperation.get_or_create(task_id=self.params['task_id'], key=input_key,
             defaults={'state': 'completed', 'result': {'revision': revision}})
         if saved_input.result['revision'] != revision:
@@ -291,7 +296,7 @@ class SkillExecution:
             from prompts.creation_plan import resolved_storyboard_resources_instructions
             additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
         from services.extraction.validation import AssetCandidateValidator, AssetExtractionValidationError
-        asset_candidates = AssetCandidateValidator(output_type) if skill == 'assets' else None
+        asset_candidates = AssetCandidateValidator(output_type, asset_scope) if skill == 'assets' else None
         agent_output = (storyboard_candidates.draft_type if storyboard_candidates else
                         asset_candidates.draft_type if asset_candidates else output_type)
         if chosen.supports_json_output:
@@ -410,6 +415,8 @@ class SkillExecution:
 
             project = await Novel.get(id=self.params["novel_id"])
             request_aspect_ratio = project.aspect_ratio or "16:9"
+            if initial_assets is not None and asset_candidates and not asset_checkpoint:
+                asset_candidates.merge(initial_assets, self.snapshot, self.language, request_aspect_ratio)
             project_facts = {
                 "name": project.name,
                 "style_key": project.style_key,

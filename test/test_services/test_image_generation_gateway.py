@@ -1,4 +1,7 @@
 import base64
+import json
+from email import policy
+from email.parser import BytesParser
 
 import httpx
 import pytest
@@ -12,6 +15,76 @@ from services.image_generation.gateway import (
     _safe_endpoint,
     generate_images,
 )
+
+
+@pytest.mark.parametrize("model", ["gpt-image-2.5", "gpt-image-2.6", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"])
+@pytest.mark.parametrize("clarity,size", [("1K", "1024x1024"), ("2K", "2048x2048"), ("4K", "4096x4096")])
+@pytest.mark.parametrize("base_url", ["https://image.example.com/v1", "https://other.example.com/custom/v1/"])
+async def test_gpt_image_generation_uses_configured_provider_and_model(monkeypatch, model, base_url, clarity, size):
+    from services.image_generation.capabilities import validate_selection
+    from services.reference.generator import generate_for_sora_consistency
+
+    selection = validate_selection(model.replace("-", "_").replace(".", "_"),
+        clarity=clarity, aspect_ratio="1:1", output_format="png", generation_count=1)
+
+    async def handler(request):
+        assert str(request.url) == base_url.rstrip("/") + "/images/generations"
+        assert request.headers["content-type"] == "application/json"
+        assert json.loads(request.content) == {"model": model, "prompt": "a mug", "size": size,
+            "quality": "high", "n": 1, "output_format": "png"}
+        return httpx.Response(200, json={"data": [{"b64_json": "generated"}]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr("services.image_generation.gateway.httpx.AsyncClient",
+        lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(handler)))
+    images = await generate_for_sora_consistency({"base_traits": "a mug"}, base_url=base_url,
+        api_key="secret", model=model, resolution=selection.provider_size, quality=selection.provider_quality)
+    assert images[0].b64_json == "generated"
+
+
+@pytest.mark.parametrize("model", ["gpt-image-2.5", "gpt-image-2.6", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"])
+@pytest.mark.parametrize("source_kind", ["data", "url", "local", "multiple"])
+async def test_openai_edits_uploads_reference_files(monkeypatch, tmp_path, source_kind, model):
+    content = b"\x89PNG\r\n\x1a\nreference-image"
+    data_uri = "data:image/png;base64," + base64.b64encode(content).decode()
+    local = tmp_path / "reference.png"
+    local.write_bytes(content)
+    references = {"data": [data_uri], "url": ["https://cdn.example.com/ref.png?signature=private"],
+        "local": [str(local)], "multiple": [data_uri, str(local)]}[source_kind]
+    requests = []
+
+    async def handler(request):
+        requests.append(request)
+        if request.method == "GET":
+            assert request.url.host == "cdn.example.com"
+            assert "authorization" not in request.headers
+            return httpx.Response(200, content=content, headers={"content-type": "image/png"})
+        assert request.url == "https://custom.example.com/proxy/v1/images/edits"
+        assert request.headers["authorization"] == "Bearer secret"
+        assert request.headers["content-type"].startswith("multipart/form-data; boundary=")
+        message = BytesParser(policy=policy.default).parsebytes(
+            b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + request.content)
+        parts = list(message.iter_parts())
+        fields = {part.get_param("name", header="content-disposition"): part.get_content()
+            for part in parts if not part.get_filename()}
+        assert fields == {"model": model, "prompt": "replace background",
+            "size": "1024x1024", "quality": "high", "n": "1", "output_format": "png"}
+        files = [part for part in parts if part.get_filename()]
+        assert len(files) == len(references)
+        for part in files:
+            assert part.get_param("name", header="content-disposition") == ("image" if len(files) == 1 else "image[]")
+            assert part.get_content_type() == "image/png"
+            assert part.get_payload(decode=True) == content
+        return httpx.Response(200, json={"data": [{"url": "https://cdn.example.com/edited.png"}]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr("services.image_generation.gateway.httpx.AsyncClient",
+        lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(handler)))
+    images = await generate_images(base_url="https://custom.example.com/proxy/v1/", api_key="secret",
+        model=model, prompt="replace background", resolution="1024x1024",
+        quality="high", extra_body={"image": references})
+    assert images[0].url == "https://cdn.example.com/edited.png"
+    assert len(requests) == (2 if source_kind == "url" else 1)
 
 
 def test_openai_adapter_maps_resolution_alias_to_supported_vertical_size():
@@ -31,6 +104,7 @@ def test_openai_adapter_maps_resolution_alias_to_supported_vertical_size():
         "n": 1,
         "size": "1024x1536",
         "output_format": "png",
+        "quality": "high",
     }
 
 
@@ -121,6 +195,13 @@ def test_openrouter_adapter_sends_explicit_size_without_conflicting_aspect_ratio
         "output_format": "png",
         "size": "2048x1152",
     }
+
+
+def test_openrouter_preserves_fixed_high_quality_independent_of_size():
+    prepared = image_protocol_adapter("openrouter_compatible").prepare(ImageGenerationInput(
+        model="supplier-alias", prompt="cover", resolution="4096x4096", quality="high"))
+    assert prepared.payload["size"] == "4096x4096"
+    assert prepared.payload["quality"] == "high"
 
 
 def test_boundary_log_endpoint_removes_credentials_and_query_values():

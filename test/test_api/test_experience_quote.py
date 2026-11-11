@@ -24,6 +24,20 @@ async def member_context(balance, *, limit=None, used=0):
     return AuthContext(user=user,team_id=team.id,membership=member), team
 
 
+@pytest.mark.parametrize('resolution,expected', [('1K', '0.12'), ('2K', '0.34'), ('4K', '0.56')])
+async def test_gpt_image_quote_uses_resolution_tier(resolution, expected):
+    from models.config import AiModelConfig
+
+    config = await AiModelConfig.create(task_type=2, task_types=[2], name='GPT Image 2',
+        image_model_type='gpt_image_2', model='gpt-image-2', base_url='https://provider.example/v1',
+        api_key='test', is_active=True, pricing={'type': 'image', 'prices': {'1K': 0.12, '2K': 0.34, '4K': 0.56}})
+    request = ExperienceQuoteIn(task_type='image', mode='direct', model_config_id=config.id,
+        resolution=resolution, aspect_ratio='1:1')
+    quote = await clip_quote(request, AuthContext())
+    assert quote.allowed
+    assert quote.estimated_cost == Decimal(expected)
+
+
 @pytest.mark.asyncio
 async def test_quote_matches_settlement_discount_and_duration(configured):
     video, _ = configured

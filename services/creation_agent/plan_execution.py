@@ -27,9 +27,14 @@ async def targets_for_step(step, records):
     return upstream.get('asset_ids' if step.operation == 'image' else 'scene_ids', [])
 
 
-async def existing_result(step, target_id):
+async def existing_result(step, target_id, execution=None):
     if step.mode != 'fill_missing':
         return None
+    if step.operation == 'assets' and step.asset_scope == 'chapter' and execution is not None:
+        from services.extraction.reuse import extraction_reuse
+        reusable = await extraction_reuse.find(execution, target_id)
+        if reusable and reusable.complete:
+            return reusable.summary
     if step.operation == 'storyboard':
         scenes = await Scene.filter(chapter_id=target_id).order_by('sequence')
         if scenes:
@@ -161,7 +166,7 @@ class CreationPlanRunner:
             return receipt.result
         try:
             await validate_step_inputs(execution.params)
-            kept = await existing_result(step, target_id)
+            kept = await existing_result(step, target_id, execution)
             if kept is not None:
                 from services.creation_agent.creative_checks import check_preserved_result
                 await check_preserved_result(execution, step, target_id, kept)

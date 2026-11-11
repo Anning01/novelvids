@@ -49,6 +49,8 @@ def _image_extension(content: bytes) -> str:
         return ".jpg"
     if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
         return ".webp"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
     raise RuntimeError(localized_message('生图供应商返回了不支持的图片格式'))
 
 
@@ -97,6 +99,7 @@ def _content_type_for(extension: str) -> str:
         ".jpeg": "image/jpeg",
         ".png": "image/png",
         ".webp": "image/webp",
+        ".gif": "image/gif",
     }.get(extension, "application/octet-stream")
 
 
@@ -146,31 +149,11 @@ async def _download_image(remote_url: str, asset_id: int, suffix: str = "") -> s
     Returns:
         可通过 /media/ 前缀访问的路径，如 /media/assets/42.png
     """
-    asset_dir = os.path.join(settings.MEDIA_PATH, "assets")
-    os.makedirs(asset_dir, exist_ok=True)
-
-    # 从 URL 推断扩展名，默认 .png
-    parsed = urlparse(remote_url)
-    ext = os.path.splitext(parsed.path)[1] or ".png"
-    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
-        ext = ".png"
-
-    filename = f"{asset_id}{suffix}{ext}"
-    local_path = os.path.join(asset_dir, filename)
-
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-        resp = await client.get(remote_url)
-        resp.raise_for_status()
-        with open(local_path, "wb") as f:
-            f.write(resp.content)
-
-    media_url = f"/media/assets/{filename}"
-    try:
-        await ensure_image_derivatives(media_url, force=True)
-    except ValueError:
-        logger.warning("Generated asset image has no decodable thumbnail: asset_id=%s", asset_id)
-    logger.info("Image downloaded: asset_id=%s -> %s", asset_id, media_url)
-    return media_url
+        response = await client.get(remote_url)
+        response.raise_for_status()
+        content = response.content
+    return await _store_asset_image(content, _image_extension(content), asset_id, suffix)
 
 
 async def _persist_generated_image(image, asset_id: int, suffix: str) -> str:
@@ -327,6 +310,7 @@ class AssetReferenceHandler(BaseTaskHandler):
                 quality=quality,
                 prompt_language=prompt_language,
                 style_prompt=style_prompt,
+                **({"frame_count": request_params.get("frame_count", 9), "frame_duration_ms": request_params.get("frame_duration_ms", 200)} if output_format == "gif" else {}),
             )
 
             result_urls = []

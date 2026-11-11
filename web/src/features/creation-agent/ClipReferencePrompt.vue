@@ -6,7 +6,7 @@ import MaterialMentionInput from '@/features/workbench/components/MaterialMentio
 import { clipReferenceMentions } from './clipReferences'
 import type { VideoReferenceMedia } from '@/types'
 
-const props = defineProps<{modelValue: string; references: VideoReferenceMedia[]; uploading?: boolean}>()
+const props = defineProps<{modelValue: string; references: VideoReferenceMedia[]; uploading?: boolean; placeholder?: string}>()
 const emit = defineEmits<{'update:modelValue':[value:string];remove:[index:number];upload:[];submit:[]}>()
 const editor = ref<InstanceType<typeof MaterialMentionInput> | null>(null)
 const mentions = computed(() => clipReferenceMentions(props.references))
@@ -29,7 +29,7 @@ defineExpose({focus: () => editor.value?.focus()})
       </div>
       <button type="button" class="clip-reference-more" :disabled="uploading" :aria-label="tr('添加更多参考素材')" @click="emit('upload')"><Plus :size="18" /></button>
     </div>
-    <MaterialMentionInput ref="editor" :model-value="modelValue" :materials="mentions" :mentions="mentions" :label="tr('创作想法')" :placeholder="tr('描述画面、动作与氛围，输入 @ 引用已上传的素材…')" :show-hint="false" :show-reference-counts="false" @update:model-value="emit('update:modelValue',$event)" @add="(_material,text) => emit('update:modelValue',text)" />
+    <MaterialMentionInput ref="editor" :model-value="modelValue" :materials="mentions" :mentions="mentions" :label="tr('创作想法')" :placeholder="placeholder ?? tr('描述画面、动作与氛围，输入 @ 引用已上传的素材…')" :show-hint="false" :show-reference-counts="false" @update:model-value="emit('update:modelValue',$event)" @add="(_material,text) => emit('update:modelValue',text)" />
     <p v-if="modelValue.length > 4000" class="clip-prompt-error" role="alert">{{ tr('创作描述不能超过 4000 字，请缩短后再提交。') }}</p>
   </div>
 </template>

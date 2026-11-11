@@ -150,8 +150,14 @@ class ProductionRecovery:
                 }
                 for waiting in await AiTask.filter(status=2, stage='waiting_dependencies'):
                     operations = await AgentOperation.filter(task=waiting, key__startswith='submit:', state='completed')
-                    ids = [row.result['task_id'] for row in operations if row.result.get('task_id')]
-                    if not await AiTask.filter(id__in=ids, status__in=[1, 2, 6]).exists():
+                    if waiting.request_params.get('operation') == 'video_batch':
+                        # Continuity uses the original video/tail, not its independent HD follow-up.
+                        ids = [row.result['video_id'] for row in operations if row.result.get('video_id')]
+                        blocked = await Video.filter(id__in=ids, status__in=[1, 2, 6]).exists()
+                    else:
+                        ids = [row.result['task_id'] for row in operations if row.result.get('task_id')]
+                        blocked = await AiTask.filter(id__in=ids, status__in=[1, 2, 6]).exists()
+                    if not blocked:
                         await AiTask.filter(id=waiting.id, status=2, stage='waiting_dependencies').update(status=6, stage='resuming')
                 from services.creation_agent.sessions import agent_configuration
 

@@ -24,7 +24,7 @@ class AiModelConfigProperties(BaseModel):
     )
     image_model_type: Optional[ImageModelTypeEnum] = Field(
         None,
-        description="生图模型能力类型，仅支持 Seedream 5 Lite/Pro/Flash 与 GPT Image 2",
+        description="生图模型能力类型，支持 Seedream 5 与 GPT Image 系列",
     )
     video_model_type: Optional[VideoGenerationModelTypeEnum] = Field(
         None,
@@ -123,6 +123,13 @@ class ImageGenerationCapabilitiesOut(BaseModel):
     default_aspect_ratio: str
     default_output_format: str
     default_generation_count: int
+    frame_counts: list[int] = Field(default_factory=list)
+    default_frame_count: int = 9
+    frame_duration_ms_min: int = 20
+    frame_duration_ms_max: int = 655350
+    frame_duration_ms_step: int = 10
+    default_frame_duration_ms: int = 200
+    clarities_by_format: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ImageGenerationModelOut(BaseModel):

@@ -6,6 +6,24 @@ const privacyError = "视频供应商请求失败：The request failed because t
 const downloadError = '视频供应商请求失败：The parameter `content[1].image_uri` specified in the request is not valid: resource download failed. (InvalidParameterValue)（HTTP 400，request_id=req-400）'
 
 describe('VideoGenerationErrorState', () => {
+  it.each(['light', 'dark'])('explains output moderation without blaming a reference in %s mode', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    try {
+      const wrapper = mount(VideoGenerationErrorState, { props: {
+        error: '视频生成失败，请检查生成内容或联系管理员（OutputVideoSensitiveContentDetected）',
+      } })
+      expect(wrapper.get('.video-generation-error > strong').text()).toBe('生成结果未通过内容审核')
+      expect(wrapper.text()).toContain('生成的视频可能包含敏感信息')
+      expect(wrapper.find('.video-generation-error__reference').exists()).toBe(false)
+      expect(wrapper.get('.video-generation-error__technical').text()).toContain('OutputVideoSensitiveContentDetected')
+      expect(wrapper.emitted('retry')).toBeUndefined()
+      await wrapper.get('button').trigger('click')
+      expect(wrapper.emitted('retry')).toHaveLength(1)
+    } finally {
+      delete document.documentElement.dataset.appTheme
+    }
+  })
+
   it('shows the asset nickname and locates the rejected reference', async () => {
     const wrapper = mount(VideoGenerationErrorState, {
       props: {

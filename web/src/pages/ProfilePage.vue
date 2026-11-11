@@ -525,7 +525,7 @@ onMounted(load)
         <p v-else class="profile-copy">{{ tr('使用他人发出的邀请链接加入团队。') }}</p>
       </section>
 
-      <!-- 账号与安全：改成紧凑的设置行。器灵版将扫码方式和绑定状态合到一行，待绑定时保留绑定入口。密码版保留可展开的改密表单。退出登录放在安全区末尾，协议和数据申请放在页脚。 -->
+      <!-- 账号与安全：改成紧凑的设置行。器灵登录将扫码方式和绑定状态合到一行，待绑定时保留绑定入口。密码登录保留可展开的改密表单。退出登录放在安全区末尾，协议和数据申请放在页脚。 -->
       <section class="profile-card profile-security" aria-labelledby="profile-security-title">
         <div class="profile-section-header">
           <h2 id="profile-security-title">

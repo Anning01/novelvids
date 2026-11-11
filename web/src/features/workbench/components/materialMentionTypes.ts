@@ -8,6 +8,7 @@ export interface MaterialMentionOption {
   nodeKey: string;
   connectionKey?: string;
   mentionKey?: string;
+  syntax?: string;
   name: string;
   sourceName?: string;
   prompt: string;

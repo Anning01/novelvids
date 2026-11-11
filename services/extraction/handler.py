@@ -79,6 +79,20 @@ class ExtractionTaskHandler(BaseTaskHandler):
             novel_id=novel_id,
             chapter_id=chapter_id,
         )
+        from services.creation_agent.skill_execution import current_execution
+        from services.creation_agent.step_context import step_context
+        execution = current_execution.get()
+        reusable = None
+        plan_context = await step_context(request_params) if execution else None
+        targeted = bool(plan_context and plan_context.step.asset_scope == 'targeted')
+        if plan_context and plan_context.step.mode == 'fill_missing' and not targeted:
+            from services.extraction.reuse import extraction_reuse
+            reusable = await extraction_reuse.find(execution, chapter_id)
+            if reusable and reusable.complete:
+                return {**reusable.summary, 'preserved_existing': True}
+        if execution:
+            from services.extraction.reuse import extraction_reuse
+            await extraction_reuse.remember_inputs(execution, context)
         messages = self.message_builder.build(
             context,
             prompt_language=prompt_language,
@@ -113,7 +127,9 @@ class ExtractionTaskHandler(BaseTaskHandler):
             report.message_characters,
             report.total_characters,
         )
-        required_assets = tuple((asset.asset_type, asset.canonical_name) for asset in context.required_design_assets)
+        required_assets = () if targeted else tuple((asset.asset_type, asset.canonical_name) for asset in context.required_design_assets)
+        if reusable:
+            required_assets = tuple(dict.fromkeys((*required_assets, *reusable.required_assets)))
         extractor = self.extractor_factory(
             AsyncOpenAI(
                 api_key=request_params["api_key"],
@@ -126,6 +142,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 False,
             ),
             **({'required_assets': required_assets} if required_assets else {}),
+            **({'initial_assets': reusable.accepted, 'required_variants': reusable.required_variants} if reusable else {}),
         )
         logger.info(
             "Extraction model call: novel_id=%s chapter_id=%s "
@@ -137,6 +154,8 @@ class ExtractionTaskHandler(BaseTaskHandler):
         try:
             result = await extractor.extract(messages)
             validate_required_design_assets(result, required_assets)
+            if getattr(extractor, 'targeted_assets', None) is not None:
+                reusable = extractor.targeted_assets
         except asyncio.CancelledError:
             logger.warning(
                 "Extraction model call: novel_id=%s chapter_id=%s "
@@ -186,10 +205,19 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 from models.asset import Asset
                 from models.asset_variant import AssetVariant
                 from services.creation_agent.object_state import object_state, object_version, object_label, creation_version
+                if reusable:
+                    from utils.messages import localized_message
+                    for key, version in reusable.repair_versions.items():
+                        kind, identifier = key.split(':')
+                        target = await (Asset if kind == 'asset' else AssetVariant).get_or_none(id=int(identifier))
+                        if target is None or await object_version(target) != version:
+                            raise ValueError(localized_message('待补全的设定已有新修改，已保留人工编辑，请重新核对'))
                 before = {asset.id: await object_state(asset) for asset in await Asset.filter(novel_id=novel_id)} if plan_context else {}
                 before_variants = {variant.id: await object_state(variant) for variant in
                     await AssetVariant.filter(asset__novel_id=novel_id)} if plan_context else {}
                 options = {'preserve_existing': plan_context.step.mode == 'fill_missing', 'include_ids': True} if plan_context else {}
+                if reusable:
+                    options.update(repair_asset_ids=reusable.repair_asset_ids, repair_variant_ids=reusable.repair_variant_ids)
                 summary = await self.upsert_service.save_result(novel_id=novel_id,
                     chapter_number=context.chapter.number, result=result, **options)
                 if plan_context:
@@ -221,4 +249,5 @@ class ExtractionTaskHandler(BaseTaskHandler):
                             tool_call_id='persist:assets', request_hash=fingerprint(result.model_dump()), changes=changes)
                 return summary
         summary = await execute_step(execution.params['task_id'], 'persist:assets', persist, atomic=True) if execution else await persist()
-        return {**summary, "token_usage": getattr(extractor, "last_usage", {})}
+        return {**summary, "token_usage": getattr(extractor, "last_usage", {}),
+            **({'not_applied_reason': extractor.not_applied_reason} if getattr(extractor, 'not_applied_reason', None) else {})}

@@ -169,6 +169,13 @@ async def test_api_lists_only_active_supported_image_models_with_capabilities(cl
             "default_aspect_ratio": "16:9",
             "default_output_format": "png",
             "default_generation_count": 1,
+            "frame_counts": [],
+            "default_frame_count": 9,
+            "frame_duration_ms_min": 20,
+            "frame_duration_ms_max": 655350,
+            "frame_duration_ms_step": 10,
+            "default_frame_duration_ms": 200,
+            "clarities_by_format": {},
         },
     }]
 

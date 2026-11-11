@@ -160,6 +160,10 @@ class ImageModelTypeEnum(NicknameStrEnum):
     seedream_5_pro = "seedream_5_pro", "Doubao Seedream 5.0 Pro"
     seedream_5_flash = "seedream_5_flash", "Doubao Seedream 5.0 Flash"
     gpt_image_2 = "gpt_image_2", "GPT Image 2"
+    gpt_image_2_5 = "gpt_image_2_5", "GPT Image 2.5"
+    gpt_image_2_6 = "gpt_image_2_6", "GPT Image 2.6"
+    gpt_image_2_6_sunburst = "gpt_image_2_6_sunburst", "GPT Image 2.6 Sunburst"
+    gpt_image_2_6_flare = "gpt_image_2_6_flare", "GPT Image 2.6 Flare"
 
 
 @enum_description

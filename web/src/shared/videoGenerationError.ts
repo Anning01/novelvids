@@ -1,6 +1,6 @@
 
 import { tr } from '@/i18n'
-export type VideoGenerationErrorCategory = 'privacy' | 'download' | 'other'
+export type VideoGenerationErrorCategory = 'privacy' | 'download' | 'moderation' | 'other'
 
 export interface VideoGenerationErrorInfo {
   title: string
@@ -15,6 +15,7 @@ export interface VideoGenerationErrorInfo {
 }
 
 const PRIVACY_ERROR_CODE = 'InputImageSensitiveContentDetected.PrivacyInformation'
+const OUTPUT_MODERATION_ERROR_CODE = 'OutputVideoSensitiveContentDetected'
 
 function firstMatch(value: string, expressions: RegExp[]) {
   for (const expression of expressions) {
@@ -44,6 +45,7 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
   const errorCode = firstMatch(raw, [
     /\(([A-Za-z][A-Za-z0-9_.-]+)\)\s*[（(]?HTTP/iu,
     /（([A-Za-z][A-Za-z0-9_.-]+)）\s*（HTTP/iu,
+    /[（(]([A-Za-z][A-Za-z0-9_.-]+)[）)]\s*$/u,
   ])
   const httpStatusText = firstMatch(raw, [/HTTP\s*(\d{3})/iu])
   const httpStatus = httpStatusText ? Number(httpStatusText) : undefined
@@ -54,6 +56,19 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
     /content\[(\d+)\]/iu,
   ])
   const referenceNumber = contentIndexText ? Number(contentIndexText) : undefined
+
+  if (raw.includes(OUTPUT_MODERATION_ERROR_CODE) || /output video may contain sensitive information/iu.test(raw)) {
+    return {
+      title: tr('生成结果未通过内容审核'),
+      message: tr('供应商判定生成的视频可能包含敏感信息，因此没有返回成片。'),
+      suggestion: tr('请检查提示词与参考素材，调整不符合供应商内容规范的部分后再生成。'),
+      raw,
+      errorCode: OUTPUT_MODERATION_ERROR_CODE,
+      requestId,
+      httpStatus,
+      category: 'moderation',
+    }
+  }
 
   const isVideoUrl = /video_url/iu.test(raw)
   const isPrivacyError = raw.includes(PRIVACY_ERROR_CODE) || /may contain real person/iu.test(raw)

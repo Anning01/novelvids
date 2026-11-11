@@ -26,6 +26,7 @@ class ImageGenerationInput:
 class PreparedImageRequest:
     path: str
     payload: dict[str, Any]
+    images: tuple[str, ...] = ()
 
 
 class ImageProtocolAdapter(Protocol):
@@ -63,10 +64,18 @@ class OpenAICompatibleImageAdapter:
         if size:
             payload["size"] = size
         payload["output_format"] = request.output_format
-        if request.quality:
-            payload["quality"] = request.quality
+        payload["quality"] = request.quality or "high"
         payload.update(request.extra_body or {})
-        return PreparedImageRequest(path="/images/generations", payload=payload)
+        images = payload.pop("image", None) or []
+        if isinstance(images, str):
+            images = [images]
+        if not isinstance(images, list) or any(not isinstance(image, str) or not image.strip() for image in images):
+            raise ImageProtocolAdapterError("参考图片必须是图片地址列表")
+        return PreparedImageRequest(
+            path="/images/edits" if images else "/images/generations",
+            payload=payload,
+            images=tuple(images),
+        )
 
 
 class OpenRouterCompatibleImageAdapter:
@@ -87,6 +96,8 @@ class OpenRouterCompatibleImageAdapter:
             payload["resolution"] = resolution
         if request.aspect_ratio and not has_explicit_size:
             payload["aspect_ratio"] = request.aspect_ratio
+        if request.quality:
+            payload["quality"] = request.quality
         payload.update(request.extra_body or {})
         return PreparedImageRequest(path="/images", payload=payload)
 

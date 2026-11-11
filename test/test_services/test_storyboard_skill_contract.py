@@ -6,15 +6,6 @@ from schemas.scene import SceneEntity
 from test.test_services.test_prompt_language import _shot
 
 
-@pytest.fixture(autouse=True)
-def public_prompt_pack(tmp_path, monkeypatch):
-    """Public serialization contracts must not depend on ignored private rules."""
-    import prompts.skill_pack as pack
-    for filename in pack.FILES.values():
-        (tmp_path / filename).write_text((pack.ROOT / filename).read_text())
-    monkeypatch.setattr(pack, 'ROOT', tmp_path)
-
-
 def characters():
     return [SceneEntity(name='苏玄', aliases=[], description='十六岁少年', asset_type='人物'),
             SceneEntity(name='赵无垢', aliases=['师父'], description='六十四岁师父', asset_type='人物')]
@@ -59,8 +50,8 @@ def test_skill_prompt_contract_rejects_summary_missing_voice_and_complete_sectio
 def test_complete_prompt_keeps_all_structured_content_and_timing(language):
     from services.storyboard.validation import validate_skill_storyboard_shot
     shot = _shot()
-    shot.narration = ['0s-1s: Narrator (soft): The gate is closed.']
-    shot.dialogue = ['2s-3s: Alex (quiet): Master, are you there?']
+    shot.narration = ['0s-2s: Narrator (soft): The gate is closed.']
+    shot.dialogue = ['2s-4s: Alex (quiet): Master, are you there?']
     shot.prompt = format_storyboard_prompt(shot, language)
     validate_skill_storyboard_shot(shot, SkillSnapshot.model_validate(snapshot_skills()), language)
     shot.prompt = shot.prompt.replace(shot.dialogue[0], '')
@@ -183,13 +174,13 @@ def test_structure_is_serialized_once_using_frozen_strategy_and_literal_voice():
     shot = _shot().model_dump(exclude={'prompt','reference_only_types'})
     shot.update(visual_prose='@{苏玄}跪在坟前。', spatial_relationships='@{苏玄}位于坟前。',
                 actions=['0s-4s: @{苏玄}擦去眼泪。'],
-                narration=['0s-1s: 旁白：赵无垢长眠于此。'],
-                dialogue=['1s-3s: @{苏玄}（哽咽）：师父！'])
+                narration=['0s-2s: 旁白：赵无垢长眠于此。'],
+                dialogue=['2s-3s: @{苏玄}（哽咽）：师父！'])
     raw = StructuredSkillStoryboard.model_validate({'shots':[shot]})
     compiled = prepare_skill_storyboard(raw, snapshot, 'zh', characters(), 'narration').shots[0]
     assert compiled.prompt.startswith(prompt_label('【禁止项】','zh')+'\n冻结的策略限制')
     assert '【核心生成指令｜高优先级】' in compiled.prompt
-    assert '1s-3s: @{苏玄}（哽咽）：师父！' in compiled.prompt
+    assert '2s-3s: @{苏玄}（哽咽）：师父！' in compiled.prompt
     assert '@{赵无垢}' not in compiled.prompt
     for name in ('actions','narration','dialogue'):
         assert all(line in compiled.prompt for line in getattr(compiled,name))

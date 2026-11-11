@@ -18,17 +18,10 @@ from prompts.styles import (
     video_project_style_suffix,
 )
 
-@pytest.fixture(autouse=True)
-def public_style_pack(tmp_path, monkeypatch):
-    """Public contract tests must not depend on a developer's private overrides."""
-    import prompts.skill_pack as pack
-    (tmp_path / "styles.json").write_text((pack.ROOT / "styles.json").read_text())
-    monkeypatch.setattr(pack, "ROOT", tmp_path)
-
-
 EXPECTED_KEYS = {
     "realistic-general",
     "realistic-urban",
+    "urban-3d",
     "realistic-cinematic",
     "anime-japanese",
     "manhwa-urban",
@@ -87,7 +80,7 @@ def test_custom_project_style_is_injected_without_a_registry_key():
 
 def test_list_styles_shape():
     styles = list_styles()
-    assert len(styles) == 14
+    assert len(styles) == len(EXPECTED_KEYS)
     assert styles[0] == {"key": "realistic-general", "label": "写实通用"}
     assert all(set(item) == {"key", "label"} for item in styles)
 
@@ -95,7 +88,7 @@ def test_list_styles_shape():
 def test_remake_styles_prepend_ai_recognition_without_changing_builtin_registry():
     styles = list_remake_styles()
 
-    assert len(styles) == 15
+    assert len(styles) == len(EXPECTED_KEYS) + 1
     assert styles[0] == {"key": AUTO_STYLE_KEY, "label": AUTO_STYLE_LABEL}
     assert styles[1:] == list_styles()
 
@@ -153,7 +146,7 @@ async def test_visual_styles_endpoint(client: AsyncClient):
     assert response.status_code == 200, response.text
     assert response.json()["code"] == 0
     items = response.json()["data"]
-    assert len(items) == 14
+    assert len(items) == len(EXPECTED_KEYS)
     assert items[0] == {"key": "realistic-general", "label": "写实通用"}
     assert {"key": "gongbi", "label": "工笔画"} in items
 

@@ -28,6 +28,10 @@ class CreationBrief(PlanModel):
     read_chapter_ids: list[int] = Field(default_factory=list)
     write_chapter_ids: list[int] = Field(default_factory=list)
     asset_chapter_ids: list[int] = Field(default_factory=list, description='仅提取文字资产的来源章；不授权修改正文或分镜')
+    asset_mode: Literal['fill_missing', 'revise'] = Field('fill_missing',
+        description='资产操作模式：已有成果不用重做用 fill_missing；明确重新提取或修改已有设定用 revise')
+    asset_scope: Literal['chapter', 'targeted'] = Field('chapter',
+        description='整章提取用 chapter；用户指出某个遗漏的角色、场景或道具，仅核对补全这些对象用 targeted')
     write_selection: Literal['current', 'chapters', 'project'] = 'current'
     read_chapter_numbers: list[int] = Field(default_factory=list)
     project_scope_quote: str | None = None
@@ -72,6 +76,7 @@ class CreationPlanStep(PlanModel):
     source_step: str | None = None
     depends_on: list[str] = Field(default_factory=list)
     mode: Literal['fill_missing', 'regenerate', 'revise'] = 'fill_missing'
+    asset_scope: Literal['chapter', 'targeted'] = 'chapter'
     requirement_ids: list[str] = Field(default_factory=list)
     sources: list[SourceSelection] = Field(default_factory=list)
     asset_ids: list[int] = Field(default_factory=list)

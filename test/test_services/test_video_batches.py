@@ -98,6 +98,77 @@ async def test_batch_runs_with_existing_executor_without_a_model_call(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('enhancement_stage', ['enhancing', 'failed', 'needs_review'])
+async def test_batch_continues_from_original_tail_without_waiting_for_enhancement(monkeypatch, enhancement_stage):
+    task, scenes, _ = await batch_fixture()
+    first_child = await AiTask.create(task_type=4, status=2)
+    first = await Video.create(scene=scenes[0], model_type=1, status=3, url='/media/first.mp4', metadata={
+        'agent_run_id': str(first_child.id), 'auto_enhancement': {'stage': enhancement_stage},
+        'last_frame_url': '/media/tail.png', 'last_frame_source': 'provider',
+        'last_frame_injected_scene_id': scenes[1].id,
+        'last_frame_reference': {'url': '/media/tail.png'}, 'last_frame_prompt_instruction': 'Use original tail',
+    })
+    second_child = await AiTask.create(task_type=4, status=2)
+    second = await Video.create(scene=scenes[1], model_type=1, status=2,
+        metadata={'agent_run_id': str(second_child.id)})
+    submit = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr('services.creation_agent.video_jobs.submit_video', submit)
+    token = current_execution.set(SimpleNamespace(before_request=AsyncMock()))
+    try:
+        with pytest.raises(WaitingForDependencies):
+            await VideoBatchHandler().execute({**task.request_params, 'task_id': str(task.id)})
+        assert [call.args[0].scene_id for call in submit.await_args_list] == [scenes[0].id, scenes[1].id]
+        await first_child.refresh_from_db()
+        assert first_child.status == 2
+    finally:
+        current_execution.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_batch_recovery_resumes_while_previous_video_enhancement_is_running(monkeypatch):
+    import asyncio
+    from uuid import UUID, uuid5
+    from models.agent_operation import AgentOperation
+    from services.creation_agent.recovery import ProductionRecovery
+    from services.video_enhancement.automatic import KEY, automatic_enhancements
+
+    task, scenes, _ = await batch_fixture()
+    child = await AiTask.create(task_type=4, status=2, stage='waiting_media', request_params={
+        'workflow_version': 'agent-skills-v1', 'operation': 'video', 'novel_id': task.request_params['novel_id']})
+    first = await Video.create(scene=scenes[0], model_type=1, status=3, url='/media/first.mp4', metadata={
+        'agent_run_id': str(child.id), 'auto_enhancement': {'stage': 'enhancing'},
+        'last_frame_url': '/media/tail.png', 'last_frame_source': 'provider',
+        'last_frame_injected_scene_id': scenes[1].id,
+        'last_frame_reference': {'url': '/media/tail.png'}, 'last_frame_prompt_instruction': 'Use original tail',
+    })
+    child.request_params['video_id'] = first.id
+    await child.save(update_fields=['request_params'])
+    await AgentOperation.create(task=child, key=KEY, state='pending', result={'stage': 'enhancing'})
+    await AgentOperation.create(task=task, key='submit:' + str(uuid5(UUID(str(task.id)), f'video:{scenes[0].id}')),
+        state='completed', result={'video_id': first.id, 'task_id': str(child.id)})
+    await AiTask.filter(id=task.id).update(stage='waiting_dependencies')
+    second_child = await AiTask.create(task_type=4, status=2)
+    second = await Video.create(scene=scenes[1], model_type=1, status=2,
+        metadata={'agent_run_id': str(second_child.id)})
+    submit = AsyncMock(return_value=second)
+    monkeypatch.setattr('services.creation_agent.video_jobs.submit_video', submit)
+    monkeypatch.setattr(automatic_enhancements, 'collect', AsyncMock())
+    recovery = ProductionRecovery()
+    recovery.worker = asyncio.create_task(recovery.loop())
+    try:
+        async def next_submitted():
+            while submit.await_count == 0:
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(next_submitted(), timeout=2)
+        assert submit.call_args.args[0].scene_id == scenes[1].id
+        await child.refresh_from_db()
+        assert child.status == 2
+        assert (await AgentOperation.get(task=child, key=KEY)).state == 'pending'
+    finally:
+        await recovery.stop()
+
+
+@pytest.mark.asyncio
 async def test_batch_api_persists_all_selected_scenes_and_exposes_recovery_status(client):
     task, scenes, request = await batch_fixture()
     response = await client.post('/api/video/batch', json=request.model_dump(mode='json'))

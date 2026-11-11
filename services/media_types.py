@@ -9,3 +9,4 @@ def register_media_mime_types() -> None:
     """确保浏览器可在 ``nosniff`` 策略下正确识别衍生媒体。"""
 
     mimetypes.add_type("image/webp", ".webp", strict=True)
+    mimetypes.add_type("image/gif", ".gif", strict=True)

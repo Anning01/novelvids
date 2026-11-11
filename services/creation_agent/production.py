@@ -183,7 +183,7 @@ async def run_production(task, handler):
             from services.creation_agent.plans import load_plan
             from services.creation_agent.plan_execution import existing_result
             plan = await load_plan(task.id)
-            kept = await existing_result(plan.steps[0], plan.steps[0].target_id)
+            kept = await existing_result(plan.steps[0], plan.steps[0].target_id, execution)
             if kept is not None:
                 from services.creation_agent.creative_checks import check_preserved_result
                 await check_preserved_result(execution, plan.steps[0], plan.steps[0].target_id, kept)

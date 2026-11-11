@@ -5,7 +5,7 @@
 <h1 align="center">NovelVids · 猫影短剧</h1>
 
 <p align="center">
-  <strong>An AI creation platform for illustrated stories and short dramas · hosted service and open-source self-hosting.</strong>
+  <strong>An open-source workspace for illustrated stories and short dramas, available online or on your own server.</strong>
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ Join the **NovelVids · 猫影短剧 WeChat group** to discuss AI animation, sho
 
 Sign in with Qiling through WeChat. Start with an image or video idea, add reference material, or develop a story into a short drama. The hosted service provides model selection, team collaboration, usage records and top-ups. Generation fees follow the displayed estimates and actual usage.
 
-For open-source self-hosting and development, see Quick start and Local development below.
+The hosted service uses the source code and creative rules in this repository. Self-hosting includes the same Qiling sign-in, team management, usage billing and WeChat Pay integrations. Each operator configures their own services.
 
 ## Video tutorial
 
@@ -88,7 +88,7 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 - **Editable steps.** Keep prompts and generation versions. Revise one shot before deciding whether to generate it again.
 - **Shared capabilities for buttons and chat.** The assistant orchestrates creation; image and video models generate the media. Tasks and usage remain recorded.
 - **Customizable creative rules.** One Chinese skill pack guides story analysis, assets, images and storyboards, with Chinese or English output selected by system language.
-- **Choose how to use it.** Create with the hosted service, or manage your own models, storage and deployment with the open-source edition.
+- **Choose how to use it.** Create online or deploy the same application with your own models and storage.
 
 ### Current interface
 
@@ -112,9 +112,9 @@ Screenshots use public example projects in the current Chinese interface. Englis
 2. Choose an image or video model, enter a visual idea, add references and review the estimate. For a series, import a story through Short dramas and continue into assets and storyboards.
 3. Review generated versions, revise shots, organize resources and manage finished episodes in the works library. Projects and costs belong to the currently selected team.
 
-### Open-source self-hosting
+### Self-hosting
 
-The open-source edition lets you manage models, data and deployment. It runs anonymously by default.
+Local use is anonymous by default. The asset design templates, storyboard speech timing rules and 15 visual styles ship in `prompts/skills/`, where you can edit them.
 
 <details>
 <summary>Expand Docker self-hosting and first-run configuration</summary>
@@ -146,6 +146,8 @@ Use `docker compose exec backend ffprobe -version` to check that the video tools
 
 - **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
 - **No login by default:** intended for personal local use. Before public exposure, set `AUTH_ENABLED=true`, `AUTH_PROVIDER=password`, `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD` through environment variables, and enable HTTPS.
+- **Qiling sign-in:** Set `AUTH_ENABLED=true`, `AUTH_PROVIDER=qiling` and `QILING_API_BASE_URL` to your Qiling HTTPS endpoint. To accept new accounts, set `QILING_SIGNUP_ENABLED=true` and fill in the operator, policy and third-party disclosures under `LEGAL_*` in Compose.
+- **WeChat Pay and remote media processing:** To enable top-ups, configure the backend with your own `WECHAT_PAY_*` merchant settings and point the callback URL to `/api/payment/wechat/notify` on your site. Use a Compose override to mount the key files read-only at their configured container paths. Remake jobs run locally by default. To use an installed media worker, set `REMAKE_MEDIA_SSH_HOST` and configure backend SSH credentials and a verified host key.
 - **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See Local development below.
 
 </details>
