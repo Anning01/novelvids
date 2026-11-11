@@ -126,6 +126,7 @@ class AiTaskTypeEnum(NicknameIntEnum):
     creation_agent = 7, "创作助手"
     video_enhancement = 8, "视频画质增强"
     audio_recognition = 9, "语音识别"
+    screenplay = 10, "生成本集剧本"
 
 
 @enum_description

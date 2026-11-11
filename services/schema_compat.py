@@ -550,3 +550,46 @@ async def ensure_recharge_refund_columns() -> None:
             "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMP WITH TIME ZONE;"
             "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refund_reason VARCHAR(255) DEFAULT '';"
         )
+
+
+async def ensure_chapter_screenplay_schema() -> None:
+    """Keep original chapter text independent from adaptations in previous releases."""
+    from tortoise.transactions import in_transaction
+    from models.chapter import Chapter
+    from models.creation_agent import PromptChange
+
+    async with in_transaction() as db:
+        if db.capabilities.dialect == "sqlite":
+            columns = await db.execute_query_dict("PRAGMA table_info(chapters)")
+            if not columns or any(row["name"] == "screenplay" for row in columns):
+                return
+            tables = {row["name"] for row in await db.execute_query_dict(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        else:
+            columns = await db.execute_query_dict(
+                "SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chapters'")
+            if not columns or any(row["name"] == "screenplay" for row in columns):
+                return
+            await db.execute_query("LOCK TABLE chapters IN ACCESS EXCLUSIVE MODE")
+            if await db.execute_query_dict("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chapters' AND column_name='screenplay'"):
+                return
+            tables = {row["name"] for row in await db.execute_query_dict(
+                "SELECT table_name AS name FROM information_schema.tables WHERE table_schema=current_schema()")}
+        await db.execute_query("ALTER TABLE chapters ADD COLUMN screenplay TEXT")
+        if "work_sync_objects" in tables:
+            await db.execute_query(
+                "UPDATE chapters SET screenplay=content, content='' WHERE EXISTS (SELECT 1 FROM work_sync_objects w "
+                "WHERE w.kind='episode' AND w.local_id=chapters.id)")
+        if "creation_prompt_changes" in tables:
+            # Only classify an old adaptation when its write receipt matches the current text.
+            history = {}
+            for changes in await PromptChange.filter(reverted_at=None).using_db(db).order_by("id").values_list("changes", flat=True):
+                for change in changes:
+                    if change.get("kind") == "chapter" and "content" in change.get("after", {}):
+                        chapter_id = change["target_id"]
+                        before = change["before"]["content"]
+                        original, previous = history.get(chapter_id, (before, before))
+                        history[chapter_id] = (original if previous == before else before, change["after"]["content"])
+            for chapter_id, (original, draft) in history.items():
+                await Chapter.filter(id=chapter_id, screenplay=None, content=draft).using_db(db).update(
+                    content=original, screenplay=draft)

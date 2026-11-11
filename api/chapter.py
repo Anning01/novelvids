@@ -93,6 +93,15 @@ async def delete_chapter(
     return ResponseSchema()
 
 
+@router.post("/{chapter_id}/screenplay", summary="根据本集原文生成导演剧本", response_model=ResponseSchema[AiTaskOut])
+async def generate_episode_screenplay(chapter_id: int, bg: BackgroundTasks,
+                                      ctx: AuthContext = Depends(require_chapter_access), _: AuthContext = _EDITOR):
+    from services.chapter_screenplay import submit_screenplay
+    task = await submit_screenplay(chapter_id, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
 @router.get(
     "/extract/{chapter_id}/latest",
     summary="获取章节最近一次提取任务",

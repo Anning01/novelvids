@@ -64,7 +64,7 @@ class CreationChanges:
             read.update(version=version, pages=set())
         read['pages'].add(page)
         return {'id': chapter.id, 'number': chapter.number, 'name': chapter.name, 'version': version,
-            'content': chapter.content[(page - 1) * size:page * size], 'page': page, 'has_more': page * size < len(chapter.content)}
+            'content': chapter.production_text[(page - 1) * size:page * size], 'page': page, 'has_more': page * size < len(chapter.production_text)}
 
     async def revise_episode_script(self, chapter_id: int, content: str, name: str | None, tool_call_id: str):
         from models.creation_agent import PromptChange
@@ -87,11 +87,11 @@ class CreationChanges:
             if self.observed.get(('chapter', chapter.id)) != await object_version(chapter):
                 raise ValueError('剧本尚未读取或已有新修改，请重新读取')
             read = self.read_snapshots.get(('chapter', chapter.id), {})
-            pages = max(1, (len(chapter.content) + self.chapter_character_budget - 1) // self.chapter_character_budget)
+            pages = max(1, (len(chapter.production_text) + self.chapter_character_budget - 1) // self.chapter_character_budget)
             if not set(range(1, pages + 1)).issubset(read.get('pages', set())):
                 raise ValueError('请先读完本集正文的所有分页，再保存完整导演稿')
             before = await object_state(chapter)
-            values = {'content': content, **({'name': name} if name is not None else {})}
+            values = {'screenplay': content, **({'name': name} if name is not None else {})}
             chapter = await chapter_controller.patch(chapter.id, ChapterPatch(**values))
             after = await object_state(chapter)
             version = await object_version(chapter)

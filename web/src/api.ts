@@ -302,6 +302,7 @@ export const api = {
     (page, pageSize) => `/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`,
   ),
   chapter: (id: number) => request<SingleResponse<Chapter>>(`/chapter/${id}`),
+  generateScreenplay: (id: number) => request<SingleResponse<AiTask>>(`/chapter/${id}/screenplay`, { method: 'POST' }),
   createChapter: (data: Partial<Chapter>) => request<SingleResponse<Chapter>>('/chapter', { method: 'POST', body: JSON.stringify(data) }),
   updateChapter: (id: number, data: Partial<Chapter>) => request<SingleResponse<Chapter>>(`/chapter/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteChapter: (id: number) => request<SingleResponse<null>>(`/chapter/${id}`, { method: 'DELETE' }),

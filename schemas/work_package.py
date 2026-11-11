@@ -20,6 +20,7 @@ class Episode(StrictModel):
     aspect_ratio: Literal['16:9', '9:16', '1:1', '4:3', '3:4'] = '16:9'
     language: Literal['zh', 'en'] = 'zh'
     screenplay: str = 'screenplay.md'
+    source_text: str | None = None
     assets: str = 'assets.json'
     storyboard: str = 'storyboard.json'
     originals: list[str] = Field(default_factory=list)

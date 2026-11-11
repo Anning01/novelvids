@@ -4,9 +4,9 @@
 
 ## 文件交接
 
-一集目录内：`episode.json` 轻量清单、可阅读的 `screenplay.md`、`assets.json`、`storyboard.json`，可选 `media/`。还未做完的阶段保留已完成文件，后续技能接着写；不要为满足整集导入而编造未完成的资产或镜头。没有镜头时可用空 shots；资产设计未完成时保留原始材料，确认后才填写 assets。
+一集目录内：`episode.json` 轻量清单（有本集小说原文时用可选字段 source_text 指向包内 UTF-8 原文文件）、可阅读的 `screenplay.md`、`assets.json`、`storyboard.json`，可选 `media/`。还未做完的阶段保留已完成文件，后续技能接着写；不要为满足整集导入而编造未完成的资产或镜头。没有镜头时可用空 shots；资产设计未完成时保留原始材料，确认后才填写 assets。
 
-- screenplay 技能交付 screenplay.md，可新建清单；收到上游材料时保留已有标识。
+- screenplay 技能将导演稿写入 screenplay.md。随包交付本集小说原文时，另存 source.txt，在 episode.json 指定 `"source_text": "source.txt"`；只有导演稿时省略 source_text。originals 是归档附录，以 source_text 指定阅读页的原文。收到上游材料时保留已有标识。
 - assets 技能接收剧本与资产连续性记录，交付 assets.json；形态 ID 独立于资产 ID。
 - storyboard 技能接收剧本、资产或已有分镜，交付 storyboard.json；保留八栏通用稿与已完成专项稿，每镜 drafts.general 对应本镜 prompt；专项稿以目标模型为键，挂回同一稳定镜头 ID。旧专项稿通过其随附通用底稿唯一定位，无法确认归属时保留原件，等用户确认。
 

@@ -183,10 +183,11 @@ async def test_episode_business_tool_is_scoped_conflict_checked_and_undoable():
     change = await PromptChange.get(id=result['change_id'])
     PromptChangeItemOut.model_validate(change.changes[0])
     current = await Chapter.get(id=request.chapter_id)
-    assert current.name == '回声' and 'OS' in current.content
+    assert current.name == '回声' and 'OS' in current.screenplay
+    assert current.content == read['content']
     await service.undo(change.id)
     current = await Chapter.get(id=request.chapter_id)
-    assert current.content == read['content'] and current.name == read['name']
+    assert current.content == read['content'] and current.name == read['name'] and current.screenplay is None
     await read_episode_script(ctx, current.id)
     await Chapter.filter(id=current.id).update(content='页面并发修改')
     ctx.tool_call_id = 'after-conflict'

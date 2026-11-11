@@ -2392,7 +2392,7 @@ onBeforeUnmount(() => {
           <button type="button" class="chapter-summary" :disabled="!activeChapter" :aria-label="tr('查看并编辑当前章节详情')" @click="openChapterDetails">
             <span :class="{ 'is-agent': isAgent }">{{ isAgent ? 'AGENT STORYBOARD' : 'MANUAL STORYBOARD' }}</span>
             <h1>{{ activeChapter ? episodeDisplayLabel(activeChapter) : tr('分镜制作') }}</h1>
-            <p>{{ activeChapter?.content?.slice(0, 120) }}</p>
+            <p>{{ (activeChapter?.screenplay || activeChapter?.content)?.slice(0, 120) }}</p>
             <small>{{ tr('点击查看详情') }}</small>
           </button>
           <div class="chapter-actions">
@@ -2611,7 +2611,7 @@ onBeforeUnmount(() => {
         :open="chapterDetailOpen"
         :chapter-number="activeChapter?.number || 0"
         :title="activeChapter ? stripChapterOrdinal(activeChapter.name) : ''"
-        :content="activeChapter?.content || ''"
+        :content="activeChapter?.screenplay || activeChapter?.content || ''"
         :saving="savingChapterDetails"
         @close="chapterDetailOpen = false"
         @save="saveChapterDetails"

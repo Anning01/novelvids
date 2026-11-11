@@ -27,6 +27,8 @@ import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
+import EpisodeScreenplay from '@/components/EpisodeScreenplay.vue'
+import {pollUntilTerminal} from '@/features/workbench/execution/workbenchAsync'
 import ProjectCover from '@/components/ProjectCover.vue'
 import {
   chapterDraftChanged,
@@ -168,6 +170,39 @@ const selectedEpisode = computed(() => {
   const chapter = selectedEpisodeBrief.value
   return chapter ? (chapterDetails.value[chapter.id] ?? chapter) : undefined
 })
+type EpisodeView = 'source' | 'screenplay'
+const episodeViews = ref<Record<number, EpisodeView>>({})
+const episodeView = computed(() => selectedEpisode.value &&
+  (episodeViews.value[selectedEpisode.value.id] ?? (selectedEpisode.value.screenplay ? 'screenplay' : 'source')))
+const generatingScripts = ref<Record<number, boolean>>({})
+const scriptRequests = new AbortController()
+const adapting = computed(() => Object.keys(generatingScripts.value).length > 0)
+
+function taskKey(id: number) { return `novelvids:screenplay:${projectId.value}:${id}` }
+
+async function generateScreenplay(id: number, existingTask = sessionStorage.getItem(taskKey(id))) {
+  if (generatingScripts.value[id] || (!existingTask && (!canEdit.value || editing.value))) return
+  generatingScripts.value[id] = true
+  try {
+    const taskId = existingTask || (await api.generateScreenplay(id)).data.id
+    sessionStorage.setItem(taskKey(id), taskId)
+    const task = await pollUntilTerminal(async signal => (await api.task(taskId, signal)).data, {
+      signal: scriptRequests.signal, intervalMs: 1200,
+      terminalStatuses: new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED]),
+    })
+    sessionStorage.removeItem(taskKey(id))
+    if (task.status !== TaskStatusEnum.COMPLETED) throw new Error(task.error_message || tr('剧本生成未完成'))
+    const chapter = (await api.chapter(id)).data
+    if (!chapter.screenplay) throw new Error(tr('未读取到本集导演剧本'))
+    chapterDetails.value[id] = chapter
+    episodeViews.value[id] = 'screenplay'
+  } catch (error) {
+    if (!scriptRequests.signal.aborted) notice.error((error as Error).message)
+  } finally {
+    delete generatingScripts.value[id]
+  }
+}
+
 const selectedEpisodeDraft = computed(() => {
   const chapter = selectedEpisode.value
   return chapter ? chapterDrafts.value[chapter.id] : undefined
@@ -288,6 +323,8 @@ async function loadChapterContent(chapter?: Chapter) {
       const detail = detailResponse.data
       chapterDetails.value = { ...chapterDetails.value, [chapter.id]: detail }
       if (editing.value) ensureChapterDraft(detail)
+      const existing = sessionStorage.getItem(taskKey(detail.id))
+      if (existing) void generateScreenplay(detail.id, existing)
     }
   } catch (error) {
     notice.error((error as Error).message)
@@ -342,9 +379,7 @@ async function loadAnalysis() {
     await loadChapters()
     const response = await api.novelAnalysis(projectId.value)
     analysisTask.value = response.data
-    if (!response.data) {
-      if (canEdit.value && manuscriptLength.value > 0 && !novel.value?.episodes_managed) await startAnalysis()
-    } else if (analysisRunning.value) {
+    if (response.data && analysisRunning.value) {
       await pollAnalysis(response.data.id)
     }
   } catch (error) {
@@ -366,7 +401,7 @@ function ensureChapterDraft(chapter: Chapter) {
 }
 
 function beginEditing() {
-  if (!novel.value || !canEdit.value) return
+  if (!novel.value || !canEdit.value || adapting.value) return
   narratorVoiceBeforeEditing.value = narratorVoice.value
   projectDraft.value = createProjectAnalysisDraft(
     novel.value,
@@ -495,8 +530,9 @@ async function saveEdits() {
       hasProjectChanges ? api.updateNovel(projectId.value, projectPatch) : Promise.resolve(null),
       hasChapterChanges
         ? Promise.all(changedChapterDrafts.map(draft => api.updateChapter(draft.id, {
-            name: draft.name.trim(),
-            content: draft.content,
+            ...(draft.name.trim() !== createChapterEditDraft(chapterDetails.value[draft.id]!).name ? { name: draft.name.trim() } : {}),
+            ...(draft.content !== (chapterDetails.value[draft.id]?.content ?? '') ? { content: draft.content } : {}),
+            ...(draft.screenplay !== (chapterDetails.value[draft.id]?.screenplay ?? '') ? { screenplay: draft.screenplay } : {}),
           })))
         : Promise.resolve([]),
     ])
@@ -616,6 +652,7 @@ onMounted(async () => {
   observeEpisodeSentinel()
 })
 onBeforeUnmount(() => {
+  scriptRequests.abort()
   stopPolling()
   episodeObserver?.disconnect()
 })
@@ -667,7 +704,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <AppButton v-if="canEdit && manuscriptLength > 0" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
-            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
+            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration || adapting" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
       </div>
@@ -775,10 +812,27 @@ onBeforeUnmount(() => {
               <h3 v-else>{{ episodeDisplayLabel(selectedEpisode) }}</h3>
             </div>
           </header>
+          <div class="episode-doc-tools">
+            <div class="episode-doc-tabs" :aria-label="tr('分集剧情')" role="group">
+              <button type="button" :aria-pressed="episodeView === 'source'" @click="episodeViews[selectedEpisode.id] = 'source'">{{ tr('原文') }}</button>
+              <button type="button" :aria-pressed="episodeView === 'screenplay'" @click="episodeViews[selectedEpisode.id] = 'screenplay'">{{ tr('导演剧本') }}</button>
+            </div>
+            <AppButton v-if="canEdit && selectedEpisode.content && !selectedEpisode.screenplay && !editing" variant="primary" size="sm"
+              :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
+              {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : tr('生成本集剧本') }}
+            </AppButton>
+          </div>
           <p v-if="selectedEpisodeLoading" class="episode-content-state">{{ tr('正在加载章节正文…') }}</p>
-          <textarea v-else-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" :aria-label="tr('章节内容')" />
-          <p v-else-if="selectedEpisode.content">{{ selectedEpisode.content }}</p>
-          <p v-else class="episode-content-state">{{ tr('该章节暂无正文内容') }}</p>
+          <template v-else-if="episodeView === 'source'">
+            <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" :aria-label="tr('章节内容')" />
+            <p v-else-if="selectedEpisode.content">{{ selectedEpisode.content }}</p>
+            <p v-else class="episode-content-state">{{ tr('本集未提供原文') }}</p>
+          </template>
+          <template v-else>
+            <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.screenplay" class="chapter-content-editor" :aria-label="tr('导演剧本')" />
+            <EpisodeScreenplay v-else-if="selectedEpisode.screenplay" :text="selectedEpisode.screenplay" />
+            <p v-else class="episode-content-state">{{ tr('本集暂无导演剧本') }}</p>
+          </template>
           <footer><span><UsersRound :size="14" />{{ selectedEpisodeCharacters }}</span><span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('章') }}</span></footer>
         </article>
       </section>
@@ -792,6 +846,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.episode-doc-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
+.episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
+.episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
+.episode-doc-tabs button[aria-pressed="true"] { background:var(--app-surface); color:var(--app-accent); box-shadow:0 1px 3px #0002; }
+.episode-doc-tabs button:hover { color:var(--app-accent); }
+.episode-doc-tabs button:focus-visible { outline:2px solid var(--app-accent); }
+
 .episode-actions { display: flex; gap: 8px; }
 .profile-card input[type="checkbox"] { width: auto; min-height: 0; height: auto; accent-color: var(--app-accent); }
 .creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }

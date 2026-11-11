@@ -84,7 +84,7 @@ export interface ProjectOverviewSummary {
   unknown_duration_count: number
 }
 export interface ProjectOverview { items: ProjectOverviewItem[]; summary: ProjectOverviewSummary }
-export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
+export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; screenplay?: string | null; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; image_thumbnails?: Array<string | null>; image_previews?: Array<string | null>; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; main_image_thumbnail?: string | null; main_image_preview?: string | null; angle_image_1?: string; angle_image_1_thumbnail?: string | null; angle_image_1_preview?: string | null; angle_image_2?: string; angle_image_2_thumbnail?: string | null; angle_image_2_preview?: string | null; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }

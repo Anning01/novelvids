@@ -36,6 +36,7 @@ async def conversation_for_task(task):
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
         "story": ("分析故事", "Analyze story"),
+        "screenplay": ("生成本集剧本", "Adapt episode screenplay"),
         "remake": ("重制视频", "Analyze source video"),
         "video": ("生成视频", "Generate video"),
         "compose": ("合成章节", "Compose episode"),

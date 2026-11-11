@@ -10,7 +10,7 @@ def chapter_context(chapter: Chapter | None, character_budget: int, offset: int 
         if offset is not None:
             raise ValueError(localized_message('当前请求未选择章节，不能读取章节片段'))
         return None
-    content = chapter.content or ""
+    content = chapter.production_text or ""
     total = len(content)
     if offset is not None:
         if offset < 0 or offset > total:

@@ -16,7 +16,7 @@ def fingerprint(value) -> str:
 
 
 def chapter_version(chapter):
-    return fingerprint([chapter.id, chapter.number, chapter.name, chapter.content])
+    return fingerprint([chapter.id, chapter.number, chapter.name, chapter.production_text])
 
 
 async def plan_activity(execution, key, label, *, status='completed', detail=''):
@@ -60,18 +60,18 @@ class CreationSourceLoader:
         for index, chapter_id in enumerate(ids):
             await self.execution.before_request()
             chapter = await Chapter.get_or_none(id=chapter_id, novel_id=self.novel_id)
-            if chapter is None or not (chapter.content or '').strip():
+            if chapter is None or not (chapter.production_text or '').strip():
                 raise ValueError(localized_message('需要阅读的章节不存在或正文为空'))
             version = chapter_version(chapter)
             pages = []
             coverage = []
-            for offset in range(0, len(chapter.content), limits.context_page_characters):
-                end = min(len(chapter.content), offset + limits.context_page_characters)
+            for offset in range(0, len(chapter.production_text), limits.context_page_characters):
+                end = min(len(chapter.production_text), offset + limits.context_page_characters)
                 facts = {
                     'segment': f'{chapter.id}:{version}:{offset}', 'chapter_id': chapter.id,
                     'chapter_number': chapter.number, 'start': offset, 'end': end,
-                    'content': chapter.content[offset:end], 'requirements': requirements,
-                    'paragraphs': source_paragraphs(chapter.content[offset:end], offset), 'reference_protocol': 2,
+                    'content': chapter.production_text[offset:end], 'requirements': requirements,
+                    'paragraphs': source_paragraphs(chapter.production_text[offset:end], offset), 'reference_protocol': 2,
                 }
                 options = {'additional_instructions': reading_reference_instructions(self.execution.language)}
                 page = await self.execution.generate('source_reading', facts, SourceReading, **options)
@@ -92,7 +92,7 @@ class CreationSourceLoader:
             if chapter_version(chapter) != version:
                 raise ValueError(localized_message('阅读期间原文已变化，请重新规划'))
             chapters.append(ChapterEvidence(chapter_id=chapter.id, number=chapter.number, name=chapter.name,
-                version=version, characters=len(chapter.content), pages=pages, coverage=coverage))
+                version=version, characters=len(chapter.production_text), pages=pages, coverage=coverage))
             await plan_activity(self.execution, f'read:{chapter.id}', localized_message(
                 '已读第 {p0}/{p1} 章', p0=index + 1, p1=len(ids)), detail=chapter.name)
         return chapters
@@ -110,9 +110,9 @@ class CreationSourceLoader:
             chapter = await Chapter.get_or_none(id=selection.chapter_id, novel_id=self.novel_id)
             if chapter is None or versions.get(chapter.id) != chapter_version(chapter):
                 raise ValueError(localized_message('选段原文未完整阅读或版本已变化'))
-            if not 0 <= selection.start < selection.end <= len(chapter.content):
+            if not 0 <= selection.start < selection.end <= len(chapter.production_text):
                 raise ValueError(localized_message('选段位置超出原文范围'))
-            if selection.quote and chapter.content[selection.start:selection.end] != selection.quote:
+            if selection.quote and chapter.production_text[selection.start:selection.end] != selection.quote:
                 raise ValueError(localized_message('方案选段与原文引文不一致'))
-            excerpts.append(SourceExcerpt(**selection.model_dump(), text=chapter.content[selection.start:selection.end]))
+            excerpts.append(SourceExcerpt(**selection.model_dump(), text=chapter.production_text[selection.start:selection.end]))
         return excerpts

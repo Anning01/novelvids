@@ -185,7 +185,8 @@ class WorkSync:
                                                 {'asset_id': asset.id, 'source': variant.model_dump(),
                                                  'version': await objects.recovery_version(obj)})
                 chapter = await chapter_controller.create(ChapterCreate(novel_id=project.id, number=manifest.number,
-                    name=manifest.episode.name, content=screenplay))
+                    name=manifest.episode.name, screenplay=screenplay,
+                    content=files.files[manifest.source_text].decode("utf-8-sig") if manifest.source_text else ""))
                 await self.register(work, episode, 'episode', episode, chapter.id,
                                     {'manifest': manifest.model_dump(), 'archive': urls,
                                      'scenes': [s.model_dump() for s in board.scenes]})

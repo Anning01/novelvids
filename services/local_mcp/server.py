@@ -81,6 +81,8 @@ async def run(args):
                         modules={'models': [f'models.{name}' for name in models.__all__]}, timezone='Asia/Shanghai')
     try:
         # Only additive missing tables; no seeds, migrations, analysis or background jobs.
+        from services.schema_compat import ensure_chapter_screenplay_schema
+        await ensure_chapter_screenplay_schema()
         await Tortoise.generate_schemas(safe=True)
         server = MCPServer(WorkSync(args.allow_root.resolve(strict=True), Path(settings.MEDIA_PATH).resolve(), args.app_url))
         while line := await asyncio.to_thread(sys.stdin.buffer.readline):

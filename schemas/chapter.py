@@ -22,7 +22,8 @@ class ChapterFullProperties(ChapterProperties):
     完整的业务属性，包含 content 等大字段。
     用于创建、更新、详情。
     """
-    content: Optional[str] = Field(None, description="正文内容")
+    content: Optional[str] = Field(None, description="章节原文")
+    screenplay: str | None = Field(None, description="本集导演剧本")
 
 
 # --- 输入 Schema (In-bound) ---

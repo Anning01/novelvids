@@ -87,6 +87,8 @@ async def _initialize_database_schema() -> None:
     await ensure_resource_library_schema()
     # Ownership columns must exist before generating the scoped project-name index.
     await ensure_shared_team_columns()
+    from services.schema_compat import ensure_chapter_screenplay_schema
+    await ensure_chapter_screenplay_schema()
     await ensure_novel_analysis_schema()
     if settings.AUTH_ENABLED:
         from services.schema_compat import _ensure_qiling_issuer_columns, ensure_recharge_refund_columns
@@ -207,6 +209,8 @@ from services.video_enhancement.handler import EnhanceExportHandler
 ai_task_executor.register(AiTaskTypeEnum.video_enhancement, EnhanceExportHandler())
 ai_task_executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
+from services.chapter_screenplay import ScreenplayHandler
+ai_task_executor.register(AiTaskTypeEnum.screenplay, ScreenplayHandler())
 ai_task_executor.register(
     AiTaskTypeEnum.remake_decomposition,
     RemakeDecompositionTaskHandler(),

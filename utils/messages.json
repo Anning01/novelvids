@@ -1,4 +1,7 @@
 {
+  "本集已有导演剧本或缺少原文": "This episode already has a screenplay or has no source text",
+  "本集原文或剧本已修改，请刷新后查看": "The source text or screenplay has changed. Refresh to view it.",
+  "模型未返回导演剧本": "The model returned an empty screenplay",
   "空间定位图的标注名须唯一，每个机位须指向图中已标记的目标": "Use unique blocking diagram labels and mark each camera target on the plan.",
   "内部切镜需要一张空间定位图，每个子镜头按顺序对应一个机位": "Internal cuts require a shared blocking diagram with one camera entry per segment, in order.",
   "空间定位图缺少出镜资产：{p0}": "Visible assets missing from the blocking diagram: {p0}",

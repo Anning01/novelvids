@@ -49,6 +49,8 @@ class PackageFiles:
     def episode(self):
         manifest = Episode.model_validate(self.json('episode.json'))
         screenplay = self.read(manifest.screenplay).decode('utf-8')
+        if manifest.source_text is not None:
+            self.read(manifest.source_text).decode("utf-8-sig")
         assets = Assets.model_validate(self.json(manifest.assets)).assets
         board = Storyboard.model_validate(self.json(manifest.storyboard))
         for filename in manifest.originals:

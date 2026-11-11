@@ -277,3 +277,18 @@ async def test_receipt_origin_and_legacy_retry(tmp_path):
     for url in ('file:///tmp/site', 'http://user:secret@localhost', 'http://localhost/#/home'):
         with pytest.raises(ValueError):
             WorkSync(tmp_path, tmp_path, url)
+
+
+@pytest.mark.parametrize('include_original', [False, True])
+async def test_import_separates_source_and_director_script(tmp_path, include_original):
+    root = package(tmp_path / 'pack', work=f'episode-docs-{include_original}')
+    if include_original:
+        manifest = json.loads((root/'episode.json').read_text())
+        manifest['source_text'] = 'novel.txt'
+        (root/'novel.txt').write_text('这是小说原文。')
+        (root/'episode.json').write_text(json.dumps(manifest))
+    service = WorkSync(tmp_path, tmp_path/'media')
+    receipt = await service.import_episode(ImportEpisode(directory=str(root), request_id=f'two-docs-{include_original}', confirmed=True))
+    chapter = await Chapter.get(id=receipt['chapter_id'])
+    assert chapter.screenplay == (root/'screenplay.md').read_text()
+    assert chapter.content == ('这是小说原文。' if include_original else '')

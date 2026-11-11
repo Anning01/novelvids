@@ -33,6 +33,7 @@ export interface ChapterEditDraft {
   id: number
   name: string
   content: string
+  screenplay?: string
 }
 
 type EditableNovel = Pick<
@@ -174,9 +175,10 @@ export function createChapterEditDraft(chapter: Chapter): ChapterEditDraft {
     id: chapter.id,
     name: stripChapterOrdinal(chapter.name) || tr('未命名'),
     content: chapter.content ?? '',
+    screenplay: chapter.screenplay ?? '',
   }
 }
 
 export function chapterDraftChanged(draft: ChapterEditDraft, chapter: Chapter): boolean {
-  return draft.name !== (stripChapterOrdinal(chapter.name) || '未命名') || draft.content !== (chapter.content ?? '')
+  return draft.name !== (stripChapterOrdinal(chapter.name) || '未命名') || draft.content !== (chapter.content ?? '') || (draft.screenplay ?? '') !== (chapter.screenplay ?? '')
 }

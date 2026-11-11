@@ -81,7 +81,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             
             storyboard, api_metadata = await generate_storyboard(
                 client=client,
-                long_text=chapter.content,
+                long_text=chapter.production_text,
                 entities=entities,
                 model=model,
                 supports_json_output=supports_json_output,

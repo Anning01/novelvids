@@ -68,6 +68,18 @@
         "title": "Screenplay",
         "type": "string"
       },
+      "source_text": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Text"
+      },
       "assets": {
         "default": "assets.json",
         "title": "Assets",

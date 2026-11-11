@@ -1,5 +1,15 @@
 {
   "common": {
+    "单分镜最长时长须为 1–30 秒": "Maximum shot duration must be between 1 and 30 seconds",
+    "单分镜最长时长": "Maximum shot duration",
+    "导演剧本": "Director’s screenplay",
+    "原文": "Original text",
+    "生成本集剧本": "Generate episode screenplay",
+    "正在改编…": "Adapting…",
+    "本集暂无导演剧本": "This episode has no screenplay yet",
+    "本集未提供原文": "No source text was provided for this episode",
+    "未读取到本集导演剧本": "The episode screenplay could not be loaded",
+    "剧本生成未完成": "Screenplay generation did not complete",
     "生成结果未通过内容审核": "Generated video did not pass content review",
     "供应商判定生成的视频可能包含敏感信息，因此没有返回成片。": "The provider flagged the generated video as potentially sensitive and did not return a finished video.",
     "请检查提示词与参考素材，调整不符合供应商内容规范的部分后再生成。": "Review the prompt and reference materials, revise anything that does not meet the provider's content rules, then generate again.",

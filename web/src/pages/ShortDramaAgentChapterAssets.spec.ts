@@ -31,6 +31,7 @@ vi.mock('@/api', async (importOriginal) => {
       assets: vi.fn(),
       storyboardStrategies: vi.fn(),
       analyzeNovel: vi.fn(),
+      generateScreenplay: vi.fn(),
       task: vi.fn(),
       updateNovel: vi.fn(),
       updateChapter: vi.fn(),
@@ -333,13 +334,25 @@ it('opens and refreshes a finished imported script without creating an analysis 
   expect(api.analyzeNovel).not.toHaveBeenCalled()
 })
 
-it('still automatically analyzes a normal source manuscript', async () => {
+it('opens the original and generates only when the user clicks, preserving both texts', async () => {
   vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
-  vi.mocked(api.analyzeNovel).mockResolvedValue({code: 0, message: '', data: {id: 'book-analysis', task_type: 5, status: 3, created_at: ''}})
-  vi.mocked(api.task).mockResolvedValue({code: 0, message: '', data: {id: 'book-analysis', task_type: 5, status: 3, created_at: ''}})
+  const saved = { ...chapter, screenplay: '# 第一集 救人\n**1-1　徐家村泥路　外　黄昏**\n出场：徐长寿\n△ 长寿牵牛停下。' }
+  vi.mocked(api.chapter).mockResolvedValueOnce({code: 0, message: '', data: chapter})
+    .mockResolvedValue({code: 0, message: '', data: saved})
+  vi.mocked(api.generateScreenplay).mockResolvedValue({code: 0, message: '', data: {id: 'adapt', task_type: 10, status: 2, created_at: ''}})
+  vi.mocked(api.task).mockResolvedValue({code: 0, message: '', data: {id: 'adapt', task_type: 10, status: 3, created_at: ''}})
   const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
   await flushPromises()
-  expect(api.analyzeNovel).toHaveBeenCalledWith(9)
+  expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('原文')
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
+  expect(api.generateScreenplay).not.toHaveBeenCalled()
+  await wrapper.get('.episode-doc-tools > button').trigger('click')
+  await flushPromises()
+  expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id)
+  expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('导演剧本')
+  expect(wrapper.get('.scene-heading').text()).toBe('1-1　徐家村泥路　外　黄昏')
+  await wrapper.get('.episode-doc-tabs button').trigger('click')
+  expect(wrapper.text()).toContain(chapter.content)
   wrapper.unmount()
 })
 
