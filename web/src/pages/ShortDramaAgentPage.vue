@@ -5,7 +5,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
-  BookOpenText,
   Bot,
   Check,
   Clapperboard,
@@ -633,7 +632,6 @@ onBeforeUnmount(() => {
         <div>
           <h2>{{ analysisStatus }}</h2>
           <p v-if="analysisError">{{ analysisError }}</p>
-          <p v-else-if="analysisRunning && analysisResult">{{ tr('标签和大纲已可查看。') }}</p>
           <p v-else-if="analysisRunning || startingAnalysis">{{ tr('正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。') }}</p>
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
           <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>
@@ -687,15 +685,6 @@ onBeforeUnmount(() => {
             </div>
           </article>
         </div>
-      </section>
-
-      <section class="analysis-section">
-        <header><div><span class="section-kicker">STORY OVERVIEW</span><h2>{{ tr('故事大纲') }}</h2></div></header>
-        <article class="outline-card">
-          <span><BookOpenText :size="20" /></span>
-          <textarea v-if="editing && projectDraft" v-model="projectDraft.storyOutline" :aria-label="tr('故事大纲')" rows="8" />
-          <p v-else>{{ projectView.storyOutline }}</p>
-        </article>
       </section>
 
       <section class="analysis-section">
@@ -803,15 +792,11 @@ onBeforeUnmount(() => {
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
 .narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid #dedff0; border-radius: 9px; color: #5b5cf6; background: #f8f8ff; cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: #999af3; }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: #969baa; font-size: 8px; }.narrator-voice-button strong { color: #4f5464; font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: #6567e9; font-size: 9px; }
-.analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .outline-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
-.analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .outline-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
+.analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
 .tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--app-text); font-size: 11px; }
 .storyboard-strategy-select { width: min(260px, 100%); }
 .profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: var(--app-text-secondary); font: inherit; font-size: 10px; line-height: 1.6; }
-.outline-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 20px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
-.outline-card > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
-.outline-card p { margin: 0; color: #5e6474; font-size: 12px; line-height: 1.9; }
-.outline-card textarea { width: 100%; min-height: 190px; padding: 12px 14px; resize: vertical; color: var(--app-text-secondary); font: inherit; font-size: 12px; line-height: 1.9; }
 .character-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .character-card { display: grid; gap: 12px; padding: 17px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .character-title { display: flex; align-items: center; gap: 11px; }

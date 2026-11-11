@@ -216,7 +216,8 @@ it('reanalysis replaces the old failed run only after a new task is admitted', a
   await flushPromises()
   expect(api.task).toHaveBeenCalledWith('new-run')
   expect(wrapper.text()).toContain('剧本分析完成')
-  expect(wrapper.text()).toContain('新的分析结果')
+  expect(wrapper.text()).toContain('冒险')
+  expect(wrapper.find('.outline-card').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('外部请求结果待核对')
 })
 
@@ -237,7 +238,8 @@ it('keeps completed story analysis usable when only the cover is awaiting review
   expect(wrapper.text()).toContain('剧本分析完成')
   expect(wrapper.text()).not.toContain('分析失败')
   expect(wrapper.text()).not.toContain('外部请求结果待核对')
-  expect(wrapper.text()).toContain('封面失败后仍可使用的大纲')
+  expect(wrapper.text()).toContain('冒险')
+  expect(wrapper.text()).not.toContain('封面失败后仍可使用的大纲')
   expect(wrapper.text()).not.toContain('林舟')
   expect(wrapper.text()).not.toContain('人物小传')
   expect(wrapper.get('.creation-cover-notice').text()).toContain('封面暂未生成')
@@ -305,7 +307,8 @@ it.each(['light', 'dark'])('shows story results while the cover is pending (%s)'
   try {
     await flushPromises()
     expect(wrapper.text()).toContain('分析已完成，封面生成中')
-    expect(wrapper.text()).toContain('旅人回家。')
+    expect(wrapper.find('.outline-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('旅人回家。')
     expect(wrapper.text()).toContain('冒险')
   } finally {
     wrapper.unmount()
