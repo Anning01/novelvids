@@ -1,4 +1,5 @@
 {
+  "角色 {p0} 相对第 {p1} 镜的普通语速发生偏移。第 {p2} 镜 {p3}–{p4} 秒的台词分配了 {p5} 秒，请调整为 {p6}–{p7} 秒，保留原话。": "{p0}'s speech pace differs from shot {p1}. In shot {p2}, the line at {p3}–{p4}s has {p5}s. Allocate {p6}–{p7}s and preserve the words.",
   "所选动图帧数不受当前模型支持": "The selected GIF frame count is not supported by this model.",
   "所选动图帧间隔不受当前模型支持": "The selected GIF frame interval is not supported by this model.",
   "定点补漏只允许返回已核对的指定资产，不增加其他对象或衍生形态": "Targeted completion may only return the verified requested assets, without additional objects or variants.",

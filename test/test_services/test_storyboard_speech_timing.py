@@ -182,3 +182,61 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
         assert task.status == 4
         assert (await Scene.get(id=old.id)).prompt == 'Keep original'
         assert await Scene.filter(chapter=chapter).count() == 1
+
+
+def shipped_snapshot():
+    from prompts.skill_pack import snapshot_skills
+    return SkillSnapshot.model_validate(snapshot_skills())
+
+
+def timed_shot(number, name, text, end, cue='平静', field='dialogue'):
+    candidate = shot(text, field, end=end)
+    candidate.sequence = number
+    setattr(candidate, field, [f'0s-{end}s: @{{{name}}}（{cue}）：{text}'])
+    return candidate
+
+
+def test_series_detects_same_voice_drift_across_os_form_and_another_speaker():
+    validator = StoryboardSpeechValidator(shipped_snapshot())
+    phrase = '你今天还要再走一趟'
+    first = timed_shot(1, '李舟', phrase, 3)
+    other = timed_shot(2, '宋安', phrase, 2)
+    changed = timed_shot(3, '李舟#夜行', phrase, 2, '内心 OS', 'narration')
+    validator.validate_shot(changed)
+    with pytest.raises(ValueError, match='李舟.*1.*3'):
+        validator.validate([first, other, changed])
+    StoryboardSpeechValidator(snapshot()).validate([first, other, changed])
+
+
+def test_recitation_has_bounded_slow_range_and_does_not_replace_baseline():
+    snap = shipped_snapshot()
+    first = timed_shot(1, '张正元', '你今天还要再走一趟', 2)
+    chant = timed_shot(2, '张正元', '嘘，呵，呼，嘶，吹，嘻。', 5, '贴耳，逐字轻念')
+    third = timed_shot(3, '张正元', '你今天还要再走一趟', 2.1)
+    StoryboardSpeechValidator(snap).validate([first, chant, third])
+    with pytest.raises(ValueError):
+        StoryboardSpeechValidator(snap).validate_shot(timed_shot(2, '张正元', '嘘，呵，呼，嘶，吹，嘻。', 5, '压低声音'))
+    with pytest.raises(ValueError):
+        StoryboardSpeechValidator(snap).validate_shot(timed_shot(2, '张正元', '嘘，呵，呼，嘶，吹，嘻。', 12, '逐字轻念'))
+    with pytest.raises(ValueError, match='张正元.*1.*3'):
+        StoryboardSpeechValidator(snap).validate([first, chant, timed_shot(3, '张正元', '你今天还要再走一趟', 3)])
+
+
+def test_ordinary_pace_checks_previous_as_well_as_anchor_and_ignores_short_responses():
+    phrase = '一二三四五六七八九十'
+    shots = [timed_shot(n, '林安', phrase, window) for n, window in enumerate((3, 3.6, 2.5), 1)]
+    with pytest.raises(ValueError, match='林安.*2.*3'):
+        StoryboardSpeechValidator(shipped_snapshot()).validate(shots)
+    shots[1] = timed_shot(2, '林安', '是。', .6)
+    StoryboardSpeechValidator(shipped_snapshot()).validate(shots)
+
+
+def test_english_recitation_annotation_only_and_mixed_language_pace():
+    snap = shipped_snapshot()
+    long_window = 5.5
+    with pytest.raises(ValueError):
+        StoryboardSpeechValidator(snap).validate_shot(timed_shot(1, 'Alex', 'Read it word by word.', long_window))
+    StoryboardSpeechValidator(snap).validate_shot(timed_shot(1, 'Alex', 'Read it word by word.', long_window, 'word by word'))
+    m = [timed_shot(1, 'Alex', '走吧 Alex please come back', 3.2), timed_shot(2, 'Alex', 'We must leave right now', 2)]
+    with pytest.raises(ValueError, match='Alex.*1.*2'):
+        StoryboardSpeechValidator(snap).validate(m)

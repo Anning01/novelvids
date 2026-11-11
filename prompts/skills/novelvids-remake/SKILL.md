@@ -18,3 +18,7 @@ license: MIT
 - [资产清点、定点补漏与修订](../novelvids-assets/references/asset_templates.json)
 - [首次出场与分镜修订](../novelvids-storyboard/references/storyboard_templates.json)
 - [按阶段提取资产与镜头](references/remake_templates.json)
+- [人声时间窗与跨镜语速](../novelvids-storyboard/references/speech_pacing.md)
+- [独立语速检测脚本](../scripts/check_speech.py)
+
+审稿前运行 `python3 scripts/check_speech.py 分镜.json`（从导出的技能目录执行）。输入为按播放顺序排列的 `shots`，每镜含 sequence、duration、dialogue 和 narration；可附 entities 的人物登记名与别名。时间轴格式见人声规范。

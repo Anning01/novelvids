@@ -46,12 +46,12 @@ class StoryboardCandidateValidator:
 
     def validate_group(self, number, shots):
         errors = []
-        if self.preserve_speech:
-            validator = self.speech.setdefault(number, StoryboardSpeechValidator(self.snapshot))
-            try:
-                validator.validate(shots)
-            except ValueError as error:
-                errors.append(str(error))
+        validator = (self.speech.setdefault(number, StoryboardSpeechValidator(self.snapshot))
+                     if self.preserve_speech else StoryboardSpeechValidator(self.snapshot))
+        try:
+            validator.validate(shots)
+        except ValueError as error:
+            errors.append(str(error))
         for shot in shots:
             try:
                 validate_storyboard_duration(shot, self.duration_range)
@@ -101,6 +101,12 @@ class StoryboardCandidateValidator:
             else:
                 self.groups[number] = shots
                 self.pending.pop(number, None)
+        if not self.pending and not protocol_errors:
+            slots = [number for number in sorted(self.groups) for _ in self.groups[number]]
+            entities = self.source_facts.get('entities', []) if isinstance(self.source_facts, dict) else []
+            issues = StoryboardSpeechValidator(self.snapshot).continuity_issues(self.result().shots, entities)
+            for index, error in issues:
+                self.pending.setdefault(slots[index], []).append(error)
         accepted = [number for number in self.groups if number not in self.pending]
         checkpoint = {'accepted_shots': accepted, 'pending': self.pending, 'candidates': self.raw,
                       'protocol_errors': protocol_errors,

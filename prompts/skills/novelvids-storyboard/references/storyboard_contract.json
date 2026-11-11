@@ -20,6 +20,20 @@
       2.7
     ],
     "pause_seconds": 0.2,
-    "slack_seconds": 0.5
+    "slack_seconds": 0.5,
+    "continuity": {
+      "max_rate_ratio": 1.25,
+      "min_sample_seconds": 1.5,
+      "slow_rate_factor": 0.65,
+      "slow_cues": [
+        "逐字慢读",
+        "逐字轻念",
+        "逐字念",
+        "贴耳逐字轻念",
+        "逐字念口诀",
+        "word by word",
+        "syllable by syllable"
+      ]
+    }
   }
 }

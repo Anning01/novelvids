@@ -4,13 +4,14 @@ import json
 import re
 
 from collections.abc import Sequence
+from prompts.skills.scripts.check_speech import TIMELINE
 from prompts.labels import prompt_label
 from prompts.skill_pack import SkillSnapshot
 from prompts.storyboard import normalized_storyboard_reference_fields, split_storyboard_voice_track, format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig, SceneEntity
 from utils.messages import localized_message
 
-TIMELINE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*s?\s*[-–—~]\s*(\d+(?:\.\d+)?)\s*s?\s*[:：]")
+
 CONTENT_FIELDS = (
     "visual_style", "format_and_look", "lenses_and_filtration", "lighting_and_atmosphere",
     "grade_and_palette", "camera_movement", "time_setting", "environment", "spatial_relationships",
@@ -57,7 +58,7 @@ def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
     from prompts.storyboard_strategies import StoryboardStrategyPrompt
     from services.storyboard.speech_timing import StoryboardSpeechValidator
 
-    StoryboardSpeechValidator(snapshot).validate(storyboard.shots)
+    StoryboardSpeechValidator(snapshot).validate(storyboard.shots, entities)
 
     resource = json.loads(snapshot.read("strategies"))[strategy_key]
     strategy = StoryboardStrategyPrompt(key=strategy_key, name=strategy_key, description="",

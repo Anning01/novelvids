@@ -26,12 +26,13 @@ def test_stage_exports_without_application_files(tmp_path, name):
     entry = (package / "SKILL.md").read_text()
     assert f"name: {package.name}\n" in entry
     targets = [package / match[2] for match in LINK.finditer(entry)]
-    assert targets and set(targets) == set((package / "references").iterdir())
+    assert targets and set(targets) == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
     assert (package / "LICENSE").read_bytes() == (ROOT.parents[1] / "LICENSE").read_bytes()
     for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
         assert target.resolve().is_relative_to(package)
         assert target.read_bytes() == (source.parent / match[2]).read_bytes()
-    assert not list(package.rglob("*.py"))
+    scripts = [p.name for p in package.rglob("*.py")]
+    assert scripts == (["check_speech.py"] if name in {"storyboard", "remake"} else [])
     assert list(tmp_path.iterdir()) == [package]
 
 
@@ -119,3 +120,23 @@ def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_pa
     assert source in targeted_cast_instructions(language)
     for handoff in ("导演剧本", "风格确认", "资产连续性.md", "参考图"):
         assert handoff in prompt
+
+
+def test_standalone_speech_checker_runs_without_application_dependencies(tmp_path):
+    import subprocess
+    import sys
+
+    pkg = export_skill("novelvids-storyboard", tmp_path)
+    script = pkg / "scripts/check_speech.py"
+    board = {"shots": [
+        {"sequence": 1, "duration": "4s", "dialogue": ["0s-3s: @{沈禾}：今天赶路还来得及"]},
+        {"sequence": 2, "duration": "4s", "narration": ["0s-2s: @{沈禾}（OS）：今天赶路还来得及"]},
+    ]}
+    src = tmp_path / "分镜.json"
+    def check():
+        src.write_text(json.dumps(board))
+        return subprocess.run([sys.executable, '-I', '-S', script, src], cwd=tmp_path, text=True, capture_output=True)
+    failure = check()
+    assert failure.returncode == 1 and '沈禾' in failure.stderr and '2 镜' in failure.stderr
+    board["shots"][1]["narration"] = ["0s-2.8s: @{沈禾}（OS）：今天赶路还来得及"]
+    assert check().returncode == 0

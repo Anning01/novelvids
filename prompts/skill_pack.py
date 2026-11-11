@@ -30,6 +30,7 @@ FILES = {
     "source_reading": "novelvids-story/references/source_reading.md",
     "story": "novelvids-story/references/story.md",
     "storyboard": "novelvids-storyboard/references/storyboard.md",
+    "speech_pacing": "novelvids-storyboard/references/speech_pacing.md",
     "storyboard_contract": "novelvids-storyboard/references/storyboard_contract.json",
     "storyboard_templates": "novelvids-storyboard/references/storyboard_templates.json",
     "strategies": "novelvids-storyboard/references/strategies.json",
@@ -133,6 +134,8 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_k
                 )
     if (skill == "storyboard" or remake_shots) and "storyboard_contract" in snapshot.contents:
         from prompts.labels import prompt_label
+        if "speech_pacing" in snapshot.contents:
+            contract += "\n" + snapshot.read("speech_pacing")
         specification = json.loads(snapshot.read("storyboard_contract"))
         specification["sections"] = [prompt_label(section, language) for section in specification["sections"]]
         contract += snapshot.template("storyboard_templates", "contract") + json.dumps(specification, ensure_ascii=False)
