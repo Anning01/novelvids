@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -84,5 +85,13 @@ def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path
     rules = (package / "references/screenplay.md").read_text()
     prompt = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "screenplay")
     assert rules in prompt and f"language={language}" in prompt
-    for marker in ("出场：", "仅声音：", "△", "（内心）", "（画外）", "旁白：", "【音效】", "【屏显】"):
+    for marker in ("出场：", "仅声音：", "△", "（开口）", "（内心）", "（画外）", "旁白：", "【音效】", "【屏显】"):
         assert marker in rules
+
+    example = rules.split("```text\n", 1)[1].split("```", 1)[0]
+    voices = [line for line in example.splitlines() if "：" in line and not line.startswith(
+        ("出场：", "仅声音：", "△", "【音效】", "【屏显】", "旁白：")
+    )]
+    labels = [re.fullmatch(r"[^：（]+（(开口|画外|内心|旁白)(?:，[^）]+)?）：.+", line) for line in voices]
+    assert all(labels), voices
+    assert {label[1] for label in labels} >= {"开口", "内心", "画外"}
