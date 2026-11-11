@@ -17,7 +17,7 @@ from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.storyboard.validation import validate_storyboard_duration
 from services.storyboard.entities import generation_entities_for_assets, shot_variant_bindings
-from services.storyboard.appearances import previously_seen_assets
+from services.storyboard.appearances import existing_scene_layouts, previously_seen_assets
 from services.creation_agent.memory import creation_memory
 from services.creation_objects import CreationObjects, project_write
 from schemas.scene import SceneEntity
@@ -92,6 +92,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 storyboard_strategy=strategy.key,
                 creative_constraints=creative_constraints,
                 previously_seen_assets=seen_assets,
+                scene_layouts=await existing_scene_layouts(chapter, entities),
                 shot_duration_range=request_params.get("shot_duration_range"),
                 introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )

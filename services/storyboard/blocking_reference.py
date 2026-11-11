@@ -18,11 +18,16 @@ from utils.messages import localized_message
 BLOCKING_ID = "novelvids:blocking-map"
 
 
+def has_drawable_plan(params):
+    plan = (params or {}).get("blocking_map")
+    return isinstance(plan, dict) and bool(plan) and (bool(plan.get("layout")) or len(params.get("segments") or []) > 1)
+
+
 def blocking_source(scene_id, metadata, params):
     for item in (metadata.get("imported_media") or []) if isinstance(metadata, dict) else []:
         if isinstance(item, dict) and item.get("role") == "blocking" and isinstance(item.get("url"), str) and item["url"]:
             return item["url"]
-    if (params or {}).get("blocking_map") and len(params.get("segments") or []) > 1:
+    if has_drawable_plan(params):
         return f"/api/scene/{scene_id}/blocking-map.svg"
 
 

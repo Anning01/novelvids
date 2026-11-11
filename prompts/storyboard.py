@@ -540,7 +540,9 @@ def format_storyboard_prompt(
         ]
     blocking = getattr(shot, "blocking_map", None)
     layout = []
-    if blocking and len(segments) > 1:
+    if blocking and blocking.layout:
+        layout.extend(f"C{i} · {camera.framing} · {camera.beat}".rstrip(" ·") for i, camera in enumerate(blocking.cameras, 1))
+    elif blocking and len(segments) > 1:
         layout.append(f"{prompt_label('空间定位图（左上 0,0；右下 100,100）', language)} · {blocking.orientation}")
         for asset in blocking.assets:
             end = f" → ({asset.end.x},{asset.end.y})" if asset.end else ""

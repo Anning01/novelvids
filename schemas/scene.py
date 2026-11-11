@@ -53,20 +53,63 @@ class PlanAsset(PlanPoint):
     facing: str = Field(default="", max_length=80, description="朝向或视线目标")
 
 
+    asset_name: str | None = Field(None, description="多个实体实例共享的登记资产名")
+    kind: Literal["person", "animal", "prop", "anchor"] = "anchor"
+    heading: int | None = Field(None, ge=0, lt=360)
+    route: list[PlanPoint] = Field(default_factory=list)
+
+
+class PlanFeature(BaseModel):
+    name: str = Field(min_length=1)
+    kind: Literal["wall", "opening", "path", "footprint"]
+    points: list[PlanPoint] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def polygon_has_area(self):
+        if self.kind in {"path", "footprint"} and len(self.points) < 3:
+            raise ValueError("An area needs at least three points")
+        return self
+
+
+class SceneLayout(BaseModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    orientation: str = Field(min_length=1)
+    features: list[PlanFeature] = Field(min_length=1)
+
+
 class PlanCamera(PlanPoint):
     target: str = Field(min_length=1, max_length=100, description="本次切镜朝向的图上资产或锚点名")
+
+
+    frame: tuple[PlanPoint, PlanPoint] | None = None
+    framing: str = ""
+    beat: str = ""
 
 
 class BlockingMap(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     orientation: str = Field(min_length=1, max_length=120, description="图上方对应的固定场景方向")
+    layout: SceneLayout | None = None
+    axis: tuple[str, str] | None = None
     assets: list[PlanAsset] = Field(min_length=1)
     cameras: list[PlanCamera] = Field(min_length=1, description="按内部画面顺序排列的机位")
 
     @model_validator(mode="after")
     def cameras_have_targets(self):
         names = {asset.name for asset in self.assets}
+        if self.layout and any(not (c.frame and c.framing) for c in self.cameras):
+            raise ValueError("Provide a field of view and framing for each camera on a scene layout")
+        if self.layout and self.layout.orientation != self.orientation:
+            raise ValueError("Shot and layout must share the same orientation")
+        if self.axis and (self.axis[0] == self.axis[1] or not set(self.axis) <= names):
+            raise ValueError("Axis endpoints must be distinct named subjects or anchors")
+        for camera in self.cameras:
+            if camera.frame:
+                a, b = camera.frame
+                if (a.x-camera.x)*(b.y-camera.y) == (b.x-camera.x)*(a.y-camera.y):
+                    raise ValueError("Camera field of view needs three non-collinear points")
         if len(names) != len(self.assets) or any(camera.target not in names for camera in self.cameras):
             raise ValueError(localized_message("空间定位图的标注名须唯一，每个机位须指向图中已标记的目标"))
         return self
@@ -221,7 +264,7 @@ class SoraScenePromptConfig(BaseModel):
     )
 
     blocking_map: BlockingMap | None = Field(
-        default=None, description="同一生成段内部切镜共用的俯视定位图；坐标 0–100，自左向右、自上而下",
+        default=None, description="本镜的空场景底图与拍摄覆盖层，内部切镜共用同一张图；左上 (0,0)，右下 (100,100)",
     )
 
     segments: list[ScenePromptSegment] = Field(

@@ -60,13 +60,13 @@ def validate_blocking_map(shot, snapshot, entities=()):
     if plan is None or len(plan.cameras) != len(shot.segments):
         raise ValueError(localized_message("内部切镜需要一张空间定位图，每个子镜头按顺序对应一个机位"))
     visible = visible_storyboard_assets(shot, [entity for entity in entities if entity.asset_type != "场景"])
-    missing = set(visible) - {asset.name for asset in plan.assets}
+    missing = set(visible) - {asset.asset_name or asset.name for asset in plan.assets}
     if missing:
         raise ValueError(localized_message("空间定位图缺少出镜资产：{p0}", p0="、".join(sorted(missing))))
 
 
 def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
-                             entities: Sequence[SceneEntity], strategy_key: str):
+                             entities: Sequence[SceneEntity], strategy_key: str, *, scene_layouts: dict | None = None):
     from schemas.agent_workflow import SkillStoryboard, SkillShot
     from prompts.storyboard_strategies import StoryboardStrategyPrompt
 
@@ -74,7 +74,14 @@ def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
     strategy = StoryboardStrategyPrompt(key=strategy_key, name=strategy_key, description="",
                                       prohibitions=resource["restrictions"], generation_rules=resource["rules"])
     shots = []
+    layouts = dict(scene_layouts or {})
+    location_ids = {layout["name"]: key for key, layout in layouts.items()}
     for shot in storyboard.shots:
+        if shot.blocking_map and shot.blocking_map.layout:
+            layout = shot.blocking_map.layout.model_dump()
+            same_location = location_ids.setdefault(layout["name"], layout["id"])
+            if same_location != layout["id"] or layouts.setdefault(layout["id"], layout) != layout:
+                raise ValueError(localized_message("同一场景形态的底图发生变化，请复用已确认的底图"))
         validate_skill_storyboard_timing(shot)
         normalized = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities))
         prompt = format_storyboard_prompt(normalized, language, entities=entities, strategy=strategy,

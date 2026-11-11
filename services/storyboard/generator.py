@@ -74,6 +74,7 @@ async def generate_storyboard(
     storyboard_strategy: str | None = None,
     creative_constraints: list[dict] | None = None,
     previously_seen_assets: list[str] | None = None,
+    scene_layouts: dict | None = None,
     introduction_descriptions: dict[str, str] | None = None,
     shot_duration_range: list[int] | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
@@ -87,6 +88,8 @@ async def generate_storyboard(
         facts = {'chapter': long_text,
             'entities': [entity.model_dump() for entity in entities], 'strategy': storyboard_strategy,
             'constraints': creative_constraints or []}
+        if scene_layouts:
+            facts["scene_layouts"] = scene_layouts
         if duration_range := execution.params.get("shot_duration_range", shot_duration_range):
             facts["shot_duration_range"] = duration_range
         requirement = asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions)
@@ -95,7 +98,7 @@ async def generate_storyboard(
         if modern:
             from services.storyboard.validation import prepare_skill_storyboard
             result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,
-                                               storyboard_strategy or "cinematic")
+                                               storyboard_strategy or "cinematic", scene_layouts=scene_layouts)
         return result, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {}}
     strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
     fixed_messages = build_storyboard_messages(

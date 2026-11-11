@@ -156,7 +156,8 @@ async def scene_blocking_map(scene_id: int, _: AuthContext = Depends(require_sce
     from prompts.skills.scripts.draw_blocking import draw
     scene = await Scene.get_or_none(id=scene_id)
     params = (scene.prompt_params or {}) if scene else {}
-    if not params.get("blocking_map") or len(params.get("segments") or []) < 2:
+    from services.storyboard.blocking_reference import has_drawable_plan
+    if not has_drawable_plan(params):
         raise HTTPException(404, detail=localized_message("此分镜没有空间定位图"))
     try:
         plan = BlockingMap.model_validate(params["blocking_map"])

@@ -1,4 +1,5 @@
 {
+  "同一场景形态的底图发生变化，请复用已确认的底图": "Reuse the confirmed layout for this location variant.",
   "空间定位图无法转为视频参考图，请提供 PNG 定位图": "Could not rasterize the blocking map. Supply a PNG map.",
   "空间定位图文件不存在": "The blocking map file is missing",
   "空间定位图来源无效": "Invalid blocking map source",

@@ -11,7 +11,7 @@ export function useSceneBlockingMap(scene: () => Scene | undefined) {
   })
   const plan = computed(() => {
     const data = scene()?.prompt_params
-    return Array.isArray(data?.segments) && data.segments.length > 1 ? data.blocking_map : null
+    return scene()?.blocking_reference || (Array.isArray(data?.segments) && data.segments.length > 1) ? data?.blocking_map : null
   })
   const rendered = ref('')
   const error = ref('')
