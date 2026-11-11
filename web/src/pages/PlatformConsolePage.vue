@@ -9,7 +9,7 @@ import { notice } from '@/shared/notice'
 import AppButton from '@/components/AppButton.vue'
 
 type Section = 'usage' | 'models' | 'docs' | 'keys'
-type PlatformModel = {id:string; name:string; kinds:string[]; image_model_type?: string; reference_image_urls?:boolean; pricing:ModelPricing}
+type PlatformModel = {id:string; name:string; kinds:string[]; video_model_type?: string; image_model_type?: string; reference_image_urls?:boolean; pricing:ModelPricing}
 type KeyRow = {purpose?:'api'|'studio'; id:number; name:string; preview:string; created_at:string}
 const props = defineProps<{section:Section}>()
 const auth = useAuthStore()
@@ -121,7 +121,7 @@ onBeforeUnmount(()=>{++epoch;secret.value=''})
       <section class="panel"><h2>{{ tr('按模型统计') }}</h2><div v-for="m in summary.by_model" :key="m.model" class="line"><span>{{ m.model }}</span><b>¥ {{ money(m.cost) }}</b></div><p v-if="!summary.by_model.length">{{ tr('暂无计费记录') }}</p></section>
     </template>
     <template v-else-if="section==='models'"><div class="period filters"><button v-for="k in ['all',...new Set(models.flatMap(m=>m.kinds))]" :key="k" :aria-pressed="kind===k" @click="kind=k">{{ kinds[k] ?? tr('全部') }}</button></div>
-      <section class="catalog"><article v-for="m in catalog" :key="m.id"><small>{{ m.kinds.map(k=>kinds[k]).join(' / ') }}</small><h2>{{ m.name }}</h2><code>{{ m.id }}</code><p v-if="m.image_model_type">{{ m.image_model_type }} · {{ m.reference_image_urls ? tr('支持参考图') : tr('文生图') }}</p><ul><li v-for="r in rates(m.pricing,m)" :key="r">{{ r }}</li></ul></article></section>
+      <section class="catalog"><article v-for="m in catalog" :key="m.id"><small>{{ m.kinds.map(k=>kinds[k]).join(' / ') }}</small><h2>{{ m.name }}</h2><code>{{ m.id }}</code><p v-if="m.video_model_type">{{ m.video_model_type }}</p><p v-if="m.image_model_type">{{ m.image_model_type }} · {{ m.reference_image_urls ? tr('支持参考图') : tr('文生图') }}</p><ul><li v-for="r in rates(m.pricing,m)" :key="r">{{ r }}</li></ul></article></section>
       <p v-if="!catalog.length">{{ tr('暂无可用模型') }}</p>
     </template>
     <template v-else-if="section==='keys'"><p v-if="!auth.activeTeamId">{{ tr('请选择可用团队') }}</p><template v-else>
@@ -153,6 +153,13 @@ for part in stream:
   "aspect_ratio": "16:9",
   "response_format": "url"
 }</pre></section>
+      <section class="panel"><h2>{{ tr('视频生成') }}</h2><code>POST /v1/videos</code><p>{{ tr('选择目录中的视频模型，提交后用返回的 id 查询。references 按提交顺序传入，每项包含 type、role 和可读取的 HTTPS url。首尾帧使用 first_frame 和 last_frame。') }}</p><pre>{
+  "model": "nv-MODEL_ID",
+  "prompt": "A slow tracking shot down the lane.",
+  "duration": 6,
+  "aspect_ratio": "16:9",
+  "resolution": "720p"
+}</pre><code>GET /v1/videos/{id}</code><p>{{ tr('status 为 completed 时，直接从 metadata.url 下载成片。可传 UUID 格式的 request_id，断线后用 /v1/videos/req-{UUID} 找回任务。') }}</p><p>{{ tr('按受理时价格结算。供应商返回计费 token 时按 token 结算；按时长结算时优先用供应商报告时长，固定时长订单缺少报告时沿用订购时长。参考视频缺少计费用量时进入核对。') }}</p></section>
       <section class="panel"><h2>{{ tr('查询请求状态') }}</h2><code>GET /v1/requests/{id}</code><p>{{ tr('响应头 X-Request-Id 是请求编号。建议每次生成发送唯一 Idempotency-Key；重复提交返回 409 和原编号。用同一账户和团队的密钥可查询结算状态与实际 token 用量。') }}</p></section></template>
   </main>
 </template>

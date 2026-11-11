@@ -1,5 +1,9 @@
 {
   "common": {
+    "按受理时价格结算。供应商返回计费 token 时按 token 结算；按时长结算时优先用供应商报告时长，固定时长订单缺少报告时沿用订购时长。参考视频缺少计费用量时进入核对。": "Pricing is frozen at admission. Reported billable tokens are used for token tariffs. Duration-based settlement uses reported duration when available, otherwise the ordered fixed duration. Missing billable reference video usage requires reconciliation.",
+    "status 为 completed 时，直接从 metadata.url 下载成片。可传 UUID 格式的 request_id，断线后用 /v1/videos/req-{UUID} 找回任务。": "When status is completed, download the video directly from metadata.url. Supply a UUID request_id to look up the job at /v1/videos/req-{UUID} after a disconnect.",
+    "选择目录中的视频模型，提交后用返回的 id 查询。references 按提交顺序传入，每项包含 type、role 和可读取的 HTTPS url。首尾帧使用 first_frame 和 last_frame。": "Select a catalog video model and poll the returned ID. Each ordered reference has a type, role and accessible HTTPS URL. Use first_frame and last_frame for keyframes.",
+    "使用平台的 /v1 地址、视频模型 ID 和 API Key。": "Use the platform /v1 base URL, a video model ID, and an API key.",
     "从目录选择图像模型 ID。size 可使用模型支持的清晰度或像素尺寸；支持参考图的模型接受 image 数组中的 HTTPS 地址。结果在 data[].url 中，由调用方直接下载。": "Use an image model ID from the catalog. Set size to a supported tier or pixel size. Models with reference support accept an image array of HTTPS URLs. Download the results directly using data[].url.",
     "图像生成": "Image generation",
     "文生图": "Text to image",

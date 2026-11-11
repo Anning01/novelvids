@@ -239,6 +239,7 @@ const videoProtocolOptions = computed(() => {
 })
 const selectedVideoProtocol = computed(() => videoProtocolOptions.value.find(option => option.value === form.value.api_protocol))
 const selectedVideoProtocolHint = computed(() => {
+  if (form.value.api_protocol === 'novelvids') return tr('使用平台的 /v1 地址、视频模型 ID 和 API Key。')
   if (form.value.api_protocol === 'unified_video') {
     return tr('填写接口地址与模型名称，使用通用视频任务协议。')
   }
@@ -354,7 +355,7 @@ function changeImageModelType() {
 function changeVideoModelType() {
   if (!form.value.video_model_type) return
   const preset = VIDEO_MODEL_PRESETS[form.value.video_model_type]
-  if (form.value.api_protocol === 'unified_video' && videoProtocolOptions.value.some(option => option.value === 'unified_video')) {
+  if (['unified_video','novelvids'].includes(form.value.api_protocol) && videoProtocolOptions.value.some(option => option.value === form.value.api_protocol)) {
     applyVideoPricingPreset()
     return
   }

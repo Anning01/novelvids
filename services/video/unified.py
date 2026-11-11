@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any, Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -24,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 class VideoOutput(BaseModel):
     url: str | None = None
+    last_frame_url: str | None = None
+    duration: float | None = None
+    usage: dict | None = None
 
 
 class VideoTask(BaseModel):
@@ -62,12 +66,13 @@ def _prompt(prepared: PreparedVideoContent, reference_images: list[str], referen
 class UnifiedVideoGenerator(BaseVideoGenerator):
     """Translate shared video inputs without exposing service-specific details."""
 
-    async def _request(self, method: str, task_id: str | None = None, payload: dict | None = None) -> dict:
+    async def _request(self, method: str, task_id: str | None = None, payload: dict | None = None, *, refresh=False) -> dict:
         submitting = method == "POST"
         async with httpx.AsyncClient(timeout=600) as client:
             try:
                 response = await client.request(method, _endpoint(self.config.base_url, task_id),
                     headers={"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"},
+                    **({"params":{"refresh":"true"}} if refresh else {}),
                     **({"json": payload} if payload is not None else {}))
             except httpx.HTTPError as exc:
                 not_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
@@ -79,6 +84,8 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             data = response.json()
         except ValueError:
             data = None
+        if self.config.api_protocol == "novelvids" and not submitting and response.status_code == 404 and (task_id or "").startswith("req-"):
+            return {"id":task_id, "status":"failed", "error":localized_message("平台没有此视频请求的受理记录")}
         if response.status_code >= 400:
             raise VideoProviderError(public_provider_error(data, status_code=response.status_code,
                 transport_request_id=request_id(response), secrets=(self.config.api_key,)),
@@ -119,7 +126,17 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
         logger.info("video_api_submit images=%d videos=%d audios=%d duration=%d resolution=%s",
             prepared.reference_image_count, prepared.reference_video_count, prepared.reference_audio_count,
             selection.duration, selection.resolution)
-        data = await self._request("POST", payload=payload)
+        platform_key = None
+        if self.config.api_protocol == "novelvids":
+            platform_key = str(kwargs.get("platform_request_key") or uuid4())
+            payload.update(request_id=platform_key, generate_audio=selection.generate_audio,
+                           return_last_frame=selection.return_last_frame)
+        try:
+            data = await self._request("POST", payload=payload)
+        except VideoProviderError as exc:
+            if platform_key and exc.submission_uncertain:
+                return "req-" + platform_key
+            raise
         if data.get("error"):
             raise VideoProviderError(data["error"])
         task_id = data.get("id")
@@ -127,8 +144,8 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             raise VideoProviderError(localized_message('视频接口未返回任务 ID'), submission_uncertain=True)
         return task_id.strip()
 
-    async def query(self, external_task_id: str) -> dict[str, Any]:
-        data = await self._request("GET", task_id=external_task_id)
+    async def query(self, external_task_id: str, *, refresh=False) -> dict[str, Any]:
+        data = await self._request("GET", task_id=external_task_id, refresh=refresh)
         try:
             task = VideoTask.model_validate(data)
         except ValidationError:
@@ -137,7 +154,9 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             if not task.metadata or not task.metadata.url:
                 raise VideoProviderError(localized_message('视频任务已完成但未返回成片地址'))
             url = public_media_url(task.metadata.url)
-            return self._build_result(TaskStatusEnum.completed, progress=100, url=url)
+            exclude = {"url"} if self.config.api_protocol == "novelvids" else {"url","last_frame_url"}
+            return self._build_result(TaskStatusEnum.completed, progress=100, url=url,
+                                      **task.metadata.model_dump(exclude_none=True,exclude=exclude))
         if task.status == "failed":
             message = data.get("error") or localized_message('视频生成失败，请检查生成内容或联系管理员')
             return self._build_result(TaskStatusEnum.failed, error=message)

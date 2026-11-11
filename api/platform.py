@@ -10,6 +10,7 @@ from services.billing.aggregation import summary
 from auth.models import PlatformApiKey, PlatformCallReceipt, StudioKeyGrant
 from services.platform.temporary_media import UploadSpec, issue_upload
 from schemas.platform_chat import ChatRequest
+from services.platform.videos import VideoRequest, submit_video, video_status
 from services.platform.images import ImageRequest, generate as generate_platform_image
 from services.platform.chat import complete
 from services.platform.access import console_owner, create_key, developer_identity, key_view, revoke_key, studio_identity
@@ -96,3 +97,22 @@ async def studio_media_lease(body: UploadSpec, response: Response, ctx: AuthCont
 async def images(body: ImageRequest, ctx: AuthContext = Depends(developer_identity),
     idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
     return await generate_platform_image(ctx, body, idempotency_key)
+
+@developer_router.post("/videos", summary="提交视频生成")
+async def create_video(body: VideoRequest, response: Response, ctx: AuthContext = Depends(developer_identity),
+    idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
+    job = await submit_video(ctx, body, idempotency_key)
+    response.headers["X-Request-Id"] = job["id"]
+    response.headers["Cache-Control"] = "no-store"
+    return job
+
+
+@developer_router.get("/videos/{identifier}", summary="查询视频生成状态及结果链接")
+async def read_video(identifier: str, response: Response, refresh: bool = False, ctx: AuthContext = Depends(developer_identity)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        by_key = identifier.startswith("req-")
+        value = UUID(identifier[4:] if by_key else identifier)
+    except ValueError:
+        raise HTTPException(404, "视频请求不存在") from None
+    return await video_status(ctx, key=value,refresh=refresh) if by_key else await video_status(ctx, public_id=value,refresh=refresh)

@@ -37,6 +37,7 @@ class LastFrameService:
         video_id: int,
         *,
         team_id: int | None = None,
+        keep_local: bool = False,
     ) -> str:
         if not video_ref.strip():
             raise LastFrameExtractionError("视频地址为空，无法提取尾帧")
@@ -50,7 +51,7 @@ class LastFrameService:
             frame_path = temporary_dir / f"last-frame-{video_id}.png"
             await asyncio.to_thread(self._extract_with_ffmpeg, video_path, frame_path)
 
-            if oss.enabled:
+            if oss.enabled and not keep_local:
                 key = make_upload_key(
                     team_id,
                     f"video-references/last-frame-{video_id}.png",

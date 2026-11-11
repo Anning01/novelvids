@@ -96,7 +96,7 @@ async def _upload_generated_file(key: str, path: Path, content_type: str) -> Non
             await oss.put_bytes(key, source.read(), content_type)
 
 
-async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str, str | float]]:
+async def _download_video(remote_url: str, video_id: int, *, keep_local=False) -> tuple[str, dict[str, str | float]]:
     """将远程视频下载到本地 MEDIA_PATH/videos/ 目录，返回可访问的 /media/ 路径。"""
     video_dir = os.path.join(settings.MEDIA_PATH, "videos")
     os.makedirs(video_dir, exist_ok=True)
@@ -104,18 +104,27 @@ async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str
     filename = f"{video_id}.mp4"
     local_path = os.path.join(video_dir, filename)
 
-    logger.info("Video download start: video_id=%s, url=%s", video_id, remote_url[:120])
-    async with httpx.AsyncClient(timeout=120) as client:
-        async with client.stream("GET", remote_url) as resp:
-            resp.raise_for_status()
-            with open(local_path, "wb") as f:
-                async for chunk in resp.aiter_bytes(chunk_size=8192):
-                    f.write(chunk)
+    logger.info("Video download start: video_id=%s", video_id)
+    from tempfile import NamedTemporaryFile
+    with NamedTemporaryFile(dir=video_dir, suffix=".download", delete=False) as target:
+        temp_path = Path(target.name)
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                async with client.stream("GET", remote_url) as resp:
+                    resp.raise_for_status()
+                    async for chunk in resp.aiter_bytes(chunk_size=64*1024):
+                        target.write(chunk)
+            if not target.tell():
+                raise ValueError("Empty video")
+            target.close()
+            temp_path.replace(local_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     media_url = f"/media/videos/{filename}"
     from services.oss import make_upload_key, oss
 
-    if oss.enabled:
+    if oss.enabled and not keep_local:
         key = make_upload_key(None, f"videos/{filename}")
         await _upload_generated_file(key, Path(local_path), "video/mp4")
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
@@ -136,13 +145,13 @@ async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str
                        duration_source_ref=normalize_media_url(media_url) or media_url)
     except Exception as error:
         logger.warning('Video duration probe unavailable: video_id=%s error_type=%s', video_id, type(error).__name__)
-    if oss.enabled:
+    if oss.enabled and not keep_local:
         os.remove(local_path)
     logger.info("Video downloaded: video_id=%s -> %s", video_id, media_url)
     return media_url, posters
 
 
-async def _download_last_frame(remote_url: str, video_id: int) -> str:
+async def _download_last_frame(remote_url: str, video_id: int, *, keep_local=False) -> str:
     """持久化供应商尾帧，避免下一镜头生成时引用临时 URL。"""
     directory = Path(settings.MEDIA_PATH) / "video-references"
     directory.mkdir(parents=True, exist_ok=True)
@@ -165,7 +174,7 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
         raise
     from services.oss import make_upload_key, oss
 
-    if oss.enabled:
+    if oss.enabled and not keep_local:
         key = make_upload_key(None, f"video-references/last-frame-{video_id}.png")
         await _upload_generated_file(key, destination, "image/png")
         destination.unlink(missing_ok=True)
@@ -306,7 +315,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 chapter = await Chapter.get(id=scene.chapter_id)
                 novel = await Novel.get(id=chapter.novel_id)
                 try:
-                    frame = await last_frame_service.extract_and_store(video.url, video.id, team_id=novel.team_id)
+                    frame = await last_frame_service.extract_and_store(video.url, video.id, team_id=novel.team_id,
+                        **({"keep_local":True} if metadata.get("platform_request_key") else {}))
                 except Exception as error:
                     logger.warning("Last frame recovery failed: video_id=%s error=%s", video.id, type(error).__name__)
                     raise HTTPException(503, detail=localized_message('尾帧提取失败，原视频未更改，请稍后重试')) from error
@@ -587,6 +597,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 for item in voice_references
             ],
         }
+        if config.api_protocol == "novelvids":
+            from uuid import uuid4
+            video_metadata["platform_request_key"] = str(uuid4())
         if team_id is not None:
             video_metadata["team_id"] = team_id
         if user_id is not None:
@@ -626,6 +639,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 reference_audios=audio_urls,
                 return_last_frame=selection.return_last_frame,
                 team_id=team_id,
+                **({"platform_request_key":video_metadata["platform_request_key"]} if config.api_protocol=="novelvids" else {}),
             )
         except VideoProviderError as error:
             # 供应商在提交阶段直接拒绝请求时也创建失败记录，让异常在预览区可见，
@@ -707,7 +721,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
             )
 
         generator = get_generator(config)
-        result = await generator.query(video.external_task_id)
+        if config.api_protocol == "novelvids" and metadata.get("download_retry_pending"):
+            result = await generator.query(video.external_task_id, refresh=True)
+        else:
+            result = await generator.query(video.external_task_id)
         logger.info(
             "Video query result: video_id=%s, status=%s, has_url=%s",
             video_id, result.get("status"), bool(result.get("url")),
@@ -723,7 +740,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
         remote_url = result.get("url")
         if remote_url:
             try:
-                downloaded = await _download_video(remote_url, video.id)
+                downloaded = await _download_video(remote_url, video.id, keep_local=True) if config.api_protocol=="novelvids" else await _download_video(remote_url, video.id)
                 if isinstance(downloaded, tuple):
                     media_url, posters = downloaded
                     video.metadata = {**(video.metadata or {}), **posters}
@@ -732,9 +749,16 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 else:  # 兼容测试替身和旧扩展实现
                     media_url = downloaded
                 video.url = media_url
+                if isinstance(video.metadata, dict):
+                    video.metadata.pop("download_retry_pending", None)
                 update_fields.append("url")
             except Exception as e:
-                logger.error("Video download failed: video_id=%s, error=%s", video_id, e)
+                if config.api_protocol == "novelvids":
+                    # Keep polling the accepted job until the client has actually saved the file.
+                    await Video.filter(id=video.id).update(metadata={**metadata, "download_retry_pending":True})
+                    await video.refresh_from_db()
+                    return video
+                logger.error("Video download failed: video_id=%s, error_type=%s", video_id, type(e).__name__)
                 video.metadata = {**(video.metadata or {}), "error": f"视频下载失败: {e}"}
                 update_fields.append("metadata")
         elif new_status == TaskStatusEnum.completed.value:
@@ -758,6 +782,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                     persisted_last_frame_url = await _download_last_frame(
                         provider_last_frame_url,
                         video.id,
+                        **({"keep_local":True} if config.api_protocol=="novelvids" else {}),
                     )
                     last_frame_source = "provider"
             except Exception as error:
@@ -776,6 +801,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                         video_source,
                         video.id,
                         team_id=metadata.get("team_id"),
+                        **({"keep_local":True} if config.api_protocol=="novelvids" else {}),
                     )
                     last_frame_source = "ffmpeg"
                 except Exception as error:

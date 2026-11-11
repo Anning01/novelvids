@@ -293,3 +293,14 @@ class StudioMediaLease(AbstractBaseModel):
     byte_length = fields.BigIntField()
     expires_epoch = fields.BigIntField(db_index=True)
     retry_epoch = fields.BigIntField(null=True)
+
+
+class PlatformVideoJob(AbstractBaseModel):
+    receipt = fields.OneToOneField("models.PlatformCallReceipt", on_delete=fields.CASCADE)
+    route_hash = fields.CharField(max_length=64)
+    inputs = fields.JSONField()
+    status = fields.CharField(max_length=20, default="queued", db_index=True)
+    progress = fields.IntField(default=0)
+    output = fields.JSONField(null=True)
+    poll_after = fields.BigIntField(default=0, db_index=True)
+    poll_token = fields.UUIDField(null=True)

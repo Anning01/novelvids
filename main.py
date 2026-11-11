@@ -125,17 +125,20 @@ async def lifespan(_: FastAPI):
     if settings.DEPLOYMENT_ROLE == "platform":
         import asyncio
         from services.platform.temporary_media import expire_periodically
+        from services.platform.videos import reconcile_videos
         from services.platform.calls import recover_measured
         from services.platform.chat import settle_periodically, stop_streams
         await recover_measured()
         reconciler = asyncio.create_task(settle_periodically())
         expiry = asyncio.create_task(expire_periodically())
+        videos = asyncio.create_task(reconcile_videos())
         try:
             yield
         finally:
             reconciler.cancel()
             expiry.cancel()
-            await asyncio.gather(reconciler, expiry, return_exceptions=True)
+            videos.cancel()
+            await asyncio.gather(reconciler, expiry, videos, return_exceptions=True)
             await stop_streams()
             await Tortoise.close_connections()
         return

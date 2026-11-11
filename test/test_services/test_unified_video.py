@@ -239,7 +239,7 @@ async def test_config_persists_protocol_and_exposes_matching_capabilities(model_
     assert caps["output_formats"] == ["mp4"]
     assert "4k" not in caps["resolutions"]
     options = (await ai_model_config_controller.list_generation_capabilities())["video_protocols"][model_type]
-    assert [item["value"] for item in options] == ["volcengine_ark", "unified_video"]
+    assert [item["value"] for item in options] == ["volcengine_ark", "unified_video", "novelvids"]
     assert options[1]["label"] == "通用视频接口"
     assert "https://" not in json.dumps(options)
 

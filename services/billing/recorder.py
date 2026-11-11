@@ -47,11 +47,9 @@ class BillingRecorder:
         try:
             # 消耗来源：团队自己的 Key 直连供应商不计入团队余额；
             # 平台模型（官方配置/未配置回退）按团队余额扣费
-            cost_source = (
-                "team_key"
-                if config is not None and config.scope == "team"
-                else "balance"
-            )
+            remote_platform = config is not None and (config.api_protocol == "novelvids" or
+                (config.model.startswith("nv-") and config.api_key.startswith("nv_")))
+            cost_source = "team_key" if config is not None and (config.scope == "team" or remote_platform) else "balance"
             return await ModelUsageRecord.create(
                 novel_id=novel_id,
                 task_type=task_type,

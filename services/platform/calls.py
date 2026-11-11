@@ -6,7 +6,7 @@ from math import isfinite
 from uuid import uuid4
 
 from fastapi import HTTPException
-from tortoise.expressions import F
+from tortoise.expressions import F, Q
 from tortoise.transactions import in_transaction
 
 from auth.models import PlatformCallReceipt
@@ -63,8 +63,9 @@ async def admit(ctx, model_id, body, key, *, validate=chat_options):
             raise HTTPException(409, detail, headers={"X-Request-Id":str(previous.public_id)})
         rates = validate(config, body)
         await ensure_solvent(ctx.team_id, ctx.user.id)
-        count = await PlatformCallReceipt.filter(model_config_id=model_id, state="submitted",
-            created_at__gte=datetime.now(timezone.utc)-timedelta(seconds=CALL_TIMEOUT+15)).using_db(db).count()
+        recent = datetime.now(timezone.utc) - timedelta(seconds=CALL_TIMEOUT+15)
+        count = await PlatformCallReceipt.filter(Q(state="processing") | Q(state="submitted", created_at__gte=recent),
+                                                 model_config_id=model_id).using_db(db).count()
         if count >= config.concurrency:
             raise HTTPException(429, "模型并发已满，请稍后重试", headers={"Retry-After":"2"})
         receipt = await PlatformCallReceipt.create(using_db=db, public_id=identifier, dedup_key=dedup,
@@ -84,9 +85,12 @@ async def settle(receipt_id):
         if kind == "image":
             cost = compute_image_cost(r.usage["image_count"], r.usage["clarity"], r.pricing)
             cost += compute_input_image_cost(r.usage["input_image_count"], r.pricing)
+        elif kind == "video":
+            from services.platform.videos import video_cost
+            cost = video_cost(r.usage, r.pricing)
         else:
             cost = compute_text_cost(r.usage, r.pricing)
-        record = await ModelUsageRecord.create(using_db=db, novel_id=0, task_type=AiTaskTypeEnum.reference_image if kind == "image" else AiTaskTypeEnum.creation_agent,
+        record = await ModelUsageRecord.create(using_db=db, novel_id=0, task_type={"image":AiTaskTypeEnum.reference_image,"video":AiTaskTypeEnum.video,"text":AiTaskTypeEnum.creation_agent}[kind],
             billing_type=kind, model_config_id=r.model_config_id, model_name=r.model_name, model=r.model,
             pricing_snapshot=r.pricing, usage={**r.usage, "platform_request_id":str(r.public_id)},
             cost=cost, cost_source="balance", team_id=r.team_id, user_id=r.user_id)

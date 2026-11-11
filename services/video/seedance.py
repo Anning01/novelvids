@@ -220,6 +220,8 @@ class SeedanceGenerator(BaseVideoGenerator):
                 "duration": data.get("duration"),
                 "frames": data.get("frames"),
             }
+            if isinstance(data.get("usage"), dict):
+                metadata["usage"] = data["usage"]
             if last_frame_url := _last_frame_url(data):
                 metadata["last_frame_url"] = last_frame_url
             logger.info(

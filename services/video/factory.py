@@ -95,4 +95,4 @@ video_generator_factory = VideoGeneratorFactory({
     VideoGenerationModelTypeEnum.wan_3: VideoGeneratorAdapterSpec(
         Wan3Generator, VideoModelTypeEnum.wan
     ),
-}, protocol_registry={ImageApiProtocol.unified_video: UnifiedVideoGenerator})
+}, protocol_registry={ImageApiProtocol.unified_video: UnifiedVideoGenerator, ImageApiProtocol.novelvids: UnifiedVideoGenerator})

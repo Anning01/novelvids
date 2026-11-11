@@ -347,6 +347,11 @@ PROTOCOL_CAPABILITIES = {
             VideoGenerationModelTypeEnum.seedance_2_5,
         )
     },
+    ImageApiProtocol.novelvids: {
+        kind: replace(caps, api_protocol=ImageApiProtocol.novelvids, supports_auto_duration=False,
+                      supports_temporary_file_upload=True, supports_audio_data_uri=True, output_formats=("mp4",))
+        for kind, caps in CAPABILITIES.items()
+    },
 }
 
 
@@ -376,6 +381,7 @@ def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: 
 
 def protocol_options() -> dict[str, list[dict]]:
     labels = {
+        ImageApiProtocol.novelvids: "猫影开放平台",
         ImageApiProtocol.volcengine_ark: "火山方舟",
         ImageApiProtocol.unified_video: "通用视频接口",
         ImageApiProtocol.minimax: "MiniMax 官方",
