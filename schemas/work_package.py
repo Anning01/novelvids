@@ -18,6 +18,9 @@ class Episode(StrictModel):
     episode: Identity
     number: int = Field(ge=1)
     aspect_ratio: Literal['16:9', '9:16', '1:1', '4:3', '3:4'] = '16:9'
+    style_key: str | None = Field(None, max_length=64)
+    custom_style_prompt: str | None = Field(None, max_length=2000)
+    storyboard_enabled: bool | None = None
     language: Literal['zh', 'en'] = 'zh'
     screenplay: str = 'screenplay.md'
     source_text: str | None = None
@@ -28,7 +31,7 @@ class Episode(StrictModel):
 
 class Media(StrictModel):
     path: str
-    role: Literal['main', 'angle_1', 'angle_2', 'reference', 'video', 'audio', 'blocking']
+    role: Literal['main', 'angle_1', 'angle_2', 'reference', 'video', 'audio', 'blocking', 'storyboard']
 
 
 class Variant(Identity):
@@ -70,6 +73,14 @@ class Shot(Identity):
 
     @model_validator(mode='after')
     def check_timing(self):
+        sheet = self.structure.get("storyboard_sheet")
+        if sheet is not None and (not isinstance(sheet, dict) or any(
+            key in sheet and not isinstance(sheet[key], str) for key in ("video_guidance", "video_prompt", "image_prompt")
+        )):
+            raise ValueError("故事版提示词须使用文本")
+        for role in ("storyboard", "blocking"):
+            if sum(m.role == role for m in self.media) > 1:
+                raise ValueError("每镜每类制作图只登记一张")
         if any(v.end <= v.start or v.end > self.duration for v in self.voices):
             raise ValueError('人声时间轴超出镜头时长')
         if len({r.asset_id for r in self.visual}) != len(self.visual):

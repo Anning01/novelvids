@@ -33,6 +33,8 @@ import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
+import SceneVoiceTracks from '@/components/SceneVoiceTracks.vue'
+import SceneBlockingMap from '@/components/SceneBlockingMap.vue'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
@@ -2499,6 +2501,7 @@ onBeforeUnmount(() => {
                     @select="handleAssetPickerSelection(scene, group.type, $event)"
                   />
                 </section>
+                <SceneVoiceTracks :scene="scene" :assets="assets" :voice-busy="Boolean(savingAssetVoiceKey)" @voice="openAssetVoicePicker(scene, $event)" />
               </aside>
 
               <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
@@ -2533,7 +2536,8 @@ onBeforeUnmount(() => {
                   @choose-library="addLibraryReferences(scene, $event)"
                   @remove="removeReferenceMedia(scene, $event)"
                 />
-                <StoryboardSheetCard v-if="project?.storyboard_enabled || scene.metadata?.storyboard_sheet" :scene="scene" :enabled="project?.storyboard_enabled ?? false" :can-use="draftFor(scene).videoGenerationMode === 'reference'" @updated="replaceSheetScene" @use="applyStoryboardSheet(scene)" />
+                <SceneBlockingMap :scene="scene" />
+                <StoryboardSheetCard v-if="project?.storyboard_enabled || scene.metadata?.storyboard_sheet" :scene="scene" :enabled="project?.storyboard_enabled ?? false" :can-use="Boolean(selectedVideoModelConfig) && draftFor(scene).videoGenerationMode === 'reference'" @updated="replaceSheetScene" @use="applyStoryboardSheet(scene)" />
                 <div v-for="version in modelDrafts(scene)" :key="version.model" class="model-optimized-prompt">
                   <details><summary>{{ tr('模型专项稿') }} · {{ version.label }}</summary><p>{{ version.text }}</p></details>
                   <AppButton v-if="version.model === selectedVideoModelConfig?.model_type && draftFor(scene).prompt !== version.text" variant="secondary" size="sm" @click="useOptimizedPrompt(scene, version.text)">{{ tr('使用模型专项稿') }}</AppButton>

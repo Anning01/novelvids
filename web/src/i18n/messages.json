@@ -1,5 +1,10 @@
 {
   "common": {
+    "对白": "Dialogue",
+    "画外音": "Off-screen",
+    "内心 OS": "Inner voice",
+    "人声时间轴": "Voice timeline",
+    "空间定位图": "Blocking diagram",
     "场次目录": "Scenes",
     "待添加分集": "No episodes yet",
     "可以先和创作助手构思，也可以新增一集开始写剧本。": "Plan the story with the assistant or add an episode to start writing.",

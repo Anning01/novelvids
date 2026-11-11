@@ -1,4 +1,5 @@
 """Package orchestration using the workbench's canonical objects and write locks."""
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 from tortoise.transactions import in_transaction
@@ -9,7 +10,9 @@ from controllers.chapter import chapter_controller
 from controllers.asset import asset_controller
 from models.scene import Scene
 from models.work_sync import WorkSyncObject, WorkSyncRequest
-from prompts.skill_pack import SkillSnapshot, snapshot_skills
+from prompts.skill_pack import SkillSnapshot, snapshot_skills, read_skill
+from services.project_config import validate_project_config
+from fastapi import HTTPException
 from prompts.reference import CHARACTER_TURNAROUND, GROUP_PORTRAIT
 from schemas.work_package import ImportEpisode, ReadEpisode, Shot, UpdateShot
 from services.creation_objects import CreationObjects, project_write
@@ -97,15 +100,18 @@ class WorkSync:
                 if variant.payload['asset_id'] != ref.asset_id:
                     raise ValueError('形态不属于指定资产')
                 bindings[str(asset.local_id)] = variant.local_id
-        for voice in shot.voices:
-            asset = await self.mapping(work_id, '', 'asset', voice.asset_id)
-            await CreationObjects((await self.project(work_id)).id).active_assets([asset.local_id])
+        voice_asset_ids = {}
+        for key in dict.fromkeys(voice.asset_id for voice in shot.voices):
+            asset = await self.mapping(work_id, '', 'asset', key)
+            voice_asset_ids[key] = asset.local_id
+        if voice_asset_ids:
+            await CreationObjects((await self.project(work_id)).id).active_assets(list(voice_asset_ids.values()))
         return {'description': shot.description, 'prompt': shot.prompt, 'duration': shot.duration,
                 'prompt_params': shot.structure,
-                'metadata': {'asset_variant_ids': bindings, 'work_package': shot.model_dump(),
+                'metadata': {'asset_variant_ids': bindings, 'voice_asset_ids': voice_asset_ids, 'work_package': shot.model_dump(),
                              'imported_media': [{**m.model_dump(), 'url': urls[m.path]} for m in shot.media]}}, assets, bindings
 
-    async def persist_shot(self, objects, chapter_id, work_id, episode_id, shot, urls, target=None, preserve_visual=False):
+    async def persist_shot(self, objects, chapter_id, work_id, episode_id, shot, urls, target=None, preserve_visual=False, sync_media=True, language="zh"):
         values, assets, bindings = await self.scene_values(work_id, shot, urls)
         if target is not None and preserve_visual:
             assets = await target.assets.all().values_list('id', flat=True)
@@ -113,11 +119,24 @@ class WorkSync:
             values['metadata']['asset_variant_ids'] = bindings
         await objects.active_assets(assets)
         await objects.validate_variant_bindings(assets, bindings)
+        metadata = {**(target.metadata if target else {}), **values['metadata']}
+        if sync_media:
+            sheet = next((m for m in shot.media if m.role == "storyboard"), None)
+            if sheet:
+                guidance = json.loads(read_skill("storyboard_sheet_templates"))[language]["video"]
+                supplied = shot.structure.get("storyboard_sheet") or {}
+                guidance = supplied.get("video_guidance") or guidance
+                metadata["storyboard_sheet"] = {"source": "work_package", "status": "completed",
+                    "image_url": urls[sheet.path], "video_prompt": supplied.get("video_prompt") or shot.prompt + "\n\n" + guidance,
+                    "image_prompt": supplied.get("image_prompt") or "",
+                    "video_guidance": guidance}
+            elif (metadata.get("storyboard_sheet") or {}).get("source") == "work_package":
+                metadata.pop("storyboard_sheet")
+        values["metadata"] = metadata
         if target is None:
             target = await objects.create_scene(chapter_id, after_id=None, values=values)
         else:
             await objects.ensure_idle('scene', target)
-            values['metadata'] = {**target.metadata, **values['metadata']}
             await write_fields(objects, target, values)
         await objects.bind_assets(target, assets)
         return target
@@ -135,9 +154,14 @@ class WorkSync:
             work = manifest.work.id
             episode = manifest.episode.id
             mapping = await WorkSyncObject.get_or_none(work_id=work, episode_id='', kind='work', stable_id=work)
+            try:
+                preferences = validate_project_config(manifest.model_dump(exclude_none=True,
+                    include={"style_key", "custom_style_prompt", "storyboard_enabled"}))
+            except HTTPException as error:
+                raise ValueError(error.detail) from error
             if mapping is None:
                 project = await Novel.create(name=manifest.work.name, aspect_ratio=manifest.aspect_ratio,
-                                             author='Agent 创建')
+                                             author='Agent 创建', **preferences)
                 await self.register(work, '', 'work', work, project.id, manifest.work.model_dump())
             else:
                 project = await self.project(work)
@@ -191,7 +215,7 @@ class WorkSync:
                                     {'manifest': manifest.model_dump(), 'archive': urls,
                                      'scenes': [s.model_dump() for s in board.scenes]})
                 for shot in board.shots:
-                    target = await self.persist_shot(objects, chapter.id, work, episode, shot, urls)
+                    target = await self.persist_shot(objects, chapter.id, work, episode, shot, urls, language=manifest.language)
                     await self.register(work, episode, 'shot', shot.id, target.id, shot.model_dump())
                 await self.link_episode_assets(work, chapter, assets, board, objects)
                 receipt = await self.read_episode(ReadEpisode(work_id=work, episode_id=episode))
@@ -223,6 +247,8 @@ class WorkSync:
         return {'status': 'ok', 'format_version': 1, 'work_id': request.work_id,
                 'episode_id': request.episode_id, 'novel_id': project.id, 'chapter_id': chapter.id,
                 'location': self.location(project.id, chapter.id, chapter.number),
+                'project_settings': {'style_key': project.style_key, 'custom_style_prompt': project.custom_style_prompt,
+                                     'storyboard_enabled': project.storyboard_enabled},
                 'archive': episode.payload['archive'], 'shots': sorted(shots, key=lambda s: s['sequence'])}
 
     async def update_shot(self, request: UpdateShot):
@@ -261,7 +287,8 @@ class WorkSync:
                 files.media(shot)
                 urls = files.archive(self.archive_root)
             await self.persist_shot(objects, target.chapter_id, request.work_id, request.episode_id, shot, urls, target,
-                                    preserve_visual='visual' not in request.changes)
+                                    preserve_visual='visual' not in request.changes, sync_media='media' in request.changes,
+                                    language=episode.payload['manifest'].get('language', 'zh'))
             row.payload = shot.model_dump()
             await row.save(update_fields=['payload'])
             receipt = await self.read_episode(ReadEpisode(work_id=request.work_id, episode_id=request.episode_id))

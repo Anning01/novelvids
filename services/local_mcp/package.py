@@ -44,6 +44,12 @@ class PackageFiles:
 
     def media(self, shot: Shot):
         for media in shot.media:
+            if media.role in {"storyboard", "blocking"}:
+                extensions = {".png", ".jpg", ".jpeg", ".webp"}
+                if media.role == "blocking":
+                    extensions.add(".svg")
+                if Path(media.path).suffix.lower() not in extensions:
+                    raise ValueError("分镜制作图需使用支持的图片格式")
             self.read(media.path)
 
     def episode(self):

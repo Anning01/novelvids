@@ -292,3 +292,32 @@ async def test_import_separates_source_and_director_script(tmp_path, include_ori
     chapter = await Chapter.get(id=receipt['chapter_id'])
     assert chapter.screenplay == (root/'screenplay.md').read_text()
     assert chapter.content == ('这是小说原文。' if include_original else '')
+
+
+async def test_confirmed_style_and_shot_artwork_survive_import_and_partial_update(tmp_path):
+    from models.novel import Novel
+    root = package(tmp_path / 'artwork', work='artwork-work')
+    manifest = json.loads((root / 'episode.json').read_text())
+    manifest.update(style_key='xianxia-3d', storyboard_enabled=False)
+    (root / 'episode.json').write_text(json.dumps(manifest))
+    (root / 'sheet.png').write_bytes(b'test-sheet')
+    (root / 'layout.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    board = json.loads((root / 'storyboard.json').read_text())
+    board['shots'][0]['media'] = [{'path':'sheet.png','role':'storyboard'}, {'path':'layout.svg','role':'blocking'}]
+    (root / 'storyboard.json').write_text(json.dumps(board))
+    service = WorkSync(tmp_path, tmp_path/'media')
+    receipt = await service.import_episode(ImportEpisode(directory=str(root), request_id='artwork-import', confirmed=True))
+    project = await Novel.get(id=receipt['novel_id'])
+    assert project.style_key == 'xianxia-3d' and not project.storyboard_enabled
+    row = receipt['shots'][0]
+    scene = await Scene.get(id=row['local_id'])
+    sheet = scene.metadata['storyboard_sheet']
+    assert sheet['image_url'] == receipt['archive']['sheet.png'] and sheet['video_guidance']
+    assert scene.metadata['imported_media'][1]['url'] == receipt['archive']['layout.svg']
+    base = dict(directory=str(root), confirmed=True, work_id='artwork-work', episode_id='ep1', shot_id=row['shot_id'])
+    edited = await service.update_shot(UpdateShot(**base, base_version=row['version'], request_id='artwork-text', changes={'description':'修改说明'}))
+    await scene.refresh_from_db()
+    assert scene.metadata['storyboard_sheet'] == sheet
+    await service.update_shot(UpdateShot(**base, base_version=edited['shots'][0]['version'], request_id='artwork-clear', changes={'media':[]}))
+    await scene.refresh_from_db()
+    assert 'storyboard_sheet' not in scene.metadata and scene.metadata['imported_media']==[]

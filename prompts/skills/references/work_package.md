@@ -19,6 +19,8 @@
   "episode": {"id": "ep-001", "name": "第一集"},
   "number": 1,
   "aspect_ratio": "16:9",
+  "style_key": "xianxia-3d",
+  "storyboard_enabled": true,
   "language": "zh",
   "screenplay": "screenplay.md",
   "assets": "assets.json",
@@ -26,6 +28,8 @@
   "originals": ["original.md", "general-eight-columns.md", "specialized.md"]
 }
 ```
+
+新作品在清单中写入用户确认的作品默认 style_key 或 custom_style_prompt，逐镜故事版开关写 storyboard_enabled。局部场次的不同画风保留在相应镜头。续导分集时沿用猫影中已保存的作品设置。
 
 work、episode、场、镜头、资产、形态均用持久 ID（字母数字、点、短横线、下划线，最长120字符）。首次创建可用 UUID；显示名、数组位置、镜头编号和猫影数据库主键不能当 ID。插镜、改名、改序保留 ID；复制为新作品才新建 ID。同作品跨集复用相同资产/形态 ID；新集导入不会修改已有资产。
 
@@ -53,6 +57,8 @@ work、episode、场、镜头、资产、形态均用持久 ID（字母数字、
 ```
 
 visual 与通用提示词的角色、道具、场景参考栏使用同一份出镜名单。仅声音角色写入 voices；text 只存说出的原话，表演提示保留在原分镜的人声时间轴。voices 的 mode 明确区分 dialogue（开口对白）、offscreen（画外声音）、os（心声、嘴唇不动）、narration（旁白）；时间相对本镜，声音资产须在 assets 登记。参考图片的职责放 media.role，不能据此推断画面出镜。structure 可保留当前已有结构化分镜；drafts 原样保留稿件，不重新渲染覆盖。数组顺序决定首次导入顺序，后续单镜同步不改顺序。
+
+逐镜已有的线稿故事版与空间定位图分别登记在该镜 media，role 使用 storyboard 和 blocking。将每张原图复制到 media/，并保留 structure.blocking_map 和 segments 中的空间及机位数据；仅写入 originals 不会绑定到镜头。
 
 所有文件须是包内相对路径，不得越界、链接到包外或引用隐藏文件。originals 显式列出要归档的原文、八栏稿、专项稿；不能自动扫描目录把个人文件或密钥打包。媒体只归档实际存在的文件，不凭空补图。不允许用远端 URL 冒充本地文件。
 

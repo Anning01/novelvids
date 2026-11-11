@@ -54,6 +54,44 @@
         "title": "Aspect Ratio",
         "type": "string"
       },
+      "style_key": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Style Key"
+      },
+      "custom_style_prompt": {
+        "anyOf": [
+          {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Custom Style Prompt"
+      },
+      "storyboard_enabled": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Storyboard Enabled"
+      },
       "language": {
         "default": "zh",
         "enum": [
@@ -124,7 +162,8 @@
               "reference",
               "video",
               "audio",
-              "blocking"
+              "blocking",
+              "storyboard"
             ],
             "title": "Role",
             "type": "string"
@@ -298,7 +337,8 @@
               "reference",
               "video",
               "audio",
-              "blocking"
+              "blocking",
+              "storyboard"
             ],
             "title": "Role",
             "type": "string"
