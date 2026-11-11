@@ -167,6 +167,34 @@ flowchart LR
 
 故事板适合逐镜头检查，画布适合组织引用与工作流。开始生成后可以关闭页面，后台继续查询已受理任务；结果不确定时需核对，不会自动重复提交收费请求。
 
+## 单独使用创作技能
+
+只做某个环节时，可以把对应的技能包装进支持 `SKILL.md` 的助手，直接在会话里提供正文、剧本或参考资料。独立包包含入口、该环节引用的规则和 MIT 许可证，可以将其目录内容放入单独的开源仓库。
+
+| 环节 | 技能名 | 交付内容 |
+| --- | --- | --- |
+| 故事分析 | `novelvids-story` | 基于原文的大纲、人物弧光与出处 |
+| 剧本改编 | `novelvids-screenplay` | 分场剧本、动作与对白 |
+| 资产设定 | `novelvids-assets` | 人物、群像、场景、道具和形态的完整设计 |
+| 分镜制作 | `novelvids-storyboard` | 镜头、资产引用与人声时间轴 |
+| 生图提示词 | `novelvids-image` | 资产参考图或封面的完整提示词 |
+| 视频制作 | `novelvids-video` | 逐镜提交清单、衔接与成片要求 |
+| 视频拆解 | `novelvids-remake` | 来自参考视频的资产与逐镜制作资料 |
+| 创作规划 | `novelvids-planning` | 原文证据、步骤、依赖和验收要求 |
+| 局部修订 | `novelvids-editing` | 指定对象的修改稿 |
+
+从仓库根目录导出或安装一个技能，只需 Python 标准库：
+
+```bash
+python3 scripts/export_skill.py --list
+python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
+python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
+```
+
+第一条列出可选环节。第二条生成可独立发布的目录 `output/skills/novelvids-storyboard/`。第三条安装剧本技能到当前项目；在该项目的会话中可用 `$novelvids-screenplay` 指定它。例如：“把下面这一章改成 60 秒短剧，保留结尾那句对白。”
+
+规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
+
 ## 本地开发
 
 需要 Python 3.12+、Node.js 22.12+、uv 与 FFmpeg。

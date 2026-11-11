@@ -100,7 +100,8 @@ def test_style_options_follow_the_single_skill_resource(tmp_path, monkeypatch):
     from services.project_config import validate_project_config
 
     styles = {"new-style": {"label": "新风格", "image": "规则", "video": "规则"}}
-    (tmp_path / "styles.json").write_text(json.dumps(styles))
+    (tmp_path / pack.FILES["styles"]).parent.mkdir(parents=True)
+    (tmp_path / pack.FILES["styles"]).write_text(json.dumps(styles))
     monkeypatch.setattr(pack, "ROOT", tmp_path)
     assert list_styles() == [{"key": "new-style", "label": "新风格"}]
     assert validate_project_config({"style_key": "new-style"}) == {"style_key": "new-style"}
@@ -178,7 +179,8 @@ def test_video_enhancement_skill_keeps_targets_authorization_and_source_identity
 @pytest.mark.parametrize('value', [[], {'bad': {}}, {'bad': {'label': 'X', 'image': 1, 'video': 'v'}}])
 def test_styles_reject_malformed_config_without_exposing_contents(tmp_path, monkeypatch, value):
     import prompts.skill_pack as pack
-    (tmp_path / 'styles.json').write_text(json.dumps(value))
+    (tmp_path / pack.FILES['styles']).parent.mkdir(parents=True)
+    (tmp_path / pack.FILES['styles']).write_text(json.dumps(value))
     monkeypatch.setattr(pack, 'ROOT', tmp_path)
     with pytest.raises(ValueError, match='Invalid styles'):
         pack.read_skill('styles')

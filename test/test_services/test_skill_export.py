@@ -1,0 +1,69 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from prompts.skill_pack import FILES, ROOT, SkillSnapshot, instructions, snapshot_skills
+from scripts.export_skill import LINK, export_skill
+
+
+@pytest.mark.parametrize("name", [
+    "story", "screenplay", "assets", "image", "storyboard", "video", "remake", "planning", "editing",
+])
+def test_stage_exports_without_application_files(tmp_path, name):
+    package = export_skill(f"novelvids-{name}", tmp_path)
+    source = ROOT / package.name / "SKILL.md"
+    entry = (package / "SKILL.md").read_text()
+    assert f"name: {package.name}\n" in entry
+    targets = [package / match[2] for match in LINK.finditer(entry)]
+    assert targets and set(targets) == set((package / "references").iterdir())
+    assert (package / "LICENSE").read_bytes() == (ROOT.parents[1] / "LICENSE").read_bytes()
+    for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
+        assert target.resolve().is_relative_to(package)
+        assert target.read_bytes() == (source.parent / match[2]).read_bytes()
+    assert not list(package.rglob("*.py"))
+    assert list(tmp_path.iterdir()) == [package]
+
+
+def test_export_keeps_unrelated_and_preexisting_skills(tmp_path):
+    installed = export_skill("novelvids-storyboard", tmp_path)
+    entry = installed / "SKILL.md"
+    entry.write_text("Local edits")
+    with pytest.raises(FileExistsError):
+        export_skill("novelvids-storyboard", tmp_path)
+    with pytest.raises(ValueError):
+        export_skill("../runtime", tmp_path)
+    assert entry.read_text() == "Local edits"
+
+
+def test_saved_rules_come_from_the_same_files_as_the_standalone_package(tmp_path):
+    package = export_skill("novelvids-storyboard", tmp_path)
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    for key in ("storyboard", "storyboard_contract", "styles", "strategies"):
+        assert snapshot.read(key) == (package / "references" / Path(FILES[key]).name).read_text()
+    templates = json.loads(snapshot.read("storyboard_templates"))
+    templates["contract"] = "FROZEN CONTRACT LABEL"
+    snapshot.contents["storyboard_templates"] = json.dumps(templates)
+    assert "FROZEN CONTRACT LABEL" in instructions(snapshot, "en", "storyboard")
+    # A pre-split job has its original rules and no separate renderer template file.
+    del snapshot.contents["storyboard_templates"]
+    assert json.loads(snapshot.read("storyboard_contract"))["sections"]
+    assert "FROZEN CONTRACT LABEL" not in instructions(snapshot, "en", "storyboard")
+
+
+def test_task_uses_frozen_repair_rules_and_restores_caller_context():
+    from prompts.extraction import targeted_cast_instructions
+    from prompts.skill_pack import use_skill_snapshot
+
+    original = targeted_cast_instructions("en")
+    saved = snapshot_skills()
+    resource = json.loads(saved["contents"]["asset_templates"])
+    resource["targeted_cast_instructions"]["en"] = "Frozen task instruction"
+    saved["contents"]["asset_templates"] = json.dumps(resource)
+    with pytest.raises(RuntimeError), use_skill_snapshot(saved):
+        assert targeted_cast_instructions("en") == "Frozen task instruction"
+        with use_skill_snapshot(None):
+            assert targeted_cast_instructions("en") == original
+        assert snapshot_skills()["contents"] == saved["contents"]
+        raise RuntimeError("interrupted")
+    assert targeted_cast_instructions("en") == original

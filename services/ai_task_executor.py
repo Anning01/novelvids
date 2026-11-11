@@ -274,10 +274,12 @@ class AiTaskExecutor:
         token = current_task_id.set(task.id)
         try:
             from services.creation_agent.skill_execution import WORKFLOW_VERSION
-            if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
-                from services.creation_agent.production import run_production
-                return await run_production(task, handler)
-            return await handler.execute(task.request_params)
+            from prompts.skill_pack import use_skill_snapshot
+            with use_skill_snapshot(task.request_params.get("skill_snapshot")):
+                if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
+                    from services.creation_agent.production import run_production
+                    return await run_production(task, handler)
+                return await handler.execute(task.request_params)
         finally:
             current_task_id.reset(token)
 

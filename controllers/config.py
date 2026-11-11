@@ -301,7 +301,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         return result
 
     async def list_visual_styles(self) -> list[dict]:
-        """视觉风格清单（prompts/skills/styles.json 为唯一事实来源）。"""
+        """视觉风格清单（图片技能的 styles.json 为唯一事实来源）。"""
         from prompts.styles import list_styles
 
         return list_styles()

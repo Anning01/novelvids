@@ -155,6 +155,6 @@ def test_creative_requirements_preserve_user_text_inside_mandatory_format():
         result = creative_requirements(text, language)
         assert result.endswith(text)
         assert '格式' in result if language == 'zh' else 'format' in result
-    from pathlib import Path
-    editing = (Path(__file__).parents[2] / 'prompts/skills/editing.md').read_text()
+    from prompts.skill_pack import read_skill
+    editing = read_skill('editing')
     assert '不要求固定自然语言栏位' not in editing

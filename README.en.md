@@ -167,6 +167,20 @@ flowchart LR
 
 Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
 
+## Standalone creative skills
+
+Choose a single stage for any assistant that loads `SKILL.md`. Available packages cover story analysis (`novelvids-story`), screenplay adaptation (`novelvids-screenplay`), asset design, storyboarding, image prompts, video production, remake analysis, planning and editing.
+
+From the repository root, use Python's standard library to list, export or install a package:
+
+```bash
+python3 scripts/export_skill.py --list
+python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
+python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
+```
+
+The exported directory contains its entrypoint, referenced rules and MIT license. Its contents can be published as an independent repository. The last command installs a project-local skill. Invoke it with `$novelvids-screenplay` and supply the source passage and target running time. Each source entrypoint under `prompts/skills/novelvids-*/` explains the inputs and deliverable. The application and exports share the rules under `references/`. Shared resources are included in each export. To update a locally edited package, export to a fresh directory and review the differences.
+
 ## Local development
 
 Install Python 3.12+, Node.js 22.12+, uv and FFmpeg.
