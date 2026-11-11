@@ -1464,7 +1464,7 @@ async def test_started_model_failure_remains_uncertain_and_cannot_replay():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('explicit_cap', [None, 64000])
+@pytest.mark.parametrize('explicit_cap', [None, 64000, 2000])
 async def test_large_story_input_uses_model_limit_and_never_marks_local_rejection_uncertain(explicit_cap):
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.models.function import FunctionModel
@@ -1503,7 +1503,7 @@ async def test_large_story_input_uses_model_limit_and_never_marks_local_rejectio
         await ai_task_executor.run(task)
     await task.refresh_from_db()
     receipt = await AgentOperation.get(task=task, key='model:story:BookAnalysis:')
-    if explicit_cap is None:
+    if explicit_cap in (None, 64000):
         assert task.status == 3, task.error_message
         assert calls
         assert receipt.state == 'completed'

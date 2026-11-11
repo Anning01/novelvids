@@ -8,12 +8,12 @@ from prompts.skill_pack import FILES, ROOT, SkillSnapshot, instructions, snapsho
 from scripts.export_skill import LINK, entrypoints, export_skill
 
 
-STAGES = ("story", "screenplay", "assets", "image", "storyboard", "video", "remake")
+STAGES = ("screenplay", "assets", "storyboard")
 
 
 def test_only_professional_stages_are_publishable(tmp_path):
     assert set(entrypoints()) == {f"novelvids-{stage}" for stage in STAGES}
-    for retired in ("novelvids-planning", "novelvids-editing"):
+    for retired in ("novelvids-image", "novelvids-video", "novelvids-remake", "novelvids-story", "novelvids-planning", "novelvids-editing"):
         with pytest.raises(ValueError, match="Unknown skill"):
             export_skill(retired, tmp_path)
     assert not list(tmp_path.iterdir())
@@ -26,17 +26,17 @@ def test_stage_exports_without_application_files(tmp_path, name):
     entry = (package / "SKILL.md").read_text()
     assert f"name: {package.name}\n" in entry
     targets = [package / match[2] for match in LINK.finditer(entry)]
-    assert targets and set(targets) == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
+    metadata = package / "agents/openai.yaml"
+    assert metadata.read_bytes() == (source.parent / "agents/openai.yaml").read_bytes()
+    title = re.search(r'^description: (猫影[^。\n]+)。', entry, re.MULTILINE)[1]
+    assert f'  display_name: "{title}"' in metadata.read_text().splitlines()
+    assert targets and set(targets) | {metadata} == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
     assert (package / "LICENSE").read_bytes() == (ROOT.parents[1] / "LICENSE").read_bytes()
     for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
         assert target.resolve().is_relative_to(package)
         assert target.read_bytes() == (source.parent / match[2]).read_bytes()
     scripts = {p.name for p in package.rglob("*.py")}
-    expected_scripts = {"draw_blocking.py"} if name in {"storyboard", "remake"} else set()
-    if name == "storyboard":
-        expected_scripts.add("storyboard_sheets.py")
-    if name in {"storyboard", "video"}:
-        expected_scripts.add("select_video_optimizer.py")
+    expected_scripts = {"draw_blocking.py", "storyboard_sheets.py", "select_video_optimizer.py"} if name == "storyboard" else set()
     assert scripts == expected_scripts
     assert list(tmp_path.iterdir()) == [package]
 
@@ -127,6 +127,19 @@ def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_pa
         assert handoff in prompt
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_asset_skill_alone_contains_the_workbench_image_rules_and_asset_layouts(tmp_path, language):
+    package = export_skill("novelvids-assets", tmp_path)
+    assert list(tmp_path.iterdir()) == [package]
+    rules = (package / "references/image.md").read_text()
+    layouts = json.loads((package / "references/asset_contract.json").read_text())[language]
+    styles = json.loads((package / "references/styles.json").read_text())
+    rendered = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "image")
+    assert rules in rendered and f"language={language}" in rendered
+    assert all(layout["heading"] in rendered for layout in layouts.values())
+    assert styles["xianxia-3d"]["image"].strip()
+
+
 def test_standalone_storyboard_offers_a_baseline_and_performance_guidance(tmp_path):
     pkg = export_skill("novelvids-storyboard", tmp_path)
     rules = (pkg / "references/speech_pacing.md").read_text()
@@ -139,7 +152,7 @@ def test_standalone_storyboard_offers_a_baseline_and_performance_guidance(tmp_pa
 
 @pytest.mark.parametrize("stage", ["storyboard", "video", "remake"])
 def test_video_stages_share_one_script_driven_presentation_rule(tmp_path, stage):
-    package = export_skill(f"novelvids-{stage}", tmp_path)
+    package = export_skill("novelvids-storyboard", tmp_path)
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     rule = (package / "references/video_presentation.md").read_text()
     assert rule == snapshot.read("video_presentation")
@@ -233,11 +246,10 @@ def test_storyboard_sheet_switch_preserves_bad_config_and_rejects_incomplete_sho
     assert call("prepare", "shots.json").returncode == 0
 
 
-@pytest.mark.parametrize("stage", ["storyboard", "video"])
-def test_exported_skill_selects_installed_optimizer_only_for_target_model(tmp_path, stage):
+def test_exported_skill_selects_installed_optimizer_only_for_target_model(tmp_path):
     import subprocess
     import sys
-    pkg = export_skill(f"novelvids-{stage}", tmp_path / 'portable')
+    pkg = export_skill("novelvids-storyboard", tmp_path / 'portable')
     script = pkg / 'scripts/select_video_optimizer.py'
     def select(*args):
         res = subprocess.run([sys.executable, '-I', '-S', script, *args], cwd=tmp_path,
@@ -252,5 +264,14 @@ def test_exported_skill_selects_installed_optimizer_only_for_target_model(tmp_pa
     local.write_text('---\nname: sd25-pe\n---\nProvider instructions')
     assert Path(select()['entry']) == local
     assert select('--model', 'Seedance 2.5')['skill'] == 'sd25-pe'
-    for model in ('seedance_2', 'minimax_h3_autodl', 'my-seedance_2_5-alike', 'generic'):
+    h3 = tmp_path / '.agents/skills/h3-prompt-writing/SKILL.md'
+    assert select('--model', 'MiniMax-H3')['mode'] == 'missing'
+    h3.parent.mkdir()
+    h3.write_text('---\nname: h3-prompt-writing\n---\nProvider instructions')
+    for model, canonical in [('MiniMax H3', 'minimax_h3'), ('minimax_h3', 'minimax_h3'),
+                             ('minimax_h3_zm_u24', 'minimax_h3_autodl'), ('minimax_h3_autodl', 'minimax_h3_autodl')]:
+        (tmp_path / 'novelvids.config.json').write_text(json.dumps({'video_model_type': model}))
+        assert select() == {'mode': 'optimize', 'model_type': canonical, 'skill': 'h3-prompt-writing', 'entry': str(h3)}
+        assert select('--model', 'seedance_2_5')['skill'] == 'sd25-pe'
+    for model in ('seedance_2', 'minimax_h3_preview', 'my-seedance_2_5-alike', 'generic'):
         assert select('--model', model)['mode'] == 'generic'

@@ -1,6 +1,6 @@
 ---
 name: novelvids-screenplay
-description: 把小说章节或故事点子改编为可拍摄的短剧剧本，或按指定目标修改已有场次与对白。
+description: 猫影剧本改编。把小说章节或故事点子改编为可拍摄的短剧剧本，或按指定目标修改已有场次与对白。
 license: MIT
 ---
 

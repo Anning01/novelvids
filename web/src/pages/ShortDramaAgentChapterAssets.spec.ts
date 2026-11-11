@@ -288,3 +288,26 @@ it('sends only changed fields via patch when saving edits', async () => {
   expect(api.updateNovel).toHaveBeenCalledTimes(1)
   expect(api.updateNovel).toHaveBeenCalledWith(9, { name: '修改后的名字' })
 })
+
+it.each(['light', 'dark'])('shows story results while the cover is pending (%s)', async theme => {
+  document.documentElement.dataset.theme = theme
+  const task = {
+    id: 'cover-running', task_type: 5, status: TaskStatusEnum.PROCESSING, created_at: '',
+    response_data: { analysis_completed: true, cover_status: 'pending', book_types: ['冒险'],
+      story_outline: '旅人回家。', key_characters: [], chapter_count: 1 },
+  }
+  vi.mocked(api.novelAnalysis).mockResolvedValue({ code: 0, message: '', data: task })
+  vi.mocked(api.task).mockResolvedValue({ code: 0, message: '', data: task })
+  const wrapper = mount(ShortDramaAgentPage, { global: {
+    plugins: [pinia], components: { AppButton }, stubs: { RouterLink: { template: '<a><slot /></a>' } },
+  } })
+  try {
+    await flushPromises()
+    expect(wrapper.text()).toContain('分析已完成，封面生成中')
+    expect(wrapper.text()).toContain('旅人回家。')
+    expect(wrapper.text()).toContain('冒险')
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.theme
+  }
+})

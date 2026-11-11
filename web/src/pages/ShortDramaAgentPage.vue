@@ -199,6 +199,7 @@ const analysisRunning = computed(() => {
   return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
 })
 const analysisStatus = computed(() => {
+  if (analysisRunning.value && analysisResult.value) return tr('分析已完成，封面生成中')
   if (startingAnalysis.value || analysisRunning.value) return tr('正在理解故事并准备封面')
   if (analysisResult.value) return tr('剧本分析完成')
   if (analysisTask.value?.status === TaskStatusEnum.FAILED) return tr('分析失败')
@@ -302,8 +303,10 @@ async function pollAnalysis(taskId: string) {
   stopPolling()
   try {
     const response = await api.task(taskId)
+    const hadResult = Boolean(analysisResult.value)
     analysisTask.value = response.data
     if (analysisRunning.value) {
+      if (analysisResult.value && !hadResult) await loadProject()
       pollTimer = window.setTimeout(() => pollAnalysis(taskId), 1800)
     } else if (response.data.status === TaskStatusEnum.COMPLETED) {
       await Promise.all([loadProject(), loadChapters()])
@@ -571,6 +574,7 @@ onBeforeUnmount(() => {
         <div>
           <h2>{{ analysisStatus }}</h2>
           <p v-if="analysisError">{{ analysisError }}</p>
+          <p v-else-if="analysisRunning && analysisResult">{{ tr('标签、大纲和人物已可查看。') }}</p>
           <p v-else-if="analysisRunning || startingAnalysis">{{ tr('正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。') }}</p>
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
           <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>

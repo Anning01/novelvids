@@ -1,6 +1,6 @@
 ---
 name: novelvids-storyboard
-description: 将剧本或章节拆成分镜，或修改指定镜头的画面、运镜、时长、对白与转场。
+description: 猫影分镜设计。将剧本或章节拆成分镜，或修改指定镜头的画面、运镜、时长、对白与转场。
 license: MIT
 ---
 

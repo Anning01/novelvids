@@ -169,7 +169,7 @@ Use the storyboard to inspect each shot and the canvas to organize references an
 
 ## Standalone creative skills
 
-Choose a single stage for any assistant that loads `SKILL.md`. Available packages cover story analysis (`novelvids-story`), screenplay adaptation (`novelvids-screenplay`), asset design, storyboarding, image prompts, video production and remake analysis. Each skill handles revisions to its own output. The host agent coordinates requests spanning chapters or stages.
+Story analysis is built into the workbench. The three installable creative skills are maintained in this repository under `prompts/skills/`, one directory per skill. Install any stage individually in an assistant that loads `SKILL.md`. Available packages cover screenplay adaptation (`novelvids-screenplay`), asset design and storyboarding. Image production, video production and reference-video analysis are available in the workbench. Each skill handles revisions to its own output. The host agent coordinates requests spanning chapters or stages.
 
 From the repository root, use Python's standard library to list, export or install a package:
 
@@ -181,9 +181,9 @@ python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
 
 The storyboard skill has a project-wide picture-board switch, off by default. From the production project root, run `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` (or `off`). When enabled, each video generation segment gets a single black-and-white storyboard image and a companion video prompt. The action determines the panel count.
 
-Storyboard and video skills keep the generic prompt. Selecting `seedance_2_5` also produces a submission prompt using the official project-local `sd25-pe` skill. Pass the active video model to the skill or set `video_model_type` in the production project’s `novelvids.config.json`. See the [model routing and official installation instructions](prompts/skills/novelvids-video/references/model_optimization.md).
+Storyboard and video skills keep the generic prompt. Install the optional official optimizer for your video model: `sd25-pe` for Seedance 2.5 or `h3-prompt-writing` for MiniMax H3. Pass the active video model to the skill or set `video_model_type` in the production project’s `novelvids.config.json`. See the [model routing and official installation instructions](prompts/skills/novelvids-video/references/model_optimization.md).
 
-The exported directory contains its entrypoint, referenced rules and MIT license. Its contents can be published as an independent repository. The last command installs a project-local skill. Invoke it with `$novelvids-screenplay` and supply the source passage and target running time. Each source entrypoint under `prompts/skills/novelvids-*/` explains the inputs and deliverable. The application and exports share the rules under `references/`. Shared resources are included in each export. To update a locally edited package, export to a fresh directory and review the differences.
+The exported directory contains its entrypoint, referenced rules and MIT license. The last command installs a project-local skill. Invoke it with `$novelvids-screenplay` and supply the source passage and target running time. Each source entrypoint under `prompts/skills/novelvids-*/` explains the inputs and deliverable. The application and exports share the rules under `references/`. Shared resources are included in each export. To update a locally edited package, export to a fresh directory and review the differences.
 
 ## Local development
 

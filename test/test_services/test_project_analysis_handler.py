@@ -342,3 +342,43 @@ async def test_agent_cover_prompt_and_image_call_share_project_ratio(aspect_rati
         assert aspect_ratio in images.call_args.kwargs['prompt']
     finally:
         current_execution.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_analysis_samples_across_long_books_and_publishes_before_cover(monkeypatch):
+    import json
+    from models.ai_task import AiTask
+    from utils.enums import TaskStatusEnum
+
+    novel = await Novel.create(name="旅途", content="长书正文" * 8000)
+    await Chapter.bulk_create([
+        Chapter(novel_id=novel.id, number=i, name=f"第{i}站", content="甲" * 3000 + "乙")
+        for i in range(1, 33)
+    ])
+    task = await AiTask.create(task_type=5, status=TaskStatusEnum.running.value)
+    await AiModelConfig.create(task_type=5, name="analysis", model="test", api_key="test",
+                               base_url="https://example.invalid", is_active=True)
+    analysis = BookAnalysis(book_types=["冒险"], story_outline="旅人回家。", key_characters=[])
+    llm = FakeLlmClient(analysis)
+    monkeypatch.setattr("services.project_analysis.handler.AsyncOpenAI", lambda **_: llm)
+    seen = []
+
+    async def prepare_cover(*args, **kwargs):
+        await task.refresh_from_db()
+        seen.append((task.status, task.response_data.copy()))
+        raise RuntimeError("cover unavailable")
+
+    from services.project_analysis.handler import ai_model_config_controller
+    with patch.object(ai_model_config_controller, "get_active_with_legacy_fallback",
+                      new=AsyncMock(return_value=await AiModelConfig.get(task_type=5))):
+        monkeypatch.setattr(ai_model_config_controller, "get_active", prepare_cover)
+        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "task_id": str(task.id)})
+    status, early = seen[0]
+    assert status == TaskStatusEnum.running.value and early["analysis_completed"]
+    assert early["cover_status"] == "pending" and early["story_outline"] == analysis.story_outline
+    assert result["cover_status"] == "failed" and result["chapter_count"] == 32
+    facts = json.loads(llm.create.call_args.kwargs["messages"][1]["content"])["untrusted_task_facts"]
+    blocks = [json.loads(block) for block in facts["manuscript"].split("\n\n")]
+    assert [b["chapter_number"] for b in blocks] == [1, 5, 10, 14, 19, 23, 28, 32]
+    assert all(b["content"].endswith("乙") for b in blocks)
+    assert sum(len(b["content"].replace("\n……\n", "")) for b in blocks) <= 8000

@@ -169,17 +169,15 @@ flowchart LR
 
 ## 单独使用创作技能
 
-只做某个环节时，可以把对应的技能包装进支持 `SKILL.md` 的助手，直接在会话里提供正文、剧本或参考资料。独立包包含入口、该环节引用的规则和 MIT 许可证，可以将其目录内容放入单独的开源仓库。
+故事分析是工作台内置功能，导入书稿后提供故事速览。3 个可单独安装的猫影创作技能统一在本仓库的 `prompts/skills/` 下维护，每个技能一个目录。只做某个环节时，可以单独导出并安装对应的技能，再向助手提供正文、剧本或参考资料。
 
-| 环节 | 技能名 | 交付内容 |
+| 技能名称 | 安装标识 | 交付内容 |
 | --- | --- | --- |
-| 故事分析 | `novelvids-story` | 基于原文的大纲、人物弧光与出处 |
-| 剧本改编 | `novelvids-screenplay` | 分场剧本、动作与对白 |
-| 资产设定 | `novelvids-assets` | 人物、群像、场景、道具和形态的完整设计 |
-| 分镜制作 | `novelvids-storyboard` | 镜头、资产引用与人声时间轴 |
-| 生图提示词 | `novelvids-image` | 资产参考图或封面的完整提示词 |
-| 视频制作 | `novelvids-video` | 逐镜提交清单、衔接与成片要求 |
-| 视频拆解 | `novelvids-remake` | 来自参考视频的资产与逐镜制作资料 |
+| 猫影剧本改编 | `novelvids-screenplay` | 分场剧本、动作与对白 |
+| 猫影资产设定 | `novelvids-assets` | 人物、群像、场景、道具和形态的完整设计 |
+| 猫影分镜设计 | `novelvids-storyboard` | 镜头、资产引用与人声时间轴 |
+
+每个导出包自带所需的共享规则和脚本，安装一个包只会增加一个技能。图像制作、视频制作和视频拆解由工作台提供。
 
 改稿时继续使用负责该产物的技能，例如用资产设定修改某一章的服装形态，用分镜制作调整对白时间轴。跨章节、跨环节的步骤编排由宿主 Agent 负责。
 
@@ -191,11 +189,11 @@ python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
 python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
 ```
 
-第一条列出可选环节。第二条生成可独立发布的目录 `output/skills/novelvids-storyboard/`。第三条安装剧本技能到当前项目；在该项目的会话中可用 `$novelvids-screenplay` 指定它。例如：“把下面这一章改成 60 秒短剧，保留结尾那句对白。”
+第一条列出可选环节。第二条导出包含所需规则的技能目录 `output/skills/novelvids-storyboard/`。第三条安装剧本技能到当前项目；在该项目的会话中可用 `$novelvids-screenplay` 指定它。例如：“把下面这一章改成 60 秒短剧，保留结尾那句对白。”
 
 分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段交付一张简约黑白线稿故事版和配套视频提示词，图内格数随动作与构图变化。
 
-分镜和视频技能默认交付通用提示词。选用 `seedance_2_5` 时，调用本项目安装的火山方舟 `sd25-pe`，另出一份模型专项稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
+分镜和视频技能默认交付通用提示词。Seedance 2.5 专项稿使用火山方舟的 `sd25-pe`，MiniMax H3 专项稿使用 `h3-prompt-writing`，两者按需单独安装。分镜包自带模型选择脚本；缺少专项技能时仍可使用通用稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
 
 规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
 

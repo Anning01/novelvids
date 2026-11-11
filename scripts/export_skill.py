@@ -21,7 +21,7 @@ def export_skill(name: str, destination: Path) -> Path:
         raise ValueError(f"Unknown skill: {name}")
 
     entry = entries[name]
-    resources: dict[str, Path] = {}
+    resources: dict[str, Path] = {"agents/openai.yaml": entry.parent / "agents/openai.yaml"}
 
     def package_link(match: re.Match) -> str:
         source = (entry.parent / match[2]).resolve(strict=True)

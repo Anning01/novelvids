@@ -1,6 +1,6 @@
 ---
 name: novelvids-assets
-description: 提取或修订人物、群像、场景、道具及衍生形态，交付视觉设定与完整生图提示词。
+description: 猫影资产设定。提取或修订人物、群像、场景、道具及衍生形态，交付视觉设定与完整生图提示词。
 license: MIT
 ---
 

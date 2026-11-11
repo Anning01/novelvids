@@ -8,10 +8,24 @@
 
 通用稿与专项稿并存，专项稿标记目标模型。分镜阶段已产出对应专项稿，且底稿、模型、模式和素材关系均相同时，视频阶段直接复用；任一项变动，用通用稿重新优化。只要求沿用已确认提示词生成时，提交用户确认的版本。
 
-Seedance 2.5 对应火山方舟的 `sd25-pe`。返回 `missing` 表示本项目尚未安装，先保留通用稿并告知缺少的专项技能。项目安装命令：
+返回 `missing` 时交付通用稿，说明目标模型的专项技能可单独安装到当前作品。
+
+## Seedance 2.5
+
+火山方舟官方技能为 `sd25-pe`。
 
 ```sh
 npx --yes skills@latest add "https://arkdocs.tos-cn-beijing.volces.com/skills/" --skill sd25-pe --agent codex --yes
 ```
 
 首次安装调试的官方版本为 0.1.1。官方技能单独由上述来源安装，交付的是文本；视频提交仍走原有生成流程。
+
+## MiniMax H3
+
+官方 H3 与 AutoDL 的 H3 工作流共用 `h3-prompt-writing`。根据本次渠道支持的模式和实际附带的素材，选官方基础文本／关键帧规范或全参考规范。角色设定图用于外观，故事版用于构图；只有指定为首帧或尾帧的图才约束对应时刻。仅声音出场的人物按声源位置和时间写入声音，媒体编号对应本次实际附件。
+
+专项稿用英文描述画面和声音，台词、歌词和可见文字保留原语言。实际时长、切点、配乐沿用本镜确认稿。
+
+```sh
+npx --yes skills@latest add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing --agent codex --yes
+```
