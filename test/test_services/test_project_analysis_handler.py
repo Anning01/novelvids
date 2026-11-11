@@ -297,6 +297,21 @@ def test_project_analysis_templates_preserve_material_and_requested_language():
         assert facts == {"name": "雨夜来信", "chapter_count": 2, "manuscript": "第一章 车站\n第二章 咖啡馆"}
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_sampled_story_instructions_keep_missing_events_unknown(language):
+    from prompts.project_analysis import render_analysis_messages
+    from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
+
+    material = '{"head":"小满递出票根。","tail":"检票员收回手。"}'
+    messages = render_analysis_messages(name="末班车", chapter_count=12, material=material, prompt_language=language)
+    agent_rules = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "story")
+    for rules in (messages[0]["content"], agent_rules):
+        assert "保留取样之间的空缺" in rules
+        assert "目录只能证明章节存在" in rules
+        assert "只有一次行动时，写当下的反应" in rules
+        assert f"language={language}" in rules
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('aspect_ratio', ['16:9', '9:16', '1:1'])
 async def test_agent_cover_prompt_and_image_call_share_project_ratio(aspect_ratio):
