@@ -76,3 +76,13 @@ def test_task_uses_frozen_repair_rules_and_restores_caller_context():
         assert snapshot_skills()["contents"] == saved["contents"]
         raise RuntimeError("interrupted")
     assert targeted_cast_instructions("en") == original
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path, language):
+    package = export_skill("novelvids-screenplay", tmp_path)
+    rules = (package / "references/screenplay.md").read_text()
+    prompt = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "screenplay")
+    assert rules in prompt and f"language={language}" in prompt
+    for marker in ("出场：", "仅声音：", "△", "（内心）", "（画外）", "旁白：", "【音效】", "【屏显】"):
+        assert marker in rules
