@@ -188,12 +188,12 @@ def missing_current_definitions(target: dict) -> list[str]:
             if entity['name'] in prompt and entity['description'] not in prompt]
 
 
-async def run_evaluation_case(case: EvaluationCase, model_config, repetition: int) -> dict:
+async def run_evaluation_case(case: EvaluationCase, model_config, repetition: int, *, runtime: str = 'deepagents') -> dict:
     """Use actual session admission, executor, prompt writers, memory and billing."""
     from services.creation_agent import handler as handler_module
 
     novel, chapters, targets = await create_evaluation_project(case)
-    await AgentSettings.update_or_create(id=1, defaults={'configuration': AgentConfiguration(enabled=True).model_dump()})
+    await AgentSettings.update_or_create(id=1, defaults={'configuration': AgentConfiguration(enabled=True, runtime=runtime).model_dump()})
     conversation = await agent_sessions.create(novel.id, AuthContext())
     executor = AiTaskExecutor()
     executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
@@ -265,8 +265,8 @@ async def run_evaluation_case(case: EvaluationCase, model_config, repetition: in
     return {'case_id': case.id, 'repetition': repetition, 'model': model_config.model,
             'provider_host': urlsplit(model_config.base_url).hostname,
             'model_parameters': {'max_tokens': min(3000, model_config.max_tokens or 3000),
-                                 'thinking': model_config.thinking, 'configuration': AgentConfiguration(enabled=True).model_dump()},
-            'runtime_versions': {package: version(package) for package in ('pydantic-ai-slim', 'ag-ui-protocol', 'openai')},
+                                 'thinking': model_config.thinking, 'configuration': AgentConfiguration(enabled=True, runtime=runtime).model_dump()},
+            'runtime_versions': {package: version(package) for package in ('deepagents', 'langgraph', 'pydantic-ai-slim', 'ag-ui-protocol', 'openai')},
             'corpus_sha256': hashlib.sha256(CORPUS_PATH.read_bytes()).hexdigest(),
             'status': 'hard_failure' if any(record['hard_failures'] for record in records) else
                       'outcome_failure' if any(record['outcome_failures'] for record in records) else 'awaiting_quality_review',

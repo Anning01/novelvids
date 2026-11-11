@@ -3,6 +3,7 @@
 from services.creation_agent.authorization import public_run_input
 from utils.messages import localized_message
 
+import asyncio
 import json
 import time
 from datetime import datetime, timezone
@@ -51,11 +52,11 @@ async def authorize_run(params: dict) -> AuthContext:
     return ctx
 
 
-def configured_model(config, limits: AgentConfiguration):
+def configured_model(config, limits: AgentConfiguration, *, structured_output=True):
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
                          max_retries=0, timeout=None)
     extra_body = {}
-    if getattr(config, 'supports_json_output', False):
+    if structured_output and getattr(config, 'supports_json_output', False):
         extra_body['response_format'] = {'type': 'json_object'}
     if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
         extra_body['thinking'] = {'type': config.thinking}
@@ -81,7 +82,9 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
         return localized_message('本轮处理次数已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。')
     if '本轮 token 消耗已达到配置上限' in message or localized_message('本轮 token 消耗已达到配置上限') in message or 'total_tokens_limit' in message:
         return localized_message('本轮用量已达到上限。已保存的修改可在记录中查看，请继续描述尚未完成的调整。')
-    last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason')), None)
+    if 'Context remains above the input budget' in message:
+        return localized_message('当前工作上下文压缩后仍超过设置额度。请提高工作上下文额度，或减少本轮输入；已保存的修改仍然有效。')
+    last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason') and call.get('phase', 'main') != 'summary'), None)
     if last_finish == 'length':
         return localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。')
     if '增量修复已用完' in message or 'incremental repair' in message:
@@ -156,18 +159,22 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             context.update(await changes.prepare_context())
         from services.creation_agent.run_recovery import checkpoint_inputs
         await checkpoint_inputs(request_params)
-        model = configured_model(chosen, limits)
+        deep = request_params.get("agent_runtime") == "deepagents"
+        model = configured_model(chosen, limits, structured_output=False) if deep else configured_model(chosen, limits)
         from services.creation_agent.reliability import recovery_root
         recorded_model = RecordedAgentModel(model, message=assistant, before_request=before_request,
             max_characters=limits.context_character_limit(chosen.max_context_characters),
             request_limit=limits.request_limit, total_tokens_limit=limits.total_tokens_limit, limits=limits,
-            repair_root=await recovery_root(request_params))
+            repair_root=await recovery_root(request_params), manage_context=not deep)
+        flush_lock = asyncio.Lock()
         buffer = []
         content = ""
         last_flush = time.monotonic()
         error = ''
         next_seq = await agent_event_log.start(assistant)
         async def notify_compaction():
+            if deep:
+                deps.read_cache.clear()
             buffer.append({'type': 'CUSTOM', 'name': 'context_compaction', 'value': {'status': 'running'}})
             await flush()
         recorded_model.budget.on_compact = notify_compaction
@@ -175,15 +182,15 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         async def flush():
             nonlocal last_flush, next_seq
-            appended = False
-            if buffer:
-                next_seq = await agent_event_log.append(assistant.id, list(buffer), next_seq)
+            async with flush_lock:
+                pending = list(buffer)
                 buffer.clear()
-                appended = True
-            await AgentMessage.filter(id=assistant.id).update(content=content, updated_at=datetime.now(timezone.utc))
-            if appended:
-                await task_signals.publish(str(task_id))
-            last_flush = time.monotonic()
+                if pending:
+                    next_seq = await agent_event_log.append(assistant.id, pending, next_seq)
+                await AgentMessage.filter(id=assistant.id).update(content=content, updated_at=datetime.now(timezone.utc))
+                if pending:
+                    await task_signals.publish(str(task_id))
+                last_flush = time.monotonic()
 
         async def complete(result):
             await before_request()
@@ -214,7 +221,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             execution_token = current_execution.set(SkillExecution(request_params, assistant, before_request))
         try:
             execution = current_execution.get()
-            routed_start = bool(progressive and not request.targets and request.write_scope in {'chapter', 'project'}
+            routed_start = bool(not deep and progressive and not request.targets and request.write_scope in {'chapter', 'project'}
                 and not request.production_intents and execution and 'creation_planning' in execution.snapshot.contents)
             if routed_start:
                 # Broad production requests must not depend on the chat model
@@ -239,22 +246,29 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                     ])
                     await flush()
                     return {'conversation_id': conversation.id, 'change_ids': [], 'plan_prepared': True}
-            history = await prepare_history(conversation, assistant, limits, recorded_model)
-            context['conversation_summary'] = conversation.summary
-            async for event in stream_creation_agent(
-                message=request.message, conversation_id=str(conversation.id), run_id=task_id,
-                model=recorded_model, deps=deps,
-                usage_limits=UsageLimits(request_limit=limits.request_limit, tool_calls_limit=limits.tool_calls_limit,
-                                         total_tokens_limit=limits.total_tokens_limit),
-                model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)},
-                message_history=history, on_complete=complete,
-            ):
-                item = event.model_dump(mode="json", by_alias=True, exclude_none=True)
+            if deep:
+                from services.creation_agent.deep_execution import stream_deep_agent
+                events = stream_deep_agent(request=request, conversation=conversation, assistant=assistant,
+                    deps=deps, recorded=recorded_model, execution=execution, before_request=before_request,
+                    model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)})
+            else:
+                history = await prepare_history(conversation, assistant, limits, recorded_model)
+                context['conversation_summary'] = conversation.summary
+                events = stream_creation_agent(
+                    message=request.message, conversation_id=str(conversation.id), run_id=task_id,
+                    model=recorded_model, deps=deps,
+                    usage_limits=UsageLimits(request_limit=limits.request_limit, tool_calls_limit=limits.tool_calls_limit,
+                                             total_tokens_limit=limits.total_tokens_limit),
+                    model_settings={"max_tokens": min(limits.max_output_tokens, chosen.max_tokens or limits.max_output_tokens)},
+                    message_history=history, on_complete=complete,
+                )
+            async for event in events:
+                item = event if isinstance(event, dict) else event.model_dump(mode="json", by_alias=True, exclude_none=True)
                 kind = item["type"]
                 if routed_start and kind == 'RUN_STARTED':
                     continue
                 item["timestamp"] = int(time.time() * 1000)
-                if kind.startswith('TEXT_MESSAGE') and item.get('messageId') != final_message_id:
+                if not deep and kind.startswith('TEXT_MESSAGE') and item.get('messageId') != final_message_id:
                     # Some models put planning/retries in ordinary content.
                     # Stream tool progress, then publish only the validated reply.
                     continue

@@ -1,4 +1,5 @@
 """Model-directed pace, voice timeline structure and retry preservation."""
+from test.agent_stream_fixtures import streaming_model
 import json
 
 import pytest
@@ -90,7 +91,7 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
             shots[1]['sequence'] = 2
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots': shots})])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await scene_controller.generate(chapter.id, replace_existing=True)

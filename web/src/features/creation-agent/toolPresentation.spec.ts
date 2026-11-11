@@ -4,6 +4,7 @@ import { setLocale } from '@/i18n'
 afterEach(() => setLocale('zh'))
 describe('shared Agent tool presentation', () => {
   it('reuses the existing progress wording and hides internal names for local terminal tools', () => {
+    expect(creationAgentToolOperationLabel('read_file')).toBe('读取创作资料')
     expect(creationAgentToolOperationLabel('read_creation_history')).toBe('回查对话历史')
     expect(creationAgentToolProgressLabel('read_creation_history')).toBe('正在回查对话历史')
     expect(creationAgentToolProgressLabel('get_creation_context')).toBe('正在读取创作上下文')

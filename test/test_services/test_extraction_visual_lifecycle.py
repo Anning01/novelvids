@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 import json
 
 import pytest
@@ -284,7 +285,7 @@ async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(
             [{'name': placeholder.canonical_name, 'base_traits': prompt}] if repair_omission else [])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
             {'persons': persons, 'scenes': [], 'items': []})])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -352,7 +353,7 @@ async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
             persons.append({'name': '合格人物', 'base_traits': '不允许覆盖已通过的设计'})
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'persons': persons, 'scenes': [], 'items': []})])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)

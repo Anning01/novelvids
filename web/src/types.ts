@@ -28,6 +28,9 @@ export interface WorkbenchCapabilities {
 }
 
 export interface NovelMeta {
+  episodes_managed?: boolean
+  audiovisual_guidance?: string | null
+  storyboard_enabled?: boolean
   video_generation_defaults?: VideoDefaults | null
   id: number
   name: string
@@ -52,7 +55,7 @@ export interface NovelMeta {
   updated_at: string
 }
 export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
-export interface Novel { video_generation_defaults?: VideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface Novel { audiovisual_guidance?: string | null; storyboard_enabled?: boolean; video_generation_defaults?: VideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface ProjectProduction {
   chapter_count: number
   storyboard_chapter_count: number

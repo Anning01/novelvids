@@ -15,10 +15,10 @@ from services.creation_agent.sessions import agent_sessions
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
-async def session_fixture():
+async def session_fixture(runtime='pydantic_ai'):
     config = await AiModelConfig.create(task_type=AiTaskTypeEnum.creation_agent.value,
         name='test-agent', model='test-model', base_url='https://example.invalid/v1', api_key='fake-test-key', supports_tool_calls=True, is_active=True)
-    await AgentSettings.update_or_create(id=1, defaults={'configuration': AgentConfiguration(enabled=True).model_dump()})
+    await AgentSettings.update_or_create(id=1, defaults={'configuration': AgentConfiguration(enabled=True, runtime=runtime).model_dump()})
     novel = await Novel.create(name='会话测试')
     chapter = await Chapter.create(novel=novel, number=1, name='第一章', content='合成书稿')
     scene = await Scene.create(chapter=chapter, sequence=1, prompt='空站台', duration=6)

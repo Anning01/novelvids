@@ -26,6 +26,8 @@ class NovelProperties(BaseModel):
     author: Optional[str] = Field(None, description="作者", max_length=255)
     description: Optional[str] = Field(None, description="描述")
     cover: Optional[str] = Field(None, description="封面图URL")
+    audiovisual_guidance: str | None = Field(None, max_length=4000)
+    storyboard_enabled: bool = False
     total_chapters: Optional[int] = Field(None, description="总章节数")
     video_generation_defaults: VideoDefaults | None = None
     video_model_config_id: Optional[int] = Field(
@@ -114,6 +116,7 @@ class NovelMetaOut(NovelProperties, BaseResponse):
     style_key: Optional[str] = Field(None, description="视觉风格 key", max_length=64)
     storyboard_strategy: Optional[str] = Field(None, description="分镜策略 key", max_length=120)
     storyboard_setting: Optional[str] = Field(None, description="分镜策略说明")
+    episodes_managed: bool = False
     content_length: int = Field(0, description="书稿正文字符数（校验拆分质量用）")
     cover_thumbnail: Optional[str] = Field(None, description="项目列表封面缩略图")
     cover_preview: Optional[str] = Field(None, description="项目详情封面预览图")

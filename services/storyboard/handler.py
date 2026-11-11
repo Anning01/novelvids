@@ -70,6 +70,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
         # 3. 调用 OpenAI API 生成分镜
         creative_constraints = await creation_memory.for_generation(chapter, assets)
+        if chapter.novel.audiovisual_guidance:
+            creative_constraints.append({"scope": {"kind": "project"}, "content": chapter.novel.audiovisual_guidance})
         seen_assets = await previously_seen_assets(chapter, entities)
         start_time = time.time()
 
@@ -187,6 +189,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
+        await chapter.fetch_related("novel")
         for shot in storyboard.shots:
             normalized = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities or []))
             bindings = shot_variant_bindings(normalized, entities or [])
@@ -276,6 +279,14 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     entities=entities or [],
                     strategy=strategy,
                 )
+            if chapter.novel.storyboard_enabled:
+                import json
+                from prompts.skills.scripts.storyboard_sheets import prepare
+                from prompts.skill_pack import read_skill
+                templates = json.loads(read_skill("storyboard_sheet_templates"))[normalize_prompt_language(prompt_language)]
+                data = shot.model_dump()
+                data["prompt"] = prompt
+                prompt_params["storyboard_sheet"] = prepare({"shots": [data]}, templates)[0]
             # 镜头实际引用的资产 ID，持久化到 scene.assets（与画布工作流共用同一份引用数据）
             referenced_asset_ids = list(dict.fromkeys(
                 entity.asset_id

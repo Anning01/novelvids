@@ -27,6 +27,11 @@ class ChapterFullProperties(ChapterProperties):
 
 # --- 输入 Schema (In-bound) ---
 
+class ChapterExtractRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    conversation_id: int | None = Field(None, gt=0)
+
+
 class ChapterCreate(ChapterFullProperties):
     """创建请求：number/name 可选（后端自动计算）"""
     number: Optional[int] = Field(None, description="章节序号，不传则自动递增")

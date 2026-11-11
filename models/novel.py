@@ -36,6 +36,9 @@ class Novel(AbstractBaseModel):
         null=True,
         description="项目设定说明",
     )
+    episodes_managed = fields.BooleanField(default=False)
+    audiovisual_guidance = fields.TextField(null=True)
+    storyboard_enabled = fields.BooleanField(default=False)
     storyboard_strategy = fields.CharField(
         max_length=120,
         blank=True,

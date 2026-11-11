@@ -3,6 +3,7 @@
 from utils.messages import localized_message
 
 import hashlib
+from datetime import datetime, timezone
 from models.ai_task import AiTask
 from models.creation_agent import AgentConversation, AgentMessage
 from services.creation_agent.skill_execution import (
@@ -23,11 +24,10 @@ async def conversation_for_task(task):
     chosen, _ = await require_agent(
         params.get("team_id"), params["assistant_model_config_id"]
     )
-    conversation = await AgentConversation.create(
-        novel_id=params["novel_id"],
-        created_by=params.get("user_id"),
-        team_id=params.get("team_id"),
-    )
+    from services.creation_agent.handler import authorize_run
+    from services.creation_agent.sessions import agent_sessions
+    ctx = await authorize_run(params)
+    conversation = await agent_sessions.default(params['novel_id'], ctx, params.get('conversation_id'))
     digest = hashlib.sha256(str(task.id).encode()).hexdigest()
     operation = params.get("operation") or SKILLS.get(task.task_type, "editing")
     labels = {
@@ -110,7 +110,11 @@ async def conversation_for_task(task):
             "pricing": chosen.pricing,
         },
     )
-    await AgentConversation.filter(id=conversation.id).update(active_task_id=task.id)
+    await AgentConversation.filter(id=conversation.id).update(updated_at=datetime.now(timezone.utc))
+    # A nested production task must not replace the active conversational run.
+    active = await AiTask.get_or_none(id=conversation.active_task_id) if conversation.active_task_id else None
+    if active is None or active.status not in {TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued}:
+        await AgentConversation.filter(id=conversation.id, active_task_id=conversation.active_task_id).update(active_task_id=task.id)
     return message
 
 

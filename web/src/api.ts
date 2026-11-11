@@ -305,7 +305,7 @@ export const api = {
   createChapter: (data: Partial<Chapter>) => request<SingleResponse<Chapter>>('/chapter', { method: 'POST', body: JSON.stringify(data) }),
   updateChapter: (id: number, data: Partial<Chapter>) => request<SingleResponse<Chapter>>(`/chapter/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteChapter: (id: number) => request<SingleResponse<null>>(`/chapter/${id}`, { method: 'DELETE' }),
-  extract: (chapterId: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST' }),
+  extract: (chapterId: number, conversationId?: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST', ...(conversationId ? { body: JSON.stringify({ conversation_id: conversationId }) } : {}) }),
   latestExtraction: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/chapter/extract/${chapterId}/latest`),
   assets: (novelId: number, page = 1, pageSize = 100, chapterId?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, chapter_id: chapterId })}`),
   referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),

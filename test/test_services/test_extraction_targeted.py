@@ -1,4 +1,5 @@
 """Targeted omissions cannot be hidden by a completed chapter receipt."""
+from test.agent_stream_fixtures import streaming_model
 
 from unittest.mock import AsyncMock, patch
 
@@ -48,7 +49,7 @@ async def targeted_run(chapter, snapshot, inventory, *, extra=False, revise=Fals
             if extra:
                 payload['scenes'] = [{'name': '未指定场景', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}]
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     async def prepare(task, execution):
         await prepare_direct_plan(task, execution)

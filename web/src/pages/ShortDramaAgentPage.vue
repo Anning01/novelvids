@@ -8,7 +8,6 @@ import {
   BookOpenText,
   Bot,
   Check,
-  ChevronDown,
   Clapperboard,
   FileText,
   Film,
@@ -27,6 +26,7 @@ import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
 import ProjectCover from '@/components/ProjectCover.vue'
@@ -105,7 +105,14 @@ const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.projectId))
 const activeEpisode = ref(1)
-const showingAllCharacters = ref(false)
+const episodeBusy = ref(false)
+const styles = ref<{key: string, label: string}[]>([])
+const styleOptions = computed(() => [
+  {value: 'auto', label: tr('按剧情决定')},
+  ...styles.value.filter(item => item.key !== 'auto').map(item => ({value: item.key, label: tr(item.label)})),
+  {value: 'custom', label: tr('自定义风格')},
+])
+const styleLabel = computed(() => projectView.value.customStyle || styleOptions.value.find(item => item.value === projectView.value.styleKey)?.label || projectView.value.styleKey)
 const analysisTask = ref<AiTask | null>(null)
 const analysisError = ref('')
 const {
@@ -160,8 +167,6 @@ const displayedProjectName = computed(() => editing.value && projectDraft.value
   ? projectDraft.value.name
   : project.value.name)
 const displayedTags = computed(() => normalizeTags(projectView.value.tagsText))
-const characters = computed(() => analysisResult.value?.key_characters ?? [])
-const visibleCharacters = computed(() => showingAllCharacters.value ? characters.value : characters.value.slice(0, 4))
 const selectedEpisodeBrief = computed(() => chapters.value.find(item => item.number === activeEpisode.value) ?? chapters.value[0])
 const selectedEpisode = computed(() => {
   const chapter = selectedEpisodeBrief.value
@@ -206,7 +211,6 @@ const analysisStatus = computed(() => {
   if (hasScriptPreview.value) return tr('剧本已载入')
   return tr('准备分析')
 })
-const characterColors = ['#6a6cf4', '#df9854', '#4c9d89', '#ad6d9e', '#df7790', '#8d73db']
 async function loadProject(): Promise<boolean> {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
   try {
@@ -219,7 +223,7 @@ async function loadProject(): Promise<boolean> {
       narratorVoice.value = null
     }
     const contentLength = response.data.content_length || 0
-    if (contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
+    if (!response.data.episodes_managed && contentLength >= 30_000 && (response.data.total_chapters || 0) <= 1) {
       notice.error(tr('书稿约 {p0} 字但只拆分出 {p1} 章，已阻止进入。请重新上传并检查文件编码或章节标题。', { p0: contentLength.toLocaleString(dateLocale.value), p1: response.data.total_chapters || 0 }))
       await router.replace('/create/short-drama')
       return false
@@ -252,11 +256,11 @@ async function loadStoryboardStrategies() {
   }
 }
 
-async function loadChapters() {
+async function loadChapters(preferredId = Number(route.query.chapter)) {
   try {
     resetChapters()
     await loadMoreChapters()
-    const requestedChapterId = Number(route.query.chapter)
+    const requestedChapterId = preferredId
     const requestedChapter = await ensureChapter(requestedChapterId)
     if (requestedChapter) {
       activeEpisode.value = requestedChapter.number
@@ -364,7 +368,7 @@ function ensureChapterDraft(chapter: Chapter) {
 }
 
 function beginEditing() {
-  if (!novel.value || !analysisResult.value) return
+  if (!novel.value || !canEdit.value) return
   narratorVoiceBeforeEditing.value = narratorVoice.value
   projectDraft.value = createProjectAnalysisDraft(
     novel.value,
@@ -405,6 +409,10 @@ function cancelEditing(restoreVoice = true) {
 
 async function saveEdits() {
   if (!novel.value || !projectDraft.value || savingEdits.value) return
+  if (projectDraft.value.styleKey === 'custom' && !projectDraft.value.customStyle?.trim()) {
+    notice.error(tr('自定义风格不能为空'))
+    return
+  }
   const projectPatch = projectPatchFromDraft(projectDraft.value, initialProjectDraft.value)
   if ('name' in projectPatch && !projectPatch.name) {
     notice.error(tr('小说昵称不能为空'))
@@ -468,6 +476,42 @@ async function saveEdits() {
   }
 }
 
+async function addEpisode() {
+  if (episodeBusy.value || editing.value || !canEdit.value) return
+  episodeBusy.value = true
+  try {
+    const {data} = await api.createChapter({novel_id: projectId.value, content: ''})
+    await loadChapters(data.id)
+    await selectEpisode(data.number)
+    beginEditing()
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    episodeBusy.value = false
+  }
+}
+
+async function removeEpisode() {
+  const target = selectedEpisodeBrief.value
+  if (!target || episodeBusy.value || editing.value || !canEdit.value) return
+  episodeBusy.value = true
+  try {
+    if (!await appConfirm({title: tr('删除本集'), message: episodeDisplayLabel(target), confirmLabel: tr('删除')})) return
+    await api.deleteChapter(target.id)
+    delete chapterDetails.value[target.id]
+    delete chapterAssets.value[target.id]
+    const neighbor = chapters.value.find(item => item.id !== target.id)
+    await router.replace({query: {...route.query, chapter: neighbor ? String(neighbor.id) : undefined}})
+    await loadChapters(neighbor?.id ?? 0)
+    if (neighbor) await selectEpisode(neighbor.number)
+    if (novel.value) novel.value.total_chapters = chaptersTotal.value
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    episodeBusy.value = false
+  }
+}
+
 function continueToSettings() {
   notice.success(tr('剧本分析已确认，正在进入角色与场景设定'))
   void router.push({
@@ -505,6 +549,7 @@ onMounted(async () => {
   const [, projectReady] = await Promise.all([
     loadStoryboardStrategies(),
     loadProject(),
+    api.visualStyles().then(response => { styles.value = response.data }).catch(error => notice.error(error.message)),
   ])
   if (projectReady) await loadAnalysis()
   observeEpisodeSentinel()
@@ -548,7 +593,7 @@ onBeforeUnmount(() => {
           </AppBadge>
           <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" :aria-label="tr('小说昵称')" maxlength="255" />
           <h1 v-else>{{ project.name }}</h1>
-          <p><FileText :size="14" />{{ analysisResult?.chapter_count || chaptersTotal || 0 }} {{ tr('章') }} <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
+          <p><FileText :size="14" />{{ chaptersTotal }} {{ tr('章') }} <i /> <Film :size="14" />{{ project.aspectRatio }} <i /> <MonitorPlay :size="14" />{{ project.resolution }}</p>
           <label v-if="editing && projectDraft" class="tag-editor">
             <span>{{ tr('项目标签') }}</span>
             <input v-model="projectDraft.tagsText" :placeholder="tr('使用逗号分隔，例如：都市，热血，成长')" />
@@ -564,7 +609,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <AppButton v-if="canEdit" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
-            <AppButton v-if="canEdit && analysisResult" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
+            <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
       </div>
@@ -584,19 +629,22 @@ onBeforeUnmount(() => {
       </section>
 
       <div v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status"><p>{{ analysisResult.cover_warning }}</p><p v-if="analysisResult.cover_error">{{ analysisResult.cover_error }}</p></div>
-      <template v-if="hasScriptPreview">
+      <template v-if="novel">
       <section class="analysis-section">
         <header><div><span class="section-kicker">PRODUCTION PROFILE</span><h2>{{ tr('项目设定') }}</h2></div></header>
         <div class="profile-grid">
           <article class="profile-card">
             <span><Bot :size="18" /></span>
             <div>
-              <small>{{ tr('剧本类型') }}</small>
+              <small>{{ tr('全局风格') }}</small>
               <template v-if="editing && projectDraft">
-                <input v-model="projectDraft.projectType" :aria-label="tr('剧本类型')" maxlength="120" />
-                <textarea v-model="projectDraft.projectSetting" :aria-label="tr('项目设定说明')" rows="3" />
+                <AppSelect v-model="projectDraft.styleKey" :options="styleOptions" :aria-label="tr('全局风格')" />
+                <textarea v-if="projectDraft.styleKey === 'custom'" v-model="projectDraft.customStyle" :aria-label="tr('自定义风格')" maxlength="2000" rows="3" />
               </template>
-              <template v-else><strong>{{ projectView.projectType }}</strong><p>{{ projectView.projectSetting }}</p></template>
+              <strong v-else>{{ styleLabel }}</strong>
+              <small>{{ tr('项目设定说明') }}</small>
+              <textarea v-if="editing && projectDraft" v-model="projectDraft.projectSetting" :aria-label="tr('项目设定说明')" rows="3" />
+              <p v-else>{{ projectView.projectSetting }}</p>
             </div>
           </article>
           <article class="profile-card">
@@ -637,23 +685,23 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="analysis-section">
-        <header><div><span class="section-kicker">CHARACTER BIBLE</span><h2>{{ tr('人物小传') }}</h2></div><span>{{ characters.length }} {{ tr('位主要人物') }}</span></header>
-        <div class="character-grid">
-          <article v-for="(character, index) in visibleCharacters" :key="character.name" class="character-card">
-            <div class="character-title"><span :style="{ '--character-accent': characterColors[index % characterColors.length] }">{{ character.name.slice(0, 1) }}</span><div><h3>{{ character.name }}</h3><small>{{ character.role }}</small></div></div>
-            <p>{{ character.description }}</p>
-            <div class="episode-appearances"><small>{{ tr('出场章节') }}</small><AppBadge v-for="chapterNumber in character.chapter_numbers" :key="chapterNumber" size="sm">{{ tr('第') }} {{ chapterNumber }} {{ tr('章') }}</AppBadge></div>
-          </article>
-        </div>
-        <AppButton v-if="characters.length > 4" class="show-more" variant="ghost" size="sm" block type="button" @click="showingAllCharacters = !showingAllCharacters">
-          {{ showingAllCharacters ? tr('收起人物') : tr('查看全部人物') }}<ChevronDown :class="{ 'is-up': showingAllCharacters }" :size="15" />
-        </AppButton>
+        <header><h2>{{ tr('全片视听约定') }}</h2></header>
+        <article class="profile-card">
+          <div v-if="editing && projectDraft">
+            <textarea v-model="projectDraft.audiovisualGuidance" :aria-label="tr('全片视听约定')" :placeholder="tr('按剧情决定')" maxlength="4000" rows="3" />
+            <label><input type="checkbox" v-model="projectDraft.storyboardEnabled" /> {{ tr('逐镜线稿故事版') }}</label>
+          </div>
+          <div v-else><p>{{ projectView.audiovisualGuidance || tr('按剧情决定') }}</p><small>{{ tr('逐镜线稿故事版') }} · {{ projectView.storyboardEnabled ? tr('开启') : tr('关闭') }}</small></div>
+        </article>
       </section>
 
       <section class="analysis-section episode-section">
         <header>
           <div><span class="section-kicker">EPISODE CHAPTERS</span><h2>{{ tr('分集剧情') }}</h2><p>{{ tr('复用项目的分章节结构，每一集对应一个章节。') }}</p></div>
-          <span>{{ chaptersTotal }} {{ tr('章') }}</span>
+          <div v-if="canEdit && !editing" class="episode-actions">
+            <AppButton variant="secondary" size="sm" :disabled="episodeBusy" @click="addEpisode">{{ tr('新增集') }}</AppButton>
+            <AppButton v-if="selectedEpisodeBrief" variant="ghost" size="sm" :disabled="episodeBusy" @click="removeEpisode">{{ tr('删除本集') }}</AppButton>
+          </div>
         </header>
         <div ref="episodeTabs" class="episode-tabs" role="tablist" :aria-label="tr('分集剧情')" tabindex="0">
           <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only type="button" role="tab" :active="activeEpisode === chapter.number" :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</AppButton>
@@ -689,6 +737,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.episode-actions { display: flex; gap: 8px; }
+.profile-card input[type="checkbox"] { width: auto; accent-color: var(--app-accent); }
 .creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }
 .creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
 .creation-stage-guide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 24px; padding: 18px 20px; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-text); background: var(--app-surface); }

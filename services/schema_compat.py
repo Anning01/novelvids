@@ -175,7 +175,10 @@ async def ensure_novel_analysis_schema() -> None:
     """为已有 SQLite 项目补齐分析字段与工作台偏好。"""
     if settings.DATABASE_URL.startswith(('postgres://', 'postgresql://')):
         await Tortoise.get_connection('default').execute_script(
-            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS video_generation_defaults JSONB;')
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS video_generation_defaults JSONB;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS episodes_managed BOOLEAN NOT NULL DEFAULT FALSE;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS audiovisual_guidance TEXT;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS storyboard_enabled BOOLEAN NOT NULL DEFAULT FALSE;')
         return
     if not settings.DATABASE_URL.startswith("sqlite"):
         return
@@ -189,6 +192,9 @@ async def ensure_novel_analysis_schema() -> None:
     definitions = {
         "tags": "JSON",
         "story_outline": "TEXT",
+        "episodes_managed": "BOOL NOT NULL DEFAULT 0",
+        "audiovisual_guidance": "TEXT",
+        "storyboard_enabled": "BOOL NOT NULL DEFAULT 0",
         "project_type": "VARCHAR(120)",
         "project_setting": "TEXT",
         "storyboard_strategy": "VARCHAR(120)",

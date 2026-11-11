@@ -31,6 +31,13 @@ FILES = {
     "source_reading": "runtime/source_reading.md",
     "story": "runtime/story.md",
     "storyboard": "novelvids-storyboard/references/storyboard.md",
+    "storyboard_sheets": "novelvids-storyboard/references/storyboard_sheets.md",
+    "storyboard_sheet_templates": "novelvids-storyboard/references/storyboard_sheet_templates.json",
+    "model_optimization": "novelvids-video/references/model_optimization.md",
+    "video_prompt_models": "novelvids-video/references/video_prompt_models.json",
+    "draw_blocking_script": "scripts/draw_blocking.py",
+    "storyboard_sheets_script": "scripts/storyboard_sheets.py",
+    "select_video_optimizer_script": "scripts/select_video_optimizer.py",
     "speech_pacing": "novelvids-storyboard/references/speech_pacing.md",
     "storyboard_contract": "novelvids-storyboard/references/storyboard_contract.json",
     "storyboard_templates": "novelvids-storyboard/references/storyboard_templates.json",
@@ -42,6 +49,10 @@ FILES = {
     "video": "novelvids-video/references/video.md",
     "video_presentation": "novelvids-storyboard/references/video_presentation.md",
 }
+
+# Package entrypoints share the same immutable snapshot as their references.
+FILES.update({path.parent.name: str(path.relative_to(ROOT))
+              for path in sorted(ROOT.glob("novelvids-*/SKILL.md"))})
 
 
 class SkillSnapshot(BaseModel):
@@ -83,7 +94,7 @@ def read_skill(name: str) -> str:
         return snapshot.read(name)
     path = ROOT / FILES[name]
     content = path.read_text(encoding="utf-8")
-    if path.suffix == ".md":
+    if path.suffix in {".md", ".py"}:
         if not content.strip():
             raise ValueError(f"Invalid {name}: instructions must not be empty")
     else:
@@ -152,6 +163,7 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_k
         + "\n任务语言 language="
         + language
         + "\n"
+        + (snapshot.read(package) + "\n" if (package := FILES[skill].split("/")[0]) in snapshot.contents else "")
         + snapshot.read(skill)
         + contract
     )

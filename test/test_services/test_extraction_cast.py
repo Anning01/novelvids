@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -81,7 +82,7 @@ async def test_new_unregistered_character_is_required_and_only_omission_is_repai
             payload = {'persons': [{'name': name, 'base_traits': prompt} for name in names], 'scenes': [], 'items': []}
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -202,7 +203,7 @@ async def test_same_name_assets_of_all_categories_are_saved_independently(langua
             payload = {field: [{'name': '晨星', 'base_traits': fixed_asset_prompt(language, kind=kind, snapshot=snapshot)}]
                        for field, kind in [('persons', 'person'), ('scenes', 'scene'), ('items', 'item')]}
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -267,7 +268,7 @@ async def test_extraction_persists_people_scenes_and_system_prop_without_false_c
                 assert '会议室' in retry and '系统' in retry and '角色甲' in retry
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)

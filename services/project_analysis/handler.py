@@ -170,7 +170,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
 
         chapter_query = Chapter.filter(novel_id=novel_id).order_by("number")
         chapter_count = await chapter_query.count()
-        if not chapter_count:
+        if not chapter_count and not novel.episodes_managed:
             await novel_controller.split(novel_id)
             chapter_count = await chapter_query.count()
 
@@ -222,7 +222,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         async def persist_analysis():
             from services.creation_objects import project_write
             async with project_write(novel_id):
-                novel.total_chapters = chapter_count
+                novel.total_chapters = await Chapter.filter(novel_id=novel_id).count()
                 novel.tags = analysis.book_types
                 novel.story_outline = analysis.story_outline
                 await novel.save(update_fields=["total_chapters", "tags", "story_outline", "updated_at"])

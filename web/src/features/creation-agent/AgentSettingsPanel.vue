@@ -18,7 +18,7 @@ const saving = ref(false)
 const error = ref('')
 const dirty = computed(() => Boolean(configuration.value && JSON.stringify(configuration.value) !== savedSnapshot.value))
 interface BudgetField {
-  key: Exclude<keyof AgentConfiguration, 'enabled'>
+  key: Exclude<keyof AgentConfiguration, 'enabled' | 'runtime'>
   label: string
   unit: string
   ratio?: boolean

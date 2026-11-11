@@ -218,7 +218,7 @@ npm run dev
 
 ## 开发与社区
 
-前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
+前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Deep Agents 和 Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
 
 欢迎带着实际创作问题参与：[报告问题](https://github.com/Anning01/novelvids/issues/new) · [讨论需求](https://github.com/Anning01/novelvids/issues) · [提交贡献](https://github.com/Anning01/novelvids/pulls)。报告生成问题时，提供可公开的最小样例、模型配置类型和复现步骤，别附 Key 或私人素材。
 
@@ -249,3 +249,5 @@ npm run dev
   </a>
 </p>
 <!-- star-growth-card:end -->
+
+创作助手的新会话由 Python Deep Agents 管理工具循环、按需技能加载和上下文整理，业务工具继续校验权限、版本和输出协议。会话检查点默认保存在 `data/creation_agent_checkpoints.db`，可用 `CREATION_AGENT_CHECKPOINT_PATH` 指定位置；需要保留长会话恢复能力时，请将该状态文件纳入备份。历史运行保留原执行路径。

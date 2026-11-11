@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import completion_stream_response, streaming_model
 from unittest.mock import AsyncMock
 
 import pytest
@@ -91,7 +92,7 @@ async def test_invalid_json_keeps_original_response_and_stops_before_third_paid_
         calls.append(messages)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, '{"prompt": "unclosed')])
 
-    model = RecordedAgentModel(FunctionModel(respond), message=message, before_request=AsyncMock(),
+    model = RecordedAgentModel(streaming_model(respond), message=message, before_request=AsyncMock(),
         max_characters=None, repair_root=str(task.id), stage='assets')
     with pytest.raises(RepairExhausted):
         await Agent(output_type=CompletePrompt, retries=3).run('生成', model=model)
@@ -259,7 +260,7 @@ async def test_structured_json_generation_sends_configured_response_format_witho
 
     def respond(request):
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={'id': 'local', 'created': 1, 'model': 'test', 'object': 'chat.completion',
+        return completion_stream_response({'id': 'local', 'created': 1, 'model': 'test', 'object': 'chat.completion',
             'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': '{"prompt":"完整设计"}'}, 'finish_reason': 'stop'}],
             'usage': {'prompt_tokens': 100, 'completion_tokens': 10, 'total_tokens': 110}})
 
@@ -403,7 +404,7 @@ async def test_resumed_planning_replays_completed_model_output_without_a_second_
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '已校验的内容'})])
 
     def model(*_):
-        result = FunctionModel(respond)
+        result = streaming_model(respond)
         result.client = AsyncMock()
         return result
 
@@ -466,3 +467,20 @@ async def test_storyboard_draft_renders_canonical_sections_with_default_strategy
     await scene.refresh_from_db()
     assert '【禁止项】' in scene.prompt and '【全局前置条件】' in scene.prompt
     assert '镜头时长:6s' in scene.prompt and '老人在晨雾中漫步' in scene.prompt
+
+
+@pytest.mark.asyncio
+async def test_summary_output_limit_does_not_block_main_tool_repair():
+    from pydantic_ai.messages import ModelRequest, RetryPromptPart
+    from pydantic_ai.models.function import FunctionModel
+    from services.creation_agent.model_boundary import RecordedAgentModel
+    from models.creation_agent import AgentConversation
+    from pydantic_ai.models import ModelRequestParameters
+    changes, _, _, _, task = await crud()
+    conversation = await AgentConversation.create(novel_id=changes.novel_id)
+    message = await AgentMessage.create(conversation=conversation, task=task, request_id=task.id, request_hash='summary-limit', role='assistant')
+    model = RecordedAgentModel(FunctionModel(lambda messages, info: None), message=message, before_request=AsyncMock(), max_characters=None, repair_root=str(task.id))
+    model.calls = [{'phase': 'main', 'finish_reason': 'tool_call', 'usage_reported': True}, {'phase': 'summary', 'finish_reason': 'length', 'usage_reported': True}]
+    await model._begin([ModelRequest(parts=[RetryPromptPart('invalid tool arguments', tool_name='link_scene_references', tool_call_id='repair')])], ModelRequestParameters())
+    repair = await AgentOperation.get(task=task, key='recovery:repair')
+    assert repair.state == 'completed'

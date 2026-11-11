@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import streaming_model
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -79,7 +80,7 @@ async def test_actual_model_retry_requests_only_invalid_shot_and_saves_all_other
             assert 'keep-first' not in retry and 'keep-third' not in retry
             shots = [raw_shot(2, repair_of=2), raw_shot(1, repair_of=1, description='unwanted rewrite')]
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots': shots})])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await scene_controller.generate(chapter.id)

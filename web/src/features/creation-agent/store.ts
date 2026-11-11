@@ -145,12 +145,18 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     }
   }
 
+  function selectionKey(novelId = projectId.value) {
+    return `creation-agent:conversation:${getActiveTeamId() ?? 'personal'}:${novelId}`
+  }
+
   async function selectConversation(id: number | null) {
+    const sameConversation = conversationId.value === id
     disconnect()
     epoch += 1
     conversationId.value = id
+    if (id !== null) sessionStorage.setItem(selectionKey(), String(id))
     currentRun.value = null
-    messages.value = []
+    if (!sameConversation) messages.value = []
     error.value = ''
     statusText.value = ''
     observed.clear()
@@ -195,7 +201,9 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       if (revision !== epoch) return
       capabilities.value = available.data
       conversations.value = listed.data
-      const selected = listed.data.find(item => item.id === conversationId.value) ?? listed.data[0]
+      const remembered = Number(sessionStorage.getItem(selectionKey(novelId)))
+      const selected = listed.data.find(item => item.id === conversationId.value)
+        ?? listed.data.find(item => item.id === remembered) ?? listed.data[0]
       await selectConversation(selected?.id ?? null)
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('加载助手失败')
@@ -206,8 +214,15 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (!projectId.value || loading.value) return
     const revision = epoch
     const id = projectId.value
+    const selectedId = conversationId.value
+    const previous = conversations.value.find(item => item.id === selectedId)
     const listed = await agentApi.conversations(id)
-    if (revision === epoch && projectId.value === id) conversations.value = listed.data
+    if (revision !== epoch || projectId.value !== id) return
+    conversations.value = listed.data
+    const selected = listed.data.find(item => item.id === selectedId)
+    if (selected && !busy.value && (selected.updated_at !== previous?.updated_at || selected.active_task_id !== previous?.active_task_id)) {
+      await selectConversation(selected.id)
+    }
   }
 
   async function newConversation() {
@@ -267,10 +282,11 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     const frozenInput: Omit<AgentRunInput, 'request_id'> = JSON.parse(JSON.stringify(content))
     try {
       if (!conversationId.value) {
-        const created = await agentApi.create(projectId.value)
+        const created = await agentApi.resumeOrCreate(projectId.value)
         if (revision !== epoch) return false
         conversations.value.unshift(created.data)
         conversationId.value = created.data.id
+        sessionStorage.setItem(selectionKey(), String(created.data.id))
       }
       const id = conversationId.value
       const receipt = await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]),

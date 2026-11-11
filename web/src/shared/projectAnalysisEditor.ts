@@ -17,6 +17,10 @@ export interface ProjectAnalysisDraft {
   name: string
   tagsText: string
   storyOutline: string
+  styleKey?: string
+  customStyle?: string
+  audiovisualGuidance?: string
+  storyboardEnabled?: boolean
   projectType: string
   projectSetting: string
   storyboardStrategy: string
@@ -32,6 +36,7 @@ export interface ChapterEditDraft {
 
 type EditableNovel = Pick<
   Novel,
+  | 'style_key' | 'custom_style_prompt' | 'audiovisual_guidance' | 'storyboard_enabled'
   | 'name'
   | 'tags'
   | 'story_outline'
@@ -60,6 +65,10 @@ export function createProjectAnalysisDraft(
   const strategy = resolveStoryboardStrategy(novel.storyboard_strategy, strategies)
   return {
     name: novel.name,
+    styleKey: novel.custom_style_prompt ? 'custom' : novel.style_key || 'auto',
+    customStyle: novel.custom_style_prompt || '',
+    audiovisualGuidance: novel.audiovisual_guidance || '',
+    storyboardEnabled: novel.storyboard_enabled ?? false,
     tagsText: tags.join('，'),
     storyOutline: novel.story_outline ?? analysis?.story_outline ?? '',
     projectType: novel.project_type ?? tr(DEFAULT_PROJECT_TYPE),
@@ -87,8 +96,17 @@ export function projectPatchFromDraft(
   draft: ProjectAnalysisDraft,
   initial?: ProjectAnalysisDraft | null,
 ): Partial<Novel> {
+  const settings: Partial<Novel> = {}
+  if (draft.styleKey && (draft.styleKey !== initial?.styleKey ||
+      (draft.styleKey === 'custom' && draft.customStyle !== initial?.customStyle))) {
+    settings.style_key = ['auto', 'custom'].includes(draft.styleKey) ? null : draft.styleKey
+    settings.custom_style_prompt = draft.styleKey === 'custom' ? draft.customStyle?.trim() : null
+  }
+  if (draft.audiovisualGuidance !== initial?.audiovisualGuidance) settings.audiovisual_guidance = draft.audiovisualGuidance?.trim() || null
+  if (draft.storyboardEnabled !== initial?.storyboardEnabled) settings.storyboard_enabled = draft.storyboardEnabled
   if (!initial) {
     return {
+      ...settings,
       name: draft.name.trim(),
       tags: normalizeTags(draft.tagsText),
       story_outline: draft.storyOutline.trim(),
@@ -102,7 +120,7 @@ export function projectPatchFromDraft(
     }
   }
 
-  const patch: Partial<Novel> = {}
+  const patch: Partial<Novel> = settings
   const nextName = draft.name.trim()
   if (nextName !== initial.name.trim()) {
     patch.name = nextName
