@@ -31,8 +31,11 @@ def test_stage_exports_without_application_files(tmp_path, name):
     for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
         assert target.resolve().is_relative_to(package)
         assert target.read_bytes() == (source.parent / match[2]).read_bytes()
-    scripts = [p.name for p in package.rglob("*.py")]
-    assert scripts == (["draw_blocking.py"] if name in {"storyboard", "remake"} else [])
+    scripts = {p.name for p in package.rglob("*.py")}
+    expected_scripts = {"draw_blocking.py"} if name in {"storyboard", "remake"} else set()
+    if name == "storyboard":
+        expected_scripts.add("storyboard_sheets.py")
+    assert scripts == expected_scripts
     assert list(tmp_path.iterdir()) == [package]
 
 
@@ -158,3 +161,65 @@ def test_portable_blocking_diagram_draws_assets_and_ordered_views(tmp_path):
     subprocess.run([sys.executable, "-I", "-S", package / "scripts/draw_blocking.py", src, dest], check=True)
     labels = [el.text for el in ElementTree.parse(dest).findall(".//{*}text")]
     assert {"C1", "C2", "甲&乙"} <= set(labels)
+
+
+def test_project_storyboard_sheet_switch_gates_every_shot_in_portable_package(tmp_path):
+    import subprocess
+    import sys
+
+    pkg = export_skill("novelvids-storyboard", tmp_path / "skills")
+    script = pkg / "scripts/storyboard_sheets.py"
+    def run(*args, cwd=tmp_path, check=True):
+        return subprocess.run([sys.executable, "-I", "-S", script, *args], cwd=cwd,
+                              capture_output=True, text=True, check=check)
+
+    assert json.loads(run("status").stdout) == {"storyboard_enabled": False}
+    assert json.loads(run("prepare", "not-needed.json").stdout) == []
+    settings = tmp_path / "novelvids.config.json"
+    assert not settings.exists()
+    settings.write_text('{"project_name":"Test"}')
+    run("on")
+    assert json.loads(settings.read_text()) == {"project_name": "Test", "storyboard_enabled": True}
+    shot = {"sequence": 1, "prompt": "FINAL 3D, trucks left, then dialogue and a fade.",
+            "visual_prose": "Two people meet.", "actions": ["0s-2s: hands meet."],
+            "duration": "3s", "camera_movement": "truck left", "visual_style": "cinematic CG"}
+    src = tmp_path / "shots.json"
+    src.write_text(json.dumps({"shots": [shot, {**shot, "sequence": 2}]}))
+    jobs = json.loads(run("prepare", src).stdout)
+    assert [job['sequence'] for job in jobs] == [1, 2]
+    assert all('黑白线稿' in job['image_prompt'] and 'hands meet.' in job['image_prompt'] for job in jobs)
+    assert all(job['video_prompt'].startswith(shot['prompt']) for job in jobs)
+    assert 'cinematic CG' not in jobs[0]['image_prompt']
+    assert jobs[0]['file_stem'] != jobs[1]['file_stem']
+    assert 'line art' in json.loads(run('prepare', src, '--language', 'en').stdout)[0]['image_prompt']
+    other = tmp_path / "another_project"
+    other.mkdir()
+    assert json.loads(run("status", cwd=other).stdout)["storyboard_enabled"] is False
+    run("off")
+    assert json.loads(run("prepare", src).stdout) == []
+    assert json.loads(settings.read_text())["project_name"] == "Test"
+
+
+def test_storyboard_sheet_switch_preserves_bad_config_and_rejects_incomplete_shots(tmp_path):
+    import subprocess
+    import sys
+    pkg = export_skill("novelvids-storyboard", tmp_path / "skills")
+    script = pkg / "scripts/storyboard_sheets.py"
+    project = tmp_path / "project"
+    project.mkdir()
+    def call(*args):
+        return subprocess.run([sys.executable, "-I", "-S", script, "--project", project, *args],
+                              cwd=tmp_path, text=True, capture_output=True)
+    config = project / "novelvids.config.json"
+    config.write_text('{"storyboard_enabled":"false"}')
+    assert call("on").returncode != 0
+    assert config.read_text() == '{"storyboard_enabled":"false"}'
+    config.write_text('{"storyboard_enabled":true}')
+    board = project / "shots.json"
+    shot = {"sequence": 1, "visual_prose": "A door.", "actions": ["The door opens."], "prompt": "Finished prompt."}
+    for shots in ([], [shot, shot], [{**shot, "prompt": ""}]):
+        board.write_text(json.dumps({"shots": shots}))
+        result = call("prepare", "shots.json")
+        assert result.returncode != 0 and not result.stdout
+    board.write_text(json.dumps({"shots": [shot]}))
+    assert call("prepare", "shots.json").returncode == 0

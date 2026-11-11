@@ -179,6 +179,8 @@ python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
 python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
 ```
 
+The storyboard skill has a project-wide picture-board switch, off by default. From the production project root, run `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` (or `off`). When enabled, each video generation segment gets a simple black-and-white panel sheet and a companion video prompt. The action determines the panel count.
+
 The exported directory contains its entrypoint, referenced rules and MIT license. Its contents can be published as an independent repository. The last command installs a project-local skill. Invoke it with `$novelvids-screenplay` and supply the source passage and target running time. Each source entrypoint under `prompts/skills/novelvids-*/` explains the inputs and deliverable. The application and exports share the rules under `references/`. Shared resources are included in each export. To update a locally edited package, export to a fresh directory and review the differences.
 
 ## Local development

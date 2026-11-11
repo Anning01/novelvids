@@ -6,6 +6,11 @@ license: MIT
 
 读取导演剧本、场段资产与当前视频模型的可用时长，把连续表演编成尽量少的独立生成段。依据人物当下的处境和观众获知信息的时机，选择机位、画面、声音和节奏。每镜给出时长、出场对象、动作和人声时间轴；如要求完整视频提示词，按输出协议组装各栏。缺少素材 ID 时使用输入中的名字，不虚构平台记录。
 
+开始时读取作品全局的「故事版」开关；开启后按每段的关键构图交付黑白线稿故事版，配套视频提示词补齐动作、运镜、声音和成片风格。
+
+- [故事版开关与出图交付](references/storyboard_sheets.md)
+- [线稿与视频配套提示词](references/storyboard_sheet_templates.json)
+- [查询、切换和准备逐镜出图](../scripts/storyboard_sheets.py)
 - [分镜写作](references/storyboard.md)
 - [栏目与普通对白基准语速](references/storyboard_contract.json)
 - [叙事策略](references/strategies.json)

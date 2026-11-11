@@ -25,7 +25,7 @@ def export_skill(name: str, destination: Path) -> Path:
 
     def package_link(match: re.Match) -> str:
         source = (entry.parent / match[2]).resolve(strict=True)
-        if source == SKILLS / "scripts/draw_blocking.py":
+        if source in {SKILLS / "scripts/draw_blocking.py", SKILLS / "scripts/storyboard_sheets.py"}:
             relative = f"scripts/{source.name}"
         elif (source.is_relative_to(SKILLS) and source.parent.name == "references"
               and source.suffix in {".md", ".json"} and source.is_file()):
