@@ -391,9 +391,9 @@ async def ensure_team_schema() -> None:
         await _ensure_team_member_schema(connection)
         await _backfill_default_team(connection)
 
-    from auth.models import QilingIdentity, QilingLoginAttempt
+    from auth.models import PlatformApiKey, QilingIdentity, QilingLoginAttempt
     generator = connection.schema_generator(connection)
-    for model in (QilingIdentity, QilingLoginAttempt):
+    for model in (QilingIdentity, QilingLoginAttempt, PlatformApiKey):
         await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])
     await _ensure_qiling_issuer_columns(connection)
 

@@ -13,7 +13,6 @@ from tortoise.exceptions import (
     ValidationError as TortoiseValidationError,
 )
 
-from api import api_router
 from config import settings
 from exceptions.handlers import (
     http_exception_handler,
@@ -109,10 +108,11 @@ async def _initialize_database_schema() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await _initialize_database_schema()
-    await remake_upload_service.cleanup_expired()
-    await backfill_last_frame_continuity()
-    if settings.MEDIA_LIBRARY_SEED_ENABLED:
-        await ensure_media_library_seed_data()
+    if settings.DEPLOYMENT_ROLE == "studio":
+        await remake_upload_service.cleanup_expired()
+        await backfill_last_frame_continuity()
+        if settings.MEDIA_LIBRARY_SEED_ENABLED:
+            await ensure_media_library_seed_data()
     if settings.MODEL_CONFIG_SEED_ENABLED:
         await ensure_model_config_seed_data()
     if settings.AUTH_ENABLED:
@@ -122,6 +122,12 @@ async def lifespan(_: FastAPI):
         if settings.AUTH_PROVIDER == "password":
             from auth.bootstrap import ensure_super_admin
             await ensure_super_admin()
+    if settings.DEPLOYMENT_ROLE == "platform":
+        try:
+            yield
+        finally:
+            await Tortoise.close_connections()
+        return
     # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）
     await ai_task_executor.fail_stale_on_boot()
     await video_task_reconciler.start()
@@ -176,7 +182,19 @@ app.add_exception_handler(Exception, global_exception_handler)
 app.add_exception_handler(RemakeError, remake_exception_handler)
 
 
-app.include_router(api_router, prefix="/api")
+if settings.DEPLOYMENT_ROLE == "platform":
+    if not settings.AUTH_ENABLED:
+        raise RuntimeError("Platform deployment requires AUTH_ENABLED=true")
+    from api.platform import console_router, developer_router
+    app.include_router(console_router, prefix="/api")
+    developer_api = FastAPI(title="猫影模型 API", version="1", docs_url=None, redoc_url=None)
+    developer_api.include_router(developer_router)
+    app.mount("/v1", developer_api)
+elif settings.DEPLOYMENT_ROLE == "studio":
+    from api import api_router
+    app.include_router(api_router, prefix="/api")
+else:
+    raise RuntimeError("NOVELVIDS_ROLE must be studio or platform")
 
 # 状态探测路由在两种模式下都注册，前端据此渲染登录 UI 或保持无鉴权体验
 from auth.api import public_router as auth_public_router

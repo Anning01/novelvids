@@ -5,6 +5,10 @@ import { resolveAuthGuard } from './features/auth/routeGuard'
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    ...(['usage', 'keys', 'models', 'docs'] as const).map(section => ({
+      path: '/platform/' + section, component: () => import('./pages/PlatformConsolePage.vue'), props: {section},
+      meta: {platformOnly: true, public: ['models', 'docs'].includes(section)},
+    })),
     { path: '/login', name: 'login', component: () => import('./pages/LoginPage.vue'), meta: { public: true, fullscreen: true } },
     { path: '/mcp/connect/:code', name: 'local-mcp-connect', component: () => import('./pages/LocalMcpConnectPage.vue'), meta: {fullscreen: true} },
     { path: '/invite/:token', name: 'invite', component: () => import('./pages/InvitePage.vue'), meta: { public: true, fullscreen: true } },
@@ -47,6 +51,12 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.ready) await auth.bootstrap()
+  if (auth.deploymentRole === 'platform') {
+    if (!to.meta.platformOnly && !['/login','/profile','/projects','/billing','/orders','/teams','/members','/users'].includes(to.path) && to.name !== 'invite') {
+      return auth.canAccessBilling ? '/platform/usage' : '/platform/models'
+    }
+    if (['/platform/usage','/platform/keys'].includes(to.path) && auth.isLoggedIn && !auth.canAccessBilling) return '/platform/models'
+  } else if (to.meta.platformOnly) return '/'
   const decision = resolveAuthGuard(to, auth)
   if (decision.redirect === '/login' && to.name === 'local-mcp-connect') {
     return {path: '/login', query: {redirect: to.fullPath}}

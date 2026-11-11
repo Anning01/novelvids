@@ -152,6 +152,12 @@ docker compose exec backend ffprobe -version
 
 </details>
 
+### 本地工作台和开放平台
+
+同一套程序支持两种部署角色。默认的 `NOVELVIDS_ROLE=studio` 提供创作工作台。在项目列表的更多操作中选择「导出作品」，在另一套本地工作台选择「导入作品」即可恢复为新项目。云端素材由导出浏览器直接下载，存储域名需允许该工作台来源的跨域读取。
+
+`NOVELVIDS_ROLE=platform` 需要 `AUTH_ENABLED=true`。控制台提供用量、充值、模型目录、API Key 和接口文档，旧项目只提供导出。平台反向代理需将 `/api/` 和 `/v1/` 指向后端，旧项目仍保留媒体下载路径。将现有创作站切换为平台前，请先完成作品迁移验收并处理在途任务。
+
 ## 创作流程
 
 ```mermaid

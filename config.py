@@ -21,6 +21,7 @@ def _env_list(name: str, default: list[str]) -> list[str]:
 
 
 class Settings:
+    DEPLOYMENT_ROLE = os.getenv("NOVELVIDS_ROLE", "studio").strip().lower()
     # 数据库配置
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "sqlite://./data/novelvids.db"  # 默认使用 SQLite 数据库

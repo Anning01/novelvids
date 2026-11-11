@@ -403,6 +403,7 @@ export interface AuthMe {
 }
 
 export interface AuthStatus {
+  deployment_role?: 'studio' | 'platform'
   enabled: boolean
   provider?: 'password' | 'qiling'
   qiling_enabled?: boolean

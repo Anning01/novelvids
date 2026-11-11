@@ -315,7 +315,11 @@ async function qilingBound() {
   if (!loadError.value) notice.success(tr('器灵账号已绑定'))
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (new URLSearchParams(location.hash.split('?')[1]).get('recharge') === '1' &&
+      !loadError.value && current.value && (current.value.role === 'admin' || current.value.role === 'creator' || auth.isSuperAdmin)) openTopUpModal()
+})
 </script>
 
 <template>
@@ -389,7 +393,7 @@ onMounted(load)
                   {{ tr('成员管理') }}
                 </RouterLink>
                 <!-- 配置仅超级管理员可见 -->
-                <RouterLink v-if="auth.canAccessSettings" class="profile-link" to="/settings">
+                <RouterLink v-if="auth.canAccessSettings && auth.deploymentRole !== 'platform'" class="profile-link" to="/settings">
                   <Settings :size="15" aria-hidden="true" />
                   {{ tr('模型配置') }}
                 </RouterLink>

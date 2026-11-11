@@ -9,7 +9,7 @@ import { projectDate, projectKindLabel, projectNumber, projectRuntime } from '@/
 import { projectEntryRoute, readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { ProjectOverviewItem } from '@/types'
 
-const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; deleting?: boolean; exporting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error'; costHint?: string }>()
+const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; exportOnly?: boolean; deleting?: boolean; exporting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error'; costHint?: string }>()
 const emit = defineEmits<{ download: [project: ProjectOverviewItem]; remove: [project: ProjectOverviewItem] }>()
 const menuOpen = ref(false)
 const actions = ref<HTMLElement | null>(null)
@@ -60,7 +60,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 
 <template>
   <article class="project-overview-card" :class="{ 'is-deleting': deleting }" :aria-labelledby="`project-title-${project.id}`">
-    <RouterLink :to="projectEntryRoute(project)" class="project-overview-card__link" :aria-label="tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
+    <component :is="exportOnly ? 'div' : 'RouterLink'" :to="exportOnly ? undefined : projectEntryRoute(project)" class="project-overview-card__link" :aria-label="tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
       <div class="project-overview-card__identity">
         <ProjectCover class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
         <div class="project-overview-card__copy">
@@ -94,16 +94,16 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
         <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_finished_duration_count ?? 0 }) : tr('每集按最新成功合成版本的实际时长统计。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
         <div v-if="costState" class="project-overview-card__cost" :title="[costHint, tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')].filter(Boolean).join(' ')" :aria-busy="costState === 'loading'"><dt><Coins :size="13" aria-hidden="true" />{{ tr('已花费') }}</dt><dd :class="{ 'is-pending': costState !== 'ready' }">{{ costState === 'ready' ? money(cost ?? 0) : costState === 'loading' ? tr('正在读取…') : tr('读取失败') }}</dd></div>
       </dl>
-    </RouterLink>
+    </component>
 
-    <footer v-if="project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }} · {{ project.production.completed_episode_count }} {{ tr('集') }}</RouterLink></footer>
+    <footer v-if="!exportOnly && project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }} · {{ project.production.completed_episode_count }} {{ tr('集') }}</RouterLink></footer>
     <div v-if="editable" ref="actions" class="project-overview-card__actions" :class="{ 'is-open': menuOpen }" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="event => { if (!actions?.contains(event.relatedTarget as Node)) closeMenu() }">
       <AppButton ref="trigger" variant="ghost" icon-only size="sm" :aria-label="tr('项目「{p0}」更多操作', { p0: project.name })" aria-haspopup="menu" :aria-expanded="menuOpen" :disabled="deleting || exporting" :loading="exporting" @click.stop="openMenu" @keydown.down.prevent="openMenu">
         <Ellipsis :size="18" aria-hidden="true" />
       </AppButton>
       <div v-if="menuOpen" class="project-overview-card__menu" role="menu" :aria-label="tr('项目操作')" @keydown.up.prevent="moveFocus" @keydown.down.prevent="moveFocus">
         <button ref="exportButton" type="button" role="menuitem" @click.stop="download"><Download :size="14" aria-hidden="true" />{{ tr('导出作品') }}</button>
-        <button ref="deleteButton" class="remove-project" type="button" role="menuitem" @click.stop="remove"><Trash2 :size="14" aria-hidden="true" />{{ tr('删除项目') }}</button>
+        <button v-if="!exportOnly" ref="deleteButton" class="remove-project" type="button" role="menuitem" @click.stop="remove"><Trash2 :size="14" aria-hidden="true" />{{ tr('删除项目') }}</button>
       </div>
     </div>
   </article>

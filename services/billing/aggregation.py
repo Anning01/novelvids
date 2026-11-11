@@ -24,8 +24,11 @@ async def summary(
     novel_id: int | None = None,
     team_id: int | None = None,
     user_id: int | None = None,
+    *, cost_source: str | None = None,
 ) -> dict:
     query = ModelUsageRecord.all()
+    if cost_source is not None:
+        query = query.filter(cost_source=cost_source)
     if novel_id is not None:
         query = query.filter(novel_id=novel_id)
     if team_id is not None:

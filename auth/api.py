@@ -37,6 +37,7 @@ async def approve_local_mcp(code: UUID, request: Request, ctx: AuthContext = Dep
 async def auth_status():
     legal, missing = profile_status()
     return ResponseSchema(data={"enabled": settings.AUTH_ENABLED, "provider": settings.AUTH_PROVIDER,
+                                "deployment_role": settings.DEPLOYMENT_ROLE,
                                 "qiling_enabled": qiling.enabled(), "legal_ready": legal is not None,
                                 "legal_missing": missing})
 

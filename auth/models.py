@@ -254,3 +254,12 @@ class LocalMcpConnection(AbstractBaseModel):
 
     class Meta:
         table = "local_mcp_connections"
+
+
+class PlatformApiKey(AbstractBaseModel):
+    user = fields.ForeignKeyField("models.User", on_delete=fields.CASCADE)
+    team = fields.ForeignKeyField("models.Team", on_delete=fields.CASCADE)
+    name = fields.CharField(max_length=80)
+    token_hash = fields.CharField(max_length=64, unique=True)
+    preview = fields.CharField(max_length=20)
+    revoked_at = fields.DatetimeField(null=True)

@@ -196,8 +196,8 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 <template>
   <main class="projects-page">
     <header class="projects-page__header">
-      <h1>{{ tr('我的项目') }}</h1>
-      <div v-if="editable" class="projects-page__actions">
+      <h1>{{ auth.deploymentRole === 'platform' ? tr('作品迁移') : tr('我的项目') }}</h1>
+      <div v-if="editable && auth.deploymentRole === 'studio'" class="projects-page__actions">
         <input ref="filePicker" type="file" hidden accept=".zip,application/zip" @change="uploadProject">
         <AppButton variant="secondary" size="sm" :loading="importing" @click="filePicker?.click()"><Upload v-if="!importing" :size="15" />{{ importing ? tr('正在导入') : tr('导入作品') }}</AppButton>
         <RouterLink to="/create/short-drama" class="projects-page__create"><Plus :size="18" aria-hidden="true" />{{ tr('新建项目') }}</RouterLink>
@@ -230,14 +230,14 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
         </div>
 
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
-          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :deleting="deletingIds.has(project.id)" :exporting="exportingIds.has(project.id)" @download="downloadProject" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
+          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :export-only="auth.deploymentRole === 'platform'" :deleting="deletingIds.has(project.id)" :exporting="exportingIds.has(project.id)" @download="downloadProject" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
         </div>
         <div v-else class="projects-page__empty">
           <span class="projects-page__empty-icon"><Search v-if="hasFilters" :size="28" aria-hidden="true" /><BookOpen v-else :size="28" aria-hidden="true" /></span>
           <h3>{{ hasFilters ? tr('没有找到匹配的项目') : tr('暂无项目') }}</h3>
-          <p>{{ hasFilters ? tr('试试其他关键词，或调整筛选条件。') : tr('从一个故事开始，逐步完成你的第一部作品。') }}</p>
+          <p v-if="hasFilters || auth.deploymentRole === 'studio'">{{ hasFilters ? tr('试试其他关键词，或调整筛选条件。') : tr('从一个故事开始，逐步完成你的第一部作品。') }}</p>
           <AppButton v-if="hasFilters" variant="soft" @click="resetFilters">{{ tr('清除筛选') }}</AppButton>
-          <RouterLink v-else-if="editable" to="/create/short-drama" class="projects-page__empty-link">{{ tr('前往创作') }}<ArrowRight :size="15" aria-hidden="true" /></RouterLink>
+          <RouterLink v-else-if="editable && auth.deploymentRole === 'studio'" to="/create/short-drama" class="projects-page__empty-link">{{ tr('前往创作') }}<ArrowRight :size="15" aria-hidden="true" /></RouterLink>
         </div>
         <AppPagination v-if="filtered.length > 12" :page="page" :page-size="pageSize" :total="filtered.length" :page-size-options="[12, 24, 48]" @page-change="page = $event" @size-change="pageSize = $event" />
       </section>

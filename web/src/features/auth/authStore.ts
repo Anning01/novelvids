@@ -13,6 +13,7 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     enabled: null as boolean | null,
     ready: false,
+    deploymentRole: 'studio' as 'studio' | 'platform',
     token: getAuthToken(),
     user: null as AuthUser | null,
     memberships: [] as Membership[],
@@ -55,6 +56,7 @@ export const useAuthStore = defineStore('auth', {
       if (this.ready) return
       try {
         const status = await api.authStatus()
+        this.deploymentRole = status.data.deployment_role ?? 'studio'
         this.enabled = status.data.enabled
         this.qilingEnabled = status.data.qiling_enabled === true
         this.provider = status.data.provider ?? (this.qilingEnabled ? 'qiling' : 'password')
