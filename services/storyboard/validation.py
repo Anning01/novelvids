@@ -4,10 +4,10 @@ import json
 import re
 
 from collections.abc import Sequence
-from prompts.skills.scripts.check_speech import TIMELINE
+from services.storyboard.speech_tracks import spoken_parts
 from prompts.labels import prompt_label
 from prompts.skill_pack import SkillSnapshot
-from prompts.storyboard import normalized_storyboard_reference_fields, split_storyboard_voice_track, format_storyboard_prompt
+from prompts.storyboard import TIMELINE, normalized_storyboard_reference_fields, format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig, SceneEntity
 from utils.messages import localized_message
 
@@ -44,7 +44,8 @@ def validate_skill_storyboard_timing(shot: SoraScenePromptConfig) -> None:
             if not match or not 0 <= float(match[1]) < float(match[2]) <= duration + .001:
                 raise ValueError(localized_message("分镜时间轴缺失或超出镜头时长：{p0}", p0=name))
             if name != "actions":
-                if "@{" in split_storyboard_voice_track(line)[1]:
+                _, _, text = spoken_parts(line)
+                if "@{" in text:
                     raise ValueError(localized_message("台词或旁白正文不能包含素材引用，请保留原文内容"))
                 voices.append((float(match[1]), float(match[2])))
     voices.sort()
@@ -56,9 +57,6 @@ def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
                              entities: Sequence[SceneEntity], strategy_key: str):
     from schemas.agent_workflow import SkillStoryboard, SkillShot
     from prompts.storyboard_strategies import StoryboardStrategyPrompt
-    from services.storyboard.speech_timing import StoryboardSpeechValidator
-
-    StoryboardSpeechValidator(snapshot).validate(storyboard.shots, entities)
 
     resource = json.loads(snapshot.read("strategies"))[strategy_key]
     strategy = StoryboardStrategyPrompt(key=strategy_key, name=strategy_key, description="",
@@ -102,5 +100,3 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     if f"@{{镜头时长:{duration:g}s}}" not in prompt:
         raise ValueError(localized_message("分镜提示词缺少镜头时长标记"))
     validate_skill_storyboard_timing(shot)
-    from services.storyboard.speech_timing import StoryboardSpeechValidator
-    StoryboardSpeechValidator(snapshot).validate_shot(shot)

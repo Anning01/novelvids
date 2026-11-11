@@ -31,8 +31,7 @@ def test_stage_exports_without_application_files(tmp_path, name):
     for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
         assert target.resolve().is_relative_to(package)
         assert target.read_bytes() == (source.parent / match[2]).read_bytes()
-    scripts = [p.name for p in package.rglob("*.py")]
-    assert scripts == (["check_speech.py"] if name in {"storyboard", "remake"} else [])
+    assert not list(package.rglob("*.py"))
     assert list(tmp_path.iterdir()) == [package]
 
 
@@ -122,21 +121,11 @@ def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_pa
         assert handoff in prompt
 
 
-def test_standalone_speech_checker_runs_without_application_dependencies(tmp_path):
-    import subprocess
-    import sys
-
+def test_standalone_storyboard_offers_a_baseline_and_performance_guidance(tmp_path):
     pkg = export_skill("novelvids-storyboard", tmp_path)
-    script = pkg / "scripts/check_speech.py"
-    board = {"shots": [
-        {"sequence": 1, "duration": "4s", "dialogue": ["0s-3s: @{沈禾}：今天赶路还来得及"]},
-        {"sequence": 2, "duration": "4s", "narration": ["0s-2s: @{沈禾}（OS）：今天赶路还来得及"]},
-    ]}
-    src = tmp_path / "分镜.json"
-    def check():
-        src.write_text(json.dumps(board))
-        return subprocess.run([sys.executable, '-I', '-S', script, src], cwd=tmp_path, text=True, capture_output=True)
-    failure = check()
-    assert failure.returncode == 1 and '沈禾' in failure.stderr and '2 镜' in failure.stderr
-    board["shots"][1]["narration"] = ["0s-2.8s: @{沈禾}（OS）：今天赶路还来得及"]
-    assert check().returncode == 0
+    rules = (pkg / "references/speech_pacing.md").read_text()
+    contract = json.loads((pkg / "references/storyboard_contract.json").read_text())
+    assert contract["speech_baseline"] == {"characters_per_second": 3.5, "words_per_second": 2.1}
+    assert "speech_timing" not in contract
+    assert "争吵" in rules and "六字诀" in rules
+    assert not (pkg / "scripts/check_speech.py").exists()

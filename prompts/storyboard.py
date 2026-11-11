@@ -8,7 +8,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from typing import Protocol
 
-from prompts.skills.scripts.check_speech import split_voice_track as split_storyboard_voice_track
 from prompts.storyboard_strategies import (
     CINEMATIC_STORYBOARD_STRATEGY,
     StoryboardStrategyPrompt,
@@ -102,6 +101,25 @@ _UNSAFE_AUTOMATIC_ALIASES = {
     "那人",
     "师父", "师傅", "父亲", "母亲", "老师", "宗主", "前辈",
 }
+
+
+TIMELINE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*s?\s*[-–—~]\s*(\d+(?:\.\d+)?)\s*s?\s*[:：]")
+
+
+def split_storyboard_voice_track(value: str) -> tuple[str, str]:
+    """Separate timeline/speaker from literal speech, including colons in emotions."""
+    timeline = TIMELINE.match(value)
+    start = timeline.end() if timeline else 0
+    depth = 0
+    for index in range(start, len(value)):
+        character = value[index]
+        if character in "（(":
+            depth += 1
+        elif character in "）)":
+            depth = max(0, depth - 1)
+        elif character in ":：" and depth == 0:
+            return value[:index + 1], value[index + 1:]
+    return value, ""
 
 
 def _safe_canonical_asset_name(value: object) -> str:

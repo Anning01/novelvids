@@ -2,7 +2,7 @@
 
 from pydantic import Field, SkipValidation, ValidationError, create_model
 
-from services.storyboard.speech_timing import StoryboardSpeechValidator
+from services.storyboard.speech_tracks import SpeechContent
 from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration, prepare_skill_storyboard
 
 
@@ -35,7 +35,7 @@ class StoryboardCandidateValidator:
         self.groups = {number: [self.shot_type.model_validate(value) for value in values]
                        for number, values in self.raw.items() if number not in self.pending}
         for number, speech in checkpoint.get('speech', {}).items():
-            validator = StoryboardSpeechValidator(self.snapshot)
+            validator = SpeechContent()
             validator.original_speech = {(field, speaker): text for field, speaker, text in speech}
             self.speech[int(number)] = validator
 
@@ -46,12 +46,12 @@ class StoryboardCandidateValidator:
 
     def validate_group(self, number, shots):
         errors = []
-        validator = (self.speech.setdefault(number, StoryboardSpeechValidator(self.snapshot))
-                     if self.preserve_speech else StoryboardSpeechValidator(self.snapshot))
-        try:
-            validator.validate(shots)
-        except ValueError as error:
-            errors.append(str(error))
+        if self.preserve_speech and 'storyboard_contract' in self.snapshot.contents:
+            validator = self.speech.setdefault(number, SpeechContent())
+            try:
+                validator.validate(shots)
+            except ValueError as error:
+                errors.append(str(error))
         for shot in shots:
             try:
                 validate_storyboard_duration(shot, self.duration_range)
@@ -101,12 +101,6 @@ class StoryboardCandidateValidator:
             else:
                 self.groups[number] = shots
                 self.pending.pop(number, None)
-        if not self.pending and not protocol_errors:
-            slots = [number for number in sorted(self.groups) for _ in self.groups[number]]
-            entities = self.source_facts.get('entities', []) if isinstance(self.source_facts, dict) else []
-            issues = StoryboardSpeechValidator(self.snapshot).continuity_issues(self.result().shots, entities)
-            for index, error in issues:
-                self.pending.setdefault(slots[index], []).append(error)
         accepted = [number for number in self.groups if number not in self.pending]
         checkpoint = {'accepted_shots': accepted, 'pending': self.pending, 'candidates': self.raw,
                       'protocol_errors': protocol_errors,

@@ -41,7 +41,7 @@ def test_published_rules_supply_the_full_contract_to_new_tasks(rules, language):
     assert all(spec["heading"] in rendered for spec in assets.values())
     storyboard = json.loads(snapshot.read("storyboard_contract"))
     assert len(storyboard["sections"]) == 8
-    assert storyboard["speech_timing"]["characters_per_second"] == [2.5, 4.5]
+    assert storyboard["speech_baseline"]["characters_per_second"] == 3.5
 
 
 @pytest.mark.parametrize(("name", "content"), [

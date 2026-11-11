@@ -149,10 +149,6 @@ class StoryboardTaskHandler(BaseTaskHandler):
             from services.creation_agent.prompt_edits import validate_prompt_dependencies
             from services.creation_agent.operations import CreationOperations
             from services.storyboard.validation import validate_skill_storyboard_shot
-            from services.storyboard.speech_timing import StoryboardSpeechValidator
-            issues = StoryboardSpeechValidator(execution.snapshot).continuity_issues(storyboard.shots, entities or [])
-            if issues:
-                raise ValueError(issues[0][1])
             for shot in storyboard.shots:
                 validate_storyboard_duration(shot, execution.params.get("shot_duration_range"))
                 validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])

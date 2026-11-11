@@ -19,7 +19,7 @@ def test_split_retains_other_shots_and_freezes_original_speech():
     validator = StoryboardCandidateValidator(StructuredSkillStoryboard, snapshot(), 'zh', [1, 4], {})
     first = raw_shot(1, description='keep-first')
     third = raw_shot(3, description='keep-third')
-    bad = raw_shot(2, narration=['0s-0.5s: 旁白：你先回家。我们明天再见。'])
+    bad = raw_shot(2, narration=['0s-5s: 旁白：你先回家。我们明天再见。'])
     output, state = validator.merge(validator.draft_type(shots=[first, bad, third]))
     assert output is None and state['accepted_shots'] == [1, 3]
     shortened = raw_shot(2, repair_of=2, narration=['0s-1.5s: 旁白：你先回家。'])
@@ -125,24 +125,3 @@ async def test_semantic_check_never_requests_a_full_chapter_rewrite(localized):
         result = await generate_checked(execution, 'storyboard', {}, StructuredSkillStoryboard, {}, context)
     assert result.shots[0].description == 'keep-first' and result.shots[2].description == 'keep-third'
     assert calls.count('storyboard') == (2 if localized else 1)
-
-
-def test_pace_drift_reopens_only_failed_slot_and_survives_resume():
-    from test.test_services.test_storyboard_speech_timing import shipped_snapshot
-    actor = {'name':'张正元', 'aliases':['道人'], 'description':'中年道长', 'asset_type':'人物'}
-    def validator():
-        return StoryboardCandidateValidator(StructuredSkillStoryboard, shipped_snapshot(), 'zh', [1, 4], {'entities':[actor]})
-    def line(speaker, seconds):
-        return [f'0s-{seconds}s: @{{{speaker}}}（平静）：今天赶路还来得及']
-    current = validator()
-    output, state = current.merge(current.draft_type(shots=[
-        raw_shot(1, dialogue=line('张正元', 3)),
-        raw_shot(2, dialogue=line('道人', 2)),
-        raw_shot(3, description='keep-silent-shot'),
-    ]))
-    assert output is None and list(state['pending']) == [2]
-    assert state['accepted_shots'] == [1, 3] and '张正元' in state['pending'][2][0]
-    resumed = validator()
-    resumed.restore(json.loads(json.dumps(state)))
-    output, state = resumed.merge(resumed.draft_type(shots=[raw_shot(2, repair_of=2, dialogue=line('道人', 2.8))]))
-    assert not state['pending'] and output.shots[2].description == 'keep-silent-shot'
