@@ -789,7 +789,7 @@ onBeforeUnmount(() => {
 .analysis-progress-card.is-failed > span { color: #bb5b68; background: #fff0f2; }
 .analysis-section { padding-top: 38px; }
 .analysis-section > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
-.analysis-section > header > div { display: grid; gap: 4px; }
+.analysis-section > header > div:not(.episode-actions) { display: grid; gap: 4px; }
 .analysis-section > header h2 { margin: 0; color: #303442; font-size: 17px; }
 .analysis-section > header p { margin: 2px 0 0; color: #9297a7; font-size: 11px; }
 .analysis-section > header > span { color: #999eac; font-size: 10px; }
