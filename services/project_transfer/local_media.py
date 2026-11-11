@@ -8,14 +8,18 @@ from services.project_transfer.archive import ArchiveError, MEDIA_SUFFIXES, writ
 MENTION = re.compile(r"(@\{参考(?:图片|视频):)([^}]+)(\})")
 
 
-def translate(value, resolve):
+PROSE_FIELDS = frozenset({"content", "screenplay", "prompt", "text", "description", "story_outline", "base_traits",
+                         "generic_video_prompt", "generic_prompt", "audiovisual_guidance"})
+
+
+def translate(value, resolve, field=None):
     if isinstance(value, dict):
-        return {k: translate(v, resolve) for k, v in value.items()}
+        return {k: translate(v, resolve, k) for k, v in value.items()}
     if isinstance(value, list):
-        return [translate(item, resolve) for item in value]
+        return [translate(item, resolve, field) for item in value]
     if not isinstance(value, str):
         return value
-    translated = resolve(value)
+    translated = value if field in PROSE_FIELDS else resolve(value)
     if translated != value:
         return translated
 

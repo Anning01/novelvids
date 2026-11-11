@@ -13,7 +13,7 @@ vi.mock('@/api', async (importOriginal) => {
   return { ...original, api: { ...original.api, projectOverview: vi.fn(), billingProjects: vi.fn(), deleteNovel: vi.fn() } }
 })
 vi.mock('@/shared/confirmDialog', () => ({ appConfirm: vi.fn() }))
-vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn() } }))
+vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn(), success:vi.fn() } }))
 
 function project(id: number, name: string, state: ProjectOverviewItem['production']['state'] = 'not_started'): ProjectOverviewItem {
   return { id, name, author: 'Agent 创建', tags: ['科幻'], created_at: '2026-10-20 10:00:00', updated_at: '2026-10-25 10:00:00', production: {
@@ -111,7 +111,7 @@ it('isolates delete from navigation, requires confirmation and refreshes totals 
   await card.get('[aria-haspopup="menu"]').trigger('click')
   expect(card.get('.project-overview-card__link').find('[role="menuitem"]').exists()).toBe(false)
   vi.mocked(api.projectOverview).mockResolvedValue(response([project(1, '星河来信', 'ready')]))
-  await card.get('[role="menuitem"]').trigger('click')
+  await card.get('.remove-project').trigger('click')
   await flushPromises()
   expect(appConfirm).toHaveBeenCalledOnce()
   const confirmation = vi.mocked(appConfirm).mock.calls[0]![0]
@@ -134,7 +134,7 @@ it('supports Escape and cancelled confirmation without deleting', async () => {
   await card.get('[role="menuitem"]').trigger('keydown', { key: 'Escape' })
   expect(card.find('[role="menuitem"]').exists()).toBe(false)
   await card.get('[aria-haspopup="menu"]').trigger('click')
-  await card.get('[role="menuitem"]').trigger('click')
+  await card.get('.remove-project').trigger('click')
   await flushPromises()
   expect(api.deleteNovel).not.toHaveBeenCalled()
   wrapper.unmount()
@@ -344,9 +344,37 @@ it('keeps the project visible and refreshes its status when deletion fails', asy
   await flushPromises()
   const card = wrapper.findAll('.project-overview-card')[0]!
   await card.get('[aria-haspopup="menu"]').trigger('click')
-  await card.get('[role="menuitem"]').trigger('click')
+  await card.get('.remove-project').trigger('click')
   await flushPromises()
   expect(api.projectOverview).toHaveBeenCalledTimes(2)
   expect(wrapper.findAll('.project-overview-card')).toHaveLength(2)
   wrapper.unmount()
+})
+
+it.each(['light','dark'])('offers export beside delete and imports through the list toolbar (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const transfer = await import('@/features/project-transfer/transfer')
+  const importing = vi.spyOn(transfer, 'importProject').mockResolvedValue({code:0,message:'',data:{id:77,name:'导入作品'}})
+  const exporting = vi.spyOn(transfer, 'exportProject').mockResolvedValue(new Blob(['archive']))
+  const click = vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(() => {})
+  const wrapper = render()
+  try {
+    await flushPromises()
+    const card = wrapper.get('.project-overview-card')
+    await card.get('[aria-haspopup="menu"]').trigger('click')
+    expect(card.findAll('[role="menuitem"]').map(b=>b.text())).toEqual(['导出作品','删除项目'])
+    await card.findAll('[role="menuitem"]')[0]!.trigger('click')
+    await flushPromises()
+    expect(exporting).toHaveBeenCalledOnce()
+    expect(api.deleteNovel).not.toHaveBeenCalled()
+    const file = new File(['archive'],'本地作品.zip')
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element,'files',{value:[file],configurable:true})
+    await input.trigger('change'); await flushPromises()
+    expect(importing).toHaveBeenCalledWith(file,expect.any(AbortSignal))
+    expect(api.projectOverview).toHaveBeenCalledTimes(2)
+  } finally {
+    wrapper.unmount(); importing.mockRestore(); exporting.mockRestore(); click.mockRestore()
+    delete document.documentElement.dataset.appTheme
+  }
 })

@@ -19,6 +19,8 @@ async def install_project(file, *, media_root: Path, exports_root: Path, team_id
         opened = read_project(file, Path(staging))
         verified = await asyncio.to_thread(opened.__enter__)
         try:
+            from services.project_transfer.validation import validate_portable_graph
+            validate_portable_graph(verified)
             roots = {
                 "media": (media_root / "project-imports" / collection, f"/media/project-imports/{collection}/"),
                 "export": (exports_root / "imports" / collection, f"/media/exports/imports/{collection}/"),

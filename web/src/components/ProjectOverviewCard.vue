@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { BookOpen, Clapperboard, Clock3, Coins, Ellipsis, Image, Trash2 } from 'lucide-vue-next'
+import { BookOpen, Clapperboard, Clock3, Coins, Download, Ellipsis, Image, Trash2 } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import ProjectCover from '@/components/ProjectCover.vue'
@@ -9,11 +9,12 @@ import { projectDate, projectKindLabel, projectNumber, projectRuntime } from '@/
 import { projectEntryRoute, readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { ProjectOverviewItem } from '@/types'
 
-const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; deleting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error'; costHint?: string }>()
-const emit = defineEmits<{ remove: [project: ProjectOverviewItem] }>()
+const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; deleting?: boolean; exporting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error'; costHint?: string }>()
+const emit = defineEmits<{ download: [project: ProjectOverviewItem]; remove: [project: ProjectOverviewItem] }>()
 const menuOpen = ref(false)
 const actions = ref<HTMLElement | null>(null)
 const trigger = ref<InstanceType<typeof AppButton> | null>(null)
+const exportButton = ref<HTMLButtonElement | null>(null)
 const deleteButton = ref<HTMLButtonElement | null>(null)
 const runtime = computed(() => projectRuntime(props.project.production.finished_seconds ?? 0, props.project.production.unknown_finished_duration_count ?? 0))
 const settings = computed(() => readShortDramaSettings(props.project))
@@ -25,7 +26,7 @@ async function openMenu() {
   menuOpen.value = !menuOpen.value
   if (menuOpen.value) {
     await nextTick()
-    deleteButton.value?.focus()
+    exportButton.value?.focus()
   }
 }
 
@@ -36,6 +37,16 @@ function closeMenu(restoreFocus = false) {
 
 function outside(event: PointerEvent) {
   if (event.target instanceof Node && !actions.value?.contains(event.target)) closeMenu()
+}
+
+function moveFocus() {
+  const target = document.activeElement === exportButton.value ? deleteButton.value : exportButton.value
+  target?.focus()
+}
+
+function download() {
+  closeMenu(true)
+  emit('download', props.project)
 }
 
 function remove() {
@@ -87,11 +98,12 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 
     <footer v-if="project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }} · {{ project.production.completed_episode_count }} {{ tr('集') }}</RouterLink></footer>
     <div v-if="editable" ref="actions" class="project-overview-card__actions" :class="{ 'is-open': menuOpen }" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="event => { if (!actions?.contains(event.relatedTarget as Node)) closeMenu() }">
-      <AppButton ref="trigger" variant="ghost" icon-only size="sm" :aria-label="tr('项目「{p0}」更多操作', { p0: project.name })" aria-haspopup="menu" :aria-expanded="menuOpen" :disabled="deleting" @click.stop="openMenu" @keydown.down.prevent="openMenu">
+      <AppButton ref="trigger" variant="ghost" icon-only size="sm" :aria-label="tr('项目「{p0}」更多操作', { p0: project.name })" aria-haspopup="menu" :aria-expanded="menuOpen" :disabled="deleting || exporting" :loading="exporting" @click.stop="openMenu" @keydown.down.prevent="openMenu">
         <Ellipsis :size="18" aria-hidden="true" />
       </AppButton>
-      <div v-if="menuOpen" class="project-overview-card__menu" role="menu" :aria-label="tr('项目操作')" @keydown.up.prevent="deleteButton?.focus()" @keydown.down.prevent="deleteButton?.focus()">
-        <button ref="deleteButton" type="button" role="menuitem" @click.stop="remove"><Trash2 :size="14" aria-hidden="true" />{{ tr('删除项目') }}</button>
+      <div v-if="menuOpen" class="project-overview-card__menu" role="menu" :aria-label="tr('项目操作')" @keydown.up.prevent="moveFocus" @keydown.down.prevent="moveFocus">
+        <button ref="exportButton" type="button" role="menuitem" @click.stop="download"><Download :size="14" aria-hidden="true" />{{ tr('导出作品') }}</button>
+        <button ref="deleteButton" class="remove-project" type="button" role="menuitem" @click.stop="remove"><Trash2 :size="14" aria-hidden="true" />{{ tr('删除项目') }}</button>
       </div>
     </div>
   </article>
@@ -131,7 +143,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 .project-overview-card__actions > .app-button { width: 32px; min-height: 32px; color: var(--app-text-secondary); opacity: 0; transition: opacity 140ms ease, background-color 140ms ease; }
 .project-overview-card:hover .project-overview-card__actions > .app-button, .project-overview-card:focus-within .project-overview-card__actions > .app-button, .project-overview-card__actions.is-open > .app-button { opacity: 1; }
 .project-overview-card__menu { position: absolute; top: 36px; right: 0; width: 140px; padding: 5px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-surface); box-shadow: var(--app-shadow); }
-.project-overview-card__menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--creation-danger); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.project-overview-card__menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--app-text); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.project-overview-card__menu .remove-project { color: var(--creation-danger); }
 .project-overview-card__menu button:hover, .project-overview-card__menu button:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; background: var(--app-surface-muted); }
 .is-deleting { opacity: .6; pointer-events: none; }
 @media (hover: none) { .project-overview-card__actions > .app-button { opacity: 1; min-height: 40px; width: 40px; } }

@@ -1,5 +1,10 @@
 {
   "common": {
+    "作品素材下载失败，请重试": "Could not download the project media. Try again.",
+    "已导入作品「{p0}」": "Imported “{p0}”",
+    "正在导入": "Importing",
+    "导出作品": "Export project",
+    "导入作品": "Import project",
     "连接本机 MCP": "Connect local MCP",
     "本机创作工具将使用当前登录身份，按所选团队权限读取和同步作品。退出登录后连接失效。": "Your local authoring tool will use this signed-in session and the selected team’s permissions to read and sync work. Signing out ends access.",
     "已连接，可以返回创作工具。": "Connected. You can return to your authoring tool.",

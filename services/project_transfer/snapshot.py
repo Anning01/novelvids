@@ -12,6 +12,7 @@ from models.scene import Scene
 from models.video import Video
 from models.video_edit import ChapterEditDraft, EditorAsset
 from services.creation_objects import project_write
+from services.resource_permissions import readable_scope
 
 
 # Only creative data crosses installations. Model credentials, identities, leases
@@ -45,8 +46,8 @@ def creative_value(value):
 
 async def project_snapshot(novel_id: int) -> dict:
     async with project_write(novel_id) as db:
-        async def rows(model, **scope):
-            data = await model.filter(**scope).using_db(db).order_by("id").values(*FIELDS[model].split())
+        async def rows(model, *filters, **scope):
+            data = await model.filter(*filters, **scope).using_db(db).order_by("id").values(*FIELDS[model].split())
             return [creative_value(row) for row in data]
 
         project, = await rows(Novel, id=novel_id)
@@ -74,7 +75,7 @@ async def project_snapshot(novel_id: int) -> dict:
         return {
             "novel": project, "chapters": chapters, "assets": assets, "scenes": scenes,
             "variants": variants, "voices": audio,
-            "library": await rows(VideoResource, id__in=library_ids, team_id=team or 0),
+            "library": await rows(VideoResource, readable_scope(team or 0), id__in=library_ids),
             "videos": await rows(Video, scene__chapter__novel_id=novel_id, scene__deleted_at__isnull=True),
             "editor_assets": await rows(EditorAsset, novel_id=novel_id),
             "edit_drafts": await rows(ChapterEditDraft, chapter__novel_id=novel_id),

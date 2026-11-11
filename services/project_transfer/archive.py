@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 FORMAT = "novelvids.project"
 MANIFEST = "project.json"
 CHUNK_SIZE = 1024 * 1024
+HASH_BLOCK_SIZE = 8 * CHUNK_SIZE
 MEDIA_SUFFIXES = frozenset("png jpg jpeg webp bmp gif svg mp4 mov mkv webm avi m4v wav mp3 aac flac m4a ogg srt vtt".split())
 
 
@@ -28,13 +29,14 @@ class MediaEntry(BaseModel):
     member: str = Field(pattern=r"^media/[1-9][0-9]*\.[a-z0-9]{1,5}$")
     byte_length: int = Field(ge=0)
     storage: Literal["media", "export", "remake"] = "media"
+    hash_scheme: Literal["sha256", "sha256-blocks-8m"] = "sha256"
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     format: Literal["novelvids.project"]
-    version: Literal[1]
+    version: Literal[1, 2]
     project: dict
     media: list[MediaEntry]
 
@@ -82,7 +84,7 @@ def write_project(path: Path, project: dict) -> Iterator[ProjectWriter]:
             writer = ProjectWriter(archive)
             yield writer
             manifest = Manifest(format=FORMAT, version=1, project=project, media=writer.media)
-            archive.writestr(MANIFEST, manifest.model_dump_json(), compress_type=ZIP_DEFLATED)
+            archive.writestr(MANIFEST, manifest.model_dump_json(exclude_defaults=True), compress_type=ZIP_DEFLATED)
         partial.replace(path)
     finally:
         partial.unlink(missing_ok=True)
@@ -105,6 +107,8 @@ def read_manifest(archive: ZipFile, max_manifest_bytes: int) -> tuple[Manifest, 
         raise ArchiveError("作品清单与包内文件不一致")
     for item in manifest.media:
         member = indexed[item.member]
+        if manifest.version == 1 and item.hash_scheme != "sha256":
+            raise ArchiveError("作品包校验格式无效")
         if (item.member.rsplit(".", 1)[1] not in MEDIA_SUFFIXES or member.compress_type != ZIP_STORED
                 or member.file_size != member.compress_size or member.file_size != item.byte_length or member.flag_bits & 1):
             raise ArchiveError("作品媒体大小或格式无效")
@@ -121,13 +125,18 @@ def read_project(file: BinaryIO, staging_parent: Path, *, max_manifest_bytes: in
                 manifest, indexed = read_manifest(archive, max_manifest_bytes)
                 for entry in manifest.media:
                     digest = hashlib.sha256()
+                    blocks = hashlib.sha256()
                     path = Path(staging) / Path(entry.member).name
                     with archive.open(indexed[entry.member]) as source, path.open("xb") as dest:
-                        while chunk := source.read(CHUNK_SIZE):
+                        while chunk := source.read(HASH_BLOCK_SIZE):
                             digest.update(chunk)
+                            if entry.hash_scheme == "sha256-blocks-8m":
+                                blocks.update(hashlib.sha256(chunk).digest())
                             dest.write(chunk)
-                    if path.stat().st_size != entry.byte_length or digest.hexdigest() != entry.sha256:
+                    expected = blocks if entry.hash_scheme == "sha256-blocks-8m" else digest
+                    if path.stat().st_size != entry.byte_length or expected.hexdigest() != entry.sha256:
                         raise ArchiveError("作品媒体校验失败")
+                    entry.sha256 = digest.hexdigest()
                     files[media_ref(entry.member)] = path
         except (BadZipFile, EOFError) as exc:
             raise ArchiveError("作品包已损坏") from exc

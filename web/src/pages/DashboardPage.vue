@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, X } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Upload, X } from 'lucide-vue-next'
+import { exportProject, importProject } from '@/features/project-transfer/transfer'
 import { api, ApiRequestError } from '@/api'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
@@ -114,6 +115,55 @@ function resetFilters() {
   stateFilter.value = 'all'
 }
 
+const filePicker = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const exportingIds = ref(new Set<number>())
+let transfers = new AbortController()
+
+function cancelTransfers() {
+  transfers.abort()
+  transfers = new AbortController()
+  importing.value = false
+  exportingIds.value = new Set()
+}
+
+async function downloadProject(project: ProjectOverviewItem) {
+  if (exportingIds.value.has(project.id)) return
+  const {signal} = transfers
+  exportingIds.value.add(project.id)
+  try {
+    const blob = await exportProject(project.id, signal)
+    if (signal.aborted) return
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = project.name + '.novelvids.zip'
+    document.body.append(link)
+    try { link.click() } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000) }
+  } catch (error) {
+    if (!signal.aborted) notice.error((error as Error).message)
+  } finally { if (!signal.aborted) exportingIds.value.delete(project.id) }
+}
+
+async function uploadProject(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || importing.value) return
+  const {signal} = transfers
+  importing.value = true
+  try {
+    const {data} = await importProject(file, signal)
+    if (signal.aborted) return
+    resetFilters()
+    page.value = 1
+    await load()
+    if (!signal.aborted) notice.success(tr('已导入作品「{p0}」', {p0:data.name}))
+  } catch (error) {
+    if (!signal.aborted) notice.error((error as Error).message)
+  } finally { if (!signal.aborted) importing.value = false }
+}
+
 async function remove(project: ProjectOverviewItem) {
   if (deletingIds.value.has(project.id) || !editable.value) return
   if (!await appConfirm({
@@ -137,17 +187,21 @@ async function remove(project: ProjectOverviewItem) {
 
 watch([search, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })
-watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { overview.value = null; void load() })
+watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { cancelTransfers(); overview.value = null; void load() })
 function refreshOnFocus() { if (!loading.value) void load() }
 onMounted(() => { void load(); window.addEventListener('focus', refreshOnFocus) })
-onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', refreshOnFocus) })
+onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEventListener('focus', refreshOnFocus) })
 </script>
 
 <template>
   <main class="projects-page">
     <header class="projects-page__header">
       <h1>{{ tr('我的项目') }}</h1>
-      <RouterLink v-if="editable" to="/create/short-drama" class="projects-page__create"><Plus :size="18" aria-hidden="true" />{{ tr('新建项目') }}</RouterLink>
+      <div v-if="editable" class="projects-page__actions">
+        <input ref="filePicker" type="file" hidden accept=".zip,application/zip" @change="uploadProject">
+        <AppButton variant="secondary" size="sm" :loading="importing" @click="filePicker?.click()"><Upload v-if="!importing" :size="15" />{{ importing ? tr('正在导入') : tr('导入作品') }}</AppButton>
+        <RouterLink to="/create/short-drama" class="projects-page__create"><Plus :size="18" aria-hidden="true" />{{ tr('新建项目') }}</RouterLink>
+      </div>
     </header>
 
     <div v-if="loading && !overview" class="projects-page__loading" role="status">
@@ -176,7 +230,7 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
         </div>
 
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
-          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :deleting="deletingIds.has(project.id)" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
+          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :deleting="deletingIds.has(project.id)" :exporting="exportingIds.has(project.id)" @download="downloadProject" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
         </div>
         <div v-else class="projects-page__empty">
           <span class="projects-page__empty-icon"><Search v-if="hasFilters" :size="28" aria-hidden="true" /><BookOpen v-else :size="28" aria-hidden="true" /></span>
@@ -195,6 +249,7 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
 <style scoped>
 .projects-page { container: projects / inline-size; min-height: 100%; padding: 32px 30px 60px; color: var(--app-text); background: var(--app-canvas); }
 .projects-page__header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
+.projects-page__actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .projects-page h1 { margin: 0; font-size: clamp(26px, 2.6vw, 34px); font-weight: 700; line-height: 1.25; letter-spacing: -.035em; }
 .projects-page__create { display: inline-flex; min-height: 42px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 17px; border-radius: 11px; color: #fff; background: #5b5cf6; box-shadow: 0 5px 14px rgb(91 92 246 / 16%); font-size: 13px; font-weight: 600; transition: background-color 150ms ease; }
 .projects-page__create:hover { background: #4d4ee5; }

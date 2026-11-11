@@ -214,3 +214,44 @@ async def test_completed_episode_is_playable_after_import_and_keeps_private_stor
     assert version.media_ref.startswith("/media/exports/imports/")
     assert (tmp_path/"new-private"/version.media_ref.removeprefix("/media/exports/")).read_bytes() == b"finished episode"
     assert not (tmp_path/"media").exists()
+
+
+def test_transfer_plan_leaves_cloud_body_at_its_origin_and_export_private(monkeypatch):
+    from services.project_transfer.downloads import export_plan
+    monkeypatch.setattr("services.project_transfer.downloads.resolve_media_url", lambda k: "https://bucket.example/"+k+"?signature=temporary")
+    snapshot = {"exports":[{"id":42,"media_ref":"/media/exports/42/movie.mp4"}],
+        "remake_sources":[], "assets":[{"main_image":"uploads/3/hero.png"}]}
+    plan = export_plan(snapshot, 3)
+    assert plan["project"]["assets"][0]["main_image"] == "novelvids:media/2.png"
+    assert plan["files"][0]["url"] == "/api/video/exports/42/download" and plan["files"][0]["authenticated"]
+    assert plan["files"][1]["url"].startswith("https://bucket.example/") and not plan["files"][1]["authenticated"]
+    for bad in ["uploads/4/photo.png","/media/exports/900/other.mp4","/media/../private/photo.png"]:
+        snapshot["assets"][0]["main_image"] = bad
+        with pytest.raises(ArchiveError):
+            export_plan(snapshot,3)
+
+
+@pytest.mark.asyncio
+async def test_import_endpoint_rejects_invalid_archive_and_imports_into_new_project(client, tmp_path, monkeypatch):
+    from config import settings
+    from models.novel import Novel
+    from services.project_transfer.snapshot import project_snapshot
+    monkeypatch.setattr(settings, "MEDIA_PATH", str(tmp_path/"media"))
+    monkeypatch.setattr(settings, "CHAPTER_EXPORT_PATH", str(tmp_path/"private"))
+    novel = await Novel.create(name="归来")
+    r = await client.get(f"/api/novel/{novel.id}/transfer")
+    assert r.json()["data"]["project"]["novel"]["name"] == "归来" and not r.json()["data"]["files"]
+    dest = tmp_path/"work.zip"
+    snapshot = await project_snapshot(novel.id)
+    with write_project(dest, snapshot):
+        pass
+    async def submit(data):
+        return (await client.post("/api/novel/import-project", files={"file":("work.zip",data,"application/zip")})).json()
+    assert (await submit(b"bad archive"))["code"] == 422
+    restored = await submit(dest.read_bytes())
+    assert restored["code"] == 0 and restored["data"]["id"] != novel.id
+    snapshot["assets"]=[{"id":12,"main_image":"/some/path.png"}]
+    with write_project(dest, snapshot):
+        pass
+    assert (await submit(dest.read_bytes()))["code"] == 422
+    assert await Novel.all().count() == 2
