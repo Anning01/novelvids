@@ -30,6 +30,7 @@ class AssetExtractionGatewayError(RuntimeError):
 
 
 class ExtractedVariant(BaseModel):
+    existing_variant_id: int | None = Field(default=None, gt=0, description="复用时填写同一基础资产下的目录形态 ID；新形态留空")
     name: str = Field(min_length=1, max_length=100, description="衍生形态名；与目录中相同形态必须使用相同名称")
     description: str = Field(default="", description="形态的剧情阶段与适用情境")
     base_traits: str = Field(min_length=1, description="遵循当前资产输出协议的完整形态生图提示词")

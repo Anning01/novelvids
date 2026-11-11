@@ -172,7 +172,7 @@ class ExtractionReuse:
                         complete = False
                         continue
                     current = item.model_copy(update={'name': name, 'aliases': asset.aliases, 'description': asset.description or '',
-                        'base_traits': asset.base_traits, 'variant': item.variant.model_copy(update={'name': variant.name, 'base_traits': variant.base_traits,
+                        'base_traits': asset.base_traits, 'variant': item.variant.model_copy(update={'existing_variant_id': variant.id, 'name': variant.name, 'base_traits': variant.base_traits,
                             'description': variant.description or ''}) if variant else None})
                     groups[field].append(current)
                     summary[field].append({'name': name, 'action': 'reused', 'asset_id': asset.id,

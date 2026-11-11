@@ -194,6 +194,7 @@
   "对象已有后续恢复，不能覆盖": "This object has a later restoration and cannot be overwritten",
   "对象已有后续删除操作，不能覆盖": "This object has a later deletion and cannot be overwritten",
   "已移除对象的内容或引用已有后续修改，不能直接恢复覆盖": "This removed object's content or references have changed. It cannot be restored by overwriting.",
+  "形态编号与登记名称指向不同造型，请核对后重试": "The variant ID and registered name refer to different designs. Check the selection and retry.",
   "绑定形态不存在、已移除或不属于出镜设定": "The bound variant is missing, removed or does not belong to the on-screen setting",
   "该对象仍有生成任务，请先停止或等待完成": "This object still has generation tasks. Stop them or wait for completion.",
   "设定仍被分镜引用，请先明确并处理引用范围": "Shots still reference this setting. Specify and resolve the references first.",
