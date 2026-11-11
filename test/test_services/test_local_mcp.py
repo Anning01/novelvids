@@ -33,7 +33,7 @@ async def test_import_update_retry_order_and_conflict(tmp_path):
     assert await Chapter.filter(id=receipt['chapter_id']).count() == 1
     assert (root / 'sync-receipt.json').exists()
     from models.novel import Novel
-    assert (await Novel.get(id=receipt['novel_id'])).author == '人工创建'
+    assert (await Novel.get(id=receipt['novel_id'])).author == 'Agent 创建'
     assert receipt['location']['path'] == f"/#/create/short-drama/storyboard/{receipt['novel_id']}?chapter={receipt['chapter_id']}"
     assert receipt['location']['url'] == 'http://localhost:3000' + receipt['location']['path']
     url = receipt['archive']['clip.mp4']

@@ -137,7 +137,7 @@ class WorkSync:
             mapping = await WorkSyncObject.get_or_none(work_id=work, episode_id='', kind='work', stable_id=work)
             if mapping is None:
                 project = await Novel.create(name=manifest.work.name, aspect_ratio=manifest.aspect_ratio,
-                                             author='人工创建')
+                                             author='Agent 创建')
                 await self.register(work, '', 'work', work, project.id, manifest.work.model_dump())
             else:
                 project = await self.project(work)
