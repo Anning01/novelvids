@@ -35,7 +35,8 @@ import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import SceneVoiceTracks from '@/components/SceneVoiceTracks.vue'
-import { bindBlocking, unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
+import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt } from '@/shared/sceneModelPrompt'
+import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
@@ -408,15 +409,6 @@ async function persistVideoModelPreference(modelId: number) {
     }
     notice.error(error instanceof Error ? error.message : tr('视频模型偏好保存失败'))
   }
-}
-
-function boundPrompt(prompt: string, scene: Scene, model: string, sheetExcluded: boolean) {
-  const text = !sheetExcluded && sheetReference(scene) ? bindSheet(prompt, scene, model) : prompt
-  return bindBlocking(text, scene, model)
-}
-
-function plainPrompt(prompt: string, scene: Scene) {
-  return unbindBlocking(unbindSheet(prompt, scene), scene)
 }
 
 function makeSceneDraft(scene: Scene): SceneDraft {
@@ -1808,27 +1800,8 @@ function useSavedSheet(scene: Scene) {
   scheduleSceneSave(scene)
 }
 
-function importedDrafts(scene: Scene): Record<string, unknown> {
-  const work = scene.metadata?.work_package as { drafts?: Record<string, unknown> } | undefined
-  return work?.drafts || {}
-}
-
-function genericPrompt(scene: Scene): string {
-  const work = scene.metadata?.work_package as {prompt?: string} | undefined
-  const value = scene.metadata?.generic_video_prompt ?? scene.prompt_params?.generic_prompt ?? importedDrafts(scene).general ?? work?.prompt
-  return typeof value === 'string' ? value : ''
-}
-
 function modelDrafts(scene: Scene) {
-  const drafts = new Map<string, string>()
-  for (const [model, text] of Object.entries(importedDrafts(scene))) {
-    if (model !== 'general' && model !== 'eight_columns' && typeof text === 'string' && text.trim()) drafts.set(model, text)
-  }
-  const generated = scene.prompt_params?.model_optimized_prompt as {model_type?: string; prompt?: string} | undefined
-  if (generated?.model_type && generated.prompt) {
-    drafts.set(generated.model_type, generated.prompt)
-  }
-  return Array.from(drafts, ([model, text]) => ({model, text,
+  return Array.from(modelPromptTexts(scene), ([model, text]) => ({model, text,
     label: videoModels.value.find(item => item.model_type === model)?.name || model}))
 }
 
@@ -1885,27 +1858,10 @@ async function toggleModelPrompt(scene: Scene) {
   if (!model || !draft.prompt.trim() || promptOptimizations.value.has(scene.id)) return
   const facts = optimizationInput(scene, model)
   const input = JSON.stringify(facts)
-  const cached = draft.modelVersions[model.model_type]
-  const importedBase = scene.prompt_params?.generic_prompt ?? importedDrafts(scene).general ??
-    (scene.metadata?.work_package as {prompt?: string} | undefined)?.prompt
-  let optimized = cached?.input === input ? cached.prompt : undefined
-  if (!cached && typeof importedBase === 'string' && plainPrompt(importedBase, scene) === facts.generic_prompt) {
-    optimized = modelDrafts(scene).find(item => item.model === model.model_type)?.text
-  }
   const controller = new AbortController()
   promptOptimizations.value.set(scene.id, controller)
   try {
-    if (!optimized) {
-      const {data: task} = await api.optimizeScenePrompt(scene.id, {model_config_id: model.config_id, ...facts})
-      const result = terminalTaskStatuses.has(task.status) ? task : await pollUntilTerminal(
-        async signal => (await api.task(task.id, signal)).data,
-        { signal: controller.signal, intervalMs: 1500, terminalStatuses: terminalTaskStatuses, requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
-      if (result.status !== TaskStatusEnum.COMPLETED) throw new Error(result.error_message || tr('提示词优化失败'))
-      const text = result.response_data?.prompt
-      if (typeof text !== 'string' || !text.trim() || result.response_data?.model_type !== model.model_type ||
-          result.response_data?.scene_id !== scene.id) throw new Error(tr('模型未返回本镜头的提示词'))
-      optimized = text
-    }
+    const optimized = await resolveModelPrompt(scene, model, facts, draft.modelVersions, controller.signal)
     if (controller.signal.aborted || selectedVideoModelConfig.value?.config_id !== model.config_id) return
     if (JSON.stringify(optimizationInput(scene, model)) !== input) {
       notice.info(tr('分镜内容已修改，请按当前内容重新优化'))

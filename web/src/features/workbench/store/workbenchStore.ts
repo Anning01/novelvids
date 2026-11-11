@@ -1,4 +1,5 @@
 
+import { sheetReference, includeSheet } from '@/shared/storyboardSheetReference'
 import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
@@ -1379,8 +1380,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const sourceScene = this.scenes.find(item => item.id === sceneId)
         const savedReferences = readVideoReferenceMedia(sourceScene?.metadata?.video_reference_media)
           .filter(item => !item.library_resource_id)
+        const sheet = sourceScene && sourceScene.metadata?.storyboard_sheet_excluded !== true ? sheetReference(sourceScene) : undefined
+        const referenceText = [sourceScene?.metadata?.video_prompt_model ? sourceScene.metadata.generic_video_prompt : '', sourceScene?.prompt].filter(Boolean).join('\n')
         const references = options.generation_mode === 'keyframes' ? [] : [
-          ...referencedVideoMedia(sourceScene?.prompt || '', savedReferences),
+          ...referencedVideoMedia(referenceText, sheet ? includeSheet(savedReferences, sheet) : savedReferences),
           ...this.libraryVideoReferences(sceneId),
         ]
         let video = (await api.generateVideo(sceneId, modelConfigId, { ...options, ...(references.length ? { reference_media: references } : {}) })).data

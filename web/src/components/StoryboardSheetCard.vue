@@ -5,8 +5,8 @@ import { tr } from '@/i18n'
 import { GalleryHorizontalEnd } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
 import type { Scene } from '@/types'
-const props = defineProps<{ scene: Scene; enabled: boolean; canUse?: boolean }>()
-const emit = defineEmits<{ updated: [scene: Scene]; use: [] }>()
+const props = defineProps<{ scene: Scene; enabled: boolean; canUse?: boolean; beforeGenerate?: () => Promise<void> }>()
+const emit = defineEmits<{ updated: [scene: Scene]; use: []; submitted: [taskId: string] }>()
 const busy = ref(false)
 const submitting = ref(false)
 const error = ref('')
@@ -44,7 +44,9 @@ async function generate() {
   submitting.value = true
   error.value = ''
   try {
+    await props.beforeGenerate?.()
     const task = (await api.generateStoryboardSheet(props.scene.id)).data
+    emit('submitted', task.id)
     await follow(task.id)
   } catch (caught) { error.value = (caught as Error).message }
   finally { submitting.value = false }

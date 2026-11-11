@@ -96,6 +96,7 @@ export interface Scene { blocking_reference?: (VideoReferenceMedia & {rules: Rec
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface VideoMergeResult { chapter_id: number; merged_url: string; poster_url?: string | null; poster_thumbnail_url?: string | null; video_count: number; total_duration: number }
 export interface WorkbenchProjectConfig {
+  storyboard_enabled?: boolean
   workflow_kind: 'script' | 'remake'
   aspect_ratio?: string | null
   resolution?: string | null

@@ -83,6 +83,7 @@ class WorkbenchCapabilitiesOut(BaseModel):
 
 
 class WorkbenchProjectConfigOut(BaseModel):
+    storyboard_enabled: bool = False
     workflow_kind: Literal["script", "remake"] = "script"
     aspect_ratio: str | None = None
     resolution: str | None = None

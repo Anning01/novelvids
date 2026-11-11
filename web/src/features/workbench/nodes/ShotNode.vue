@@ -3,9 +3,14 @@ import { tr } from '@/i18n'
 
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
+import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
+import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt, type ModelPromptVersions, type OptimizationFacts } from '@/shared/sceneModelPrompt'
+import { includeSheet, sheetReference } from '@/shared/storyboardSheetReference'
+import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
+import { withBlockingReference } from '@/shared/sceneBlockingReference'
 import type { AssetReferenceEdgeConfig, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
-import { computed, inject, markRaw, ref, watch } from 'vue'
-import { Film } from 'lucide-vue-next'
+import { computed, inject, markRaw, onScopeDispose, ref, watch } from 'vue'
+import { Film, LoaderCircle, WandSparkles } from 'lucide-vue-next'
 import type { Asset, Scene, Video, VideoGenerationModel } from '@/types'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
 import type { VideoResource } from '@/features/resource-library/types'
@@ -31,7 +36,7 @@ import { sceneHasRunningVideo } from '../graph/videoVersions'
 import { videoAspectRatio, videoCoverUrl, videoPixelSize, videoResolution } from '../graph/videoMedia'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import { estimateVideoCost } from '@/shared/modelPricing'
-import { readVideoReferenceMedia, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
+import { buildVideoInputImageReferences, readVideoReferenceMedia, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { TaskStatusEnum } from '@/types'
 
 const props = defineProps<NodeProps>()
@@ -49,12 +54,34 @@ const description = ref('')
 const prompt = ref('')
 const config = ref<ShotWorkbenchConfig>(normalizeShotConfig(scene.value, projectDefaults.value))
 const saving = ref(false)
+const optimizing = ref(false)
+let optimization: AbortController | undefined
+onScopeDispose(() => optimization?.abort())
+const activePromptModel = computed(() => {
+  const saved = scene.value.metadata?.video_prompt_model
+  if (typeof saved === 'string') return saved
+  return [...modelPromptTexts(scene.value)].find(([, text]) => text === scene.value.prompt)?.[0] || ''
+})
+const sheetExcluded = computed(() => scene.value.metadata?.storyboard_sheet_excluded === true)
+function renderPrompt(value: string, model: string, source = scene.value, excluded = sheetExcluded.value) {
+  return config.value.useLastFrame ? plainPrompt(value, source) : boundPrompt(value, source, model, excluded)
+}
+function sceneMedia(source: Scene, excluded: boolean) {
+  const saved = readVideoReferenceMedia(source.metadata?.video_reference_media)
+  const sheet = sheetReference(source)
+  return sheet && !excluded ? includeSheet(saved, sheet) : saved
+}
+
 const measuredVideoSize = ref<{ width: number; height: number } | null>(null)
 
-watch([scene, projectDefaults], ([value, defaults]) => {
+watch([scene, projectDefaults], ([value, defaults], [previous]) => {
+  const preserveInput = previous?.id === value.id && previous.prompt === value.prompt &&
+    previous.metadata?.video_prompt_model === value.metadata?.video_prompt_model
   description.value = value.description || ''
-  prompt.value = value.prompt || ''
-  config.value = normalizeShotConfig(value, defaults)
+  const next = normalizeShotConfig(value, defaults)
+  if (!videoModels.value.some(item => item.config_id === next.modelType)) next.modelType = videoModels.value[0]?.config_id || null
+  config.value = next
+  if (!preserveInput) prompt.value = renderPrompt(value.prompt || '', activePromptModel.value, value)
 }, { immediate: true })
 watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (scene.value.prompt || '') }))
 watch(videoModels, value => {
@@ -66,6 +93,7 @@ watch(videoModels, value => {
 const busy = computed(() => store.busySceneIds.includes(scene.value.id) || sceneHasRunningVideo(videos.value))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
 const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
+const blockingMap = useSceneBlockingMap(() => promptEditorOpen.value ? scene.value : undefined)
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
 const keyframesReady = computed(() => !config.value.useLastFrame || Boolean(config.value.firstFrameUrl && config.value.lastFrameUrl))
 const generationMode = computed(() => config.value.useLastFrame ? 'keyframes' : 'reference')
@@ -73,7 +101,8 @@ const canGenerate = computed(() => Boolean(backendCanGenerate.value
   && selectedModel.value?.capabilities.generation_modes.includes(generationMode.value)
   && keyframesReady.value
   && !busy.value
-  && !saving.value))
+  && !saving.value && !optimizing.value
+  && (!activePromptModel.value || activePromptModel.value === selectedModel.value?.model_type)))
 const activeVideoId = computed(() => {
   const configured = config.value.activeVideoId
   return configured && videos.value.some(video => video.id === configured) ? configured : videos.value[0]?.id || null
@@ -195,14 +224,16 @@ const materialMentions = computed<MaterialMention[]>(() => {
         mode: referenceMode(edge, source),
       }))
   }))
-  const saved = referencedVideoMedia(prompt.value, readVideoReferenceMedia(scene.value.metadata?.video_reference_media))
+  const refs = withBlockingReference(scene.value, sceneMedia(scene.value, sheetExcluded.value))
+  const text = activePromptModel.value ? genericPrompt(scene.value) + '\n' + prompt.value : prompt.value
+  const saved = referencedVideoMedia(text, refs)
     .map(reference => ({
       nodeKey: props.id,
       edgeKey: `saved:${videoReferenceMentionSyntax(reference)}`,
       syntax: videoReferenceMentionSyntax(reference),
       name: reference.name || (reference.type === 'image' ? tr('参考图片') : tr('参考视频')),
       prompt: '',
-      previewUrl: reference.url,
+      previewUrl: reference.mention_url === scene.value.blocking_reference?.mention_url && scene.value.blocking_reference ? blockingMap.image.value : reference.url,
       hasImage: reference.type === 'image',
       mediaKind: reference.type,
       mode: reference.type === 'image' ? 'reference_image' as const : 'reference_video' as const,
@@ -224,24 +255,111 @@ function normalizedDraftConfig(): ShotWorkbenchConfig {
   }
 }
 
-async function save() {
+async function save(metadata: Scene['metadata'] = {}, nextPrompt = prompt.value, source = scene.value) {
   saving.value = true
   try {
     const nextConfig = normalizedDraftConfig()
     config.value = nextConfig
     await store.saveScene(scene.value.id, {
       description: description.value,
-      prompt: prompt.value,
+      prompt: nextPrompt,
       duration: nextConfig.duration,
       asset_ids: referenceEdges.value
         .map(edge => store.nodeByKey(edge.source))
         .filter((node): node is WorkbenchNode => node?.kind === 'asset')
         .map(node => node.id),
-      metadata: patchShotWorkbenchConfig(scene.value.metadata, nextConfig),
+      metadata: patchShotWorkbenchConfig({ ...source.metadata, ...metadata }, nextConfig),
     })
   } finally {
     saving.value = false
   }
+}
+
+function optimizationFacts(): OptimizationFacts {
+  const cfg = config.value
+  const submitted: OptimizationFacts['submitted_media'] = []
+  if (cfg.useLastFrame) {
+    if (cfg.firstFrameUrl) submitted.push({type: 'image', label: tr('首帧')})
+    if (cfg.lastFrameUrl) submitted.push({type: 'image', label: tr('尾帧')})
+  } else {
+    const imageSources = referenceEdges.value.flatMap(edge => {
+      const node = store.nodeByKey(edge.source)
+      const asset = node?.kind === 'asset' && assetForWorkbenchNode(node)
+      if (!asset) return []
+      return [{assetId: asset.id, label: asset.canonical_name, mentionNames: [asset.canonical_name, ...(asset.aliases || [])],
+        imageUrls: assetSelectedImageCandidates(asset).map(item => item.url)}]
+    })
+    const references = withBlockingReference(scene.value, sceneMedia(scene.value, sheetExcluded.value))
+    for (const image of buildVideoInputImageReferences(prompt.value, imageSources, references, selectedModel.value?.capabilities.max_reference_images)) {
+      submitted.push({type: 'image', label: image.label})
+    }
+    for (const ref of materialMentions.value) {
+      if (ref.mode === 'reference_video') submitted.push({type: 'video', label: ref.name})
+      if (ref.mode === 'reference_audio') submitted.push({type: 'audio', label: ref.name})
+    }
+  }
+  return {generic_prompt: plainPrompt(prompt.value, scene.value), duration: cfg.duration,
+    aspect_ratio: cfg.aspectRatio, generation_mode: generationMode.value, submitted_media: submitted}
+}
+
+function promptVersions(): ModelPromptVersions {
+  return {...(scene.value.metadata?.video_prompt_versions as ModelPromptVersions || {})}
+}
+
+async function restoreGeneric() {
+  const versions = promptVersions()
+  const model = activePromptModel.value
+  if (versions[model]) versions[model] = {...versions[model], prompt: plainPrompt(prompt.value, scene.value)}
+  const generic = genericPrompt(scene.value)
+  const text = renderPrompt(generic, '')
+  await save({video_prompt_model: '', video_prompt_versions: versions}, text)
+  prompt.value = text
+}
+
+async function togglePrompt() {
+  if (saving.value || optimizing.value) return
+  const controller = new AbortController()
+  optimization = controller
+  optimizing.value = true
+  try {
+    if (activePromptModel.value) { await restoreGeneric(); return }
+    const model = selectedModel.value
+    if (!model || !prompt.value.trim()) return
+    const facts = optimizationFacts()
+    const input = JSON.stringify(facts)
+    const versions = promptVersions()
+    const sourceId = scene.value.id
+    const draft = await resolveModelPrompt(scene.value, model, facts, versions, controller.signal)
+    if (controller.signal.aborted || sourceId !== scene.value.id || model.config_id !== selectedModel.value?.config_id) return
+    if (input !== JSON.stringify(optimizationFacts())) {
+      notice.info(tr('分镜内容已修改，请按当前内容重新优化'))
+      return
+    }
+    versions[model.model_type] = {prompt: draft, input}
+    const text = renderPrompt(draft, model.model_type)
+    await save({generic_video_prompt: facts.generic_prompt, video_prompt_model: model.model_type, video_prompt_versions: versions}, text)
+    prompt.value = text
+  } catch (error) {
+    if (!controller.signal.aborted) notice.error((error as Error).message)
+  } finally {
+    optimizing.value = false
+  }
+}
+
+function rememberSheetTask(taskId: string) {
+  // Closing the floating panel stops its poll. Reopening resumes from this task.
+  const current = store.scenes.find(item => item.id === scene.value.id)
+  if (!current) return
+  const sheet = current.metadata?.storyboard_sheet as Record<string, unknown> | undefined
+  current.metadata = {...current.metadata, storyboard_sheet: {...sheet, task_id: taskId, status: 'pending'}}
+}
+
+async function useSheet(source: Scene) {
+  try {
+    const text = renderPrompt(prompt.value, activePromptModel.value, source, false)
+    await save({ storyboard_sheet_excluded: false, video_reference_media: sceneMedia(source, false) }, text, source)
+    prompt.value = text
+  } catch (error) { notice.error((error as Error).message) }
 }
 
 const libraryOpen = ref(false)
@@ -298,7 +416,12 @@ registerWorkbenchPromptAction(props.id, {
       modelValue: computed(() => config.value.modelType),
       updateModelValue(value) {
         const modelType = Number(value)
-        if (Number.isFinite(modelType)) config.value.modelType = modelType
+        if (!Number.isFinite(modelType) || config.value.modelType === modelType) return
+        optimization?.abort()
+        config.value.modelType = modelType
+        if (activePromptModel.value && activePromptModel.value !== selectedModel.value?.model_type && genericPrompt(scene.value)) {
+          void restoreGeneric().catch(error => notice.error(error.message))
+        }
       },
     },
     {
@@ -436,7 +559,23 @@ watch([selectedModel, generationMode], ([model]) => {
       @focus-reference="promptEditor?.focusReference($event)"
       @remove-reference="promptEditor?.removeReference($event)"
       @focusout="handlePromptFocusOut"
-    />
+    >
+      <template #header-actions>
+        <StoryboardSheetCard v-if="store.projectConfig.storyboard_enabled || scene.metadata?.storyboard_sheet"
+          :scene="scene" :enabled="Boolean(store.projectConfig.storyboard_enabled)" :can-use="sheetExcluded"
+          :before-generate="() => save()" @submitted="rememberSheetTask" @updated="useSheet" @use="useSheet(scene)" />
+      </template>
+      <template #footer-actions>
+        <button type="button" class="workbench-prompt-panel__secondary-action"
+          :aria-pressed="Boolean(activePromptModel)" :aria-busy="optimizing"
+          :disabled="saving || optimizing || (activePromptModel ? !genericPrompt(scene) : !selectedModel || !prompt.trim())"
+          @click="togglePrompt">
+          <LoaderCircle v-if="optimizing" class="workbench-prompt-panel__action-spinner" :size="13" />
+          <WandSparkles v-else :size="13" />
+          {{ optimizing ? tr('优化中') : activePromptModel ? tr('使用通用 Prompt') : tr('模型 Skills 优化') }}
+        </button>
+      </template>
+    </WorkbenchPromptEditorPanel>
   </div>
 </template>
 

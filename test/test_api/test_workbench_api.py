@@ -119,6 +119,7 @@ async def test_workbench_bootstrap_returns_only_current_chapter_working_set(clie
 @pytest.mark.asyncio
 async def test_remake_workbench_bootstrap_includes_project_source_and_analysis_task(client: AsyncClient):
     novel = await Novel.create(
+        storyboard_enabled=True,
         name="重制项目",
         workflow_kind="remake",
         aspect_ratio="16:9",
@@ -158,6 +159,7 @@ async def test_remake_workbench_bootstrap_includes_project_source_and_analysis_t
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["project_config"] == {
+        "storyboard_enabled": True,
         "workflow_kind": "remake",
         "aspect_ratio": "16:9",
         "resolution": "1080p",

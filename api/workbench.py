@@ -123,6 +123,7 @@ async def get_workbench_bootstrap(
             "chapter": chapter,
             "project_config": {
                 "workflow_kind": novel.workflow_kind,
+                "storyboard_enabled": novel.storyboard_enabled,
                 "aspect_ratio": novel.aspect_ratio,
                 "resolution": novel.resolution,
                 "style_key": novel.style_key,
