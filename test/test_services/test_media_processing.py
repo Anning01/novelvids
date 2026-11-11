@@ -287,6 +287,7 @@ async def test_completed_video_uploads_file_stream_without_reading_entire_video(
         put_bytes=AsyncMock(side_effect=AssertionError('whole-file upload used')))
     monkeypatch.setattr(services.oss, 'oss', provider)
     monkeypatch.setattr(controller.settings, 'MEDIA_PATH', str(tmp_path))
+    monkeypatch.setattr(controller.settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', True)
     monkeypatch.setattr(controller.httpx, 'AsyncClient', Client)
     monkeypatch.setattr(controller.video_poster_service, 'extract_file_and_store', AsyncMock(return_value={}))
     monkeypatch.setattr(services.video.duration, 'measure_video_duration', lambda path: 1.0)
@@ -294,6 +295,21 @@ async def test_completed_video_uploads_file_stream_without_reading_entire_video(
     assert uploaded and uploaded[0][1] == 'video/mp4'
     provider.put_bytes.assert_not_called()
     assert not (tmp_path / 'videos/987.mp4').exists()
+
+
+@pytest.mark.asyncio
+async def test_default_generated_upload_keeps_bytes_only_provider_compatibility(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    import controllers.video as controller
+    import services.oss
+    source = tmp_path / 'video.mp4'
+    source.write_bytes(b'video')
+    provider = SimpleNamespace(put_bytes=AsyncMock())
+    monkeypatch.setattr(services.oss, 'oss', provider)
+    monkeypatch.setattr(controller.settings, 'MEDIA_PROCESSING_REMOTE_ENABLED', False)
+    await controller._upload_generated_file('uploads/video.mp4', source, 'video/mp4')
+    provider.put_bytes.assert_awaited_once_with('uploads/video.mp4', b'video', 'video/mp4')
 
 
 @pytest.mark.asyncio

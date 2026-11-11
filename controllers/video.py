@@ -87,6 +87,15 @@ async def _ensure_video_posters(
         return {}
 
 
+async def _upload_generated_file(key: str, path: Path, content_type: str) -> None:
+    from services.oss import oss
+    if settings.MEDIA_PROCESSING_REMOTE_ENABLED:
+        await oss.put_file(key, path, content_type)
+    else:
+        with path.open('rb') as source:
+            await oss.put_bytes(key, source.read(), content_type)
+
+
 async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str, str | float]]:
     """将远程视频下载到本地 MEDIA_PATH/videos/ 目录，返回可访问的 /media/ 路径。"""
     video_dir = os.path.join(settings.MEDIA_PATH, "videos")
@@ -108,7 +117,7 @@ async def _download_video(remote_url: str, video_id: int) -> tuple[str, dict[str
 
     if oss.enabled:
         key = make_upload_key(None, f"videos/{filename}")
-        await oss.put_file(key, Path(local_path), "video/mp4")
+        await _upload_generated_file(key, Path(local_path), "video/mp4")
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
         media_url = key
     posters: dict[str, str | float] = {}
@@ -158,7 +167,7 @@ async def _download_last_frame(remote_url: str, video_id: int) -> str:
 
     if oss.enabled:
         key = make_upload_key(None, f"video-references/last-frame-{video_id}.png")
-        await oss.put_file(key, destination, "image/png")
+        await _upload_generated_file(key, destination, "image/png")
         destination.unlink(missing_ok=True)
         # 落库存 key，读取时由 OUT schema 解析为公共 URL
         return key
