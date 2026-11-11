@@ -310,6 +310,7 @@ def test_continuous_rack_focus_renders_one_request_with_unbroken_dialogue(langua
     snap = SkillSnapshot.model_validate(snapshot_skills())
     guidance = instructions(snap, language, 'storyboard')
     assert 'shot_duration_range' in guidance and 'segments 留空' in guidance
+    assert '根据剧情设计视听' in guidance and '画外的现场对白仍用 dialogue' in guidance
     assert f'language={language}' in guidance
     shot = _shot()
     shot.duration = f'{duration}s'
