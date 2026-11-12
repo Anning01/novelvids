@@ -32,12 +32,17 @@ class UploadSpec(BaseModel):
 
 
 def bucket_config():
-    if not (re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", settings.STUDIO_TEMP_BUCKET)
-            and re.fullmatch(r"[a-z0-9-]+", settings.STUDIO_TEMP_REGION)
+    bucket = settings.STUDIO_TEMP_BUCKET or settings.OSS_BUCKET
+    region = settings.STUDIO_TEMP_REGION
+    if not region:
+        endpoint = settings.OSS_ENDPOINT.removeprefix("https://").removeprefix("http://").rstrip("/")
+        match = re.fullmatch(r"oss-([a-z0-9-]+)\.aliyuncs\.com", endpoint)
+        region = match[1] if match else ""
+    if not (re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", bucket)
+            and re.fullmatch(r"[a-z0-9-]+", region)
             and settings.OSS_ACCESS_KEY_ID and settings.OSS_ACCESS_KEY_SECRET):
         return None
-    return TemporaryBucket(settings.STUDIO_TEMP_BUCKET, settings.STUDIO_TEMP_REGION,
-                           settings.OSS_ACCESS_KEY_ID, settings.OSS_ACCESS_KEY_SECRET)
+    return TemporaryBucket(bucket, region, settings.OSS_ACCESS_KEY_ID, settings.OSS_ACCESS_KEY_SECRET)
 
 
 async def issue_upload(team_id, spec):
