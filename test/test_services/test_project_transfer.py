@@ -335,3 +335,17 @@ async def test_import_preserves_external_stable_ids_without_redirecting_an_exist
     assert new_episode.stable_id=="ep-1" and new_episode.payload["manifest"]["work"]["id"]==new_work.stable_id
     new_shot=await WorkSyncObject.get(work_id=new_work.work_id,kind="shot",stable_id="shot-5")
     assert new_shot.local_id!=shot.id and await Scene.filter(id=new_shot.local_id,chapter_id=new_episode.local_id).exists()
+
+
+def test_legacy_generated_assets_in_shared_zero_directory_remain_exportable(monkeypatch):
+    from services.project_transfer.downloads import export_plan
+    monkeypatch.setattr("services.project_transfer.downloads.resolve_media_url",lambda k:"https://storage.example/"+k)
+    work={"exports":[],"remake_sources":[],"novel":{"cover":"uploads/0/cover.png"},
+          "assets":[{"main_image":"uploads/0/actor.png","metadata":{"image_gallery":["uploads/0/actor.png"]}}],
+          "videos":[{"url":"uploads/0/video.mp4","metadata":{"poster_url":"uploads/0/poster.png"}}]}
+    plan=export_plan(work,7)
+    assert len(plan["files"])==4
+    assert plan["project"]["assets"][0]["metadata"]["image_gallery"][0]==plan["project"]["assets"][0]["main_image"]
+    work["novel"]["cover"]="uploads/8/other-team.png"
+    with pytest.raises(ArchiveError,match="团队"):
+        export_plan(work,7)

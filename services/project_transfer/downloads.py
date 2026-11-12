@@ -60,7 +60,9 @@ def export_plan(snapshot: dict, team_id: int | None) -> dict:
                 raise ArchiveError("作品引用的成片不属于当前项目")
             url, authenticated, storage = private[value], True, "export"
         elif key.startswith("uploads/"):
-            if not key.startswith(f"uploads/{team_id or 0}/") and key not in shared_media:
+            # Historical generated images, covers and videos were written with team=None.
+            # They are public objects, retained as canonical references on this authorized work.
+            if not key.startswith((f"uploads/{team_id or 0}/", "uploads/0/")) and key not in shared_media:
                 raise ArchiveError("素材不属于作品团队")
             url = resolve_media_url(key)
             if not url or url == key:
