@@ -88,3 +88,20 @@ async def test_console_usage_uses_platform_billing_and_member_scope():
         data = (await client.get("/api/platform/usage",headers={"Authorization":"Bearer "+await issue_test_session(author.username),
                  "X-Team-Id":str(team.id)})).json()["data"]
     assert data["total_cost"] == 5 and data["total_records"] == 1 and data["daily_trend"][0]["cost"] == 5
+
+
+@pytest.mark.skipif(not settings.AUTH_ENABLED, reason="requires authenticated accounts")
+async def test_platform_provider_settings_are_administrator_only():
+    from fastapi import FastAPI
+    from httpx import ASGITransport,AsyncClient
+    from api.platform import console_router
+    app=FastAPI()
+    app.include_router(console_router,prefix="/api")
+    team=await Team.create(name="平台配置权限")
+    regular=await User.create(username="platform-config-user",password_hash="!")
+    await TeamMember.create(team=team,user=regular,role="admin")
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
+        r=await client.get("/api/config",headers={"Authorization":"Bearer "+await issue_test_session(regular.username),
+            "X-Team-Id":str(team.id)})
+        assert r.status_code==403
+        assert (await client.get("/api/config")).status_code==401

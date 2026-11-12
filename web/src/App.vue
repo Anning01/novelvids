@@ -63,6 +63,7 @@ const adminItems = computed(() => {
     items.push({ path: '/teams', get label() { return tr('团队管理') }, icon: Building2, active: () => route.path.startsWith('/teams') })
     items.push({ path: '/users', get label() { return tr('用户管理') }, icon: UserRound, active: () => route.path.startsWith('/users') })
   }
+  if (platform.value && auth.isSuperAdmin) items.push({path:'/settings', get label(){return tr('模型配置')},icon:Settings,active:()=>route.path==='/settings'})
   if (!platform.value && auth.enabled === true && auth.isLoggedIn) {
     items.push({ path: '/orders', get label() { return tr('订单管理') }, icon: Receipt, active: () => route.path.startsWith('/orders') })
   }

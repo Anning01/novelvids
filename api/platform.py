@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from auth.deps import AuthContext, require_roles
+from auth.deps import AuthContext, require_roles, require_super_admin
 from controllers.billing import billing_scope
 from services.billing.aggregation import summary
 from auth.models import PlatformApiKey, PlatformCallReceipt, StudioKeyGrant
@@ -24,6 +24,8 @@ from api.video_export import download_export
 console_router = APIRouter()
 developer_router = APIRouter()
 console_router.include_router(billing, prefix="/billing")
+from api.config import router as model_config_router
+console_router.include_router(model_config_router, prefix="/config", dependencies=[Depends(require_super_admin)], include_in_schema=False)
 console_router.add_api_route("/novel/overview", get_project_overview, methods=["GET"], include_in_schema=False)
 console_router.add_api_route("/novel/{novel_id}/transfer", export_project, methods=["GET"], include_in_schema=False)
 console_router.add_api_route("/novel/{novel_id}/transfer", export_with_canvases, methods=["POST"], include_in_schema=False)
