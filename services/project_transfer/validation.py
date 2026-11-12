@@ -2,8 +2,8 @@
 from pathlib import PureWindowsPath
 import re
 
-from services.project_transfer.archive import ArchiveError, VerifiedProject
-from services.project_transfer.local_media import PROSE_FIELDS
+from services.project_transfer.archive import ArchiveError, DOCUMENT_SUFFIXES, VerifiedProject
+from services.project_transfer.local_media import PROSE_FIELDS, document_refs
 
 GROUPS = ("chapters", "assets", "variants", "scenes", "videos", "editor_assets", "edit_drafts",
           "exports", "publications", "remake_sources", "voices", "library")
@@ -41,4 +41,18 @@ def validate_portable_graph(verified: VerifiedProject):
             elif value.startswith(("/", "\\", "../", "file:", "uploads/", "remake/sources/")) or PureWindowsPath(value).drive and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]+://", value):
                 raise ArchiveError("作品包包含外部文件路径")
 
+    canvases = project.get("canvases", {})
+    if not isinstance(canvases, dict) or not set(canvases) <= {str(row["id"]) for row in project["chapters"]}:
+        raise ArchiveError("作品中的画布章节无效")
+    from services.project_transfer.canvas import check_layout
+    for layout in canvases.values():
+        check_layout(layout)
+    groups = project.get("sync_works", [])
+    if not isinstance(groups,list) or any(not isinstance(g,dict) or not isinstance(g.get("work"),str)
+       or not isinstance(g.get("objects"),list) or any(not isinstance(o,dict) or not isinstance(o.get("payload"),dict)
+       for o in g["objects"]) for g in groups):
+        raise ArchiveError("外部作品同步清单无效")
+    docs = document_refs(project)
+    if any(file.suffix[1:] in DOCUMENT_SUFFIXES and ref not in docs for ref,file in verified.files.items()):
+        raise ArchiveError("原始文稿不在作品清单中")
     visit(project, "")

@@ -12,11 +12,14 @@ from models.chapter import Chapter
 from models.chapter_export import ChapterExport
 from models.finished_episode import FinishedEpisodePublication
 from models.novel import Novel
+from models.portfolio import PortfolioWork, PortfolioEpisode
+from services.project_transfer.sync_identity import restore_mappings
 from models.remake_source import RemakeSource
 from models.resource_library import ProjectResource, VideoResource
 from models.scene import Scene
 from models.video import Video
-from models.video_edit import ChapterEditDraft, EditorAsset
+from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset
+from services.project_transfer.canvas import rebind_layout
 from services.project_transfer.archive import ArchiveError
 from services.project_transfer.snapshot import FIELDS, creative_value
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -144,4 +147,13 @@ async def restore_graph(project, *, team_id, user_id):
         for row in project["publications"]:
             await create(FinishedEpisodePublication, row, chapter_id=ids.get(Chapter,row["chapter_id"]),
                          export_id=ids.get(ChapterExport,row.get("export_id")))
+        for row in project.get("portfolio",[]):
+            await create(PortfolioWork,row,novel_id=novel.id,cover_chapter_id=ids.get(Chapter,row.get("cover_chapter_id")),
+                         status="private",featured=False)
+        for row in project.get("portfolio_episodes",[]):
+            await create(PortfolioEpisode,row,work_id=ids.get(PortfolioWork,row["work_id"]),chapter_id=ids.get(Chapter,row["chapter_id"]),
+                         export_id=ids.get(ChapterExport,row["export_id"]))
+        await restore_mappings(project.get("sync_works",[]),ids,novel.id,team_id,db)
+        for chapter_id,layout in project.get("canvases",{}).items():
+            await ChapterCanvasSnapshot.create(using_db=db,chapter_id=ids.get(Chapter,chapter_id),layout=rebind_layout(layout,ids))
         return novel

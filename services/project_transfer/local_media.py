@@ -1,6 +1,10 @@
 """Translate application media references when packing or opening a local project."""
 from pathlib import Path
 import re
+import base64
+import binascii
+import mimetypes
+from io import BytesIO
 from urllib.parse import quote, unquote
 
 from services.project_transfer.archive import ArchiveError, MEDIA_SUFFIXES, write_project
@@ -34,14 +38,35 @@ def translate(value, resolve, field=None):
     return MENTION.sub(mention, value)
 
 
+def document_refs(project):
+    return {ref for group in project.get("sync_works", []) for item in group["objects"] if item["kind"] == "episode"
+            for ref in item["payload"].get("archive", {}).values() if isinstance(ref, str)}
+
+
+def archived_document(ref, approved):
+    return ref in approved and re.fullmatch(r"/media/(?:work-packages|project-imports/[a-f0-9]{32})/[a-f0-9]{64}\.(md|txt|json|csv|pdf|docx)", ref)
+
+
 def pack_local_snapshot(snapshot: dict, destination: Path, *, media_root: Path, exports_root: Path):
     """Package on the machine that owns the media. No server-side URL fetching."""
     contents = {}
+    approved = document_refs(snapshot)
     with write_project(destination, contents) as writer:
         cached = {}
 
         def resolve(source):
             if source in cached:
+                return cached[source]
+            if source.startswith("data:"):
+                header, separator, data = source[5:].partition(";base64,")
+                suffix = (mimetypes.guess_extension(header) or "").lstrip(".")
+                if not separator or suffix not in MEDIA_SUFFIXES:
+                    raise ArchiveError("作品内嵌素材格式无效")
+                try:
+                    raw = base64.b64decode(data,validate=True)
+                except (ValueError,binascii.Error) as e:
+                    raise ArchiveError("作品内嵌素材编码无效") from e
+                cached[source] = writer.add_media(BytesIO(raw),suffix)
                 return cached[source]
             storage = "media"
             if source.startswith("/media/exports/"):
@@ -59,7 +84,7 @@ def pack_local_snapshot(snapshot: dict, destination: Path, *, media_root: Path, 
                 return source
             root = root.resolve()
             path = (root / relative).resolve()
-            if not path.is_relative_to(root) or not path.is_file() or path.suffix.lower().lstrip(".") not in MEDIA_SUFFIXES:
+            if not path.is_relative_to(root) or not path.is_file() or (path.suffix.lower().lstrip(".") not in MEDIA_SUFFIXES and not archived_document(source, approved)):
                 raise ArchiveError("作品引用的本地素材缺失或路径无效")
             with path.open("rb") as file:
                 ref = writer.add_media(file, path.suffix, storage=storage)

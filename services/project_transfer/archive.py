@@ -20,6 +20,9 @@ HASH_BLOCK_SIZE = 8 * CHUNK_SIZE
 MEDIA_SUFFIXES = frozenset("png jpg jpeg webp bmp gif svg mp4 mov mkv webm avi m4v wav mp3 aac flac m4a ogg srt vtt".split())
 
 
+DOCUMENT_SUFFIXES = frozenset({"md", "txt", "json", "csv", "pdf", "docx"})
+
+
 class ArchiveError(ValueError):
     pass
 
@@ -60,7 +63,7 @@ class ProjectWriter:
 
     def add_media(self, stream: BinaryIO, suffix: str, *, storage: Literal["media", "export", "remake"] = "media") -> str:
         suffix = suffix.lower().removeprefix(".")
-        if suffix not in MEDIA_SUFFIXES:
+        if suffix not in MEDIA_SUFFIXES | DOCUMENT_SUFFIXES:
             raise ArchiveError("不支持的作品媒体格式")
         member = f"media/{len(self.media) + 1}.{suffix}"
         digest = hashlib.sha256()
@@ -109,7 +112,7 @@ def read_manifest(archive: ZipFile, max_manifest_bytes: int) -> tuple[Manifest, 
         member = indexed[item.member]
         if manifest.version == 1 and item.hash_scheme != "sha256":
             raise ArchiveError("作品包校验格式无效")
-        if (item.member.rsplit(".", 1)[1] not in MEDIA_SUFFIXES or member.compress_type != ZIP_STORED
+        if (item.member.rsplit(".", 1)[1] not in MEDIA_SUFFIXES | DOCUMENT_SUFFIXES or member.compress_type != ZIP_STORED
                 or member.file_size != member.compress_size or member.file_size != item.byte_length or member.flag_bits & 1):
             raise ArchiveError("作品媒体大小或格式无效")
     return manifest, indexed

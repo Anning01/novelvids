@@ -255,3 +255,83 @@ async def test_import_endpoint_rejects_invalid_archive_and_imports_into_new_proj
         pass
     assert (await submit(dest.read_bytes()))["code"] == 422
     assert await Novel.all().count() == 2
+
+
+@pytest.mark.asyncio
+async def test_project_transfer_restores_browser_canvas_in_bootstrap(client,tmp_path,monkeypatch):
+    from config import settings
+    from models.novel import Novel
+    from models.chapter import Chapter
+    from models.scene import Scene
+    from models.asset import Asset
+    from models.asset_variant import AssetVariant
+    from services.project_transfer.snapshot import project_snapshot
+    from services.project_transfer.local_media import pack_local_snapshot
+
+    monkeypatch.setattr(settings,"MEDIA_PATH",str(tmp_path/"media"))
+    monkeypatch.setattr(settings,"CHAPTER_EXPORT_PATH",str(tmp_path/"private"))
+    work=await Novel.create(name="画布迁移")
+    ch=await Chapter.create(novel=work,number=1,name="一",content="原文")
+    actor=await Asset.create(novel=work,asset_type=1,canonical_name="演员")
+    variant=await AssetVariant.create(asset=actor,name="少年")
+    shot=await Scene.create(chapter=ch,sequence=1,prompt="保留提示")
+    await shot.assets.add(actor)
+    old=f"shot-{shot.id}"
+    asset_key=f"asset-{actor.id}-variant-{variant.id}"
+    view={"version":2,"viewport":{"x":4,"y":5,"zoom":0.8},"canvasSize":{"width":700,"height":500},
+        "nodes":{old:{"position":{"x":10,"y":20}},asset_key:{"position":{"x":40,"y":60}}},
+        "manualNodes":[{"key":"note-19","kind":"note","id":-19,"title":"笔记","data":{"content":"保留这条镜头说明"}},
+                       {"key":"section-3","kind":"section","id":-3,"title":"场","data":{"node_keys":[old,asset_key,"note-19"]}}],
+        "manualEdges":[{"key":"media-edge-2","source":asset_key,"target":old,"config":None}]}
+    path=f"/api/novel/{work.id}/transfer"
+    result=(await client.post(path,json={str(ch.id):view})).json()
+    assert result["code"]==0
+    assert result["data"]["project"]["canvases"][str(ch.id)]==view
+    assert (await client.post(path,json={"9999":view})).json()["code"]==422
+    dest=tmp_path/"canvas.zip"
+    pack_local_snapshot(result["data"]["project"],dest,media_root=tmp_path/"old-media",exports_root=tmp_path/"old-exports")
+    with dest.open('rb') as file:
+        response=await client.post("/api/novel/import-project",files={"file":("canvas.zip",file,"application/zip")})
+    copied_id=response.json()["data"]["id"]
+    newch=await Chapter.get(novel_id=copied_id)
+    newshot=await Scene.get(chapter=newch)
+    newactor=await Asset.get(novel_id=copied_id)
+    newvariant=await AssetVariant.get(asset=newactor)
+    bootstrap=(await client.get("/api/workbench/bootstrap",params={"novel_id":copied_id,"chapter_id":newch.id})).json()["data"]
+    saved=bootstrap["canvas_layout"]
+    newkey=f"shot-{newshot.id}"
+    newasset=f"asset-{newactor.id}-variant-{newvariant.id}"
+    assert set(saved["nodes"])=={newkey,newasset}
+    assert saved["viewport"]==view["viewport"] and saved["nodes"][newkey]==view["nodes"][old]
+    assert saved["manualNodes"][0]["data"]["content"]=="保留这条镜头说明"
+    assert saved["manualEdges"][0]["target"]==newkey and saved["manualEdges"][0]["source"]==newasset
+    assert saved["manualNodes"][1]["data"]["node_keys"]==[newkey,newasset,"note-19"]
+    assert (await project_snapshot(copied_id))["canvases"][str(newch.id)]==saved
+
+
+@pytest.mark.asyncio
+async def test_import_preserves_external_stable_ids_without_redirecting_an_existing_work():
+    from models.novel import Novel
+    from models.chapter import Chapter
+    from models.scene import Scene
+    from models.work_sync import WorkSyncObject
+    from services.project_transfer.snapshot import project_snapshot
+    from services.project_transfer.restore import restore_graph
+    work=await Novel.create(name="外部创作")
+    ch=await Chapter.create(novel=work,number=1,name="一",content="原稿")
+    shot=await Scene.create(chapter=ch,sequence=5,prompt="镜头")
+    for kind,ep,stable,local,payload in [
+        ("work","","my-story",work.id,{"id":"my-story"}),
+        ("episode","ep-1","ep-1",ch.id,{"manifest":{"work":{"id":"my-story"}},"scenes":[{"id":"scene-1"}]}),
+        ("shot","ep-1","shot-5",shot.id,{"id":"shot-5","scene_id":"scene-1"}),
+    ]:
+        await WorkSyncObject.create(work_id="my-story",kind=kind,episode_id=ep,stable_id=stable,local_id=local,payload=payload)
+    snapshot=await project_snapshot(work.id)
+    restored=await restore_graph(snapshot,team_id=None,user_id=None)
+    new_work=await WorkSyncObject.get(kind="work",local_id=restored.id)
+    assert new_work.work_id!="my-story"
+    assert (await WorkSyncObject.get(work_id="my-story",kind="work")).local_id==work.id
+    new_episode=await WorkSyncObject.get(work_id=new_work.work_id,kind="episode")
+    assert new_episode.stable_id=="ep-1" and new_episode.payload["manifest"]["work"]["id"]==new_work.stable_id
+    new_shot=await WorkSyncObject.get(work_id=new_work.work_id,kind="shot",stable_id="shot-5")
+    assert new_shot.local_id!=shot.id and await Scene.filter(id=new_shot.local_id,chapter_id=new_episode.local_id).exists()

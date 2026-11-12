@@ -1,14 +1,16 @@
 """Describe what the browser should download. Model media never passes through a migration proxy."""
 from pathlib import PurePosixPath
+import mimetypes
 from urllib.parse import unquote, urlsplit
 from ipaddress import ip_address
 
 from services.oss import normalize_media_url, resolve_media_url
 from services.project_transfer.archive import ArchiveError, MEDIA_SUFFIXES, media_ref
-from services.project_transfer.local_media import translate
+from services.project_transfer.local_media import archived_document, document_refs, translate
 
 
 def export_plan(snapshot: dict, team_id: int | None) -> dict:
+    approved = document_refs(snapshot)
     private = {}
     for row in snapshot["exports"]:
         for field, query in (("media_ref", ""), ("source_media_ref", "?source=true")):
@@ -18,10 +20,26 @@ def export_plan(snapshot: dict, team_id: int | None) -> dict:
 
     shared_media = {normalize_media_url(row.get(field)) for row in snapshot.get("library", [])
                     for field in ("storage_ref", "poster_ref") if row.get(field)}
+    export_urls = {url:ref for ref,url in private.items()}
     files = []
     refs = {}
 
     def resolve(value):
+        if value.startswith("blob:"):
+            raise ArchiveError("浏览器中的素材应由导出端直接打包")
+        if value.startswith("data:"):
+            if value in refs:
+                return refs[value]
+            mime, separator, _ = value[5:].partition(";base64,")
+            suffix = (mimetypes.guess_extension(mime) or "").lstrip(".")
+            if not separator or suffix not in MEDIA_SUFFIXES:
+                raise ArchiveError("作品内嵌素材格式无效")
+            member = f"media/{len(files)+1}.{suffix}"
+            files.append({"member":member,"url":value,"storage":"media","authenticated":False})
+            refs[value] = media_ref(member)
+            return refs[value]
+        if value in export_urls:
+            return resolve(export_urls[value])
         if not value.startswith(("/media/", "uploads/", "remake/sources/", "https://", "http://")) or "\n" in value:
             return value
         if value in refs:
@@ -33,7 +51,7 @@ def export_plan(snapshot: dict, team_id: int | None) -> dict:
         if ".." in parts or "\\" in path or any(ord(c) < 32 for c in path):
             raise ArchiveError("素材地址无效")
         suffix = PurePosixPath(path).suffix.lower().removeprefix(".")
-        if suffix not in MEDIA_SUFFIXES:
+        if suffix not in MEDIA_SUFFIXES and not archived_document(key, approved):
             raise ArchiveError("作品包含无法识别格式的素材")
         authenticated = False
         storage = "media"

@@ -120,6 +120,7 @@ class WorkbenchBootstrapOut(BaseModel):
     """当前章节画布所需的完整工作集，避免前端逐条请求详情。"""
 
     chapter: ChapterOut
+    canvas_layout: dict | None = None
     project_config: WorkbenchProjectConfigOut
     remake_source: WorkbenchRemakeSourceOut | None = None
     assets: list[AssetWithVariantsOut]

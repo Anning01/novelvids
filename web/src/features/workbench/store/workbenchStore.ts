@@ -181,11 +181,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         }))
       } catch { /* ignore unavailable storage */ }
     },
-    loadSavedLayout() {
+    loadSavedLayout(imported?: Record<string, unknown> | null) {
       try {
         const current = localStorage.getItem(this.layoutKey())
         const legacy = current ? null : localStorage.getItem(this.legacyLayoutKey())
-        const saved = parseWorkbenchState(current || legacy || '')
+        const saved = parseWorkbenchState(current || legacy || (imported ? JSON.stringify(imported) : ''))
         if (!saved) return
         this.viewport = saved.viewport
         this.manualNodes = saved.manualNodes.filter(item => isManualNodeKind(item.kind))
@@ -222,7 +222,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         this.imageModelOptions = imageConfigResponse.data
         this.videos = bootstrapResponse.data.videos
         this.rebuildGraph()
-        this.loadSavedLayout()
+        this.loadSavedLayout(bootstrapResponse.data.canvas_layout)
         Object.entries(this.videos).forEach(([sceneId, videos]) => videos
           .filter(video => !isTerminalVideo(video))
           .forEach(video => { void this.resumeVideoPolling(Number(sceneId), video.id) }))

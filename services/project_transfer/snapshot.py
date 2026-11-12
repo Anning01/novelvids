@@ -7,10 +7,14 @@ from models.chapter import Chapter
 from models.chapter_export import ChapterExport
 from models.finished_episode import FinishedEpisodePublication
 from models.novel import Novel
+from models.portfolio import PortfolioWork, PortfolioEpisode
+from services.project_transfer.sync_identity import mappings_for
 from models.remake_source import RemakeSource
 from models.scene import Scene
 from models.video import Video
-from models.video_edit import ChapterEditDraft, EditorAsset
+from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset
+from services.project_transfer.archive import ArchiveError
+from services.project_transfer.canvas import check_layout
 from services.creation_objects import project_write
 from services.resource_permissions import readable_scope
 
@@ -18,6 +22,8 @@ from services.resource_permissions import readable_scope
 # Only creative data crosses installations. Model credentials, identities, leases
 # and provider request/response records belong to the originating installation.
 FIELDS = {
+    PortfolioWork: "id title description category tags cover_chapter_id revision",
+    PortfolioEpisode: "id work_id chapter_id export_id",
     Novel: "id name author cover description content total_chapters tags story_outline project_type project_setting episodes_managed audiovisual_guidance shot_duration_max storyboard_enabled storyboard_strategy storyboard_setting style_key workflow_kind aspect_ratio resolution custom_style_prompt video_generation_defaults narrator_audio_reference_id",
     AudioReference: "id nickname gender audio_url avatar_url asset_id source duration is_active",
     VideoResource: "id kind name filename storage_ref poster_ref media is_source state",
@@ -44,7 +50,7 @@ def creative_value(value):
     return value
 
 
-async def project_snapshot(novel_id: int) -> dict:
+async def project_snapshot(novel_id: int, *, browser_layouts=None) -> dict:
     async with project_write(novel_id) as db:
         async def rows(model, *filters, **scope):
             data = await model.filter(*filters, **scope).using_db(db).order_by("id").values(*FIELDS[model].split())
@@ -57,11 +63,22 @@ async def project_snapshot(novel_id: int) -> dict:
         team = (await Novel.get(id=novel_id).using_db(db)).team_id
         voice_ids = {a["metadata"].get("voice_reference_id") for a in [*assets, *variants] if isinstance(a["metadata"], dict)}
         voice_ids.add(project.get("narrator_audio_reference_id"))
+        layouts = {str(ch):layout for ch,layout in await ChapterCanvasSnapshot.filter(chapter__novel_id=novel_id).using_db(db).values_list("chapter_id","layout")}
+        if browser_layouts:
+            if not set(browser_layouts) <= {str(chapter["id"]) for chapter in chapters}:
+                raise ArchiveError("画布与作品章节不匹配")
+            layouts.update({key:creative_value(check_layout(value)) for key,value in browser_layouts.items()})
+        manual_data = [n for layout in layouts.values() for n in layout["manualNodes"]]
+        for n in manual_data:
+            if n["kind"]=="audio_reference" and isinstance(n["data"].get("resource"),dict):
+                voice_ids.add(n["data"]["resource"].get("id"))
         voices = [int(i) for i in voice_ids if str(i).isdigit()]
         audio = await rows(AudioReference, id__in=voices, team_id__isnull=True)
         if team is not None:
             audio.extend(await rows(AudioReference, id__in=voices, team_id=team))
         library_ids = set(await ProjectResource.filter(novel_id=novel_id).using_db(db).values_list("resource_id", flat=True))
+        library_ids.update(n["data"][field] for n in manual_data for field in ("library_resource_id","upload_source_id")
+                           if type(n["data"].get(field)) is int)
         scenes = await rows(Scene, chapter__novel_id=novel_id)
         links = await Scene.filter(chapter__novel_id=novel_id, assets__novel_id=novel_id,
                                    assets__deleted_at__isnull=True).using_db(db).values_list("id", "assets__id")
@@ -73,7 +90,10 @@ async def project_snapshot(novel_id: int) -> dict:
             library_ids.update(ref["library_resource_id"] for ref in (shot["metadata"] or {}).get("video_reference_media", [])
                                if isinstance(ref, dict) and isinstance(ref.get("library_resource_id"), int))
         return {
-            "novel": project, "chapters": chapters, "assets": assets, "scenes": scenes,
+            "sync_works":creative_value(await mappings_for(novel_id,db)),
+            "portfolio":await rows(PortfolioWork,novel_id=novel_id),
+            "portfolio_episodes":await rows(PortfolioEpisode,work__novel_id=novel_id),
+            "canvases":layouts, "novel": project, "chapters": chapters, "assets": assets, "scenes": scenes,
             "variants": variants, "voices": audio,
             "library": await rows(VideoResource, readable_scope(team or 0), id__in=library_ids),
             "videos": await rows(Video, scene__chapter__novel_id=novel_id, scene__deleted_at__isnull=True),

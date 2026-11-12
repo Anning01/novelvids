@@ -40,6 +40,16 @@ async def create_novel(
 
 @router.get("/{novel_id}/transfer", summary="读取作品迁移清单")
 async def export_project(novel_id: int, ctx: AuthContext = Depends(require_team_access), _: AuthContext = _EDITOR):
+    return await transfer_plan(novel_id)
+
+
+@router.post("/{novel_id}/transfer", summary="包含本机画布的作品迁移清单", include_in_schema=False)
+async def export_with_canvases(novel_id:int, layouts:dict[str,dict], _:AuthContext=Depends(require_team_access),
+                               __:AuthContext=_EDITOR):
+    return await transfer_plan(novel_id, layouts)
+
+
+async def transfer_plan(novel_id, layouts=None):
     from models.novel import Novel
     from services.project_transfer.archive import ArchiveError
     from services.project_transfer.downloads import export_plan
@@ -48,7 +58,7 @@ async def export_project(novel_id: int, ctx: AuthContext = Depends(require_team_
     if project is None:
         raise HTTPException(404, "项目不存在")
     try:
-        return ResponseSchema(data=export_plan(await project_snapshot(novel_id), project.team_id))
+        return ResponseSchema(data=export_plan(await project_snapshot(novel_id,browser_layouts=layouts), project.team_id))
     except ArchiveError as exc:
         raise HTTPException(422, str(exc)) from exc
 

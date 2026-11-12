@@ -1,5 +1,8 @@
 {
   "common": {
+    "本地画布素材无法读取": "The browser could not read a local canvas media file.",
+    "不支持的画布素材格式": "Unsupported canvas media format.",
+    "本地画布存档无法读取，请检查后重新导出": "Could not read the local canvas layout. Check it before exporting again.",
     "按受理时价格结算。供应商返回计费 token 时按 token 结算；按时长结算时优先用供应商报告时长，固定时长订单缺少报告时沿用订购时长。参考视频缺少计费用量时进入核对。": "Pricing is frozen at admission. Reported billable tokens are used for token tariffs. Duration-based settlement uses reported duration when available, otherwise the ordered fixed duration. Missing billable reference video usage requires reconciliation.",
     "status 为 completed 时，直接从 metadata.url 下载成片。可传 UUID 格式的 request_id，断线后用 /v1/videos/req-{UUID} 找回任务。": "When status is completed, download the video directly from metadata.url. Supply a UUID request_id to look up the job at /v1/videos/req-{UUID} after a disconnect.",
     "选择目录中的视频模型，提交后用返回的 id 查询。references 按提交顺序传入，每项包含 type、role 和可读取的 HTTPS url。首尾帧使用 first_frame 和 last_frame。": "Select a catalog video model and poll the returned ID. Each ordered reference has a type, role and accessible HTTPS URL. Use first_frame and last_frame for keyframes.",

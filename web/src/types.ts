@@ -127,6 +127,7 @@ export interface WorkbenchRemakeSource {
   analysis_task?: WorkbenchRemakeTask | null
 }
 export interface WorkbenchBootstrap {
+  canvas_layout?: Record<string, unknown> | null
   chapter: Chapter
   project_config?: WorkbenchProjectConfig
   remake_source?: WorkbenchRemakeSource | null
