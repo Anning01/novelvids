@@ -24,63 +24,24 @@
 </p>
 
 <p align="center">
-  <a href="#安装猫影工作台">安装工作台</a> · <a href="#单独安装创作-skills">单独安装 Skills</a> · <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
+  <a href="#快速开始">快速开始</a> · <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
 </p>
 
-## 安装猫影工作台
+## 快速开始
 
-用浏览器管理作品、生成素材和剪辑成片。准备好 Git 和带 Compose 的 Docker，在终端运行：
+选一种用法，把对应的一句话发给 AI。
 
-```bash
-git clone https://github.com/Anning01/novelvids.git
-cd novelvids
-docker compose up -d --build
+**下载并使用猫影工作台**
+
+```text
+请从 https://github.com/Anning01/novelvids 下载猫影工作台，用 Docker 在我的电脑上启动它，然后告诉我在哪里打开工作台、导入小说。
 ```
 
-Linux 服务器首次安装并启用网页一键升级时，将最后一行换成 `sudo sh scripts/update/install.sh`。见[在线升级](#在线升级)。
+**单独使用创作 Skills**
 
-1. 打开 [本地工作台](http://localhost:8080)。首次安装的默认账号是 `admin`，密码是 `123456`。要自定初始密码，在首次启动前设置 `SUPER_ADMIN_PASSWORD`。
-2. 在「设置 → 模型配置」添加文本模型，勾选「创作助手」和「支持多轮工具调用」，再到通用设置启用助手。使用猫影开放平台时，可在「连接开放平台」填入 API Key 并同步模型。
-3. 进入「短剧制作」，导入一章小说，生成导演剧本、资产和分镜。需要出图或生成视频时，在模型配置中启用对应模型。
-
-项目数据保存在 `data/`，图片、音频和视频保存在 `media/`。工作台已内置创作 Skills，以及 Seedance 2.0、Seedance 2.5、MiniMax H3 和万相 3.0 的视频提示词优化规则。
-
-## 在线升级
-
-使用标准 Docker Compose 和 SQLite 的 Linux 主机，可在安装目录运行一次以下命令，启用网页升级。需要 systemd、Docker Compose、Git 和 Python 3。已有安装先将源码更新到包含此脚本的正式版。
-
-```sh
-sudo sh scripts/update/install.sh
+```text
+请用 https://github.com/Anning01/novelvids 里的 scripts/export_skill.py，把剧本改编、资产设定和分镜设计三个 Skills 安装到我当前的创作项目，然后告诉我怎么用它们处理第一章小说。
 ```
-
-有新版时，部署管理员在工作台顶部点 **升级工作台**。更新服务从官方 GitHub Release 构建镜像，备份数据库，切换服务并检查前后端版本；检查失败会恢复上一版。构建期间工作台可继续使用，切换时会短暂停服。更新程序管理本安装的 `docker-compose.override.yml`，项目数据和媒体沿用原目录。宿主机服务日志可用 `journalctl -u novelvids-update` 查看。
-
-升级完成后，每位用户可自行点 **刷新页面**。有未保存的分镜时，先保存再刷新。源码安装和其他 Docker 部署方式可按对应 Release 的说明更新。
-
-**发布新版**：在 `release.json` 填写正式版本号、更新摘要和各项能力的最低兼容版本。测试通过后，将该提交发布为同版本的 GitHub Release（例如版本 `1.1.0` 对应标签 `v1.1.0`），标为最新稳定版。工作台只检查正式发布。标准升级保留 `update_format: 1`。需要修改数据库部署方式、挂载或 Compose 结构时，删除该字段，并在 Release 中写明升级步骤。
-
-## 单独安装创作 Skills
-
-想在自己的 AI 助手里改剧本、做资产或拆分镜，可按需安装下面三个技能。需要 Git、Python 3.9+ 和支持项目技能的助手。以下以 Codex 为例。
-
-| 安装标识 | 提供给助手 | 得到的结果 |
-| --- | --- | --- |
-| `novelvids-screenplay` | 小说章节、目标时长 | 带镜号、动作和对白的导演剧本 |
-| `novelvids-assets` | 导演剧本、作品画风 | 人物、场景、道具设定与生图提示词 |
-| `novelvids-storyboard` | 导演剧本、资产清单、单次生成时长 | 分镜、动作与对白时间轴、视频提示词 |
-
-**在作品目录里**打开终端。下面以分镜技能为例，最后一行的技能名可换成表中的其他安装标识。若已下载仓库，直接使用已有的 `export_skill.py` 路径。
-
-```bash
-git clone https://github.com/Anning01/novelvids.git
-python3 novelvids/scripts/export_skill.py novelvids-storyboard --dest .agents/skills
-```
-
-在同一作品目录打开新的助手会话，附上剧本和资产清单，然后输入：
-
-> $novelvids-storyboard 请按每次最多 10 秒拆分这份导演剧本。1-2 如果需要拆段，让后一段从前一段结束时的人物站位和道具状态接起。
-
-分镜技能还支持黑白线稿故事版。在作品目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启。按视频模型编写专项提示词时，见[模型选择与专项技能安装](prompts/skills/novelvids-video/references/model_optimization.md)。
 
 ## 加入交流群
 
@@ -183,6 +144,20 @@ flowchart LR
 ```
 
 故事板适合逐镜头检查，画布适合组织引用与工作流。开始生成后可以关闭页面，后台继续查询已受理任务；结果不确定时需核对，不会自动重复提交收费请求。
+
+## 在线升级
+
+使用标准 Docker Compose 和 SQLite 的 Linux 主机，可在安装目录运行一次以下命令，启用网页升级。需要 systemd、Docker Compose、Git 和 Python 3。已有安装先将源码更新到包含此脚本的正式版。
+
+```sh
+sudo sh scripts/update/install.sh
+```
+
+有新版时，部署管理员在工作台顶部点 **升级工作台**。更新服务从官方 GitHub Release 构建镜像，备份数据库，切换服务并检查前后端版本；检查失败会恢复上一版。构建期间工作台可继续使用，切换时会短暂停服。更新程序管理本安装的 `docker-compose.override.yml`，项目数据和媒体沿用原目录。宿主机服务日志可用 `journalctl -u novelvids-update` 查看。
+
+升级完成后，每位用户可自行点 **刷新页面**。有未保存的分镜时，先保存再刷新。源码安装和其他 Docker 部署方式可按对应 Release 的说明更新。
+
+**发布新版**：在 `release.json` 填写正式版本号、更新摘要和各项能力的最低兼容版本。测试通过后，将该提交发布为同版本的 GitHub Release（例如版本 `1.1.0` 对应标签 `v1.1.0`），标为最新稳定版。工作台只检查正式发布。标准升级保留 `update_format: 1`。需要修改数据库部署方式、挂载或 Compose 结构时，删除该字段，并在 Release 中写明升级步骤。
 
 ## 本地开发
 

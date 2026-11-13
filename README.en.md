@@ -24,63 +24,24 @@
 </p>
 
 <p align="center">
-  <a href="#install-the-novelvids-studio">Install the studio</a> · <a href="#install-standalone-creative-skills">Install standalone skills</a> · <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">NovelVids service</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
+  <a href="#quick-start">Quick start</a> · <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">NovelVids service</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
 </p>
 
-## Install the NovelVids studio
+## Quick start
 
-Use the browser workspace to manage projects, generate media and assemble episodes. Install Git and Docker with Compose, then run the following commands.
+Choose one option and send its prompt to your AI assistant.
 
-```bash
-git clone https://github.com/Anning01/novelvids.git
-cd novelvids
-docker compose up -d --build
+**Download and run the studio**
+
+```text
+Download NovelVids from https://github.com/Anning01/novelvids, start it on my computer with Docker, and show me where to open the studio and import my novel.
 ```
 
-For one-click updates on a Linux server, replace the last command with `sudo sh scripts/update/install.sh`. See [Online updates](#online-updates).
+**Use the creative skills on their own**
 
-1. Open the [local studio](http://localhost:8080). A fresh installation uses `admin` and password `123456`. To choose your own initial password, set `SUPER_ADMIN_PASSWORD` before the first launch.
-2. Under **Settings → Model configuration**, add a text model and enable **Creation assistant** and **Multi-turn tool calling**. Enable the assistant in General settings. To use the NovelVids platform, enter your API key under **Connect to the platform** and sync the models.
-3. Open **Short dramas**, import a chapter and generate a screenplay, assets and storyboard. Enable an image or video model when you are ready to generate media.
-
-Project data lives in `data/` and media files in `media/`. The studio includes the creative skills and video prompt optimizers for Seedance 2.0, Seedance 2.5, MiniMax H3 and Wan 3.0.
-
-## Online updates
-
-On a Linux host using systemd and the standard SQLite Docker Compose deployment, run this once in the installation directory. The host needs Git and Python 3. Existing installations must first update their checkout to a release that includes the installer.
-
-```sh
-sudo sh scripts/update/install.sh
+```text
+Use scripts/export_skill.py from https://github.com/Anning01/novelvids to install the screenplay, asset design and storyboard skills in my current project, then show me how to use them on the first chapter of my novel.
 ```
-
-The deployment administrator can then click **Upgrade studio** in the top banner. The host builds images from the latest official GitHub Release, backs up SQLite, switches services and checks both versions. A failed health check restores the previous installation. The switch briefly interrupts service. The updater manages `docker-compose.override.yml` and keeps the existing project and media mounts. See `journalctl -u novelvids-update` for host logs.
-
-After the upgrade, each user can save their edits and click **Refresh page**. For other deployment layouts, follow the release instructions.
-
-**Publishing**. Update the version, summary and minimum feature versions in `release.json`. After testing, publish that commit as the latest stable GitHub Release with a matching tag (for example, `v1.1.0`). Keep `update_format: 1` for standard updates. Omit it and publish manual instructions for releases that change database deployment, mounts or Compose topology.
-
-## Install standalone creative skills
-
-Install the stages you want in your own AI assistant. You need Git, Python 3.9+ and an assistant that supports project skills. This example uses Codex.
-
-| Skill ID | Give the assistant | What you get |
-| --- | --- | --- |
-| `novelvids-screenplay` | A chapter and target running time | A numbered screenplay with action and dialogue |
-| `novelvids-assets` | The screenplay and visual style | Character, location and prop designs with image prompts |
-| `novelvids-storyboard` | The screenplay, asset list and clip duration limit | Shots with timed action, dialogue and video prompts |
-
-Open a terminal **in your creative project folder**. This example installs the storyboard skill. Substitute another skill ID from the table to install it. If you already have the repository, use the path to its `export_skill.py` script.
-
-```bash
-git clone https://github.com/Anning01/novelvids.git
-python3 novelvids/scripts/export_skill.py novelvids-storyboard --dest .agents/skills
-```
-
-Start a new assistant chat in the same project folder, attach the screenplay and asset list, and try this request.
-
-> $novelvids-storyboard Break this screenplay into clips of up to 10 seconds. If shot 1-2 spans several clips, start each one with the character positions and prop placement from the previous clip’s final action.
-
-To enable black-and-white storyboard sheets, run `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` in your creative project folder. For model-specific video prompts, see the [optimizer installation guide](prompts/skills/novelvids-video/references/model_optimization.md).
 
 ## Join the community
 
@@ -183,6 +144,20 @@ flowchart LR
 ```
 
 Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
+
+## Online updates
+
+On a Linux host using systemd and the standard SQLite Docker Compose deployment, run this once in the installation directory. The host needs Git and Python 3. Existing installations must first update their checkout to a release that includes the installer.
+
+```sh
+sudo sh scripts/update/install.sh
+```
+
+The deployment administrator can then click **Upgrade studio** in the top banner. The host builds images from the latest official GitHub Release, backs up SQLite, switches services and checks both versions. A failed health check restores the previous installation. The switch briefly interrupts service. The updater manages `docker-compose.override.yml` and keeps the existing project and media mounts. See `journalctl -u novelvids-update` for host logs.
+
+After the upgrade, each user can save their edits and click **Refresh page**. For other deployment layouts, follow the release instructions.
+
+**Publishing**. Update the version, summary and minimum feature versions in `release.json`. After testing, publish that commit as the latest stable GitHub Release with a matching tag (for example, `v1.1.0`). Keep `update_format: 1` for standard updates. Omit it and publish manual instructions for releases that change database deployment, mounts or Compose topology.
 
 ## Local development
 
