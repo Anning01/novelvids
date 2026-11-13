@@ -480,3 +480,15 @@ async def test_retry_charges_only_missing_indices_and_preserves_sequence(tmp_pat
     assert [s['shot_index'] for s in result] == [1, 2, 3, 4, 5]
     assert [s['value'] for s in result] == ['saved','new','saved','new','saved']
     assert progress.await_args_list[0].args == (3,5)
+
+
+@pytest.mark.asyncio
+async def test_partial_retry_skips_saved_and_uncertain_without_renumbering(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    gateway = RemakeVideoAnalysisGateway(_config(), client=_Client([]))
+    analyze = AsyncMock(return_value={'shot_index': 3})
+    monkeypatch.setattr(gateway, 'analyze_one', analyze)
+    results = await gateway.analyze_many([tmp_path / f'{i}.mp4' for i in (1, 2, 3)],
+        prompt='', schema_name='shots', response_schema={}, completed_results={1:{}}, held_shots=frozenset({2}))
+    assert [item['shot_index'] for item in results] == [1, 3]
+    assert analyze.await_count == 1 and analyze.await_args.kwargs['index'] == 3

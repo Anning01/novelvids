@@ -7,7 +7,7 @@ from utils.messages import localized_message
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import shutil
-from config import settings
+from services.remake.checkpoints import scene_cache_directory
 from typing import Any, Awaitable, Callable
 
 from controllers.config import ai_model_config_controller
@@ -119,7 +119,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                 work_dir = Path(temp_dir)
                 source_path = await self.materializer.materialize(source, work_dir)
                 project = await source.novel
-                cache = Path(settings.STUDIO_MEDIA_CACHE_PATH).resolve().parent / "remake-scenes" / str(source.id) / source.checksum
+                cache = scene_cache_directory(source)
                 result = await self.pipeline.run(
                     source_path=source_path,
                     model_config=model_config,

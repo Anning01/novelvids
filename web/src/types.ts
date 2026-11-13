@@ -347,6 +347,10 @@ export interface RemakeProjectCreateResult {
 }
 export type RemakeAggregateStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'partial_failed'
 export interface RemakeProgressTask {
+  completed_clips?: number
+  total_clips?: number | null
+  retryable_clips?: number
+  awaiting_platform_result?: boolean
   id: string
   status: TaskStatusEnum
   stage: string

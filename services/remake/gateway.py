@@ -84,6 +84,7 @@ class RemakeVideoAnalysisGateway:
         context_builder: Callable[[int], str | dict[str, Any]] | None = None,
         on_completed: Callable[[int, int], Awaitable[None]] | None = None,
         completed_results: dict[int, dict] | None = None,
+        held_shots: frozenset[int] = frozenset(),
     ) -> list[dict[str, Any]]:
         semaphore = asyncio.Semaphore(max(1, int(self.config.concurrency or 1)))
         completion_lock = asyncio.Lock()
@@ -120,7 +121,7 @@ class RemakeVideoAnalysisGateway:
             return result
 
         # Let accepted calls finish and checkpoint before releasing their clip files.
-        results = await asyncio.gather(*(analyze(i, path) for i, path in enumerate(paths, 1)), return_exceptions=True)
+        results = await asyncio.gather(*(analyze(i, path) for i, path in enumerate(paths, 1) if i not in held_shots), return_exceptions=True)
         if failure is not None:
             raise failure
         for result in results:

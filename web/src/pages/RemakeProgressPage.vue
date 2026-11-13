@@ -58,6 +58,7 @@ const statusTitle = computed(() => {
 })
 const statusDescription = computed(() => {
   if (isCompleted.value) return tr('设定和分镜已经生成，正在为你打开创作页面。')
+  if (snapshot.value?.sources.some(source => source.task?.awaiting_platform_result)) return tr('已完成的分镜会保留，部分请求正在等待结果核对。')
   if (hasFailures.value) return tr('已完成的剧集会保留，可单独重试失败剧集。')
   return tr('AI 正在识别设定、切分镜头并生成分镜。关闭或离开本页面不会中断后台任务。')
 })
@@ -79,7 +80,10 @@ function stageLabel(stage?: string | null) {
 }
 
 function stageState(key: string, threshold: number) {
-  if (isCompleted.value || (snapshot.value?.overall_progress ?? 0) > threshold) return 'completed'
+  const progress = snapshot.value?.overall_progress ?? 0
+  const next = stages[stages.findIndex(stage => stage.key === key) + 1]
+  if (isCompleted.value || (next && progress >= next.threshold)) return 'completed'
+  if (snapshot.value?.aggregate_status === 'failed' && progress >= threshold) return 'failed'
   if (activeStage.value === key) return 'active'
   return 'pending'
 }
@@ -221,6 +225,7 @@ onBeforeUnmount(() => {
             <li v-for="stage in stages" :key="stage.key" :class="`is-${stageState(stage.key, stage.threshold)}`">
               <span class="stage-marker">
                 <Check v-if="stageState(stage.key, stage.threshold) === 'completed'" :size="14" />
+                <AlertTriangle v-else-if="stageState(stage.key, stage.threshold) === 'failed'" :size="14" />
                 <LoaderCircle v-else-if="stageState(stage.key, stage.threshold) === 'active'" :size="15" />
                 <Circle v-else :size="10" />
               </span>
@@ -238,6 +243,7 @@ onBeforeUnmount(() => {
               <div class="episode-copy">
                 <strong>{{ tr('第') }} {{ source.episode_number }} {{ tr('集') }}</strong>
                 <p>{{ source.original_filename }}</p>
+                <small v-if="source.task?.total_clips">{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:source.task.completed_clips || 0,p1:source.task.total_clips}) }}</small>
                 <div><span :style="{ width: `${source.task?.progress || 0}%` }" /></div>
               </div>
               <div class="episode-state">
@@ -245,13 +251,13 @@ onBeforeUnmount(() => {
                 <span>{{ sourceStatusLabel(source) }}</span>
               </div>
               <AppButton
-                v-if="isTerminalTask(source) && source.task?.status !== TaskStatusEnum.COMPLETED"
+                v-if="isTerminalTask(source) && source.task?.status !== TaskStatusEnum.COMPLETED && (!source.task?.awaiting_platform_result || !!source.task.retryable_clips)"
                 type="button"
                 variant="soft"
                 size="xs"
                 :loading="retryingSourceIds.has(source.source_id)"
                 @click="retrySource(source)"
-              ><RotateCcw v-if="!retryingSourceIds.has(source.source_id)" :size="13" />{{ tr('重试') }}</AppButton>
+              ><RotateCcw v-if="!retryingSourceIds.has(source.source_id)" :size="13" />{{ source.task?.retryable_clips ? tr('重试未完成片段（{p0}）', {p0:source.task.retryable_clips}) : tr('重试') }}</AppButton>
               <p v-if="source.task?.error_message" class="episode-error">{{ source.task.error_message }}</p>
             </section>
           </div>
@@ -268,6 +274,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.pipeline-list li.is-failed .stage-marker { color: var(--creation-danger); background: var(--app-surface); }
 .retry-error { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--creation-danger); background: var(--app-surface); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .remake-progress-page { height: 100vh; min-height: 100vh; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; color: #292d3b; background: radial-gradient(circle at 50% -10%, #eef0ff 0, transparent 36%), #f8f9fc; }
 .progress-header { display: grid; min-height: 70px; grid-template-columns: 40px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 0 30px; border-bottom: 1px solid #e8eaf1; background: rgb(255 255 255 / 88%); backdrop-filter: blur(16px); }

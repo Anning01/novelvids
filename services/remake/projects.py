@@ -418,19 +418,24 @@ class RemakeProjectService:
             from services.creation_agent.skill_execution import current_execution
             parent = current_execution.get()
             origin = {"origin_run_id": parent.params["task_id"]} if parent else {}
+            from services.remake.checkpoints import partial_retry, resume_position
+            stage, progress, _, total = await resume_position(previous, source)
+            held, retryable = await partial_retry(previous, total)
+            if previous_params.get('held_shots') and not retryable:
+                raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '剩余片段正在等待结果核对')
             if previous_params.get('workflow_version'):
                 from models.agent_operation import AgentOperation
                 unresolved = await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True)
                 from services.remake.receipt_check import rejected_inline_upload
-                if unresolved and not await rejected_inline_upload(previous, unresolved):
+                if unresolved and not (held and retryable) and not await rejected_inline_upload(previous, unresolved):
                     raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '请先核对未完成的外部请求')
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
             task = await AiTask.create(
                 using_db=connection,
                 task_type=AiTaskTypeEnum.remake_decomposition.value,
                 status=TaskStatusEnum.queued.value,
-                stage="queued",
-                progress=0,
+                stage=stage,
+                progress=progress,
                 request_params={
                     **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
                     "novel_id": source.novel_id,
@@ -441,6 +446,7 @@ class RemakeProjectService:
                     "attempt": attempt,
                     "prompt_language": previous_params.get("prompt_language", "zh"),
                     "retry_of_task_id": str(previous.id),
+                    **({"held_shots": held} if held else {}),
                     **origin,
                 },
             )
