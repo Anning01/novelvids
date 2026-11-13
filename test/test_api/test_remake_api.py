@@ -143,10 +143,14 @@ def install_services(monkeypatch, tmp_path, provider):
 
 @pytest.mark.asyncio
 async def test_capabilities_are_backend_managed(client):
+    from models.config import AiModelConfig
+    selected = await AiModelConfig.create(name='分析模型', model='reader', task_type=6,
+        supports_json_output=True, base_url='https://example.test', api_key='test', is_active=True)
     response = await client.get("/api/remake/capabilities")
     body = response.json()
 
     assert body["code"] == 0
+    assert {"id": selected.id, "name": "分析模型"} in body["data"]["analysis_models"]
     assert body["data"]["media"] == {
         "extensions": ["mp4", "mov"],
         "max_bytes": 500 * 1024 * 1024,

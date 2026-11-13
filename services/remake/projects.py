@@ -32,6 +32,14 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum, WorkflowStatus
 logger = logging.getLogger(__name__)
 
 
+async def available_analysis_models(team_id):
+    from services.model_resolution import resolve_scope_configs
+    return await resolve_scope_configs(
+        AiTaskTypeEnum.remake_decomposition.value, team_id=team_id,
+        capability_filter=lambda model: model.supports_json_output or model.supports_tool_calls,
+    )
+
+
 class RemakeProjectService:
     """幂等创建项目、章节、不可变来源和拆解任务的事务编排器。"""
 
@@ -53,6 +61,8 @@ class RemakeProjectService:
     @staticmethod
     def _payload_hash(payload: RemakeProjectCreate) -> str:
         normalized = payload.model_dump(mode="json", exclude={"idempotency_key"})
+        if payload.model_config_id is None:
+            normalized.pop("model_config_id", None)  # Preserve hashes for existing creation requests.
         encoded = json.dumps(
             normalized,
             ensure_ascii=False,
@@ -126,6 +136,10 @@ class RemakeProjectService:
             detail = getattr(error, "detail", localized_message('项目配置无效'))
             raise RemakeError(422, "REMAKE_PROJECT_CONFIG_INVALID", str(detail)) from error
 
+        if payload.model_config_id is not None:
+            models = await available_analysis_models(team_id)
+            if not any(model.id == payload.model_config_id for model in models):
+                raise RemakeError(422, "REMAKE_MODEL_UNAVAILABLE", localized_message("请选择当前团队可用的视频拆解模型"))
         await self.balance_checker(team_id, user_id)
         prepared, warnings = await self._prepare_sources(
             payload,
@@ -212,6 +226,7 @@ class RemakeProjectService:
                         progress=0,
                         request_params={
                             **workflow,
+                            **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
                             "novel_id": novel.id,
                             "chapter_id": chapter.id,
                             "remake_source_id": source.id,

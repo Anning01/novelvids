@@ -367,12 +367,15 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     second = await ready_upload(upload_service, "第2话.mp4")
     service = RemakeProjectService(upload_service=upload_service)
 
+    from models.config import AiModelConfig
+    selected = await AiModelConfig.create(name='chosen', model='video-reader', task_type=6,
+        supports_json_output=True, base_url='https://example.test', api_key='test', is_active=True)
     result = await service.create(
         folder_payload([
             {"episode_number": 3, "upload_token": third.id},
             {"episode_number": 1, "upload_token": first.id},
             {"episode_number": 2, "upload_token": second.id},
-        ]),
+        ]).model_copy(update={"model_config_id": selected.id}),
         team_id=3,
         user_id=5,
     )
@@ -382,6 +385,8 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     assert await Chapter.filter(novel_id=result["novel_id"]).count() == 3
     assert await RemakeSource.filter(novel_id=result["novel_id"]).count() == 3
     assert len({item["task_id"] for item in result["sources"]}) == 3
+    for item in result["sources"]:
+        assert (await AiTask.get(id=item["task_id"])).request_params["model_config_id"] == selected.id
     for upload in (first, second, third):
         await upload.refresh_from_db()
         assert upload.status == "committed"

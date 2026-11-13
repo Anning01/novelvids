@@ -31,7 +31,7 @@ from services.remake.media import (
 from services.remake.history import remake_history_catalog
 from services.remake.episodes import EPISODE_PATTERN_EXAMPLES
 from services.remake.dispatcher import remake_task_dispatcher
-from services.remake.projects import remake_project_service
+from services.remake.projects import available_analysis_models, remake_project_service
 from services.remake.progress import remake_progress_service
 from services.remake.uploads import remake_upload_service
 from utils.enums import TaskStatusEnum
@@ -67,7 +67,7 @@ def _upload_data(upload) -> dict:
 
 
 @router.get("/capabilities", summary="获取重制工坊能力配置")
-async def get_capabilities(_: AuthContext = Depends(get_auth_context)):
+async def get_capabilities(ctx: AuthContext = Depends(get_auth_context)):
     return ResponseSchema(
         data={
             "media": {
@@ -79,6 +79,7 @@ async def get_capabilities(_: AuthContext = Depends(get_auth_context)):
                 "max_bytes": MAX_REMAKE_BYTES,
                 "max_duration_seconds": int(MAX_REMAKE_DURATION_SECONDS),
             },
+            "analysis_models": [{"id": m.id, "name": m.name or m.model} for m in await available_analysis_models(ctx.team_id)],
             "aspect_ratios": list(project_aspect_ratios()),
             "resolutions": list(project_resolutions()),
             "styles": list_remake_styles(),
