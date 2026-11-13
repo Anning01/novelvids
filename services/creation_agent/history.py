@@ -124,7 +124,7 @@ async def prepare_history(conversation: AgentConversation, assistant: AgentMessa
                 model.phase = 'summary'
             result = await summary_agent.run(
                 render_creation_summary(conversation.summary[:history_budget], data), model=model,
-                model_settings={'max_tokens': min(limits.summary_output_tokens, limits.max_output_tokens)},
+                model_settings={'max_tokens': min(limits.summary_output_tokens, limits.max_output_tokens or limits.summary_output_tokens)},
                 usage_limits=UsageLimits(request_limit=1))
             if not isinstance(result.output, str) or not result.output.strip():
                 raise ValueError('empty summary')

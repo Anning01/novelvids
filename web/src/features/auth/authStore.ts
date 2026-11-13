@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { api, clearAuthToken, getActiveTeamId, getAuthToken, redirectToLogin, setActiveTeamId, setAuthToken } from '@/api'
 import type { AuthMe, AuthUser, LoginResult, Membership, TeamRole } from '@/types'
 
+const PLATFORM_USER_KEY = 'novelvids_platform_user'
+
 /**
  * 登录与权限状态。
  *
@@ -13,6 +15,7 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     enabled: null as boolean | null,
     ready: false,
+    deploymentRole: 'studio' as 'studio' | 'platform',
     token: getAuthToken(),
     user: null as AuthUser | null,
     memberships: [] as Membership[],
@@ -55,6 +58,7 @@ export const useAuthStore = defineStore('auth', {
       if (this.ready) return
       try {
         const status = await api.authStatus()
+        this.deploymentRole = status.data.deployment_role ?? 'studio'
         this.enabled = status.data.enabled
         this.qilingEnabled = status.data.qiling_enabled === true
         this.provider = status.data.provider ?? (this.qilingEnabled ? 'qiling' : 'password')
@@ -86,15 +90,20 @@ export const useAuthStore = defineStore('auth', {
     _resolveActiveTeam(): number | null {
       const saved = getActiveTeamId()
       if (saved !== null && this.activeMemberships.some(item => item.team_id === saved)) return saved
-      const first = this.isSuperAdmin ? null : this.activeMemberships[0]?.team_id ?? null
+      if (this.isSuperAdmin && sessionStorage.getItem(PLATFORM_USER_KEY) === String(this.user!.id)) return null
+      const preferred = this.activeMemberships.find(item => item.team_name === '默认团队') ?? this.activeMemberships[0]
+      const first = preferred?.team_id ?? null
       setActiveTeamId(first)
       return first
     },
     setActiveTeam(teamId: number | null): void {
+      if (teamId === null && this.user?.is_super_admin) sessionStorage.setItem(PLATFORM_USER_KEY, String(this.user.id))
+      else sessionStorage.removeItem(PLATFORM_USER_KEY)
       setActiveTeamId(teamId)
       this.activeTeamId = teamId
     },
     async acceptSession(session: LoginResult): Promise<void> {
+      sessionStorage.removeItem(PLATFORM_USER_KEY)
       setActiveTeamId(null)
       setAuthToken(session.token)
       this.token = session.token
@@ -120,6 +129,7 @@ export const useAuthStore = defineStore('auth', {
         // 会话已失效也照常清理本地状态
       }
       clearAuthToken()
+      sessionStorage.removeItem(PLATFORM_USER_KEY)
       setActiveTeamId(null)
       this.token = null
       this.user = null

@@ -66,6 +66,16 @@ describe('ShortDramaWorkspaceShell', () => {
     expect(wrapper.get('button[aria-current="step"]').text()).toContain('设定')
   })
 
+  it('offers the script phase and assistant in an empty project and preserves the remake navigation', async () => {
+    const wrapper = mount(ShortDramaWorkspaceShell, {props: {...baseProps, chapters: [], activeChapterId: 0}})
+    const navigation = wrapper.get('.short-drama-phase-nav')
+    expect(navigation.findAll('button').map(button => button.text())).toEqual(['剧本', '设定', '分镜', '视频'])
+    expect(wrapper.text()).toContain('创作助手')
+    await wrapper.setProps({showScriptPhase: false})
+    expect(navigation.findAll('button').map(button => button.text())).toEqual(['设定', '分镜', '视频'])
+    wrapper.unmount()
+  })
+
   it('hides the episode rail on the script phase', () => {
     const wrapper = mount(ShortDramaWorkspaceShell, {
       props: { ...baseProps, activePhase: 'script' },

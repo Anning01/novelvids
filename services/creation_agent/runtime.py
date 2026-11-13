@@ -650,7 +650,7 @@ async def submit_production(ctx: RunContext[CreationAgentDeps], intent_index: in
     request = ctx.deps.changes.request
     from services.creation_agent.skill_execution import current_execution
     execution = current_execution.get()
-    if execution and 'creation_planning' in execution.snapshot.contents and not request.production_intents:
+    if execution and execution.params.get('agent_runtime') != 'deepagents' and 'creation_planning' in execution.snapshot.contents and not request.production_intents:
         from services.creation_agent.plans import CreationPlanner, plan_proposal
         try:
             plan = await CreationPlanner(execution, ctx.deps.source_message).prepare(request)

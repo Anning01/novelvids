@@ -30,7 +30,7 @@ class AssetCandidateValidator:
         self.pending = {}
         self.issues = []
 
-    def merge(self, output, snapshot, language, aspect_ratio):
+    def merge(self, output):
         field_types = {'persons': 1, 'scenes': 2, 'items': 3}
         known_names = {name for _, name in self.asset_scope}
         def misplaced(field, name):
@@ -40,7 +40,7 @@ class AssetCandidateValidator:
         self.pending = {key: issue for key, issue in self.pending.items() if not misplaced(*key)}
         if self.output_type:
             self.extra.update(output.model_dump(exclude=set(field_types), mode='json', warnings=False))
-        for field, kind in (('persons', 'person'), ('scenes', 'scene'), ('items', 'item')):
+        for field in field_types:
             for index, raw in enumerate(getattr(output, field), 1):
                 original = None
                 if self.output_type:
@@ -65,11 +65,10 @@ class AssetCandidateValidator:
                 # A later repair cannot rewrite a design that already passed.
                 if name in self.accepted[field]:
                     continue
-                asset_kind = 'group' if kind == 'person' and item.label == '群像' else kind
                 try:
-                    validate_asset_design(item.base_traits, asset_kind, snapshot, language, aspect_ratio)
+                    validate_asset_design(item.base_traits)
                     if item.variant:
-                        validate_asset_design(item.variant.base_traits, asset_kind, snapshot, language, aspect_ratio)
+                        validate_asset_design(item.variant.base_traits)
                 except ValueError as error:
                     self.pending[key] = f'{field}/{name}: {error}'
                 else:

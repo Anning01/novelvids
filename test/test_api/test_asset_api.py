@@ -639,6 +639,8 @@ async def test_api_reference_asset_with_image_inputs(client: AsyncClient, config
         novel_id=novel.id,
         asset_type=AssetTypeEnum.person.value,
         canonical_name="API图生图测试",
+        base_traits="保留 @{参考图2} 的服饰",
+        metadata={"generation_reference_images": ["/media/face.png", "/media/clothes.png"]},
     )
     await AiModelConfig.create(
         task_type=AiTaskTypeEnum.reference_image.value,
@@ -652,13 +654,13 @@ async def test_api_reference_asset_with_image_inputs(client: AsyncClient, config
 
     response = await client.post(
         f"/api/asset/reference/{asset.id}",
-        json={"reference_images": ["/media/reference.png"]},
+        json={"reference_images": ["/media/clothes.png", "/media/reference.png"]},
     )
 
     assert response.status_code == 200, response.text
     task_id = response.json()["data"]["id"]
     task = await AiTask.get(id=task_id)
-    assert task.request_params["reference_images"] == ["/media/reference.png"]
+    assert task.request_params["reference_images"] == ["/media/face.png", "/media/clothes.png", "/media/reference.png"]
 
 
 @pytest.mark.asyncio

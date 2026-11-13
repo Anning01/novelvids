@@ -243,3 +243,65 @@ class RechargeOrder(AbstractBaseModel):
 
     def __str__(self):
         return f"Order({self.out_trade_no}, {self.amount}, {self.status})"
+
+
+class LocalMcpConnection(AbstractBaseModel):
+    """One local MCP process, delegated by an existing browser session."""
+    code = fields.UUIDField(unique=True)
+    expires_at = fields.DatetimeField()
+    session = fields.ForeignKeyField("models.UserSession", null=True, on_delete=fields.CASCADE)
+    team = fields.ForeignKeyField("models.Team", null=True, on_delete=fields.CASCADE)
+
+    class Meta:
+        table = "local_mcp_connections"
+
+
+class PlatformApiKey(AbstractBaseModel):
+    user = fields.ForeignKeyField("models.User", on_delete=fields.CASCADE)
+    team = fields.ForeignKeyField("models.Team", on_delete=fields.CASCADE)
+    name = fields.CharField(max_length=80)
+    token_hash = fields.CharField(max_length=64, unique=True)
+    preview = fields.CharField(max_length=20)
+    revoked_at = fields.DatetimeField(null=True)
+
+
+class PlatformCallReceipt(AbstractBaseModel):
+    public_id = fields.UUIDField(unique=True)
+    dedup_key = fields.CharField(max_length=64, unique=True)
+    payload_hash = fields.CharField(max_length=64)
+    team_id = fields.IntField(db_index=True)
+    user_id = fields.IntField()
+    api_key_id = fields.IntField(null=True)
+    model_config_id = fields.IntField(db_index=True)
+    model_name = fields.CharField(max_length=100)
+    model = fields.CharField(max_length=200)
+    pricing = fields.JSONField()
+    state = fields.CharField(max_length=16, db_index=True, default="submitted")
+    provider_id = fields.CharField(max_length=255, null=True)
+    usage = fields.JSONField(null=True)
+    usage_record_id = fields.IntField(null=True)
+
+
+class StudioKeyGrant(AbstractBaseModel):
+    key = fields.OneToOneField("models.PlatformApiKey", on_delete=fields.CASCADE)
+
+
+class StudioMediaLease(AbstractBaseModel):
+    object_key = fields.CharField(max_length=220, unique=True)
+    bucket = fields.CharField(max_length=64)
+    region = fields.CharField(max_length=64)
+    team_id = fields.IntField(db_index=True)
+    byte_length = fields.BigIntField()
+    expires_epoch = fields.BigIntField(db_index=True)
+    retry_epoch = fields.BigIntField(null=True)
+
+
+class PlatformVideoJob(AbstractBaseModel):
+    receipt = fields.OneToOneField("models.PlatformCallReceipt", on_delete=fields.CASCADE)
+    route_hash = fields.CharField(max_length=64)
+    inputs = fields.JSONField()
+    status = fields.CharField(max_length=20, default="queued", db_index=True)
+    progress = fields.IntField(default=0)
+    output = fields.JSONField(null=True)
+    poll_after = fields.BigIntField(default=0, db_index=True)
+    poll_token = fields.UUIDField(null=True)

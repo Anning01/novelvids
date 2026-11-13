@@ -195,6 +195,17 @@ describe('creation assistant panel', () => {
     wrapper.unmount()
   })
 
+  it('can send in project scope before the first episode exists', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, {props: {projectId: 7, chapterId: 0}, global: {plugins: [pinia]}})
+    await flushPromises()
+    const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
+    expect(wrapper.get('button[aria-label="助手操作范围"]').text()).toContain('全项目')
+    await wrapper.get('[data-testid="sender"]').trigger('click')
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({chapter_id: null, write_scope: 'project', targets: []}))
+    wrapper.unmount()
+  })
+
   it('selects an existing variant independently from its parent asset', async () => {
     vi.mocked(api.assets).mockResolvedValue({ code: 0, message: '', data: {
       items: [{ id: 8, novel_id: 7, asset_type: 1, canonical_name: '女主', created_at: '', updated_at: '',
@@ -224,11 +235,11 @@ describe('creation assistant panel', () => {
     expect(send).toHaveBeenCalledWith({ message: '灯光柔和一点', chapter_id: 3, model_config_id: 1, targets: [{ kind: 'scene', id: 9 }], write_scope: 'selected' })
   })
 
-  it('disables sending when the server feature flag is off', async () => {
+  it('disables sending when no assistant model is available', async () => {
     vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: { enabled: false, can_write: true, max_targets: 2, models: [] } })
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [createPinia()] } })
     await flushPromises()
-    expect(wrapper.text()).toContain('尚未启用')
+    expect(wrapper.text()).toContain('还需要配置一个对话模型')
     expect(wrapper.find('[data-testid="sender"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="助手连接状态"]').exists()).toBe(true)
     await wrapper.get('[aria-label="关闭创作助手"]').trigger('click')

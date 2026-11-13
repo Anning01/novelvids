@@ -3,18 +3,15 @@
 from math import isclose
 from prompts.storyboard import referenced_entities
 
-from schemas.agent_workflow import RemakeShot, StructuredSkillStoryboard
+from schemas.agent_workflow import REMAKE_TIMELINE_ROUNDING_SECONDS, RemakeShot, StructuredSkillStoryboard
 from schemas.scene import SceneEntity
 from services.storyboard.strategies import storyboard_strategy_factory
 from services.storyboard.validation import prepare_skill_storyboard, TIMELINE
 
-# Model timeline labels commonly round source frame times to two decimals.
-TIMELINE_ROUNDING_SECONDS = .005
-
 
 def _align_timeline_end(line, duration):
     match = TIMELINE.match(line)
-    if match and float(match[2]) > duration and isclose(float(match[2]), duration, abs_tol=TIMELINE_ROUNDING_SECONDS):
+    if match and float(match[2]) > duration and isclose(float(match[2]), duration, abs_tol=REMAKE_TIMELINE_ROUNDING_SECONDS):
         return line[:match.start(2)] + f'{duration:g}' + line[match.end(2):]
     return line
 
@@ -37,13 +34,13 @@ def prepare_remake_prompt(raw, catalog, snapshot, language, *, strategy_key=None
                    for field in ('actions','dialogue','narration')}
         segments = list(shot.segments)
         delta = duration_seconds - sum(segment.duration for segment in segments)
-        if segments and abs(delta) <= TIMELINE_ROUNDING_SECONDS:
+        if segments and abs(delta) <= REMAKE_TIMELINE_ROUNDING_SECONDS:
             last = segments[-1]
             segments[-1] = last.model_copy(update={'duration':last.duration + delta,
                 'actions':[_align_timeline_end(line,last.duration + delta) for line in last.actions]})
         shot = shot.model_copy(update={**updates,'duration':f'{duration_seconds}s','segments':segments})
     prepared = prepare_skill_storyboard(StructuredSkillStoryboard(shots=[shot]), snapshot, language, entities,
-        storyboard_strategy_factory.resolve(strategy_key).key).shots[0]
+        storyboard_strategy_factory.resolve(strategy_key).key, optional_blocking=True).shots[0]
     used = {entity.name for entity in referenced_entities(prepared, entities)} | {reference['asset_name'] for reference in references}
     references = [{'asset_id':item['id'], 'asset_name':item['name'], 'asset_type':item['type']}
                   for item in catalog if item['name'] in used]

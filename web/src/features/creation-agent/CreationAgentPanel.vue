@@ -50,6 +50,8 @@ const options = ref<(AgentTargetOption & { key: string })[]>([])
 const pickerOpen = ref(false)
 const writeScope = ref<'chapter' | 'project' | 'read_only'>('chapter')
 
+const effectiveWriteScope = computed(() => !props.chapterId && writeScope.value === 'chapter' ? 'project' : writeScope.value)
+
 function changeWriteScope(next: string) {
   if (next === writeScope.value) return
   writeScope.value = next as typeof writeScope.value
@@ -92,7 +94,7 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
-const productionLabel = (operation: string) => tr(({ story: '项目分析', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
+const productionLabel = (operation: string) => tr(({ story: '项目分析', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
 function singleProductionResult(message: { role: string; content: string; production?: ProductionReceipt[] }): ProductionReceipt | undefined {
   const receipt = message.production?.length === 1 ? message.production[0] : undefined
   return message.role === 'assistant' && ['', '已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined
@@ -209,7 +211,7 @@ async function send(text: string) {
   if (!text.trim() || !ready.value || store.busy || props.suspended) return
   const key = draftKey.value
   if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null,
-    targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : writeScope.value })) {
+    targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : effectiveWriteScope.value })) {
     workspace.drafts[key] = ''
     // The first accepted request creates a conversation with its own draft slot.
     workspace.drafts[draftKey.value] = ''
@@ -262,7 +264,9 @@ function close() {
 }
 
 async function locate(target: AgentChangeItem) {
-  if (target.kind === 'scene') {
+  if (target.kind === 'chapter') {
+    await router.push({path: `/create/short-drama/agent/${props.projectId}`, query: {chapter: target.target_id}})
+  } else if (target.kind === 'scene') {
     const scene = (await api.scene(target.target_id)).data
     await router.push({ path: `/create/short-drama/storyboard/${props.projectId}`, query: { chapter: scene.chapter_id, scene: scene.id } })
   } else {
@@ -303,7 +307,11 @@ onBeforeUnmount(() => {
 })
 onMounted(() => {
   window.addEventListener('focus', refreshVisibleState)
-  productionTimer = setInterval(() => { if (!document.hidden) void store.refreshProduction() }, 4000)
+  productionTimer = setInterval(() => {
+    if (document.hidden) return
+    void store.refreshProduction()
+    void store.refreshConversations().catch(() => {})
+  }, 4000)
 })
 </script>
 
@@ -322,11 +330,11 @@ onMounted(() => {
       <AppSelect
         class="creation-agent-panel__scope-select"
         density="compact"
-        :model-value="writeScope"
+        :model-value="effectiveWriteScope"
         :ariaLabel="tr('助手操作范围')"
         :disabled="store.busy"
         :options="[
-          { value: 'chapter', label: targets.length ? tr('指定对象') : tr('当前章') },
+          ...(chapterId || targets.length ? [{ value: 'chapter', label: targets.length ? tr('指定对象') : tr('当前章') }] : []),
           { value: 'project', label: tr('全项目') },
           { value: 'read_only', label: tr('只查询') },
         ]"

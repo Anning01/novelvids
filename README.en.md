@@ -5,7 +5,7 @@
 <h1 align="center">NovelVids · 猫影短剧</h1>
 
 <p align="center">
-  <strong>An open-source workspace for illustrated stories and short dramas, available online or on your own server.</strong>
+  <strong>An open-source local workspace for illustrated stories and short dramas, with your own models or the NovelVids developer platform.</strong>
 </p>
 
 <p align="center">
@@ -24,8 +24,24 @@
 </p>
 
 <p align="center">
-  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
+  <a href="#quick-start">Quick start</a> · <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">NovelVids service</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
 </p>
+
+## Quick start
+
+Choose one option and send its prompt to your AI assistant.
+
+**Download and run the studio**
+
+```text
+Download NovelVids from https://github.com/Anning01/novelvids, start it on my computer with Docker, and show me where to open the studio and import my novel.
+```
+
+**Use the creative skills on their own**
+
+```text
+Use scripts/export_skill.py from https://github.com/Anning01/novelvids to install the screenplay, asset design and storyboard skills in my current project, then show me how to use them on the first chapter of my novel.
+```
 
 ## Join the community
 
@@ -40,13 +56,13 @@ Join the **NovelVids · 猫影短剧 WeChat group** to discuss AI animation, sho
   Group QR codes expire after 7 days. If this one has expired, check the latest version of the repository home page.
 </p>
 
-## Create online
+## NovelVids service
 
 **[Open the NovelVids commercial service →](https://shortdramas.xiazq.com)**
 
-Sign in with Qiling through WeChat. Start with an image or video idea, add reference material, or develop a story into a short drama. The hosted service provides model selection, team collaboration, usage records and top-ups. Generation fees follow the displayed estimates and actual usage.
+Sign in with Qiling through WeChat. The new developer platform provides a model catalog, API documentation, API keys, usage records and top-ups. See Local studio and developer platform for project migration.
 
-The hosted service uses the source code and creative rules in this repository. Self-hosting includes the same Qiling sign-in, team management, usage billing and WeChat Pay integrations. Each operator configures their own services.
+This repository provides the creative workspace and creative rules. The developer platform is maintained separately as [Cat API](https://github.com/Anning01/cat-api). Workspace accounts, teams and balances are managed by the local deployment; platform accounts and model API billing are managed independently by Cat API.
 
 ## Video tutorial
 
@@ -88,7 +104,7 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 - **Editable steps.** Keep prompts and generation versions. Revise one shot before deciding whether to generate it again.
 - **Shared capabilities for buttons and chat.** The assistant orchestrates creation; image and video models generate the media. Tasks and usage remain recorded.
 - **Customizable creative rules.** One Chinese skill pack guides story analysis, assets, images and storyboards, with Chinese or English output selected by system language.
-- **Choose how to use it.** Create online or deploy the same application with your own models and storage.
+- **Choose your models.** Keep projects on your computer and connect your own model provider or the NovelVids developer platform.
 
 ### Current interface
 
@@ -106,51 +122,13 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 
 Screenshots use public example projects in the current Chinese interface. English is also supported.
 
-## Quick start
+## Local studio and developer platform
 
-1. Open the **[NovelVids commercial service](https://shortdramas.xiazq.com)**, read the agreements and sign in with Qiling through WeChat.
-2. Choose an image or video model, enter a visual idea, add references and review the estimate. For a series, import a story through Short dramas and continue into assets and storyboards.
-3. Review generated versions, revise shots, organize resources and manage finished episodes in the works library. Projects and costs belong to the currently selected team.
+This repository runs the creative workspace with `NOVELVIDS_ROLE=studio` by default. Deploy the developer platform from the separate [Cat API repository](https://github.com/Anning01/cat-api). Use **Export project** in the project menu and **Import project** in another local studio to restore a new project. The exporting browser downloads cloud media directly from storage, which must permit cross-origin reads from the studio origin.
 
-### Self-hosting
+Create a key for **Local Cat Shadow Studio** in the platform console. As a studio super administrator, open **Model configuration → Connect to the platform**, enter the key, and sync the models. The studio uses `https://shortdramas.xiazq.com/v1` by default. Set `STUDIO_PLATFORM_BASE_URL` to use a different platform address. The studio downloads completed videos directly to local storage.
 
-Local use is anonymous by default. The asset design templates, storyboard speech timing rules and 15 visual styles ship in `prompts/skills/`, where you can edit them.
-
-<details>
-<summary>Expand Docker self-hosting and first-run configuration</summary>
-
-You need Docker with Docker Compose and access to model services. **Self-hosting is not offline inference:** AI features call the APIs you configure, and providers may charge for them.
-
-```bash
-git clone https://github.com/Anning01/novelvids.git
-cd novelvids
-docker compose up -d --build
-```
-
-Open **[http://localhost:8080](http://localhost:8080)** when startup completes.
-
-Before creating your first project:
-
-1. Under **Settings → Model settings**, enable a text model, select **Creation assistant**, and enable **Multi-turn tool calling**. Enable the assistant in General settings.
-2. Configure the image/video models you want and their prices. A text model alone is enough to start planning stories, assets and storyboards.
-3. Start with a short story or one chapter. Review extraction and storyboard results before generating media. Explicit generation requests can incur model charges; editing a prompt does not automatically generate images or videos.
-
-The Docker backend image includes FFmpeg. For older images, install and check it in the backend container:
-
-```bash
-docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
-docker compose exec backend ffprobe -version
-```
-
-Use `docker compose exec backend ffprobe -version` to check that the video tools are ready.
-
-- **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
-- **No login by default:** intended for personal local use. Before public exposure, set `AUTH_ENABLED=true`, `AUTH_PROVIDER=password`, `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD` through environment variables, and enable HTTPS.
-- **Qiling sign-in:** Set `AUTH_ENABLED=true`, `AUTH_PROVIDER=qiling` and `QILING_API_BASE_URL` to your Qiling HTTPS endpoint. To accept new accounts, set `QILING_SIGNUP_ENABLED=true` and fill in the operator, policy and third-party disclosures under `LEGAL_*` in Compose.
-- **WeChat Pay and remote media processing:** To enable top-ups, configure the backend with your own `WECHAT_PAY_*` merchant settings and point the callback URL to `/api/payment/wechat/notify` on your site. Use a Compose override to mount the key files read-only at their configured container paths. Remake jobs run locally by default. To use an installed media worker, set `REMAKE_MEDIA_SSH_HOST` and configure backend SSH credentials and a verified host key.
-- **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See Local development below.
-
-</details>
+The legacy `NOVELVIDS_ROLE=platform` role remains for existing deployments. New installations should deploy the studio and Cat API separately. Users of the retired online studio can download a complete project package from [Historical project migration](https://shortdramas.xiazq.com/#/legacy-works) and import it into a local studio. Preserve original projects and media, allow time for migration and notify users before switching services.
 
 ## Creative workflow
 
@@ -166,6 +144,20 @@ flowchart LR
 ```
 
 Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
+
+## Online updates
+
+On a Linux host using systemd and the standard SQLite Docker Compose deployment, run this once in the installation directory. The host needs Git and Python 3. Existing installations must first update their checkout to a release that includes the installer.
+
+```sh
+sudo sh scripts/update/install.sh
+```
+
+The deployment administrator can then click **Upgrade studio** in the top banner. The host builds images from the latest official GitHub Release, backs up SQLite, switches services and checks both versions. A failed health check restores the previous installation. The switch briefly interrupts service. The updater manages `docker-compose.override.yml` and keeps the existing project and media mounts. See `journalctl -u novelvids-update` for host logs.
+
+After the upgrade, each user can save their edits and click **Refresh page**. For other deployment layouts, follow the release instructions.
+
+**Publishing**. Update the version, summary and minimum feature versions in `release.json`. After testing, publish that commit as the latest stable GitHub Release with a matching tag (for example, `v1.1.0`). Keep `update_format: 1` for standard updates. Omit it and publish manual instructions for releases that change database deployment, mounts or Compose topology.
 
 ## Local development
 
@@ -188,7 +180,7 @@ Open [http://localhost:3000](http://localhost:3000). The frontend proxies reques
 
 ## Development and community
 
-The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
+The frontend uses **Vue 3, TypeScript and Vue Flow**; the backend uses **FastAPI, Tortoise ORM, Deep Agents and Pydantic AI**. Creative guidance lives in [`prompts/skills/`](prompts/skills/), separate from model adapters and task execution.
 
 Bring a real creative problem: [report a bug](https://github.com/Anning01/novelvids/issues/new), [discuss an idea](https://github.com/Anning01/novelvids/issues), or [contribute](https://github.com/Anning01/novelvids/pulls). For generation problems, include a shareable minimal example, model configuration type and reproduction steps. Keep keys and private media out of reports.
 
@@ -213,3 +205,7 @@ Third-party dependencies, fonts, media and model services retain their own terms
 ## Star history
 
 [![NovelVids Star history](https://novelvids-star-history.864399407.workers.dev/card.svg)](https://github.com/Anning01/novelvids/stargazers)
+
+New creation-assistant conversations use the Python Deep Agents runtime for tool execution, on-demand skills and context compaction. Application services retain permission, version and output-contract checks. Conversation checkpoints default to `data/creation_agent_checkpoints.db`; set `CREATION_AGENT_CHECKPOINT_PATH` to change the location and include this state file in backups when retaining conversation recovery. Historical runs keep their original execution path.
+
+The script workspace stores project visual style, audiovisual direction and an optional line-art storyboard switch (off by default). New shots can generate one storyboard image each; existing shots offer individual generation and retry. Images can be attached as video references with companion guidance. Installed official prompt optimizers are loaded from `CREATION_AGENT_OPTIONAL_SKILLS_PATH` (default `.agents/skills`) for the selected project video model. Generic and model-specific prompts are retained separately.

@@ -2,8 +2,6 @@
 import { tr } from '@/i18n'
 
 import { computed, onMounted, ref, useId } from 'vue'
-import { ElSwitch } from 'element-plus'
-import 'element-plus/theme-chalk/el-switch.css'
 import { Bot, ChevronDown, SlidersHorizontal } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import AppSettingsCard from '@/components/AppSettingsCard.vue'
@@ -18,17 +16,18 @@ const saving = ref(false)
 const error = ref('')
 const dirty = computed(() => Boolean(configuration.value && JSON.stringify(configuration.value) !== savedSnapshot.value))
 interface BudgetField {
-  key: Exclude<keyof AgentConfiguration, 'enabled'>
+  key: Exclude<keyof AgentConfiguration, 'enabled' | 'runtime'>
   label: string
   unit: string
   ratio?: boolean
   optional?: boolean
+  min?: number
 }
 const groups: { title: string; description: string; fields: BudgetField[] }[] = [
   { get title() { return tr('执行与输出') }, get description() { return tr('助手持续执行到任务完成或主动停止，上下文自动整理；单次输出遵循所选模型的能力。') }, fields: [
     { key: 'production_concurrency', get label() { return tr('同时执行的创作任务') }, get unit() { return tr('个') } },
     { key: 'max_targets', get label() { return tr('单批操作对象') }, get unit() { return tr('个 / 批') } },
-    { key: 'max_output_tokens', get label() { return tr('单次输出上限') }, unit: 'token' },
+    { key: 'max_output_tokens', get label() { return tr('单次输出上限') }, unit: 'token', optional: true, min: 256 },
   ] },
   { get title() { return tr('记忆与上下文') }, get description() { return tr('按 840K 输入预算管理工作区，达到 70% 时自动整理历史。') }, fields: [
     { key: 'working_input_tokens', get label() { return tr('工作上下文预算') }, get unit() { return tr('预估 token') } },
@@ -51,7 +50,7 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
-    configuration.value = (await agentApi.updateConfiguration({ ...configuration.value, max_context_characters: configuration.value.max_context_characters || null })).data
+    configuration.value = (await agentApi.updateConfiguration({ ...configuration.value, max_context_characters: configuration.value.max_context_characters || null, max_output_tokens: configuration.value.max_output_tokens || null })).data
     savedSnapshot.value = JSON.stringify(configuration.value)
     notice.success(tr('创作助手配置已保存'))
   } catch (caught) { error.value = (caught as Error).message }
@@ -65,10 +64,6 @@ async function save() {
     <template #status><span class="agent-settings-panel__tag">{{ tr('对话创作') }}</span></template>
     <p v-if="error" class="agent-settings-panel__error" role="alert">{{ error }}</p>
     <form v-if="configuration" :id="formId" @submit.prevent="save">
-      <div class="agent-settings-panel__enable">
-        <div><strong>{{ tr('启用创作助手') }}</strong><p>{{ tr('所有新创作任务都需要启用助手并配置支持工具调用的模型。') }}</p></div>
-        <ElSwitch v-model="configuration.enabled" :aria-label="tr('启用创作助手')" :disabled="saving" />
-      </div>
       <div class="agent-settings-panel__features" :aria-label="tr('助手能力')">
         <span>{{ tr('跨对话记忆') }}</span><span>{{ tr('自动整理上下文') }}</span><span>{{ tr('修改可撤销') }}</span>
       </div>
@@ -79,7 +74,7 @@ async function save() {
             <legend>{{ group.title }}</legend><p>{{ group.description }}</p>
             <div class="agent-settings-panel__fields">
               <label v-for="field in group.fields" :key="field.key"><span>{{ field.label }}</span>
-                <span class="agent-settings-panel__input"><input v-model.number="configuration[field.key]" type="number" :placeholder="field.optional ? tr('留空，由模型服务判断') : undefined" :min="field.ratio ? 0.01 : field.optional ? 2000 : 1" :max="field.ratio ? 0.99 : undefined" :step="field.ratio ? 0.01 : 1" /><span aria-hidden="true">{{ field.unit }}</span></span>
+                <span class="agent-settings-panel__input"><input v-model.number="configuration[field.key]" type="number" :placeholder="field.optional ? tr('留空，由模型服务判断') : undefined" :min="field.min ?? (field.ratio ? 0.01 : field.optional ? 2000 : 1)" :max="field.ratio ? 0.99 : undefined" :step="field.ratio ? 0.01 : 1" /><span aria-hidden="true">{{ field.unit }}</span></span>
               </label>
             </div>
           </fieldset>
@@ -95,12 +90,7 @@ async function save() {
 </template>
 
 <style scoped>
-.agent-settings-panel { --el-switch-on-color: var(--app-accent); --el-switch-off-color: var(--app-border-strong); }
 .agent-settings-panel__tag { padding: 4px 9px; border-radius: 6px; background: var(--app-surface-muted); color: var(--app-text-secondary); }
-.agent-settings-panel__enable { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.agent-settings-panel__enable strong { font-size: 13px; font-weight: 600; }
-.agent-settings-panel__enable p { margin: 5px 0 0; font-size: 12px; line-height: 1.6; color: var(--app-text-secondary); }
-.agent-settings-panel :deep(.el-switch) { flex: 0 0 auto; --el-switch-on-color: var(--app-accent); --el-switch-off-color: var(--app-border-strong); }
 .agent-settings-panel__features { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 16px 0 18px; font-size: 11px; color: var(--app-text-secondary); }
 .agent-settings-panel__features span { display: inline-flex; align-items: center; gap: 7px; }
 .agent-settings-panel__features span::before { content: ''; width: 4px; height: 4px; background: var(--app-accent); border-radius: 50%; }

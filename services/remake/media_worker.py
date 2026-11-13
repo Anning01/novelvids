@@ -17,7 +17,7 @@ def execute(request: MediaWorkerRequest, root: Path) -> dict:
         work.mkdir(parents=True, mode=0o700, exist_ok=False)
         return {"ok": True}
     if request.action == "cleanup":
-        for phase in ("prepare", "split"):
+        for phase in ("prepare", "split", "process"):
             subprocess.run(
                 ["systemctl", "stop", f"novelvids-remake-{request.job_id.hex}-{phase}.service"],
                 check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -25,6 +25,9 @@ def execute(request: MediaWorkerRequest, root: Path) -> dict:
         if work.exists():
             shutil.rmtree(work)
         return {"ok": True}
+    if request.action == "process":
+        from services.media_worker import execute as process_media
+        return process_media(work)
     if request.action == "prepare":
         from services.remake.media_prepare import prepare_video_for_model_input
 

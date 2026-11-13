@@ -4,12 +4,13 @@ import AppSelect from '@/components/AppSelect.vue'
 
 import { ElConfigProvider } from 'element-plus'
 import { elementLocale } from '@/i18n'
-import { BarChart3, Building2, Clapperboard, Film, FolderKanban, Images, Receipt, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
+import { BookOpen, KeyRound, Layers, BarChart3, Building2, Clapperboard, Film, FolderKanban, Images, Receipt, RefreshCcw, Settings, Sparkles, UserRound, Users } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { computed, ref, watch } from 'vue'
 import { mediaUrl } from '@/api'
 import { notice } from '@/shared/notice'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
+import StudioReleaseBanner from '@/components/StudioReleaseBanner.vue'
 import AppNotice from '@/components/AppNotice.vue'
 import AppThemeToggle from '@/components/AppThemeToggle.vue'
 import AppSidebarPreferences from '@/components/AppSidebarPreferences.vue'
@@ -34,6 +35,16 @@ const creationItems = [
 ]
 // 按角色渲染「我的」导航：成本（管理员/创作者/超管）、设置（管理员/超管）；
 // AUTH_ENABLED=false 时全部可见（vanilla 体验）
+const platform = computed(() => auth.deploymentRole === 'platform')
+const platformItems = computed(() => [
+  ...(auth.canAccessBilling ? [{path:'/platform/usage', label:tr('用量概览'), icon:BarChart3},
+    {path:'/platform/keys',label:'API Keys',icon:KeyRound}] : []),
+  {path:'/platform/models',label:tr('模型目录'),icon:Layers},
+  {path:'/platform/docs',label:tr('接口文档'),icon:BookOpen},
+  ...(auth.isLoggedIn ? [
+    ...(auth.canAccessBilling ? [{path:'/billing',label:tr('消费账单'),icon:Receipt}] : []),
+    {path:'/orders',label:tr('充值订单'),icon:Receipt}] : [{path:'/login',label:tr('登录'),icon:UserRound}]),
+])
 const personalItems = computed(() => {
   const items = [
     { path: '/projects', get label() { return tr('我的创作') }, icon: FolderKanban, active: () => route.path === '/projects' || route.path.startsWith('/novel') },
@@ -53,7 +64,8 @@ const adminItems = computed(() => {
     items.push({ path: '/teams', get label() { return tr('团队管理') }, icon: Building2, active: () => route.path.startsWith('/teams') })
     items.push({ path: '/users', get label() { return tr('用户管理') }, icon: UserRound, active: () => route.path.startsWith('/users') })
   }
-  if (auth.enabled === true && auth.isLoggedIn) {
+  if (platform.value && auth.isSuperAdmin) items.push({path:'/settings', get label(){return tr('模型配置')},icon:Settings,active:()=>route.path==='/settings'})
+  if (!platform.value && auth.enabled === true && auth.isLoggedIn) {
     items.push({ path: '/orders', get label() { return tr('订单管理') }, icon: Receipt, active: () => route.path.startsWith('/orders') })
   }
   return items
@@ -90,18 +102,21 @@ function handleTeamSwitch(teamId: string) {
 </script>
 <template>
   <ElConfigProvider :locale="elementLocale">
+  <div class="studio-frame">
+  <StudioReleaseBanner v-if="!platform" />
   <div class="app-shell" :class="{ 'is-workflow-surface': isWorkflowSurface }">
     <aside v-if="!isFullscreen" class="app-sidebar">
       <RouterLink to="/" class="app-brand" :aria-label="tr('猫影首页')">
         <img src="/logo.png" alt="" />
         <span>
           <strong>{{ tr('猫影') }}</strong>
-          <small>NOVEL STUDIO</small>
+          <small>{{ platform ? tr('开放平台') : 'NOVEL STUDIO' }}</small>
         </span>
       </RouterLink>
       <AppSelect
         v-if="auth.enabled === true && auth.isLoggedIn && auth.activeMemberships.length"
         class="app-team-selector"
+        menu-width="trigger"
         density="compact"
         :model-value="String(auth.activeTeamId ?? '')"
         :options="teamOptions"
@@ -113,6 +128,10 @@ function handleTeamSwitch(teamId: string) {
         class="app-team-selector app-team-selector--super"
       > {{ tr('平台管理员 · 全部团队') }} </div>
       <nav :aria-label="tr('主导航')">
+        <template v-if="platform">
+          <RouterLink v-for="item in platformItems" :key="item.path" :to="item.path" class="app-nav-item" :class="{'is-active':route.path === item.path}"><component :is="item.icon" :size="18"/><span>{{ item.label }}</span></RouterLink>
+        </template>
+        <template v-else>
         <RouterLink to="/" :aria-label="tr('首页')" class="app-nav-item app-home-item" :class="{ 'is-active': route.path === '/' }">
           <Sparkles :size="18" />
           <span>{{ tr('首页') }}</span>
@@ -134,6 +153,7 @@ function handleTeamSwitch(teamId: string) {
           </RouterLink>
         </section>
 
+        </template>
         <section v-if="adminItems.length" class="app-nav-group" aria-labelledby="admin-nav-title">
           <h2 id="admin-nav-title">{{ tr('管理') }}</h2>
           <RouterLink v-for="item in adminItems" :key="item.path" :to="item.path" :aria-label="item.label" class="app-nav-item" :class="{ 'is-active': item.active() }">
@@ -162,12 +182,17 @@ function handleTeamSwitch(teamId: string) {
     <AppConfirmDialog :dark="confirmDialogDark" />
     <TransitionGroup name="notice" tag="div" class="notice-stack" aria-live="polite"><AppNotice v-for="item in notice.state.notices" :key="item.id" :item="item" /></TransitionGroup>
   </div>
+  </div>
   </ElConfigProvider>
 </template>
 
 <style scoped>
+.studio-frame { display:flex; height:100%; flex-direction:column }
+.studio-frame > .app-shell { flex:1; min-height:0 }
 .app-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .app-team-selector {
+  flex: 0 0 auto;
+  min-width: 0;
   display: block;
   margin: 0 10px 10px;
 }
@@ -178,6 +203,7 @@ function handleTeamSwitch(teamId: string) {
   color: var(--app-text-muted, #9398a8);
 }
 .app-user-block {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;

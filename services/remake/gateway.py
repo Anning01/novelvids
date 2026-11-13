@@ -83,33 +83,50 @@ class RemakeVideoAnalysisGateway:
         response_schema: dict[str, Any],
         context_builder: Callable[[int], str | dict[str, Any]] | None = None,
         on_completed: Callable[[int, int], Awaitable[None]] | None = None,
+        completed_results: dict[int, dict] | None = None,
     ) -> list[dict[str, Any]]:
         semaphore = asyncio.Semaphore(max(1, int(self.config.concurrency or 1)))
         completion_lock = asyncio.Lock()
-        completed = 0
+        failure: Exception | None = None
+        saved = completed_results or {}
+        completed = len(saved)
+        if completed and on_completed:
+            await on_completed(completed, len(paths))
 
         async def analyze(index: int, path: Path) -> dict[str, Any]:
-            nonlocal completed
+            nonlocal completed, failure
+            if index in saved:
+                return {**saved[index], "shot_index": index, "file": path.name}
             async with semaphore:
-                result = await self.analyze_one(
-                    index=index,
-                    path=path,
-                    prompt=prompt,
-                    context=context_builder(index) if context_builder else "",
-                    schema_name=schema_name,
-                    response_schema=response_schema,
-                )
+                if failure is not None:
+                    raise failure
+                try:
+                    result = await self.analyze_one(
+                        index=index,
+                        path=path,
+                        prompt=prompt,
+                        context=context_builder(index) if context_builder else "",
+                        schema_name=schema_name,
+                        response_schema=response_schema,
+                    )
+                except Exception as error:
+                    if failure is None:
+                        failure = error
+                    raise
             if on_completed is not None:
                 async with completion_lock:
                     completed += 1
                     await on_completed(completed, len(paths))
             return result
 
-        return list(
-            await asyncio.gather(
-                *(analyze(index, path) for index, path in enumerate(paths, start=1))
-            )
-        )
+        # Let accepted calls finish and checkpoint before releasing their clip files.
+        results = await asyncio.gather(*(analyze(i, path) for i, path in enumerate(paths, 1)), return_exceptions=True)
+        if failure is not None:
+            raise failure
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return list(results)
 
     async def analyze_one(
         self,
@@ -128,12 +145,15 @@ class RemakeVideoAnalysisGateway:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         if execution:
-            from pydantic_ai import BinaryContent
+            from pydantic_ai import BinaryContent, VideoUrl
             from schemas.agent_workflow import RemakeAssets, RemakeShot
             schema = RemakeAssets if schema_name == 'global_key_assets' else RemakeShot
             video_bytes, mime = await asyncio.to_thread(self._read_video, path)
-            video_content = BinaryContent(data=video_bytes, media_type=mime,
-                                          vendor_metadata={'fps': VIDEO_INPUT_FPS})
+            if getattr(self.config, "api_protocol", None) == "novelvids":
+                url = await self._platform_video_url(video_bytes, mime, execution.params.get("team_id"))
+                video_content = VideoUrl(url=url, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
+            else:
+                video_content = BinaryContent(data=video_bytes, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
             try:
                 result = await execution.generate(
                     'remake',
@@ -152,7 +172,12 @@ class RemakeVideoAnalysisGateway:
                 data.update(shot_index=index, file=path.name)
             self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='completed')
             return data
-        video_input = await asyncio.to_thread(self._build_video_input, path)
+        if getattr(self.config, "api_protocol", None) == "novelvids":
+            data, mime = await asyncio.to_thread(self._read_video, path)
+            url = await self._platform_video_url(data, mime, None)
+            video_input = {"type": "video_url", "video_url": {"url": url, "fps": VIDEO_INPUT_FPS}}
+        else:
+            video_input = await asyncio.to_thread(self._build_video_input, path)
         instruction = render_remake_request(prompt, context=context, index=index,
             schema=response_schema, include_segment_metadata=include_segment_metadata, language=task_language.get() or "zh")
         messages = [
@@ -263,6 +288,14 @@ class RemakeVideoAnalysisGateway:
             )
         mime = "video/quicktime" if path.suffix.lower() == ".mov" else "video/mp4"
         return path.read_bytes(), mime
+
+    async def _platform_video_url(self, data: bytes, mime: str, team_id: int | None) -> str:
+        from services.oss.studio_client import studio_client
+        client = studio_client(team_id, base_url=self.config.base_url, api_key=self.config.api_key)
+        if client is None:
+            raise RemakeVideoAnalysisError(localized_message("本地猫影的平台密钥尚未配置"))
+        encoded = await asyncio.to_thread(base64.b64encode, data)
+        return await client.resolve(f"data:{mime};base64,{encoded.decode('ascii')}")
 
     def _build_video_input(self, path: Path) -> dict[str, Any]:
         data, mime = self._read_video(path)

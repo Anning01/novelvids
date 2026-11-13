@@ -11,7 +11,7 @@ class AssetDesignDraft(BaseModel):
     model_config = ConfigDict(extra='forbid')
     description: str = Field(min_length=1, max_length=8000)
     visual_fields: dict[str, str] = Field(default_factory=dict)
-    design: str = Field(default='', max_length=32000, description='无固定字段协议时的完整设计')
+    design: str = Field(default='', max_length=32000, description='完整视觉设计正文')
 
 
 async def revise_object(service, execution, target, instructions, tool_call_id):

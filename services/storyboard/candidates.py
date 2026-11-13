@@ -2,8 +2,8 @@
 
 from pydantic import Field, SkipValidation, ValidationError, create_model
 
-from services.storyboard.speech_timing import StoryboardSpeechValidator
-from services.storyboard.validation import validate_skill_storyboard_timing, validate_storyboard_duration, prepare_skill_storyboard
+from services.storyboard.speech_tracks import SpeechContent
+from services.storyboard.validation import validate_blocking_map, validate_skill_storyboard_timing, validate_storyboard_duration, prepare_skill_storyboard
 
 
 class StoryboardCandidateValidator:
@@ -35,7 +35,7 @@ class StoryboardCandidateValidator:
         self.groups = {number: [self.shot_type.model_validate(value) for value in values]
                        for number, values in self.raw.items() if number not in self.pending}
         for number, speech in checkpoint.get('speech', {}).items():
-            validator = StoryboardSpeechValidator(self.snapshot)
+            validator = SpeechContent()
             validator.original_speech = {(field, speaker): text for field, speaker, text in speech}
             self.speech[int(number)] = validator
 
@@ -46,8 +46,8 @@ class StoryboardCandidateValidator:
 
     def validate_group(self, number, shots):
         errors = []
-        if self.preserve_speech:
-            validator = self.speech.setdefault(number, StoryboardSpeechValidator(self.snapshot))
+        if self.preserve_speech and 'storyboard_contract' in self.snapshot.contents:
+            validator = self.speech.setdefault(number, SpeechContent())
             try:
                 validator.validate(shots)
             except ValueError as error:
@@ -57,6 +57,11 @@ class StoryboardCandidateValidator:
                 validate_storyboard_duration(shot, self.duration_range)
                 if 'storyboard_contract' in self.snapshot.contents:
                     validate_skill_storyboard_timing(shot)
+                    if (isinstance(self.source_facts, dict) and self.source_facts.get('source_scene_number')
+                            and shot.blocking_map is None):
+                        # Model placement runs after segment order is final.
+                        shot = shot.model_copy(update={'duration_split_part': None})
+                    validate_blocking_map(shot, self.snapshot)
                     if isinstance(self.source_facts, dict) and 'entities' in self.source_facts:
                         from schemas.scene import SceneEntity
                         from services.creation_agent.prompt_edits import validate_prompt_dependencies

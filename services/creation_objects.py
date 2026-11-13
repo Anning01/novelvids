@@ -22,7 +22,7 @@ from models.video import Video
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
-OBJECT_MODELS = {"asset": Asset, "variant": AssetVariant, "scene": Scene}
+OBJECT_MODELS = {"asset": Asset, "variant": AssetVariant, "scene": Scene, "chapter": Chapter}
 ACTIVE_TASK_STATUSES = [TaskStatusEnum.pending, TaskStatusEnum.queued, TaskStatusEnum.running]
 
 
@@ -71,7 +71,7 @@ class CreationObjects:
         model = OBJECT_MODELS.get(kind)
         if model is None:
             raise ValueError(localized_message('不支持的创作对象'))
-        query = model.with_deleted() if include_deleted else model.all()
+        query = model.with_deleted() if include_deleted and kind != "chapter" else model.all()
         scope = {"chapter__novel_id": self.novel_id} if kind == "scene" else (
             {"asset__novel_id": self.novel_id, "asset__deleted_at__isnull": True} if kind == "variant" else {"novel_id": self.novel_id})
         target = await query.filter(id=object_id, **scope).first()
@@ -197,6 +197,11 @@ class CreationObjects:
         await scene.refresh_from_db()
 
     async def ensure_idle(self, kind: str, target, *, current_storyboard_task=None) -> None:
+        if kind == 'chapter':
+            for task in await AiTask.filter(status__in=ACTIVE_TASK_STATUSES, task_type__in=[AiTaskTypeEnum.extraction, AiTaskTypeEnum.storyboard]):
+                if (task.request_params or {}).get('chapter_id') == target.id:
+                    raise ValueError(localized_message('本集仍有任务执行中'))
+            return
         if kind == "scene" and await Video.filter(scene_id=target.id, status__in=ACTIVE_TASK_STATUSES).exists():
             raise ValueError(localized_message('该分镜仍有生成任务，请先停止或等待完成'))
         task_types = [AiTaskTypeEnum.reference_image, AiTaskTypeEnum.storyboard] if kind != "scene" else [AiTaskTypeEnum.video, AiTaskTypeEnum.storyboard]

@@ -13,20 +13,9 @@ from utils.messages import localized_message as msg
 
 
 async def _run_command(args: list[str], cwd: Path) -> None:
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        cwd=cwd,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        await asyncio.wait_for(process.communicate(), timeout=180)
-    except BaseException:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
-        raise
-    if process.returncode != 0:
+    from services.media_processing import run_media_async
+    result = await run_media_async(args, cwd=cwd, timeout=180)
+    if result.returncode != 0:
         raise RuntimeError("FFmpeg 处理音频失败，请检查素材")
 
 

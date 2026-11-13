@@ -13,7 +13,8 @@ class AiTaskController:
         task = await AiTask.get_or_none(id=task_id)
         if task is None:
             raise HTTPException(status_code=404, detail="AiTask not found")
-        return task
+        from services.extraction.errors import describe_extraction_failure
+        return await describe_extraction_failure(task)
 
     async def cancel(self, task_id: UUID) -> AiTask:
         from services.task_cancellation import cancel_task

@@ -3,7 +3,8 @@ import { tr } from '@/i18n'
 
 import { computed, ref, watch } from 'vue'
 import { Check, ImagePlus, LoaderCircle, Sparkles, WandSparkles, X } from 'lucide-vue-next'
-import { api } from '@/api'
+import { api, mediaUrl } from '@/api'
+import { fallbackImage } from '@/shared/mediaFallback'
 import EpisodeSelectionPicker from '@/components/EpisodeSelectionPicker.vue'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
@@ -13,7 +14,7 @@ const props = withDefaults(defineProps<{ asset: Asset; draft?: AssetVariantDraft
   draft: null,
   episodeNumbers: () => [],
 })
-const emit = defineEmits<{ select: [variant: AssetVariant | null]; draft: [draft: AssetVariantDraft | null] }>()
+const emit = defineEmits<{ select: [variant: AssetVariant | null]; draft: [draft: AssetVariantDraft | null]; loaded: [variants: AssetVariant[]] }>()
 
 const variants = ref<AssetVariant[]>([])
 const loading = ref(false)
@@ -76,6 +77,7 @@ async function loadVariants() {
   loading.value = true
   try {
     variants.value = (await api.assetVariants(props.asset.id)).data
+    emit('loaded', variants.value)
     const initialVariant = variants.value.find(variant => variant.id === props.initialVariantId)
     if (initialVariant) selectVariant(initialVariant)
   } catch (error) {
@@ -109,6 +111,7 @@ function upsertVariant(variant: AssetVariant) {
   else variants.value.splice(existingIndex, 1, variant)
   selectedVariantId.value = variant.id
   beginEdit(variant)
+  emit('loaded', variants.value)
 }
 
 defineExpose({ upsertVariant })
@@ -123,6 +126,7 @@ async function removeVariant(variant: AssetVariant) {
   try {
     await api.deleteAssetVariant(props.asset.id, variant.id)
     variants.value = variants.value.filter(item => item.id !== variant.id)
+    emit('loaded', variants.value)
     if (editingId.value === variant.id) editingId.value = null
     if (selectedVariantId.value === variant.id) selectBase()
     notice.success(tr('衍生形态已删除'))
@@ -161,7 +165,7 @@ watch([formName, formDescription, formChapters], () => {
     <div class="asset-variant-strip__rail">
       <button type="button" class="asset-variant-item is-base" :class="{ 'is-selected': selectedVariantId === null }" :aria-label="tr('切换到主形象')" @click="selectBase">
         <span class="asset-variant-item__media">
-          <img v-if="asset.main_image || asset.angle_image_1" :src="asset.main_image_thumbnail || asset.angle_image_1_thumbnail || asset.main_image || asset.angle_image_1" :alt="asset.canonical_name" />
+          <img v-if="asset.main_image || asset.angle_image_1" :key="asset.main_image || asset.angle_image_1" :src="mediaUrl(asset.main_image_thumbnail || asset.angle_image_1_thumbnail || asset.main_image || asset.angle_image_1)" :alt="asset.canonical_name" @error="fallbackImage($event, mediaUrl(asset.main_image || asset.angle_image_1))" />
           <ImagePlus v-else :size="22" />
         </span>
         <strong>{{ tr('主形象') }}</strong>
@@ -171,7 +175,7 @@ watch([formName, formDescription, formChapters], () => {
       <article v-for="variant in variants" v-else :key="variant.id" class="asset-variant-item" :class="{ 'is-current': currentVariantId === variant.id, 'is-selected': selectedVariantId === variant.id }">
         <button type="button" class="asset-variant-item__open" :aria-label="tr('切换到{p0}', { p0: variant.name })" @click="selectVariant(variant)">
           <span class="asset-variant-item__media">
-          <img v-if="imageFor(variant)" :src="thumbnailFor(variant)" :alt="variant.name" />
+          <img v-if="imageFor(variant)" :key="imageFor(variant)" :src="mediaUrl(thumbnailFor(variant))" :alt="variant.name" @error="fallbackImage($event, mediaUrl(imageFor(variant)))" />
             <WandSparkles v-else :size="22" />
             <small v-if="currentVariantId === variant.id"><Check :size="10" />{{ tr('本集') }}</small>
           </span>

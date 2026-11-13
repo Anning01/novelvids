@@ -25,10 +25,11 @@ const startRequestedAt = ref<string | null>(null)
 const loading = ref(true), starting = ref(false), startFailed = ref(false), refreshing = ref(false), error = ref(''), resultsError = ref(''), chatOpen = ref(true)
 const startErrorCode = ref<number | null>(null)
 const quotaBlocked = computed(() => startFailed.value && startErrorCode.value === 402)
+const platformQuota = computed(() => quotaBlocked.value && /API 平台|API platform account/i.test(error.value))
 const personalLimit = computed(() => quotaBlocked.value && /个人.*限额|personal.*(?:limit|quota)/i.test(error.value))
 const canRecharge = computed(() => Boolean(auth.isSuperAdmin || ['admin','creator'].includes(auth.role || '')))
-const quotaLink = computed(() => personalLimit.value && auth.canManageMembers ? '/members' : '/profile')
-const quotaAction = computed(() => personalLimit.value ? auth.canManageMembers ? tr('管理成员额度') : tr('查看我的额度') : canRecharge.value ? tr('查看余额 / 充值') : tr('查看团队信息'))
+const quotaLink = computed(() => platformQuota.value ? '/settings' : personalLimit.value && auth.canManageMembers ? '/members' : '/profile')
+const quotaAction = computed(() => platformQuota.value ? tr('查看平台余额') : personalLimit.value ? auth.canManageMembers ? tr('管理成员额度') : tr('查看我的额度') : canRecharge.value ? tr('查看余额 / 充值') : tr('查看团队信息'))
 let epoch = 0, costRequest = 0, timer: ReturnType<typeof setInterval> | undefined
 const targets = computed(() => session.value ? [
   ...(session.value.scene_id ? [{ kind: 'scene' as const, id: session.value.scene_id }] : []),
@@ -51,7 +52,7 @@ const imageQuote = useClipQuote(computed(() => quoteInput('image')), quoteScope)
 const videoQuote = useClipQuote(computed(() => quoteInput('video')), quoteScope)
 const recordedTotal = computed(() => {
   const totals = new Map<string, number>()
-  const settled = billingRecords.value.filter(record => !record.usage.missing_usage && !record.usage.accounting_needs_review)
+  const settled = billingRecords.value.filter(record => record.settlement_status !== 'pending' && record.settlement_status !== 'review' && !record.usage.missing_usage && !record.usage.accounting_needs_review)
   for (const record of settled) totals.set(record.currency, (totals.get(record.currency) || 0) + record.cost)
   const total = [...totals].map(([currency, cost]) => money(cost, currency)).join(' + ')
   return settled.length < billingRecords.value.length ? [total, tr('费用待核对')].filter(Boolean).join(' · ') : total
@@ -173,7 +174,7 @@ onBeforeUnmount(() => { ++epoch; clearInterval(timer); store.disconnect() })
         <section v-if="startFailed" class="studio-start-notice" :class="{'is-quota':quotaBlocked}" role="alert">
           <span class="start-notice-icon"><Wallet v-if="quotaBlocked" :size="24" /><AlertCircle v-else :size="24" /></span>
           <div><h2>{{ quotaBlocked ? personalLimit ? tr('个人额度已用完') : tr('余额不足，暂时无法开始') : tr('暂时无法开始创作') }}</h2><p>{{ error }}</p><p class="start-notice-preserved">{{ tr('你的描述、参考素材和生成参数已保存，处理后可以继续本次创作。') }}</p>
-            <div class="start-notice-actions"><RouterLink v-if="quotaBlocked" :to="quotaLink">{{ quotaAction }}<ArrowUpRight :size="14" /></RouterLink><AppButton variant="secondary" size="sm" :loading="starting" @click="start">{{ quotaBlocked ? tr('处理后继续创作') : tr('重试') }}</AppButton><RouterLink v-if="!quotaBlocked" to="/settings">{{ tr('查看设置') }}</RouterLink></div>
+            <div class="start-notice-actions"><RouterLink v-if="quotaBlocked && (!platformQuota || auth.canAccessSettings)" :to="quotaLink">{{ quotaAction }}<ArrowUpRight :size="14" /></RouterLink><span v-else-if="platformQuota">{{ tr('请联系部署管理员检查 API 平台余额。') }}</span><AppButton variant="secondary" size="sm" :loading="starting" @click="start">{{ quotaBlocked ? tr('处理后继续创作') : tr('重试') }}</AppButton><RouterLink v-if="!quotaBlocked" to="/settings">{{ tr('查看设置') }}</RouterLink></div>
           </div>
         </section>
         <AgentActivity v-if="starting" :active="true" :text="tr('正在继续本次创作…')" />

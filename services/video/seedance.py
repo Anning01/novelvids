@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 import httpx
+from services.platform.http_contract import check_upstream_response, public_task_error
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for
@@ -148,6 +149,7 @@ class SeedanceGenerator(BaseVideoGenerator):
                     submission_uncertain=not not_sent) from exc
 
         request_id = _request_id(resp)
+        check_upstream_response(resp)
         if resp.status_code >= 400:
             provider_error = _http_provider_error(resp)
             logger.warning(
@@ -198,6 +200,7 @@ class SeedanceGenerator(BaseVideoGenerator):
                 )
                 raise SeedanceGenerationError(localized_message('查询视频任务时网络请求失败')) from exc
         request_id = _request_id(resp)
+        check_upstream_response(resp)
         if resp.status_code >= 400:
             provider_error = _http_provider_error(resp)
             suffix = f"，request_id={request_id}" if request_id else ""
@@ -220,6 +223,8 @@ class SeedanceGenerator(BaseVideoGenerator):
                 "duration": data.get("duration"),
                 "frames": data.get("frames"),
             }
+            if isinstance(data.get("usage"), dict):
+                metadata["usage"] = data["usage"]
             if last_frame_url := _last_frame_url(data):
                 metadata["last_frame_url"] = last_frame_url
             logger.info(
@@ -239,7 +244,7 @@ class SeedanceGenerator(BaseVideoGenerator):
             error_msg = _provider_error(data) or localized_message("视频生成任务失败")
             return self._build_result(
                 TaskStatusEnum.failed,
-                error=error_msg,
+                error=public_task_error(data, error_msg),
             )
 
         if status == "queued":

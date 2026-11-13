@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Mapping
 
+from fastapi import HTTPException
 from openai import AsyncOpenAI
 
 from services.ai_task_executor import BaseTaskHandler
@@ -92,7 +93,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 return {**reusable.summary, 'preserved_existing': True}
         if execution:
             from services.extraction.reuse import extraction_reuse
-            await extraction_reuse.remember_inputs(execution, context)
+            await extraction_reuse.remember_inputs(execution, context, targeted=targeted)
         messages = self.message_builder.build(
             context,
             prompt_language=prompt_language,
@@ -182,9 +183,9 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 type(error).__name__,
                 error_code,
             )
-            if isinstance(error, (AssetExtractionGatewayError, AssetExtractionValidationError)):
+            if isinstance(error, (HTTPException, AssetExtractionGatewayError, AssetExtractionValidationError)):
                 raise error from None
-            raise AssetExtractionGatewayError() from None
+            raise AssetExtractionGatewayError.from_exception(error) from None
         logger.info(
             "Extraction model call: novel_id=%s chapter_id=%s "
             "roles=%s call_status=succeeded",

@@ -47,7 +47,8 @@ def test_operation_schema_only_keeps_requested_write_capability():
 
     assert set(narrowed['$defs']) == {
         'PromptReplacement', 'SceneContentChanges', 'SceneFields',
-        'ScenePromptSegment', 'UpdateScene',
+        'ScenePromptSegment', 'UpdateScene', 'BlockingMap', 'PlanPoint', 'PlanAsset', 'PlanCamera',
+        'SceneLayout', 'PlanFeature',
     }
     assert narrowed['properties']['operations']['items']['discriminator']['mapping'] == {
         'update_scene': '#/$defs/UpdateScene',

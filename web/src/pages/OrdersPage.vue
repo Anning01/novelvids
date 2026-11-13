@@ -358,7 +358,8 @@ onUnmounted(() => {
           <h1>{{ tr('订单管理') }}</h1>
         </div>
         <p class="orders-header-desc">
-          <span v-if="auth.isSuperAdmin">{{ tr('全平台充值订单总览 · 主动查单与自动维护') }}</span>
+          <span v-if="auth.deploymentRole === 'studio'">{{ tr('本部署的团队充值订单，款项按本部署支付配置收取。') }}</span>
+          <span v-else-if="auth.isSuperAdmin">{{ tr('全平台充值订单总览 · 主动查单与自动维护') }}</span>
           <span v-else>{{ tr('我的充值订单与支付状态记录') }}</span>
         </p>
       </div>

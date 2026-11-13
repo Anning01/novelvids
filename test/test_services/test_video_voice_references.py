@@ -340,3 +340,22 @@ async def test_minimax参考音频总时长不能超过15秒():
             ],
             capabilities=capabilities_for("minimax_h3"),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("imported", [False, True])
+async def test_offscreen_voice_uses_audio_without_binding_a_character_image(imported):
+    novel = await Novel.create(name="门外的声音")
+    scene = await _scene(novel)
+    voice = await AudioReference.create(nickname="门外嗓音", gender="女",
+        audio_url="https://cdn.example.com/outside.wav", avatar_url="", asset_id="outside")
+    woman = await Asset.create(novel=novel, asset_type=1, canonical_name="柳姨", metadata={"voice_reference_id": voice.id})
+    if imported:
+        scene.metadata = {"voice_asset_ids": {"woman": woman.id}, "work_package": {"voices": [
+            {"asset_id": "woman", "mode": "offscreen", "start": 1, "end": 3, "text": "回来！"}]}}
+    else:
+        scene.prompt_params = {"dialogue": ["1s-3s: @{柳姨}（棚外喊）：“回来！”"]}
+    references = await resolve_voice_references(scene=scene, novel=novel, subjects=[],
+                                                capabilities=capabilities_for("seedance_2"))
+    assert [r.subjects for r in references] == [("柳姨",)]
+    assert not await scene.assets.all().exists()

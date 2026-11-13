@@ -295,9 +295,18 @@ class AssetUpsertService:
         if item.variant is None:
             return None
         from services.creation_objects import CreationObjects
+        from utils.messages import localized_message
 
         incoming = item.variant
-        variant = await AssetVariant.filter(asset_id=asset.id, name=incoming.name).using_db(connection).first()
+        variants = AssetVariant.filter(asset_id=asset.id).using_db(connection)
+        if incoming.existing_variant_id is None:
+            variant = await variants.filter(name=incoming.name).first()
+        else:
+            variant = await variants.filter(id=incoming.existing_variant_id).first()
+            if variant is None:
+                raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
+            if variant.name != incoming.name and await variants.filter(name=incoming.name).exists():
+                raise ValueError(localized_message('形态编号与登记名称指向不同造型，请核对后重试'))
         objects = CreationObjects(asset.novel_id)
         if variant:
             if variant.id in repair_ids:

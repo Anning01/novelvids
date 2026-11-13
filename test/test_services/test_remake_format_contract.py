@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
 from schemas.agent_workflow import RemakeShot
 from services.remake.storyboards import prepare_remake_prompt
-from services.remake.asset_validation import render_remake_assets, validate_remake_assets
+from services.remake.asset_validation import render_remake_assets
 from prompts.remake_render import compact_catalog
 from test.remake_fixtures import design_fields, remake_shot, synthetic_snapshot
 
@@ -40,7 +40,6 @@ def test_asset_renderer_uses_configured_template_field_order_and_ratio(language,
         'scenes':[{'name':'军帐','description':'A tent with clear spatial relationships','visual_fields':{}}],
         'objects':[{'name':'令牌','description':'A dark wooden token with a carved edge','visual_fields':{}}]}
     result = render_remake_assets(raw, snapshot, language, '9:16')
-    validate_remake_assets(result, snapshot, language, '9:16')
     person = result['characters'][0]['description']
     assert person.startswith(f'Task:{language}:{kind}:9:16')
     assert len(re.findall(r'^\*\*.+?\*\*：', person, re.M)) == count
@@ -103,3 +102,46 @@ def test_validation_errors_remain_serializable_in_model_audit_history():
     }])])
     messages = _audit_messages([request])
     assert messages[0]['parts'][0]['content'][0]['ctx']['error'] == 'Segment durations must match'
+
+
+def test_remake_diagram_uses_a_single_orientation_for_shot_and_layout():
+    from schemas.agent_workflow import RemakeBlockingMap
+    from test.test_services.test_scene_blueprint import LAYOUT, SHOT
+    layout = {k:v for k,v in LAYOUT.items() if k != 'orientation'}
+    assert 'orientation' not in RemakeShot.model_json_schema()['$defs']['RemakeLayout']['properties']
+    plan = RemakeBlockingMap.model_validate({**SHOT,'layout':layout})
+    assert plan.layout.orientation == plan.orientation
+    duplicate = RemakeBlockingMap.model_validate({**SHOT, 'layout':{**layout, 'orientation':'图上方为北'}})
+    assert duplicate.layout.orientation == duplicate.orientation
+
+
+@pytest.mark.parametrize('issue', ['wording', 'axis', 'missing', 'coverage', 'valid'])
+def test_optional_remake_diagram_never_blocks_an_otherwise_valid_shot(issue):
+    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
+    raw = remake_shot()
+    raw['duration_split_part'] = 2
+    plan = {**SHOT, 'layout': dict(LAYOUT), 'assets': [*SHOT['assets'], {'name':'将军', 'x':45, 'y':50}]}
+    if issue == 'wording':
+        plan['layout']['orientation'] = '图上方为北'
+    elif issue == 'axis':
+        plan['axis'] = ['不存在的锚点','将军']
+    elif issue == 'coverage':
+        plan['assets'] = SHOT['assets']
+    if issue != 'missing':
+        raw['blocking_map'] = plan
+    result = prepare_remake_prompt(raw, [{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
+                                   synthetic_snapshot(), 'zh')
+    assert result['prompt'] and result['actions'] == ['0s-4.2s: @{将军}抬眼。']
+    assert result['duration_split_part'] == 2
+    assert bool(result['blocking_map']) == (issue in ('wording', 'valid'))
+
+
+def test_remake_rounded_total_accepts_three_milliseconds_but_rejects_missing_time():
+    raw = remake_shot(duration=4.73)
+    raw['description'] = '将军在帐内抬眼。'
+    raw['segments'] = [dict(duration=t, **{k:raw[k] for k in
+        ('description','shot_size_and_camera','visual_prose','actions','camera_movement')}) for t in (2, 2.733)]
+    data = {k:v for k,v in raw.items() if k in RemakeShot.model_fields}
+    assert RemakeShot.model_validate(data).duration == '4.733s'
+    with pytest.raises(ValidationError, match='时长之和'):
+        RemakeShot.model_validate({**data, 'duration':'5s'})

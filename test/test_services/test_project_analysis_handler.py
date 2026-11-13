@@ -71,7 +71,7 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
         model="test-llm",
         is_active=True,
     )
-    await AiModelConfig.create(
+    image_config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.reference_image.value,
         name="image",
         base_url="https://image.example.com",
@@ -114,7 +114,7 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
             new=AsyncMock(return_value="/media/covers/test.png"),
         ),
     ):
-        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id})
+        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "cover_model_config_id": image_config.id})
 
     chapters = await Chapter.filter(novel_id=novel.id).order_by("number")
     assert [chapter.name for chapter in chapters] == ["启程", "归途"]
@@ -140,6 +140,7 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
     generate_images.assert_awaited_once()
     request = generate_images.await_args.kwargs
     assert request["api_protocol"] == "volcengine_ark"
+    assert request["model"] == image_config.model
     from services.image_generation.capabilities import validate_selection
     expected = validate_selection('seedream_5_pro', clarity=None, aspect_ratio=aspect_ratio or '2:3', output_format='png', generation_count=1)
     assert request["resolution"] == expected.provider_size
@@ -166,7 +167,7 @@ async def test_project_analysis_result_carries_billing_keys():
         pricing={"type": "text", "currency": "CNY", "input_price_per_1m": 1.0, "output_price_per_1m": 2.0},
         is_active=True,
     )
-    await AiModelConfig.create(
+    image_config = await AiModelConfig.create(
         task_type=AiTaskTypeEnum.reference_image.value,
         name="image", base_url="https://image.example.com", api_key="k", model="img-model",
         api_protocol="volcengine_ark", image_model_type="seedream_5_pro",
@@ -188,7 +189,7 @@ async def test_project_analysis_result_carries_billing_keys():
         patch("services.project_analysis.handler.generate_images", new=AsyncMock(return_value=[generated_image])),
         patch("services.project_analysis.handler._save_cover", new=AsyncMock(return_value="/media/covers/c.png")),
     ):
-        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id})
+        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "cover_model_config_id": image_config.id})
 
     assert result["token_usage"]["prompt_tokens"] == 200
     assert result["llm_config_id"] == llm.id
@@ -252,23 +253,28 @@ async def test_save_cover_uploads_to_oss_when_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', ['missing_config', 'provider', 'save'])
+@pytest.mark.parametrize('failure', ['unselected', 'missing_config', 'provider', 'save'])
 @pytest.mark.parametrize('language', ['zh', 'en'])
 async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_usage(failure, language):
     novel = await Novel.create(name='可继续制作', content='第一章 归来\n林舟走回故乡。', cover='/media/existing.png')
     llm = await AiModelConfig.create(task_type=5, name='llm', model='test-llm', api_key='test-key', base_url='https://example.invalid', is_active=True)
+    image_config = None
     if failure != 'missing_config':
-        await AiModelConfig.create(task_type=2, name='image', model='test-image', api_key='test-key', base_url='https://example.invalid', api_protocol='volcengine_ark', image_model_type='seedream_5_pro', is_active=True)
+        image_config = await AiModelConfig.create(task_type=2, name='image', model='test-image', api_key='test-key', base_url='https://example.invalid', api_protocol='volcengine_ark', image_model_type='seedream_5_pro', is_active=True)
     analysis = BookAnalysis(book_types=['归乡'], story_outline='林舟返回故乡。', key_characters=[
         KeyCharacter(name='林舟', role='主角', description='归来的青年', base_traits=STRUCTURED_PERSON_TRAITS, chapter_numbers=[1]),
     ])
     generate = AsyncMock(side_effect=RuntimeError('provider rejects request')) if failure == 'provider' else AsyncMock(return_value=[SimpleNamespace(url='https://example.invalid/cover.png')])
     save = AsyncMock(side_effect=OSError('storage unavailable'))
     with patch('services.project_analysis.handler.AsyncOpenAI', return_value=FakeLlmClientWithUsage(analysis)), patch('services.project_analysis.handler.generate_images', generate), patch('services.project_analysis.handler._save_cover', save):
-        result = await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id, 'prompt_language': language})
+        result = await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id, 'prompt_language': language, 'cover_model_config_id': None if failure == 'unselected' else (image_config.id if image_config else 999)})
     await novel.refresh_from_db()
     assert result['story_outline'] == novel.story_outline == analysis.story_outline
     assert result['cover'] == novel.cover == '/media/existing.png'
+    if failure == 'unselected':
+        generate.assert_not_awaited()
+        assert result['cover_status'] == 'ready'  # The existing cover remains available.
+        return
     assert ('可以继续' if language == 'zh' else 'ready to use') in result['cover_warning']
     assert result['analysis_completed'] is True
     assert result['cover_status'] == 'failed'
@@ -297,6 +303,21 @@ def test_project_analysis_templates_preserve_material_and_requested_language():
         assert facts == {"name": "雨夜来信", "chapter_count": 2, "manuscript": "第一章 车站\n第二章 咖啡馆"}
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_sampled_story_instructions_keep_missing_events_unknown(language):
+    from prompts.project_analysis import render_analysis_messages
+    from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
+
+    material = '{"head":"小满递出票根。","tail":"检票员收回手。"}'
+    messages = render_analysis_messages(name="末班车", chapter_count=12, material=material, prompt_language=language)
+    agent_rules = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "story")
+    for rules in (messages[0]["content"], agent_rules):
+        assert "保留取样之间的空缺" in rules
+        assert "目录只能证明章节存在" in rules
+        assert "只有一次行动时，写当下的反应" in rules
+        assert f"language={language}" in rules
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('aspect_ratio', ['16:9', '9:16', '1:1'])
 async def test_agent_cover_prompt_and_image_call_share_project_ratio(aspect_ratio):
@@ -321,9 +342,72 @@ async def test_agent_cover_prompt_and_image_call_share_project_ratio(aspect_rati
              patch('services.creation_agent.operation_receipts.execute_step', new=execute_step), \
              patch('services.project_analysis.handler.generate_images', new=AsyncMock(return_value=[object()])) as images, \
              patch('services.project_analysis.handler._save_cover', new=AsyncMock(return_value='/media/test-cover.png')):
-            result = await ProjectAnalysisTaskHandler().execute({'novel_id':novel.id,'assistant_model_config_id':1})
+            result = await ProjectAnalysisTaskHandler().execute({'novel_id':novel.id,'assistant_model_config_id':1,'cover_model_config_id':image_config.id})
         assert result['cover_status'] == 'ready'
         assert images.call_args.kwargs['aspect_ratio'] == aspect_ratio
         assert aspect_ratio in images.call_args.kwargs['prompt']
     finally:
         current_execution.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_analysis_samples_across_long_books_and_publishes_before_cover(monkeypatch):
+    import json
+    from models.ai_task import AiTask
+    from utils.enums import TaskStatusEnum
+
+    novel = await Novel.create(name="旅途", content="长书正文" * 8000)
+    await Chapter.bulk_create([
+        Chapter(novel_id=novel.id, number=i, name=f"第{i}站", content="甲" * 3000 + "乙")
+        for i in range(1, 33)
+    ])
+    task = await AiTask.create(task_type=5, status=TaskStatusEnum.running.value)
+    await AiModelConfig.create(task_type=5, name="analysis", model="test", api_key="test",
+                               base_url="https://example.invalid", is_active=True)
+    analysis = BookAnalysis(book_types=["冒险"], story_outline="旅人回家。", key_characters=[])
+    llm = FakeLlmClient(analysis)
+    monkeypatch.setattr("services.project_analysis.handler.AsyncOpenAI", lambda **_: llm)
+    seen = []
+
+    async def prepare_cover(*args, **kwargs):
+        await task.refresh_from_db()
+        seen.append((task.status, task.response_data.copy()))
+        raise RuntimeError("cover unavailable")
+
+    from services.project_analysis.handler import ai_model_config_controller
+    with patch.object(ai_model_config_controller, "get_active_with_legacy_fallback",
+                      new=AsyncMock(return_value=await AiModelConfig.get(task_type=5))):
+        monkeypatch.setattr(ai_model_config_controller, "get_active", prepare_cover)
+        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "task_id": str(task.id), "cover_model_config_id": 999})
+    status, early = seen[0]
+    assert status == TaskStatusEnum.running.value and early["analysis_completed"]
+    assert early["cover_status"] == "pending" and early["story_outline"] == analysis.story_outline
+    assert result["cover_status"] == "failed" and result["chapter_count"] == 32
+    facts = json.loads(llm.create.call_args.kwargs["messages"][1]["content"])["untrusted_task_facts"]
+    blocks = [json.loads(block) for block in facts["manuscript"].split("\n\n")]
+    assert [b["chapter_number"] for b in blocks] == [1, 5, 10, 14, 19, 23, 28, 32]
+    assert all(b["content"].endswith("乙") for b in blocks)
+    assert sum(len(b["content"].replace("\n……\n", "")) for b in blocks) <= 8000
+
+
+@pytest.mark.asyncio
+async def test_cover_only_uses_selected_model_and_saved_outline_without_analyzing_again():
+    novel = await Novel.create(name="项目", story_outline="已有故事大纲", tags=["冒险"])
+    image = await AiModelConfig.create(task_type=2, name="selected", model="selected-image",
+        api_key="test", base_url="https://example.invalid", api_protocol="volcengine_ark",
+        image_model_type="seedream_5_pro", is_active=True)
+    generate = AsyncMock(return_value=[SimpleNamespace(url="https://example.invalid/cover.png")])
+    with (
+        patch("services.project_analysis.handler.AsyncOpenAI") as text_client,
+        patch("services.project_analysis.handler.generate_images", generate),
+        patch("services.project_analysis.handler._save_cover", AsyncMock(return_value="/media/cover.png")),
+    ):
+        result = await ProjectAnalysisTaskHandler().execute({
+            "novel_id": novel.id, "operation": "project_cover", "cover_model_config_id": image.id,
+        })
+    text_client.assert_not_called()
+    assert generate.await_args.kwargs["model"] == image.model
+    assert "已有故事大纲" in generate.await_args.kwargs["prompt"]
+    await novel.refresh_from_db()
+    assert novel.story_outline == "已有故事大纲"
+    assert novel.cover == result["cover"] == "/media/cover.png"

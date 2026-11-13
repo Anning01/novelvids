@@ -5,7 +5,7 @@
 <h1 align="center">猫影短剧 · NovelVids</h1>
 
 <p align="center">
-  <strong>开源 AI 漫剧与短剧创作平台，可在线使用，也可自行部署。</strong>
+  <strong>开源 AI 漫剧与短剧工作台，在本地管理作品，可接入自有模型或猫影开放平台。</strong>
 </p>
 
 <p align="center">
@@ -24,8 +24,24 @@
 </p>
 
 <p align="center">
-  <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
+  <a href="#快速开始">快速开始</a> · <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
 </p>
+
+## 快速开始
+
+选一种用法，把对应的一句话发给 AI。
+
+**下载并使用猫影工作台**
+
+```text
+请从 https://github.com/Anning01/novelvids 下载猫影工作台，用 Docker 在我的电脑上启动它，然后告诉我在哪里打开工作台、导入小说。
+```
+
+**单独使用创作 Skills**
+
+```text
+请用 https://github.com/Anning01/novelvids 里的 scripts/export_skill.py，把剧本改编、资产设定和分镜设计三个 Skills 安装到我当前的创作项目，然后告诉我怎么用它们处理第一章小说。
+```
 
 ## 加入交流群
 
@@ -40,13 +56,13 @@
   二维码有效期为 7 天；如已失效，请查看仓库首页的最新版本。
 </p>
 
-## 在线创作
+## 猫影服务
 
 **[进入猫影商业站 →](https://shortdramas.xiazq.com)**
 
-使用器灵账号微信扫码登录，从一句想法开始生成图片或视频，也可以把故事推进成系列短剧。在线版提供模型选择、参考素材、团队协作、用量记录与充值入口；生成费用以页面展示的报价和实际用量为准。
+使用器灵账号微信扫码登录。新版开放平台提供模型目录、接口文档、API Key、用量和充值。旧作品的迁移入口见「本地工作台和开放平台」。
 
-本站使用本仓库的源码和创作规则。自行部署也包含器灵登录、团队协作、用量账单和微信支付接入，所需服务由部署者配置。
+本仓库提供猫影创作工作台与创作规则。模型开放平台已独立为 [Cat API](https://github.com/Anning01/cat-api)。本地工作台的账号、团队和余额由部署者管理，平台账号与模型调用费用由 Cat API 独立管理。
 
 ## 使用教程
 
@@ -88,7 +104,7 @@
 - **每一步可以修改。** 保留提示词与生成版本；可以只调整一个镜头，再决定是否生成。
 - **按钮与对话用同一套能力。** 创作助手负责编排，图片和视频模型负责生成，任务与用量有记录。
 - **规则可以自己改。** 故事、资产、生图和分镜规则集中在一套中文 Skills；按系统语言输出中文或英文。
-- **按需要选择使用方式。** 可以直接在猫影站点创作，也可以自行部署，管理自己的模型服务和数据。
+- **模型可选。** 作品保存在本地，可使用自有模型服务，也可配置猫影开放平台。
 
 ### 新版界面
 
@@ -106,51 +122,13 @@
 
 截图使用公开示例项目，展示当前版本的中文界面；系统也支持英文。
 
-## 快速开始
+## 本地工作台和开放平台
 
-1. 打开 **[猫影商业站](https://shortdramas.xiazq.com)**，阅读协议并通过器灵微信扫码登录。
-2. 在首页选择图片或视频模型，填写画面描述、添加参考素材并核对预计费用；也可以从「短剧制作」导入故事，进入资产与分镜工作区。
-3. 查看生成结果与历史版本，继续编辑镜头、整理资源，或在作品库管理成片。团队和费用归属以当前选中的团队为准。
+本仓库部署创作工作台，默认使用 `NOVELVIDS_ROLE=studio`。开放平台请使用独立的 [Cat API 项目](https://github.com/Anning01/cat-api)。在项目列表的更多操作中选择「导出作品」，在另一套本地工作台选择「导入作品」即可恢复为新项目。云端素材由导出浏览器直接下载，存储域名需允许该工作台来源的跨域读取。
 
-### 自行部署
+在平台控制台创建用途为「本地猫影」的 API Key，然后用工作台超级管理员打开「模型配置 → 连接开放平台」，填入 Key 并同步模型。工作台默认连接 `https://shortdramas.xiazq.com/v1`，也可通过 `STUDIO_PLATFORM_BASE_URL` 指定其他平台地址。成片由工作台直接下载并保存在本地。
 
-默认可匿名在本地创作。资产设计模板、分镜语速规则和 15 套视觉风格随源码提供，统一在 `prompts/skills/` 编辑。
-
-<details>
-<summary>展开 Docker 自部署与首次配置步骤</summary>
-
-需要 Docker 与 Docker Compose，以及可用的模型服务。**自部署不等于离线推理**：当前 AI 能力通过你配置的 API 调用，供应商可能收费。
-
-```bash
-git clone https://github.com/Anning01/novelvids.git
-cd novelvids
-docker compose up -d --build
-```
-
-启动后打开 **[http://localhost:8080](http://localhost:8080)**。
-
-首次创作前：
-
-1. 在「设置 → 模型配置」添加并启用文本模型，勾选「创作助手」和「支持多轮工具调用」；在通用设置中启用助手。
-2. 配置要使用的图片、视频模型和价格。只配置文本模型，也可以先做故事、资产和分镜规划。
-3. 从一段短故事或一章正文开始，检查提取与分镜结果，再生成媒体。明确的生成请求会调用付费模型；只改提示词不会自动生图或生视频。
-
-Docker 后端镜像已包含 FFmpeg；使用旧镜像时，可安装并检查：
-
-```bash
-docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
-docker compose exec backend ffprobe -version
-```
-
-可用 `docker compose exec backend ffprobe -version` 检查视频工具是否就绪。
-
-- **数据在本地：**`./data` 保存数据库和私有导出，`./media` 保存图片、视频、音频；更新前备份这两个目录。
-- **默认无登录：**适合个人本地使用。公网部署前，请通过环境变量配置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=password`、`SUPER_ADMIN_USERNAME` 和 `SUPER_ADMIN_PASSWORD`，并启用 HTTPS。
-- **器灵扫码登录：**设置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=qiling` 和器灵服务的 HTTPS 地址 `QILING_API_BASE_URL`。开放新账号注册时设置 `QILING_SIGNUP_ENABLED=true`，并填写 Compose 中的 `LEGAL_*` 运营者、协议与第三方信息。
-- **微信支付与远程重制：**启用充值时，为后端配置自己的 `WECHAT_PAY_*` 商户参数和回调地址（站点的 `/api/payment/wechat/notify`），通过 Compose 覆盖文件把密钥文件只读挂载到配置的容器路径。重制默认在本机处理；已安装媒体工作进程时，填写 `REMAKE_MEDIA_SSH_HOST` 并为后端配置 SSH 身份和已验证的主机公钥。
-- **本地开发：**Python 3.12+、Node.js 22.12+、uv 与 FFmpeg，步骤见下方「本地开发」。
-
-</details>
+旧版本的 `NOVELVIDS_ROLE=platform` 仅为已有部署保留兼容，新部署应分别安装工作台与 Cat API。旧站用户可登录 [历史作品迁移](https://shortdramas.xiazq.com/#/legacy-works) 下载完整作品包，再导入本地工作台。切换服务前应保留原作品和媒体，预留迁移时间并提前通知用户。
 
 ## 创作流程
 
@@ -166,6 +144,20 @@ flowchart LR
 ```
 
 故事板适合逐镜头检查，画布适合组织引用与工作流。开始生成后可以关闭页面，后台继续查询已受理任务；结果不确定时需核对，不会自动重复提交收费请求。
+
+## 在线升级
+
+使用标准 Docker Compose 和 SQLite 的 Linux 主机，可在安装目录运行一次以下命令，启用网页升级。需要 systemd、Docker Compose、Git 和 Python 3。已有安装先将源码更新到包含此脚本的正式版。
+
+```sh
+sudo sh scripts/update/install.sh
+```
+
+有新版时，部署管理员在工作台顶部点 **升级工作台**。更新服务从官方 GitHub Release 构建镜像，备份数据库，切换服务并检查前后端版本；检查失败会恢复上一版。构建期间工作台可继续使用，切换时会短暂停服。更新程序管理本安装的 `docker-compose.override.yml`，项目数据和媒体沿用原目录。宿主机服务日志可用 `journalctl -u novelvids-update` 查看。
+
+升级完成后，每位用户可自行点 **刷新页面**。有未保存的分镜时，先保存再刷新。源码安装和其他 Docker 部署方式可按对应 Release 的说明更新。
+
+**发布新版**：在 `release.json` 填写正式版本号、更新摘要和各项能力的最低兼容版本。测试通过后，将该提交发布为同版本的 GitHub Release（例如版本 `1.1.0` 对应标签 `v1.1.0`），标为最新稳定版。工作台只检查正式发布。标准升级保留 `update_format: 1`。需要修改数据库部署方式、挂载或 Compose 结构时，删除该字段，并在 Release 中写明升级步骤。
 
 ## 本地开发
 
@@ -188,7 +180,7 @@ npm run dev
 
 ## 开发与社区
 
-前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
+前端使用 **Vue 3、TypeScript、Vue Flow**，后端使用 **FastAPI、Tortoise ORM、Deep Agents 和 Pydantic AI**。创作规则位于 [`prompts/skills/`](prompts/skills/)，模型适配与任务执行保持独立。
 
 欢迎带着实际创作问题参与：[报告问题](https://github.com/Anning01/novelvids/issues/new) · [讨论需求](https://github.com/Anning01/novelvids/issues) · [提交贡献](https://github.com/Anning01/novelvids/pulls)。报告生成问题时，提供可公开的最小样例、模型配置类型和复现步骤，别附 Key 或私人素材。
 
@@ -219,3 +211,5 @@ npm run dev
   </a>
 </p>
 <!-- star-growth-card:end -->
+
+创作助手的新会话由 Python Deep Agents 管理工具循环、按需技能加载和上下文整理，业务工具继续校验权限、版本和输出协议。会话检查点默认保存在 `data/creation_agent_checkpoints.db`，可用 `CREATION_AGENT_CHECKPOINT_PATH` 指定位置；需要保留长会话恢复能力时，请将该状态文件纳入备份。历史运行保留原执行路径。

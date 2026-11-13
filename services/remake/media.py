@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.media_processing import run_media
+
 from utils.messages import localized_message
 
 import hashlib
@@ -31,7 +33,7 @@ class ValidatedRemakeMedia:
 
 
 def _run_ffprobe(path: Path) -> dict[str, Any]:
-    result = subprocess.run(
+    result = run_media(
         [
             "ffprobe",
             "-v",

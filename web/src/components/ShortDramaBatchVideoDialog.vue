@@ -1,13 +1,13 @@
 <script setup lang="ts">
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
+import { estimateVideoCost } from '@/shared/modelPricing'
 import { tr } from '@/i18n'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, Link2, ListChecks, Sparkles, X } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
-import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AppScrollArea from '@/components/AppScrollArea.vue'
 import AppSelect from '@/components/AppSelect.vue'
-import { estimateVideoCost } from '@/shared/modelPricing'
 import type { VideoGenerationModel } from '@/types'
 import type { AutoEnhancement, VideoDefaults } from '@/types'
 import type { EnhancementModel } from '@/features/video-export/api'
@@ -90,20 +90,19 @@ const allSelected = computed(() => (
   Boolean(eligibleScenes.value.length)
   && eligibleScenes.value.every(scene => selectedIds.value.includes(scene.id))
 ))
-const estimatedTotal = computed(() => {
+const selectedGenerationScenes = computed(() => {
   const model = selectedModel.value
-  if (!model) return 0
-  return props.scenes
+  if (!model) return []
+  const { duration_min, duration_max } = model.capabilities
+  return eligibleScenes.value
     .filter(scene => selectedIds.value.includes(scene.id))
-    .reduce((sum, scene) => sum + estimateVideoCost(
-      model.pricing,
-      selectedResolution.value,
-      Math.max(model.capabilities.duration_min, Math.min(model.capabilities.duration_max, scene.duration)),
-      Boolean(scene.hasVideoReference),
-      scene.inputVideoSeconds || 0,
-      scene.inputImageCount || 0,
-    ), 0)
+    .map(scene => ({ ...scene, duration: Math.max(duration_min, Math.min(duration_max, scene.duration)) }))
 })
+const totalDuration = computed(() => selectedGenerationScenes.value.reduce((sum, scene) => sum + scene.duration, 0))
+const estimatedTotal = computed(() => selectedGenerationScenes.value.reduce((sum, scene) => sum + estimateVideoCost(
+  selectedModel.value?.pricing, selectedResolution.value, scene.duration, Boolean(scene.hasVideoReference), scene.inputVideoSeconds ?? 0, scene.inputImageCount ?? 0,
+), 0))
+
 function close() {
   emit('close')
 }
@@ -266,9 +265,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           </AppScrollArea>
 
           <footer class="batch-video-dialog__footer">
-            <AppButton v-if="!parametersOnly" type="button" class="batch-video-dialog__select-all" variant="soft" :disabled="!eligibleScenes.length" @click="toggleAll">
-              {{ allSelected ? tr('取消全选') : tr('全选') }}
-            </AppButton>
+            <div v-if="!parametersOnly">
+              <AppButton type="button" class="batch-video-dialog__select-all" variant="soft" :disabled="!eligibleScenes.length" @click="toggleAll">
+                {{ allSelected ? tr('取消全选') : tr('全选') }}
+              </AppButton>
+              <span class="batch-video-dialog__duration" role="status">{{ tr('已选分镜共 {p0} 秒', { p0: totalDuration }) }}</span>
+            </div>
             <div>
               <AppButton type="button" variant="soft" @click="close">{{ tr('取消') }}</AppButton>
               <AppButton
@@ -395,11 +397,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   min-height: 76px;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 14px;
   padding: 14px 20px 16px;
   background: var(--app-surface);
   box-shadow: 0 -12px 34px rgb(36 40 57 / 5%);
 }
+.batch-video-dialog__duration { color: var(--app-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .batch-video-dialog__footer > div { display: flex; align-items: center; gap: 10px; }
 .batch-video-dialog__footer :deep(.app-button) { min-width: 84px; min-height: 40px; border-radius: 10px; font-size: 12px; }
 .batch-video-dialog__footer :deep(.app-button--soft) { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }

@@ -173,6 +173,11 @@ async def reconcile_evidence(task_id, record, evidence):
             if record
             else None
         )
+        if record and record.settlement_status != "legacy":
+            identity = {"video_id": record.video_id} if record.video_id else {"ai_task_id": record.ai_task_id}
+            entries = await ModelUsageRecord.filter(**identity, billing_type=record.billing_type).using_db(connection)
+            amounts = [quantity(row.usage.get("image_count" if evidence.kind == "image" else "seconds")) for row in entries]
+            billed = sum(amounts) if all(value is not None for value in amounts) and all(row.settlement_status == "settled" for row in entries) else None
         acknowledged = review.result.get("accepted_evidence") or {}
         mismatch = (
             evidence.quantity is not None

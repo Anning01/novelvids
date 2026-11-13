@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from config import settings
+from models.asset import Asset
 from models.audio_reference import AudioReference
 from models.asset_variant import AssetVariant
 from models.novel import Novel
@@ -143,7 +144,36 @@ async def resolve_voice_references(
         asset.canonical_name: asset
         for asset in await scene.assets.all()
     }
+    # Voice-only speakers have no image binding. Resolve them from the confirmed
+    # speaker prefix within this project, not from names mentioned in the words.
+    from services.storyboard.speech_tracks import spoken_parts
+    tracks = scene.prompt_params or {}
+    speakers = set()
+    for field in ("dialogue", "narration"):
+        lines = tracks.get(field)
+        if isinstance(lines, list):
+            for line in lines:
+                if isinstance(line, str):
+                    try:
+                        _, name, _ = spoken_parts(line)
+                    except ValueError:
+                        continue  # Historical untimed tracks use the existing bound-asset lookup.
+                    speakers.add(name)
+    missing = speakers.difference(scene_assets)
+    if missing:
+        for asset in await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.person.value, canonical_name__in=missing):
+            scene_assets[asset.canonical_name] = asset
     metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
+    imported_voice_ids = set()
+    bindings = metadata.get("voice_asset_ids")
+    package = metadata.get("work_package")
+    if isinstance(bindings, dict) and isinstance(package, dict):
+        for voice in package.get("voices") or []:
+            if isinstance(voice, dict) and (identifier := _positive_reference_id(bindings.get(voice.get("asset_id")))):
+                imported_voice_ids.add(identifier)
+    if imported_voice_ids:
+        for asset in await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.person.value, id__in=imported_voice_ids):
+            scene_assets[asset.canonical_name] = asset
     raw_variant_ids = metadata.get("asset_variant_ids")
     variant_ids = raw_variant_ids if isinstance(raw_variant_ids, dict) else {}
     selected_variant_ids = {
@@ -180,7 +210,7 @@ async def resolve_voice_references(
         if name in assigned_names or asset.asset_type != AssetTypeEnum.person.value:
             continue
         aliases = asset.aliases if isinstance(asset.aliases, list) else []
-        if not _character_has_dialogue(scene, [name, *aliases]):
+        if asset.id not in imported_voice_ids and not _character_has_dialogue(scene, [name, *aliases]):
             continue
         reference_id = asset_voice_reference_id(asset)
         if reference_id:

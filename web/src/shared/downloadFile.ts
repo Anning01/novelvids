@@ -14,7 +14,11 @@ export async function fetchFileBlob(url: string, headers?: Record<string, string
 }
 
 export async function downloadFile(url: string, filename: string, headers?: Record<string, string>) {
-  const blobUrl = URL.createObjectURL(await fetchFileBlob(url, headers))
+  saveBlob(await fetchFileBlob(url, headers), filename)
+}
+
+export function saveBlob(blob: Blob, filename: string) {
+  const blobUrl = URL.createObjectURL(blob)
   try {
     const link = document.createElement('a')
     link.href = blobUrl

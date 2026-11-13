@@ -62,15 +62,16 @@ def test_worker_reuses_media_algorithms_and_cleans_only_its_job(monkeypatch, tmp
     monkeypatch.setattr("services.remake.media_worker.subprocess.run", lambda cmd, **_: stopped.append(cmd))
     execute(MediaWorkerRequest(action="cleanup", job_id=job_id), tmp_path)
     assert not work.exists() and sibling.is_dir()
-    assert [cmd[-1] for cmd in stopped] == [f"novelvids-remake-{job_id.hex}-{phase}.service" for phase in ("prepare", "split")]
+    assert [cmd[-1] for cmd in stopped] == [f"novelvids-remake-{job_id.hex}-{phase}.service" for phase in ("prepare", "split", "process")]
 
 
 @pytest.mark.asyncio
-async def test_ssh_commands_bound_resources_and_require_known_host(monkeypatch):
+@pytest.mark.parametrize('action', ['split', 'process'])
+async def test_ssh_commands_bound_resources_and_require_known_host(monkeypatch, action):
     worker = RemoteMediaSession(MediaWorkerConnection(host="root@worker.example"))
     run = AsyncMock(return_value=b"{}")
     monkeypatch.setattr(worker, "_run", run)
-    await worker._command("split")
+    await worker._command(action)
     command = run.call_args.args
     assert command[0] == "ssh"
     assert "StrictHostKeyChecking=yes" in command

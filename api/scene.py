@@ -1,7 +1,9 @@
 from api._production_request import production_request
 
 from utils.messages import localized_message
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi.responses import Response
+from pydantic import ValidationError
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 
 from auth.deps import (
     AuthContext,
@@ -14,11 +16,13 @@ from controllers.scene import scene_controller
 from models.chapter import Chapter
 from models.scene import Scene
 from schemas.scene import (
+    BlockingMap,
     SceneBriefOut,
     SceneCreate,
     SceneGenerateCreate,
     SceneOut,
     ScenePatch,
+    ScenePromptOptimization,
     SceneUpdate,
     StoryboardStrategyOut,
 )
@@ -66,6 +70,8 @@ async def generate_scene(
     task = await scene_controller.generate(
         generate_data.chapter_id,
         replace_existing=generate_data.replace_existing,
+        assistant_model_config_id=generate_data.assistant_model_config_id,
+        sheet_model_config_id=generate_data.sheet_model_config_id,
         team_id=ctx.team_id,
         user_id=ctx.user.id if ctx.user else None,
     )
@@ -137,6 +143,31 @@ async def patch_scene(
     return ResponseSchema(data=scenes)
 
 
+@router.post("/{scene_id}/optimize-prompt", summary="按所选视频模型优化分镜提示词", response_model=ResponseSchema[AiTaskOut])
+async def optimize_scene_prompt(scene_id: int, body: ScenePromptOptimization, bg: BackgroundTasks,
+                                ctx: AuthContext = Depends(require_scene_access), _: AuthContext = _EDITOR):
+    from services.storyboard.prompt_optimization import submit_prompt_optimization
+    task = await submit_prompt_optimization(scene_id, body, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.get("/{scene_id}/blocking-map.svg", summary="查看分镜空间定位图", response_class=Response,
+            responses={200: {"content": {"image/svg+xml": {}}}})
+async def scene_blocking_map(scene_id: int, _: AuthContext = Depends(require_scene_access)):
+    from prompts.skills.scripts.draw_blocking import draw
+    scene = await Scene.get_or_none(id=scene_id)
+    params = (scene.prompt_params or {}) if scene else {}
+    from services.storyboard.blocking_reference import has_drawable_plan
+    if not has_drawable_plan(params):
+        raise HTTPException(404, detail=localized_message("此分镜没有空间定位图"))
+    try:
+        plan = BlockingMap.model_validate(params["blocking_map"])
+    except ValidationError as error:
+        raise HTTPException(422, detail=localized_message("空间定位图数据无效")) from error
+    return Response(draw(plan.model_dump(exclude_none=True)), media_type="image/svg+xml")
+
+
 @router.get(
     "", summary="获取分镜列表", response_model=ResponseSchema[PaginationResponse[SceneBriefOut]]
 )
@@ -172,3 +203,25 @@ async def delete_scene(
 ):
     await scene_controller.remove(scene_id)
     return ResponseSchema()
+
+
+@router.post('/chapter/{chapter_id}/storyboard-sheets', summary='整集补齐线稿故事版', response_model=ResponseSchema[list[str]])
+async def generate_chapter_sheets(chapter_id: int, model_config_id: int = Query(gt=0),
+                                  ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    from uuid import uuid4
+    from services.creation_agent.submissions import submission
+    from services.storyboard.sheets import enqueue_chapter_sheets
+    await _ensure_chapter_team_access(chapter_id, ctx)
+    batch_id = (submission.get() or {}).get("submission_id") or uuid4()
+    ids = await enqueue_chapter_sheets(chapter_id, None, model_config_id, ctx.team_id,
+                                       ctx.user.id if ctx.user else None, batch_id=batch_id)
+    return ResponseSchema(data=ids)
+
+
+@router.post('/{scene_id}/storyboard-sheet', response_model=ResponseSchema[AiTaskOut], summary='生成本镜线稿故事版')
+async def generate_storyboard_sheet(scene_id: int, background_tasks: BackgroundTasks, model_config_id: int = Query(gt=0),
+    ctx: AuthContext = Depends(get_auth_context), _: AuthContext = Depends(require_scene_access), __: AuthContext = _EDITOR):
+    from services.storyboard.sheets import submit_sheet
+    task = await submit_sheet(scene_id, model_config_id=model_config_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    background_tasks.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)

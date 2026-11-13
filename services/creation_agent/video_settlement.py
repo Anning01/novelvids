@@ -28,6 +28,8 @@ async def settle_video(video):
             .order_by("id")
             .first()
         )
+        if usage is not None and usage.settlement_status != "legacy":
+            await ModelUsageRecord.filter(id=usage.id).update(status=accounting["status"])
         if usage is None:
             usage = await billing_recorder.record_video(
                 novel_id=metadata["novel_id"],

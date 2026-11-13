@@ -62,7 +62,7 @@ def process_subject_prompt(
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)
-        if _MEDIA_REFERENCE_RE.fullmatch(name):
+        if _MEDIA_REFERENCE_RE.fullmatch(name) or (name not in subject_map and re.match(r"^(?:图|图片|视频|音频)\d+", name)):
             return match.group(0)
         subject = subject_map.get(name)
         if not subject:

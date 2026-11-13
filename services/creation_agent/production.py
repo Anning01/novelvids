@@ -3,6 +3,7 @@
 from utils.messages import localized_message
 
 import hashlib
+from datetime import datetime, timezone
 from models.ai_task import AiTask
 from models.creation_agent import AgentConversation, AgentMessage
 from services.creation_agent.skill_execution import (
@@ -23,18 +24,22 @@ async def conversation_for_task(task):
     chosen, _ = await require_agent(
         params.get("team_id"), params["assistant_model_config_id"]
     )
-    conversation = await AgentConversation.create(
-        novel_id=params["novel_id"],
-        created_by=params.get("user_id"),
-        team_id=params.get("team_id"),
-    )
+    from services.creation_agent.handler import authorize_run
+    from services.creation_agent.sessions import agent_sessions
+    ctx = await authorize_run(params)
+    conversation = await agent_sessions.default(params['novel_id'], ctx, params.get('conversation_id'))
     digest = hashlib.sha256(str(task.id).encode()).hexdigest()
     operation = params.get("operation") or SKILLS.get(task.task_type, "editing")
     labels = {
+        "blocking_maps": ("补齐本集空间定位图", "Complete shot blocking diagrams"),
+        "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         "image": ("生成图片", "Generate image"),
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
         "story": ("分析故事", "Analyze story"),
+        "project_cover": ("生成项目封面", "Generate project cover"),
+        "optimize_video_prompt": ("优化分镜提示词", "Optimize shot prompt"),
+        "screenplay": ("生成本集剧本", "Adapt episode screenplay"),
         "remake": ("重制视频", "Analyze source video"),
         "video": ("生成视频", "Generate video"),
         "compose": ("合成章节", "Compose episode"),
@@ -62,11 +67,11 @@ async def conversation_for_task(task):
             id=params["asset_id"], novel_id=params["novel_id"]
         )
         kind = "asset"
-    elif params.get("video_request", {}).get("scene_id"):
+    elif params.get("scene_id") or params.get("video_request", {}).get("scene_id"):
         from models.scene import Scene
 
         target = await Scene.get_or_none(
-            id=params["video_request"]["scene_id"], chapter__novel_id=params["novel_id"]
+            id=params.get("scene_id") or params["video_request"]["scene_id"], chapter__novel_id=params["novel_id"]
         )
         kind = "scene"
     if target:
@@ -110,8 +115,18 @@ async def conversation_for_task(task):
             "pricing": chosen.pricing,
         },
     )
-    await AgentConversation.filter(id=conversation.id).update(active_task_id=task.id)
+    await AgentConversation.filter(id=conversation.id).update(updated_at=datetime.now(timezone.utc))
+    # A nested production task must not replace the active conversational run.
+    active = await AiTask.get_or_none(id=conversation.active_task_id) if conversation.active_task_id else None
+    if active is None or active.status not in {TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued}:
+        await AgentConversation.filter(id=conversation.id, active_task_id=conversation.active_task_id).update(active_task_id=task.id)
     return message
+
+
+async def _queue_selected_sheets(params, result):
+    from services.storyboard.sheets import enqueue_chapter_sheets
+    return await enqueue_chapter_sheets(params['chapter_id'], result['scene_ids'], params['sheet_model_config_id'],
+        params.get('team_id'), params.get('user_id'), batch_id=params['task_id'])
 
 
 async def run_production(task, handler):
@@ -187,6 +202,8 @@ async def run_production(task, handler):
             if kept is not None:
                 from services.creation_agent.creative_checks import check_preserved_result
                 await check_preserved_result(execution, plan.steps[0], plan.steps[0].target_id, kept)
+                if task.task_type == AiTaskTypeEnum.storyboard and params.get('sheet_model_config_id'):
+                    kept['storyboard_sheet_task_ids'] = await _queue_selected_sheets(params, kept)
                 return {**kept, 'preserved_existing': True, 'conversation_id': message.conversation_id}
         if task.task_type == AiTaskTypeEnum.reference_image.value:
             from services.creation_agent.media_execution import run_image_handler
@@ -194,6 +211,8 @@ async def run_production(task, handler):
             result = await run_image_handler(handler, params)
         else:
             result = await handler.execute(params)
+        if task.task_type == AiTaskTypeEnum.storyboard and params.get('sheet_model_config_id'):
+            result['storyboard_sheet_task_ids'] = await _queue_selected_sheets(params, result)
         result = {
             **result,
             "conversation_id": message.conversation_id,
@@ -245,6 +264,7 @@ async def finish_production_message(task):
         return
     english = task.request_params.get("prompt_language", "en") == "en"
     labels = {
+        "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         3: ("已完成", "Completed"),
         4: ("任务未完成", "Task failed"),
         5: ("后续步骤已停止", "Further steps stopped"),

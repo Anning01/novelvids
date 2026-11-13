@@ -6,6 +6,8 @@ from utils.messages import localized_message
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import shutil
+from config import settings
 from typing import Any, Awaitable, Callable
 
 from controllers.config import ai_model_config_controller
@@ -117,6 +119,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                 work_dir = Path(temp_dir)
                 source_path = await self.materializer.materialize(source, work_dir)
                 project = await source.novel
+                cache = Path(settings.STUDIO_MEDIA_CACHE_PATH).resolve().parent / "remake-scenes" / str(source.id) / source.checksum
                 result = await self.pipeline.run(
                     source_path=source_path,
                     model_config=model_config,
@@ -124,6 +127,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                     progress=report,
                     storyboard_strategy=project.storyboard_strategy,
                     aspect_ratio=project.aspect_ratio or '16:9',
+                    **({"scene_cache": cache} if execution else {}),
                 )
                 async def persist():
                     summary = await self.persistence.persist(
@@ -137,7 +141,9 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                 if execution:
                     await execution.before_request()
                     from services.creation_agent.operation_receipts import execute_step
-                    return await execute_step(execution.params["task_id"], "persist:remake", persist, atomic=True)
+                    summary = await execute_step(execution.params["task_id"], "persist:remake", persist, atomic=True)
+                    shutil.rmtree(cache, ignore_errors=True)
+                    return summary
                 return await persist()
         except RemakeDecompositionError:
             await self._mark_failed(source)

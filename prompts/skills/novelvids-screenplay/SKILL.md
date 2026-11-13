@@ -1,0 +1,12 @@
+---
+name: novelvids-screenplay
+description: 猫影剧本改编。把小说章节或故事点子改编为可拍摄的短剧剧本，或按指定目标修改已有场次与对白。
+license: MIT
+---
+
+按用户的改编范围交付分场剧本，保留来源中的关键动作和指定原话。按下方规范分场，普通对白默认开口，心声标 OS，有表演需要时标出语气，动作另起一行。交稿前按场核对出镜人物、动物、群像和关键道具。
+
+- [改编方法、分场格式与修订规则](references/screenplay.md)
+
+- [作品目录交接与用户明确要求时的本地 MCP 同步](../references/work_package.md)
+- [作品文件与 MCP 工具的 JSON Schema（按文件名或工具名选择）](../references/work_package.schema.json)

@@ -1,6 +1,7 @@
 """账单计费相关 schema。"""
 
 from datetime import date
+from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -25,6 +26,9 @@ class ModelUsageRecordOut(BaseResponse):
     pricing_snapshot: Optional[dict] = None
     usage: dict
     cost: float
+    platform_cost: Decimal | None = None
+    local_charge: Decimal | None = None
+    settlement_status: Literal['legacy', 'pending', 'settled', 'review'] = 'legacy'
     currency: str
     status: int
     duration_seconds: Optional[float] = None
@@ -41,6 +45,9 @@ class ModelUsageRecordOut(BaseResponse):
 class BillingSummaryOut(BaseModel):
     total_cost: float
     total_records: int
+    platform_cost: Decimal = Decimal("0")
+    local_charge: Decimal = Decimal("0")
+    pending_records: int = 0
     by_billing_type: list[dict]
     by_task_type: list[dict]
     by_model: list[dict]
@@ -52,6 +59,7 @@ class BillingProjectOut(BaseModel):
     novel_name: str
     total_cost: float
     record_count: int
+    pending_records: int = 0
 
 
 class BillingProjectDetailOut(BaseModel):

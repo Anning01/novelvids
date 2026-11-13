@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import { api } from '@/api'
 import ShortDramaManualPage from './ShortDramaManualPage.vue'
 
@@ -58,6 +59,7 @@ it('redirects an unfinished remake away from the empty settings workspace', asyn
 
   mount(ShortDramaManualPage, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         ShortDramaWorkspaceShell: { template: '<div><slot /></div>' },
         AssetCreateDialog: true,

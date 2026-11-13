@@ -27,3 +27,11 @@ class EditorAsset(AbstractBaseModel):
 
     class Meta:
         table = 'editor_assets'
+
+
+class ChapterCanvasSnapshot(AbstractBaseModel):
+    chapter = fields.OneToOneField("models.Chapter", related_name="imported_canvas", on_delete=fields.CASCADE)
+    layout = fields.JSONField(default=dict)
+
+    class Meta:
+        table = "chapter_canvas_snapshots"

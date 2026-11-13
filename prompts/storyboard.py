@@ -103,9 +103,12 @@ _UNSAFE_AUTOMATIC_ALIASES = {
 }
 
 
+TIMELINE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*s?\s*[-–—~]\s*(\d+(?:\.\d+)?)\s*s?\s*[:：]")
+
+
 def split_storyboard_voice_track(value: str) -> tuple[str, str]:
     """Separate timeline/speaker from literal speech, including colons in emotions."""
-    timeline = re.match(r"^\s*\d+(?:\.\d+)?\s*s?\s*[-–—~]\s*\d+(?:\.\d+)?\s*s?\s*[:：]\s*", value)
+    timeline = TIMELINE.match(value)
     start = timeline.end() if timeline else 0
     depth = 0
     for index in range(start, len(value)):
@@ -135,8 +138,11 @@ def _safe_automatic_alias(value: object) -> str:
 
 def _asset_reference_candidates(
     entities: Sequence[StoryboardEntity],
+    visible_names: Sequence[str] | None = None,
 ) -> list[tuple[str, str]]:
     """返回可自动补标的全部资产名称，并排除有歧义的别名。"""
+    if visible_names is not None:
+        entities = [entity for entity in entities if entity.name in visible_names]
     canonical_names = {
         name for entity in entities if (name := _safe_canonical_asset_name(entity.name))
     }
@@ -189,6 +195,8 @@ def _normalize_asset_reference_text(
         re.sub(rf"{timeline}[^\n]*?(?={timeline}|\n|\Z)", protect_speech, text)
         if preserve_speech else text
     )
+    # Quoted inscriptions, captions, and screen text are literal content.
+    normalized = re.sub(r'“[^”\n]*”|「[^」\n]*」|『[^』\n]*』|"[^"\n]*"', lambda match: protect(match[0]), normalized)
     normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, normalized)
 
     # 兼容旧格式 @资产名，并统一升级为带花括号的正式名。模型常会把后续
@@ -226,9 +234,8 @@ def normalized_storyboard_reference_fields(
     entities: Sequence[StoryboardEntity],
 ) -> dict[str, object]:
     """为模型漏写的普通资产名补齐正式引用语法，返回非破坏性字段更新。"""
-    candidates = _asset_reference_candidates(entities)
-    if not candidates:
-        return {}
+    candidates = _asset_reference_candidates(entities, getattr(shot, "visible_asset_names", None))
+    voice_candidates = _asset_reference_candidates(entities)
 
     updates: dict[str, object] = {}
     for field_name in _REFERENCE_TEXT_FIELDS:
@@ -240,7 +247,7 @@ def normalized_storyboard_reference_fields(
         original = list(getattr(shot, field_name))
         normalized = [
             (
-                _normalize_asset_reference_text(split_storyboard_voice_track(str(value))[0], candidates)
+                _normalize_asset_reference_text(split_storyboard_voice_track(str(value))[0], voice_candidates)
                 + split_storyboard_voice_track(str(value))[1]
                 if field_name in {"dialogue", "narration"}
                 else _normalize_asset_reference_text(str(value), candidates)
@@ -286,7 +293,7 @@ def build_storyboard_messages(
     next_sequence=1, previous_shot=None, strategy=CINEMATIC_STORYBOARD_STRATEGY,
     creative_constraints=(),
     previously_seen_assets=(),
-    introduction_descriptions=None,
+    introduction_descriptions=None, shot_duration_range=None,
 ):
     system_prompt = render_skill("storyboard", prompt_language)
     requirement = asset_introduction_requirement(entities, previously_seen_assets, prompt_language, introduction_descriptions)
@@ -296,6 +303,7 @@ def build_storyboard_messages(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task_facts({
             "assets": json.loads(_asset_payload(entities)),
+            **({"shot_duration_range": shot_duration_range} if shot_duration_range else {}),
             "manuscript": long_text, "strategy": strategy.key,
             "batch_number": batch_index + 1, "batch_count": batch_count,
             "next_sequence": next_sequence, "constraints": list(creative_constraints),
@@ -320,20 +328,6 @@ def _join_values(values: Sequence[str], fallback: str = "无") -> str:
     return "、".join(normalized) if normalized else fallback
 
 
-def _shot_search_text(shot: StoryboardShot) -> str:
-    values: list[object] = [
-        *(getattr(shot, field_name) for field_name in _REFERENCE_TEXT_FIELDS),
-        *(
-            split_storyboard_voice_track(value)[0] if field_name in {"dialogue", "narration"} else value
-            for field_name in _REFERENCE_LIST_FIELDS
-            for value in getattr(shot, field_name)
-        ),
-    ]
-    for segment in getattr(shot, "segments", ()):
-        values.extend((segment.description, segment.visual_prose, *segment.actions))
-    return "\n".join(str(value) for value in values)
-
-
 def entity_reference_names(
     text: str,
     entities: Sequence[StoryboardEntity],
@@ -355,15 +349,19 @@ def referenced_entities(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
 ) -> list[StoryboardEntity]:
-    """返回镜头实际引用的实体。"""
-    names = {entity.name for entity in entity_reference_names(_shot_search_text(shot), entities)}
-    names.update(reference.asset_name for reference in getattr(shot, 'asset_refs', ()))
+    """Resolve image references independently of dialogue and sound bindings."""
+    names = set(visible_storyboard_assets(shot, entities))
+    if getattr(shot, 'visible_asset_names', None) is None:
+        names.update(reference.asset_name for reference in getattr(shot, 'asset_refs', ()))
     return [entity for entity in entities if entity.name in names]
 
 
 def visible_storyboard_assets(shot: object, entities: Sequence[StoryboardEntity]) -> list[str]:
     """Count visual presence of assets; spoken mentions do not consume a debut."""
-    values = [getattr(shot, "visual_prose", "") or "", getattr(shot, "spatial_relationships", "") or "",
+    declared = getattr(shot, "visible_asset_names", None)
+    if declared is not None:
+        return [entity.name for entity in entities if entity.name in declared]
+    values = [getattr(shot, "shot_size_and_camera", "") or "", getattr(shot, "visual_prose", "") or "", getattr(shot, "spatial_relationships", "") or "",
               getattr(shot, "environment", "") or "",
               *(getattr(shot, "actions", ()) or ())]
     for segment in getattr(shot, "segments", ()) or ():
@@ -425,10 +423,7 @@ def without_inline_reference_descriptions(
 def _format_asset_references(
     shot: StoryboardShot, entities: Sequence[StoryboardEntity], language: str = "zh"
 ) -> str:
-    text = _normalize_asset_reference_text(_shot_search_text(shot), _asset_reference_candidates(entities))
-    names = {entity.name for entity in entity_reference_names(text, entities)}
-    names.update(entity.name for entity in referenced_entities(shot, entities))
-    referenced = [entity for entity in entities if entity.name in names]
+    referenced = referenced_entities(shot, entities)
     if not referenced:
         return prompt_label("本镜头未引用已登记资产。", language)
     sections: list[str] = []
@@ -547,10 +542,21 @@ def format_storyboard_prompt(
             prompt_label("【详细执行】", language),
             *shot_body_parts,
         ]
+    blocking = getattr(shot, "blocking_map", None)
+    layout = []
+    if blocking and blocking.layout:
+        layout.extend(f"C{i} · {camera.framing} · {camera.beat}".rstrip(" ·") for i, camera in enumerate(blocking.cameras, 1))
+    elif blocking:
+        layout.append(f"{prompt_label('空间定位图（左上 0,0；右下 100,100）', language)} · {blocking.orientation}")
+        for asset in blocking.assets:
+            end = f" → ({asset.end.x},{asset.end.y})" if asset.end else ""
+            layout.append(f"{asset.name} ({asset.x},{asset.y}){end} {asset.facing}".rstrip())
+        layout.extend(f"C{i} ({cam.x},{cam.y}) → {cam.target}" for i, cam in enumerate(blocking.cameras, 1))
     prompt = "\n".join(
         (
             prompt_label("【禁止项】", language),
-            prompt_label(strategy.prohibitions, language),
+            prompt_label(strategy.prohibitions, language) if strategy.prohibitions else
+            _join_values(shot.effect_restrictions, prompt_label("无", language)),
             "",
             prompt_label("【风格定调】", language),
             f"{prompt_label('视觉风格：', language)}{shot.visual_style}",
@@ -565,6 +571,7 @@ def format_storyboard_prompt(
             f"{prompt_label('时间：', language)}{shot.time_setting}",
             f"{prompt_label('环境：', language)}{shot.environment}",
             f"{prompt_label('空间关系：', language)}{shot.spatial_relationships}",
+            *layout,
             "",
             prompt_label("【镜头描述】", language),
             *details,
@@ -579,14 +586,26 @@ def format_storyboard_prompt(
             f"{prompt_label('总时长：', language)}{duration_token}",
         )
     )
-    candidates = _asset_reference_candidates(entities)
+    candidates = _asset_reference_candidates(entities, getattr(shot, "visible_asset_names", None))
+    voice_candidates = _asset_reference_candidates(entities)
     protected_voices = []
     for index, voice in enumerate([*shot.narration, *shot.dialogue]):
         prefix, speech = split_storyboard_voice_track(voice)
         placeholder = f"\ue100{index}\ue101"
-        protected_voices.append((placeholder, _normalize_asset_reference_text(prefix, candidates) + speech))
+        protected_voices.append((placeholder, _normalize_asset_reference_text(prefix, voice_candidates) + speech))
         prompt = prompt.replace(voice, placeholder)
     prompt = _normalize_asset_reference_text(prompt, candidates)
     for placeholder, voice in protected_voices:
         prompt = prompt.replace(placeholder, voice)
     return prompt
+
+
+def scene_continuity_instruction(language: str) -> str:
+    if language == "en":
+        return ("For this request, the numbered screenplay scene is the continuity group. Establish positions "
+                "in words in its first segment and leave blocking_map empty. For each subsequent segment, "
+                "describe the preceding segment's final positions as the starting positions. Supply its own "
+                "blocking diagram or leave the diagram to the separate placement step. Restart at each scene heading.")
+    return ("本次按导演稿场号接戏。每个场号的第一段用文字建立位置，blocking_map 留空；从第二段起，"
+            "以上一段结束时的人物位置、朝向、动作和道具归属为本段起点。续段定位图可在独立的空间调度步骤补全。"
+            "换场号后从第一段重新开始。")

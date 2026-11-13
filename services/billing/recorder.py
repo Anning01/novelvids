@@ -45,13 +45,20 @@ class BillingRecorder:
         user_id=None,
     ) -> ModelUsageRecord | None:
         try:
+            if config is not None and config.api_protocol == "novelvids" and (ai_task_id or video_id):
+                identity = {"video_id": video_id} if video_id else {"ai_task_id": ai_task_id}
+                existing = await ModelUsageRecord.filter(**identity, billing_type=billing_type).exclude(settlement_status="legacy").order_by("-id").first()
+                if existing is not None:
+                    fields = {"status": status}
+                    if billing_type == "video":
+                        fields["duration_seconds"] = duration_seconds
+                    await ModelUsageRecord.filter(id=existing.id).update(**fields)
+                    return existing
             # 消耗来源：团队自己的 Key 直连供应商不计入团队余额；
             # 平台模型（官方配置/未配置回退）按团队余额扣费
-            cost_source = (
-                "team_key"
-                if config is not None and config.scope == "team"
-                else "balance"
-            )
+            remote_platform = config is not None and (config.api_protocol == "novelvids" or
+                (config.model.startswith("nv-") and config.api_key.startswith("nv_")))
+            cost_source = "team_key" if config is not None and (config.scope == "team" or remote_platform) else "balance"
             return await ModelUsageRecord.create(
                 novel_id=novel_id,
                 task_type=task_type,
@@ -413,12 +420,14 @@ async def _record_creation_agent_usage(task, *, team_id, user_id) -> None:
         await AgentMessage.filter(id=message.id).using_db(connection).update(billing_record_id=record.id)
 
 
-async def _consume_team_balance(record, team_id, user_id=None) -> None:
+async def _consume_team_balance(record, team_id, user_id=None, *, strict=False) -> None:
     """计费后处理：仅平台模型（balance 来源）扣团队余额；成员累计消耗两种来源都记。"""
     if record is None or team_id is None:
+        return
+    if record.settlement_status != "legacy":
         return
     from services.balance import accumulate_member_cost, consume
 
     if record.cost_source != "team_key":
-        await consume(team_id, record.cost, usage_record_id=record.id)
-    await accumulate_member_cost(team_id, user_id, record.cost)
+        await consume(team_id, record.cost, usage_record_id=record.id, strict=strict)
+    await accumulate_member_cost(team_id, user_id, record.cost, strict=strict)

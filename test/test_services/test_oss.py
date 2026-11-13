@@ -34,6 +34,8 @@ def test_aliyun_form_policy_contains_expected_fields():
     # policy 可解出并满足 bucket/key 条件
     decoded = json.loads(base64.b64decode(fields["policy"]).decode("utf-8"))
     assert {"bucket": "my-bucket"} in decoded["conditions"]
+    assert {"key": fields["key"]} in decoded["conditions"]
+    assert {"Content-Type": "text/plain"} in decoded["conditions"]
     # 签名与 policy 匹配
     expected = _hmac_sign("sk", fields["policy"])
     assert fields["signature"] == expected

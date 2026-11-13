@@ -23,6 +23,8 @@ class AiTaskOut(BaseResponse):
                 "api_key",
                 "base_url",
                 "skill_snapshot",
+                "video_optimizer",
+                "prompt_inputs",
                 "agent_configuration",
                 "config_snapshot",
                 "auto_enhancement_snapshot",

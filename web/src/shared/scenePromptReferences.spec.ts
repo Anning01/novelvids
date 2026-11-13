@@ -15,6 +15,19 @@ describe('scenePromptReferences', () => {
     expect(buildVideoInputImageReferences(prompt, assets, [], 9)).toHaveLength(9)
   })
 
+  it('keeps explicitly bound assets in optimized drafts alongside the indexed storyboard image', () => {
+    const sheet = { type: 'image' as const, url: '/media/sheet.png', name: '故事版' }
+    const assets = [
+      { assetId: 8, label: '墓碑', mentionNames: ['墓碑'], imageUrls: ['/media/prop.png'] },
+      { assetId: 3, label: '山坡', mentionNames: ['山坡'], imageUrls: ['/media/location.png'] },
+    ]
+    const general = '镜头推向墓碑。'
+    const active = videoReferenceMentionSyntax(sheet)
+    expect(buildVideoInputImageReferences(general, assets, [sheet], 3, true, active)
+      .map(({number, label}) => [number, label])).toEqual([[1, '山坡'], [2, '墓碑'], [3, '故事版']])
+    expect(buildVideoInputImageReferences(general, assets, [sheet], 3)).toEqual([])
+  })
+
   it('numbers shared image URLs only once across assets and uploads', () => {
     const upload: VideoReferenceMedia = { type: 'image', url: '/media/shared.png' }
     expect(buildVideoInputImageReferences(`@{甲}@{乙}${videoReferenceMentionSyntax(upload)}`, [

@@ -54,11 +54,11 @@ def _image_extension(content: bytes) -> str:
     raise RuntimeError(localized_message('生图供应商返回了不支持的图片格式'))
 
 
-async def _store_asset_image(content: bytes, extension: str, asset_id: int, suffix: str = "") -> str:
+async def _store_asset_image(content: bytes, extension: str, asset_id: int, suffix: str = "", *, keep_local=False) -> str:
     """图片落库：OSS 启用时经内网上传并返回公网 URL，否则存本地磁盘。"""
     from services.oss import make_upload_key, oss
 
-    if oss.enabled:
+    if oss.enabled and not keep_local:
         key = make_upload_key(None, f"asset-{asset_id}{suffix}{extension}")
         await oss.put_bytes(key, content, _content_type_for(extension))
         try:
@@ -161,6 +161,9 @@ async def _persist_generated_image(image, asset_id: int, suffix: str) -> str:
 
     remote_url = getattr(image, "url", None)
     if isinstance(remote_url, str) and remote_url:
+        if getattr(image, "keep_local", False):
+            content = await _fetch_image_bytes(remote_url)
+            return await _store_asset_image(content, _image_extension(content), asset_id, suffix, keep_local=True)
         if oss.enabled:
             content = await _fetch_image_bytes(remote_url)
             return await _store_asset_image(content, _image_extension(content), asset_id, suffix)
@@ -206,6 +209,9 @@ class AssetReferenceHandler(BaseTaskHandler):
             api_key: str
             model: str
         """
+        if request_params.get('operation') == 'storyboard_sheet':
+            from services.storyboard.sheets import execute_sheet
+            return await execute_sheet(request_params)
         asset_id = request_params["asset_id"]
         base_url = request_params["base_url"]
         api_key = request_params["api_key"]

@@ -49,8 +49,9 @@ class CreationAgentController:
             can_write = True
         except HTTPException:
             can_write = False
-        return {"enabled": limits.enabled, "can_write": can_write, "max_targets": limits.max_targets,
-                "models": [{"id": item.id, "name": item.name, "model": item.model} for item in await agent_models(ctx)]}
+        models = await agent_models(ctx)
+        return {"enabled": bool(models), "can_write": can_write, "max_targets": limits.max_targets,
+                "models": [{"id": item.id, "name": item.name, "model": item.model} for item in models]}
 
     async def conversations(self, novel_id: int, ctx: AuthContext, *, deleted: bool = False):
         await ensure_novel_access(novel_id, ctx)

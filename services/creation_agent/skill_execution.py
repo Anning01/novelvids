@@ -24,8 +24,6 @@ async def require_agent(team_id=None, model_id=None):
     from config import settings
 
     limits = await agent_configuration()
-    if not limits.enabled:
-        raise HTTPException(409, localized_message("创作助手尚未启用"))
     models = await resolve_scope_configs(
         AiTaskTypeEnum.creation_agent.value,
         team_id if settings.AUTH_ENABLED else None,
@@ -76,13 +74,22 @@ async def prepare_workflow(params: dict) -> dict:
             source_id = source.id if source else None
         if source_id is not None:
             inherited["instruction_message_id"] = source_id
-        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
+        for key in ('video_optimizer', 'conversation_id', 'agent_runtime', 'creation_plan_id', 'creation_step_id', 'creation_run_id', 'recovery_root_task_id'):
             if key in parent.params:
                 inherited[key] = parent.params[key]
+    from services.creation_agent.video_optimizer import project_optimizer
+    if params.get('novel_id'):
+        from models.novel import Novel
+        project = await Novel.get(id=params['novel_id'])
+        duration_range = params.get('shot_duration_range') or [1, project.shot_duration_max]
+        params = {**params, 'shot_duration_range': [duration_range[0], min(duration_range[1], project.shot_duration_max)]}
+    optimizer = inherited.get('video_optimizer') or params.get('video_optimizer') or (await project_optimizer(params['novel_id'], params.get('team_id')) if params.get('novel_id') else {'mode': 'generic'})
     return {
+        'video_optimizer': optimizer,
         **params,
         **(submission.get() or {}),
         "workflow_version": WORKFLOW_VERSION,
+        "agent_runtime": params.get("agent_runtime", limits.runtime),
         "assistant_model_config_id": chosen.id,
         "agent_configuration": limits.model_dump(),
         "skill_snapshot": snapshot_skills(),
@@ -159,6 +166,7 @@ class SkillExecution:
         asset_scope: tuple[tuple[int, str], ...] = (),
     ):
         from services.creation_agent.handler import configured_model
+        from schemas.agent_workflow import RemakeShot
 
         chosen, limits = await require_agent(
             self.params.get("team_id"), self.params["assistant_model_config_id"]
@@ -267,7 +275,14 @@ class SkillExecution:
                      "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}
             seq = await agent_event_log.start(child_message)
             await agent_event_log.append(child_message.id, [event], seq)
+            from services.creation_agent.skill_stream import forward_skill_event
+            await forward_skill_event(event)
             await task_signals.publish(str(self.message.task_id))
+
+        from services.creation_agent.skill_stream import SkillRunActivity
+
+        tool_activity = SkillRunActivity(child_message, str(self.message.task_id),
+            public_thinking=self.params.get('agent_runtime') != 'deepagents')
 
         recorded = RecordedAgentModel(
             model,
@@ -278,7 +293,9 @@ class SkillExecution:
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
             on_activity=report_activity,
-            repair_root=await self.repair_root(), stage=skill,
+            # Each detected clip is a separate model step with its own durable retry allowance.
+            repair_root=str(child.id) if skill == "remake" and output_type is RemakeShot else await self.repair_root(),
+            stage=skill,
         )
         request_aspect_ratio = "16:9"
         from services.storyboard.candidates import StoryboardCandidateValidator
@@ -308,7 +325,7 @@ class SkillExecution:
                 "\n" + additional_instructions if additional_instructions else ""
             ),
             output_type=agent_output,
-            retries=2,
+            retries=0 if skill == 'screenplay' else 2,
         )
 
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
@@ -317,7 +334,7 @@ class SkillExecution:
 
         # These phases already receive their full rules and evidence. Additional
         # skill lookups only repeat context and consume the user's call budget.
-        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video', 'structured', 'remake'}:
+        if skill not in {'planning_request', 'source_reading', 'creative_check', 'screenplay', 'storyboard', 'video', 'structured', 'remake'}:
             agent.tool(read_skill)
 
         asset_checkpoint = None
@@ -340,11 +357,10 @@ class SkillExecution:
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'global_key_assets':
-                from services.remake.asset_validation import render_remake_assets, validate_remake_assets
+                from services.remake.asset_validation import render_remake_assets
                 from pydantic_ai import ModelRetry
                 try:
                     rendered = render_remake_assets(output.model_dump(), ctx.deps, self.language, request_aspect_ratio)
-                    validate_remake_assets(rendered, ctx.deps, self.language, request_aspect_ratio)
                     output = type(output).model_validate(rendered)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
@@ -361,7 +377,7 @@ class SkillExecution:
                 from prompts.extraction import render_asset_repair
 
                 attempted = output.model_dump(mode='json', warnings=False)
-                output = asset_candidates.merge(output, ctx.deps, self.language, request_aspect_ratio)
+                output = asset_candidates.merge(output)
                 if output_validator:
                     try:
                         await output_validator(output)
@@ -375,14 +391,10 @@ class SkillExecution:
                     raise ModelRetry(render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues))
             if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
                 from pydantic_ai import ModelRetry
-                from prompts.creation_standards import ASSET_PROMPT_KINDS
-                from prompts.reference import GROUP_PORTRAIT
                 from services.extraction.extractor import validate_asset_design
 
-                kind = ('group' if facts['asset_type'] == 1 and facts.get('reference_layout') == GROUP_PORTRAIT
-                        else ASSET_PROMPT_KINDS[facts['asset_type']])
                 try:
-                    validate_asset_design(output.prompt, kind, ctx.deps, self.language, request_aspect_ratio)
+                    validate_asset_design(output.prompt)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             if storyboard_candidates:
@@ -390,8 +402,9 @@ class SkillExecution:
                 from models.agent_operation import AgentOperation
                 from prompts.storyboard_repair import structural_repair
                 merged, checkpoint = storyboard_candidates.merge(output)
+                # JSON object keys must also work with the ORM's optional accelerated encoder.
                 await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:storyboard:{segment}',
-                    defaults={'state': 'completed', 'result': checkpoint})
+                    defaults={'state': 'completed', 'result': json.loads(json.dumps(checkpoint))})
                 if merged is None:
                     raise ModelRetry(structural_repair(self.language, checkpoint))
                 output = merged
@@ -416,9 +429,13 @@ class SkillExecution:
             project = await Novel.get(id=self.params["novel_id"])
             request_aspect_ratio = project.aspect_ratio or "16:9"
             if initial_assets is not None and asset_candidates and not asset_checkpoint:
-                asset_candidates.merge(initial_assets, self.snapshot, self.language, request_aspect_ratio)
+                asset_candidates.merge(initial_assets)
+            from prompts.project_settings import audiovisual_guidance
             project_facts = {
                 "name": project.name,
+                "audiovisual_guidance": audiovisual_guidance(project.audiovisual_guidance, self.language),
+                "shot_duration_max": project.shot_duration_max,
+                "storyboard_enabled": project.storyboard_enabled,
                 "style_key": project.style_key,
                 "custom_style_prompt": project.custom_style_prompt,
                 "aspect_ratio": project.aspect_ratio,
@@ -498,17 +515,13 @@ class SkillExecution:
                         user_input,
                         deps=self.snapshot,
                         model=recorded,
+                        event_stream_handler=tool_activity,
                         usage_limits=UsageLimits(
                             request_limit=limits.request_limit,
                             tool_calls_limit=limits.tool_calls_limit,
                             total_tokens_limit=limits.total_tokens_limit,
                         ),
-                        model_settings={
-                            "max_tokens": min(
-                                limits.max_output_tokens,
-                                chosen.max_tokens or limits.max_output_tokens,
-                            )
-                        },
+                        model_settings=limits.output_model_settings(chosen.max_tokens),
                     )
                 except ModelHTTPError as error:
                     request_rejected = 400 <= error.status_code < 500 and error.status_code not in {408, 409}
@@ -561,6 +574,7 @@ def _audit_messages(messages):
     import hashlib
     from pydantic_ai.messages import (
         BinaryContent,
+        VideoUrl,
         ModelRequest,
         ModelMessagesTypeAdapter,
         UserPromptPart,
@@ -575,6 +589,7 @@ def _audit_messages(messages):
                     content = [
                         f"[{item.media_type}; bytes={len(item.data)}; sha256={hashlib.sha256(item.data).hexdigest()}]"
                         if isinstance(item, BinaryContent)
+                        else f"[{item.media_type}; temporary video]" if isinstance(item, VideoUrl)
                         else item
                         for item in part.content
                     ]

@@ -1,9 +1,11 @@
 """Structured production inputs; natural-language layout belongs to skills."""
 
+from math import isclose
 from typing import Literal
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from schemas.scene import SoraScenePromptConfig
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
+from schemas.scene import BlockingMap, SceneLayout, SoraScenePromptConfig
 from schemas.video import VideoGenerationOptions
 from schemas.video_export import ExportEnhanceIn
 
@@ -63,7 +65,7 @@ class RemakeAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=255)
     description: str = Field(min_length=1, max_length=100_000)
-    visual_fields: dict[str, str] = Field(description="资产协议中各设计字段的值；无固定字段的场景、道具返回空字典")
+    visual_fields: dict[str, str] = Field(description="补充视觉设计字段；无须补充时返回空字典")
     label: Literal["人物", "动物", "群像"] = "人物"
 
 
@@ -80,10 +82,47 @@ class RemakeReference(BaseModel):
     asset_type: Literal["character", "scene", "object"]
 
 
+REMAKE_TIMELINE_ROUNDING_SECONDS = .005
+
+
+class RemakeLayout(SceneLayout):
+    # In the model-facing schema the direction is stated once, on the shot.
+    orientation: SkipJsonSchema[str] = ""
+
+
+class RemakeBlockingMap(BlockingMap):
+    layout: RemakeLayout | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def inherit_shot_orientation(cls, value):
+        if isinstance(value, dict) and isinstance(layout := value.get("layout"), dict):
+            return {**value, "layout": {**layout, "orientation": value.get("orientation")}}
+        return value
+
+
 class RemakeShot(StructuredSkillShot):
+    blocking_map: RemakeBlockingMap | None = None
     model_config = ConfigDict(extra="forbid")
     asset_refs: list[RemakeReference] = Field(max_length=30)
     confidence: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_segment_duration(self):
+        # The model often reports a rounded total and more precise segment times.
+        if self.segments:
+            total = sum(segment.duration for segment in self.segments)
+            if 1 <= total <= 30 and isclose(total, float(self.duration[:-1]), abs_tol=REMAKE_TIMELINE_ROUNDING_SECONDS):
+                self.duration = f"{total:g}s"
+        return super().validate_segment_duration()
+
+    @field_validator("blocking_map", mode="wrap")
+    @classmethod
+    def keep_drawable_map(cls, value, handler):
+        try:
+            return handler(value)
+        except ValidationError:
+            return None
 
 
 class RequestedProduction(BaseModel):

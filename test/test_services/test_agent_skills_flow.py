@@ -29,8 +29,9 @@ from test.test_services.test_prompt_language import _shot
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
+@pytest.mark.parametrize("screenplay_only", [False, True])
 async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
-    monkeypatch, language, tmp_path
+    monkeypatch, language, tmp_path, screenplay_only
 ):
     novel, first, _ = await enabled_project()
     novel.storyboard_strategy = 'narration'
@@ -42,6 +43,12 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
         content="Alex Chen and Sam Lee hear the signal.",
     )
     novel.content = "Chapter 1: Arrival\nAlex Chen meets Sam Lee.\nChapter 2: The signal\nThey hear the signal."
+    if screenplay_only:
+        novel.content = ""
+        for chapter in (first, second):
+            chapter.screenplay = chapter.content
+            chapter.content = ""
+            await chapter.save()
     await novel.save()
     await GeneralConfig.create(id=1, prompt_language=language)
     image_model = await AiModelConfig.create(
@@ -79,15 +86,17 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
         seen.append((skill, self.language, self.snapshot.revision))
         assert self.language == language
         if skill == "story":
+            if screenplay_only:
+                assert first.screenplay in facts['manuscript']
+                assert second.screenplay in facts['manuscript']
             payload = {
                 "book_types": ["Drama"],
                 "story_outline": words,
                 "key_characters": [],
             }
-        elif skill == 'structured' and output_type.__name__ == 'ChapterCast':
-            # The existing cast-reading phase is mocked separately from visual design.
-            payload = {'characters': []}
         elif skill == "assets":
+            if screenplay_only:
+                assert any(chapter.screenplay in str(facts) for chapter in (first, second))
             payload = {
                 "persons": [
                     {"name": name, "description": name, "base_traits": visual}

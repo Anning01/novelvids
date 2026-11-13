@@ -60,6 +60,13 @@ class BillingRecordView:
             'record_count': len(records), 'turn_count': len({record.ai_task_id for record in records}),
             'statuses': sorted({record.status for record in records}),
             'cost': float(sum((record.cost for record in records), Decimal('0'))),
+            'platform_cost': sum((record.platform_cost for record in records), Decimal('0'))
+                if all(record.platform_cost is not None for record in records) else None,
+            'local_charge': sum((record.local_charge for record in records), Decimal('0'))
+                if all(record.local_charge is not None for record in records) else None,
+            'settlement_status': ('review' if any(record.settlement_status == 'review' for record in records) else
+                'pending' if any(record.settlement_status == 'pending' for record in records) else
+                'settled' if all(record.settlement_status == 'settled' for record in records) else 'legacy'),
             'usage': usage, 'ai_task_id': None, 'model_config_id': None, 'pricing_snapshot': None,
             'model': '、'.join(sorted({record.model for record in records})),
             'model_name': '、'.join(sorted({record.model_name or record.model for record in records})),

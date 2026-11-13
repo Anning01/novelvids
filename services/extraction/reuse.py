@@ -8,9 +8,9 @@ from models.asset_variant import AssetVariant
 from models.creation_agent import CreationConstraint
 from models.chapter import Chapter
 from models.novel import Novel
-from services.extraction.cast import ChapterCast, cast_segment, rebind_cast
+from services.extraction.cast import ChapterCast, cast_segment
 from services.extraction.context import ExtractionContextLoader, normalize_source_chapters
-from services.extraction.extractor import AssetExtractionResult, validate_asset_design, validate_required_design_assets
+from services.extraction.extractor import AssetExtractionResult, validate_required_design_assets
 
 
 @dataclass
@@ -34,8 +34,8 @@ class ExtractionReuse:
         project = await Novel.get(id=execution.params['novel_id'])
         groups = {'persons': [], 'scenes': [], 'items': []}
         required, repair_ids, versions = [], set(), {}
-        for cast_field, field, kind, contract, model in (
-            ('characters', 'persons', 1, 'person', Person), ('scenes', 'scenes', 2, 'scene', Scene), ('items', 'items', 3, 'item', Item)):
+        for cast_field, field, kind, model in (
+            ('characters', 'persons', 1, Person), ('scenes', 'scenes', 2, Scene), ('items', 'items', 3, Item)):
             for item in getattr(cast, cast_field):
                 if item.presence == 'voice_only':
                     continue
@@ -48,12 +48,7 @@ class ExtractionReuse:
                     continue
                 metadata = asset.metadata or {}
                 label = '群像' if metadata.get('reference_layout') == 'group_portrait' else '动物' if metadata.get('gender') == '其他（动物）' else '人物'
-                try:
-                    validate_asset_design(asset.base_traits or '', 'group' if kind == 1 and label == '群像' else contract,
-                        execution.snapshot, execution.language, project.aspect_ratio or '16:9')
-                    if not (asset.base_traits or '').strip() or metadata.get('analysis_source') == 'project_analysis':
-                        raise ValueError('Incomplete design')
-                except ValueError:
+                if not (asset.base_traits or '').strip() or metadata.get('analysis_source') == 'project_analysis':
                     repair_ids.add(asset.id)
                 else:
                     groups[field].append(model(name=asset.canonical_name, aliases=asset.aliases or [],
@@ -77,30 +72,33 @@ class ExtractionReuse:
             'language': execution.language, 'rules': {key: execution.snapshot.contents.get(key) for key in
                 ('assets', 'image', 'asset_contract', 'asset_lifecycle')}, 'constraints': constraints})
 
-    async def remember_inputs(self, execution, context):
+    async def remember_inputs(self, execution, context, *, targeted: bool):
         from utils.messages import localized_message
         project = await Novel.get(id=execution.params['novel_id'])
         revision = await self.input_revision(execution, context, project)
-        row, _ = await AgentOperation.get_or_create(task_id=execution.params['task_id'], key='extraction:inputs',
-            defaults={'state': 'completed', 'result': {'revision': revision}})
+        key = 'extraction:inputs' if targeted else f'extraction:inputs:{context.chapter.id}:{execution.snapshot.revision}'
+        previous = await AgentOperation.get_or_none(task_id=execution.params['task_id'], key='extraction:inputs') if not targeted else None
+        row, _ = await AgentOperation.get_or_create(task_id=execution.params['task_id'], key=key,
+            defaults={'state': 'completed', 'result': previous.result if previous else {'revision': revision}})
         if row.result.get('revision') != revision:
             raise ValueError(localized_message('资产提取的原文或规则已变化，请重新提交'))
 
     async def find(self, execution, chapter_id: int) -> ReusableExtraction | None:
         context = await ExtractionContextLoader().load(novel_id=execution.params['novel_id'], chapter_id=chapter_id)
         segment = cast_segment(asdict(context.chapter), execution.language, execution.snapshot.revision)
-        inventories = await AgentOperation.filter(key=f'model:structured:ChapterCast:{segment}', state='completed',
-            task__task_type=1, task__status=3).select_related('task').order_by('-id')
+        input_key = f'extraction:inputs:{chapter_id}:{execution.snapshot.revision}'
+        # Legacy inventory receipts locate earlier tasks. Their contents do not determine asset coverage.
+        receipts = await AgentOperation.filter(key__in=[input_key, f'model:structured:ChapterCast:{segment}'],
+            state='completed', task__task_type=1, task__status=3).select_related('task').order_by('-id')
         project = await Novel.get(id=execution.params['novel_id'])
         revision = await self.input_revision(execution, context, project)
-        registry = [{'id': a.id, 'asset_type': a.asset_type, 'canonical_name': a.canonical_name, 'aliases': a.aliases}
-                    for a in context.assets]
-        for inventory in inventories:
-            task = inventory.task
+        for receipt in receipts:
+            task = receipt.task
             if task.request_params.get('novel_id') != project.id or task.request_params.get('chapter_id') != chapter_id:
                 continue
             # Historical receipts did not freeze project settings. A later project/rule edit cannot be assumed safe.
-            inputs = await AgentOperation.get_or_none(task=task, key='extraction:inputs', state='completed')
+            inputs = receipt if receipt.key == input_key else await AgentOperation.get_or_none(
+                task=task, key='extraction:inputs', state='completed')
             if inputs:
                 if inputs.result.get('revision') != revision:
                     continue
@@ -110,20 +108,15 @@ class ExtractionReuse:
             candidate = await AgentOperation.get_or_none(task=task, key='candidate:assets:', state='completed')
             if saved is None or candidate is None or candidate.result.get('issues'):
                 continue
-            cast = ChapterCast.model_validate(inventory.result)
-            try:
-                cast = rebind_cast(cast, context.chapter.content, registry)
-            except ValueError:
-                continue
             original = AssetExtractionResult.model_validate(candidate.result['accepted'])
             groups = {'persons': [], 'scenes': [], 'items': []}
-            required = list(cast.required_assets())
+            required = []
             variants = []
             summary = {'persons': [], 'scenes': [], 'items': [], 'asset_ids': [], 'variant_ids': []}
             complete = True
             repair_assets, repair_variants = set(), set()
             repair_versions = {}
-            for field, kind, contract in [('persons', 1, 'person'), ('scenes', 2, 'scene'), ('items', 3, 'item')]:
+            for field, kind in [('persons', 1), ('scenes', 2), ('items', 3)]:
                 bindings = {row['name']: row for row in saved.result.get(field, []) if row.get('asset_id')}
                 for item in getattr(original, field):
                     binding = bindings.get(item.name)
@@ -146,23 +139,10 @@ class ExtractionReuse:
                     if item.variant:
                         valid = valid and bool(variant and (variant.base_traits or '').strip()
                             and context.chapter.number in normalize_source_chapters(variant.chapter_numbers))
-                    asset_kind = 'group' if kind == 1 and item.label == '群像' else contract
-                    if asset:
-                        try:
-                            validate_asset_design(asset.base_traits or '', asset_kind, execution.snapshot, execution.language, project.aspect_ratio or '16:9')
-                        except ValueError:
-                            repair_assets.add(asset.id)
-                            valid = False
-                        if not (asset.base_traits or '').strip():
-                            repair_assets.add(asset.id)
-                    if variant:
-                        try:
-                            validate_asset_design(variant.base_traits or '', asset_kind, execution.snapshot, execution.language, project.aspect_ratio or '16:9')
-                        except ValueError:
-                            repair_variants.add(variant.id)
-                            valid = False
-                        if not (variant.base_traits or '').strip():
-                            repair_variants.add(variant.id)
+                    if asset and not (asset.base_traits or '').strip():
+                        repair_assets.add(asset.id)
+                    if variant and not (variant.base_traits or '').strip():
+                        repair_variants.add(variant.id)
                     if not valid:
                         from services.creation_agent.object_state import object_version
                         if asset and asset.id in repair_assets:
@@ -172,7 +152,7 @@ class ExtractionReuse:
                         complete = False
                         continue
                     current = item.model_copy(update={'name': name, 'aliases': asset.aliases, 'description': asset.description or '',
-                        'base_traits': asset.base_traits, 'variant': item.variant.model_copy(update={'name': variant.name, 'base_traits': variant.base_traits,
+                        'base_traits': asset.base_traits, 'variant': item.variant.model_copy(update={'existing_variant_id': variant.id, 'name': variant.name, 'base_traits': variant.base_traits,
                             'description': variant.description or ''}) if variant else None})
                     groups[field].append(current)
                     summary[field].append({'name': name, 'action': 'reused', 'asset_id': asset.id,

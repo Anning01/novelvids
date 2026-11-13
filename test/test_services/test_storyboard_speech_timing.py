@@ -1,30 +1,20 @@
-"""Speech budgets, retry preservation, and historical snapshot compatibility."""
+"""Model-directed pace, voice timeline structure and retry preservation."""
+from test.agent_stream_fixtures import streaming_model
 import json
 
 import pytest
-from pydantic import ValidationError
 
 from prompts.skill_pack import ROOT, FILES, SkillSnapshot, instructions
-from services.storyboard.speech_timing import StoryboardSpeechValidator
+from services.storyboard.speech_tracks import SpeechContent
 from test.test_services.test_prompt_language import _shot
-
-
-POLICY = {
-    'characters_per_second': [2.5, 4.5],
-    'words_per_second': [1.5, 2.7],
-    'pause_seconds': 0.2,
-    'slack_seconds': 0.5,
-}
 
 
 def snapshot(with_timing=True):
     contents = {name: (ROOT / filename).read_text() for name, filename in FILES.items()}
-    contract = json.loads(contents['storyboard_contract'])
-    if with_timing:
-        contract['speech_timing'] = POLICY
-    else:
-        contract.pop('speech_timing', None)
-    contents['storyboard_contract'] = json.dumps(contract)
+    if not with_timing:
+        contract = json.loads(contents['storyboard_contract'])
+        contract.pop('speech_baseline', None)
+        contents['storyboard_contract'] = json.dumps(contract)
     return SkillSnapshot(revision='test', contents=contents)
 
 
@@ -35,33 +25,9 @@ def shot(text, field='dialogue', end=4, start=0):
     return result
 
 
-@pytest.mark.parametrize('field', ['dialogue', 'narration'])
-def test_overfull_speech_rejected_without_mutation(field):
-    candidate = shot('我今天来到这里就是为了把所有事情都告诉你。', field, end=2)
-    before = candidate.model_dump()
-    with pytest.raises(ValueError, match='拆成连续独立镜头'):
-        StoryboardSpeechValidator(snapshot()).validate([candidate])
-    assert candidate.model_dump() == before
-
-
-@pytest.mark.parametrize('field', ['dialogue', 'narration'])
-def test_slow_speech_requires_shorter_voice_window_not_faster_playback(field):
-    with pytest.raises(ValueError, match='留白'):
-        StoryboardSpeechValidator(snapshot()).validate([shot('你好。', field)])
-
-
-def test_snapshots_without_timing_policy_keep_historical_behavior():
-    validator = StoryboardSpeechValidator(snapshot(False))
-    validator.validate([shot('很长的一段台词' * 10, end=1)])
-    old = snapshot(False)
-    old.contents.pop('storyboard_contract')
-    StoryboardSpeechValidator(old).validate([shot('你好。')])
-
-
 def test_retry_can_split_but_cannot_delete_reword_or_change_speaker():
-    validator = StoryboardSpeechValidator(snapshot())
-    with pytest.raises(ValueError):
-        validator.validate([shot('你先回家。我们明天再见。', end=1)])
+    validator = SpeechContent()
+    validator.validate([shot('你先回家。我们明天再见。', end=1)])
     for revised in ([shot('你先回家。', end=1.5)], [shot('你快回家。我们明天再见。')]):
         with pytest.raises(ValueError, match='完整保留'):
             validator.validate(revised)
@@ -73,57 +39,20 @@ def test_retry_can_split_but_cannot_delete_reword_or_change_speaker():
     validator.validate([first, second])
 
 
-def test_mixed_text_numbers_pauses_and_speaker_metadata():
-    validator = StoryboardSpeechValidator(snapshot())
-    validator.validate([shot('你好，Alex。', end=2)])
-    with pytest.raises(ValueError):
-        validator.validate_shot(shot('编号1234567890。', end=1))
-    validator.validate_shot(shot('你好。', end=1))
-    validator.validate_shot(shot('Hello my old friend.', end=2))
-
-
-def test_missing_speech_cannot_bypass_budget():
-    candidate = shot('')
-    with pytest.raises(ValueError, match='正文'):
-        StoryboardSpeechValidator(snapshot()).validate_shot(candidate)
-
-
 def test_malformed_entry_can_be_repaired_before_freezing_speech():
-    validator = StoryboardSpeechValidator(snapshot())
+    validator = SpeechContent()
     with pytest.raises(ValueError, match='正文'):
         validator.validate([shot('')])
     validator.validate([shot('你好。', end=1)])
 
 
-def test_speech_budget_is_checked_before_compilation_and_on_saved_prompt_validation():
-    from schemas.agent_workflow import StructuredSkillStoryboard
-    from prompts.storyboard import format_storyboard_prompt
-    from services.storyboard.validation import prepare_skill_storyboard, validate_skill_storyboard_shot
-
-    candidate = shot('我今天来到这里就是为了把所有事情都告诉你。', end=2)
-    candidate.prompt = format_storyboard_prompt(candidate, 'zh')
-    with pytest.raises(ValueError, match='时间不足'):
-        validate_skill_storyboard_shot(candidate, snapshot(), 'zh')
-    raw = StructuredSkillStoryboard.model_validate({'shots': [candidate.model_dump(exclude={'prompt'})]})
-    with pytest.raises(ValueError, match='时间不足'):
-        prepare_skill_storyboard(raw, snapshot(), 'zh', [], 'narration')
-
-
-def test_invalid_policy_is_rejected():
+def test_frozen_baseline_is_visible_in_model_instructions():
     value = snapshot()
-    value.contents['storyboard_contract'] = json.dumps({'speech_timing': {**POLICY, 'characters_per_second': [4, 0]}})
-    with pytest.raises(ValidationError):
-        StoryboardSpeechValidator(value)
-
-
-def test_policy_is_visible_in_model_instructions_and_snapshot_is_frozen():
-    value = snapshot()
-    assert 'speech_timing' in instructions(value, 'zh', 'storyboard')
-    assert '"speech_timing"' not in instructions(snapshot(False), 'zh', 'storyboard')
-    validator = StoryboardSpeechValidator(value)
-    value.contents['storyboard_contract'] = '{}'
-    with pytest.raises(ValueError):
-        validator.validate([shot('你好。')])
+    contract = json.loads(value.read('storyboard_contract'))
+    contract['speech_baseline']['characters_per_second'] = 3.2
+    value.contents['storyboard_contract'] = json.dumps(contract)
+    assert '"characters_per_second": 3.2' in instructions(value, 'zh', 'storyboard')
+    assert '"speech_baseline"' not in instructions(snapshot(False), 'zh', 'storyboard')
 
 
 @pytest.mark.asyncio
@@ -151,9 +80,9 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
     def respond(messages, info):
         nonlocal attempts
         attempts += 1
-        assert 'speech_timing' in info.instructions
+        assert 'speech_baseline' in info.instructions
         if attempts == 1:
-            shots = [candidate('你先回家。我们明天再见。', .5)]
+            shots = [candidate('你先回家。我们明天再见。', 3)]  # Overlap and the second track exceeds the shot.
         elif not repair:
             assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
             shots = [candidate('你先回家。', 1.5)]
@@ -162,7 +91,7 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
             shots[1]['sequence'] = 2
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots': shots})])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await scene_controller.generate(chapter.id, replace_existing=True)
@@ -182,3 +111,41 @@ async def test_generation_retries_split_both_tracks_and_never_saves_deleted_spee
         assert task.status == 4
         assert (await Scene.get(id=old.id)).prompt == 'Keep original'
         assert await Scene.filter(chapter=chapter).count() == 1
+
+
+def shipped_snapshot():
+    from prompts.skill_pack import snapshot_skills
+    return SkillSnapshot.model_validate(snapshot_skills())
+
+
+def timed_shot(number, name, text, end, cue='平静', field='dialogue'):
+    candidate = shot(text, field, end=end)
+    candidate.sequence = number
+    setattr(candidate, field, [f'0s-{end}s: @{{{name}}}（{cue}）：{text}'])
+    return candidate
+
+
+@pytest.mark.parametrize("legacy_rates", [False, True])
+def test_performance_tempo_alone_never_requests_a_repair_or_blocks_compilation(legacy_rates):
+    from services.storyboard.candidates import StoryboardCandidateValidator
+    from services.storyboard.validation import prepare_skill_storyboard
+    from schemas.agent_workflow import StructuredSkillStoryboard
+
+    text = '今天这件事我一定要问清楚。'
+    shots = [timed_shot(1, '张正元', text, 3.5),
+             timed_shot(2, '张正元', text, 1.2, '争执中抢话'),
+             timed_shot(3, '张正元', '嘘，呵，呼，嘶，吹，嘻。', 9, '耐心教他念'),
+             timed_shot(4, '张正元', text, 3.5)]
+    snap = shipped_snapshot()
+    if legacy_rates:
+        contract = json.loads(snap.read('storyboard_contract'))
+        contract.pop('speech_baseline')
+        contract['speech_timing'] = {'characters_per_second': [2.5, 4.5], 'words_per_second': [1.5, 2.7],
+                                     'pause_seconds': 0.2, 'slack_seconds': 0.5}
+        snap.contents['storyboard_contract'] = json.dumps(contract)
+    validator = StoryboardCandidateValidator(StructuredSkillStoryboard, snap, 'zh', [1, 30], {})
+    raw = [s.model_dump(exclude={'prompt'}) for s in shots]
+    board, checkpoint = validator.merge(validator.draft_type(shots=raw))
+    assert board is not None and checkpoint['pending'] == {}
+    ready = prepare_skill_storyboard(board, snap, 'zh', [], 'cinematic')
+    assert [s.dialogue for s in ready.shots] == [s.dialogue for s in shots]

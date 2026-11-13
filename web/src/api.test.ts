@@ -1,8 +1,27 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { api } from './api'
+import { api, persistedMediaRef } from './api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+it('saves a model reference locally when the upload policy disables direct storage', async () => {
+  const reference = { filename: 'reference.png', type: 'image', url: '/media/video-references/reference.png' }
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(Response.json({ code: 0, data: { direct: false } }))
+    .mockResolvedValueOnce(Response.json({ code: 0, data: reference }))
+  vi.stubGlobal('fetch', fetchMock)
+  const file = new File(['reference'], reference.filename, { type: 'image/png' })
+
+  expect(await api.uploadVideoReference(file, 12)).toEqual(reference)
+  const policy = new URL(fetchMock.mock.calls[0]![0], 'http://localhost')
+  expect(policy.pathname).toBe('/api/file/upload-policy')
+  expect(policy.searchParams.get('model_config_id')).toBe('12')
+  const [path, options] = fetchMock.mock.calls[1]!
+  expect(path).toBe('/api/video/reference/upload')
+  expect(options.body.get('file')).toBe(file)
+  expect(options.body.get('model_config_id')).toBe('12')
+  expect(persistedMediaRef({ filename: reference.filename })).toBe('/media/reference.png')
 })
 
 it('uploads the avatar as multipart file data while preserving authentication headers', async () => {

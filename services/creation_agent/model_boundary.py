@@ -12,6 +12,11 @@ from schemas.creation_agent import AgentConfiguration
 from pydantic_ai.models.wrapper import WrapperModel
 
 from models.creation_agent import AgentMessage
+from services.billing.platform import active_model_call, finish_model_call
+
+
+class ModelOutputLimitError(ValueError):
+    """The provider stopped the response at its output limit."""
 
 
 def main_request_count(calls) -> int:
@@ -21,8 +26,9 @@ def main_request_count(calls) -> int:
 
 class RecordedAgentModel(WrapperModel):
     def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
-                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation'):
+                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation', manage_context=True):
         super().__init__(model)
+        self.manage_context = manage_context
         self.message = message
         self.on_activity = on_activity
         self.repair_root = repair_root
@@ -50,10 +56,11 @@ class RecordedAgentModel(WrapperModel):
                 from services.creation_agent.reliability import retry_issues, failure_checkpoint, claim_repair
                 issues = retry_issues(messages)
                 if issues:
-                    if self.calls and self.calls[-1].get('finish_reason') == 'length':
+                    last_main = next((call for call in reversed(self.calls) if call.get('phase', 'main') != 'summary'), None)
+                    if last_main and last_main.get('finish_reason') == 'length':
                         await failure_checkpoint(self.repair_root, self.message.id,
                             [{'code': 'output_length'}], stage=self.stage)
-                        raise ValueError(localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'))
+                        raise ModelOutputLimitError(localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'))
                     await failure_checkpoint(self.repair_root, self.message.id, issues, stage=self.stage)
                     await claim_repair(self.repair_root, issues)
         if self.request_limit is not None and self.main_requests >= self.request_limit:
@@ -81,6 +88,7 @@ class RecordedAgentModel(WrapperModel):
             call["usage_reported"] = bool(usage.input_tokens or usage.output_tokens)
             call["cache_usage_reported"] = bool(usage.details.get('cache_usage_reported', False) or usage.cache_read_tokens or usage.cache_write_tokens)
             self.budget.observe(call['context'], usage)
+        await finish_model_call(call, completed=completed, usage=call.get('usage'), duration=call['duration_seconds'])
         await self._checkpoint()
         if self.on_activity:
             await self.on_activity(call)
@@ -131,19 +139,21 @@ class RecordedAgentModel(WrapperModel):
         return any(code in body for code in ('context_length_exceeded', 'context_window_exceeded', 'maximum context length'))
 
     async def request(self, messages, model_settings, model_request_parameters):
-        messages = await self.budget.prepare(messages, model_request_parameters)
+        messages = await self.budget.prepare(messages, model_request_parameters) if self.manage_context else messages
         while True:
             call, started = await self._begin(messages, model_request_parameters)
             response = None
+            billing_context = active_model_call.set((self.message, call))
             try:
                 response = await self.wrapped.request(messages, model_settings, model_request_parameters)
                 return response
             except Exception as exc:
-                if self.overflow_retried or not self._is_context_overflow(exc):
+                if not self.manage_context or self.overflow_retried or not self._is_context_overflow(exc):
                     raise
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
+                active_model_call.reset(billing_context)
                 if response is not None and self.phase != 'summary':
                     await self._save_response(call, response)
                 await self._finish(call, started, response.usage if response else None, response is not None,
@@ -153,11 +163,12 @@ class RecordedAgentModel(WrapperModel):
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
-        messages = await self.budget.prepare(messages, model_request_parameters)
+        messages = await self.budget.prepare(messages, model_request_parameters) if self.manage_context else messages
         while True:
             call, started = await self._begin(messages, model_request_parameters)
             response = None
             entered = completed = False
+            billing_context = active_model_call.set((self.message, call))
             try:
                 async with self.wrapped.request_stream(messages, model_settings, model_request_parameters, run_context) as response:
                     entered = True
@@ -167,11 +178,12 @@ class RecordedAgentModel(WrapperModel):
             except Exception as exc:
                 # Once streaming starts the caller may have seen tool deltas.
                 # Never replay a partially consumed model response.
-                if entered or self.overflow_retried or not self._is_context_overflow(exc):
+                if not self.manage_context or entered or self.overflow_retried or not self._is_context_overflow(exc):
                     raise
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
+                active_model_call.reset(billing_context)
                 if response is not None and self.phase != 'summary':
                     await self._save_response(call, response.get())
                 await self._finish(call, started, response.usage() if response else None, completed,

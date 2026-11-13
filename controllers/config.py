@@ -42,6 +42,11 @@ def _validate_image_pricing(pricing: dict, model_type) -> None:
     if not isinstance(prices, dict):
         raise HTTPException(status_code=400, detail=localized_message('生图费用需要 prices 档位对象'))
     allowed = set(image_capabilities_for(model_type).clarities)
+    if pricing.get("billing_unit") == "pixel_tier":
+        allowed = {"seedream_5_5": {"low", "high_capped"},
+                   "seedream_5_pro": {"single_low", "single_high", "layer_low", "layer_high"}}.get(model_type)
+        if not allowed or prices.keys() != allowed:
+            raise HTTPException(400, "请配置该模型的全部像素价格档位")
     for tier, value in prices.items():
         if tier not in allowed:
             raise HTTPException(status_code=400, detail=localized_message('生图费用包含不支持的清晰度档位：{p1}', p1=f'{tier}'))
@@ -113,7 +118,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
 
     @staticmethod
     def _normalize_payload(obj_in) -> dict:
-        data = obj_in.model_dump(exclude_unset=True, exclude={"id"})
+        data = obj_in.model_dump(exclude_unset=True, exclude={"id", "scope", "team_id"})
         if "task_types" in data:
             values = list(dict.fromkeys(int(value) for value in (data["task_types"] or [])))
             if not values:
@@ -141,6 +146,8 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         validate_image_protocol(model_type, str(protocol))
         pricing = data.get("pricing", instance.pricing if instance else None)
         if pricing is not None:
+            if pricing.get("billing_unit") == "pixel_tier" and str(protocol) != "novelvids":
+                raise HTTPException(400, "像素分档结算需要平台用量回执")
             _validate_image_pricing(pricing, model_type)
 
     @staticmethod
@@ -229,12 +236,20 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
     async def update(self, config_id: int, obj_in: AiModelConfigUpdate) -> AiModelConfig:
         instance = await self.get(config_id)
         data = self._normalize_payload(obj_in)
+        from services.video.ark_migration import LEGACY_ROUTE
+        old_route = (instance.processing_options or {}).get(LEGACY_ROUTE)
+        if old_route and "processing_options" in data:
+            data["processing_options"] = {**(data["processing_options"] or {}), LEGACY_ROUTE: old_route}
         self._validate_generation_payload(data, instance)
         return await super().update(instance, data)
 
     async def patch(self, config_id: int, obj_in) -> AiModelConfig:
         instance = await self.get(config_id)
         data = self._normalize_payload(obj_in)
+        from services.video.ark_migration import LEGACY_ROUTE
+        old_route = (instance.processing_options or {}).get(LEGACY_ROUTE)
+        if old_route and "processing_options" in data:
+            data["processing_options"] = {**(data["processing_options"] or {}), LEGACY_ROUTE: old_route}
         self._validate_generation_payload(data, instance)
         return await super().patch(instance, data)
 
@@ -301,7 +316,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         return result
 
     async def list_visual_styles(self) -> list[dict]:
-        """视觉风格清单（prompts/skills/styles.json 为唯一事实来源）。"""
+        """视觉风格清单（图片技能的 styles.json 为唯一事实来源）。"""
         from prompts.styles import list_styles
 
         return list_styles()
@@ -366,8 +381,21 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             if task_type == AiTaskTypeEnum.video.value:
                 self._validate_video_payload({}, selected)
             return selected
+        config = await self.find_active_default(task_type, team_id=team_id)
+        if config is None:
+            try:
+                name = AiTaskTypeEnum(task_type).nickname
+            except ValueError:
+                name = str(task_type)
+            raise HTTPException(
+                status_code=404,
+                detail=localized_message('请先在「配置」中为「{p1}」启用一个模型', p1=f'{name}'),
+            )
+        return config
+
+    async def find_active_default(self, task_type: int, team_id: int | None = None) -> AiModelConfig | None:
+        """Return the first usable scoped default when this capability is configured."""
         candidates = await resolve_scope_configs(task_type, team_id=team_id)
-        config = None
         for candidate in candidates:
             if task_type == AiTaskTypeEnum.reference_image.value:
                 try:
@@ -379,18 +407,8 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                     self._validate_video_payload({}, candidate)
                 except HTTPException:
                     continue
-            config = candidate
-            break
-        if config is None:
-            try:
-                name = AiTaskTypeEnum(task_type).nickname
-            except ValueError:
-                name = str(task_type)
-            raise HTTPException(
-                status_code=404,
-                detail=localized_message('请先在「配置」中为「{p1}」启用一个模型', p1=f'{name}'),
-            )
-        return config
+            return candidate
+        return None
 
     async def get_active_with_legacy_fallback(
         self,
@@ -469,8 +487,9 @@ class GeneralConfigController:
 
     async def update(self, obj_in: GeneralConfigUpdate) -> GeneralConfig:
         config = await self.get()
-        config.prompt_language = obj_in.prompt_language
-        await config.save(update_fields=["prompt_language", "updated_at"])
+        values = obj_in.model_dump(exclude_unset=True, exclude_none=True)
+        config.update_from_dict(values)
+        await config.save(update_fields=[*values, "updated_at"])
         return config
 
     async def get_prompt_language(self) -> str:

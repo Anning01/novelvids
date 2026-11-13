@@ -587,3 +587,22 @@ async def test_remake_keeps_a_title_already_used_by_a_different_team(tmp_path, c
     assert created.id != existing.id
     assert created.team_id == 3
     assert await Novel.filter(id=existing.id, team_id=8).exists()
+
+
+@pytest.mark.asyncio
+async def test_retry_collects_completed_steps_across_multiple_attempts_without_replaying_failures():
+    from models.agent_operation import AgentOperation
+    from services.remake.checkpoints import completed_outputs
+    scope = dict(remake_source_id=7, chapter_id=9, novel_id=3, team_id=4, user_id=5,
+                 prompt_language='zh', model_config_id=20)
+    first = await AiTask.create(task_type=6,status=4,request_params=scope)
+    second = await AiTask.create(task_type=6,status=4,request_params={**scope,'retry_of_task_id':str(first.id)})
+    for task,key,state,value in [
+        (first,'RemakeAssets:1','completed','global'), (first,'RemakeShot:1','completed','first'),
+        (second,'RemakeShot:2','completed','second'), (second,'RemakeShot:3','failed','partial')]:
+        await AgentOperation.create(task=task,key='model:remake:'+key,state=state,result={'value':value})
+    retry = {**scope, 'retry_of_task_id':str(second.id)}
+    assert await completed_outputs(retry) == {
+        'model:remake:RemakeAssets:1':{'value':'global'}, 'model:remake:RemakeShot:1':{'value':'first'},
+        'model:remake:RemakeShot:2':{'value':'second'}}
+    assert await completed_outputs({**retry, 'remake_source_id':8}) == {}

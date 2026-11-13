@@ -112,3 +112,10 @@ class GeneralConfig(AbstractBaseModel):
     class Meta:
         table = "general_configs"
         table_description = "应用级通用配置表"
+
+
+class StudioPlatformConnection(AbstractBaseModel):
+    api_key = fields.CharField(max_length=128)
+
+    class Meta:
+        table = "studio_platform_connection"

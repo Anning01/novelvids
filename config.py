@@ -1,6 +1,8 @@
 import os
 from zoneinfo import ZoneInfo
 
+from services.releases import LOCAL as STUDIO_RELEASE
+
 import dotenv
 
 dotenv.load_dotenv()
@@ -21,15 +23,19 @@ def _env_list(name: str, default: list[str]) -> list[str]:
 
 
 class Settings:
+    DEPLOYMENT_ROLE = os.getenv("NOVELVIDS_ROLE", "studio").strip().lower()
     # 数据库配置
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "sqlite://./data/novelvids.db"  # 默认使用 SQLite 数据库
     )
 
+    CREATION_AGENT_OPTIONAL_SKILLS_PATH: str = os.getenv("CREATION_AGENT_OPTIONAL_SKILLS_PATH", ".agents/skills")
+    CREATION_AGENT_CHECKPOINT_PATH: str = os.getenv("CREATION_AGENT_CHECKPOINT_PATH", "data/creation_agent_checkpoints.db")
+
     # 应用配置
     APP_NAME: str = "猫影短剧"
     APP_DESC: str = "基于第三方AI模型的短剧/小说生成平台"
-    VERSION: str = "1.0.0"
+    VERSION: str = STUDIO_RELEASE["version"]
     DEBUG: bool = _env_bool("DEBUG", True)
     GENERATE_SCHEMAS: bool = _env_bool("GENERATE_SCHEMAS", True)
 
@@ -120,15 +126,20 @@ class Settings:
     tz = ZoneInfo(TIMEZONE)
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
-    # 登录与团队功能开关（个人本地使用默认关闭）
-    AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", False)
+    # 自建工作台默认启用本地账号与团队。
+    AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", DEPLOYMENT_ROLE == "studio")
     AUTH_PROVIDER: str = os.getenv("AUTH_PROVIDER", "password").strip().lower()
     if AUTH_PROVIDER not in {"password", "qiling"}:
         raise ValueError("AUTH_PROVIDER must be password or qiling")
+    if DEPLOYMENT_ROLE == "studio":
+        AUTH_PROVIDER = "password"
     QILING_API_BASE_URL: str = os.getenv(
         "QILING_API_BASE_URL", os.getenv("NOVELVIDS_DEV_QILING_API_BASE_URL", "")
     ).strip().rstrip("/")
     QILING_SIGNUP_ENABLED: bool = _env_bool("QILING_SIGNUP_ENABLED", False)
+    if DEPLOYMENT_ROLE == "studio":
+        QILING_API_BASE_URL = ""
+        QILING_SIGNUP_ENABLED = False
     SUPER_ADMIN_USERNAME: str = os.getenv("SUPER_ADMIN_USERNAME", "")
     SUPER_ADMIN_PASSWORD: str = os.getenv("SUPER_ADMIN_PASSWORD", "")
 
@@ -157,6 +168,16 @@ class Settings:
     OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 
+    # Private temporary-object bucket on the platform; the local studio needs only its scoped API key.
+    STUDIO_TEMP_BUCKET = os.getenv("STUDIO_TEMP_BUCKET", "")
+    STUDIO_TEMP_REGION = os.getenv("STUDIO_TEMP_REGION", "")
+    STUDIO_TEMP_TEAM_BYTES = int(os.getenv("STUDIO_TEMP_TEAM_BYTES", str(20 * 1024**3)))
+    STUDIO_PLATFORM_BASE_URL = (
+        os.getenv("STUDIO_PLATFORM_BASE_URL", "").strip() or "https://shortdramas.xiazq.com/v1"
+    ).rstrip("/")
+    STUDIO_PLATFORM_API_KEY = os.getenv("STUDIO_PLATFORM_API_KEY", "")
+    STUDIO_MEDIA_CACHE_PATH = os.getenv("STUDIO_MEDIA_CACHE_PATH", "./data/studio-media")
+
     # 视频供应商任务由后端持续收口，不依赖浏览器页面保持打开。
     VIDEO_RECONCILE_INTERVAL_SECONDS: int = max(
         5,
@@ -176,6 +197,8 @@ class Settings:
     REMAKE_MEDIA_TIMEOUT_SECONDS = int(os.getenv("REMAKE_MEDIA_TIMEOUT_SECONDS", "3600"))
     REMAKE_MEDIA_MEMORY_MB = int(os.getenv("REMAKE_MEDIA_MEMORY_MB", "2048"))
     REMAKE_MEDIA_CPU_PERCENT = int(os.getenv("REMAKE_MEDIA_CPU_PERCENT", "100"))
+    MEDIA_PROCESSING_REMOTE_ENABLED: bool = _env_bool("MEDIA_PROCESSING_REMOTE_ENABLED", False)
+    MEDIA_PROCESSING_CONCURRENCY = max(1, int(os.getenv("MEDIA_PROCESSING_CONCURRENCY", "1")))
 
 
 settings = Settings()

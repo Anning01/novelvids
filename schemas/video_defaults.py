@@ -10,13 +10,17 @@ class AutoEnhancement(BaseModel):
     config_version: str | None = Field(None, pattern=r'^[a-f0-9]{64}$')
 
 
-class VideoDefaults(BaseModel):
+class ProjectVideoDefaults(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    model_config_id: int = Field(ge=1)
+    model_config_id: int | None = Field(None, ge=1)
     resolution: str = Field(min_length=1, max_length=32)
     aspect_ratio: str = Field(min_length=1, max_length=16)
     return_last_frame: bool = False
     auto_enhancement: AutoEnhancement | None = None
+
+
+class VideoDefaults(ProjectVideoDefaults):
+    model_config_id: int = Field(ge=1)
 
 
 class ApplyVideoDefaults(BaseModel):

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class MediaWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["create", "prepare", "split", "cleanup"]
+    action: Literal["create", "prepare", "split", "process", "cleanup"]
     job_id: UUID
     extension: Literal[".mp4", ".mov"] = ".mp4"
     max_bytes: int = Field(default=35_000_000, gt=1024 * 1024, le=500 * 1024 * 1024)

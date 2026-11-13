@@ -115,7 +115,7 @@ class CreationPlanner:
                 if result and result.complete:
                     chapter = await Chapter.get(id=chapter_id, novel_id=self.novel_id)
                     reusable[chapter_id] = ChapterEvidence(chapter_id=chapter_id, number=chapter.number, name=chapter.name,
-                        version=chapter_version(chapter), characters=len(chapter.content or ''), pages=[])
+                        version=chapter_version(chapter), characters=len(chapter.production_text or ''), pages=[])
             if reusable:
                 await plan_activity(self.execution, 'reused-assets', localized_message('已找到 {p0} 章可复用的完整资产，无需重复阅读生成', p0=len(reusable)))
         evidence = await loader.read([id for id in read_ids if id not in reusable], [r.model_dump() for r in brief.requirements])

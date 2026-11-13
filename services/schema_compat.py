@@ -5,6 +5,38 @@ from tortoise import Tortoise
 from config import settings
 
 
+async def ensure_billing_integration_schema() -> None:
+    """Add platform accounting fields while preserving historical records."""
+    connection = Tortoise.get_connection("default")
+    definitions = {
+        "model_usage_records": {
+            "platform_cost": "DECIMAL(18,6)",
+            "local_charge": "DECIMAL(18,6)",
+            "settlement_status": "VARCHAR(16) NOT NULL DEFAULT 'legacy'",
+        },
+        "studio_calls": {"local_pricing": "JSON" if connection.capabilities.dialect == "sqlite" else "JSONB"},
+        "platformcallreceipt": {"api_key_id": "INT"},
+    }
+    for table, columns in definitions.items():
+        if connection.capabilities.dialect == "sqlite":
+            existing = await connection.execute_query_dict(f"PRAGMA table_info({table})")
+            if not existing:
+                continue
+            names = {row["name"] for row in existing}
+            for name, definition in columns.items():
+                if name not in names:
+                    await connection.execute_script(f"ALTER TABLE {table} ADD COLUMN {name} {definition};")
+        else:
+            for name, definition in columns.items():
+                await connection.execute_script(f"ALTER TABLE IF EXISTS {table} ADD COLUMN IF NOT EXISTS {name} {definition};")
+
+    from models.config import StudioPlatformConnection
+    from models.studio_call import StudioCall
+    generator = connection.schema_generator(connection)
+    for model in (StudioPlatformConnection, StudioCall):
+        await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])
+
+
 async def ensure_resource_library_schema() -> None:
     from models.resource_library import ResourcePlacement
     connection = Tortoise.get_connection('default')
@@ -23,13 +55,13 @@ async def ensure_resource_library_schema() -> None:
 
 
 async def ensure_video_editor_schema() -> None:
-    from models.video_edit import ChapterEditDraft, EditorAsset
+    from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset
     from models.finished_episode import FinishedEpisodePublication
     from models.portfolio import PortfolioEpisode, PortfolioWork
     from models.resource_library import ProjectResource
     connection = Tortoise.get_connection('default')
     generator = connection.schema_generator(connection)
-    for model in (ChapterEditDraft, EditorAsset, ProjectResource, FinishedEpisodePublication, PortfolioWork, PortfolioEpisode):
+    for model in (ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset, ProjectResource, FinishedEpisodePublication, PortfolioWork, PortfolioEpisode):
         definition = generator._get_table_sql(model, safe=True)
         await connection.execute_script(definition['table_creation_string'])
 
@@ -175,7 +207,11 @@ async def ensure_novel_analysis_schema() -> None:
     """为已有 SQLite 项目补齐分析字段与工作台偏好。"""
     if settings.DATABASE_URL.startswith(('postgres://', 'postgresql://')):
         await Tortoise.get_connection('default').execute_script(
-            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS video_generation_defaults JSONB;')
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS video_generation_defaults JSONB;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS episodes_managed BOOLEAN NOT NULL DEFAULT FALSE;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS audiovisual_guidance TEXT;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS shot_duration_max INT NOT NULL DEFAULT 15;'
+            'ALTER TABLE IF EXISTS novels ADD COLUMN IF NOT EXISTS storyboard_enabled BOOLEAN NOT NULL DEFAULT FALSE;')
         return
     if not settings.DATABASE_URL.startswith("sqlite"):
         return
@@ -189,6 +225,10 @@ async def ensure_novel_analysis_schema() -> None:
     definitions = {
         "tags": "JSON",
         "story_outline": "TEXT",
+        "episodes_managed": "BOOL NOT NULL DEFAULT 0",
+        "audiovisual_guidance": "TEXT",
+        "shot_duration_max": "INT NOT NULL DEFAULT 15",
+        "storyboard_enabled": "BOOL NOT NULL DEFAULT 0",
         "project_type": "VARCHAR(120)",
         "project_setting": "TEXT",
         "storyboard_strategy": "VARCHAR(120)",
@@ -383,9 +423,9 @@ async def ensure_team_schema() -> None:
         await _ensure_team_member_schema(connection)
         await _backfill_default_team(connection)
 
-    from auth.models import QilingIdentity, QilingLoginAttempt
+    from auth.models import PlatformApiKey, PlatformCallReceipt, PlatformVideoJob, QilingIdentity, QilingLoginAttempt, StudioKeyGrant, StudioMediaLease
     generator = connection.schema_generator(connection)
-    for model in (QilingIdentity, QilingLoginAttempt):
+    for model in (QilingIdentity, QilingLoginAttempt, PlatformApiKey, PlatformCallReceipt, StudioKeyGrant, StudioMediaLease, PlatformVideoJob):
         await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])
     await _ensure_qiling_issuer_columns(connection)
 
@@ -542,3 +582,54 @@ async def ensure_recharge_refund_columns() -> None:
             "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMP WITH TIME ZONE;"
             "ALTER TABLE IF EXISTS recharge_orders ADD COLUMN IF NOT EXISTS refund_reason VARCHAR(255) DEFAULT '';"
         )
+
+
+async def ensure_chapter_screenplay_schema() -> None:
+    """Keep original chapter text independent from adaptations in previous releases."""
+    from tortoise.transactions import in_transaction
+    from models.chapter import Chapter
+    from models.creation_agent import PromptChange
+
+    async with in_transaction() as db:
+        if db.capabilities.dialect == "sqlite":
+            columns = await db.execute_query_dict("PRAGMA table_info(chapters)")
+            if not columns:
+                return
+            if not any(row["name"] == "episode_pacing" for row in columns):
+                await db.execute_query("ALTER TABLE chapters ADD COLUMN episode_pacing JSON")
+            if any(row["name"] == "screenplay" for row in columns):
+                return
+            tables = {row["name"] for row in await db.execute_query_dict(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        else:
+            columns = await db.execute_query_dict(
+                "SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chapters'")
+            if not columns:
+                return
+            if not any(row["name"] == "episode_pacing" for row in columns):
+                await db.execute_query("ALTER TABLE chapters ADD COLUMN IF NOT EXISTS episode_pacing JSONB")
+            if any(row["name"] == "screenplay" for row in columns):
+                return
+            await db.execute_query("LOCK TABLE chapters IN ACCESS EXCLUSIVE MODE")
+            if await db.execute_query_dict("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chapters' AND column_name='screenplay'"):
+                return
+            tables = {row["name"] for row in await db.execute_query_dict(
+                "SELECT table_name AS name FROM information_schema.tables WHERE table_schema=current_schema()")}
+        await db.execute_query("ALTER TABLE chapters ADD COLUMN screenplay TEXT")
+        if "work_sync_objects" in tables:
+            await db.execute_query(
+                "UPDATE chapters SET screenplay=content, content='' WHERE EXISTS (SELECT 1 FROM work_sync_objects w "
+                "WHERE w.kind='episode' AND w.local_id=chapters.id)")
+        if "creation_prompt_changes" in tables:
+            # Only classify an old adaptation when its write receipt matches the current text.
+            history = {}
+            for changes in await PromptChange.filter(reverted_at=None).using_db(db).order_by("id").values_list("changes", flat=True):
+                for change in changes:
+                    if change.get("kind") == "chapter" and "content" in change.get("after", {}):
+                        chapter_id = change["target_id"]
+                        before = change["before"]["content"]
+                        original, previous = history.get(chapter_id, (before, before))
+                        history[chapter_id] = (original if previous == before else before, change["after"]["content"])
+            for chapter_id, (original, draft) in history.items():
+                await Chapter.filter(id=chapter_id, screenplay=None, content=draft).using_db(db).update(
+                    content=original, screenplay=draft)

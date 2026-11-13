@@ -29,7 +29,11 @@ class UpstreamIdentity(BaseModel):
 
 
 def enabled() -> bool:
-    return bool(settings.AUTH_ENABLED and settings.AUTH_PROVIDER == "qiling" and settings.QILING_API_BASE_URL)
+    return bool(_platform_login() and settings.QILING_API_BASE_URL)
+
+
+def _platform_login() -> bool:
+    return settings.AUTH_ENABLED and settings.DEPLOYMENT_ROLE == "platform" and settings.AUTH_PROVIDER == "qiling"
 
 
 def _now() -> datetime:
@@ -56,7 +60,7 @@ async def _request(method: str, path: str, **kwargs) -> dict:
 
 
 async def start(user: User | None = None) -> dict:
-    if settings.AUTH_PROVIDER != "qiling":
+    if not _platform_login():
         raise HTTPException(404, msg("登录方式不可用"))
     if user and await QilingIdentity.filter(user_id=user.id).exists():
         raise HTTPException(409, msg("当前账号已绑定器灵"))
@@ -78,7 +82,7 @@ async def start(user: User | None = None) -> dict:
 
 
 async def poll(token: str, user: User | None = None) -> dict:
-    if settings.AUTH_PROVIDER != "qiling":
+    if not _platform_login():
         raise HTTPException(404, msg("登录方式不可用"))
     key = hash_token(token)
     owner_id = user.id if user else None

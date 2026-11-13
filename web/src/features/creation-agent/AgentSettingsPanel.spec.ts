@@ -17,16 +17,14 @@ beforeEach(() => {
   vi.mocked(agentApi.updateConfiguration).mockImplementation(async value => ({ code: 0, message: '', data: value }))
 })
 
-it('keeps assistant activation and budgets backend managed', async () => {
+it('exposes budget controls without an activation switch', async () => {
   const wrapper = mount(AgentSettingsPanel)
   await flushPromises()
   expect(wrapper.text()).not.toContain('运行超时')
   expect(wrapper.text()).not.toContain('摘要等待时间')
   for (const label of ['模型调用上限', '工具调用上限', '每轮总用量上限']) expect(wrapper.text()).not.toContain(label)
-  const enabled = wrapper.get('[role="switch"]')
-  await enabled.trigger('click')
-  await wrapper.get('form').trigger('submit')
-  expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, request_limit: null, max_targets: 32 }))
+  expect(wrapper.find('[role="switch"]').exists()).toBe(false)
+
 })
 
 it('keeps advanced controls collapsed and preserves edited ratios on save', async () => {
@@ -67,5 +65,17 @@ it('allows clearing the optional character cap and saves null for model-managed 
   await wrapper.get('form').trigger('submit')
   await flushPromises()
   expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ max_context_characters: null }))
-  expect(wrapper.get('[placeholder="留空，由模型服务判断"]').element).toHaveValue(null)
+  expect(wrapper.findAll('label').find(label => label.text().includes('上下文字符上限'))!.get('input').element).toHaveValue(null)
+})
+
+
+it('allows removing the per-response output cap', async () => {
+  const wrapper = mount(AgentSettingsPanel)
+  await flushPromises()
+  const cap = wrapper.findAll('label').find(label => label.text().includes('单次输出上限'))!.get('input')
+  expect(cap.attributes('placeholder')).toBe('留空，由模型服务判断')
+  await cap.setValue('')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({max_output_tokens: null}))
 })

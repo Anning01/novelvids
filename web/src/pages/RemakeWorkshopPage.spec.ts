@@ -88,6 +88,27 @@ describe('RemakeWorkshopPage', () => {
     expect(wrapper.text()).toContain('AI 识别风格')
   })
 
+  it('accepts one dropped video and validates invalid and multiple files before upload', async () => {
+    const wrapper = mount(RemakeWorkshopPage)
+    await flushPromises()
+    const zone = wrapper.get('.upload-zone')
+    const video = new File(['video'], 'demo.mov', {type:'video/quicktime'})
+    const transfer = {types:['Files'], files:[video], dropEffect:'none'}
+    await zone.trigger('dragenter', {dataTransfer:transfer})
+    expect(zone.text()).toContain('松开即可上传视频')
+    expect(transfer.dropEffect).toBe('copy')
+    await zone.trigger('drop', {dataTransfer:{files:[video,video]}})
+    expect(wrapper.get('[role="alert"]').text()).toContain('一次只能拖入一个视频')
+    await zone.trigger('drop', {dataTransfer:{files:[new File(['text'], 'bad.txt')]}})
+    expect(wrapper.get('[role="alert"]').text()).toContain('仅支持 MP4 或 MOV')
+    expect(api.uploadRemakeVideo).not.toHaveBeenCalled()
+    await zone.trigger('drop', {dataTransfer:transfer})
+    await flushPromises()
+    expect(api.uploadRemakeVideo).toHaveBeenCalledExactlyOnceWith(video)
+    expect(wrapper.find('.uploaded-file').exists()).toBe(true)
+    expect(api.createRemakeProject).not.toHaveBeenCalled()
+  })
+
   it('rejects an unsupported local file before making a request', async () => {
     const wrapper = mount(RemakeWorkshopPage)
     await flushPromises()

@@ -14,7 +14,7 @@ import { exportApi } from '@/features/video-export/api'
 vi.mock('@/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/api')>()
   return { ...original, api: { ...original.api, novelMeta: vi.fn(), chapters: vi.fn(),
-    videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(), generateVideoBatch: vi.fn(), latestVideoBatch: vi.fn(), task: vi.fn(),
+    videoGenerationModels: vi.fn(), workbenchBootstrap: vi.fn(), queryVideo: vi.fn(), generateVideo: vi.fn(), generateVideoBatch: vi.fn(), latestVideoBatch: vi.fn(), task: vi.fn(), optimizeScenePrompt: vi.fn(),
     extractVideoLastFrame: vi.fn(), videoGenerationHistory: vi.fn(), scene: vi.fn(), updateScene: vi.fn(), applyVideoDefaults: vi.fn() } }
 })
 
@@ -371,4 +371,78 @@ it('retains the server submission time when polling returns only video status', 
   expect(wrapper.get('.video-generation-progress time').text()).toBe('12 分 31 秒')
   await vi.advanceTimersByTimeAsync(2000)
   expect(wrapper.get('.video-generation-progress time').text()).toBe('12 分 33 秒')
+})
+
+it.each(['light', 'dark'])('switches between edited general and model prompts at the generate button in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
+  const shot = { ...scene, metadata: { work_package: { drafts: { general: scene.prompt, seedance_2: '已导入的专项稿' } } } }
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [shot], assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (_, update) => ({ data: { ...shot, ...update } }) as never)
+  const { wrapper } = await render()
+  const toggle = wrapper.get('.prompt-actions .prompt-version-toggle')
+  const editor = wrapper.getComponent(ScenePromptEditor)
+  expect(toggle.element.nextElementSibling?.getAttribute('aria-label')).toBe('生成视频')
+  expect(toggle.text()).toBe('模型 Skills 优化')
+  await toggle.trigger('click')
+  expect(editor.props('modelValue')).toBe('已导入的专项稿')
+  expect(toggle.text()).toBe('使用通用 Prompt')
+  editor.vm.$emit('update:modelValue', '调整后的专项稿')
+  await toggle.trigger('click')
+  expect(editor.props('modelValue')).toBe(scene.prompt)
+  await toggle.trigger('click')
+  expect(editor.props('modelValue')).toBe('调整后的专项稿')
+  await toggle.trigger('click')
+  expect(api.optimizeScenePrompt).not.toHaveBeenCalled()
+  editor.vm.$emit('update:modelValue', '从门外传来喊声')
+  vi.mocked(api.optimizeScenePrompt).mockResolvedValue({data: {id: 'opt', status: 1}} as never)
+  vi.mocked(api.task).mockResolvedValue({data: {status: 3, response_data: {scene_id: scene.id, model_type: model.model_type, prompt: '新专项稿'}}} as never)
+  await toggle.trigger('click')
+  await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledExactlyOnceWith(scene.id, expect.objectContaining({
+    model_config_id: model.config_id, generic_prompt: '从门外传来喊声', duration: 6,
+  }))
+  expect(editor.props('modelValue')).toBe('新专项稿')
+  await toggle.trigger('click')
+  expect(editor.props('modelValue')).toBe('从门外传来喊声')
+  expect(api.generateVideo).not.toHaveBeenCalled()
+})
+
+it('keeps the editor on the general prompt during optimization failure and after concurrent edits', async () => {
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data: [model]} as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data: {chapter, scenes: [scene], assets: [], videos: {}}} as never)
+  vi.mocked(api.updateScene).mockResolvedValue({data: scene} as never)
+  vi.mocked(api.optimizeScenePrompt).mockResolvedValue({data: {id: 'later', status: 1}} as never)
+  vi.mocked(api.task).mockResolvedValueOnce({data: {status: 4, error_message: '优化失败'}} as never)
+  const {wrapper} = await render()
+  const toggle = wrapper.get('.prompt-version-toggle')
+  await toggle.trigger('click')
+  await flushPromises()
+  expect(toggle.text()).toBe('模型 Skills 优化')
+  const editor = wrapper.getComponent(ScenePromptEditor)
+  expect(editor.props('modelValue')).toBe(scene.prompt)
+  let finish!: () => void
+  vi.mocked(api.task).mockImplementationOnce(() => new Promise(resolve => {
+    finish = () => resolve({data: {status: 3, response_data: {scene_id: scene.id, model_type: model.model_type, prompt: '旧结果'}}} as never)
+  }))
+  await toggle.trigger('click')
+  await flushPromises()
+  expect(toggle.attributes('disabled')).toBeDefined()
+  expect(toggle.text()).toBe('优化中')
+  editor.vm.$emit('update:modelValue', '编辑期间的用户改稿')
+  finish()
+  await flushPromises()
+  expect(editor.props('modelValue')).toBe('编辑期间的用户改稿')
+  expect(toggle.attributes('aria-pressed')).toBe('false')
+})
+
+it('waits for a local model choice when imported settings have no binding', async () => {
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data:{chapter,scenes:[{...scene,metadata:{}}],assets:[],videos:{}}} as never)
+  vi.mocked(api.novelMeta).mockResolvedValue({data:{id:9,name:'导入项目',video_generation_defaults:{
+    model_config_id:null,resolution:'480p',aspect_ratio:'16:9',return_last_frame:true}}} as never)
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data:[model]} as never)
+  const {wrapper} = await render()
+  expect(wrapper.get('.chapter-model-select button').text()).toContain('未选择视频模型')
+  expect(wrapper.get('button[aria-label="生成视频"]').attributes('disabled')).toBeDefined()
+  expect(api.generateVideo).not.toHaveBeenCalled()
 })

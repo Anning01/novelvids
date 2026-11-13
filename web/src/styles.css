@@ -11,16 +11,17 @@ a { color: inherit; text-decoration: none; }
 ::-webkit-scrollbar-thumb { border-radius: 10px; background: #4a433c; }
 
 .app-shell { display: flex; width: 100%; height: 100%; overflow: hidden; background: #fff; }
-.app-sidebar { position: relative; z-index: 30; display: flex; width: 192px; flex: 0 0 auto; flex-direction: column; border-right: 1px solid #e7e8ee; color: #4d5160; background: #fbfbfd; }
-.app-brand { display: flex; min-height: 68px; align-items: center; gap: 10px; padding: 10px 16px 6px; color: #2f3342; }
+.app-sidebar { position: relative; z-index: 30; display: flex; width: 192px; min-height: 0; overflow-x: hidden; overflow-y: auto; flex: 0 0 auto; flex-direction: column; border-right: 1px solid #e7e8ee; color: #4d5160; background: #fbfbfd; }
+.app-brand { display: flex; min-height: 68px; flex: 0 0 auto; align-items: center; gap: 10px; padding: 10px 16px 6px; color: #2f3342; }
 .app-brand img { width: 36px; height: 36px; flex: 0 0 auto; overflow: hidden; border-radius: 50%; background: #eef4f6; object-fit: cover; box-shadow: inset 0 0 0 1px rgb(49 74 86 / 10%); }
 .app-brand span { display: grid; min-width: 0; line-height: 1; }
 .app-brand strong { font-size: 15px; font-weight: 700; letter-spacing: .08em; }
 .app-brand small { margin-top: 5px; color: #979bad; font-size: 8px; font-weight: 650; letter-spacing: .12em; }
-.app-sidebar nav { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 2px 8px 20px; }
-.app-nav-group { display: grid; gap: 4px; margin-top: 20px; }
-.app-nav-group h2 { margin: 0 12px 5px; color: #9297aa; font-size: 13px; font-weight: 400; line-height: 20px; }
-.app-nav-item { display: flex; min-height: 40px; align-items: center; gap: 10px; padding: 0 12px; border-radius: 10px; color: #4d5160; font-size: 14px; font-weight: 450; line-height: 1; transition: color .15s ease, background-color .15s ease; }
+.app-sidebar nav { display: flex; min-height: 72px; flex: 1 1 0; flex-direction: column; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; scroll-padding-block: 8px; padding: 2px 8px 12px; }
+.app-sidebar nav > * { flex-shrink: 0; }
+.app-nav-group { display: grid; gap: 2px; margin-top: 14px; }
+.app-nav-group h2 { margin: 0 12px 3px; color: #9297aa; font-size: 13px; font-weight: 400; line-height: 20px; }
+.app-nav-item { display: flex; min-height: 36px; align-items: center; gap: 10px; padding: 0 12px; border-radius: 10px; color: #4d5160; font-size: 14px; font-weight: 450; line-height: 1; transition: color .15s ease, background-color .15s ease; }
 .app-nav-item svg { flex: 0 0 auto; stroke-width: 1.7; }
 .app-nav-item:hover { color: #303444; background: #f2f3f8; }
 .app-nav-item.is-active { color: #5758f7; background: #eeefff; }

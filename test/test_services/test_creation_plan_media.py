@@ -1,4 +1,5 @@
 """Existing prompts are revised visibly before actual image/video dispatch."""
+from test.agent_stream_fixtures import streaming_model
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -166,7 +167,7 @@ async def test_historical_token_cap_does_not_stop_a_confirmed_run():
     target, execution = await media_fixture()
     execution.params['agent_configuration']['total_tokens_limit'] = 1000
     await AgentMessage.filter(task_id=execution.params['creation_run_id'], role='assistant').update(usage={'input_tokens': 1000})
-    model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '继续执行'})]))
+    model = streaming_model(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '继续执行'})]))
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await execution._generate('video', {}, CompletePrompt)
@@ -181,7 +182,7 @@ async def test_prior_planning_usage_does_not_consume_the_confirmed_round_budget(
     _, execution = await media_fixture()
     execution.params['agent_configuration']['total_tokens_limit'] = 1000
     await AgentMessage.filter(task_id=execution.params['creation_plan_id'], role='assistant').update(usage={'input_tokens': 2000})
-    model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '完整候选'})]))
+    model = streaming_model(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '完整候选'})]))
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await execution._generate('video', {}, CompletePrompt)
@@ -204,7 +205,7 @@ async def test_storyboard_resources_are_supplied_without_extra_skill_calls(strat
         assert project['video_style'] == '已配置的画面风格'
         assert project['storyboard_rules'] == json.loads(execution.snapshot.read('strategies'))[strategy]
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '完整候选'})])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         await execution._generate('video', {}, CompletePrompt)
 
@@ -226,7 +227,7 @@ async def test_unknown_storyboard_reference_is_repaired_before_the_result_is_acc
         else:
             assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'shots': [shot.model_dump(exclude={'prompt'})]})])
-    model = FunctionModel(respond); model.client = AsyncMock()
+    model = streaming_model(respond); model.client = AsyncMock()
     entity = SceneEntity(name='郊区小楼', aliases=[], description='旧楼', asset_type='场景')
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await execution._generate('storyboard', {'entities': [entity.model_dump()], 'strategy': 'cinematic'}, StructuredSkillStoryboard)
@@ -257,7 +258,7 @@ async def test_actual_model_boundary_contains_scoped_plan_and_verbatim_sources(s
         assert 'step_context' in content[1]
         captured.append(facts)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, response)])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         await execution._generate(skill, {'chapter': '当前章正文'}, output_type)

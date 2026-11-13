@@ -5,6 +5,8 @@ import logging
 from contextvars import ContextVar
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
+
 from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
 from services.creation_agent.waiting import WaitingForMedia
@@ -71,6 +73,8 @@ class AiTaskExecutor:
         self._task_locks: dict[str, asyncio.Lock] = {}
         self._production_condition = asyncio.Condition()
         self._production_active = 0
+        self._image_active: dict[int, int] = {}
+        self._image_capacity: dict[int, int] = {}
 
     def is_executing(self, task_id) -> bool:
         """An executor lease includes response persistence and usage settlement."""
@@ -163,6 +167,10 @@ class AiTaskExecutor:
                 return previous
             for secret in ('api_key', 'base_url'):
                 request_params.pop(secret, None)
+        if request_params.get('chapter_id') is not None and request_params.get('novel_id') is not None:
+            from models.chapter import Chapter
+            if not await Chapter.filter(id=request_params['chapter_id'], novel_id=request_params['novel_id']).using_db(db_connection).exists():
+                raise ValueError(localized_message('章节不存在'))
         async def create(connection):
             return await AiTask.create(task_type=task_type.value, request_params=request_params,
                 status=TaskStatusEnum.pending.value, using_db=connection)
@@ -181,13 +189,28 @@ class AiTaskExecutor:
                     return
                 from services.creation_agent.sessions import agent_configuration
                 capacity = (await agent_configuration()).production_concurrency
+                params = task.request_params
+                model_id = (params.get("model_config_id") if task.task_type == AiTaskTypeEnum.reference_image
+                            else params.get("cover_model_config_id") if params.get("include_cover") else None)
+                if model_id is not None:
+                    from models.config import AiModelConfig
+                    config = await AiModelConfig.filter(id=model_id).only("concurrency").first()
+                    if config:
+                        self._image_capacity[model_id] = max(1, config.concurrency)
+                    else:
+                        model_id = None
                 async with self._production_condition:
-                    await self._production_condition.wait_for(lambda: self._production_active < capacity)
+                    await self._production_condition.wait_for(lambda: self._production_active < capacity and
+                        (model_id is None or self._image_active.get(model_id, 0) < self._image_capacity[model_id]))
+                    if model_id is not None:
+                        self._image_active[model_id] = self._image_active.get(model_id, 0) + 1
                     self._production_active += 1
                 try:
                     await self._run_once(task)
                 finally:
                     async with self._production_condition:
+                        if model_id is not None:
+                            self._image_active[model_id] -= 1
                         self._production_active -= 1
                         self._production_condition.notify_all()
         finally:
@@ -266,7 +289,7 @@ class AiTaskExecutor:
                 logger.warning("AI task failed: task_id=%s error_type=%s", task.id, type(e).__name__)
             else:
                 logger.exception("AI task #%s failed", task.id)
-            await self._fail(task, str(e), error=e)
+            await self._fail(task, str(e.detail) if isinstance(e, HTTPException) else str(e), error=e)
         finally:
             task_language.reset(token)
 
@@ -274,10 +297,12 @@ class AiTaskExecutor:
         token = current_task_id.set(task.id)
         try:
             from services.creation_agent.skill_execution import WORKFLOW_VERSION
-            if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
-                from services.creation_agent.production import run_production
-                return await run_production(task, handler)
-            return await handler.execute(task.request_params)
+            from prompts.skill_pack import use_skill_snapshot
+            with use_skill_snapshot(task.request_params.get("skill_snapshot")):
+                if task.request_params.get('workflow_version') == WORKFLOW_VERSION and task.task_type != AiTaskTypeEnum.creation_agent.value:
+                    from services.creation_agent.production import run_production
+                    return await run_production(task, handler)
+                return await handler.execute(task.request_params)
         finally:
             current_task_id.reset(token)
 
@@ -404,6 +429,13 @@ class AiTaskExecutor:
             **{field: getattr(task, field) for field in update_fields if field != "updated_at"},
             updated_at=datetime.now(timezone.utc),
         )
+        if error is not None:
+            from services.diagnostics import exception_site
+            try:
+                await AgentOperation.update_or_create(task=task, key='diagnostic:failure',
+                    defaults={'state':'completed', 'result':exception_site(error)})
+            except Exception:
+                logger.warning("Failed to record diagnostic site for task %s", task.id)
         await task.refresh_from_db()
         await task_signals.publish(str(task.id))
         partial_result = getattr(error, 'partial_result', None)

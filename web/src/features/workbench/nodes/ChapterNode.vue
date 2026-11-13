@@ -15,7 +15,7 @@ const error = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const chapter = computed(() => props.data.chapter as Chapter)
 const title = computed(() => props.label || tr('第 {p0} 章', { p0: chapter.value.number }))
-const content = computed(() => chapter.value.content || '')
+const content = computed(() => chapter.value.screenplay || chapter.value.content || '')
 const draft = ref(content.value)
 
 function resizeToContent() {
@@ -35,7 +35,7 @@ async function saveContent() {
   error.value = ''
   saving.value = true
   try {
-    await store.saveChapter({ content: draft.value })
+    await store.saveChapter(chapter.value.screenplay ? { screenplay: draft.value } : { content: draft.value })
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : tr('章节保存失败')
   } finally {

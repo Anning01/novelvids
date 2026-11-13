@@ -103,6 +103,27 @@ describe('分镜页面视频模型偏好', () => {
     } as never)
   })
 
+  it('按镜展示 MCP 已导入的各模型稿，即使本地没有相应的视频模型', async () => {
+    vi.mocked(api.videoGenerationModels).mockResolvedValue({code: 0, message: 'ok', data: []})
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({
+      code: 0, message: 'ok', data: { chapter, assets: [], videos: {}, scenes: [
+        {id: 4, sequence: 4, duration: 15, prompt: '门内听到喊声',
+          metadata: {work_package: {drafts: {general: '门内听到喊声', minimax_h3: 'H3 喂水'}}}},
+        {id: 5, sequence: 5, duration: 15, prompt: '递窝头',
+          metadata: {work_package: {drafts: {general: '递窝头', seedance_2_5: 'Seedance 接窝头'}}}},
+      ]},
+    } as never)
+    const wrapper = await mountPage()
+    try {
+      await flushPromises()
+      const fourth = wrapper.get('[data-scene-id="4"] .model-optimized-prompt')
+      const fifth = wrapper.get('[data-scene-id="5"] .model-optimized-prompt')
+      expect(fourth.get('p').text()).toBe('H3 喂水')
+      expect(fifth.get('p').text()).toBe('Seedance 接窝头')
+      expect(fourth.find('button').exists()).toBe(false)
+    } finally { wrapper.unmount() }
+  })
+
   it('刷新后恢复已保存模型，并在切换时立即落库', async () => {
     const wrapper = await mountPage()
     await flushPromises()

@@ -1,4 +1,6 @@
 """Private cover storage for completed edits, including existing exports."""
+
+from services.media_processing import run_media
 import asyncio
 from pathlib import Path
 import subprocess
@@ -18,7 +20,7 @@ def cover_reference(export_id: int) -> str:
 
 def first_frame(video: Path, cover: Path) -> None:
     try:
-        subprocess.run([
+        run_media([
             'ffmpeg', '-v', 'error', '-nostdin', '-y', '-threads', '1', '-i', str(video),
             '-map', '0:v:0', '-vf', "scale='min(960,iw)':-2",
             '-frames:v', '1', '-threads', '1', '-q:v', '3', str(cover),

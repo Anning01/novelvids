@@ -2,7 +2,7 @@ import pytest
 import json
 
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
-from services.extraction.extractor import AssetExtractionResult, Person, Scene, Item, validate_asset_prompt_contract
+from services.extraction.extractor import AssetExtractionResult
 from test.visual_fields import trait_labels
 
 
@@ -50,67 +50,25 @@ def test_fixed_fields_match_the_original_14_and_15_field_contracts(language):
     assert '资产输出协议' in instructions(snapshot, language, 'assets')
 
 
-@pytest.mark.parametrize('language', ['zh', 'en'])
-@pytest.mark.parametrize('kind', ['person', 'group', 'animal', 'scene', 'item'])
-def test_new_asset_prompts_require_full_tasks_and_type_specific_descriptions(language, kind):
-    actual_kind = 'person' if kind == 'animal' else kind
-    prompt = fixed_asset_prompt(language, actual_kind, '9:16')
-    if kind in ('person', 'group', 'animal'):
-        result = AssetExtractionResult(persons=[Person(name='Test', label={'person':'人物','group':'群像','animal':'动物'}[kind], base_traits=prompt)], scenes=[], items=[])
-    elif kind == 'scene':
-        result = AssetExtractionResult(persons=[], scenes=[Scene(name='Test', base_traits=prompt)], items=[])
-    else:
-        result = AssetExtractionResult(persons=[], scenes=[], items=[Item(name='Test', base_traits=prompt)])
+@pytest.mark.parametrize('language,design', [
+    ('zh', '次卧的正面用暖橙色晨光，反向机位用窗外透入的冷蓝色月光。'),
+    ('en', 'The front view uses amber morning light. The reverse view uses cool blue moonlight.'),
+])
+def test_asset_candidates_preserve_model_wording_and_scene_colors(language, design):
+    from services.extraction.validation import AssetCandidateValidator
+
     snapshot = synthetic_snapshot()
-    validate_asset_prompt_contract(result, snapshot, language, '9:16')
-    if kind != 'item':  # The original prop template has no aspect-ratio placeholder.
-        with pytest.raises(ValueError, match='complete task template'):
-            validate_asset_prompt_contract(result, snapshot, language, '16:9')
-
-
-def test_optional_template_requires_both_heading_and_final_guard():
-    snapshot = synthetic_snapshot()
-    prompt = fixed_asset_prompt(kind='item')
-    for invalid in (prompt.replace('Description:item:', ''), prompt.rsplit('\n\n', 1)[0], 'Description:item:\nEND-GUARD'):
-        result = AssetExtractionResult(persons=[], scenes=[], items=[Item(name='Test', base_traits=invalid)])
-        with pytest.raises(ValueError):
-            validate_asset_prompt_contract(result, snapshot, 'zh', '16:9')
-
-
-def test_historical_empty_contract_keeps_existing_free_text_behavior():
-    raw = snapshot_skills()
-    raw['contents']['asset_contract'] = '{}'
-    snapshot = SkillSnapshot.model_validate(raw)
-    result = AssetExtractionResult(persons=[Person(name='Public', base_traits='Existing public free-text design')], scenes=[], items=[])
-    validate_asset_prompt_contract(result, snapshot, 'zh', '16:9')
-    assert '\n资产输出协议：\n' not in instructions(snapshot, 'zh', 'assets')
-
-
-@pytest.mark.parametrize('change', ['no_task', 'prose', 'missing_field', 'wrong_order', 'placeholder'])
-def test_shortened_or_unstructured_designs_are_rejected_before_persistence(change):
-    snapshot = synthetic_snapshot()
-    prompt = fixed_asset_prompt()
-    if change == 'no_task':
-        prompt = prompt.split('角色描述：', 1)[1]
-    elif change == 'prose':
-        prompt = prompt.split('角色描述：', 1)[0] + '角色描述：\n十八岁男生，普通校服。'
-    elif change == 'missing_field':
-        prompt = prompt.replace('**性别**: Male\n', '')
-    elif change == 'wrong_order':
-        prompt = prompt.replace('**性别**: Male\n**年龄**: 18 years old', '**年龄**: 18 years old\n**性别**: Male')
-    else:
-        prompt = prompt.replace('**性别**: Male', '**性别**: 未提及')
-    result = AssetExtractionResult(persons=[Person(name='Test', base_traits=prompt)], scenes=[], items=[])
-    with pytest.raises(ValueError):
-        validate_asset_prompt_contract(result, snapshot, 'zh', '16:9')
-
-
-def test_historical_queued_snapshots_do_not_receive_new_contracts():
-    raw = snapshot_skills()
-    del raw['contents']['asset_contract']
-    snapshot = SkillSnapshot.model_validate(raw)
-    result = AssetExtractionResult(persons=[Person(name='Old', base_traits='Historical prompt')], scenes=[], items=[])
-    validate_asset_prompt_contract(result, snapshot, 'zh', '16:9')
+    validator = AssetCandidateValidator(AssetExtractionResult)
+    draft = validator.draft_type.model_validate({
+        'persons': [], 'items': [],
+        'scenes': [{'name': '次卧', 'base_traits': design, 'variant': {
+            'name': '夜间', 'base_traits': design, 'change_reason': '切换时段',
+        }}],
+    })
+    accepted = validator.merge(draft)
+    assert not validator.issues
+    assert accepted.scenes[0].base_traits == accepted.scenes[0].variant.base_traits == design
+    assert '资产输出协议' in instructions(snapshot, language, 'assets')
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
@@ -130,22 +88,22 @@ def test_asset_design_rules_cover_specific_designs_instead_of_plot_summaries():
     for requirement in (
         "眉眼", "鼻梁", "嘴唇", "头身比", "上装", "下装", "鞋履",
         "人数规模", "个体差异", "近景、中景、远景", "空间拓扑",
-        "结构部件", "磨损", "普通校服", "逐项自检",
+        "结构部件", "磨损", "普通校服", "具体的视觉设计",
     ):
         assert requirement in rules
 
 
 @pytest.mark.parametrize('language', ['zh', 'en'])
 @pytest.mark.parametrize('skill', ['assets', 'editing', 'image'])
-def test_all_asset_writers_receive_mandatory_format_above_user_preferences(language, skill):
+def test_all_asset_writers_receive_layout_guidance_and_allow_user_design_choices(language, skill):
     snapshot = synthetic_snapshot()
     rendered = instructions(snapshot, language, skill)
     contract = json.loads(snapshot.read('asset_contract'))[language]
     for kind in ('person', 'group', 'scene', 'item'):
         assert contract[kind]['heading'] in rendered
         assert contract[kind]['task'] in rendered
-    assert '用户补充要求只用于协议允许的设计内容' in rendered
-    assert '项目封面不适用资产协议' in rendered
+    assert '按用户意图和资产类型组织具体视觉内容' in rendered
+    assert '项目封面按封面任务生成' in rendered
 
 
 def test_creative_requirements_preserve_user_text_inside_mandatory_format():
@@ -155,6 +113,22 @@ def test_creative_requirements_preserve_user_text_inside_mandatory_format():
         result = creative_requirements(text, language)
         assert result.endswith(text)
         assert '格式' in result if language == 'zh' else 'format' in result
-    from pathlib import Path
-    editing = (Path(__file__).parents[2] / 'prompts/skills/editing.md').read_text()
+    from prompts.skill_pack import read_skill
+    editing = read_skill('editing')
     assert '不要求固定自然语言栏位' not in editing
+
+
+@pytest.mark.parametrize(('language', 'empty_scene'), [('zh', '空场景'), ('en', 'unoccupied')])
+def test_scene_renderer_adds_layout_and_ratio_without_overriding_the_color_design(language, empty_scene):
+    from prompts.creation_standards import render_asset_design
+
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    contract = json.loads(snapshot.read('asset_contract'))[language]['scene']
+    design = '暖光正面，冷光反面。' if language == 'zh' else 'Warm front view, cool reverse view.'
+    result = render_asset_design(design, {}, 'scene', snapshot, language, '9:16')
+    assert result.startswith(contract['task'].format(aspect_ratio='9:16'))
+    assert design in result
+    assert result.endswith(contract['suffix']) and empty_scene in result
+    assert '光照一致' not in result and 'lighting consistent' not in result
+    for skill in ('image', 'assets', 'remake'):
+        assert contract['suffix'] in instructions(snapshot, language, skill)

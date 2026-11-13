@@ -60,3 +60,28 @@ async def test_generation_forwards_image_inputs_to_the_configured_protocol():
         )
 
     assert generated.await_args.kwargs["extra_body"] == {"image": references}
+
+
+@pytest.mark.parametrize("language, expected", [("zh", "参考图 2 的衣服和参考图 1 的脸"),
+                                                ("en", "reference image 2 的衣服和reference image 1 的脸")])
+async def test_reference_mentions_follow_submitted_image_order(language, expected):
+    from prompts.image_references import render_image_reference_mentions
+
+    prompt = "@{参考图2} 的衣服和@{参考图1} 的脸"
+    assert render_image_reference_mentions(prompt, 2, language) == expected
+    references = ["https://example.com/face.png", "https://example.com/clothes.png"]
+    generated = AsyncMock(return_value=[])
+    with patch("services.reference.generator.generate_images", generated):
+        await generate_for_sora_consistency({"base_traits":prompt}, base_url="https://example.com/v1", api_key="test",
+            reference_images=references, prompt_language=language)
+    assert generated.await_args.kwargs["prompt"] == expected
+    assert generated.await_args.kwargs["extra_body"]["image"] == references
+
+
+async def test_removed_reference_is_rejected_before_calling_image_provider():
+    generated = AsyncMock()
+    with patch("services.reference.generator.generate_images", generated):
+        with pytest.raises(ValueError, match="参考图片已移除"):
+            await generate_for_sora_consistency({"base_traits":"参考 @{参考图2}"}, base_url="https://example.com/v1",
+                api_key="test", reference_images=["https://example.com/one.png"])
+    generated.assert_not_awaited()

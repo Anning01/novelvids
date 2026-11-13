@@ -10,6 +10,8 @@ import { usageLabel } from './recordDisplay'
 import { notice } from '@/shared/notice'
 import type { BillingStatement, BillingStatementFilters, BillingStatementParties, BillingStatementRow } from '@/types'
 
+defineProps<{ compact?: boolean }>()
+
 const parties = ref<BillingStatementParties>({ teams: [], users: [] })
 const partyError = ref('')
 const team = ref('')
@@ -72,7 +74,7 @@ onBeforeUnmount(() => { epoch += 1 })
 </script>
 
 <template>
-  <section class="billing-statements" :aria-label="tr('消费账单')">
+  <section class="billing-statements" :class="{ 'is-compact': compact }" :aria-label="tr('消费账单')">
     <div class="statement-toolbar">
       <div class="statement-filters">
         <label><span>{{ tr('团队') }}</span><AppSelect v-model="team" :options="teamOptions" :ariaLabel="tr('账单团队')" searchable /></label>
@@ -81,7 +83,7 @@ onBeforeUnmount(() => { epoch += 1 })
         <label><span>{{ tr('结束日期') }}</span><input v-model="end" type="date" :aria-label="tr('结束日期')" :min="start || undefined" /></label>
       </div>
       <div class="statement-actions">
-        <AppButton variant="secondary" :disabled="loading || invalidDates" @click="load(true)"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新') }}</AppButton>
+        <AppButton variant="secondary" :loading="loading" :disabled="invalidDates" @click="load(true)"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新') }}</AppButton>
         <AppButton variant="primary" :loading="exporting" :disabled="loading || invalidDates || !!error || !data?.summary.total_transactions" @click="exportStatement"><Download :size="14" aria-hidden="true" />{{ tr('导出全部明细') }}</AppButton>
       </div>
     </div>
@@ -96,6 +98,7 @@ onBeforeUnmount(() => { epoch += 1 })
         <article><span>{{ tr('团队当前余额') }}</span><strong>{{ exactMoney(data.summary.team_balance) }}</strong><small v-if="!team">{{ tr('选择团队后显示') }}</small></article>
       </div>
       <p class="statement-note">{{ tr('仅列出实际余额扣款。未扣款任务和自有 Key 用量不计入；金额保留6位小数，时间为北京时间。') }}</p>
+      <div v-if="compact" class="statement-record-heading"><h2>{{ tr('扣款明细') }}</h2><span>{{ tr('共 {p0} 条', { p0: data.pagination.total }) }}</span></div>
       <div class="statement-table-scroll">
         <table class="statement-table">
           <thead><tr><th>{{ tr('流水号') }}</th><th>{{ tr('时间') }}</th><th>{{ tr('团队') }}</th><th>{{ tr('用户') }}</th><th>{{ tr('项目') }}</th><th>{{ tr('费用类别') }}</th><th>{{ tr('用量') }}</th><th>{{ tr('任务状态') }}</th><th class="is-num">{{ tr('实际扣款') }}</th><th class="is-num">{{ tr('扣后团队余额') }}</th></tr></thead>
@@ -105,7 +108,7 @@ onBeforeUnmount(() => { epoch += 1 })
               <td>{{ row.created_at }}</td>
               <td>{{ row.team_name }}<small>#{{ row.team_id }}</small></td>
               <td>{{ row.user_name || tr('用户未记录') }}<small v-if="row.user_id">#{{ row.user_id }}</small></td>
-              <td>{{ row.novel_name || '—' }}<small v-if="row.novel_id">#{{ row.novel_id }}</small></td>
+              <td class="statement-project"><span class="statement-project-name" :title="row.novel_name || undefined">{{ row.novel_name || '—' }}</span><small v-if="row.novel_id">#{{ row.novel_id }}</small></td>
               <td>{{ category(row.billing_type) }}<small v-if="row.video_id">{{ tr('视频') }} #{{ row.video_id }}</small></td>
               <td>{{ rowUsage(row) }}</td>
               <td>{{ row.task_status == null ? tr('未记录') : statusLabel(row.task_status) }}</td>
@@ -144,6 +147,33 @@ td small { display: block; margin-top: 5px; }
 .is-num { text-align: right; font-variant-numeric: tabular-nums; }
 .statement-state, .statement-empty { padding: 48px 16px; color: var(--app-text-muted); text-align: center; }
 .statement-error { color: var(--app-danger, var(--app-text)); font-size: 13px; }
+.is-compact { margin-top: 18px; }
+.is-compact .statement-toolbar { gap: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); }
+.is-compact .statement-filters { flex: 1; gap: 10px; }
+.is-compact .statement-filters > label,.is-compact .statement-filters > label:nth-child(-n+2) { width: 160px; min-width: 140px; flex: 1 1 140px; }
+.is-compact input { min-height: 34px; width: 100%; border-radius: 6px; background: var(--app-surface); font-size: 12px; }
+.is-compact :deep(.app-select__trigger),.is-compact :deep(.app-button) { min-height: 34px; border-radius: 6px; font-size: 12px; }
+.is-compact .statement-summary { gap: 10px; }
+.is-compact .statement-summary article { gap: 8px; padding: 14px 16px; border-radius: 8px; background: var(--app-surface); }
+.is-compact .statement-summary strong { font-size: 22px; line-height: 1.3; }
+.is-compact .statement-summary span { color: var(--app-text-secondary); }
+.is-compact .statement-note { margin: 12px 0; font-size: 11px; }
+.statement-record-heading { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; border: 1px solid var(--app-border); border-bottom: 0; border-radius: 8px 8px 0 0; background: var(--app-surface); }
+.statement-record-heading h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.statement-record-heading span { color: var(--app-text-muted); font-size: 12px; }
+.is-compact .statement-table-scroll { min-width: 0; max-width: 100%; border-radius: 0 0 8px 8px; }
+.is-compact .statement-table { font-size: 12px; }
+.is-compact th,.is-compact td { padding: 10px 12px; }
+.is-compact td small { margin-top: 3px; font-size: 11px; }
+.is-compact .statement-project-name { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.is-compact td.is-num { font-family: 'Courier Prime',monospace; font-size: 12px; }
+@media (max-width: 640px) {
+  .is-compact .statement-toolbar { padding: 12px; }
+  .is-compact .statement-filters > label,.is-compact .statement-filters > label:nth-child(-n+2) { flex: 1 1 calc(50% - 10px); width: auto; min-width: 0; }
+  .is-compact .statement-actions { width: 100%; }
+  .is-compact .statement-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .is-compact .statement-summary article:first-child { grid-column: 1 / -1; }
+}
 :global([data-app-theme='dark']) input { color-scheme: dark; }
 @media (max-width: 640px) { .statement-summary { grid-template-columns: 1fr; } .statement-filters { width: 100%; } .statement-filters > label, .statement-filters > label:nth-child(-n+2) { flex: 1 1 calc(50% - 12px); min-width: 0; width: auto; } }
 </style>
