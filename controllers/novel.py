@@ -1,5 +1,6 @@
 
 from utils.messages import localized_message
+from prompts.project_settings import audiovisual_guidance
 import asyncio
 from itertools import count
 
@@ -45,6 +46,10 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "total_chapters": novel.total_chapters,
             "tags": novel.tags,
             "story_outline": novel.story_outline,
+            "episodes_managed": novel.episodes_managed,
+            "audiovisual_guidance": audiovisual_guidance(novel.audiovisual_guidance),
+            "shot_duration_max": novel.shot_duration_max,
+            "storyboard_enabled": novel.storyboard_enabled,
             "project_type": novel.project_type,
             "project_setting": novel.project_setting,
             "storyboard_strategy": novel.storyboard_strategy,
@@ -77,6 +82,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         避免书稿正文经浏览器中转（也避免超大 JSON 请求体）。
         """
         data = obj_in.model_dump(exclude_unset=True)
+        source_kind = data.pop("source_kind", "novel")
         if obj_in.video_generation_defaults:
             from services.video_defaults import validate_defaults
             await validate_defaults(obj_in.video_generation_defaults, team_id)
@@ -100,9 +106,16 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                     detail=localized_message('未能从上传文件读取正文，请转换为 TXT、MD、DOCX 或文本型 PDF 后重试'),
                 )
             validation = analysis["chapter_validation"]
-            if validation and not validation["valid"]:
+            if source_kind == "novel" and validation and not validation["valid"]:
                 raise HTTPException(status_code=422, detail=validation["message"])
             data["content"] = text
+        screenplay_chapters = None
+        if source_kind == "screenplay":
+            text = (data.get("content") or "").strip()
+            if not text:
+                raise HTTPException(422, detail=localized_message('请提供剧本内容'))
+            screenplay_chapters = await asyncio.to_thread(self._parse_chapters, text, screenplay=True)
+            data.update(content="", episodes_managed=True, total_chapters=len(screenplay_chapters))
         data = validate_project_config(data)
         narrator_reference_id = data.get("narrator_audio_reference_id")
         if narrator_reference_id is not None:
@@ -130,9 +143,23 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if await Novel.filter(name=candidate, **name_scope).exists():
                 continue
             try:
-                return await super().create(
-                    {**data, "name": candidate}, team_id=team_id, created_by=created_by,
-                )
+                if screenplay_chapters is None:
+                    return await super().create(
+                        {**data, "name": candidate}, team_id=team_id, created_by=created_by,
+                    )
+                from tortoise.transactions import in_transaction
+
+                async with in_transaction() as connection:
+                    novel = await super().create(
+                        {**data, "name": candidate}, team_id=team_id, created_by=created_by,
+                    )
+                    await Chapter.bulk_create([
+                        Chapter(novel_id=novel.id, number=index + 1,
+                            name=normalize_chapter_title(chapter.title, fallback=novel.name),
+                            content="", screenplay=chapter.content)
+                        for index, chapter in enumerate(screenplay_chapters)
+                    ], using_db=connection)
+                    return novel
             except IntegrityError:
                 # A concurrent request may have claimed the name after our check.
                 if not await Novel.filter(name=candidate, **name_scope).exists():
@@ -156,7 +183,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         await self._validate_video_model_preference(instance, obj_in)
         await self._validate_narrator_audio_reference(instance, obj_in)
         data = validate_project_config(
-            obj_in.model_dump(exclude_unset=True, exclude={"id"}),
+            obj_in.model_dump(exclude_unset=True, exclude={"id", "source_kind"}),
             current=instance,
         )
         return await super().update(instance, data)
@@ -172,7 +199,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         await self._validate_video_model_preference(instance, obj_in)
         await self._validate_narrator_audio_reference(instance, obj_in)
         data = validate_project_config(
-            obj_in.model_dump(exclude_unset=True, exclude={"id"}),
+            obj_in.model_dump(exclude_unset=True, exclude={"id", "source_kind"}),
             current=instance,
         )
         return await super().patch(instance, data)
@@ -235,37 +262,42 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             self._parse_chapters, novel.content or ""
         )
 
-        # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
-        await Chapter.bulk_create([
-            Chapter(
-                novel_id=novel.id,
-                number=idx + 1,
-                name=normalize_chapter_title(
-                    chapter_result.title,
-                    fallback=novel.name,
-                ),
-                content=chapter_result.content,
-            )
-            for idx, chapter_result in enumerate(parsed_chapters)
-        ])
+        from services.creation_objects import project_write
+        async with project_write(novel_id) as connection:
+            novel = await self.get(novel_id)
+            if novel.episodes_managed or await Chapter.filter(novel_id=novel_id).exists():
+                return novel
+            # 批量创建章节，避免上千章书稿逐条写库造成长时间等待。
+            await Chapter.bulk_create([
+                Chapter(
+                    novel_id=novel.id,
+                    number=idx + 1,
+                    name=normalize_chapter_title(
+                        chapter_result.title,
+                        fallback=novel.name,
+                    ),
+                    content=chapter_result.content,
+                )
+                for idx, chapter_result in enumerate(parsed_chapters)
+            ])
 
-        # 更新小说的总章节数和状态
-        await novel.update_from_dict(
-            {
-                "total_chapters": len(parsed_chapters),
-            }
-        )
-        await novel.save()
+            # 更新小说的总章节数和状态
+            await novel.update_from_dict(
+                {
+                    "total_chapters": len(parsed_chapters),
+                }
+            )
+            await novel.save(update_fields=["total_chapters", "updated_at"])
         return novel
 
     @staticmethod
-    def _parse_chapters(content: str):
+    def _parse_chapters(content: str, *, screenplay: bool = False):
         """识别章节并做质量校验（纯 CPU，供线程池调用）。"""
         novel_text = NovelText.from_string(content)
         parsed_chapters = RegexChapterRecognitionStrategy().recognize(novel_text)
 
         try:
-            validate_chapter_split(content, parsed_chapters)
+            validate_chapter_split(content, parsed_chapters, require_multiple_for_long=not screenplay)
         except ChapterSplitError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -292,20 +324,29 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         team_id: int | None = None,
         user_id: int | None = None,
         include_cover: bool = True,
+        cover_model_config_id: int | None = None,
+        *,
+        cover_only: bool = False,
+        assistant_model_config_id: int | None = None,
     ) -> AiTask:
         """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
         novel = await self.get(novel_id)
-        if not (novel.content or "").strip():
+        if cover_only and cover_model_config_id is None:
+            raise HTTPException(422, detail=localized_message("请选择生图模型"))
+        if not cover_only and not (novel.content or "").strip() and not await Chapter.filter(novel_id=novel_id).exclude(
+            screenplay__isnull=True).exclude(screenplay="").exists():
             raise HTTPException(status_code=400, detail=localized_message('项目没有可分析的书稿内容'))
 
+        include_cover = include_cover and cover_model_config_id is not None
         if include_cover:
-            from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
-            for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
-                if pending.request_params.get("novel_id") == novel_id:
-                    if not await reconcile_unstarted_model_task(pending):
-                        raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
-        from services.creation_agent.skill_execution import require_agent
-        await require_agent(team_id)
+            await ai_model_config_controller.get_active(
+                AiTaskTypeEnum.reference_image, cover_model_config_id, team_id=team_id,
+            )
+        from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
+        for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
+            if pending.request_params.get("novel_id") == novel_id:
+                if not await reconcile_unstarted_model_task(pending):
+                    raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 
@@ -313,6 +354,9 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "novel_id": novel_id,
             "resolution": "1K",
             "include_cover": include_cover,
+            "assistant_model_config_id": assistant_model_config_id,
+            **({"operation": "project_cover"} if cover_only else {}),
+            **({"cover_model_config_id": cover_model_config_id} if include_cover else {}),
             "prompt_language": prompt_language,
         }
         if team_id is not None:
@@ -329,6 +373,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
                 if existing.request_params.get('novel_id') == novel_id:
+                    if assistant_model_config_id is not None and existing.request_params.get('assistant_model_config_id') != assistant_model_config_id:
+                        raise HTTPException(409, localized_message('已有分析任务正在运行，请等待完成后再切换分析模型'))
+                    if (existing.request_params.get('cover_model_config_id') != params.get('cover_model_config_id')
+                            or existing.request_params.get('operation') != params.get('operation')):
+                        raise HTTPException(409, localized_message('项目已有分析任务，请等待完成后再调整封面模型'))
                     return await bind_submission(existing, {**params, "team_id": team_id, "user_id": user_id})
             return await ai_task_executor.submit(AiTaskTypeEnum.project_analysis, params, db_connection=connection)
 
@@ -339,7 +388,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         ).order_by("-created_at")
         from services.project_analysis.results import expose_saved_analysis
         return await expose_saved_analysis(next(
-            (task for task in tasks if task.request_params.get("novel_id") == novel_id),
+            (task for task in tasks if task.request_params.get("novel_id") == novel_id
+             and task.request_params.get("operation") != "project_cover"),
             None,
         ))
 

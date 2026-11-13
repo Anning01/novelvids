@@ -9,6 +9,7 @@ from models.novel import Novel
 from models.remake_source import RemakeSource
 from models.scene import Scene
 from models.video import Video
+from models.video_edit import ChapterCanvasSnapshot
 from schemas.workbench import WorkbenchBootstrapOut, WorkbenchCapabilitiesOut
 from services.oss import oss
 from utils.response_format import ResponseSchema
@@ -118,11 +119,14 @@ async def get_workbench_bootstrap(
                 ),
             }
 
+    imported_canvas = await ChapterCanvasSnapshot.get_or_none(chapter_id=chapter.id).only("layout")
     payload = WorkbenchBootstrapOut.model_validate(
         {
             "chapter": chapter,
+            "canvas_layout": imported_canvas.layout if imported_canvas else None,
             "project_config": {
                 "workflow_kind": novel.workflow_kind,
+                "storyboard_enabled": novel.storyboard_enabled,
                 "aspect_ratio": novel.aspect_ratio,
                 "resolution": novel.resolution,
                 "style_key": novel.style_key,

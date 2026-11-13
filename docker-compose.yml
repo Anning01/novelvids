@@ -8,14 +8,28 @@ services:
       MEDIA_PATH: /app/media
       DEBUG: "false"
       GENERATE_SCHEMAS: "true"
-      # 登录与团队功能开关：个人本地使用默认关闭。
-      # 开启登录时默认使用本部署的账号密码。
-      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      NOVELVIDS_ROLE: ${NOVELVIDS_ROLE:-studio}
+      # 登录与团队功能开关。
+      # 工作台使用本部署的账号密码。AUTH_PROVIDER 与器灵配置由 API 平台使用。
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
       AUTH_PROVIDER: ${AUTH_PROVIDER:-password}
       SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-}
       SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-}
       QILING_API_BASE_URL: ${QILING_API_BASE_URL:-}
       QILING_SIGNUP_ENABLED: ${QILING_SIGNUP_ENABLED:-false}
+      OSS_PROVIDER: ${OSS_PROVIDER:-local}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+      OSS_INTERNAL_ENDPOINT: ${OSS_INTERNAL_ENDPOINT:-}
+      OSS_PUBLIC_BASE: ${OSS_PUBLIC_BASE:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      STUDIO_TEMP_BUCKET: ${STUDIO_TEMP_BUCKET:-}
+      STUDIO_TEMP_REGION: ${STUDIO_TEMP_REGION:-}
+      STUDIO_TEMP_TEAM_BYTES: ${STUDIO_TEMP_TEAM_BYTES:-21474836480}
+      STUDIO_PLATFORM_BASE_URL: ${STUDIO_PLATFORM_BASE_URL:-}
+      STUDIO_PLATFORM_API_KEY: ${STUDIO_PLATFORM_API_KEY:-}
+      STUDIO_MEDIA_CACHE_PATH: /app/data/studio-media
       WECHAT_PAY_APP_ID: ${WECHAT_PAY_APP_ID:-}
       WECHAT_PAY_MCH_ID: ${WECHAT_PAY_MCH_ID:-}
       WECHAT_PAY_API_V3_KEY: ${WECHAT_PAY_API_V3_KEY:-}
@@ -45,8 +59,8 @@ services:
 
   frontend:
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web/Dockerfile
     ports:
       - "8080:80"
     depends_on:

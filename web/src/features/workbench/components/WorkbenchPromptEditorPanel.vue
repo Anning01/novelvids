@@ -180,7 +180,7 @@ onBeforeUnmount(() => {
       v-if="open"
       ref="panel"
       class="viral-workbench-surface-theme workbench-prompt-panel nodrag nowheel"
-      :class="{ 'is-expanded': expanded }"
+      :class="{ 'is-expanded': expanded, 'is-shot-prompt': config.nodeKind === 'shot' }"
       :style="panelStyle"
       role="dialog"
       :aria-modal="expanded"
@@ -191,6 +191,7 @@ onBeforeUnmount(() => {
       @focusout="emit('focusout', $event)"
     >
       <div class="workbench-prompt-panel__actions">
+        <slot name="header-actions" />
         <button
           type="button"
           :aria-label="expanded ? tr('退出 Prompt 专注模式') : tr('进入 Prompt 专注模式')"
@@ -241,6 +242,7 @@ onBeforeUnmount(() => {
           />
         </div>
         <div v-if="promptActions.length" class="workbench-prompt-panel__footer-actions" :aria-label="tr('Prompt 操作')">
+          <slot name="footer-actions" />
           <button
             v-for="action in promptActions"
             :key="action.id"
@@ -256,7 +258,7 @@ onBeforeUnmount(() => {
             <LoaderCircle v-if="actionBusy(action)" class="workbench-prompt-panel__action-spinner" :size="15" aria-hidden="true" />
             <Play v-else :size="14" aria-hidden="true" />
             <span>{{ actionBusy(action) ? (action.busyLabel || tr('处理中')) : action.label }}</span>
-            <BillingPriceTag v-if="!actionBusy(action)" :cost="actionCost(action)" :pricing="actionCostPricing(action)" />
+            <BillingPriceTag v-if="!actionBusy(action)" :compact="config.nodeKind === 'shot'" :cost="actionCost(action)" :pricing="actionCostPricing(action)" />
             <i v-if="actionProgress(action) !== null" aria-hidden="true">
               <b :style="{ width: `${actionProgress(action)}%` }" />
             </i>

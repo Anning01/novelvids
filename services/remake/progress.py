@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from services.remake.customer_errors import failure_message
 from models.novel import Novel
 from models.remake_source import RemakeSource
 from utils.enums import TaskStatusEnum
@@ -68,7 +69,7 @@ class RemakeProgressService:
                             "status": task.status,
                             "stage": task.stage or "queued",
                             "progress": progress,
-                            "error_message": task.error_message,
+                            "error_message": await failure_message(task),
                             "updated_at": task.updated_at.isoformat(),
                         }
                         if task is not None

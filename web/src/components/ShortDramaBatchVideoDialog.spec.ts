@@ -73,6 +73,27 @@ describe('ShortDramaBatchVideoDialog', () => {
     }]])
   })
 
+  it.each(['light', 'dark'])('shows the selected generation duration in %s mode', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const wrapper = mount(ShortDramaBatchVideoDialog, {
+      props: { open: true, scenes: [{ ...scenes[0]!, duration: 2 }, scenes[1]!, { ...scenes[2]!, duration: 35 }], models },
+      global,
+    })
+    try {
+      const total = wrapper.get('.batch-video-dialog__duration')
+      expect(total.text()).toBe('已选分镜共 0 秒')
+      await wrapper.get('.batch-video-dialog__select-all').trigger('click')
+      expect(total.text()).toBe('已选分镜共 34 秒')
+      await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(false)
+      expect(total.text()).toBe('已选分镜共 30 秒')
+      await wrapper.setProps({ parametersOnly: true })
+      expect(wrapper.find('.batch-video-dialog__duration').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+      delete document.documentElement.dataset.appTheme
+    }
+  })
+
   it('applies one model, ratio and resolution and enables sequential last-frame generation', async () => {
     const wrapper = mount(ShortDramaBatchVideoDialog, {
       props: { open: true, scenes, models, initialResolution: '1080p', initialAspectRatio: '16:9' },

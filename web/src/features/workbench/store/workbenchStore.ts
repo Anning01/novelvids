@@ -1,4 +1,5 @@
 
+import { sheetReference, includeSheet } from '@/shared/storyboardSheetReference'
 import { tr } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
@@ -180,11 +181,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         }))
       } catch { /* ignore unavailable storage */ }
     },
-    loadSavedLayout() {
+    loadSavedLayout(imported?: Record<string, unknown> | null) {
       try {
         const current = localStorage.getItem(this.layoutKey())
         const legacy = current ? null : localStorage.getItem(this.legacyLayoutKey())
-        const saved = parseWorkbenchState(current || legacy || '')
+        const saved = parseWorkbenchState(current || legacy || (imported ? JSON.stringify(imported) : ''))
         if (!saved) return
         this.viewport = saved.viewport
         this.manualNodes = saved.manualNodes.filter(item => isManualNodeKind(item.kind))
@@ -221,7 +222,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         this.imageModelOptions = imageConfigResponse.data
         this.videos = bootstrapResponse.data.videos
         this.rebuildGraph()
-        this.loadSavedLayout()
+        this.loadSavedLayout(bootstrapResponse.data.canvas_layout)
         Object.entries(this.videos).forEach(([sceneId, videos]) => videos
           .filter(video => !isTerminalVideo(video))
           .forEach(video => { void this.resumeVideoPolling(Number(sceneId), video.id) }))
@@ -421,7 +422,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (!this.nodeByKey(key)) return
       this.persistLayout()
     },
-    async saveChapter(patch: Pick<Partial<Chapter>, 'name' | 'content'>) {
+    async saveChapter(patch: Pick<Partial<Chapter>, 'name' | 'content' | 'screenplay'>) {
       if (!this.chapter) return null
       const updated = (await api.updateChapter(this.chapter.id, patch)).data
       this.chapter = updated
@@ -1379,8 +1380,10 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const sourceScene = this.scenes.find(item => item.id === sceneId)
         const savedReferences = readVideoReferenceMedia(sourceScene?.metadata?.video_reference_media)
           .filter(item => !item.library_resource_id)
+        const sheet = sourceScene && sourceScene.metadata?.storyboard_sheet_excluded !== true ? sheetReference(sourceScene) : undefined
+        const referenceText = [sourceScene?.metadata?.video_prompt_model ? sourceScene.metadata.generic_video_prompt : '', sourceScene?.prompt].filter(Boolean).join('\n')
         const references = options.generation_mode === 'keyframes' ? [] : [
-          ...referencedVideoMedia(sourceScene?.prompt || '', savedReferences),
+          ...referencedVideoMedia(referenceText, sheet ? includeSheet(savedReferences, sheet) : savedReferences),
           ...this.libraryVideoReferences(sceneId),
         ]
         let video = (await api.generateVideo(sceneId, modelConfigId, { ...options, ...(references.length ? { reference_media: references } : {}) })).data

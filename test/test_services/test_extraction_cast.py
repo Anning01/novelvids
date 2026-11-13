@@ -1,9 +1,8 @@
-import json
+from test.agent_stream_fixtures import streaming_model
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from pydantic_ai.messages import ModelResponse, ToolCallPart, RetryPromptPart, UserPromptPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 
 from services.extraction.cast import ChapterCast, validate_cast
 from prompts.extraction import render_cast_instructions, render_cast_scope
@@ -35,8 +34,7 @@ def test_shared_title_does_not_merge_distinct_people():
 
 
 @pytest.mark.parametrize('language', ['zh', 'en'])
-@pytest.mark.parametrize('complete_new_character', [True, False])
-async def test_new_unregistered_character_is_required_and_only_omission_is_repaired(language, complete_new_character):
+async def test_full_extraction_uses_the_screenplay_without_a_required_inventory(language):
     from models.asset import Asset
     from models.config import GeneralConfig
     from models.agent_operation import AgentOperation
@@ -46,42 +44,27 @@ async def test_new_unregistered_character_is_required_and_only_omission_is_repai
     from test.test_services.test_asset_design_instructions import synthetic_snapshot, fixed_asset_prompt
 
     novel, chapter, _ = await enabled_project()
-    chapter.content = '阿洛推门。小梅说：“进来。”回忆里，老周挥手。有人提及张三。'
+    chapter.content = '文静（妻子、小静、儿媳）推门。建平在次卧应了一声。'
     await chapter.save()
     await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': language})
     snapshot = synthetic_snapshot()
     prompt = fixed_asset_prompt(language, snapshot=snapshot)
-    await Asset.create(novel=novel, asset_type=1, canonical_name='陈洛', aliases=['阿洛'], base_traits=prompt, source_chapters=[1])
-    counts = {'cast': 0, 'design': 0}
+    scene_prompt = ('次卧正面用暖橙光，反向机位用冷蓝光。' if language == 'zh'
+                    else 'The bedroom front view uses amber light, and the reverse view uses blue light.')
+    calls = []
 
     def respond(messages, info):
         tool = info.output_tools[0]
-        if 'characters' in tool.parameters_json_schema['properties']:
-            counts['cast'] += 1
-            facts = next(json.loads(part.content)['untrusted_task_facts']['input'] for message in messages
-                         for part in message.parts if isinstance(part, UserPromptPart))
-            assert facts['chapter']['content'] == chapter.content
-            assert set(facts['known_assets'][0]) == {'id', 'asset_type', 'canonical_name', 'aliases'}
-            assert render_cast_instructions(language) in info.instructions
-            payload = {'characters': [
-                {'name': '阿洛', 'presence': 'present', 'quote': '阿洛推门。'},
-                {'name': '小梅', 'presence': 'present', 'quote': '小梅说：“进来。”'},
-                {'name': '老周', 'presence': 'flashback', 'quote': '回忆里，老周挥手。'},
-                {'name': '张三', 'presence': 'mentioned', 'quote': '有人提及张三。'},
-            ]}
-        else:
-            counts['design'] += 1
-            if counts['design'] == 1:
-                names = ['陈洛', '老周']
-                assert '小梅' in str(messages)
-            else:
-                retry = next(part.content for message in reversed(messages) for part in message.parts if isinstance(part, RetryPromptPart))
-                assert '小梅' in retry
-                names = ['小梅'] if complete_new_character else []
-            payload = {'persons': [{'name': name, 'base_traits': prompt} for name in names], 'scenes': [], 'items': []}
-        return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
+        calls.append(tool.name)
+        assert 'persons' in tool.parameters_json_schema['properties']
+        assert chapter.content in str(messages)
+        assert 'required_asset_names' not in str(messages)
+        return ModelResponse(parts=[ToolCallPart(tool.name, {
+            'persons': [{'name': '文静', 'aliases': ['妻子', '小静', '儿媳'], 'base_traits': prompt}],
+            'scenes': [{'name': '次卧', 'base_traits': scene_prompt}], 'items': [],
+        })])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -89,34 +72,13 @@ async def test_new_unregistered_character_is_required_and_only_omission_is_repai
         await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
-    if complete_new_character:
-        assert task.status == 3, task.error_message
-        assert counts == {'cast': 1, 'design': 2}
-        assert set(await Asset.filter(novel=novel).values_list('canonical_name', flat=True)) == {'陈洛', '小梅', '老周'}
-        assert (await Asset.get(novel=novel, canonical_name='小梅')).source_chapters == [1]
-    else:
-        assert task.status == 4
-        assert '小梅' in task.error_message
-        assert counts == {'cast': 1, 'design': 2}  # One shared repair, as enforced at the model boundary.
-        assert set(await Asset.filter(novel=novel).values_list('canonical_name', flat=True)) == {'陈洛'}
-        checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
-        assert {item['name'] for item in checkpoint.result['accepted']['persons']} == {'陈洛', '老周'}
-    roster = await AgentOperation.filter(task=task, key__startswith='model:structured:ChapterCast:').get()
-    assert roster.state == 'completed'
-    assert len(roster.result['characters']) == 4
-    # Resume the same read from its receipt, without another model invocation.
-    from services.creation_agent.skill_execution import SkillExecution
-    from services.extraction.cast import read_chapter_cast
-    from services.extraction.context import ExtractionContextLoader
-    from services.extraction.messages import ExtractionMessageBuilder
-    from models.creation_agent import AgentMessage
-    context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
-    execution = SkillExecution({**task.request_params, 'task_id': str(task.id)},
-        await AgentMessage.get(task=task, role='assistant'), AsyncMock())
-    with patch('services.creation_agent.handler.configured_model', return_value=model):
-        replay = await read_chapter_cast(execution, ExtractionMessageBuilder().build(context, language))
-    assert replay.required_names() == ['陈洛', '小梅', '老周']
-    assert counts == {'cast': 1, 'design': 2}
+    assert task.status == 3, task.error_message
+    assert len(calls) == 1
+    assert not await AgentOperation.filter(task=task, key__startswith='model:structured:ChapterCast:').exists()
+    asset = await Asset.get(novel=novel, canonical_name='文静')
+    assert asset.aliases == ['妻子', '小静', '儿媳']
+    assert asset.source_chapters == [chapter.number]
+    assert (await Asset.get(novel=novel, canonical_name='次卧')).base_traits == scene_prompt
 
 
 def test_cast_scope_keeps_mentions_separate_and_preserves_placeholder_requirements():
@@ -195,14 +157,10 @@ async def test_same_name_assets_of_all_categories_are_saved_independently(langua
     def respond(messages, info):
         tool = info.output_tools[0]
         calls.append(tool.name)
-        if 'characters' in tool.parameters_json_schema['properties']:
-            entry = {'name': '晨星', 'presence': 'present', 'quote': chapter.content}
-            payload = {field: [entry] for field in ('characters', 'scenes', 'items')}
-        else:
-            payload = {field: [{'name': '晨星', 'base_traits': fixed_asset_prompt(language, kind=kind, snapshot=snapshot)}]
-                       for field, kind in [('persons', 'person'), ('scenes', 'scene'), ('items', 'item')]}
+        payload = {field: [{'name': '晨星', 'base_traits': fixed_asset_prompt(language, kind=kind, snapshot=snapshot)}]
+                   for field, kind in [('persons', 'person'), ('scenes', 'scene'), ('items', 'item')]}
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -214,7 +172,7 @@ async def test_same_name_assets_of_all_categories_are_saved_independently(langua
     saved = await Asset.filter(novel=novel, canonical_name='晨星').order_by('asset_type')
     assert [asset.asset_type for asset in saved] == [1, 2, 3]
     assert len({asset.id for asset in saved}) == 3
-    assert len(calls) == 2  # One inventory read and one design call, with no repair.
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('field,asset_type', [('characters', 3), ('scenes', 1), ('items', 2)])
@@ -226,8 +184,7 @@ def test_chapter_inventory_rejects_registered_assets_in_the_wrong_category(field
 
 
 @pytest.mark.parametrize('language', ['zh', 'en'])
-@pytest.mark.parametrize('omit_visual_assets', [False, True])
-async def test_extraction_persists_people_scenes_and_system_prop_without_false_character_failure(language, omit_visual_assets):
+async def test_extraction_persists_people_scenes_and_system_prop_without_false_character_failure(language):
     from models.asset import Asset
     from models.config import GeneralConfig
     from models.agent_operation import AgentOperation
@@ -241,33 +198,16 @@ async def test_extraction_persists_people_scenes_and_system_prop_without_false_c
     await chapter.save()
     await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': language})
     snapshot = synthetic_snapshot()
-    counts = {'inventory': 0, 'design': 0}
-
     def respond(messages, info):
         tool = info.output_tools[0]
-        if 'characters' in tool.parameters_json_schema['properties']:
-            counts['inventory'] += 1
-            assert 'scenes' in tool.parameters_json_schema['properties']
-            assert 'items' in tool.parameters_json_schema['properties']
-            payload = {
-                'characters': [{'name': '角色甲', 'presence': 'present', 'quote': chapter.content}],
-                'scenes': [{'name': '会议室', 'presence': 'present', 'quote': chapter.content}],
-                'items': [{'name': '系统', 'presence': 'present', 'quote': chapter.content}],
-            }
-        else:
-            counts['design'] += 1
-            omit = omit_visual_assets and counts['design'] == 1
-            payload = {
-                'persons': [{'name': '角色甲', 'base_traits': fixed_asset_prompt(language, snapshot=snapshot)}] if counts['design'] == 1 else [],
-                'scenes': [] if omit else [{'name': '会议室', 'base_traits': fixed_asset_prompt(language, kind='scene', snapshot=snapshot)}],
-                'items': [] if omit else [{'name': '系统', 'base_traits': fixed_asset_prompt(language, kind='item', snapshot=snapshot)}],
-            }
-            if counts['design'] > 1:
-                retry = next(part.content for message in reversed(messages) for part in message.parts if isinstance(part, RetryPromptPart))
-                assert '会议室' in retry and '系统' in retry and '角色甲' in retry
+        payload = {
+            'persons': [{'name': '角色甲', 'base_traits': fixed_asset_prompt(language, snapshot=snapshot)}],
+            'scenes': [{'name': '会议室', 'base_traits': fixed_asset_prompt(language, kind='scene', snapshot=snapshot)}],
+            'items': [{'name': '系统', 'base_traits': fixed_asset_prompt(language, kind='item', snapshot=snapshot)}],
+        }
         return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
 
-    model = FunctionModel(respond)
+    model = streaming_model(respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         task = await chapter_controller.extract(chapter.id)
@@ -279,6 +219,131 @@ async def test_extraction_persists_people_scenes_and_system_prop_without_false_c
     assets = await Asset.filter(novel=novel).order_by('asset_type')
     assert [(a.asset_type, a.canonical_name) for a in assets] == [(1, '角色甲'), (2, '会议室'), (3, '系统')]
     assert all(a.base_traits and a.source_chapters == [chapter.number] for a in assets)
-    assert counts == {'inventory': 1, 'design': 2 if omit_visual_assets else 1}
     checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
     assert not checkpoint.result['issues']
+
+
+@pytest.mark.asyncio
+async def test_asset_workflow_persists_complete_chapter_after_truncation(monkeypatch):
+    from models.asset import Asset
+    from models.agent_operation import AgentOperation
+    from services.creation_agent.model_boundary import ModelOutputLimitError
+    from services.creation_agent.skill_execution import SkillExecution
+    from controllers.chapter import chapter_controller
+    from services.ai_task_executor import ai_task_executor
+    from test.test_services.test_skill_workflow import enabled_project
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+
+    novel, chapter, _ = await enabled_project()
+    chapter.content = '甲推门。乙回头。'
+    await chapter.save()
+    snapshot = synthetic_snapshot()
+    original = SkillExecution._generate
+
+    async def truncate(self, skill, facts, output_type, **options):
+        if skill == 'assets' and isinstance(facts, list):
+            raise ModelOutputLimitError('length')
+        if skill == 'structured' and facts['chapter']['content'] == chapter.content:
+            raise ModelOutputLimitError('length')
+        return await original(self, skill, facts, output_type, **options)
+
+    def respond(messages, info):
+        tool = info.output_tools[0]
+        if 'characters' in tool.parameters_json_schema['properties']:
+            text = str(messages[-1].parts[0].content)
+            name = '甲' if '甲推门' in text else '乙'
+            payload = {'characters': [{'name': name, 'presence': 'present', 'quote': name}]}
+        else:
+            import json
+            facts = json.loads(messages[-1].parts[0].content)['untrusted_task_facts']['input']
+            name = facts['selection']['name']
+            payload = {'persons': [{'name': name, 'base_traits': fixed_asset_prompt('en', snapshot=snapshot)}],
+                       'items': [], 'scenes': []}
+        return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
+
+    monkeypatch.setattr(SkillExecution, '_generate', truncate)
+    model = streaming_model(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        task = await chapter_controller.extract(chapter.id)
+        task.request_params['skill_snapshot'] = snapshot.model_dump()
+        await task.save()
+        await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert await Asset.filter(novel=novel, canonical_name__in=['甲', '乙']).count() == 2
+    assert await AgentOperation.filter(task=task, state='completed', key__startswith='model:assets:AssetExtractionResult:entry:').count() == 2
+
+
+@pytest.mark.parametrize('language,phrase', [('zh', '一个资产'), ('en', 'one asset')])
+def test_single_asset_recovery_supports_queued_skill_snapshots(language, phrase):
+    import json
+    from prompts.extraction import single_asset_instructions
+    from prompts.skill_pack import snapshot_skills, use_skill_snapshot
+    snapshot = snapshot_skills()
+    old = json.loads(snapshot['contents']['asset_templates'])
+    old.pop('single_asset')
+    snapshot['contents']['asset_templates'] = json.dumps(old)
+    with use_skill_snapshot(snapshot):
+        assert phrase in single_asset_instructions(language)
+
+
+@pytest.mark.asyncio
+async def test_new_run_reuses_completed_entries_after_provider_rejection(monkeypatch):
+    from pydantic_ai.exceptions import ModelHTTPError
+    from models.asset import Asset
+    from controllers.chapter import chapter_controller
+    from services.ai_task_executor import ai_task_executor
+    from services.creation_agent.model_boundary import ModelOutputLimitError
+    from services.creation_agent.skill_execution import SkillExecution
+    from test.test_services.test_skill_workflow import enabled_project
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+
+    novel, chapter, _ = await enabled_project()
+    chapter.content = '甲和乙走进书房。'
+    await chapter.save()
+    snapshot = synthetic_snapshot()
+    calls = []
+    original = SkillExecution._generate
+
+    async def simulate(self, skill, facts, output_type, **options):
+        if skill == 'assets' and isinstance(facts, list):
+            calls.append('whole')
+            from models.agent_operation import AgentOperation
+            from services.creation_agent.plan_sources import fingerprint
+            revision = fingerprint([skill, facts, self.snapshot.revision, self.language,
+                self.params['assistant_model_config_id'], output_type.model_json_schema(), ''])
+            await AgentOperation.create(task_id=self.params['task_id'], key='recovery:failure', state='completed',
+                result={'issues': [{'code':'output_length'}]})
+            await AgentOperation.create(task_id=self.params['task_id'], key='model-input:' + fingerprint('model:assets:AssetExtractionResult:'),
+                state='completed', result={'revision': revision})
+            raise ModelOutputLimitError('length')
+        if skill == 'assets':
+            name = facts['selection']['name']
+            calls.append(name)
+            if name == '乙' and calls.count(name) == 1:
+                raise ModelHTTPError(402, 'test')
+        return await original(self, skill, facts, output_type, **options)
+
+    def respond(messages, info):
+        tool = info.output_tools[0]
+        if 'characters' in tool.parameters_json_schema['properties']:
+            payload = {'characters': [{'name': n, 'presence': 'present', 'quote': n} for n in ('甲', '乙')]}
+        else:
+            payload = {'persons': [{'name': calls[-1], 'base_traits': fixed_asset_prompt('en', snapshot=snapshot)}],
+                       'items': [], 'scenes': []}
+        return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
+
+    monkeypatch.setattr(SkillExecution, '_generate', simulate)
+    model = streaming_model(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        for expected in (4, 3):
+            task = await chapter_controller.extract(chapter.id)
+            task.request_params['skill_snapshot'] = snapshot.model_dump()
+            await task.save()
+            await ai_task_executor.run(task)
+            await task.refresh_from_db()
+            assert task.status == expected, task.error_message
+    assert calls == ['whole', '甲', '乙', '乙']
+    assert await Asset.filter(novel=novel, canonical_name__in=['甲', '乙']).count() == 2

@@ -41,30 +41,27 @@ class EditRenderer:
         self.process = None
 
     async def command(self, args, *, cwd):
+        import re
+        from services.media_processing import run_media_async
         if await self.cancelled():
             raise asyncio.CancelledError
-        process = await asyncio.create_subprocess_exec('ffmpeg', '-hide_banner', '-v', 'error',
-            '-nostdin', '-y', '-xerror', '-filter_complex_threads', '1', '-filter_threads', '1', *args,
-            cwd=cwd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-        self.process = process
-        communication = asyncio.create_task(process.communicate())
+        extra_files = [Path(path) for value in args for path in re.findall(r"(?:filename|fontsdir)='([^']+)'", value)]
+        communication = asyncio.create_task(run_media_async(
+            ['ffmpeg', '-hide_banner', '-v', 'error', '-nostdin', '-y', '-xerror',
+             '-filter_complex_threads', '1', '-filter_threads', '1', *args],
+            cwd=cwd, extra_files=extra_files, timeout=settings.VIDEO_EDITOR_RENDER_TIMEOUT))
         try:
             while not communication.done():
                 if await self.cancelled():
                     raise asyncio.CancelledError
                 await asyncio.wait({communication}, timeout=.5)
-            _, stderr = await communication
-            if process.returncode:
+            result = await communication
+            if result.returncode:
                 # Do not send paths, subtitles or source-specific FFmpeg output into public errors/logs.
                 raise ValueError(msg('成片渲染失败，请检查素材是否可解码及服务器字体'))
         finally:
-            if process.returncode is None:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), 5)
-                except asyncio.TimeoutError:
-                    process.kill()
-                    await process.wait()
+            if not communication.done():
+                communication.cancel()
             await asyncio.gather(communication, return_exceptions=True)
             self.process = None
 

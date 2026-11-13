@@ -13,7 +13,6 @@ from tortoise.exceptions import (
     ValidationError as TortoiseValidationError,
 )
 
-from api import api_router
 from config import settings
 from exceptions.handlers import (
     http_exception_handler,
@@ -76,6 +75,8 @@ video_task_reconciler = VideoTaskReconciler(
 async def _initialize_database_schema() -> None:
     """Initialize storage while keeping legacy PostgreSQL installs bootable."""
     await Tortoise.init(config=tortoise_config)
+    from services.schema_compat import ensure_billing_integration_schema
+    await ensure_billing_integration_schema()
     # PostgreSQL emits column comments for existing tables during safe schema
     # generation. Add fields referenced by the current models first, otherwise
     # startup fails before the compatibility migrations can run.
@@ -87,6 +88,8 @@ async def _initialize_database_schema() -> None:
     await ensure_resource_library_schema()
     # Ownership columns must exist before generating the scoped project-name index.
     await ensure_shared_team_columns()
+    from services.schema_compat import ensure_chapter_screenplay_schema
+    await ensure_chapter_screenplay_schema()
     await ensure_novel_analysis_schema()
     if settings.AUTH_ENABLED:
         from services.schema_compat import _ensure_qiling_issuer_columns, ensure_recharge_refund_columns
@@ -107,12 +110,15 @@ async def _initialize_database_schema() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await _initialize_database_schema()
-    await remake_upload_service.cleanup_expired()
-    await backfill_last_frame_continuity()
-    if settings.MEDIA_LIBRARY_SEED_ENABLED:
-        await ensure_media_library_seed_data()
+    if settings.DEPLOYMENT_ROLE == "studio":
+        await remake_upload_service.cleanup_expired()
+        await backfill_last_frame_continuity()
+        if settings.MEDIA_LIBRARY_SEED_ENABLED:
+            await ensure_media_library_seed_data()
     if settings.MODEL_CONFIG_SEED_ENABLED:
         await ensure_model_config_seed_data()
+    from services.video.ark_migration import migrate_legacy_video_channels
+    await migrate_legacy_video_channels()
     if settings.AUTH_ENABLED:
         from services.schema_compat import ensure_team_schema
 
@@ -120,6 +126,26 @@ async def lifespan(_: FastAPI):
         if settings.AUTH_PROVIDER == "password":
             from auth.bootstrap import ensure_super_admin
             await ensure_super_admin()
+    if settings.DEPLOYMENT_ROLE == "platform":
+        import asyncio
+        from services.platform.temporary_media import expire_periodically
+        from services.platform.videos import reconcile_videos
+        from services.platform.calls import recover_measured
+        from services.platform.chat import settle_periodically, stop_streams
+        await recover_measured()
+        reconciler = asyncio.create_task(settle_periodically())
+        expiry = asyncio.create_task(expire_periodically())
+        videos = asyncio.create_task(reconcile_videos())
+        try:
+            yield
+        finally:
+            reconciler.cancel()
+            expiry.cancel()
+            videos.cancel()
+            await asyncio.gather(reconciler, expiry, videos, return_exceptions=True)
+            await stop_streams()
+            await Tortoise.close_connections()
+        return
     # 清理上次进程遗留的 pending/running 任务（BackgroundTask 不跨重启存活）
     await ai_task_executor.fail_stale_on_boot()
     await video_task_reconciler.start()
@@ -127,9 +153,14 @@ async def lifespan(_: FastAPI):
     await production_recovery.start()
     from services.video_editor.exports import editor_export_worker
     await editor_export_worker.start()
+    import asyncio
+    from services.billing.platform import settle_periodically as settle_studio_calls
+    billing_reconciler = asyncio.create_task(settle_studio_calls())
     try:
         yield
     finally:
+        billing_reconciler.cancel()
+        await asyncio.gather(billing_reconciler, return_exceptions=True)
         await editor_export_worker.stop()
         await production_recovery.stop()
         await video_task_reconciler.stop()
@@ -174,7 +205,21 @@ app.add_exception_handler(Exception, global_exception_handler)
 app.add_exception_handler(RemakeError, remake_exception_handler)
 
 
-app.include_router(api_router, prefix="/api")
+if settings.DEPLOYMENT_ROLE == "platform":
+    if not settings.AUTH_ENABLED:
+        raise RuntimeError("Platform deployment requires AUTH_ENABLED=true")
+    from api.platform import console_router, developer_router
+    app.include_router(console_router, prefix="/api")
+    from services.platform.http_contract import DEVELOPER_EXCEPTION_HANDLERS
+    developer_api = FastAPI(title="猫影模型 API", version="1", docs_url=None, redoc_url=None,
+                            exception_handlers=DEVELOPER_EXCEPTION_HANDLERS)
+    developer_api.include_router(developer_router)
+    app.mount("/v1", developer_api)
+elif settings.DEPLOYMENT_ROLE == "studio":
+    from api import api_router
+    app.include_router(api_router, prefix="/api")
+else:
+    raise RuntimeError("NOVELVIDS_ROLE must be studio or platform")
 
 # 状态探测路由在两种模式下都注册，前端据此渲染登录 UI 或保持无鉴权体验
 from auth.api import public_router as auth_public_router
@@ -207,6 +252,10 @@ from services.video_enhancement.handler import EnhanceExportHandler
 ai_task_executor.register(AiTaskTypeEnum.video_enhancement, EnhanceExportHandler())
 ai_task_executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
 ai_task_executor.register(AiTaskTypeEnum.project_analysis, ProjectAnalysisTaskHandler())
+from services.chapter_screenplay import ScreenplayHandler
+ai_task_executor.register(AiTaskTypeEnum.screenplay, ScreenplayHandler())
+from services.storyboard.prompt_optimization import PromptOptimizationHandler
+ai_task_executor.register(AiTaskTypeEnum.prompt_optimization, PromptOptimizationHandler())
 ai_task_executor.register(
     AiTaskTypeEnum.remake_decomposition,
     RemakeDecompositionTaskHandler(),

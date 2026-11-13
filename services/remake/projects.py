@@ -420,7 +420,9 @@ class RemakeProjectService:
             origin = {"origin_run_id": parent.params["task_id"]} if parent else {}
             if previous_params.get('workflow_version'):
                 from models.agent_operation import AgentOperation
-                if await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True).exists():
+                unresolved = await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True)
+                from services.remake.receipt_check import rejected_inline_upload
+                if unresolved and not await rejected_inline_upload(previous, unresolved):
                     raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '请先核对未完成的外部请求')
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
             task = await AiTask.create(
@@ -430,7 +432,7 @@ class RemakeProjectService:
                 stage="queued",
                 progress=0,
                 request_params={
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

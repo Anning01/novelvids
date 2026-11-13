@@ -76,7 +76,7 @@ class RemoteMediaSession:
         request = MediaWorkerRequest(action=action, job_id=self.job_id, extension=extension, max_bytes=max_bytes)
         command = [f"{cfg.root}/.venv/bin/python", "-m", "services.remake.media_worker",
                    "--root", cfg.root, request.model_dump_json()]
-        if action in {"prepare", "split"}:
+        if action in {"prepare", "split", "process"}:
             command = [
                 "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
                 f"--unit=novelvids-remake-{self.job_id.hex}-{action}",

@@ -1,3 +1,4 @@
+from test.agent_stream_fixtures import completion_stream_response, streaming_model
 from unittest.mock import AsyncMock
 
 import pytest
@@ -91,7 +92,7 @@ async def test_invalid_json_keeps_original_response_and_stops_before_third_paid_
         calls.append(messages)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, '{"prompt": "unclosed')])
 
-    model = RecordedAgentModel(FunctionModel(respond), message=message, before_request=AsyncMock(),
+    model = RecordedAgentModel(streaming_model(respond), message=message, before_request=AsyncMock(),
         max_characters=None, repair_root=str(task.id), stage='assets')
     with pytest.raises(RepairExhausted):
         await Agent(output_type=CompletePrompt, retries=3).run('生成', model=model)
@@ -142,20 +143,19 @@ async def test_asset_extraction_source_does_not_authorize_storyboard_or_prose():
 def test_asset_checkpoint_keeps_nine_valid_designs_and_repairs_only_failed_one():
     from services.extraction.validation import AssetCandidateValidator
     from services.extraction.extractor import AssetExtractionResult
-    from test.test_services.test_asset_design_instructions import synthetic_snapshot, fixed_asset_prompt
-    snapshot = synthetic_snapshot()
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt
     valid = fixed_asset_prompt(kind='item')
     first = AssetExtractionResult(persons=[], scenes=[], items=[{'name': str(i), 'description': '道具',
-        'base_traits': valid if i < 9 else 'invalid'} for i in range(10)])
+        'base_traits': valid if i < 9 else ''} for i in range(10)])
     validator = AssetCandidateValidator()
-    accepted = validator.merge(first, snapshot, 'zh', '16:9')
+    accepted = validator.merge(first)
     assert len(accepted.items) == 9 and len(validator.issues) == 1
     restored = AssetCandidateValidator()
     restored.restore({'accepted': accepted.model_dump(mode='json'), 'issues': validator.issues,
         'pending': [[list(key), issue] for key, issue in validator.pending.items()]}, AssetExtractionResult)
     repaired = restored.merge(AssetExtractionResult(persons=[], scenes=[], items=[
         {'name': '0', 'description': '不可覆盖', 'base_traits': 'invalid'},
-        {'name': '9', 'description': '道具', 'base_traits': valid}]), snapshot, 'zh', '16:9')
+        {'name': '9', 'description': '道具', 'base_traits': valid}]))
     assert len(repaired.items) == 10 and not restored.issues
     assert repaired.items[0].description == '道具'
 
@@ -163,16 +163,16 @@ def test_asset_checkpoint_keeps_nine_valid_designs_and_repairs_only_failed_one()
 def test_missing_field_in_one_asset_does_not_discard_nine_valid_assets():
     from services.extraction.validation import AssetCandidateValidator
     from services.extraction.extractor import AssetExtractionResult
-    from test.test_services.test_asset_design_instructions import synthetic_snapshot, fixed_asset_prompt
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt
     validator = AssetCandidateValidator(AssetExtractionResult)
     valid = fixed_asset_prompt(kind='item')
     draft = validator.draft_type.model_validate({'persons': [], 'scenes': [], 'items': [
         *[{'name': str(index), 'base_traits': valid} for index in range(9)], {'name': '9'}]})
-    accepted = validator.merge(draft, synthetic_snapshot(), 'zh', '16:9')
+    accepted = validator.merge(draft)
     assert len(accepted.items) == 9 and len(validator.issues) == 1
     assert 'base_traits' in validator.issues[0]
     repaired = validator.merge(validator.draft_type.model_validate({'persons': [], 'scenes': [], 'items': [
-        {'name': '9', 'base_traits': valid}, {'name': '0', 'base_traits': '不得覆盖'}]}), synthetic_snapshot(), 'zh', '16:9')
+        {'name': '9', 'base_traits': valid}, {'name': '0', 'base_traits': '不得覆盖'}]}))
     assert len(repaired.items) == 10 and not validator.issues
     assert repaired.items[0].base_traits == valid
 
@@ -259,7 +259,7 @@ async def test_structured_json_generation_sends_configured_response_format_witho
 
     def respond(request):
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={'id': 'local', 'created': 1, 'model': 'test', 'object': 'chat.completion',
+        return completion_stream_response({'id': 'local', 'created': 1, 'model': 'test', 'object': 'chat.completion',
             'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': '{"prompt":"完整设计"}'}, 'finish_reason': 'stop'}],
             'usage': {'prompt_tokens': 100, 'completion_tokens': 10, 'total_tokens': 110}})
 
@@ -403,7 +403,7 @@ async def test_resumed_planning_replays_completed_model_output_without_a_second_
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': '已校验的内容'})])
 
     def model(*_):
-        result = FunctionModel(respond)
+        result = streaming_model(respond)
         result.client = AsyncMock()
         return result
 
@@ -466,3 +466,20 @@ async def test_storyboard_draft_renders_canonical_sections_with_default_strategy
     await scene.refresh_from_db()
     assert '【禁止项】' in scene.prompt and '【全局前置条件】' in scene.prompt
     assert '镜头时长:6s' in scene.prompt and '老人在晨雾中漫步' in scene.prompt
+
+
+@pytest.mark.asyncio
+async def test_summary_output_limit_does_not_block_main_tool_repair():
+    from pydantic_ai.messages import ModelRequest, RetryPromptPart
+    from pydantic_ai.models.function import FunctionModel
+    from services.creation_agent.model_boundary import RecordedAgentModel
+    from models.creation_agent import AgentConversation
+    from pydantic_ai.models import ModelRequestParameters
+    changes, _, _, _, task = await crud()
+    conversation = await AgentConversation.create(novel_id=changes.novel_id)
+    message = await AgentMessage.create(conversation=conversation, task=task, request_id=task.id, request_hash='summary-limit', role='assistant')
+    model = RecordedAgentModel(FunctionModel(lambda messages, info: None), message=message, before_request=AsyncMock(), max_characters=None, repair_root=str(task.id))
+    model.calls = [{'phase': 'main', 'finish_reason': 'tool_call', 'usage_reported': True}, {'phase': 'summary', 'finish_reason': 'length', 'usage_reported': True}]
+    await model._begin([ModelRequest(parts=[RetryPromptPart('invalid tool arguments', tool_name='link_scene_references', tool_call_id='repair')])], ModelRequestParameters())
+    repair = await AgentOperation.get(task=task, key='recovery:repair')
+    assert repair.state == 'completed'

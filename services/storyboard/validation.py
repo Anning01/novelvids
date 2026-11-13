@@ -4,13 +4,14 @@ import json
 import re
 
 from collections.abc import Sequence
+from services.storyboard.speech_tracks import spoken_parts
 from prompts.labels import prompt_label
 from prompts.skill_pack import SkillSnapshot
-from prompts.storyboard import normalized_storyboard_reference_fields, split_storyboard_voice_track, format_storyboard_prompt
+from prompts.storyboard import visible_storyboard_assets, TIMELINE, normalized_storyboard_reference_fields, format_storyboard_prompt
 from schemas.scene import SoraScenePromptConfig, SceneEntity
 from utils.messages import localized_message
 
-TIMELINE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*s?\s*[-–—~]\s*(\d+(?:\.\d+)?)\s*s?\s*[:：]")
+
 CONTENT_FIELDS = (
     "visual_style", "format_and_look", "lenses_and_filtration", "lighting_and_atmosphere",
     "grade_and_palette", "camera_movement", "time_setting", "environment", "spatial_relationships",
@@ -43,7 +44,8 @@ def validate_skill_storyboard_timing(shot: SoraScenePromptConfig) -> None:
             if not match or not 0 <= float(match[1]) < float(match[2]) <= duration + .001:
                 raise ValueError(localized_message("分镜时间轴缺失或超出镜头时长：{p0}", p0=name))
             if name != "actions":
-                if "@{" in split_storyboard_voice_track(line)[1]:
+                _, _, text = spoken_parts(line)
+                if "@{" in text:
                     raise ValueError(localized_message("台词或旁白正文不能包含素材引用，请保留原文内容"))
                 voices.append((float(match[1]), float(match[2])))
     voices.sort()
@@ -51,38 +53,65 @@ def validate_skill_storyboard_timing(shot: SoraScenePromptConfig) -> None:
         raise ValueError(localized_message("分镜中的对白、旁白或内心独白时间重叠"))
 
 
+def validate_blocking_map(shot, snapshot, entities=(), *, required=False):
+    if not required and ("blocking_guide" not in snapshot.contents or (shot.duration_split_part is None and shot.blocking_map is None)):
+        return
+    plan = shot.blocking_map
+    if plan is None or len(plan.cameras) != max(1, len(shot.segments)):
+        raise ValueError(localized_message("本镜需要空间定位图，标明人物站位及各画面的机位"))
+    visible = visible_storyboard_assets(shot, [entity for entity in entities if entity.asset_type != "场景"])
+    missing = set(visible) - {asset.asset_name or asset.name for asset in plan.assets}
+    if missing:
+        raise ValueError(localized_message("空间定位图缺少出镜资产：{p0}", p0="、".join(sorted(missing))))
+
+
 def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
-                             entities: Sequence[SceneEntity], strategy_key: str):
+                             entities: Sequence[SceneEntity], strategy_key: str, *, scene_layouts: dict | None = None, optional_blocking=False):
     from schemas.agent_workflow import SkillStoryboard, SkillShot
     from prompts.storyboard_strategies import StoryboardStrategyPrompt
-    from services.storyboard.speech_timing import StoryboardSpeechValidator
-
-    StoryboardSpeechValidator(snapshot).validate(storyboard.shots)
 
     resource = json.loads(snapshot.read("strategies"))[strategy_key]
     strategy = StoryboardStrategyPrompt(key=strategy_key, name=strategy_key, description="",
                                       prohibitions=resource["restrictions"], generation_rules=resource["rules"])
     shots = []
+    layouts = dict(scene_layouts or {})
+    location_ids = {layout["name"]: key for key, layout in layouts.items()}
     for shot in storyboard.shots:
+        if optional_blocking and shot.blocking_map:
+            try:
+                validate_blocking_map(shot, snapshot, entities, required=True)
+            except ValueError:
+                shot = shot.model_copy(update={"blocking_map": None})
+        if shot.blocking_map and shot.blocking_map.layout:
+            layout = shot.blocking_map.layout.model_dump()
+            same_location = location_ids.setdefault(layout["name"], layout["id"])
+            if same_location != layout["id"] or layouts.setdefault(layout["id"], layout) != layout:
+                raise ValueError(localized_message("同一场景形态的底图发生变化，请复用已确认的底图"))
         validate_skill_storyboard_timing(shot)
         normalized = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities))
         prompt = format_storyboard_prompt(normalized, language, entities=entities, strategy=strategy,
                                          localize_strategy=False)
         prepared = SkillShot.model_validate({**normalized.model_dump(), "prompt": prompt})
-        validate_skill_storyboard_shot(prepared, snapshot, language, entities)
+        validate_skill_storyboard_shot(prepared, snapshot, language, entities, optional_blocking=optional_blocking)
         shots.append(prepared)
     return SkillStoryboard(shots=shots)
 
 
 def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillSnapshot, language: str,
-                                   entities: Sequence[SceneEntity] = ()) -> None:
+                                   entities: Sequence[SceneEntity] = (), *, optional_blocking=False) -> None:
     if "storyboard_contract" not in snapshot.contents:
         return
     contract = json.loads(snapshot.read("storyboard_contract"))
+    if entities and shot.visible_asset_names is not None:
+        unknown = set(shot.visible_asset_names) - {entity.name for entity in entities}
+        if unknown:
+            raise ValueError(localized_message("出镜名单含未登记的资产或形态：{p0}", p0="、".join(sorted(unknown))))
     shot = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities))
     prompt = shot.prompt or ""
     from services.storyboard.entities import shot_variant_bindings
     shot_variant_bindings(shot, entities)
+    if not optional_blocking or shot.blocking_map:
+        validate_blocking_map(shot, snapshot, entities)
     position = 0
     for section in contract["sections"]:
         label = prompt_label(section, language)
@@ -101,5 +130,16 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     if f"@{{镜头时长:{duration:g}s}}" not in prompt:
         raise ValueError(localized_message("分镜提示词缺少镜头时长标记"))
     validate_skill_storyboard_timing(shot)
-    from services.storyboard.speech_timing import StoryboardSpeechValidator
-    StoryboardSpeechValidator(snapshot).validate_shot(shot)
+
+
+def validate_episode_duration(storyboard, limit: int | None) -> None:
+    if limit is None:
+        return
+    from decimal import Decimal
+
+    total = sum(Decimal(shot.duration.removesuffix("s")) for shot in storyboard.shots)
+    if total > limit:
+        raise ValueError(localized_message(
+            "分镜总时长 {p0} 秒，超过本集上限 {p1} 秒。请调整剧本节奏或时长上限。",
+            p0=f"{total:f}", p1=limit,
+        ))

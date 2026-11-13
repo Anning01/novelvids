@@ -104,13 +104,12 @@ class AliyunProvider(OSSProvider):
         content_type: str = "application/octet-stream",
         max_size: int = _MAX_DIRECT_UPLOAD,
     ) -> dict:
-        expiration = formatdate(usegmt=True)  # 占位（下面用 ISO 重新生成）
         policy = {
             "expiration": _iso_expiration(),
             "conditions": [
                 {"bucket": self.bucket},
-                ["starts-with", "$key", ""],
-                ["starts-with", "$Content-Type", ""],
+                {"key": key},
+                {"Content-Type": content_type},
                 ["content-length-range", 1, max_size],
             ],
         }

@@ -8,7 +8,7 @@ from typing import Any, Optional, Type
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from tortoise.queryset import QuerySet
 
 from controllers.config import ai_model_config_controller, general_config_controller
@@ -17,7 +17,7 @@ from models.asset import Asset
 from models.scene import Scene
 from models.asset_variant import AssetVariant
 from models.chapter import Chapter
-from schemas.asset import AssetCreate, AssetImageEditCreate, AssetUpdate
+from schemas.asset import AssetCreate, AssetImageEditCreate, AssetReferenceCreate, AssetUpdate
 from schemas.asset_variant import AssetVariantCreate, AssetVariantPatch
 from services.ai_task_executor import ai_task_executor
 from services.cover_derivatives import ensure_image_derivatives
@@ -206,6 +206,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             )
         novel_id = data.pop('novel_id')
         async with creation_write(novel_id):
+            if chapter_id is not None and not await Chapter.filter(id=chapter_id, novel_id=novel_id, number=chapter.number).exists():
+                raise HTTPException(409, localized_message('章节已移除或集号已修改，请重新选择'))
             asset = await CreationObjects(novel_id).create_setting({**data, **kwargs})
         await _ensure_asset_image_derivatives(_asset_image_references(data))
         return asset
@@ -844,7 +846,13 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             "generation_count": selection.generation_count,
             **({"frame_count": selection.frame_count, "frame_duration_ms": selection.frame_duration_ms} if selection.frame_count is not None else {}),
         }
-        normalized_reference_images = list(dict.fromkeys(reference_images or []))
+        # Drawer mentions are numbered against the saved list. Canvas inputs follow it.
+        saved_references = effective_metadata.get("generation_reference_images") or []
+        try:
+            saved_references = AssetReferenceCreate(reference_images=saved_references).reference_images
+        except ValidationError as error:
+            raise HTTPException(422, localized_message('参考图片不存在或已失效')) from error
+        normalized_reference_images = list(dict.fromkeys(_normalize_image_list([*saved_references, *(reference_images or [])])))
         if len(normalized_reference_images) > 10:
             raise HTTPException(status_code=400, detail=localized_message('资产设定图最多支持 10 张参考图片'))
         if normalized_reference_images:

@@ -1,6 +1,9 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { mount } from '@vue/test-utils'
-import { expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { expect, it, vi } from 'vitest'
+import { api } from '@/api'
+import type { Scene } from '@/types'
+import { useWorkbenchStore } from '../store/workbenchStore'
 import WorkbenchPromptEditorPanel from '../components/WorkbenchPromptEditorPanel.vue'
 import { TaskStatusEnum } from '@/types'
 import { createWorkbenchPromptActionRegistry, workbenchPromptActionRegistryKey } from '../prompt/promptActionRegistry'
@@ -119,4 +122,52 @@ it('presents a shot as a ratio-aware video card with media and asset metadata in
   expect(libraryButton.attributes('title')).toBe('从资源库选择视频')
   expect(libraryButton.text()).toBe('')
   expect(libraryButton.find('svg').exists()).toBe(true)
+})
+
+it.each(['light', 'dark'])('switches the editable prompt and binds a generated sheet on the shot canvas in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = useWorkbenchStore()
+  store.projectConfig.storyboard_enabled = true
+  const optimize = vi.spyOn(api, 'optimizeScenePrompt').mockResolvedValue({data: {status: 3,
+    response_data: {scene_id: 4, model_type: 'seedance_2_5', prompt: '模型稿'}}} as never)
+  const generateVideo = vi.spyOn(store, 'generateVideo')
+  const source: Scene = { id: 4, sequence: 4, created_at: '', updated_at: '', prompt: '通用稿', metadata: {} }
+  const data = {scene: source, videos: [], videoModelOptions: [{config_id: 2, model_type: 'seedance_2_5',
+    name: 'Seedance', capabilities: {generation_modes: ['reference'], resolutions: ['720p'], aspect_ratios: ['16:9'],
+      aspect_ratios_by_mode: {}, duration_min: 4, duration_max: 15, output_formats: ['mp4']}}],
+    project_defaults: {aspectRatio: '16:9', resolution: '720p'}, prompt_editor_open: true,
+    prompt_editor: {editorKey:'shot_prompt',nodeKind:'shot',fieldKey:'prompt',label:'视频 Prompt',referenceLimits:{}}}
+  const wrapper = mount(ShotNode, {props: {id:'scene-4', type:'shot', data} as never,
+    global: {plugins:[pinia], provide:{[workbenchPromptActionRegistryKey as symbol]:createWorkbenchPromptActionRegistry()},
+      stubs: {WorkbenchNodeFrame: frameStub, WorkbenchVideoMedia: videoStub, Teleport: true,
+        WorkbenchPromptEditorPanel: {props:['modelValue'],emits:['update:modelValue'],
+          template:'<div><header><slot name="header-actions"/></header><output>{{modelValue}}</output><footer><slot name="footer-actions"/></footer></div>'}
+      }}})
+  let saved = source
+  const persist = vi.spyOn(store, 'saveScene').mockImplementation(async (_, patch) => {
+    saved = {...saved, ...patch}; await wrapper.setProps({data:{...data,scene:saved}} as never)
+  })
+  try {
+    const toggle = wrapper.get('footer button')
+    expect(wrapper.get('header button[aria-label="生成故事版"]').text()).toContain('生成故事版')
+    await toggle.trigger('click'); await flushPromises()
+    expect(toggle.text()).toContain('使用通用 Prompt')
+    expect(wrapper.get('output').text()).toBe('模型稿')
+    await toggle.trigger('click'); await flushPromises()
+    expect(wrapper.get('output').text()).toBe('通用稿')
+    await toggle.trigger('click'); await flushPromises()
+    expect(optimize).toHaveBeenCalledTimes(1)
+    const sheet = {...saved, metadata:{...saved.metadata, storyboard_sheet:{image_url:'/media/board.png'}},
+      storyboard_binding_rules:{general:{line:'{image} 分镜构图',headings:[]}}}
+    wrapper.getComponent({name:'StoryboardSheetCard'}).vm.$emit('updated', sheet)
+    await flushPromises()
+    expect(persist.mock.lastCall?.[1].metadata?.video_reference_media).toEqual([
+      expect.objectContaining({name:'逐镜线稿故事版', url:'/media/board.png'})])
+    expect(wrapper.get('output').text()).toContain('novelvids%3Astoryboard-sheet')
+    expect(generateVideo).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount(); vi.restoreAllMocks(); delete document.documentElement.dataset.appTheme
+  }
 })

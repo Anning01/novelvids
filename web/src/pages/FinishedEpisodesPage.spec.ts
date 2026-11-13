@@ -61,6 +61,14 @@ it.each(['light', 'dark'])('shows two episodes as one project card and opens its
   wrapper.unmount()
 })
 
+it('shows pending settlement on the work card instead of the partial amount', async () => {
+  vi.mocked(workApi.list).mockResolvedValue({ ...result, data: { ...result.data, items: [{ ...work, pending_cost: true }] } })
+  const { wrapper } = await render()
+  const facts = wrapper.get('.work-production').text()
+  expect(facts).toContain('待结算')
+  expect(facts).not.toContain('¥104.04')
+})
+
 it('filters by review status and retries a failed request', async () => {
   const { wrapper } = await render()
   vi.mocked(workApi.list).mockRejectedValueOnce(new Error('Network unavailable'))

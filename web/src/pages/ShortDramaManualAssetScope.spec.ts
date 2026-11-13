@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { agentApi } from '@/features/creation-agent/api'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
@@ -29,6 +30,7 @@ vi.mock('@/api', () => ({
     asset: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
+    extract: vi.fn(),
     updateAsset: vi.fn(),
     generateAsset: vi.fn(),
     generateAssetBatch: vi.fn(),
@@ -52,6 +54,7 @@ const chapter = {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data:{models:[{id:22,name:'Asset text',model:'b'}]}} as never)
   delete routeQuery.asset
   delete routeQuery.variant
   vi.mocked(api.novelMeta).mockResolvedValue({
@@ -488,4 +491,17 @@ it('submits the entire selection before unmount and does not depend on page work
   complete({ code: 0, message: '', data: { tasks: [], skipped_asset_ids: [] } })
   await flushPromises()
   expect(api.generateAsset).not.toHaveBeenCalled()
+})
+
+it('submits extraction with its own selected model', async () => {
+  vi.mocked(api.latestExtraction).mockResolvedValue({data:null} as never)
+  vi.mocked(api.extract).mockRejectedValue(new Error('test submission'))
+  const wrapper = await mountInCurrentChapterScope()
+  await wrapper.get('[aria-label="选择资产提取模型"]').trigger('click')
+  document.querySelector<HTMLElement>('[role="option"] [title="Asset text"]')!.click()
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '提取本章资产')!.trigger('click')
+  await flushPromises()
+  expect(api.extract).toHaveBeenCalledWith(chapter.id, undefined, 22)
+  wrapper.unmount()
 })

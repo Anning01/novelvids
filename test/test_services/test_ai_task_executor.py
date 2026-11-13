@@ -68,6 +68,8 @@ class CountingHandler(BaseTaskHandler):
 async def test_submit_创建pending任务():
     """submit 应在数据库中创建 pending 状态的任务。"""
     await Novel.create(id=1, name="executor-owned-project")
+    from models.chapter import Chapter
+    await Chapter.create(id=1, novel_id=1, number=1, name="episode", content="script")
     executor = AiTaskExecutor()
     task = await executor.submit(
         AiTaskTypeEnum.extraction,

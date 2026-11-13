@@ -16,7 +16,6 @@
   --app-accent: #5b5cf6;
   --app-accent-soft: #eeefff;
   --app-shadow: 0 12px 34px rgb(37 41 57 / 7%);
-  --creation-bg-image: url('/background-light.png');
   --creation-success: #2d805e;
   --creation-danger: #b54b58;
   --creation-warning: #9a6a12;
@@ -41,7 +40,6 @@
   --app-accent: #b8a7ff;
   --app-accent-soft: #292929;
   --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
-  --creation-bg-image: url('/background-dark.png');
   --creation-success: #82d5ad;
   --creation-danger: #e08a92;
   --creation-warning: #e4ba6a;
@@ -64,7 +62,6 @@
     --app-accent: #b8a7ff;
     --app-accent-soft: #292929;
     --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
-    --creation-bg-image: url('/background-dark.png');
     --creation-success: #82d5ad;
     --creation-danger: #e08a92;
     --creation-warning: #e4ba6a;

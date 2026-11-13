@@ -37,7 +37,7 @@ const prompt = computed(() => {
     || text(asset.description)
     || text(props.node.data.description)
     || text(props.node.data.content)
-    || text(chapter.content)
+    || text(chapter.screenplay) || text(chapter.content)
 })
 const incomingReferences = computed(() => store.edges
   .filter(edge => edge.target === props.node.key)

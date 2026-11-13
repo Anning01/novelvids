@@ -13,30 +13,13 @@ from __future__ import annotations
 
 from utils.messages import localized_message
 
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-import cv2
-import numpy as np
-
+from services.media_images import CoverDerivativeSpec, COVER_DERIVATIVE_SPECS
 
 CoverDerivativeKind = Literal["thumbnail", "preview"]
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
-
-
-@dataclass(frozen=True)
-class CoverDerivativeSpec:
-    max_width: int
-    max_height: int
-    quality: int
-
-
-COVER_DERIVATIVE_SPECS: dict[CoverDerivativeKind, CoverDerivativeSpec] = {
-    "thumbnail": CoverDerivativeSpec(max_width=320, max_height=480, quality=78),
-    "preview": CoverDerivativeSpec(max_width=640, max_height=960, quality=82),
-}
-
 
 def image_derivative_reference(
     cover: str | None,
@@ -99,16 +82,8 @@ def local_media_path(media_root: Path, media_reference: str | None) -> Path | No
 
 
 def render_cover_derivatives(image_bytes: bytes) -> dict[CoverDerivativeKind, bytes]:
-    """解码一次原图并输出两个 WebP 派生尺寸。"""
-    encoded = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(encoded, cv2.IMREAD_UNCHANGED)
-    if image is None or image.size == 0:
-        raise ValueError(localized_message('封面图片无法解码'))
-
-    return {
-        kind: _render_variant(image, spec)
-        for kind, spec in COVER_DERIVATIVE_SPECS.items()
-    }
+    from services.media_processing import image_derivatives
+    return image_derivatives(image_bytes)
 
 
 def write_local_cover_derivatives(
@@ -197,23 +172,3 @@ async def ensure_image_derivatives(
                 )
         return {kind: str(reference) for kind, reference in references.items()}
     return {}
-
-
-def _render_variant(image: np.ndarray, spec: CoverDerivativeSpec) -> bytes:
-    height, width = image.shape[:2]
-    scale = min(1.0, spec.max_width / width, spec.max_height / height)
-    if scale < 1.0:
-        target = (
-            max(1, round(width * scale)),
-            max(1, round(height * scale)),
-        )
-        image = cv2.resize(image, target, interpolation=cv2.INTER_AREA)
-
-    success, output = cv2.imencode(
-        ".webp",
-        image,
-        [cv2.IMWRITE_WEBP_QUALITY, spec.quality],
-    )
-    if not success:
-        raise ValueError(localized_message('封面 WebP 编码失败'))
-    return output.tobytes()

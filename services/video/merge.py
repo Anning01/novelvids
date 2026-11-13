@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.media_processing import run_media
+
 from utils.messages import localized_message
 
 import asyncio
@@ -27,7 +29,7 @@ def _check_audio_stream(video_path: str) -> bool:
     """检查视频文件是否包含音频流。"""
     cmd = ['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'default=noprint_wrappers=1', video_path]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = run_media(cmd, capture_output=True, text=True, timeout=10)
         # 如果有输出，说明有音频流
         return bool(result.stdout.strip())
     except Exception:
@@ -41,7 +43,7 @@ def _probe_duration(video_path: str) -> float:
         "-of", "default=noprint_wrappers=1:nokey=1", video_path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = run_media(cmd, capture_output=True, text=True, timeout=10)
         return max(0.01, float(result.stdout.strip()))
     except (OSError, ValueError, subprocess.SubprocessError):
         return 0.01
@@ -257,7 +259,7 @@ class VideoMerger:
 
     @staticmethod
     def _run_merge_command(command: list[str]) -> None:
-        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8',
+        result = run_media(command, capture_output=True, text=True, encoding='utf-8',
                                 errors='replace', timeout=1200)
         if result.returncode != 0:
             logger.error('Video merge failed: returncode=%s', result.returncode)

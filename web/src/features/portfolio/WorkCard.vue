@@ -31,7 +31,7 @@ defineProps<{ work: WorkSummary }>()
         </div>
         <div v-if="work.recorded_cost != null" :title="tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')">
           <dt><Coins :size="14" aria-hidden="true" />{{ productionCostLabel(work.cost_scope) }}</dt>
-          <dd>{{ money(work.recorded_cost) }}</dd>
+          <dd>{{ work.pending_cost ? tr('待结算') : money(work.recorded_cost) }}</dd>
         </div>
       </dl>
       <p>{{ workDate(work.archived_at) }}<span v-if="work.category"> · {{ tr(work.category) }}</span></p>

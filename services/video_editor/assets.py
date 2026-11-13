@@ -1,4 +1,6 @@
 """Validated uploads for editing, kept separate from character voice references."""
+
+from services.media_processing import run_media
 import asyncio
 import mimetypes
 import subprocess
@@ -77,7 +79,7 @@ class EditorStorage(ResourceStorage):
             poster_ref = None
             if kind == 'video':
                 poster = Path(directory) / 'poster.jpg'
-                await asyncio.to_thread(subprocess.run, ['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', str(path),
+                await asyncio.to_thread(run_media, ['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', str(path),
                     '-frames:v', '1', '-vf', 'scale=480:-2', str(poster)], check=True, capture_output=True, timeout=30)
                 poster_ref = ref + '.poster.jpg'
                 await self.put(poster_ref, poster, 'image/jpeg')

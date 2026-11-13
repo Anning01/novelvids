@@ -1,0 +1,17 @@
+**
+!release.json
+!web/
+!web/**
+!prompts/
+!prompts/home_inspirations.json
+web/node_modules
+web/dist
+web/dist-ssr
+web/**/.env
+web/**/.env.*
+web/**/*.pem
+web/**/*.key
+web/**/*.log
+web/**/.DS_Store
+web/.idea
+web/.vscode

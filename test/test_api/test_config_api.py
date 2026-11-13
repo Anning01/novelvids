@@ -1,15 +1,15 @@
 import pytest
 from httpx import AsyncClient
 from models.config import AiModelConfig
+from services.image_generation.capabilities import capabilities_for as image_capabilities_for
 from services.video.capabilities import capabilities_for
 from utils.enums import AiTaskTypeEnum
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("second_protocol", ["volcengine_ark", "unified_video"])
-async def test_api_video_channels_coexist_and_keep_independent_prices(client: AsyncClient, second_protocol):
+async def test_api_video_channels_coexist_and_keep_independent_prices(client: AsyncClient):
     configs = []
-    for name, protocol, discount in [("官方渠道", "volcengine_ark", 1), ("优惠渠道", second_protocol, 0.5)]:
+    for name, protocol, discount in [("官方渠道", "volcengine_ark", 1), ("优惠渠道", "volcengine_ark", 0.5)]:
         response = await client.post("/api/config", json={
             "task_type": 4, "task_types": [4], "name": name,
             "base_url": "https://video.example.test/v1", "api_key": "test-key",
@@ -27,7 +27,7 @@ async def test_api_video_channels_coexist_and_keep_independent_prices(client: As
     assert models[configs[0]["id"]]["pricing"]["discount"] == 1
     assert models[configs[1]["id"]]["pricing"]["discount"] == 0.5
     assert models[configs[0]["id"]]["capabilities"]["supports_auto_duration"] is True
-    assert models[configs[1]["id"]]["capabilities"]["supports_auto_duration"] is (second_protocol == "volcengine_ark")
+    assert models[configs[1]["id"]]["capabilities"]["supports_auto_duration"] is True
     for config in configs:
         response = await client.get(f"/api/config/{config['id']}")
         assert response.json()["data"]["is_active"] is True
@@ -161,6 +161,7 @@ async def test_api_lists_only_active_supported_image_models_with_capabilities(cl
         "concurrency": 3,
         "pricing": None,
         "capabilities": {
+            "sizes": {key: list(sizes) for key, sizes in image_capabilities_for("seedream_5_pro").sizes.items()},
             "clarities": ["1K", "1.5K", "2K"],
             "aspect_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"],
             "output_formats": ["png", "jpeg"],

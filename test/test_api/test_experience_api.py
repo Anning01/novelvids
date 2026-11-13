@@ -370,3 +370,19 @@ def test_named_reference_contract_rejects_ambiguous_names_and_preserves_language
     with pytest.raises(ValidationError,match='引用名称'):
         ExperienceGenerateIn.model_validate(request)
     assert render_named_references('Keep @{Alice} and 原文。',{'Alice':'@{reference}'}) == 'Keep @{reference} and 原文。'
+
+
+async def test_seedream_55_quote_uses_requested_size_and_channel_discount(configured):
+    from decimal import Decimal
+    from services.experience_quote import clip_quote
+
+    _, image = configured
+    image.image_model_type = "seedream_5_5"
+    image.api_protocol = "novelvids"
+    image.pricing = {"type": "image", "billing_unit": "pixel_tier", "discount": 0.5,
+                     "prices": {"low": .13, "high_capped": .23},
+                     "input_image": {"first_free": 0, "price_per_image": .05}}
+    await image.save()
+    request = payload(image.id, task_type="image", mode="direct").model_copy(update={"resolution": "2K"})
+    quote = await clip_quote(request, AuthContext())
+    assert quote.allowed and quote.original_cost == Decimal(".23") and quote.estimated_cost == Decimal(".115")

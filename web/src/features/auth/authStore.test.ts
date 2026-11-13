@@ -16,6 +16,7 @@ describe('useAuthStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    sessionStorage.clear()
     vi.restoreAllMocks()
   })
 
@@ -96,6 +97,25 @@ describe('useAuthStore', () => {
     expect(viewerStore.canAccessSettings).toBe(false)
     expect(viewerStore.canAccessBilling).toBe(false)
     expect(viewerStore.canManageMembers).toBe(false)
+  })
+
+  it('opens the default team on login and preserves an explicit platform switch on reload', async () => {
+    const user = { id: 9, username: 'boss', nickname: '', avatar_url: '', is_super_admin: true }
+    const memberships = [
+      { team_id: 2, team_name: '其他团队', role: 'admin' },
+      { team_id: 3, team_name: '默认团队', role: 'admin' },
+    ]
+    stubApi({ me: async () => ({ data: { user, memberships } }) })
+    const store = useAuthStore()
+    await store.bootstrap()
+    await store.acceptSession({ token: 't', user })
+    expect(store.activeTeamId).toBe(3)
+    store.setActiveTeam(null)
+    const reloaded = useAuthStore(createPinia())
+    await reloaded.bootstrap()
+    expect(reloaded.role).toBe('super')
+    await reloaded.acceptSession({ token: 'new', user })
+    expect(reloaded.activeTeamId).toBe(3)
   })
 
   it('super admin can access everything', async () => {

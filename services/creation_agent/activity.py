@@ -65,11 +65,18 @@ async def activity_for_messages(messages, events, production):
     for row in related:
         owner = str(row.task_id) if str(row.task_id) in owners else row.task.request_params['parent_task_id']
         for item in activity_from_events(child_events[row.id], row.task.status):
-            if not item['id'].startswith('model:'):
+            if not item['id'].startswith(('model:', f'tool:{row.task_id}:')):
                 item['id'] = f'{row.task_id}:{item["id"]}'
             for message_id in owners[owner]:
                 result[message_id].append(item)
-    for items in result.values():
+    for key, items in result.items():
+        unique = {}
+        for item in items:
+            previous = unique.get(item['id'])
+            if previous and previous['status'] != 'running' and item['status'] == 'running':
+                continue
+            unique[item['id']] = {**(previous or {}), **item}
+        result[key] = items = list(unique.values())
         items.sort(key=lambda item: item.get('started_at') or '')
     coalesced = [row for row in messages if (row.run_input or {}).get('creation_run_id')]
     if coalesced:

@@ -1,8 +1,11 @@
 """超级管理员引导：配置了引导账号且尚无超管时，应用启动自动创建。"""
 
 import logging
+from decimal import Decimal
 
-from auth.models import User
+from tortoise.transactions import in_transaction
+
+from auth.models import Team, User
 from auth.security import hash_password
 from config import settings
 
@@ -13,24 +16,25 @@ async def ensure_super_admin() -> None:
     """AUTH_ENABLED=true 时调用：创建首个超管（若已存在则跳过）。"""
     if settings.AUTH_PROVIDER != "password":
         return
-    if not settings.SUPER_ADMIN_USERNAME or not settings.SUPER_ADMIN_PASSWORD:
-        logger.warning(
-            "AUTH_ENABLED=true 但未配置 SUPER_ADMIN_USERNAME / "
-            "SUPER_ADMIN_PASSWORD，无法自动创建超级管理员"
-        )
-        return
-    if await User.filter(is_super_admin=True).exists():
-        return
-    if await User.filter(username=settings.SUPER_ADMIN_USERNAME).exists():
-        logger.warning(
-            "用户名 %s 已被普通用户占用，跳过超管自动创建",
-            settings.SUPER_ADMIN_USERNAME,
-        )
-        return
-    await User.create(
-        username=settings.SUPER_ADMIN_USERNAME,
-        nickname=settings.SUPER_ADMIN_USERNAME,
-        password_hash=hash_password(settings.SUPER_ADMIN_PASSWORD),
-        is_super_admin=True,
-    )
-    logger.info("已创建超级管理员账号：%s", settings.SUPER_ADMIN_USERNAME)
+    studio = settings.DEPLOYMENT_ROLE == "studio"
+    async with in_transaction() as db:
+        if await User.filter(is_super_admin=True).using_db(db).exists():
+            return
+        first_studio = studio and not await User.all().using_db(db).exists() and not await Team.all().using_db(db).exists()
+        username = settings.SUPER_ADMIN_USERNAME or ("admin" if first_studio else "")
+        password = settings.SUPER_ADMIN_PASSWORD or ("123456" if first_studio else "")
+        if not username or not password:
+            logger.warning("请设置 SUPER_ADMIN_USERNAME 和 SUPER_ADMIN_PASSWORD 以创建超级管理员")
+            return
+        user, created = await User.get_or_create(username=username, defaults={
+            "nickname": username, "password_hash": hash_password(password), "is_super_admin": True,
+        }, using_db=db)
+        if not created:
+            return
+        if first_studio:
+            from services.team_provisioning import create_owned_team
+            from services.balance import top_up
+
+            team = await create_owned_team(user.id, name="默认团队")
+            await top_up(team.id, Decimal("999999"), operator_user_id=user.id, note="工作台初始余额")
+    logger.info("已创建超级管理员账号：%s", username)

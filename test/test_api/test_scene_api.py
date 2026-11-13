@@ -360,7 +360,7 @@ async def test_generate_duplicate_returns_existing_task(client: AsyncClient, con
 
 @pytest.mark.asyncio
 async def test_generate_no_config(client: AsyncClient):
-    """无启用的配置时返回 409。"""
+    """缺少可用助手模型时返回配置错误。"""
     novel = await Novel.create(name="No Config Novel", author="Author")
     chapter = await Chapter.create(
         novel_id=novel.id, number=1, name="Ch1", content="content"
@@ -371,8 +371,8 @@ async def test_generate_no_config(client: AsyncClient):
         json={"chapter_id": chapter.id, "model": 1},
     )
     body = response.json()
-    assert body["code"] == 409
-    print(f"    无配置，返回 409: {body['message']}")
+    assert body["code"] == 422
+    assert "tool calling" in body["message"]
 
 
 @pytest.mark.asyncio
@@ -429,3 +429,22 @@ async def test_generate_llm_failure_marks_task_failed(mock_exec, client: AsyncCl
     assert task.status == TaskStatusEnum.failed.value
     assert "LLM API error" in task.error_message
     print(f"    任务 id={task.id} 执行失败: status=failed, error='{task.error_message}'")
+
+
+@pytest.mark.asyncio
+async def test_extraction_and_storyboard_accept_independent_models(client, configured_creation_agent, monkeypatch):
+    novel = await Novel.create(name="分步选模型")
+    chapter = await Chapter.create(novel=novel, number=1, name="第一集", content="原文")
+    other = await AiModelConfig.create(name='Storyboard', model='storyboard', task_type=7,
+        base_url='https://example.invalid', api_key='test', supports_tool_calls=True, is_active=True)
+    monkeypatch.setattr(ai_task_executor, "run", AsyncMock())
+    stages = [(f"/api/chapter/extract/{chapter.id}", {}, configured_creation_agent.id),
+              ("/api/scene/generate/", {"chapter_id": chapter.id}, other.id)]
+    for url, body, chosen in stages:
+        response = await client.post(url, json={**body, "assistant_model_config_id": chosen})
+        assert response.json()["code"] == 0
+        task = await AiTask.get(id=response.json()["data"]["id"])
+        assert task.request_params["model_config_id"] == task.request_params["assistant_model_config_id"] == chosen
+        different = other.id if chosen == configured_creation_agent.id else configured_creation_agent.id
+        conflict = await client.post(url, json={**body, "assistant_model_config_id": different})
+        assert conflict.json()["code"] == 409

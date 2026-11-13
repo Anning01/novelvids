@@ -347,6 +347,11 @@ PROTOCOL_CAPABILITIES = {
             VideoGenerationModelTypeEnum.seedance_2_5,
         )
     },
+    ImageApiProtocol.novelvids: {
+        kind: replace(caps, api_protocol=ImageApiProtocol.novelvids, supports_auto_duration=False,
+                      supports_temporary_file_upload=True, supports_audio_data_uri=True, output_formats=("mp4",))
+        for kind, caps in CAPABILITIES.items()
+    },
 }
 
 
@@ -363,6 +368,8 @@ def capabilities_for(
 
 
 def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: str) -> None:
+    if protocol == ImageApiProtocol.unified_video.value:
+        raise HTTPException(400, localized_message("通用视频接口已停用，请使用火山方舟协议"))
     capabilities = capabilities_for(model_type, protocol)
     if protocol != capabilities.api_protocol.value:
         label = {
@@ -376,6 +383,7 @@ def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: 
 
 def protocol_options() -> dict[str, list[dict]]:
     labels = {
+        ImageApiProtocol.novelvids: "猫影开放平台",
         ImageApiProtocol.volcengine_ark: "火山方舟",
         ImageApiProtocol.unified_video: "通用视频接口",
         ImageApiProtocol.minimax: "MiniMax 官方",
@@ -387,7 +395,7 @@ def protocol_options() -> dict[str, list[dict]]:
             {"value": protocol.value, "label": labels[protocol], "resolutions": list(caps.resolutions)}
             for protocol, caps in [
                 (default.api_protocol, default),
-                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models),
+                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models and protocol != ImageApiProtocol.unified_video),
             ]
         ]
         for model, default in CAPABILITIES.items()

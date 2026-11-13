@@ -212,11 +212,10 @@ class CreationPlanRunner:
 
 async def run_confirmed_plan(params, assistant):
     from services.creation_agent.handler import authorize_run
-    from services.creation_agent.sessions import agent_configuration
 
     async def before_request():
         await authorize_run(params)
-        if not (await agent_configuration()).enabled or not await AiTask.filter(id=params['task_id'], status=2).exists():
+        if not await AiTask.filter(id=params['task_id'], status=2).exists():
             raise ValueError(localized_message('任务已停止，不能继续执行'))
     execution = SkillExecution(params, assistant, before_request)
     if assistant.run_input.get('creation_run_id') != params['creation_run_id']:

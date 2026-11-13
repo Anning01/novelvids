@@ -126,6 +126,8 @@ class AiTaskTypeEnum(NicknameIntEnum):
     creation_agent = 7, "创作助手"
     video_enhancement = 8, "视频画质增强"
     audio_recognition = 9, "语音识别"
+    screenplay = 10, "生成本集剧本"
+    prompt_optimization = 11, "模型提示词优化"
 
 
 @enum_description
@@ -157,6 +159,7 @@ class ImageModelTypeEnum(NicknameStrEnum):
     """后台允许启用的生图模型类型。"""
 
     seedream_5_lite = "seedream_5_lite", "Doubao Seedream 5.0 Lite"
+    seedream_5_5 = "seedream_5_5", "Doubao Seedream 5.5"
     seedream_5_pro = "seedream_5_pro", "Doubao Seedream 5.0 Pro"
     seedream_5_flash = "seedream_5_flash", "Doubao Seedream 5.0 Flash"
     gpt_image_2 = "gpt_image_2", "GPT Image 2"

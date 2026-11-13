@@ -1,5 +1,5 @@
 from api._production_request import production_request
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 
 from auth.deps import AuthContext, ensure_project_creation_team, get_auth_context, require_roles, require_team_access
 from controllers.novel import novel_controller
@@ -36,6 +36,48 @@ async def create_novel(
         created_by=ctx.user.id if ctx.user else None,
     )
     return ResponseSchema(data=novels)
+
+
+@router.get("/{novel_id}/transfer", summary="读取作品迁移清单")
+async def export_project(novel_id: int, ctx: AuthContext = Depends(require_team_access), _: AuthContext = _EDITOR):
+    return await transfer_plan(novel_id)
+
+
+@router.post("/{novel_id}/transfer", summary="包含本机画布的作品迁移清单", include_in_schema=False)
+async def export_with_canvases(novel_id:int, layouts:dict[str,dict], _:AuthContext=Depends(require_team_access),
+                               __:AuthContext=_EDITOR):
+    return await transfer_plan(novel_id, layouts)
+
+
+async def transfer_plan(novel_id, layouts=None):
+    from models.novel import Novel
+    from services.project_transfer.archive import ArchiveError
+    from services.project_transfer.downloads import export_plan
+    from services.project_transfer.snapshot import project_snapshot
+    project = await Novel.get_or_none(id=novel_id)
+    if project is None:
+        raise HTTPException(404, "项目不存在")
+    try:
+        return ResponseSchema(data=export_plan(await project_snapshot(novel_id,browser_layouts=layouts), project.team_id))
+    except ArchiveError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/import-project", summary="从迁移包导入新作品")
+async def import_project(file: UploadFile = File(...), ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    from pathlib import Path
+    from xml.etree.ElementTree import ParseError
+    from tortoise.exceptions import IntegrityError, ValidationError
+    from config import settings
+    from services.project_transfer.install import install_project
+    ensure_project_creation_team(ctx)
+    try:
+        project = await install_project(file.file, media_root=Path(settings.MEDIA_PATH),
+            exports_root=Path(settings.CHAPTER_EXPORT_PATH), team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    except (ValueError, TypeError, KeyError, ParseError, ValidationError, IntegrityError) as exc:
+        from services.project_transfer.archive import ArchiveError
+        raise HTTPException(422, str(exc) if isinstance(exc, ArchiveError) else "作品包内容无效，未导入项目") from exc
+    return ResponseSchema(data={"id": project.id, "name": project.name})
 
 
 @router.put("/{novel_id}", summary="全量修改小说/剧本", response_model=ResponseSchema[NovelOut])
@@ -129,13 +171,33 @@ async def split_novel(
 async def analyze_novel(
     novel_id: int,
     bg: BackgroundTasks,
+    cover_model_config_id: int | None = Query(default=None, gt=0),
+    assistant_model_config_id: int | None = Query(default=None, gt=0),
     ctx: AuthContext = Depends(require_team_access),
     _: AuthContext = _EDITOR,
 ):
     task = await novel_controller.analyze(
         novel_id,
         team_id=ctx.team_id,
+        cover_model_config_id=cover_model_config_id,
+        assistant_model_config_id=assistant_model_config_id,
         user_id=ctx.user.id if ctx.user else None,
+    )
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.post("/{novel_id}/cover", summary="生成项目封面", response_model=ResponseSchema[AiTaskOut])
+async def generate_novel_cover(
+    novel_id: int,
+    bg: BackgroundTasks,
+    model_config_id: int = Query(gt=0),
+    ctx: AuthContext = Depends(require_team_access),
+    _: AuthContext = _EDITOR,
+):
+    task = await novel_controller.analyze(
+        novel_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None,
+        cover_model_config_id=model_config_id, cover_only=True,
     )
     bg.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)

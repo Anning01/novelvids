@@ -9,6 +9,7 @@ import pytest
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
+from models.chapter import Chapter
 from prompts.styles import list_styles
 from prompts.labels import prompt_label
 from test.remake_fixtures import remake_shot
@@ -32,7 +33,7 @@ def test_scene_image_rules_require_cinematic_panels_without_design_sheet_labels(
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     rendered = instructions(snapshot, language, "image")
     assert f"language={language}" in rendered
-    for rule in ("2×2等大画面", "画面铺满到边缘", "不要留白", "标题栏", "不画文字", "视角名称", "正交投影", "室内与室外", "写进保存的完整提示词"):
+    for rule in ("2×2等大画面", "画面铺满到边缘", "不要留白", "标题栏", "不画文字", "视角名称", "正交投影", "室内与室外", "按用户要求调整"):
         assert rule in rendered
     assert snapshot.read("image") in rendered
 
@@ -100,7 +101,8 @@ def test_style_options_follow_the_single_skill_resource(tmp_path, monkeypatch):
     from services.project_config import validate_project_config
 
     styles = {"new-style": {"label": "新风格", "image": "规则", "video": "规则"}}
-    (tmp_path / "styles.json").write_text(json.dumps(styles))
+    (tmp_path / pack.FILES["styles"]).parent.mkdir(parents=True)
+    (tmp_path / pack.FILES["styles"]).write_text(json.dumps(styles))
     monkeypatch.setattr(pack, "ROOT", tmp_path)
     assert list_styles() == [{"key": "new-style", "label": "新风格"}]
     assert validate_project_config({"style_key": "new-style"}) == {"style_key": "new-style"}
@@ -121,7 +123,7 @@ def test_skill_manuscript_sampling_uses_facts_instead_of_templates(
     with_chapters
 ):
     novel = SimpleNamespace(content="Original manuscript. " * 4000)
-    chapters = [SimpleNamespace(number=1, name="Chapter 1: Arrival", content=novel.content)]
+    chapters = [Chapter(number=1, name="Chapter 1: Arrival", content=novel.content)]
     result = _build_analysis_material(
         novel, chapters if with_chapters else [], "en"
     )
@@ -178,7 +180,8 @@ def test_video_enhancement_skill_keeps_targets_authorization_and_source_identity
 @pytest.mark.parametrize('value', [[], {'bad': {}}, {'bad': {'label': 'X', 'image': 1, 'video': 'v'}}])
 def test_styles_reject_malformed_config_without_exposing_contents(tmp_path, monkeypatch, value):
     import prompts.skill_pack as pack
-    (tmp_path / 'styles.json').write_text(json.dumps(value))
+    (tmp_path / pack.FILES['styles']).parent.mkdir(parents=True)
+    (tmp_path / pack.FILES['styles']).write_text(json.dumps(value))
     monkeypatch.setattr(pack, 'ROOT', tmp_path)
     with pytest.raises(ValueError, match='Invalid styles'):
         pack.read_skill('styles')

@@ -861,3 +861,95 @@ async def test_handler_surfaces_token_usage_from_extractor():
 
     assert summary["token_usage"] == {"prompt_tokens": 120, "completion_tokens": 40}
     assert summary["persons"] == case.summary["persons"]
+
+
+@pytest.mark.parametrize("status_code,detail", [
+    (402, "团队余额不足，请联系团队管理员充值"),
+    (402, "你已达到个人消费限额，请联系团队管理员调整"),
+    (403, "运行用户已不可用"),
+    (409, "创作助手尚未启用"),
+])
+async def test_handler_preserves_business_failure_for_task_and_agent(status_code, detail):
+    from fastapi import HTTPException
+    from services.ai_task_executor import AiTaskExecutor
+
+    case = _orchestration_case()
+    failure = HTTPException(status_code=status_code, detail=detail)
+    case.extractor.extract.side_effect = failure
+    with pytest.raises(HTTPException) as captured:
+        await case.handler.execute(case.request_params)
+    assert captured.value is failure
+    case.upsert_service.save_result.assert_not_awaited()
+
+    await Novel.create(id=case.request_params["novel_id"], name="错误提示测试")
+    await Chapter.create(id=case.request_params["chapter_id"], novel_id=case.request_params["novel_id"],
+        number=1, name="错误提示测试", content="测试正文")
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.extraction, case.handler)
+    task = await executor.submit(AiTaskTypeEnum.extraction, case.request_params)
+    await executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 4
+    assert task.error_message == detail
+    assert "asset_extraction_gateway_error" not in task.error_message
+    case.upsert_service.save_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "provider_code", "expected"), [
+    (402, "other", "insufficient_quota"),
+    (429, "insufficient_quota", "insufficient_quota"),
+    (429, "rate_limit", "asset_extraction_gateway_error"),
+    (401, "invalid_api_key", "authentication_error"),
+    (None, None, "output_length"),
+])
+async def test_extraction_preserves_safe_model_failure(status, provider_code, expected, monkeypatch):
+    from pydantic_ai.exceptions import ModelHTTPError
+    from services.creation_agent.model_boundary import ModelOutputLimitError
+    novel, chapter = await _setup_env()
+    error = ModelOutputLimitError("private") if status is None else ModelHTTPError(
+        status, "model", {"error": {"code": provider_code, "message": "private"}})
+    monkeypatch.setattr("services.extraction.extractor.AssetExtractor.extract", AsyncMock(side_effect=error))
+    with pytest.raises(AssetExtractionGatewayError) as failure:
+        await ExtractionTaskHandler().execute({"novel_id": novel.id, "chapter_id": chapter.id,
+            "model": "mock-model", "base_url": "https://example.invalid", "api_key": "test"})
+    assert failure.value.error_code == expected
+    assert "private" not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_truncated_asset_output_finishes_all_inventory_entries(monkeypatch):
+    from services.creation_agent.model_boundary import ModelOutputLimitError
+    from services.creation_agent.skill_execution import current_execution
+    from services.extraction.cast import ChapterCast, ChapterPresence
+    from services.extraction.extractor import AssetExtractor
+
+    inventory = ChapterCast(characters=[ChapterPresence(name='甲', quote='甲', presence='present')],
+        items=[ChapterPresence(name='灯', quote='灯', presence='present')])
+    monkeypatch.setattr('services.extraction.continuation.read_chapter_cast', AsyncMock(return_value=inventory))
+    monkeypatch.setattr('services.extraction.continuation.plan_activity', AsyncMock())
+    monkeypatch.setattr('services.creation_agent.step_context.step_context', AsyncMock(return_value=None))
+    segments = []
+    async def generate(skill, facts, model, **options):
+        if isinstance(facts, list):
+            raise ModelOutputLimitError('length')
+        segments.append(facts['segment'])
+        selected = facts['selection']
+        assert selected['name'] in ('甲', '灯')
+        assert 'selection' in options['additional_instructions']
+        result = model(persons=[], scenes=[], items=[])
+        item = {'name': selected['name'], 'base_traits': '有原文依据的完整设计'}
+        if selected['category'] == 1:
+            result.persons.append(Person(**item))
+        else:
+            result.items.append(Item(**item))
+        await options['output_validator'](result)
+        return result
+    execution = SimpleNamespace(params={}, language='zh', generate=generate)
+    token = current_execution.set(execution)
+    try:
+        result = await AssetExtractor(None, 'mock').extract([])
+    finally:
+        current_execution.reset(token)
+    assert len(set(segments)) == 2
+    assert [item.name for item in result.persons + result.items] == ['甲', '灯']

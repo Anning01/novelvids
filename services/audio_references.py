@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.media_processing import run_media
+
 from utils.messages import localized_message
 
 import asyncio
@@ -72,7 +74,7 @@ def _validate_extension(filename: str) -> str:
 
 def _probe_audio(path: Path) -> float:
     try:
-        result = subprocess.run(
+        result = run_media(
             [
                 "ffprobe", "-v", "error", "-show_entries",
                 "format=duration:stream=codec_type,duration", "-of", "json", str(path),
@@ -144,7 +146,7 @@ async def _materialize_reference_audio(reference: AudioReference, destination: P
 
 def _trim_audio_file(source: Path, destination: Path, *, start: float, duration: float) -> None:
     try:
-        subprocess.run(
+        run_media(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                 "-i", str(source), "-ss", f"{start:.3f}", "-t", f"{duration:.3f}",

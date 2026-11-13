@@ -54,6 +54,7 @@ class WorkSummary(BaseModel):
     producer_id: int | None = None
     production_seconds: int | None = None
     recorded_cost: float | None = None
+    pending_cost: bool = False
     cost_scope: Literal['project', 'self'] | None = None
     archived_at: datetime
     updated_at: datetime

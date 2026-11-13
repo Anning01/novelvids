@@ -83,6 +83,7 @@ class WorkbenchCapabilitiesOut(BaseModel):
 
 
 class WorkbenchProjectConfigOut(BaseModel):
+    storyboard_enabled: bool = False
     workflow_kind: Literal["script", "remake"] = "script"
     aspect_ratio: str | None = None
     resolution: str | None = None
@@ -119,6 +120,7 @@ class WorkbenchBootstrapOut(BaseModel):
     """当前章节画布所需的完整工作集，避免前端逐条请求详情。"""
 
     chapter: ChapterOut
+    canvas_layout: dict | None = None
     project_config: WorkbenchProjectConfigOut
     remake_source: WorkbenchRemakeSourceOut | None = None
     assets: list[AssetWithVariantsOut]

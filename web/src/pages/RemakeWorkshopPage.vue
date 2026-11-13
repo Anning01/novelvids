@@ -39,6 +39,7 @@ const customStylePrompt = ref('')
 const selectedFile = ref<File | null>(null)
 const stagedUpload = ref<RemakeUpload | null>(null)
 const uploadState = ref<UploadState>('empty')
+const dragDepth = ref(0)
 const errorMessage = ref('')
 const creating = ref(false)
 const projectCommitted = ref(false)
@@ -174,6 +175,7 @@ async function releaseFolderUploads() {
 }
 
 async function uploadFile(file: File) {
+  if (uploadState.value === 'uploading') return
   errorMessage.value = ''
   const validationError = validateFile(file)
   if (validationError) {
@@ -181,10 +183,10 @@ async function uploadFile(file: File) {
     uploadState.value = 'failed'
     return
   }
+  uploadState.value = 'uploading'
   await releaseCurrentUpload()
   selectedFile.value = file
   if (!projectName.value.trim()) projectName.value = file.name.replace(/\.[^.]+$/, '')
-  uploadState.value = 'uploading'
   try {
     stagedUpload.value = await api.uploadRemakeVideo(file)
     uploadState.value = 'ready'
@@ -192,6 +194,25 @@ async function uploadFile(file: File) {
     uploadState.value = 'failed'
     errorMessage.value = (error as Error).message || tr('视频上传失败')
   }
+}
+
+function dragVideo(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  const busy = uploadState.value === 'uploading'
+  event.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+  if (!busy && event.type === 'dragenter') dragDepth.value++
+}
+
+function dropVideo(event: DragEvent) {
+  dragDepth.value = 0
+  const files = event.dataTransfer?.files
+  if (!files?.length || uploadState.value === 'uploading') return
+  if (files.length > 1) {
+    errorMessage.value = tr('单视频模式一次只能拖入一个视频')
+    return
+  }
+  void uploadFile(files[0]!)
 }
 
 function handleFileChange(event: Event) {
@@ -223,6 +244,7 @@ async function loadHistoryProjects() {
 
 async function selectSourceMode(mode: SourceMode) {
   if (!capabilities.value?.source_modes[mode]) return
+  dragDepth.value = 0
   const previous = sourceMode.value
   if (previous === 'folder_upload' && mode !== previous) {
     await releaseFolderUploads()
@@ -370,9 +392,11 @@ onBeforeUnmount(() => {
 
     <form v-else-if="capabilities" class="remake-form" @submit.prevent="createProject">
       <Transition name="source-panel" mode="out-in">
-        <label v-if="sourceMode === 'single_upload' && uploadState !== 'ready'" key="single-upload" class="source-stage upload-zone" :class="{ 'is-uploading': uploadState === 'uploading' }">
+        <label v-if="sourceMode === 'single_upload' && uploadState !== 'ready'" key="single-upload" class="source-stage upload-zone"
+          :class="{ 'is-uploading': uploadState === 'uploading', 'is-dragging': dragDepth > 0 }"
+          @dragenter="dragVideo" @dragover="dragVideo" @dragleave="dragDepth = Math.max(0, dragDepth - 1)" @drop.prevent="dropVideo">
           <span class="source-stage-icon"><UploadCloud :size="27" /></span>
-          <strong>{{ uploadState === 'uploading' ? tr('正在上传并校验视频…') : tr('选择 MP4 / MOV 视频') }}</strong>
+          <strong>{{ uploadState === 'uploading' ? tr('正在上传并校验视频…') : dragDepth ? tr('松开即可上传视频') : tr('拖入 MP4 / MOV 视频，或点击选择') }}</strong>
           <span>{{ tr('单视频不超过 500 MB，时长不超过 20 分钟') }}</span>
           <input type="file" accept="video/mp4,video/quicktime,.mp4,.mov" :disabled="uploadState === 'uploading'" @change="handleFileChange" />
         </label>
@@ -504,7 +528,8 @@ onBeforeUnmount(() => {
 .state-card--error { flex-direction: column; color: var(--creation-danger); }
 .source-stage { min-height: 220px; padding: 26px; border: 1px dashed var(--app-border-strong); border-radius: 16px; background: var(--app-surface); box-sizing: border-box; }
 .upload-zone { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 9px; color: var(--app-accent); cursor: pointer; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
-.upload-zone:hover, .upload-zone.is-uploading { border-color: var(--app-accent); background: var(--app-accent-soft); box-shadow: var(--app-shadow); }
+.upload-zone:focus-within, .upload-zone.is-dragging { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.upload-zone:hover, .upload-zone.is-dragging, .upload-zone.is-uploading { border-color: var(--app-accent); background: var(--app-accent-soft); box-shadow: var(--app-shadow); }
 .upload-zone strong { color: var(--app-text); font-size: 14px; font-weight: 600; }.upload-zone > span:not(.source-stage-icon) { color: var(--app-text-secondary); font-size: 11px; }.upload-zone input, .folder-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .source-stage-icon { display: grid; width: 50px; height: 50px; margin-bottom: 3px; place-items: center; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-accent); background: var(--app-surface); box-shadow: var(--app-shadow); }
 .source-stage-icon.is-ready { color: var(--creation-success); background: color-mix(in srgb, var(--creation-success) 10%, var(--app-surface)); }

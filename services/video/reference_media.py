@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.media_processing import run_media
+
 from utils.messages import localized_message
 
 import asyncio
@@ -59,7 +61,7 @@ def select_referenced_media(prompt: str, references: Sequence[ReferenceT]) -> li
     return selected
 
 
-def render_reference_mentions(prompt: str, references: Sequence[Any], *, image_indices: dict[str, int] | None = None) -> str:
+def render_reference_mentions(prompt: str, references: Sequence[Any], *, image_indices: dict[str, int] | None = None, image_format: str = '[图{}]') -> str:
     """将内部素材标记转换为供应商可读文本，避免泄露媒体 URL。"""
     rendered = prompt
     for index, reference in enumerate(references, start=1):
@@ -74,7 +76,7 @@ def render_reference_mentions(prompt: str, references: Sequence[Any], *, image_i
             rendered = rendered.replace(f"@{{{canvas_name}}}", f"【参考视频：{name}】")
         rendered = rendered.replace(
             reference_mention_syntax(kind, _reference_mention_url(reference)),
-            f"[图{image_indices[_reference_mention_url(reference)]}]" if kind == 'image' and image_indices and _reference_mention_url(reference) in image_indices
+            image_format.format(image_indices[_reference_mention_url(reference)]) if kind == 'image' and image_indices and _reference_mention_url(reference) in image_indices
             else f"【参考{'图片' if kind == 'image' else '视频'}：{name}】",
         )
     # 已从素材池删除的旧标记不能作为 URL 或伪引用继续进入供应商 prompt。
@@ -98,7 +100,7 @@ def _media_kind(extension: str, capabilities: VideoModelCapabilities) -> MediaKi
 
 def _probe(path: Path) -> dict[str, Any]:
     try:
-        result = subprocess.run(
+        result = run_media(
             [
                 "ffprobe", "-v", "error", "-show_entries",
                 "format=duration,size,format_name:stream=codec_type,codec_name,width,height,duration,avg_frame_rate,r_frame_rate,color_transfer,color_primaries,color_space,sample_rate,channels,channel_layout",

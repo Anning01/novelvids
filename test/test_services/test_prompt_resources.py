@@ -9,6 +9,7 @@ import prompts.skill_pack as pack
 @pytest.fixture
 def rules(tmp_path, monkeypatch):
     for filename in pack.FILES.values():
+        (tmp_path / filename).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(pack.ROOT / filename, tmp_path / filename)
     monkeypatch.setattr(pack, "ROOT", tmp_path)
     return tmp_path
@@ -22,7 +23,7 @@ def test_new_runs_and_style_options_read_only_the_canonical_files(rules):
     (rules / "styles.anning.json").write_text('{"obsolete": {}}')
     assert pack.snapshot_skills() == before
     assert get_style("obsolete") is None
-    (rules / "assets.md").write_text("Updated asset instructions")
+    (rules / pack.FILES["assets"]).write_text("Updated asset instructions")
     after = pack.snapshot_skills()
     assert after["revision"] != before["revision"]
     assert after["contents"]["assets"] == "Updated asset instructions"
@@ -40,7 +41,7 @@ def test_published_rules_supply_the_full_contract_to_new_tasks(rules, language):
     assert all(spec["heading"] in rendered for spec in assets.values())
     storyboard = json.loads(snapshot.read("storyboard_contract"))
     assert len(storyboard["sections"]) == 8
-    assert storyboard["speech_timing"]["characters_per_second"] == [2.5, 4.5]
+    assert storyboard["speech_baseline"]["characters_per_second"] == 3.5
 
 
 @pytest.mark.parametrize(("name", "content"), [

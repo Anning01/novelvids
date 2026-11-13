@@ -1,0 +1,94 @@
+"""Translate application media references when packing or opening a local project."""
+from pathlib import Path
+import re
+import base64
+import binascii
+import mimetypes
+from io import BytesIO
+from urllib.parse import quote, unquote
+
+from services.project_transfer.archive import ArchiveError, MEDIA_SUFFIXES, write_project
+
+MENTION = re.compile(r"(@\{参考(?:图片|视频):)([^}]+)(\})")
+
+
+PROSE_FIELDS = frozenset({"content", "screenplay", "prompt", "text", "description", "story_outline", "base_traits",
+                         "generic_video_prompt", "generic_prompt", "audiovisual_guidance"})
+
+
+def translate(value, resolve, field=None):
+    if isinstance(value, dict):
+        return {k: translate(v, resolve, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [translate(item, resolve, field) for item in value]
+    if not isinstance(value, str):
+        return value
+    translated = value if field in PROSE_FIELDS else resolve(value)
+    if translated != value:
+        return translated
+
+    def mention(match):
+        source = unquote(match[2])
+        target = resolve(source)
+        if target == source:
+            return match[0]
+        # encodeURIComponent, as used by the canvas and the storyboard editor.
+        return match[1] + quote(target, safe="-_.!~*'()") + match[3]
+
+    return MENTION.sub(mention, value)
+
+
+def document_refs(project):
+    return {ref for group in project.get("sync_works", []) for item in group["objects"] if item["kind"] == "episode"
+            for ref in item["payload"].get("archive", {}).values() if isinstance(ref, str)}
+
+
+def archived_document(ref, approved):
+    return ref in approved and re.fullmatch(r"/media/(?:work-packages|project-imports/[a-f0-9]{32})/[a-f0-9]{64}\.(md|txt|json|csv|pdf|docx)", ref)
+
+
+def pack_local_snapshot(snapshot: dict, destination: Path, *, media_root: Path, exports_root: Path):
+    """Package on the machine that owns the media. No server-side URL fetching."""
+    contents = {}
+    approved = document_refs(snapshot)
+    with write_project(destination, contents) as writer:
+        cached = {}
+
+        def resolve(source):
+            if source in cached:
+                return cached[source]
+            if source.startswith("data:"):
+                header, separator, data = source[5:].partition(";base64,")
+                suffix = (mimetypes.guess_extension(header) or "").lstrip(".")
+                if not separator or suffix not in MEDIA_SUFFIXES:
+                    raise ArchiveError("作品内嵌素材格式无效")
+                try:
+                    raw = base64.b64decode(data,validate=True)
+                except (ValueError,binascii.Error) as e:
+                    raise ArchiveError("作品内嵌素材编码无效") from e
+                cached[source] = writer.add_media(BytesIO(raw),suffix)
+                return cached[source]
+            storage = "media"
+            if source.startswith("/media/exports/"):
+                storage = "export"
+                root, relative = exports_root, source[len("/media/exports/"):]
+            elif source.startswith("/media/"):
+                root, relative = media_root, source[len("/media/"):]
+            elif source.startswith("remake/sources/"):
+                storage = "remake"
+                root, relative = media_root, source
+            elif source.startswith(("https://", "http://", "uploads/")) and "\n" not in source:
+                # The client must fetch these directly from their origin before finalizing the archive.
+                raise ArchiveError("作品包含远程素材，需从素材来源下载原文件")
+            else:
+                return source
+            root = root.resolve()
+            path = (root / relative).resolve()
+            if not path.is_relative_to(root) or not path.is_file() or (path.suffix.lower().lstrip(".") not in MEDIA_SUFFIXES and not archived_document(source, approved)):
+                raise ArchiveError("作品引用的本地素材缺失或路径无效")
+            with path.open("rb") as file:
+                ref = writer.add_media(file, path.suffix, storage=storage)
+            cached[source] = ref
+            return ref
+
+        contents.update(translate(snapshot, resolve))

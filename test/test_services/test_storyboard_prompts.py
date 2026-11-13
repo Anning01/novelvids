@@ -216,7 +216,7 @@ def test_narration_strategy_renders_narration_and_specific_prohibitions():
     assert shot.narration[0] in core_instruction
     assert shot.dialogue[0] in core_instruction
     assert shot.sound_design in core_instruction
-    assert "仅保留环境音效、人物台词、旁白与人物内心 OS" in prompt
+    assert "【禁止项】\n禁止廉价发光特效" in prompt and shot.sound_design in prompt
 
 
 def test_primary_generation_instruction_orders_all_voice_tracks_by_time():
@@ -235,10 +235,10 @@ def test_primary_generation_instruction_orders_all_voice_tracks_by_time():
     assert prompt.index("【核心生成指令｜高优先级】") < prompt.index("【详细执行】")
 
 
-def test_cinematic_strategy_preserves_the_original_video_prohibitions():
+def test_cinematic_strategy_renders_the_shots_own_restrictions():
     prompt = format_storyboard_prompt(_shot(1), entities=[_entity()])
 
-    assert "无字幕、无水印、无 LOGO、无 BGM，仅保留环境音效与人物台词。" in prompt
+    assert "【禁止项】\n禁止廉价发光特效" in prompt
     assert "无旁白" not in prompt
     assert "无人物内心 OS" not in prompt
     assert "【旁白 / 内心 OS】" not in prompt
@@ -420,3 +420,35 @@ def test_storyboard_services_do_not_inline_large_prompt_templates():
             f"{service_path.relative_to(project_root)} 中存在大段内联文本；"
             "Prompt 模板必须放入 prompts/。"
         )
+
+
+@pytest.mark.parametrize("key", ["cinematic", "narration"])
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_script_driven_presentation_survives_structured_render(key, language):
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from prompts.skill_pack import SkillSnapshot, snapshot_skills
+    from services.storyboard.validation import prepare_skill_storyboard
+
+    snap = SkillSnapshot.model_validate(snapshot_skills())
+    value = _shot(1)
+    value.visual_prose = 'A station ident appears with the requested logo, watermark and caption.'
+    value.sound_design = 'A string score enters after the door closes.'
+    value.effect_restrictions = ['No flashing lights']
+    silent = value.model_copy(update={'sequence': 2, 'visual_prose': 'An empty doorway.',
+                                      'sound_design': 'Full silence, including music and ambience.'})
+    raw = StructuredSkillStoryboard.model_validate({'shots': [
+        shot.model_dump(exclude={'prompt'}) for shot in (value, silent)
+    ]})
+    music, quiet = prepare_skill_storyboard(raw, snap, language, [], key).shots
+    assert value.sound_design in music.prompt and value.visual_prose in music.prompt
+    assert silent.sound_design in quiet.prompt and value.sound_design not in quiet.prompt
+    for shot in (music, quiet):
+        assert '无 BGM' not in shot.prompt and '无字幕' not in shot.prompt
+        assert 'no subtitles' not in shot.prompt.lower()
+        assert 'no background music' not in shot.prompt.lower()
+
+
+def test_legacy_storyboard_request_passes_the_model_duration_range_as_facts():
+    import json
+    messages = build_storyboard_messages('雨夜', [], 'zh', shot_duration_range=[4, 15])
+    assert json.loads(messages[1]['content'])['untrusted_task_facts']['shot_duration_range'] == [4, 15]

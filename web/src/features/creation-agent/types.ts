@@ -10,7 +10,7 @@ export interface PromptTargetStatus extends AgentTarget {
 }
 
 export interface AgentChangeItem {
-  kind: AgentTarget['kind']
+  kind: AgentTarget['kind'] | 'chapter'
   target_id: number
   asset_id?: number | null
   target_label?: string | null
@@ -156,6 +156,7 @@ export interface AgentRunInput {
 }
 
 export interface AgentConfiguration {
+  runtime?: 'deepagents' | 'pydantic_ai'
   production_concurrency?: number
   enabled: boolean
   request_limit: number | null
@@ -170,6 +171,6 @@ export interface AgentConfiguration {
   summary_timeout_seconds?: number | null
   context_page_characters?: number
   history_runs: number
-  max_output_tokens: number
+  max_output_tokens: number | null
   total_tokens_limit: number | null
 }

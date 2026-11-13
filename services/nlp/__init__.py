@@ -27,6 +27,8 @@ class ChapterSplitError(ValueError):
 def validate_chapter_split(
     content: str,
     chapters: list["ParsedChapterResult"],
+    *,
+    require_multiple_for_long: bool = True,
 ) -> None:
     """阻止乱码或明显漏识别的长书稿进入后续工作流。"""
     text = (content or "").strip()
@@ -40,7 +42,7 @@ def validate_chapter_split(
             "书稿解码后出现大量乱码，请将文件转换为 UTF-8、GB18030、DOCX 或文本型 PDF 后重试"
         )
 
-    if len(text) >= LONG_SCRIPT_MIN_LENGTH and len(chapters) <= 1:
+    if require_multiple_for_long and len(text) >= LONG_SCRIPT_MIN_LENGTH and len(chapters) <= 1:
         raise ChapterSplitError(
             f"书稿约 {len(text):,} 字，但只识别到 {len(chapters)} 章。"
             "请检查章节标题是否使用“第一章/第1章”格式，或转换文件编码后重试"
@@ -231,7 +233,7 @@ class RegexChapterRecognitionStrategy(ChapterRecognitionStrategy):
     # 匹配 "第X章"，X 可以是中文数字或阿拉伯数字
     # 捕获组: (完整匹配), (数字部分), (标题部分)
     CHAPTER_PATTERN = re.compile(
-        r"^[ \t]*(?:#{1,6}[ \t]+)?((?:第[ \t]*([0-9零一二三四五六七八九十百千万亿]+)[ \t]*章)|(?:(?:Chapter|Episode)[ \t]+(?:[0-9]+|[IVXLCDM]+)\b))(.*)$", re.MULTILINE | re.IGNORECASE
+        r"^[ \t]*(?:#{1,6}[ \t]+)?((?:第[ \t]*([0-9零一二三四五六七八九十百千万亿]+)[ \t]*[章集])|(?:(?:Chapter|Episode)[ \t]+(?:[0-9]+|[IVXLCDM]+)\b))(.*)$", re.MULTILINE | re.IGNORECASE
     )
 
     def recognize(self, text: NovelText) -> list[ParsedChapterResult]:

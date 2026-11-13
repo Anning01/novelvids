@@ -98,11 +98,30 @@ async def read_chapter_cast(execution, messages, *, target_requirements=None) ->
         except ValueError:
             saved = None
     if not saved:
-        cast = await execution.generate('structured', {'segment': segment, 'chapter': chapter, 'known_assets': registry,
-            **({'target_requirements': target_requirements} if target_requirements is not None else {})},
-            ChapterCast, additional_instructions=instructions, output_validator=validate)
+        async def read_part(text, part_segment):
+            from services.creation_agent.model_boundary import ModelOutputLimitError
+
+            async def validate_part(candidate):
+                validate_cast(candidate, text, registry)
+
+            try:
+                return await execution.generate('structured', {'segment': part_segment,
+                    'chapter': {**chapter, 'content': text}, 'known_assets': registry,
+                    **({'target_requirements': target_requirements} if target_requirements is not None else {})},
+                    ChapterCast, additional_instructions=instructions, output_validator=validate_part)
+            except ModelOutputLimitError:
+                if len(text) < 2:
+                    raise
+                midpoint = len(text) // 2
+                cut = text.rfind('\n', max(0, midpoint // 2), midpoint) + 1 or midpoint
+                first = await read_part(text[:cut], part_segment + ':0')
+                second = await read_part(text[cut:], part_segment + ':1')
+                return ChapterCast(**{field: [*getattr(first, field), *getattr(second, field)]
+                                     for field, _ in INVENTORY_FIELDS})
+
+        cast = await read_part(chapter['content'], segment)
     await validate(cast)
-    await AgentOperation.get_or_create(task_id=execution.params['task_id'], key=f'model:structured:ChapterCast:{segment}',
+    await AgentOperation.update_or_create(task_id=execution.params['task_id'], key=f'model:structured:ChapterCast:{segment}',
         defaults={'state': 'completed', 'result': cast.model_dump(mode='json')})
     await plan_activity(execution, 'chapter-cast', localized_message('已核对本章资产清单'), status='completed',
         detail=str(len(cast.required_assets())))

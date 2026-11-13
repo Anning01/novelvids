@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, X } from 'lucide-vue-next'
-import { api, ApiRequestError } from '@/api'
+import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Upload, X } from 'lucide-vue-next'
+import { exportProject, importProject } from '@/features/project-transfer/transfer'
+import { api, ApiRequestError, exportDiagnostics } from '@/api'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import AppPagination from '@/components/AppPagination.vue'
@@ -19,6 +20,7 @@ const overview = ref<ProjectOverview | null>(null)
 const loading = ref(true)
 const errorMessage = ref('')
 const costs = ref(new Map<number, number>())
+const pendingCosts = ref(new Set<number>())
 const costState = ref<'loading' | 'ready' | 'error'>('loading')
 const costError = ref('')
 const search = ref('')
@@ -54,7 +56,7 @@ const stats = computed(() => [
   { key: 'chapters', label: tr('累计章节'), value: projectNumber(overview.value?.summary.chapter_count ?? 0), unit: '', hint: tr('已有文字章节'), icon: BookOpen },
   { key: 'assets', label: tr('累计资产'), value: projectNumber(overview.value?.summary.asset_count ?? 0), unit: '', hint: tr('项目内文件去重'), icon: Image },
   { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已合成作品的实际时长'), icon: Clock3 },
-  ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
+  ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? pendingCosts.value.size ? tr('待结算') : money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
 ])
 const typeOptions = computed(() => [
   { value: 'all', label: tr('全部类型') }, { value: 'clip', label: tr('独立片段') }, { value: 'agent', label: tr('AI 创作') },
@@ -91,14 +93,19 @@ async function loadCosts(revision: number) {
   if (!auth.canAccessBilling) return
   try {
     const values = new Map<number, number>()
+    const pending = new Set<number>()
     let pages = 1
     for (let current = 1; current <= pages; current++) {
       // Reuse the billing endpoint's server-side role, team and user scope.
       const { data } = await api.billingProjects(current, 100)
       if (revision !== requestRevision) return
-      for (const item of data.items) values.set(item.novel_id, item.total_cost)
+      for (const item of data.items) {
+        values.set(item.novel_id, item.total_cost)
+        if (item.pending_records) pending.add(item.novel_id)
+      }
       pages = data.pagination.pages
     }
+    pendingCosts.value = pending
     costs.value = values
     costState.value = 'ready'
   } catch (error) {
@@ -112,6 +119,64 @@ function resetFilters() {
   search.value = ''
   typeFilter.value = 'all'
   stateFilter.value = 'all'
+}
+
+const filePicker = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const exportsByProject = ref(new Map<number, AbortController>())
+let importTransfer = new AbortController()
+
+function cancelTransfers() {
+  importTransfer.abort()
+  importTransfer = new AbortController()
+  importing.value = false
+  for (const transfer of exportsByProject.value.values()) transfer.abort()
+  exportsByProject.value.clear()
+}
+
+function cancelDownload(projectId: number) {
+  exportsByProject.value.get(projectId)?.abort()
+  exportsByProject.value.delete(projectId)
+}
+
+async function downloadProject(project: ProjectOverviewItem) {
+  if (exportsByProject.value.has(project.id)) return
+  const transfer = new AbortController()
+  const {signal} = transfer
+  exportsByProject.value.set(project.id, transfer)
+  try {
+    const blob = await exportProject(project.id, signal)
+    if (signal.aborted) return
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = project.name + '.novelvids.zip'
+    document.body.append(link)
+    try { link.click() } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000) }
+  } catch (error) {
+    if (!signal.aborted) notice.error((error as Error).message)
+  } finally {
+    if (exportsByProject.value.get(project.id) === transfer) exportsByProject.value.delete(project.id)
+  }
+}
+
+async function uploadProject(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || importing.value) return
+  const {signal} = importTransfer
+  importing.value = true
+  try {
+    const {data} = await importProject(file, signal)
+    if (signal.aborted) return
+    resetFilters()
+    page.value = 1
+    await load()
+    if (!signal.aborted) notice.success(tr('已导入作品「{p0}」', {p0:data.name}))
+  } catch (error) {
+    if (!signal.aborted) notice.error((error as Error).message)
+  } finally { if (!signal.aborted) importing.value = false }
 }
 
 async function remove(project: ProjectOverviewItem) {
@@ -137,17 +202,34 @@ async function remove(project: ProjectOverviewItem) {
 
 watch([search, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })
-watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { overview.value = null; void load() })
+watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { cancelTransfers(); overview.value = null; void load() })
+const exporting = ref(false)
+async function downloadDiagnostics() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    if (await exportDiagnostics()) notice.success(tr('诊断日志已导出'))
+    else notice.info(tr('已导出网页日志，后台日志暂时无法读取'))
+  } catch (cause) { notice.error(cause instanceof Error ? cause.message : tr('文件下载失败，请稍后重试')) }
+  finally { exporting.value = false }
+}
 function refreshOnFocus() { if (!loading.value) void load() }
 onMounted(() => { void load(); window.addEventListener('focus', refreshOnFocus) })
-onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', refreshOnFocus) })
+onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEventListener('focus', refreshOnFocus) })
 </script>
 
 <template>
   <main class="projects-page">
     <header class="projects-page__header">
-      <h1>{{ tr('我的项目') }}</h1>
-      <RouterLink v-if="editable" to="/create/short-drama" class="projects-page__create"><Plus :size="18" aria-hidden="true" />{{ tr('新建项目') }}</RouterLink>
+      <div>
+        <h1>{{ auth.deploymentRole === 'platform' ? tr('作品迁移') : tr('我的项目') }}</h1>
+        <p v-if="editable && auth.deploymentRole === 'platform'" class="projects-page__migration-hint">{{ tr('下载作品包后，在本地猫影的项目列表中选择「导入作品」。') }}</p>
+      </div>
+      <div v-if="editable && auth.deploymentRole === 'studio'" class="projects-page__actions">
+        <input ref="filePicker" type="file" hidden accept=".zip,application/zip" @change="uploadProject">
+        <AppButton variant="secondary" size="sm" :loading="importing" @click="filePicker?.click()"><Upload v-if="!importing" :size="15" />{{ importing ? tr('正在导入') : tr('导入作品') }}</AppButton>
+        <RouterLink to="/create/short-drama" class="projects-page__create"><Plus :size="18" aria-hidden="true" />{{ tr('新建项目') }}</RouterLink>
+      </div>
     </header>
 
     <div v-if="loading && !overview" class="projects-page__loading" role="status">
@@ -176,25 +258,35 @@ onBeforeUnmount(() => { ++requestRevision; window.removeEventListener('focus', r
         </div>
 
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
-          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :deleting="deletingIds.has(project.id)" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
+          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :export-only="auth.deploymentRole === 'platform'" :deleting="deletingIds.has(project.id)" :exporting="exportsByProject.has(project.id)" @download="downloadProject" @cancel-download="cancelDownload" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? pendingCosts.has(project.id) ? 'pending' : costState : undefined" :cost-hint="costHint" @remove="remove" />
         </div>
         <div v-else class="projects-page__empty">
           <span class="projects-page__empty-icon"><Search v-if="hasFilters" :size="28" aria-hidden="true" /><BookOpen v-else :size="28" aria-hidden="true" /></span>
           <h3>{{ hasFilters ? tr('没有找到匹配的项目') : tr('暂无项目') }}</h3>
-          <p>{{ hasFilters ? tr('试试其他关键词，或调整筛选条件。') : tr('从一个故事开始，逐步完成你的第一部作品。') }}</p>
+          <p v-if="hasFilters || auth.deploymentRole === 'studio'">{{ hasFilters ? tr('试试其他关键词，或调整筛选条件。') : tr('从一个故事开始，逐步完成你的第一部作品。') }}</p>
           <AppButton v-if="hasFilters" variant="soft" @click="resetFilters">{{ tr('清除筛选') }}</AppButton>
-          <RouterLink v-else-if="editable" to="/create/short-drama" class="projects-page__empty-link">{{ tr('前往创作') }}<ArrowRight :size="15" aria-hidden="true" /></RouterLink>
+          <RouterLink v-else-if="editable && auth.deploymentRole === 'studio'" to="/create/short-drama" class="projects-page__empty-link">{{ tr('前往创作') }}<ArrowRight :size="15" aria-hidden="true" /></RouterLink>
         </div>
         <AppPagination v-if="filtered.length > 12" :page="page" :page-size="pageSize" :total="filtered.length" :page-size-options="[12, 24, 48]" @page-change="page = $event" @size-change="pageSize = $event" />
       </section>
     </template>
     <div v-if="errorMessage" class="projects-page__error" role="alert"><h2>{{ tr('项目加载失败') }}</h2><p>{{ errorMessage }}</p><AppButton variant="secondary" :loading="loading" @click="load">{{ tr('重新加载') }}</AppButton></div>
+    <details v-if="auth.deploymentRole === 'studio'" class="projects-support">
+      <summary>{{ tr('技术支持') }}</summary>
+      <AppButton variant="ghost" size="sm" :loading="exporting" @click="downloadDiagnostics">{{ tr('导出最近 100 条诊断日志') }}</AppButton>
+    </details>
   </main>
 </template>
 
 <style scoped>
+.projects-support { margin-top: 24px; color: var(--app-text-secondary); font-size: 12px; }
+.projects-support summary { width: fit-content; padding: 5px 0; cursor: pointer; }
+.projects-support summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+
 .projects-page { container: projects / inline-size; min-height: 100%; padding: 32px 30px 60px; color: var(--app-text); background: var(--app-canvas); }
 .projects-page__header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
+.projects-page__migration-hint { margin: 8px 0 0; color: var(--app-text-secondary); font-size: 13px; line-height: 1.5; }
+.projects-page__actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .projects-page h1 { margin: 0; font-size: clamp(26px, 2.6vw, 34px); font-weight: 700; line-height: 1.25; letter-spacing: -.035em; }
 .projects-page__create { display: inline-flex; min-height: 42px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 17px; border-radius: 11px; color: #fff; background: #5b5cf6; box-shadow: 0 5px 14px rgb(91 92 246 / 16%); font-size: 13px; font-weight: 600; transition: background-color 150ms ease; }
 .projects-page__create:hover { background: #4d4ee5; }

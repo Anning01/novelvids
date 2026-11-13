@@ -136,7 +136,7 @@ class ExtractionContextLoader:
                 id=chapter.id,
                 number=chapter.number,
                 name=normalize_chapter_title(chapter.name),
-                content=chapter.content or "",
+                content=chapter.production_text or "",
             ),
         )
 

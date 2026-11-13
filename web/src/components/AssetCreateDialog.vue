@@ -26,20 +26,25 @@ import AppSelect from '@/components/AppSelect.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import AssetVariantStrip from '@/components/AssetVariantStrip.vue'
+import MaterialMentionInput from '@/features/workbench/components/MaterialMentionInput.vue'
+import type { MaterialMention } from '@/features/workbench/components/materialMentionTypes'
+import CatalogResourcePicker from '@/features/resource-library/CatalogResourcePicker.vue'
+import { catalogApi, type CatalogResource } from '@/features/resource-library/catalog'
 import ImageAnnotationEditor from '@/components/ImageAnnotationEditor.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
-import { api, persistedMediaRef } from '@/api'
+import { api, mediaUrl, persistedMediaRef } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { notice } from '@/shared/notice'
-import { estimateImageCost } from '@/shared/modelPricing'
+import { estimateAssetImageCost } from '@/shared/modelPricing'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
 import { imageDerivativeUrl } from '@/shared/mediaDerivatives'
+import { fallbackImage } from '@/shared/mediaFallback'
 import { AssetTypeEnum, TaskStatusEnum, type AiTask, type Asset, type AssetActiveGeneration, type AssetGenerationRecord, type AssetVariant, type AssetVariantDraft, type AudioReference, type DigitalHuman, type ImageGenerationModel } from '@/types'
 
 type AssetKind = 'character' | 'scene' | 'prop'
 type CreateMode = 'ai' | 'library' | 'upload'
-type LibraryItem = { key: string; name: string; detail: string; image: string; source: 'public' | 'project'; asset?: Asset; human?: DigitalHuman }
+type LibraryItem = { key: string; name: string; detail: string; image: string; thumbnail?: string; source: 'public' | 'project'; asset?: Asset; human?: DigitalHuman }
 type LibraryScope = 'all' | 'public' | 'project'
 type PendingReferenceImage = { file: File; previewUrl: string }
 type AssetEditorFormSnapshot = {
@@ -117,12 +122,27 @@ const models = ref<ImageGenerationModel[]>([])
 const libraryItems = ref<LibraryItem[]>([])
 const selectedLibraryKey = ref('')
 const libraryScope = ref<LibraryScope>('all')
+const libraryProjectId = ref('')
+const libraryProjects = ref<Array<{ id: number; name: string }>>([])
+const projectLibraryItems = ref<LibraryItem[]>([])
+const libraryProjectsLoading = ref(false)
+const libraryProjectsLoaded = ref(false)
+const projectLibraryLoading = ref(false)
+const projectLibraryError = ref('')
+let projectLibraryRevision = 0
+let libraryProjectsRevision = 0
 const search = ref('')
 const uploadFile = ref<File | null>(null)
 const uploadPreview = ref('')
 const dragging = ref(false)
 const referenceImages = ref<string[]>([])
 const pendingReferenceImages = ref<PendingReferenceImage[]>([])
+const promptEditor = ref<InstanceType<typeof MaterialMentionInput> | null>(null)
+const referenceRevision = ref(0)
+const referenceSource = ref<'library' | 'variants' | null>(null)
+const resourcePickerOpen = ref(false)
+const referenceSearch = ref('')
+const ownVariants = ref<AssetVariant[]>([])
 const saving = ref(false)
 const autoSaving = ref(false)
 const voiceSaving = ref(false)
@@ -131,6 +151,11 @@ let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 const promptTouched = ref(false)
 const promptLanguage = ref<'zh' | 'en'>('en')
 const promptSourceAsset = ref<Asset | null>(null)
+const libraryOriginal = ref<{ thumbnail: string; original: string } | null>(null)
+const recoveredLibraryImage = computed(() => {
+  const current = promptSourceAsset.value?.main_image || props.asset?.main_image
+  return libraryOriginal.value && libraryOriginal.value.thumbnail === current ? libraryOriginal.value.original : ''
+})
 const loadingLibrary = ref(false)
 const loadingMoreLibrary = ref(false)
 const loadingHistory = ref(false)
@@ -160,12 +185,33 @@ const referenceImagePreviews = computed(() => [
   ...referenceImages.value.map((url, index) => ({ key: `persisted:${url}:${index}`, url })),
   ...pendingReferenceImages.value.map((item, index) => ({ key: `pending:${item.file.name}:${index}`, url: item.previewUrl })),
 ])
+const referenceMentions = computed<MaterialMention[]>(() => referenceImagePreviews.value.map((image, index) => ({
+  nodeKey: `asset-reference-${index}`, edgeKey: `asset-reference-${index}`,
+  name: tr('参考图 {p0}', { p0: index + 1 }), syntax: `@{参考图${index + 1}}`,
+  prompt: '', previewUrl: mediaUrl(image.url), hasImage: true, mediaKind: 'image', mode: 'reference_image',
+})))
+const availableLibraryItems = computed(() => libraryProjectId.value ? projectLibraryItems.value : libraryItems.value)
+const libraryProjectOptions = computed(() => [
+  { value: '', label: tr('全部项目') },
+  ...libraryProjects.value.map(project => ({ value: String(project.id), label: project.name })),
+])
+const referenceLibraryItems = computed(() => availableLibraryItems.value.filter(item =>
+  `${item.name} ${item.detail}`.toLocaleLowerCase().includes(referenceSearch.value.trim().toLocaleLowerCase())))
+const ownReferenceItems = computed(() => {
+  const base = promptSourceAsset.value || props.asset
+  const original = recoveredLibraryImage.value || base?.main_image
+  const items = original ? [{ key: 'base', name: tr('主形象'), image: original, thumbnail: recoveredLibraryImage.value ? null : base?.main_image_thumbnail }] : []
+  return [...items, ...ownVariants.value.flatMap(variant => variant.images.map((image, index) => ({
+    key: `variant-${variant.id}-${index}`, name: `${variant.name}${variant.images.length > 1 ? ` ${index + 1}` : ''}`,
+    image, thumbnail: variant.image_thumbnails?.[index],
+  })))].filter(item => item.name.toLocaleLowerCase().includes(referenceSearch.value.trim().toLocaleLowerCase()))
+})
 const variantContextActive = computed(() => Boolean(variantDraft.value))
 const generatedImage = computed(() => variantDraft.value?.is_new
   ? ''
   : selectedVariant.value
     ? selectedVariant.value.images?.[0] || ''
-    : promptSourceAsset.value?.main_image || props.asset?.main_image || '')
+    : recoveredLibraryImage.value || promptSourceAsset.value?.main_image || props.asset?.main_image || '')
 function currentImageDerivative(kind: 'thumbnail' | 'preview') {
   const original = generatedImage.value
   if (!original) return ''
@@ -246,17 +292,15 @@ const historyStatus = (status: TaskStatusEnum) => ({
 
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
-const estimatedCost = computed(() => estimateImageCost(
-  selectedModel.value?.pricing,
-  imageParameters.value.clarity,
-  imageParameters.value.generationCount,
+const estimatedCost = computed(() => estimateAssetImageCost(
+  selectedModel.value, imageParameters.value, referenceImagePreviews.value.length,
 ))
-const filteredLibraryItems = computed(() => libraryItems.value.filter(item => {
+const filteredLibraryItems = computed(() => availableLibraryItems.value.filter(item => {
   if (libraryScope.value !== 'all' && item.source !== libraryScope.value) return false
   const query = search.value.trim().toLowerCase()
   return !query || `${item.name} ${item.detail}`.toLowerCase().includes(query)
 }))
-const selectedLibrary = computed(() => libraryItems.value.find(item => item.key === selectedLibraryKey.value))
+const selectedLibrary = computed(() => availableLibraryItems.value.find(item => item.key === selectedLibraryKey.value))
 const publicHasMore = computed(() => props.kind === 'character' && publicPage.value < publicPages.value)
 const projectHasMore = computed(() => projectPage.value < projectPages.value)
 const isGroupPortrait = computed(() => props.kind === 'character' && referenceLayout.value === 'group_portrait')
@@ -264,6 +308,7 @@ const promptPlaceholder = computed(() => isGroupPortrait.value
   ? tr('描述群像中的人物、各自固定特征、服装与人物关系')
   : tr('描述{p0}的外观、材质、光影和视角要求', { p0: config.value.label }))
 const libraryHasMore = computed(() => {
+  if (libraryProjectId.value) return false
   if (libraryScope.value === 'public') return publicHasMore.value
   if (libraryScope.value === 'project') return projectHasMore.value
   return publicHasMore.value || projectHasMore.value
@@ -287,6 +332,7 @@ function reset() {
   prompt.value = ''
   promptTouched.value = false
   promptSourceAsset.value = null
+  libraryOriginal.value = null
   gender.value = ''
   age.value = ''
   voice.value = ''
@@ -296,6 +342,15 @@ function reset() {
   referenceLayout.value = 'character_turnaround'
   selectedLibraryKey.value = ''
   libraryScope.value = 'all'
+  libraryProjectId.value = ''
+  libraryProjects.value = []
+  libraryProjectsLoaded.value = false
+  libraryProjectsLoading.value = false
+  projectLibraryItems.value = []
+  projectLibraryError.value = ''
+  projectLibraryLoading.value = false
+  ++projectLibraryRevision
+  ++libraryProjectsRevision
   search.value = ''
   libraryItems.value = []
   publicPage.value = 0
@@ -308,6 +363,10 @@ function reset() {
   pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
   pendingReferenceImages.value = []
   referenceImages.value = []
+  referenceSource.value = null
+  resourcePickerOpen.value = false
+  referenceSearch.value = ''
+  ownVariants.value = props.asset?.variants || []
   modelId.value = ''
   generationHistory.value = []
   generationTask.value = null
@@ -479,7 +538,7 @@ function imageInfoLabel(url: string, formatHint?: string) {
 }
 
 function openImageLightbox(url: string, alt: string, formatHint?: string) {
-  lightboxImage.value = url
+  lightboxImage.value = mediaUrl(url)
   lightboxAlt.value = alt
   lightboxFormat.value = resolveImageFormat(url, formatHint)
 }
@@ -692,10 +751,20 @@ async function loadReferencePrompt() {
   if (!props.asset || selectedVariant.value || promptTouched.value) return
   try {
     const source = (await api.asset(props.asset.id)).data
+    if (!props.open || props.asset?.id !== source.id) return
     promptSourceAsset.value = source
     const metadata = source.metadata && typeof source.metadata === 'object'
       ? source.metadata as Record<string, unknown>
       : {}
+    const libraryAssetId = Number(metadata.source_asset_id)
+    if (metadata.library_source === 'project' && libraryAssetId > 0 && libraryAssetId !== source.id
+      && /\/derivatives\/[^/]+-thumbnail\.webp(?:[?#]|$)/i.test(source.main_image || '')) {
+      const libraryAsset = await api.asset(libraryAssetId).then(response => response.data).catch(() => null)
+      if (props.open && props.asset?.id === source.id && promptSourceAsset.value?.main_image === source.main_image && libraryAsset?.main_image
+        && source.main_image === (libraryAsset.main_image_thumbnail || imageDerivativeUrl(libraryAsset.main_image))) {
+        libraryOriginal.value = { thumbnail: source.main_image, original: libraryAsset.main_image }
+      }
+    }
     const characterMetadata = resolveCharacterFormMetadata(source)
     if (!gender.value) gender.value = characterMetadata.gender
     if (!age.value) age.value = characterMetadata.ageGroup
@@ -710,7 +779,7 @@ async function loadReferencePrompt() {
       },
       aspect_ratio: imageParameters.value.aspectRatio,
     })
-    if (!promptTouched.value && props.asset?.id === source.id) {
+    if (props.open && !variantDraft.value && !promptTouched.value && props.asset?.id === source.id) {
       prompt.value = preview.data.prompt
       promptLanguage.value = preview.data.prompt_language
     }
@@ -743,16 +812,63 @@ async function loadProjectPage(page: number) {
   const response = await api.assetLibrary(config.value.type, page, 24)
   projectPage.value = response.data.pagination.page
   projectPages.value = response.data.pagination.pages
-  appendLibraryItems(response.data.items
-    .filter(item => item.novel_id !== props.novelId && item.main_image)
+  appendLibraryItems(projectImageItems(response.data.items))
+}
+
+function projectImageItems(items: Asset[]): LibraryItem[] {
+  return items
+    .filter(item => item.id !== props.asset?.id && item.main_image)
     .map(item => ({
       key: `project-${item.id}`,
       name: item.canonical_name,
       detail: item.description || tr('其他项目资产'),
-      image: item.main_image_thumbnail || item.main_image || '',
+      image: item.main_image || '',
+      thumbnail: item.main_image_thumbnail || undefined,
       source: 'project' as const,
       asset: item,
-    })))
+    }))
+}
+
+async function loadLibraryProjects() {
+  if (libraryProjectsLoaded.value || libraryProjectsLoading.value) return
+  const revision = ++libraryProjectsRevision
+  libraryProjectsLoading.value = true
+  try {
+    const { data } = await catalogApi.projects()
+    if (revision === libraryProjectsRevision) {
+      libraryProjects.value = data.items
+      libraryProjectsLoaded.value = true
+    }
+  } catch (error) {
+    if (revision === libraryProjectsRevision) notice.error((error as Error).message)
+  } finally {
+    if (revision === libraryProjectsRevision) libraryProjectsLoading.value = false
+  }
+}
+
+async function selectLibraryProject(projectId: string) {
+  const revision = ++projectLibraryRevision
+  libraryProjectId.value = projectId
+  projectLibraryItems.value = []
+  projectLibraryError.value = ''
+  projectLibraryLoading.value = Boolean(projectId)
+  selectedLibraryKey.value = ''
+  if (!projectId) return
+  libraryScope.value = 'project'
+  try {
+    const { data } = await catalogApi.projectCharacters(Number(projectId))
+    if (revision === projectLibraryRevision) projectLibraryItems.value = projectImageItems(data.items)
+  } catch (error) {
+    if (revision === projectLibraryRevision) projectLibraryError.value = (error as Error).message
+  } finally {
+    if (revision === projectLibraryRevision) projectLibraryLoading.value = false
+  }
+}
+
+function selectLibraryScope(scope: LibraryScope) {
+  libraryScope.value = scope
+  if (scope !== 'project' && libraryProjectId.value) void selectLibraryProject('')
+  if (scope === 'project') void loadLibraryProjects()
 }
 
 async function loadSources() {
@@ -844,6 +960,12 @@ function onReferenceFileInput(event: Event) {
 }
 
 function removeReferenceImage(index: number) {
+  referenceRevision.value++
+  prompt.value = prompt.value.replace(/@\{参考图(\d+)\}/g, (marker, number: string) => {
+    const reference = Number(number) - 1
+    if (reference === index) return ''
+    return reference > index ? `@{参考图${reference}}` : marker
+  })
   if (index < referenceImages.value.length) {
     referenceImages.value.splice(index, 1)
     return
@@ -855,9 +977,35 @@ function removeReferenceImage(index: number) {
   pendingReferenceImages.value.splice(pendingIndex, 1)
 }
 
+function addReferenceImage(url: string) {
+  if (!url) return
+  if (referenceImages.value.includes(url)) return
+  if (referenceImagePreviews.value.length >= 10) {
+    notice.info(tr('资产设定图最多支持 10 张参考图片'))
+    return
+  }
+  // Persisted entries precede pending uploads, so keep existing prompt bindings aligned.
+  const position = referenceImages.value.length
+  if (pendingReferenceImages.value.length) referenceRevision.value++
+  prompt.value = prompt.value.replace(/@\{参考图(\d+)\}/g, (marker, number: string) =>
+    Number(number) > position ? `@{参考图${Number(number) + 1}}` : marker)
+  referenceImages.value.push(url)
+}
+
+function chooseReferenceResources(items: CatalogResource[]) {
+  for (const item of items) addReferenceImage(item.url)
+  resourcePickerOpen.value = false
+}
+
+function updatePrompt(value: string) {
+  prompt.value = value
+  promptTouched.value = true
+}
+
 async function prepareReferenceImages() {
   if (!pendingReferenceImages.value.length) return [...referenceImages.value]
-  const uploaded = await Promise.all(pendingReferenceImages.value.map(item => api.upload(item.file)))
+  const configId = selectedModel.value?.config_id
+  const uploaded = await Promise.all(pendingReferenceImages.value.map(item => api.upload(item.file, configId)))
   pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
   pendingReferenceImages.value = []
   referenceImages.value = [
@@ -874,8 +1022,12 @@ function requestAssetGeneration(assetId: number, variantId: number | undefined, 
 }
 
 function onWindowKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || event.repeat || !props.open) return
-  if (annotationOpen.value) return
+  if (event.key !== 'Escape' || event.repeat || !props.open || event.defaultPrevented) return
+  if (annotationOpen.value || resourcePickerOpen.value) return
+  if (referenceSource.value) {
+    referenceSource.value = null
+    return
+  }
   event.preventDefault()
   if (lightboxImage.value) {
     closeImageLightbox()
@@ -967,6 +1119,7 @@ async function selectVoiceReference(reference: AudioReference | null) {
 async function persistEdits() {
   if (!props.asset || !formHydrated.value) return
   if (autoSaving.value || voiceSaving.value || saving.value || generationRunning.value) return
+  if (variantDraft.value || pendingReferenceImages.value.length) return
   if (mode.value !== 'ai') return
   if (!name.value.trim()) return
   const existingMetadata = props.asset.metadata && typeof props.asset.metadata === 'object'
@@ -1011,7 +1164,7 @@ async function submit(regenerate = false) {
   try {
     const generationReferenceImages = mode.value === 'ai'
       ? await prepareReferenceImages()
-      : []
+      : [...referenceImages.value]
     if (props.asset && variantDraft.value) {
       const draft = variantDraft.value
       const variant = selectedVariant.value
@@ -1075,8 +1228,8 @@ async function submit(regenerate = false) {
 
     let assetName = name.value.trim()
     let assetDescription = description.value.trim()
-    let mainImage: string | undefined
-    let imageSource = 1
+    let mainImage: string | undefined = recoveredLibraryImage.value || undefined
+    let imageSource = props.asset?.image_source ?? 1
     const existingMetadata = props.asset?.metadata && typeof props.asset.metadata === 'object'
       ? props.asset.metadata as Record<string, unknown>
       : {}
@@ -1110,13 +1263,15 @@ async function submit(regenerate = false) {
 
     if (mode.value === 'library' && selectedLibrary.value) {
       const selected = selectedLibrary.value
-      assetName = selected.name
-      assetDescription = selected.asset?.description || selected.detail
+      if (!props.asset) {
+        assetName = selected.name
+        assetDescription = selected.asset?.description || selected.detail
+      }
       mainImage = selected.image
       imageSource = 2
       metadata.library_source = selected.source
       metadata.source_asset_id = selected.asset?.id || selected.human?.asset_id
-      if (selected.human) Object.assign(metadata, { gender: selected.human.gender, age: selected.human.age, country: selected.human.country, occupation: selected.human.occupation })
+      if (selected.human && !props.asset) Object.assign(metadata, { gender: selected.human.gender, age: selected.human.age, country: selected.human.country, occupation: selected.human.occupation })
     }
 
     const payload: Partial<Asset> = {
@@ -1180,9 +1335,10 @@ watch(() => props.open, value => {
   void loadSources()
 })
 watch(() => props.kind, () => { if (props.open) { reset(); void loadSources() } })
-watch(() => props.asset?.id, () => { if (props.open) reset() })
+watch(() => props.asset?.id, () => { if (props.open) { reset(); void loadSources() } })
 watch(() => props.asset?.main_image, () => {
   if (!props.open || !props.asset) return
+  libraryOriginal.value = null
   promptSourceAsset.value = props.asset
   void loadGenerationHistory()
 })
@@ -1214,6 +1370,8 @@ onMounted(() => {
   }
 })
 onUnmounted(() => {
+  ++projectLibraryRevision
+  ++libraryProjectsRevision
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
   generationController?.abort()
   pendingReferenceImages.value.forEach(item => URL.revokeObjectURL(item.previewUrl))
@@ -1246,7 +1404,7 @@ onUnmounted(() => {
             </header>
             <div v-if="generatedImage" class="asset-generated-preview__canvas">
               <button type="button" class="asset-generated-preview__viewer" :class="{ 'is-generating': generationBusy }" :aria-label="tr('放大查看当前图片')" @click="openImageLightbox(generatedImage, tr('{p0}的生成图片', { p0: currentImageName }), currentImageFormat)">
-                <img :src="generatedImagePreview" :alt="tr('{p0}的生成图片', { p0: currentImageName })" />
+                <img :key="generatedImage" :src="mediaUrl(generatedImagePreview)" :alt="tr('{p0}的生成图片', { p0: currentImageName })" @error="fallbackImage($event, mediaUrl(generatedImage))" />
                 <span class="asset-generated-preview__zoom"><Maximize2 :size="15" />{{ tr('放大查看') }}</span>
                 <span v-if="generationBusy" class="asset-generated-preview__overlay" aria-hidden="true">
                   <i><LoaderCircle :size="25" /></i>
@@ -1339,13 +1497,14 @@ onUnmounted(() => {
           <AssetVariantStrip
             v-if="isEditing && asset"
             ref="variantStripRef"
-            :asset="asset"
+            :asset="recoveredLibraryImage ? { ...asset, main_image: recoveredLibraryImage, main_image_thumbnail: null } : asset"
             :initial-variant-id="initialVariantId"
             :draft="variantDraft"
             :chapter-number="chapterNumber"
             :episode-numbers="episodeNumbers"
             @select="selectVariantPreview"
             @draft="updateVariantDraft"
+            @loaded="ownVariants = $event"
           />
 
           <div class="asset-form-grid" :class="{ 'is-character': kind === 'character' && !isGroupPortrait }">
@@ -1379,7 +1538,10 @@ onUnmounted(() => {
               </header>
               <div class="asset-reference-input__grid">
                 <figure v-for="(image, index) in referenceImagePreviews" :key="image.key">
-                  <img :src="imageDerivativeUrl(image.url)" :alt="tr('图生图参考图片 {p0}', { p0: index + 1 })" />
+                  <button type="button" class="asset-reference-insert" :aria-label="tr('引用参考图 {p0}', { p0: index + 1 })" @mousedown.prevent @click="promptEditor?.insertMaterial(referenceMentions[index]!)">
+                    <img :src="mediaUrl(imageDerivativeUrl(image.url))" :alt="tr('图生图参考图片 {p0}', { p0: index + 1 })" @error="fallbackImage($event, mediaUrl(image.url))" />
+                    <span>{{ tr('参考图 {p0}', { p0: index + 1 }) }}</span>
+                  </button>
                   <AppButton type="button" variant="secondary" size="xs" icon-only :aria-label="tr('移除图生图参考图片 {p0}', { p0: index + 1 })" @click="removeReferenceImage(index)"><X :size="13" /></AppButton>
                 </figure>
                 <label v-if="referenceImagePreviews.length < 10" class="asset-reference-input__add">
@@ -1388,32 +1550,55 @@ onUnmounted(() => {
                   <span>{{ tr('添加参考图') }}</span>
                 </label>
               </div>
+              <div class="asset-reference-sources">
+                <AppButton type="button" variant="secondary" size="sm" :disabled="referenceImagePreviews.length >= 10" :active="referenceSource === 'library'" @click="referenceSource = referenceSource === 'library' ? null : 'library'; if (kind === 'character' && referenceSource === 'library') void loadLibraryProjects()"><Library :size="14" />{{ config.library }}</AppButton>
+                <AppButton type="button" variant="secondary" size="sm" :disabled="referenceImagePreviews.length >= 10" @click="resourcePickerOpen = true"><Boxes :size="14" />{{ tr('资源库') }}</AppButton>
+                <AppButton v-if="asset" type="button" variant="secondary" size="sm" :disabled="referenceImagePreviews.length >= 10" :active="referenceSource === 'variants'" @click="referenceSource = referenceSource === 'variants' ? null : 'variants'"><UserRound :size="14" />{{ tr('自身形态') }}</AppButton>
+              </div>
+              <div v-if="referenceSource" class="asset-reference-picker">
+                <header><label><Search :size="14" /><input v-model="referenceSearch" type="search" :aria-label="tr('搜索参考图片')" :placeholder="tr('搜索参考图片')" /></label><AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="tr('关闭参考选择')" @click="referenceSource = null"><X :size="14" /></AppButton></header>
+                <AppSelect v-if="kind === 'character' && referenceSource === 'library'" class="asset-library__project-filter" :model-value="libraryProjectId" :options="libraryProjectOptions" :ariaLabel="tr('按项目筛选')" :disabled="libraryProjectsLoading" :menu-z-index="3000" searchable @update:model-value="selectLibraryProject" />
+                <div class="asset-reference-picker__grid" @scroll.passive="referenceSource === 'library' && onLibraryScroll($event)">
+                  <template v-if="referenceSource === 'library'">
+                    <button v-for="item in referenceLibraryItems" :key="item.key" type="button" :aria-label="tr('添加参考：{p0}', { p0: item.name })" :aria-pressed="referenceImages.includes(item.image)" :disabled="referenceImages.includes(item.image) || referenceImagePreviews.length >= 10" @click="addReferenceImage(item.image)"><img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" @error="fallbackImage($event, mediaUrl(item.image))" /><span>{{ item.name }}</span></button>
+                    <p v-if="projectLibraryError" role="alert">{{ projectLibraryError }} <AppButton type="button" size="xs" @click="selectLibraryProject(libraryProjectId)">{{ tr('重试') }}</AppButton></p>
+                    <p v-else-if="!referenceLibraryItems.length">{{ loadingLibrary || projectLibraryLoading ? tr('正在加载资产库…') : tr('暂无可用参考图片') }}</p>
+                    <AppButton v-if="libraryHasMore" type="button" variant="ghost" size="sm" :loading="loadingMoreLibrary" @click="loadMoreLibrary">{{ tr('加载更多') }}</AppButton>
+                  </template>
+                  <template v-else>
+                    <button v-for="item in ownReferenceItems" :key="item.key" type="button" :aria-label="tr('添加参考：{p0}', { p0: item.name })" :aria-pressed="referenceImages.includes(item.image)" :disabled="referenceImages.includes(item.image) || referenceImagePreviews.length >= 10" @click="addReferenceImage(item.image)"><img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" @error="fallbackImage($event, mediaUrl(item.image))" /><span>{{ item.name }}</span></button>
+                    <p v-if="!ownReferenceItems.length">{{ tr('暂无可用参考图片') }}</p>
+                  </template>
+                </div>
+              </div>
               <p>{{ tr('生成时会参考主体、服装或画面风格；JPG/PNG，单张不超过 15MB。') }}</p>
             </section>
-            <label class="asset-field">
+            <div class="asset-field asset-prompt-field">
               <span><i>*</i>{{ tr('提示词') }}<small v-if="isEditing">{{ tr('最终发送 ·') }} {{ promptLanguage === 'zh' ? tr('中文') : 'English' }}</small></span>
-              <textarea v-model="prompt" rows="8" :placeholder="promptPlaceholder" @input="promptTouched = true" />
-            </label>
+              <MaterialMentionInput :key="`${activeFormKey()}:${referenceRevision}`" ref="promptEditor" :model-value="prompt" :materials="referenceMentions" :mentions="referenceMentions" :label="tr('提示词')" :placeholder="promptPlaceholder" :image-limit="10" :video-limit="0" :audio-limit="0" :show-reference-counts="false" :hint="tr('输入 @ 引用参考图，也可以点击上方图片插入。')" @update:model-value="updatePrompt" @add="(_material, text) => updatePrompt(text)" />
+            </div>
           </template>
 
           <section v-else-if="mode === 'library'" class="asset-library">
             <header>
               <label><Search :size="16" /><input v-model="search" type="search" :placeholder="tr('搜索{p0}', { p0: config.library })" /></label>
               <nav v-if="kind === 'character'">
-                <AppButton v-for="item in [{ value: 'all', get label() { return tr('全部') } }, { value: 'public', get label() { return tr('公共数字人') } }, { value: 'project', get label() { return tr('项目人物') } }]" :key="item.value" type="button" variant="soft" size="sm" :active="libraryScope === item.value" @click="libraryScope = item.value as 'all' | 'public' | 'project'">{{ item.label }}</AppButton>
+                <AppButton v-for="item in [{ value: 'all', get label() { return tr('全部') } }, { value: 'public', get label() { return tr('公共数字人') } }, { value: 'project', get label() { return tr('项目人物') } }]" :key="item.value" type="button" variant="soft" size="sm" :active="libraryScope === item.value" @click="selectLibraryScope(item.value as LibraryScope)">{{ item.label }}</AppButton>
               </nav>
             </header>
+            <AppSelect v-if="kind === 'character' && libraryScope === 'project'" class="asset-library__project-filter" :model-value="libraryProjectId" :options="libraryProjectOptions" :ariaLabel="tr('按项目筛选')" :disabled="libraryProjectsLoading" :menu-z-index="3000" searchable @update:model-value="selectLibraryProject" />
             <div class="asset-library__grid" @scroll.passive="onLibraryScroll">
-              <div v-if="loadingLibrary" class="asset-library__state">{{ tr('正在加载资产库…') }}</div>
+              <div v-if="loadingLibrary || projectLibraryLoading" class="asset-library__state" role="status">{{ tr('正在加载资产库…') }}</div>
               <AppButton v-for="item in filteredLibraryItems" v-else :key="item.key" type="button" class="asset-library__card" :active="selectedLibraryKey === item.key" @click="selectedLibraryKey = item.key">
-                <img :src="imageDerivativeUrl(item.image)" alt="" loading="lazy" decoding="async" />
+                <img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" loading="lazy" decoding="async" @error="fallbackImage($event, mediaUrl(item.image))" />
                 <span><strong>{{ item.name }}</strong><small>{{ item.detail }}</small></span>
                 <Check v-if="selectedLibraryKey === item.key" :size="16" />
               </AppButton>
-              <div v-if="!loadingLibrary && !filteredLibraryItems.length" class="asset-library__state">{{ tr('暂无可用') }}{{ config.label }}{{ tr('资产') }}</div>
-              <div v-if="!loadingLibrary && filteredLibraryItems.length" class="asset-library__paging" role="status" aria-live="polite">
+              <div v-if="projectLibraryError" class="asset-library__state" role="alert">{{ projectLibraryError }} <AppButton type="button" size="xs" @click="selectLibraryProject(libraryProjectId)">{{ tr('重试') }}</AppButton></div>
+              <div v-else-if="!loadingLibrary && !projectLibraryLoading && !filteredLibraryItems.length" class="asset-library__state">{{ tr('暂无可用') }}{{ config.label }}{{ tr('资产') }}</div>
+              <div v-if="!loadingLibrary && !projectLibraryLoading && (filteredLibraryItems.length || libraryHasMore)" class="asset-library__paging" role="status" aria-live="polite">
                 <template v-if="loadingMoreLibrary"><LoaderCircle :size="15" />{{ tr('正在加载下一页…') }}</template>
-                <template v-else-if="libraryHasMore">{{ tr('继续下滑加载更多') }}</template>
+                <AppButton v-else-if="libraryHasMore" type="button" variant="ghost" size="xs" @click="loadMoreLibrary">{{ tr('加载更多') }}</AppButton>
                 <template v-else>{{ tr('已加载全部') }}</template>
               </div>
             </div>
@@ -1444,6 +1629,7 @@ onUnmounted(() => {
     </Transition>
   </Teleport>
   <AudioReferencePicker :open="voicePickerOpen" :selected-id="voiceReferenceId" :novel-id="props.asset?.novel_id" @close="voicePickerOpen = false" @choose="selectVoiceReference" />
+  <CatalogResourcePicker v-if="resourcePickerOpen" :open="resourcePickerOpen" kind="image" :max-selection="10 - referenceImagePreviews.length" @close="resourcePickerOpen = false" @choose="chooseReferenceResources" />
   <ImageLightbox :open="Boolean(lightboxImage)" :src="lightboxImage" :alt="lightboxAlt" :format="lightboxFormat" @close="closeImageLightbox" />
   <ImageAnnotationEditor
     :open="annotationOpen"
@@ -1467,7 +1653,16 @@ onUnmounted(() => {
 .asset-dialog__icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; color: var(--app-accent); background: var(--app-surface); box-shadow: 0 6px 16px rgb(73 75 159 / 9%); }
 .asset-dialog__header > div > span { color: var(--app-accent); font-size: 8px; font-weight: 800; letter-spacing: .13em; }
 .asset-dialog__header h2 { margin: 0; color: var(--app-text); font-size: 17px; line-height: 1.2; }
-.asset-dialog__body { display: grid; min-width: 0; gap: 17px; overflow-x: hidden; overflow-y: auto; padding: 18px 22px 20px; }
+.asset-dialog__body {
+  display: grid;
+  grid-auto-rows: max-content;
+  min-width: 0;
+  min-height: 0;
+  gap: 17px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 18px 22px 20px;
+}
 .asset-generated-preview { display: grid; gap: 8px; }
 .asset-generated-preview > header { display: flex; align-items: center; justify-content: space-between; color: var(--app-text-secondary); font-size: 12px; }
 .asset-generated-preview > header strong { font-weight: 650; }
@@ -1577,6 +1772,46 @@ onUnmounted(() => {
 .asset-reference-input__add:hover,.asset-reference-input__add:focus-within { background: var(--app-accent-soft); box-shadow: inset 0 0 0 1.5px var(--app-accent); }
 .asset-reference-input__add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .asset-reference-input__add span { font-size: 9px; font-weight: 650; }
+.asset-reference-insert { display:block; width:100%; height:100%; padding:0; border:0; background:transparent; cursor:pointer; }
+.asset-reference-insert span { position:absolute; left:5px; bottom:5px; padding:3px 5px; border-radius:4px; background:rgb(35 38 52 / 75%); color:#fff; font-size:10px; }
+.asset-reference-sources { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.asset-reference-sources :deep(.app-button) { color:var(--app-text-secondary); background:var(--app-surface); box-shadow:inset 0 0 0 1px var(--app-border); }
+.asset-reference-sources :deep(.app-button:hover:not(:disabled)),.asset-reference-sources :deep(.app-button.is-active) { color:var(--app-accent); background:var(--app-accent-soft); }
+.asset-reference-picker { margin-top:12px; padding:12px; border:1px solid var(--app-border); border-radius:11px; background:var(--app-surface); }
+.asset-reference-picker > header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.asset-reference-picker > header label { display:flex; align-items:center; flex:1; gap:7px; color:var(--app-text-secondary); }
+.asset-reference-picker input { min-width:0; width:100%; border:0; outline:0; color:var(--app-text); background:transparent; font:inherit; font-size:12px; }
+.asset-reference-picker__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; max-height:260px; overflow:auto; }
+.asset-reference-picker__grid > button:not(.app-button) { min-width:0; padding:5px; border:1px solid var(--app-border); border-radius:8px; background:var(--app-surface); color:var(--app-text); cursor:pointer; }
+.asset-reference-picker__grid > button[aria-pressed=true] { border-color:var(--app-accent); background:var(--app-accent-soft); }
+.asset-reference-picker__grid > button:disabled { opacity:.65; cursor:default; }
+.asset-reference-picker__grid img { display:block; width:100%; height:80px; object-fit:cover; border-radius:5px; }
+.asset-reference-picker__grid span { display:block; overflow:hidden; padding:5px 0 0; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.asset-reference-picker__grid p { grid-column:1/-1; padding:14px; color:var(--app-text-secondary); font-size:12px; }
+.asset-reference-insert:focus-visible,.asset-reference-picker button:focus-visible { outline:2px solid var(--app-accent); outline-offset:2px; }
+.asset-prompt-field :deep(.workbench-mention-editor) { color:var(--app-text); background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:11px; }
+.asset-prompt-field :deep(.workbench-mention-editor.is-focused) { border-color:var(--app-accent); box-shadow:0 0 0 3px var(--app-accent-soft); }
+.asset-prompt-field :deep(.workbench-mention-editor__input) {
+  min-height: 190px;
+  max-height: 380px;
+  padding: 12px;
+  background: transparent;
+  color: var(--app-text);
+  caret-color: var(--app-accent);
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-text-secondary) transparent;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.asset-prompt-field :deep(.workbench-mention-editor__input::-webkit-scrollbar-track) { background: transparent; }
+.asset-prompt-field :deep(.workbench-mention-editor__input::-webkit-scrollbar-thumb) { background: var(--app-text-secondary); }
+.asset-prompt-field :deep(.workbench-mention-editor__hint) { color:var(--app-text-secondary); padding:8px 12px; font-size:10px; }
+.asset-prompt-field :deep(.workbench-inline-mention) { color:var(--app-accent); border-color:var(--app-border); background:var(--app-accent-soft); }
+.asset-prompt-field :deep(.workbench-mention-menu) { z-index:2300; max-width:calc(100vw - 50px); color:var(--app-text); background:var(--app-surface); border-color:var(--app-border); box-shadow:var(--app-shadow); }
+.asset-prompt-field :deep(.workbench-mention-menu__header),.asset-prompt-field :deep(.workbench-mention-menu__copy strong) { color:var(--app-text); }
+.asset-prompt-field :deep(.workbench-mention-menu__copy small),.asset-prompt-field :deep(.workbench-mention-menu > p) { color:var(--app-text-secondary); }
+.asset-prompt-field :deep(.workbench-mention-menu__options > button) { border:0; color:var(--app-text); background:transparent; }
+.asset-prompt-field :deep(.workbench-mention-menu__options > button.is-active),.asset-prompt-field :deep(.workbench-mention-menu__options > button:hover) { background:var(--app-surface-hover); }
 .asset-reference-input > p { margin: 0; color: var(--app-text-secondary); font-size: 9px; line-height: 1.45; }
 .asset-mode { min-width: 0; margin: 0; padding: 0; border: 0; }
 .asset-mode legend { margin-bottom: 7px; color: var(--app-text-secondary); font-size: 12px; font-weight: 650; }
@@ -1595,6 +1830,8 @@ onUnmounted(() => {
 .asset-library > header label { display: flex; min-height: 38px; flex: 1; align-items: center; gap: 8px; padding: 0 11px; border-radius: 10px; color: var(--app-text-secondary); background: var(--app-surface); }
 .asset-library > header input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font: inherit; }
 .asset-library nav { display: flex; gap: 4px; }
+.asset-library__project-filter { width: min(250px, calc(100% - 22px)); margin: 0 11px 11px; }
+.asset-reference-picker .asset-library__project-filter { margin-inline: 0; }
 .asset-library__grid { display: grid; max-height: 320px; grid-template-columns: repeat(3,1fr); gap: 10px; overflow-y: auto; padding: 0 11px 11px; }
 .asset-library__card { position: relative; display: grid; height: auto; min-height: 0; grid-template-columns: 64px 1fr; gap: 9px; justify-content: stretch; overflow: hidden; padding: 7px; border-radius: 13px; text-align: left; background: var(--app-surface); box-shadow: 0 4px 14px rgb(38 42 62 / 5%); }
 .asset-library__card.is-active { color: var(--app-accent); box-shadow: inset 0 0 0 2px var(--app-accent),0 8px 20px rgb(73 75 190 / 12%); }

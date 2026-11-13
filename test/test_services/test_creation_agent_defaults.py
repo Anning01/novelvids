@@ -14,7 +14,7 @@ def test_creation_agent_defaults_use_deepseek_long_context_envelope():
     assert configuration.working_input_tokens == 840_000
     assert configuration.max_context_characters is None
     assert configuration.context_page_characters == 4_000
-    assert configuration.max_output_tokens == 64_000
+    assert configuration.max_output_tokens is None
     assert configuration.total_tokens_limit is None
     assert configuration.compaction_trigger_ratio == 0.70
     assert configuration.compaction_target_ratio == 0.45
@@ -34,7 +34,7 @@ def test_untouched_legacy_defaults_upgrade_without_overwriting_custom_profiles()
 
     assert upgraded.enabled is True
     assert upgraded.working_input_tokens == 840_000
-    assert upgraded.max_output_tokens == 64_000
+    assert upgraded.max_output_tokens is None
     assert custom.request_limit is None  # Retired caps do not survive old snapshots.
     assert custom.working_input_tokens == 12_000
 
@@ -64,3 +64,9 @@ def test_optional_character_cap_preserves_explicit_admin_values():
 ])
 def test_only_explicit_model_or_assistant_character_caps_apply(assistant_limit, model_limit, expected):
     assert AgentConfiguration(max_context_characters=assistant_limit).context_character_limit(model_limit) == expected
+
+
+def test_unconfigured_output_does_not_send_an_artificial_provider_cap():
+    assert AgentConfiguration().output_model_settings() == {}
+    assert AgentConfiguration().output_model_settings(12000) == {'max_tokens': 12000}
+    assert AgentConfiguration(max_output_tokens=4000).output_model_settings(12000) == {'max_tokens': 4000}

@@ -46,7 +46,7 @@ async def public_detail(project_id: int, response: Response):
     except HTTPException as error:
         return _public_error(error)
     response.headers.update(PRIVATE_HEADERS)
-    return ResponseSchema(data=work.model_dump(exclude={'production_seconds', 'recorded_cost', 'cost_scope'}))
+    return ResponseSchema(data=work.model_dump(exclude={'production_seconds', 'recorded_cost', 'cost_scope', 'pending_cost'}))
 
 
 @router.get('/public/{project_id}/episodes/{export_id}/{kind}')

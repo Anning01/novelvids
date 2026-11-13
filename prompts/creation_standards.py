@@ -4,10 +4,7 @@ import re
 import json
 
 from prompts.labels import prompt_label
-from prompts.reference import (
-    CHARACTER_TURNAROUND,
-    REFERENCE_PROMPT_MARKERS_BY_KIND,
-)
+from prompts.reference import CHARACTER_TURNAROUND
 from prompts.storyboard_strategies import StoryboardStrategyPrompt
 
 
@@ -16,19 +13,20 @@ ASSET_PROMPT_KINDS = {1: "person", 2: "scene", 3: "item"}
 
 def render_asset_design(description, visual_fields, kind, snapshot, language, aspect_ratio):
     specification = json.loads(snapshot.contents.get('asset_contract', '{}')).get(language, {}).get(kind)
-    if not specification:
-        return description.strip()
-    task = specification['task'].format(aspect_ratio=aspect_ratio)
-    fields = specification['fields']
-    if fields:
-        if set(visual_fields) != set(fields):
-            raise ValueError(f'{kind}: visual_fields 必须且只能包含这些字段：' + '、'.join(fields))
-        details = '\n'.join(f'**{field}**：' + ' '.join(visual_fields[field].split()) for field in fields)
-    else:
-        if description.strip().startswith(task or specification['heading']):
-            return description.strip()
-        details = description.strip()
+    details = description.strip()
+    if specification:
+        task = specification['task'].format(aspect_ratio=aspect_ratio)
+        if details.startswith(task or specification['heading']):
+            return details
+    preferred_fields = specification['fields'] if specification else []
+    fields = [*preferred_fields, *(field for field in visual_fields if field not in preferred_fields)]
+    field_lines = '\n'.join(f'**{field}**：{visual_fields[field].strip()}' for field in fields if visual_fields.get(field, '').strip())
+    details = '\n\n'.join(part for part in (details, field_lines) if part)
+    if not details or not specification:
+        return details
     return '\n\n'.join(part for part in (task, specification['heading'], details, specification.get('suffix', '')) if part)
+
+
 STORYBOARD_REQUIRED_SECTIONS = (
     "禁止项",
     "风格定调",
@@ -85,15 +83,3 @@ def validate_storyboard_sections(text: str, previous: str | None = None) -> None
                 raise ValueError(
                     f"分镜提示词必要栏目 {label} 不能为空，请提供完整 structure"
                 )
-
-
-def validate_reference_kind(text: str, kind: str) -> None:
-    if any(
-        text.strip().startswith(prefix)
-        for other, prefixes in REFERENCE_PROMPT_MARKERS_BY_KIND.items()
-        if other != kind
-        for prefix in prefixes
-    ):
-        raise ValueError(
-            "参考图模板与对象类型不符，请读取该对象的 get_creation_prompt_rules"
-        )

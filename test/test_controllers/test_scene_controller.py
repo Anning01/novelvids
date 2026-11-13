@@ -223,8 +223,8 @@ async def test_generate_no_config():
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
         await scene_controller.generate(chapter.id)
-    assert exc_info.value.status_code == 409
-    print(f"    无配置，返回 409: {exc_info.value.detail}")
+    assert exc_info.value.status_code == 422
+    assert "支持工具调用" in exc_info.value.detail
 
 
 @pytest.mark.asyncio

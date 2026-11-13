@@ -47,6 +47,60 @@ function teamAdminStore(): Pinia {
   return pinia
 }
 
+it('keeps platform connection unavailable without a super administrator session', async () => {
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const status = vi.spyOn(api, 'studioPlatform')
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({ enabled: false })
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+  expect(wrapper.get('.model-header-actions').text()).toBe('添加模型')
+  expect(status).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('opens platform connection and account in dialogs outside the model layout', async () => {
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ code: 0, message: '', data: { connected: false, key_management_url: 'https://platform.example/#/platform/keys' } })
+  const connect = vi.spyOn(api, 'connectStudioPlatform').mockRejectedValueOnce(new Error('连接失败'))
+    .mockResolvedValueOnce({ code: 0, message: '', data: { synced: 1 } })
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({ enabled: true, user: { id: 1, username: 'admin', is_super_admin: true, nickname: '', avatar_url: '' } })
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    expect(wrapper.find('.model-category-grid').exists()).toBe(true)
+    expect(document.body.querySelector('.platform-connection')).toBeNull()
+    const click = async (label: string) => wrapper.findAll('.model-header-actions button').find(button => button.text() === label)!.trigger('click')
+    await click('连接开放平台')
+    await flushPromises()
+    const form = document.body.querySelector<HTMLFormElement>('.platform-connection')!
+    const help = form.querySelector('#studio-platform-key-help')!
+    expect(help.textContent).toContain('猫影工作台')
+    expect(help.querySelector('a')?.getAttribute('href')).toBe('https://platform.example/#/platform/keys')
+    const key = form.querySelector('input')!
+    expect(key.getAttribute('aria-describedby')).toBe(help.id)
+    key.value = 'nv_test'
+    key.dispatchEvent(new Event('input', { bubbles: true }))
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(form.querySelector('[role="alert"]')?.textContent).toBe('连接失败')
+    expect(key.value).toBe('nv_test')
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(connect).toHaveBeenLastCalledWith('nv_test')
+    expect(key.value).toBe('')
+    await click('平台账户')
+    await flushPromises()
+    expect(document.body.querySelector('.platform-account-settings')).not.toBeNull()
+    expect(wrapper.find('.platform-account-settings').exists()).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it.each(['light', 'dark'])('GPT Image 型号按 1K/2K/4K 分辨率计价，并保留自定义渠道（%s）', async theme => {
   document.documentElement.dataset.appTheme = theme
   baseMocks()
@@ -146,6 +200,26 @@ describe('ConfigPage 平台配置仅超管可见', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.restoreAllMocks()
+  })
+
+  it.each(['light', 'dark'])('超管切到团队后仍可编辑平台模型（%s）', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    baseMocks()
+    const pinia = teamAdminStore()
+    const auth = useAuthStore(pinia)
+    auth.user!.is_super_admin = true
+    auth.deploymentRole = 'platform'
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{
+      id: 1, name: '平台模型', scope: 'official', task_type: 1, task_types: [1],
+      api_protocol: 'openai_compatible', model: 'model', concurrency: 1, is_active: true,
+    }] } } as never)
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+    expect(wrapper.find('.model-source-banner').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="编辑配置"]').isVisible()).toBe(true)
+    expect(wrapper.find('.official-badge').exists()).toBe(false)
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
   })
 
   it.each(['light', 'dark'])('配置卡片隐藏服务来源，地址仅在编辑表单中显示并保留（%s）', async theme => {
@@ -659,7 +733,7 @@ it.each(['light', 'dark'])('selects AutoDL from the shared popup and submits its
   wrapper.unmount()
 })
 
-it.each(['light', 'dark'])('配置通用视频协议，保留编辑值并显示加载、失败和成功状态（%s）', async theme => {
+it.each(['light', 'dark'])('配置视频协议，保留编辑值并显示加载、失败和成功状态（%s）', async theme => {
   document.documentElement.dataset.appTheme = theme
   baseMocks()
   vi.mocked(api.enums).mockResolvedValue({ data: {
@@ -670,7 +744,7 @@ it.each(['light', 'dark'])('配置通用视频协议，保留编辑值并显示�
     video: { seedance_2: ['480p', '720p', '1080p', '4k'] },
     video_protocols: { seedance_2: [
       { value: 'volcengine_ark', label: '火山方舟', resolutions: ['480p', '720p', '1080p', '4k'] },
-      { value: 'unified_video', label: '通用视频接口', resolutions: ['480p', '720p', '1080p'] },
+      { value: 'novelvids', label: '猫影开放平台', resolutions: ['480p', '720p', '1080p'] },
     ] },
   } } as never)
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
@@ -688,13 +762,13 @@ it.each(['light', 'dark'])('配置通用视频协议，保留编辑值并显示�
   await flushPromises()
   const menu = document.querySelector<HTMLElement>('[role="listbox"][aria-label="视频接口协议"]')!
   expect(menu).not.toBeNull()
-  const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.trim() === '通用视频接口')!
+  const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.trim() === '猫影开放平台')!
   option.dispatchEvent(new MouseEvent('mouseenter'))
   option.click()
   await flushPromises()
-  expect(protocol.text()).toBe('通用视频接口')
+  expect(protocol.text()).toBe('猫影开放平台')
   expect(wrapper.text()).not.toContain('4k')
-  expect(wrapper.text()).not.toMatch(/渠道|\/contents\/generations\/tasks/i)
+  expect(wrapper.text()).not.toMatch(/通用视频接口/i)
   expect(wrapper.get<HTMLInputElement>('input[name="model-service-base-url"]').element.value).toBe('')
   expect(wrapper.get<HTMLInputElement>('input[name="model-id"]').element.value).toBe('')
   await wrapper.get('input[name="model-config-name"]').setValue('视频服务')
@@ -704,7 +778,7 @@ it.each(['light', 'dark'])('配置通用视频协议，保留编辑值并显示�
   await wrapper.get('form.model-modal').trigger('submit')
   expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
   expect(create).toHaveBeenCalledWith(expect.objectContaining({
-    api_protocol: 'unified_video', video_model_type: 'seedance_2', model: 'configured-model',
+    api_protocol: 'novelvids', video_model_type: 'seedance_2', model: 'configured-model',
     base_url: 'https://video.example.test/v1', pricing: expect.objectContaining({ prices: { '480p': 0, '720p': 0, '1080p': 0 } }),
   }))
   rejectSave(new Error('保存失败'))
@@ -717,11 +791,11 @@ it.each(['light', 'dark'])('配置通用视频协议，保留编辑值并显示�
   await flushPromises()
   expect(wrapper.find('form.model-modal').exists()).toBe(false)
   await wrapper.get('[aria-label="编辑配置"]').trigger('click')
-  expect(wrapper.get('button[aria-label="视频接口协议"]').text()).toBe('通用视频接口')
+  expect(wrapper.get('button[aria-label="视频接口协议"]').text()).toBe('猫影开放平台')
   expect(wrapper.get<HTMLInputElement>('input[name="model-service-base-url"]').element.value).toBe('https://video.example.test/v1')
   await wrapper.get('form.model-modal').trigger('submit')
   await flushPromises()
-  expect(update).toHaveBeenCalledWith(9, expect.objectContaining({ api_protocol: 'unified_video' }))
+  expect(update).toHaveBeenCalledWith(9, expect.objectContaining({ api_protocol: 'novelvids' }))
   wrapper.unmount()
   delete document.documentElement.dataset.appTheme
 })
@@ -759,4 +833,43 @@ it('creates ASR configuration with server-provided defaults and minute pricing',
   await wrapper.get('form.model-modal').trigger('submit');await flushPromises()
   expect(create).toHaveBeenCalledWith(expect.objectContaining({task_type:9,model:'volc.seedasr.auc',api_protocol:'volcengine_openspeech',pricing:expect.objectContaining({type:'asr',price_per_minute:.031,billing_unit:'minute'})}))
   wrapper.unmount()
+})
+
+it.each(['dark', 'light'])('previews channel pixel prices before saving a synced image model (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  const pinia = teamAdminStore()
+  useAuthStore(pinia).$patch({ deploymentRole: 'studio' })
+  useAuthStore(pinia).user!.is_super_admin = true
+  const current = { id: 55, name: 'Pro', scope: 'studio_platform', task_type: 2, task_types: [2],
+    image_model_type: 'seedream_5_pro', api_protocol: 'novelvids', model: 'nv-55', concurrency: 1,
+    is_active: true, pricing: { type: 'image', prices: { '2K': 1 } } }
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [current] } } as never)
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: false } } as never)
+  vi.spyOn(api, 'generationCapabilities').mockResolvedValue({ data: { image: { seedream_5_pro: ['2K'] }, video: {} } } as never)
+  const tariff = { type: 'image', currency: 'CNY', billing_unit: 'pixel_tier',
+    prices: { single_low: .3, single_high: .6, layer_low: .15, layer_high: .3 },
+    input_image: { first_free: 1, price_per_image: .02 } }
+  const read = vi.spyOn(api, 'platformImageTariff').mockResolvedValue({ data: tariff } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: current } as never)
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    await wrapper.get('.model-category-card.is-image').trigger('click')
+    const click = async (label: string) => {
+      await wrapper.findAll('button').find(button => button.text() === label)!.trigger('click')
+      await flushPromises()
+    }
+    await click('编辑本地价格')
+    await click('填入该渠道的平台价')
+    expect(read).toHaveBeenCalledWith(55)
+    expect(update).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('图层 · 超过 261 万像素')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(55, { pricing: expect.objectContaining(tariff) })
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
 })

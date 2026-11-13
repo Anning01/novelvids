@@ -122,3 +122,39 @@ async def test_imported_completed_source_does_not_require_an_analysis_task(media
     if task_status is None:
         assert snapshot['sources'][0]['task'] is None
     assert await AiTask.all().count() == before
+
+
+@pytest.mark.asyncio
+async def test_failed_clip_progress_explains_verified_saved_work_and_next_action():
+    from uuid import uuid5
+    from models.agent_operation import AgentOperation
+    from models.creation_agent import AgentConversation, AgentMessage
+    novel = await Novel.create(name='进度说明', workflow_kind='remake')
+    source = await create_source(novel, 1, status=4, stage='generating_storyboards', progress=55)
+    task = await source.analysis_task
+    task.error_message = '第 5 个视频片段分析失败：本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。'
+    await task.save()
+    child = await AiTask.create(id=uuid5(task.id, 'model:remake:RemakeShot:5'), task_type=7,status=4)
+    conversation = await AgentConversation.create(novel=novel)
+    await AgentMessage.create(conversation=conversation, task=child,role='assistant',request_id=child.id,
+        request_hash='test',native_messages=[{'parts':[{'part_kind':'retry-prompt','content':[{
+            'msg':'Value error, Shot and layout must share the same orientation','input':'private payload'}]}]}])
+    for key in ['RemakeAssets:1','RemakeShot:1','RemakeShot:3','RemakeShot:10']:
+        await AgentOperation.create(task=task,key='model:remake:'+key,state='completed')
+    text = (await RemakeProgressService().snapshot(novel))['sources'][0]['task']['error_message']
+    assert '第 5 个片段' in text and '底图方向' in text and '已保留 3 个片段' in text and '「重试」' in text
+    assert '增量修复' not in text and 'private payload' not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stage,diagnostic,expected', [
+    ('needs_review', 'raw provider body', '以免重复扣费'),
+    ('extracting_assets','unauthorized（错误代码：REMAKE_ANALYSIS_AUTH_FAILED）','管理员检查模型密钥'),
+    ('generating_storyboards','第 2 个视频片段分析失败：private payload','第 2 个片段未能完成分镜分析'),
+])
+async def test_progress_only_displays_safe_actionable_copy(stage, diagnostic, expected):
+    novel = await Novel.create(name='失败说明',workflow_kind='remake')
+    source = await create_source(novel,1,status=4,stage=stage,progress=20)
+    await AiTask.filter(id=source.analysis_task_id).update(error_message=diagnostic)
+    text = (await RemakeProgressService().snapshot(novel))['sources'][0]['task']['error_message']
+    assert expected in text and diagnostic not in text

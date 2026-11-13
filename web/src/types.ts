@@ -3,6 +3,8 @@ export enum TaskStatusEnum { PENDING = 1, PROCESSING = 2, COMPLETED = 3, FAILED 
 export interface AutoEnhancement { config_version?: string | null; model_config_id: number; resolution: '720p' | '1080p' | '2k' | '4k' }
 export interface VideoDefaults { model_config_id: number; resolution: string; aspect_ratio: string; return_last_frame: boolean; auto_enhancement: AutoEnhancement | null }
 
+export type ProjectVideoDefaults = Omit<VideoDefaults, 'model_config_id'> & { model_config_id?: number | null }
+
 export interface WorkbenchCapabilities {
   upload_media: boolean
   generate_asset: boolean
@@ -28,7 +30,10 @@ export interface WorkbenchCapabilities {
 }
 
 export interface NovelMeta {
-  video_generation_defaults?: VideoDefaults | null
+  episodes_managed?: boolean
+  shot_duration_max?: number; audiovisual_guidance?: string | null
+  storyboard_enabled?: boolean
+  video_generation_defaults?: ProjectVideoDefaults | null
   id: number
   name: string
   author?: string
@@ -52,7 +57,8 @@ export interface NovelMeta {
   updated_at: string
 }
 export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
-export interface Novel { video_generation_defaults?: VideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+export interface Novel {
+  episodes_managed?: boolean; shot_duration_max?: number; audiovisual_guidance?: string | null; storyboard_enabled?: boolean; video_generation_defaults?: ProjectVideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface ProjectProduction {
   chapter_count: number
   storyboard_chapter_count: number
@@ -80,7 +86,12 @@ export interface ProjectOverviewSummary {
   unknown_duration_count: number
 }
 export interface ProjectOverview { items: ProjectOverviewItem[]; summary: ProjectOverviewSummary }
-export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
+export interface EpisodePacing {
+  preset: 'compact' | 'fast' | 'smart' | 'slow' | 'detailed'
+  max_seconds?: number | null
+}
+
+export interface Chapter { episode_pacing?: EpisodePacing | null; id: number; novel_id: number; number: number; name: string; content?: string; screenplay?: string | null; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; image_thumbnails?: Array<string | null>; image_previews?: Array<string | null>; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; main_image_thumbnail?: string | null; main_image_preview?: string | null; angle_image_1?: string; angle_image_1_thumbnail?: string | null; angle_image_1_preview?: string | null; angle_image_2?: string; angle_image_2_thumbnail?: string | null; angle_image_2_preview?: string | null; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
@@ -88,10 +99,11 @@ export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; is_
 export interface AssetActiveGeneration { asset_id: number; task_id: string; status: TaskStatusEnum }
 export interface AssetReferencePromptPreview { prompt: string; prompt_language: 'zh' | 'en' }
 export interface AssetMergeResult { asset: Asset; removed_asset_id: number; data_source_asset_id: number; image_source_asset_id?: number; summary: string[] }
-export interface Scene { id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
+export interface Scene { blocking_reference?: (VideoReferenceMedia & {rules: Record<string, {line: string; headings: string[]}>}) | null; storyboard_binding_rules?: Record<string, {line: string; headings: string[]}> | null; id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
 export interface Video { id: number; scene_id: number; model_type: number; url?: string; external_task_id?: string; status: TaskStatusEnum; progress?: number; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface VideoMergeResult { chapter_id: number; merged_url: string; poster_url?: string | null; poster_thumbnail_url?: string | null; video_count: number; total_duration: number }
 export interface WorkbenchProjectConfig {
+  storyboard_enabled?: boolean
   workflow_kind: 'script' | 'remake'
   aspect_ratio?: string | null
   resolution?: string | null
@@ -122,6 +134,7 @@ export interface WorkbenchRemakeSource {
   analysis_task?: WorkbenchRemakeTask | null
 }
 export interface WorkbenchBootstrap {
+  canvas_layout?: Record<string, unknown> | null
   chapter: Chapter
   project_config?: WorkbenchProjectConfig
   remake_source?: WorkbenchRemakeSource | null
@@ -143,9 +156,9 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'unified_video' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
-export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
-export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
+export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
+export type ImageModelType = 'seedream_5_5' | 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
+export interface ImageGenerationCapabilities { sizes?: Record<string, string[]>; clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
 export interface VideoGenerationOptions {
@@ -228,7 +241,7 @@ export interface ModelPricing {
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
-  billing_unit?: 'token' | 'second' | 'minute'
+  billing_unit?: 'pixel_tier' | 'token' | 'second' | 'minute'
   tiers?: Array<{ short_side_max: number; fps_max: number; price: number }>
   discount?: number
   discount_description?: string
@@ -243,7 +256,7 @@ export interface GenerationCapabilities {
   video_protocols?: Partial<Record<VideoGenerationModelType, Array<{ value: ImageApiProtocol; label: string; resolutions: string[] }>>>
   video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>
 }
-export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team'; team_id?: number | null; created_at: string; updated_at: string }
+export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team' | 'studio_platform'; team_id?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; source?: 'system' | 'upload'; duration?: number | null; team_id?: number | null; is_active: boolean; created_at: string; updated_at: string }
 export interface DigitalHuman { id: number; country: string; age: number; gender: string; occupation: string; asset_id: string; image_url: string; is_active: boolean; created_at: string; updated_at: string }
@@ -398,6 +411,7 @@ export interface AuthMe {
 }
 
 export interface AuthStatus {
+  deployment_role?: 'studio' | 'platform'
   enabled: boolean
   provider?: 'password' | 'qiling'
   qiling_enabled?: boolean
@@ -501,6 +515,9 @@ export interface BillingRecord {
   pricing_snapshot?: Record<string, unknown> | null
   usage: Record<string, unknown>
   cost: number
+  platform_cost?: string | null
+  local_charge?: string | null
+  settlement_status?: 'legacy' | 'pending' | 'settled' | 'review'
   currency: string
   status: number
   duration_seconds?: number | null
@@ -518,12 +535,15 @@ export interface BillingRecord {
 export interface BillingSummary {
   total_cost: number
   total_records: number
+  platform_cost?: string
+  local_charge?: string
+  pending_records?: number
   by_billing_type: Array<{ billing_type: string; cost: number }>
   by_task_type: Array<{ task_type: number; cost: number }>
-  by_model: Array<{ model: string; cost: number }>
+  by_model: Array<{ model: string; cost: number; record_count?: number }>
   daily_trend: Array<{ date: string; cost: number }>
 }
-export interface BillingProject { novel_id: number; novel_name: string; total_cost: number; record_count: number }
+export interface BillingProject { novel_id: number; novel_name: string; total_cost: number; record_count: number; pending_records?: number }
 export interface BillingStatementFilters {
   team_id?: number
   user_id?: number

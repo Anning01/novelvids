@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +26,7 @@ class ImageGenerationError(RuntimeError):
 class GeneratedImage:
     url: str | None = None
     b64_json: str | None = None
+    keep_local: bool = False
 
 
 def _endpoint(base_url: str, path: str) -> str:
@@ -76,6 +78,24 @@ def _http_provider_error(response: httpx.Response) -> str | None:
         return None
 
 
+def _capacity_retry_delay(response: httpx.Response) -> int | None:
+    # CAT admission rejects before creating a receipt. Forwarded provider errors carry a receipt.
+    if (response.status_code != 429 or _request_id(response) or response.headers.get("x-cat-request-id")
+            or response.headers.get("x-novelvids-request-id")):
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict) or error.get("code") != "rate_limit_exceeded":
+        return None
+    if error.get("message") != "模型并发已满，请稍后重试":
+        return None
+    delay = response.headers.get("retry-after", "")
+    return max(1, int(delay)) if delay.isascii() and delay.isdigit() and len(delay) < 10 else 2
+
+
 def _payload_error(payload: Any) -> tuple[str | None, int | None, str | None]:
     """Return sanitized details from providers that wrap errors in HTTP 200."""
     if not isinstance(payload, dict) or not isinstance(payload.get("error"), dict):
@@ -91,7 +111,7 @@ def _payload_error(payload: Any) -> tuple[str | None, int | None, str | None]:
     return code, status, request_id
 
 
-def _parse_images(payload: Any) -> list[GeneratedImage]:
+def _parse_images(payload: Any, *, keep_local=False) -> list[GeneratedImage]:
     if not isinstance(payload, dict):
         return []
     raw_items = payload.get("data")
@@ -103,15 +123,15 @@ def _parse_images(payload: Any) -> list[GeneratedImage]:
     images: list[GeneratedImage] = []
     for item in raw_items:
         if isinstance(item, str) and item.strip():
-            images.append(GeneratedImage(url=item.strip()))
+            images.append(GeneratedImage(url=item.strip(), keep_local=keep_local))
             continue
         if not isinstance(item, dict):
             continue
         url = item.get("url")
         b64_json = item.get("b64_json") or item.get("base64")
         if isinstance(url, str) and url.strip():
-            images.append(GeneratedImage(url=url.strip()))
-        elif isinstance(b64_json, str) and b64_json.strip():
+            images.append(GeneratedImage(url=url.strip(), keep_local=keep_local))
+        elif not keep_local and isinstance(b64_json, str) and b64_json.strip():
             images.append(GeneratedImage(b64_json=b64_json.strip()))
     return images
 
@@ -132,6 +152,17 @@ async def generate_images(
     timeout: float | None = 600,
 ) -> list[GeneratedImage]:
     """Generate images through a backend-configured provider protocol."""
+    # URL-capable protocols can use private studio storage instead of embedding image bytes.
+    images = (extra_body or {}).get("image")
+    if images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value, ImageApiProtocol.novelvids.value}:
+        from services.oss.studio_client import studio_client
+        studio = studio_client(None, base_url=base_url, api_key=api_key)
+        if not studio and api_protocol == ImageApiProtocol.novelvids.value:
+            raise ImageGenerationError("本地猫影的平台密钥尚未配置")
+        if studio:
+            refs = [images] if isinstance(images, str) else images
+            uploaded = [await studio.resolve(ref) if ref.startswith(("data:", "/media/")) else ref for ref in refs]
+            extra_body = {**extra_body, "image":uploaded[0] if isinstance(images, str) else uploaded}
     prepared = image_protocol_adapter(api_protocol).prepare(
         ImageGenerationInput(
             model=model,
@@ -156,8 +187,16 @@ async def generate_images(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        platform_call = None
+        if api_protocol == ImageApiProtocol.novelvids.value:
+            from services.billing.platform import begin_platform_image
+            platform_call = await begin_platform_image(base_url, model, api_key)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=api_protocol != ImageApiProtocol.novelvids.value) as client:
             headers = {"Authorization": f"Bearer {api_key}"}
+            if api_protocol == ImageApiProtocol.novelvids.value:
+                from uuid import uuid4
+                headers["X-NovelVids-Capabilities"] = "pixel_tier_images"
+                headers["Idempotency-Key"] = str(platform_call.request_key if platform_call else uuid4())
             if prepared.images:
                 try:
                     files = await image_uploads(client, prepared.images)
@@ -166,7 +205,15 @@ async def generate_images(
                 response = await client.post(endpoint, headers=headers,
                     data={key: str(value) for key, value in prepared.payload.items()}, files=files)
             else:
-                response = await client.post(endpoint, headers=headers, json=prepared.payload)
+                while True:
+                    response = await client.post(endpoint, headers=headers, json=prepared.payload)
+                    delay = _capacity_retry_delay(response) if api_protocol == ImageApiProtocol.novelvids.value else None
+                    if delay is None:
+                        break
+                    await asyncio.sleep(delay)
+            if platform_call:
+                from services.billing.platform import capture_platform_response
+                await capture_platform_response(platform_call, response)
     except httpx.HTTPError as exc:
         logger.warning(
             "image_generation_network_error protocol=%s endpoint=%s error_type=%s",
@@ -227,7 +274,7 @@ async def generate_images(
             f"生图供应商返回错误（{error_code}{status_suffix}{request_suffix}）"
         )
 
-    images = _parse_images(payload)
+    images = _parse_images(payload, keep_local=api_protocol == ImageApiProtocol.novelvids.value)
     keys = sorted(payload.keys()) if isinstance(payload, dict) else []
     logger.info(
         "image_generation_inbound protocol=%s endpoint=%s status=%s request_id=%s keys=%s image_count=%s",

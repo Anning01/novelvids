@@ -5,9 +5,9 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import type { BillingRecord } from '@/types'
-import { costSourceLabel, money, recordStatus, recordStatusHint, usageLabel } from './recordDisplay'
+import { costSourceLabel, money, recordCost, recordStatus, recordStatusHint, usageLabel } from './recordDisplay'
 
-const props = defineProps<{ recordId: number; novelId: number; showSource: boolean }>()
+const props = defineProps<{ recordId: number; novelId: number; showSource: boolean; settlementRevision?: number }>()
 const records = ref<BillingRecord[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -15,9 +15,9 @@ const page = ref(1)
 const pages = ref(1)
 const total = ref(0)
 let epoch = 0
-async function load(next = 1) {
+async function load(next = 1, background = false) {
   const current = ++epoch
-  loading.value = true
+  if (!background) loading.value = true
   error.value = ''
   try {
     const response = await api.billingRecordDetails(props.recordId, { novel_id: props.novelId, page: next, page_size: 20 })
@@ -27,12 +27,17 @@ async function load(next = 1) {
     pages.value = response.data.pagination.pages
     total.value = response.data.pagination.total
   } catch (reason) {
-    if (current === epoch) error.value = reason instanceof Error ? reason.message : tr('费用明细加载失败')
+    if (current === epoch && !background) error.value = reason instanceof Error ? reason.message : tr('费用明细加载失败')
   } finally {
     if (current === epoch) loading.value = false
   }
 }
 watch(() => [props.recordId, props.novelId], () => { records.value = []; void load() }, { immediate: true })
+watch(() => props.settlementRevision, () => {
+  if (!loading.value && records.value.some(record => record.settlement_status === 'pending' || record.settlement_status === 'review')) {
+    void load(page.value, true)
+  }
+})
 onBeforeUnmount(() => { epoch += 1 })
 </script>
 
@@ -47,7 +52,7 @@ onBeforeUnmount(() => { epoch += 1 })
         <tbody><tr v-for="record in records" :key="record.id">
           <td>{{ record.created_at }}</td><td>{{ record.model_name || record.model }}<small>{{ usageLabel(record) }}</small></td>
           <td :title="recordStatusHint(record)">{{ recordStatus(record) }}</td><td v-if="showSource">{{ costSourceLabel(record.cost_source) }}</td>
-          <td class="is-num">{{ money(record.cost, record.currency) }}</td>
+          <td class="is-num">{{ recordCost(record) }}<small v-if="record.cost_source === 'platform_key' && record.platform_cost != null">{{ tr('平台成本') }} {{ money(Number(record.platform_cost), record.currency) }}</small><small v-if="record.cost_source === 'platform_key' && record.local_charge != null">{{ tr('本地扣款') }} {{ money(Number(record.local_charge), record.currency) }}</small></td>
         </tr></tbody>
       </table>
       <footer><span>{{ tr('共') }} {{ total }} {{ tr('条原始记录') }}</span><div v-if="pages > 1">

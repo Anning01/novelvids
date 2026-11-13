@@ -43,6 +43,8 @@ async def test_archive_groups_legacy_exports_and_preserves_profiles_on_restart(c
     for team_id, user_id, cost in [(team.id, producer.id, '6.123456'), (team.id, admin.id, '9.876544'), (other.id, admin.id, '100')]:
         await ModelUsageRecord.create(novel_id=project.id, team_id=team_id, user_id=user_id, cost=cost,
                                       task_type=4, billing_type='video', model='demo')
+    pending_call = await ModelUsageRecord.create(novel_id=project.id, team_id=team.id, user_id=admin.id,
+        task_type=4, billing_type='video', model='nv-1', settlement_status='pending')
     path = f'/api/portfolio/{project.id}'
     data = (await client.get('/api/portfolio', headers=viewer)).json()['data']
     assert data['counts'] == {'all': 1, 'pending': 0, 'public': 0, 'private': 1, 'featured': 0}
@@ -52,10 +54,16 @@ async def test_archive_groups_legacy_exports_and_preserves_profiles_on_restart(c
     assert data['items'][0]['producer'] == (producer.nickname or producer.username)
     assert data['items'][0]['production_seconds'] == 2 * 86400 + 3 * 3600
     assert data['items'][0]['recorded_cost'] is None
+    assert data['items'][0]['pending_cost'] is False
     team_card = (await client.get('/api/portfolio', headers=admin_headers)).json()['data']['items'][0]
     assert team_card['recorded_cost'] == 16 and team_card['cost_scope'] == 'project'
+    assert team_card['pending_cost'] is True
     own = (await client.get(path, headers=creator)).json()['data']
     assert own['recorded_cost'] == 6.123456 and own['cost_scope'] == 'self'
+    assert own['pending_cost'] is False
+    await ModelUsageRecord.filter(id=pending_call.id).update(settlement_status='settled', cost='0.2')
+    settled_card = (await client.get(path, headers=admin_headers)).json()['data']
+    assert settled_card['recorded_cost'] == 16.2 and settled_card['pending_cost'] is False
     assert data['archive_options'] == [{'id': project.id, 'name': project.name}]
     assert (await client.get('/api/portfolio?search=not-found', headers=viewer)).json()['data']['total'] == 0
     profile = {'title': 'Archived name', 'description': 'Synopsis', 'category': '短剧', 'tags': ['悬疑'],
@@ -109,7 +117,7 @@ async def test_public_episodes_are_pinned_reviewed_and_revoked(client, tmp_path,
     assert [episode['version']['id'] for episode in guest['episodes']] == [old.id]
     assert 'Secret' not in str(guest) and guest['producer_id'] is None
     assert guest['cover_export_id'] == old.id
-    assert {'production_seconds', 'recorded_cost', 'cost_scope'}.isdisjoint(guest)
+    assert {'production_seconds', 'recorded_cost', 'cost_scope', 'pending_cost'}.isdisjoint(guest)
     assert (await client.get(f'{public}/episodes/{hidden.id}/video')).json()['code'] == 404
     assert (await client.get(f'/api/finished-episodes/versions/{hidden.id}/video', headers=outside)).json()['code'] == 404
     media = f'{public}/episodes/{old.id}'

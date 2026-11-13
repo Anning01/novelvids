@@ -53,6 +53,11 @@ async def conversations(novel_id: int = Query(gt=0), deleted: bool = False, ctx:
     return ResponseSchema(data=await creation_agent_controller.conversations(novel_id, ctx, deleted=deleted))
 
 
+@router.post('/conversations/default', response_model=ResponseSchema[AgentConversationOut])
+async def default_conversation(body: AgentConversationCreate, ctx: AuthContext = Depends(get_auth_context)):
+    return ResponseSchema(data=await agent_sessions.default(body.novel_id, ctx))
+
+
 @router.post('/conversations', response_model=ResponseSchema[AgentConversationOut])
 async def create_conversation(body: AgentConversationCreate, ctx: AuthContext = Depends(get_auth_context)):
     return ResponseSchema(data=await creation_agent_controller.create(body.novel_id, ctx))

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import StageModelSelect from '@/components/StageModelSelect.vue'
 import { tr } from '@/i18n'
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -25,6 +26,7 @@ import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
 import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
+import { useCreationAgentStore } from '@/features/creation-agent/store'
 import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
 import { appConfirm } from '@/shared/confirmDialog'
@@ -42,6 +44,7 @@ interface ManualProjectMeta {
   aspectRatio: string
   resolution: string
   style: string
+  workflowKind?: 'script' | 'remake'
   creationMode: 'agent' | 'manual'
 }
 
@@ -64,6 +67,8 @@ function readProjectMeta(): ManualProjectMeta {
 
 const route = useRoute()
 const router = useRouter()
+const agentStore = useCreationAgentStore()
+const stageModelId = ref('')
 const projectId = computed(() => Number(route.params.projectId))
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 const selectedChapterId = computed(() => Number(route.query.chapter))
@@ -220,6 +225,7 @@ async function loadProject(chapterId = selectedChapterId.value) {
       aspectRatio: settings.aspectRatio || project.value.aspectRatio,
       resolution: settings.resolution || project.value.resolution,
       style: settings.style || project.value.style,
+      workflowKind: projectResponse.data.workflow_kind,
       creationMode: projectResponse.data.author?.includes('Agent') ? 'agent' : 'manual',
     }
     selectedChapter.value = chapterResponse?.data ?? null
@@ -361,11 +367,12 @@ async function monitorExtractionTask(taskId: string, notifyWhenComplete = false)
 
 async function extractSelectedChapterAssets() {
   const chapter = selectedChapter.value
-  if (!chapter || extractionBusy.value) return
+  if (!chapter || !stageModelId.value || extractionBusy.value) return
   submittingExtraction.value = true
   extractionSubmissionError.value = ''
   try {
-    const task = (await api.extract(chapter.id)).data
+    const conversationId = agentStore.projectId === projectId.value ? agentStore.conversationId : null
+    const task = (await api.extract(chapter.id, conversationId ?? undefined, Number(stageModelId.value))).data
     extractionTask.value = task
     await monitorExtractionTask(task.id, true)
   } catch (error) {
@@ -724,7 +731,7 @@ onBeforeUnmount(() => {
       :resolution="project.resolution"
       :style-name="project.style"
       active-phase="settings"
-      :creation-mode="project.creationMode"
+      :show-script-phase="project?.workflowKind !== 'remake'"
       :chapters="chapters"
       :active-chapter-id="selectedChapter?.id || 0"
       :agent-targets="editingVariantId ? [{ kind: 'variant', id: editingVariantId }] : editingAsset ? [{ kind: 'asset', id: editingAsset.id }] : []"
@@ -756,13 +763,14 @@ onBeforeUnmount(() => {
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">{{ tr('全部项目') }}</AppButton>
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">{{ tr('当前章节') }}</AppButton>
           </div>
+          <StageModelSelect v-if="project.creationMode === 'agent' && (visibleAssets.length || loading)" v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
           <AppButton
-            v-if="project.creationMode === 'agent'"
+            v-if="(visibleAssets.length || loading) && project.creationMode === 'agent'"
             type="button"
             variant="secondary"
             size="sm"
             :loading="extractionBusy"
-            :disabled="!selectedChapter || extractionBusy"
+            :disabled="!selectedChapter || !stageModelId || extractionBusy"
             :aria-label="tr('提取本章资产')"
             :title="selectedChapter ? tr('提取第 {p0} 章资产', { p0: selectedChapter.number }) : tr('请先在剧本阶段选择章节')"
             @click="extractSelectedChapterAssets"
@@ -804,7 +812,10 @@ onBeforeUnmount(() => {
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
         <strong>{{ tr('暂无') }}{{ activeTabConfig.label }}</strong>
         <p>{{ project.creationMode === 'agent' ? tr('从本章正文提取角色、场景与道具，再和助手一起完善画面。') : tr('添加第一个{p0}，开始搭建你的短剧世界。', { p0: activeTabConfig.label }) }}</p>
-        <AppButton v-if="project.creationMode === 'agent'" type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        <div v-if="project.creationMode === 'agent'" class="stage-actions">
+          <StageModelSelect v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
+          <AppButton type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || !stageModelId || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        </div>
         <AppButton v-else type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
@@ -920,6 +931,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .manual-page { min-height: 100%; color: #303442; background: #f8f9fc; }
 .project-name-line { display: flex; align-items: center; gap: 5px; min-height: 25px; }
 .project-name-line strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

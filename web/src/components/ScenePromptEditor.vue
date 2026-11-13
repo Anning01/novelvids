@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Scene } from '@/types'
+import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { tr } from '@/i18n'
 
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue'
@@ -21,12 +23,15 @@ export interface ScenePromptMentionOption {
   thumbnailUrl?: string
   fallbackUrl?: string
   description?: string
+  displayOnly?: boolean
+  blockingPreview?: boolean
   aliases?: string[]
 }
 
 const props = withDefaults(defineProps<{
   modelValue: string
   options: ScenePromptMentionOption[]
+  scene?: Scene
   placeholder?: string
   embedded?: boolean
   focusMode?: boolean
@@ -60,9 +65,14 @@ let playingAudio: HTMLAudioElement | null = null
 
 const DURATION_MENTION_PATTERN = new RegExp(DURATION_MENTION_SOURCE, 'g')
 
+const { image: blockingImage } = useSceneBlockingMap(() =>
+  props.options.some(option => option.blockingPreview) ? props.scene : undefined)
+const renderedOptions = computed(() => props.options.map(option => option.blockingPreview && blockingImage.value
+  ? { ...option, previewUrl: blockingImage.value } : option))
+
 const filteredOptions = computed(() => {
   const normalized = query.value.trim().toLocaleLowerCase()
-  return props.options.filter(option => !normalized
+  return props.options.filter(option => !option.displayOnly).filter(option => !normalized
     || option.label.toLocaleLowerCase().includes(normalized)
     || option.group.toLocaleLowerCase().includes(normalized))
 })
@@ -164,12 +174,18 @@ function createMentionNode(option: ScenePromptMentionOption) {
 
 function findNextMention(value: string, start: number) {
   let match: { option: ScenePromptMentionOption; index: number; length: number } | null = null
-  for (const option of props.options.filter(item => item.kind !== 'duration')) {
+  for (const option of renderedOptions.value.filter(item => item.kind !== 'duration')) {
     const canonicalName = option.syntax.match(/^@\{([^{}:#]+)(?:#[^{}]+)?\}$/)?.[1]
     const legacyNames = canonicalName ? [canonicalName, ...(option.aliases || [])] : []
-    const syntaxes = [option.syntax, ...legacyNames.map(name => `@${name}`)]
+    const syntaxes = [option.syntax, ...(option.aliases || []).map(name => `@{${name}}`), ...legacyNames.map(name => `@${name}`)]
     for (const syntax of syntaxes) {
-      const index = value.indexOf(syntax, start)
+      let index = value.indexOf(syntax, start)
+      // A valid @图片1 must never decorate the prefix of an unbound @图片10.
+      if (option.displayOnly && syntax.startsWith('@图片')) {
+        while (index >= 0 && /[0-9]/.test(value.charAt(index + syntax.length))) {
+          index = value.indexOf(syntax, index + syntax.length)
+        }
+      }
       if (index < 0 || (match && (index > match.index || (index === match.index && syntax.length <= match.length)))) continue
       match = { option, index, length: syntax.length }
     }
@@ -347,7 +363,7 @@ function placeHoverPreview(anchor: HTMLElement) {
 
 function showHoverPreview(mention: HTMLElement) {
   if (!props.focusMode) return
-  const option = props.options.find(item => item.id === mention.dataset.mentionId)
+  const option = renderedOptions.value.find(item => item.id === mention.dataset.mentionId)
   if (!option || option.kind === 'audio' || option.kind === 'duration' || !(option.previewUrl || option.thumbnailUrl)) return
   placeHoverPreview(mention)
   hoverPreviewOption.value = option
@@ -483,7 +499,7 @@ function handleEditorClick(event: MouseEvent) {
     openDurationEditor(mention)
     return
   }
-  const option = props.options.find(item => item.id === mention.dataset.mentionId)
+  const option = renderedOptions.value.find(item => item.id === mention.dataset.mentionId)
   if (option) activateMention(option)
 }
 
@@ -573,7 +589,7 @@ function handleEditorKeydown(event: KeyboardEvent) {
         openDurationEditor(mention)
         return
       }
-      const option = props.options.find(item => item.id === mention.dataset.mentionId)
+      const option = renderedOptions.value.find(item => item.id === mention.dataset.mentionId)
       if (option) activateMention(option)
       return
     }
@@ -630,7 +646,7 @@ watch(() => props.modelValue, () => {
   renderValue()
 })
 
-watch(() => props.options.map(option => [
+watch(() => renderedOptions.value.map(option => [
   option.id,
   option.kind,
   option.label,

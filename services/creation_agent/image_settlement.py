@@ -17,6 +17,9 @@ async def settle_image(task, arguments, evidence):
             .order_by("id")
             .first()
         )
+        if ledger is not None and ledger.settlement_status != "legacy":
+            await ModelUsageRecord.filter(ai_task_id=task.id, billing_type="image").exclude(
+                settlement_status="legacy").update(status=arguments["status"])
         if ledger is None:
             ledger = await billing_recorder.record_image(**arguments)
             if ledger is None:

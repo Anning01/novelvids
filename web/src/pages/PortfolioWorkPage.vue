@@ -363,7 +363,7 @@ onBeforeUnmount(() => {
             <dl v-if="!publicView" class="work-facts">
               <div><dt>{{ tr('制作人') }}</dt><dd>{{ work.producer || '—' }}</dd></div>
               <div :title="tr('从项目创建到最近一次成功合成的经过时间')"><dt>{{ tr('制作耗时') }}</dt><dd>{{ productionTime(work.production_seconds) }}</dd></div>
-              <div v-if="work.recorded_cost != null"><dt>{{ productionCostLabel(work.cost_scope) }}</dt><dd>{{ money(work.recorded_cost) }}</dd></div>
+              <div v-if="work.recorded_cost != null"><dt>{{ productionCostLabel(work.cost_scope) }}</dt><dd>{{ work.pending_cost ? tr('待结算') : money(work.recorded_cost) }}</dd></div>
               <div><dt>{{ tr('归档时间') }}</dt><dd>{{ workDate(work.archived_at, true) }}</dd></div>
             </dl>
             <p class="work-muted">{{ tr('{p0} 集', { p0: work.episode_count }) }} · {{ workLength(work.duration) }} · {{ workResolution(work.resolution) }}<template v-if="work.category"> · {{ tr(work.category) }}</template></p>

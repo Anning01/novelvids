@@ -4,13 +4,14 @@
 """
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
 
 from auth.bootstrap import ensure_super_admin
-from auth.models import Team, TeamMember, User, UserSession
-from auth.security import hash_password, hash_token
+from auth.models import BalanceTransaction, Team, TeamMember, User, UserSession
+from auth.security import hash_password, hash_token, verify_password
 from config import settings
 from utils.enums import TeamRoleEnum
 
@@ -235,10 +236,52 @@ async def test_ensure_super_admin_creates_once(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ensure_super_admin_skips_without_env(monkeypatch):
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "platform")
     monkeypatch.setattr(settings, "SUPER_ADMIN_USERNAME", "")
     monkeypatch.setattr(settings, "SUPER_ADMIN_PASSWORD", "")
     await ensure_super_admin()
     assert await User.filter(is_super_admin=True).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_new_studio_defaults_and_restart_preserves_password_and_balance(client, monkeypatch):
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "studio")
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "password")
+    monkeypatch.setattr(settings, "SUPER_ADMIN_USERNAME", "")
+    monkeypatch.setattr(settings, "SUPER_ADMIN_PASSWORD", "")
+
+    await ensure_super_admin()
+    login = (await client.post("/api/auth/login", json={"username": "admin", "password": "123456"})).json()
+    assert login["code"] == 0 and login["data"]["user"]["is_super_admin"]
+    user = await User.get(username="admin")
+    team = await Team.get(owner_user_id=user.id)
+    assert await TeamMember.filter(team=team, user=user, role="admin").exists()
+    assert team.balance == Decimal("999999")
+    assert (await BalanceTransaction.get(team=team)).change_amount == Decimal("999999")
+
+    await User.filter(id=user.id).update(password_hash=hash_password("changed-for-test"))
+    await Team.filter(id=team.id).update(balance=Decimal("50"))
+    await ensure_super_admin()
+    await user.refresh_from_db()
+    await team.refresh_from_db()
+    assert verify_password("changed-for-test", user.password_hash)
+    assert team.balance == Decimal("50")
+    assert await BalanceTransaction.filter(team=team).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_studio_bootstrap_leaves_existing_team_balance_alone(monkeypatch):
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "studio")
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "password")
+    monkeypatch.setattr(settings, "SUPER_ADMIN_USERNAME", "admin")
+    monkeypatch.setattr(settings, "SUPER_ADMIN_PASSWORD", "custom-test-password")
+    team = await Team.create(name="既有团队", balance=20)
+
+    await ensure_super_admin()
+
+    await team.refresh_from_db()
+    assert team.balance == Decimal("20") and await Team.all().count() == 1
+    assert not await BalanceTransaction.filter(team=team).exists()
 
 
 @pytest.mark.asyncio

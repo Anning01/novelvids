@@ -10,7 +10,7 @@ import AppSelect from '@/components/AppSelect.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
-import { estimateImageCost } from '@/shared/modelPricing'
+import { estimateAssetImageCost } from '@/shared/modelPricing'
 import { AssetTypeEnum, type Asset, type ImageGenerationModel } from '@/types'
 
 interface BatchGenerateOptions {
@@ -47,11 +47,11 @@ const assetTypes = [
 const eligibleAssets = computed(() => props.assets.filter(asset => !asset.main_image && !props.generatingIds.has(asset.id)))
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
-const estimatedCost = computed(() => estimateImageCost(
-  selectedModel.value?.pricing,
-  imageParameters.value.clarity,
-  selectedIds.value.length,
-))
+const estimatedCost = computed(() => eligibleAssets.value.reduce((sum, asset) => {
+  if (!selectedIds.value.includes(asset.id)) return sum
+  const refs = asset.metadata?.generation_reference_images
+  return sum + estimateAssetImageCost(selectedModel.value, imageParameters.value, Array.isArray(refs) ? new Set(refs).size : 0)
+}, 0))
 const allSelected = computed(() => Boolean(eligibleAssets.value.length) && eligibleAssets.value.every(asset => selectedIds.value.includes(asset.id)))
 const canGenerate = computed(() => selectedIds.value.length > 0 && Boolean(modelId.value) && !props.submitting)
 

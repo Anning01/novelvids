@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { api } from '@/api'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -23,6 +23,41 @@ vi.mock('@/api', async (importOriginal) => {
 })
 
 describe('BillingPage', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('refreshes settled amounts in place while a conversation is expanded', async () => {
+    vi.useFakeTimers()
+    const summary = { total_cost: 0, total_records: 1, pending_records: 1, by_billing_type: [], by_task_type: [], by_model: [], daily_trend: [] }
+    const pagination = { total: 1, page: 1, page_size: 20, pages: 1 }
+    const record = { id: 1, novel_id: 1, task_type: 7, billing_type: 'text' as const, model: 'nv-1', usage: {},
+      cost: 0, currency: 'CNY', status: 3, created_at: '', updated_at: '', record_kind: 'agent_conversation' as const,
+      conversation_id: 4, settlement_status: 'pending' as const }
+    vi.mocked(api.billingSummary).mockResolvedValue({ code: 0, message: '', data: summary })
+    vi.mocked(api.billingProjects).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination } })
+    vi.mocked(api.billingRecords).mockResolvedValue({ code: 0, message: '', data: { items: [record], pagination } })
+    vi.mocked(api.billingRecordDetails).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination } })
+    const wrapper = mount(BillingPage, { global: { plugins: [createPinia()] } })
+    try {
+      await flushPromises()
+      const toggle = wrapper.get('.conversation-record-toggle')
+      await toggle.trigger('click')
+      expect(toggle.attributes('aria-expanded')).toBe('true')
+      expect(wrapper.get('.data-table tbody tr').text()).toContain('待结算')
+      vi.mocked(api.billingSummary).mockResolvedValue({ code: 0, message: '', data: { ...summary, total_cost: .2, pending_records: 0 } })
+      vi.mocked(api.billingRecords).mockResolvedValue({ code: 0, message: '', data: { pagination, items: [{
+        ...record, cost: .2, platform_cost: '.2', local_charge: '.3', settlement_status: 'settled',
+      }] } })
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(wrapper.get('.conversation-record-toggle').attributes('aria-expanded')).toBe('true')
+      expect(wrapper.get('.data-table tbody tr').text()).toContain('本地扣款 ¥0.3000')
+      expect(wrapper.get('.data-table tbody tr').text()).not.toContain('待结算')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('opens actual spending statements for super admins and keeps the original costs view available', async () => {
     vi.mocked(api.billingStatementParties).mockResolvedValue({ code: 0, message: '', data: { teams: [], users: [] } })
     vi.mocked(api.billingStatements).mockResolvedValue({ code: 0, message: '', data: {
@@ -197,4 +232,26 @@ it('renders the table inside a horizontal scroll container and keeps source badg
   } finally {
     wrapper.unmount()
   }
+})
+
+
+it.each(['light','dark'])('uses the compact consumption console for the platform deployment (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.billingStatementParties).mockResolvedValue({code:0,message:'',data:{teams:[],users:[]}})
+  vi.mocked(api.billingStatements).mockResolvedValue({code:0,message:'',data:{
+    items:[],snapshot_id:0,summary:{total_cost:'8.129640',total_transactions:40,team_balance:null},
+    pagination:{total:0,page:1,page_size:20,pages:0},
+  }})
+  const pinia = createPinia()
+  useAuthStore(pinia).$patch({deploymentRole:'platform',enabled:true,user:{id:1,username:'admin',nickname:'',avatar_url:'',is_super_admin:true}})
+  const wrapper = mount(BillingPage,{global:{plugins:[pinia]}})
+  await flushPromises()
+  expect(wrapper.classes()).toContain('is-platform-console')
+  expect(wrapper.get('h1').text()).toBe('消费记录')
+  expect(wrapper.text()).not.toContain('COST DASHBOARD')
+  expect(wrapper.get('.billing-statements').classes()).toContain('is-compact')
+  expect(wrapper.get('.statement-summary').text()).toContain('¥8.129640')
+  expect(wrapper.get('.statement-record-heading').text()).toContain('扣款明细')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
 })
