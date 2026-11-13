@@ -1030,12 +1030,12 @@ onBeforeUnmount(() => {
 .secondary-action:hover { color: #4f51e8; background: #ededff; }
 .secondary-action:disabled { opacity: .55; cursor: wait; }
 .secondary-action.compact { min-height: 34px; }
-.analysis-progress-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 16px; margin-top: 22px; padding: 20px; border-radius: 16px; background: #fff; box-shadow: 0 10px 34px rgb(45 49 68 / 6%); }
-.analysis-progress-card > span { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 14px; color: #5b5cf6; background: #f0f0ff; }
+.analysis-progress-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 16px; margin-top: 22px; padding: 20px; border-radius: 16px; background: var(--app-surface); box-shadow: 0 10px 34px rgb(45 49 68 / 6%); }
+.analysis-progress-card > span { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 14px; color: var(--app-accent); background: var(--app-accent-soft); }
 .analysis-progress-card h2 { margin: 0 0 6px; font-size: 15px; }
-.analysis-progress-card p { margin: 0; color: #858a99; font-size: 11px; line-height: 1.7; }
+.analysis-progress-card p { margin: 0; color: var(--app-text-secondary); font-size: 11px; line-height: 1.7; }
 .analysis-progress-card > button { min-height: 36px; padding: 0 15px; border: 0; border-radius: 9px; color: #fff; background: #5b5cf6; cursor: pointer; font-size: 11px; font-weight: 650; }
-.analysis-progress-card.is-failed > span { color: #bb5b68; background: #fff0f2; }
+.analysis-progress-card.is-failed > span { color: var(--creation-danger); background: color-mix(in srgb, var(--creation-danger) 10%, var(--app-surface)); }
 .analysis-section { padding-top: 20px; }
 .analysis-section > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .analysis-section > header > div:not(.episode-actions) { display: grid; gap: 4px; }
@@ -1113,7 +1113,7 @@ onBeforeUnmount(() => {
 .profile-card small { color: #969baa; font-size: 9px; }
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
-.narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid #dedff0; border-radius: 9px; color: #5b5cf6; background: #f8f8ff; cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: #999af3; }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: #969baa; font-size: 8px; }.narrator-voice-button strong { color: #4f5464; font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: #6567e9; font-size: 9px; }
+.narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid var(--app-border); border-radius: 9px; color: var(--app-accent); background: var(--app-surface-muted); cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: var(--app-accent); }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: var(--app-text-secondary); font-size: 8px; }.narrator-voice-button strong { color: var(--app-text); font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--app-accent); font-size: 9px; }
 .analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
 .analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
 .tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--app-text); font-size: 11px; }
